@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# Check if there is incompatible data
+
+# directory
+bin_link_dir="/usr/bin"
+lib_link_dir="/usr/lib"
+install_main_dir="/usr/local/kaiwudb"
+bin_dir="${install_main_dir}/bin"
+lib_dir="${install_main_dir}/lib"
+
+# Execute the commands with sudo perimission
+csudo=""
+if command -v sudo > /dev/null; then
+    csudo="sudo "
+fi
+
+# Stop the service if running
+#pid=$(ps -ef | grep "kwbase" | grep -v "grep" | awk '{print $2}')
+#if [ -n "$pid" ]; then
+#   ${csudo}kill -9 $pid
+#fi
+
+# if config, library and binary already softlink, remove it
+#cfg_install_dir="/usr/share/kwdb"
+#if [ -f "${install_main_dir}/kaiwudb.cfg" ]; then
+#    ${csudo}rm -f ${install_main_dir}/kaiwudb.cfg
+#fi
+
+# Remove bin and library
+${csudo}rm -f ${bin_dir}/kwbase
+${csudo}rm -f ${lib_dir}/libkwdbts2.so

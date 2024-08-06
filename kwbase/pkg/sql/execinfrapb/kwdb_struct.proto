@@ -1,0 +1,258 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+syntax = "proto2";
+
+package kwbase.sql.distsqlrun;
+option go_package = "execinfrapb";
+
+import "sql/execinfrapb/data.proto";
+
+import "gogoproto/gogo.proto";
+
+import "sql/types/types.proto";
+
+import "sql/sqlbase/structured.proto";
+
+import "sql/execinfrapb/processors_sql.proto";
+
+// TableDescArray is a slice of TableDesc.
+message TableDescArray {
+  repeated TableDesc table = 1 [(gogoproto.nullable) = false];
+}
+
+// TableDesc is a desc that has table id and all column id.
+message TableDesc {
+  optional uint64 tableID = 1 [(gogoproto.nullable) = false];
+
+  repeated uint32 colIDs = 2 ;
+}
+
+// TSFlowSpec describes a "flow" which is a subgraph of a distributed SQL
+// computation consisting of processors and streams.
+message TSFlowSpec {
+  optional bytes flowID = 1 [(gogoproto.nullable) = false,
+    (gogoproto.customname) = "FlowID",
+    (gogoproto.customtype) = "FlowID"];
+  // The NodeID of the gateway that planned this Flow. Used for debugging.
+  optional int32 gateway = 3 [(gogoproto.nullable) = false,
+    (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/roachpb.NodeID"];
+
+  repeated TSProcessorSpec processors = 2 [(gogoproto.nullable) = false];
+}
+
+// Each processor has the following components:
+//  - one or more input synchronizers; each one merges rows between one or more
+//    input streams;
+//
+//  - a processor "core" which encapsulates the inner logic of each processor;
+//
+//  - a post-processing stage which allows "inline" post-processing on results
+//    (like projection or filtering);
+//
+//  - one or more output synchronizers; each one directs rows to one or more
+//  output streams.
+//
+//
+// == Internal columns ==
+//
+// The core outputs rows of a certain schema to the post-processing stage. We
+// call this the "internal schema" (or "internal columns") and it differs for
+// each type of core. Column indices in a PostProcessSpec refers to these
+// internal columns. Some columns may be unused by the post-processing stage;
+// processor implementations are internally optimized to not produce values for
+// such unneeded columns.
+message TSProcessorSpec {
+  // In most cases, there is one input.
+  repeated InputSyncSpec input = 1 [(gogoproto.nullable) = false];
+
+  optional TSProcessorCoreUnion core = 2 [(gogoproto.nullable) = false];
+
+  optional TSPostProcessSpec post = 3 [(gogoproto.nullable) = false];
+
+  // In most cases, there is one output.
+  repeated OutputRouterSpec output = 4 [(gogoproto.nullable) = false];
+
+  // An optional identifier that can be used to correlate processors that are
+  // part of the same stage (e.g. multiple joiners that are part of a
+  // distributed join). This has no consequence on the running of flows, but is
+  // useful for plan diagrams.
+  //optional int32 stage_id = 5 [(gogoproto.nullable) = false,
+  //                             (gogoproto.customname) = "StageID"];
+
+  // processor_id uniquely identifies a processor within a physical plan. This
+  // has no consequence on the running of flows, but is useful for plan
+  // diagrams and linking information like tracing spans and log messages to
+  // processors.
+  optional int32 processor_id = 5 [(gogoproto.nullable) = false,
+    (gogoproto.customname) = "ProcessorID"];
+}
+
+message TSProcessorCoreUnion {
+  option (gogoproto.onlyone) = true;
+  optional TSReaderSpec tableReader = 1;
+
+  optional AggregatorSpec aggregator = 2;
+
+  optional TSNoopSpec noop = 3;
+
+  optional SorterSpec sorter = 4;
+
+  optional TSStatisticReaderSpec statisticReader = 5;
+
+  // optional PipeGroupSpec pipeGroup =  7;
+  optional TSSynchronizerSpec synchronizer = 8;
+
+  // collection of time series statistics
+  optional TSSamplerSpec sampler = 9;
+
+  optional TSTagReaderSpec tagReader = 10;
+
+  optional DistinctSpec distinct = 11;
+}
+
+// TSSynchronizerSpec operator
+message TSSynchronizerSpec{
+  // Parallelism degree
+  optional int32 degree = 1 [(gogoproto.nullable) = false];
+}
+
+message TsSpan {
+  optional int64 fromTimeStamp = 1 [(gogoproto.nullable) = false];
+
+  optional int64 toTimeStamp = 2 [(gogoproto.nullable) = false];
+}
+
+enum TSTableReadMode {
+  tagIndex = 0;
+  tagIndexTable = 1;
+  tableTableMeta = 2;
+  metaTable = 3;
+  onlyTag = 4;
+}
+
+// TSReaderSpec table reader
+message TSReaderSpec {
+  // time range
+  repeated TsSpan ts_spans = 1 [(gogoproto.nullable) = false];
+  // table id
+  required uint64 tableID = 2 [(gogoproto.nullable) = false];
+  // use statistic flag
+  required bool useStatistic = 3 [(gogoproto.nullable) = false];
+
+  // Metadata for all columns, excluding column ids
+  repeated sqlbase.TSCol colMetas = 4;
+
+  optional bool   reverse = 5;
+  optional AggregatorSpec   aggregator = 6;
+  optional TSPostProcessSpec   aggregatorPost = 7;
+  optional bool   aggPushDown = 8;
+
+  // table version
+  required uint32 tableVersion = 9 [(gogoproto.nullable) = false];
+  optional Ordering sorter = 10;
+}
+
+// StatisticTSTableReader operator
+message TSStatisticReaderSpec {
+  // Time interval
+  repeated TsSpan tsSpans = 1 [(gogoproto.nullable) = false];
+  // ID of the table to be queried
+  required uint64 tableID = 2 [(gogoproto.nullable) = false];
+  // Columns for querying statistics. Column indexes start at 0
+  repeated uint32 cols = 3;
+  // TSTableReader column agg type
+  repeated int32 aggTypes = 4;
+  // Metadata for all columns, excluding column ids
+  repeated sqlbase.TSCol tsCols = 5  [(gogoproto.nullable) = false];
+  // table version
+  required uint32 tableVersion = 6 [(gogoproto.nullable) = false];
+}
+
+// TagTSTableReader operator
+message TSTagReaderSpec {
+  // ID of the table to be queried
+  required uint64 tableID = 1 [(gogoproto.nullable) = false];
+
+  // Metadata for all columns, excluding column ids
+  repeated sqlbase.TSCol colMetas = 2 [(gogoproto.nullable) = false];
+  // primary tag values , Union PTags must appear in pairs to populate primarytags
+  // By default, all tags have the same values
+  message TagValueArray {
+    // column id of primary tag
+    optional uint32 colid = 1 [(gogoproto.nullable) = false];
+    // values of primary tag
+    repeated string tagValues = 2;
+  }
+  repeated TagValueArray primaryTags = 3 [(gogoproto.nullable) = false];
+  required TSTableReadMode accessMode = 4 [(gogoproto.nullable) = false];
+  // table version
+  required uint32 tableVersion = 5 [(gogoproto.nullable) = false];
+}
+
+enum SketchMethod {
+  // Computes the count-distinct statistical algorithm for columns
+  HLL_PLUS_PLUS = 0;
+}
+
+// Time series statistic info
+message TSSamplerSpec {
+  // Sketch info for all statsCols
+  repeated SketchInfo sketches = 1 [(gogoproto.nullable) = false];
+  // Size of sampled data
+  required uint32 sample_size = 2;
+  // Table id
+  required uint64 table_id = 3 [(gogoproto.nullable) = false];
+}
+
+// SketchSpec contains the specification for a generated statistic.
+message SketchInfo {
+  // Column base calculation method
+  optional SketchMethod sketch_type = 1 [(gogoproto.nullable) = false];
+
+  // Whether generate histogram
+  required bool GenerateHistogram = 2 [(gogoproto.nullable) = false];
+
+  // ColumnIDxs of stats
+  repeated uint32 col_idx = 4;
+
+  // Columns of type;
+  // 0 :normal columns
+  // 1 :tag
+  // 2 :primary tag
+  repeated uint32 col_types = 5;
+
+  // Whether has all primary tag columns
+  required bool HasAllPTag = 6 [(gogoproto.nullable) = false];
+}
+
+message TSNoopSpec {
+}
+
+message TSPostProcessSpec {
+  // option (gogoproto.typedecl) = false;
+
+  optional uint32 limit = 1 [(gogoproto.nullable) = false];
+
+  optional uint32 offset = 2 [(gogoproto.nullable) = false];
+
+  optional string filter = 3 [(gogoproto.nullable) = false];
+
+  repeated string renders = 4;
+  // Output column index. Start at 0
+  repeated uint32 OutputColumns = 5;
+  // Output column type
+  repeated kwbase.sql.sem.types.Family outputTypes = 6;
+
+  optional bool projection = 7 [(gogoproto.nullable) = false];
+
+  optional uint32 commandlimit = 8 [(gogoproto.nullable) = false];
+}

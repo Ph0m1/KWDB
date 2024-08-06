@@ -1,0 +1,772 @@
+syntax = "proto2";
+
+package kwdbts;
+// option go_package = "execinfrapb";
+
+// import "ee_gogo.proto";
+//import "sql/execinfrapb/data.proto";
+
+// Ordering defines an order - specifically a list of column indices and
+// directions. See sqlbase.ColumnOrdering.
+
+import "me_metadata.proto";
+message TSOrdering {
+
+  message Column {
+
+    // The direction of the desired ordering for a column.
+    enum Direction {
+      ASC = 0;
+      DESC = 1;
+    }
+    optional uint32 col_idx = 1;
+    optional Direction direction = 2;
+  }
+  repeated Column columns = 1;
+}
+// TSFlowSpec describes a "flow" which is a subgraph of a distributed SQL
+// computation consisting of processors and streams.
+message TSFlowSpec {
+  optional bytes flowID = 1;
+  // The NodeID of the gateway that planned this Flow. Used for debugging.
+  optional int32 gateway = 3;
+
+  repeated TSProcessorSpec processors = 2;
+}
+
+// Each processor has the following components:
+//  - one or more input synchronizers; each one merges rows between one or more
+//    input streams;
+//
+//  - a processor "core" which encapsulates the inner logic of each processor;
+//
+//  - a post-processing stage which allows "inline" post-processing on results
+//    (like projection or filtering);
+//
+//  - one or more output synchronizers; each one directs rows to one or more
+//  output streams.
+//
+//
+// == Internal columns ==
+//
+// The core outputs rows of a certain schema to the post-processing stage. We
+// call this the "internal schema" (or "internal columns") and it differs for
+// each type of core. Column indices in a PostProcessSpec refers to these
+// internal columns. Some columns may be unused by the post-processing stage;
+// processor implementations are internally optimized to not produce values for
+// such unneeded columns.
+message TSProcessorSpec {
+  // In most cases, there is one input.
+  repeated TSInputSyncSpec input = 1;
+  optional TSProcessorCoreUnion core = 2;
+  optional TSPostProcessSpec post = 3;
+
+  // In most cases, there is one output.
+  repeated TSOutputRouterSpec output = 4;
+
+  // An optional identifier that can be used to correlate processors that are
+  // part of the same stage (e.g. multiple joiners that are part of a
+  // distributed join). This has no consequence on the running of flows, but is
+  // useful for plan diagrams.
+  //optional int32 stage_id = 5 [(gogoproto.nullable) = false,
+  //                             (gogoproto.customname) = "StageID"];
+
+  // processor_id uniquely identifies a processor within a physical plan. This
+  // has no consequence on the running of flows, but is useful for plan
+  // diagrams and linking information like tracing spans and log messages to
+  // processors.
+  optional int32 processor_id = 5;
+}
+
+// StreamEndpointType type
+enum StreamEndpointType {
+  // Stream that is part of the local flow.
+  LOCAL = 0;
+  // Stream that has the other endpoint on a different node.
+  REMOTE = 1;
+  // Special stream used when in "sync flow" mode. In this mode, we return
+  // results directly as part of the RPC call that set up the flow. This saves
+  // overhead (extra RPCs) compared to the normal mode where the RPC just sets
+  // up the flow. This type can only be used with outbound endpoints.
+  SYNC_RESPONSE = 2;
+  QUEUE = 3;
+}
+
+message TSStreamEndpointSpec {
+  optional StreamEndpointType type = 1;
+
+  // The ID of this stream.
+  //
+  // For LOCAL streams, both ends of the stream are part of the flow on this
+  // machine (and there must be a corresponding endpoint with the same ID).
+  //
+  // For REMOTE streams, this ID is used in the ProducerHeader when connecting to
+  // the other host.
+  //
+  // For SYNC_RESPONSE streams, the ID is unused.
+  optional int32 stream_id = 2;
+
+  optional StreamEndpointType s_type = 3;
+
+  // Node ID of the target host, only used for outgoing REMOTE streams.
+  optional int32 target_node_id = 4;
+}
+
+message TSInputSyncSpec {
+  enum Type {
+    // Rows from the input streams are interleaved arbitrarily.
+    UNORDERED = 0;
+    // The input streams are guaranteed to be ordered according to the column
+    // ordering field; rows from the streams are interleaved to preserve that
+    // ordering.
+    ORDERED = 1;
+  }
+  optional Type type = 1;
+
+  optional TSOrdering ordering = 2;
+
+  repeated TSStreamEndpointSpec streams = 3;
+
+  // Schema for the streams entering this synchronizer.
+  repeated bytes column_types = 4;
+}
+
+message TSOutputRouterSpec {
+  enum Type {
+    // Single output stream.
+    PASS_THROUGH = 0;
+    // Each row is sent to all output streams.
+    MIRROR = 1;
+    // Each row is sent to one stream, chosen by hashing certain columns of
+    // the row (specified by the hash_columns field).
+    BY_HASH = 2;
+    // Each row is sent to one stream, chosen according to preset boundaries
+    // for the values of certain columns of the row.
+    BY_RANGE = 3;
+  }
+  optional Type type = 1;
+  repeated TSStreamEndpointSpec streams = 2;
+
+  // Only used for the BY_HASH type; these are the indexes of the columns we are
+  // hashing.
+  repeated uint32 hash_columns = 3;
+}
+
+message TSProcessorCoreUnion {
+  optional TSReaderSpec tableReader = 1;
+
+  optional TSAggregatorSpec aggregator = 2;
+
+  optional TSNoopSpec noop = 3;
+
+  optional TSSorterSpec sorter = 4;
+
+  optional TSStatisticReaderSpec statisticReader = 5;
+
+  optional TSSynchronizerSpec synchronizer = 8;
+
+  // collection of time series statistics
+  optional TSSamplerSpec sampler = 9;
+  optional TSTagReaderSpec tagReader = 10;
+  optional DistinctSpec distinct = 11;
+}
+
+message TSSorterSpec {
+  optional TSOrdering output_ordering = 1;
+
+  // Ordering match length, specifying that the input is already sorted by the
+  // first 'n' output ordering columns, can be optionally specified for
+  // possible speed-ups taking advantage of the partial orderings.
+  optional uint32 ordering_match_len = 2;
+}
+
+message TsSpan {
+  optional int64 fromTimeStamp = 1;
+
+  optional int64 toTimeStamp = 2;
+}
+
+enum TSTableReadMode {
+  tagIndex = 0;
+  tagIndexTable = 1;
+  tableTableMeta = 2;
+  metaTable = 3;
+  onlyTag = 4;
+}
+
+// TSReaderSpec table reader
+message TSReaderSpec {
+  // time range
+  repeated TsSpan ts_spans = 1;
+  // table id
+  required uint64 tableID = 2;
+  // use statistic flag
+  required bool useStatistic = 3;
+
+  //all cols meta，have not col id
+  repeated TSCol colMetas = 4;
+
+  optional bool   reverse = 5;
+
+  optional TSAggregatorSpec   aggregator = 6;
+  optional TSPostProcessSpec   aggregatorPost = 7;
+  optional bool aggPushDown = 8;
+
+  // table version
+  required uint32 tableVersion = 9;
+
+  optional TSOrdering   sorter = 10;
+}
+
+enum SketchMethod {
+  // Computes the count-distinct statistical algorithm for columns
+  HLL_PLUS_PLUS = 0;
+}
+
+// time series statistic info
+message TSSamplerSpec {
+  // sketch info for all statsCols
+  repeated SketchInfo sketches = 1;
+  // size of sampled data
+  required uint32 sample_size = 2;
+  // table id
+  required uint64 table_id = 3;
+}
+
+// SketchSpec contains the specification for a generated statistic.
+message SketchInfo {
+  // Column base calculation method
+  optional SketchMethod sketch_type = 1;
+  // Whether generate histogram
+  required bool GenerateHistogram = 2;
+  // ColumnIDxs of stats
+  repeated uint32 col_idx = 4;
+  // Columns of type;
+  // 0 :normal columns
+  // 1 :tag
+  // 2 :primary tag
+  repeated uint32 col_type = 5;
+  // Whether has all primary tags
+  required bool HasAllPTag = 6;
+}
+
+message DistinctSpec {
+  repeated uint32 ordered_columns = 1;
+  repeated uint32 distinct_columns = 2;
+  optional bool nulls_are_distinct = 3;
+  optional string error_on_dup = 4;
+}
+
+// AggregatorSpec is the specification for an "aggregator" (processor core
+// type, not the logical plan computation stage). An aggregator performs
+// 'aggregation' in the SQL sense in that it groups rows and computes an aggregate
+// for each group. The group is configured using the group key. The aggregator
+// can be configured with one or more aggregation functions.
+//
+// The "internal columns" of an Aggregator map 1-1 to the aggregations.
+message TSAggregatorSpec {
+  // These mirror the aggregate functions supported by sql/parser. See
+  // sql/parser/aggregate_builtins.go.
+  enum Func {
+    ANY_NOT_NULL = 0;
+    AVG = 1;
+    BOOL_AND = 2;
+    BOOL_OR = 3;
+    CONCAT_AGG = 4;
+    COUNT = 5;
+    MAX = 7;
+    MIN = 8;
+    STDDEV = 9;
+    SUM = 10;
+    SUM_INT = 11;
+    VARIANCE = 12;
+    XOR_AGG = 13;
+    COUNT_ROWS = 14;
+    SQRDIFF = 15;
+    FINAL_VARIANCE = 16;
+    FINAL_STDDEV = 17;
+    ARRAY_AGG = 18;
+    JSON_AGG = 19;
+    // JSONB_AGG is an alias for JSON_AGG, they do the same thing.
+    JSONB_AGG = 20;
+    STRING_AGG = 21;
+    BIT_AND = 22;
+    BIT_OR = 23;
+    CORR = 24;
+    FIRST = 25;
+    LAST = 26;
+    MATCHING = 27;
+    TIME_BUCKET_GAPFILL_INTERNAL = 28;
+    INTERPOLATE = 29;
+    LAST_ROW = 30;
+    LASTTS = 31;
+    LASTROWTS = 32;
+    FIRSTTS = 33;
+    FIRST_ROW = 34;
+    FIRSTROWTS = 35;
+  }
+
+  enum Type {
+    // This setting exists just for backwards compatibility; it's equivalent to
+    // SCALAR when there are no grouping columns, and to NON_SCALAR when there
+    // are grouping columns.
+    AUTO = 0;
+    // A scalar aggregation has no grouping columns and always returns one
+    // result row.
+    SCALAR = 1;
+    // A non-scalar aggregation returns no rows if there are no input rows; it
+    // may or may not have grouping columns.
+    NON_SCALAR = 2;
+  }
+
+  message Expression {
+    // TODO(radu): TBD how this will be used
+    optional string version = 1;
+
+    // SQL expressions are passed as a string, with ordinal references
+    // (@1, @2, @3 ..) used for "input" variables.
+    optional string expr = 2;
+  }
+
+  message Aggregation {
+    optional Func func = 1;
+
+    // Aggregation functions with distinct = true functions like you would
+    // expect '<FUNC> DISTINCT' to operate, the default behavior would be
+    // the '<FUNC> ALL' operation.
+    optional bool distinct = 2;
+
+    // The column index specifies the argument(s) to the aggregator function.
+    //
+    // Most aggregations take one argument
+    // COUNT_ROWS takes no arguments.
+    // FINAL_STDDEV and FINAL_VARIANCE take three arguments (SQRDIFF, SUM,
+    // COUNT).
+    repeated uint32 col_idx = 5;
+
+    // If set, this column index specifies a boolean argument; rows for which
+    // this value is not true don't contribute to this aggregation. This enables
+    // the filter clause, e.g.:
+    //   SELECT SUM(x) FILTER (WHERE y > 1), SUM(x) FILTER (WHERE y < 1) FROM t
+    optional uint32 filter_col_idx = 4;
+
+    // Arguments are const expressions passed to aggregation functions.
+    repeated Expression arguments = 6;
+
+    reserved 3;
+  }
+
+  optional Type type = 5;
+
+  // The group key is a subset of the columns in the input stream schema on the
+  // basis of which we define our groups.
+  repeated uint32 group_cols = 2 [packed = true];
+
+  repeated Aggregation aggregations = 3;
+
+  // A subset of the GROUP BY columns which are ordered in the input.
+  repeated uint32 ordered_group_cols = 4 [packed = true];
+
+  optional bool agg_push_down = 6;
+}
+
+message TSNoopSpec{
+}
+
+// See the comment header for the T.Family method for more details.
+enum KWDBTypeFamily {
+    // BoolFamily is the family of boolean true/false types.
+    //
+    //   Canonical: types.Bool
+    //   Oid      : T_bool
+    //
+    // Examples:
+    //   BOOL
+    //
+    BoolFamily = 0;
+
+    // IntFamily is the family of signed integer types.
+    //
+    //   Canonical: types.Int
+    //   Oid      : T_int8, T_int4, T_int2
+    //   Width    : 64, 32, 16
+    //
+    // Examples:
+    //   INT
+    //   INT8
+    //   INT4
+    //
+    IntFamily = 1;
+
+    // FloatFamily is the family of base-2 floating-point types (IEEE 754).
+    //
+    //   Canonical: types.Float
+    //   Oid      : T_float8, T_float4
+    //   Width    : 64, 32
+    //
+    // Examples:
+    //   FLOAT8
+    //   FLOAT4
+    //
+    FloatFamily = 2;
+
+    // DecimalFamily is the family of base-10 floating and fixed point types.
+    //
+    //   Canonical    : types.Decimal
+    //   Oid          : T_numeric
+    //   Precision    : max # decimal digits (0 = no specified limit)
+    //   Width (Scale): # digits after decimal point (0 = no specified limit)
+    //
+    // Examples:
+    //   DECIMAL
+    //   DECIMAL(10)
+    //   DECIMAL(10,3)
+    //
+    DecimalFamily = 3;
+
+    // DateFamily is the family of date types that store only year/month/day with
+    // no time component.
+    //
+    //   Canonical: types.Date
+    //   Oid      : T_date
+    //
+    // Examples:
+    //   DATE
+    //
+    DateFamily = 4;
+
+    // TimestampFamily is the family of date types that store a year/month/day
+    // date component, as well as an hour/minute/second time component. There is
+    // no timezone component (see TIMESTAMPTZ). Seconds can have varying precision
+    // (defaults to microsecond precision). Currently, only microsecond precision
+    // is supported.
+    //
+    //   Canonical: types.Timestamp
+    //   Oid      : T_timestamp
+    //   Precision: fractional seconds (3 = ms, 0,6 = us, 9 = ns, etc.)
+    //
+    // Examples:
+    //   TIMESTAMP
+    //   TIMESTAMP(6)
+    //
+    TimestampFamily = 5;
+
+    // IntervalFamily is the family of types describing a duration of time.
+    // Currently, only microsecond precision is supported.
+    //
+    //   Canonical: types.Interval
+    //   Oid      : T_interval
+    //
+    // Examples:
+    //   INTERVAL
+    //
+    IntervalFamily = 6;
+
+    // StringFamily is the family of types containing Unicode textual strings.
+    // This family includes types constructed by STRING, VARCHAR, CHAR, and "char"
+    // column type definitions (CHAR and "char" are distinct PG types). Note
+    // that while STRING and VARCHAR have no default width limit, CHAR has a
+    // default width of 1.
+    // TODO(andyk): "char" should have default width of 1 as well, but doesn't.
+    //
+    //   Canonical: types.String
+    //   Oid      : T_text, T_varchar, T_bpchar, T_char
+    //   Width    : max # characters (0 = no specified limit)
+    //
+    // Examples:
+    //   STRING
+    //   TEXT
+    //   VARCHAR(10)
+    //   CHAR
+    //
+    StringFamily = 7;
+
+    // BytesFamily is the family of types containing a list of raw byte values.
+    //
+    //   Canonical: types.BYTES
+    //   Oid      : T_bytea
+    //
+    // Examples:
+    //   BYTES
+    //
+    BytesFamily = 8;
+
+    // TimestampTZFamily is the family of date types that store a year/month/day
+    // date component, as well as an hour/minute/second time component, along with
+    // a timezone. Seconds can have varying precision (defaults to microsecond
+    // precision). Currently, only microsecond precision is supported.
+    //
+    //   Canonical: types.TimestampTZ
+    //   Oid      : T_timestamptz
+    //   Precision: fractional seconds (3 = ms, 0,6 = us, 9 = ns, etc.)
+    //
+    // Examples:
+    //   TIMESTAMPTZ
+    //   TIMESTAMPTZ(6)
+    //
+    TimestampTZFamily = 9;
+
+    // CollatedStringFamily is the family of types containing Unicode textual
+    // strings with an associated COLLATE value that specifies the locale used
+    // for various character-based operations such as sorting, pattern matching,
+    // and builtin functions like lower and upper.
+    //
+    //   Oid      : T_text, T_varchar, T_bpchar, T_char
+    //   Width    : max # characters (0 = no specified limit)
+    //   Locale   : name of locale (e.g. EN or DE)
+    //
+    // Examples:
+    //   STRING COLLATE en
+    //   VARCHAR(10) COLLATE de
+    //
+    CollatedStringFamily = 10;
+
+    // NAME deprecated in 19.1, since it now uses Oid.
+    reserved 11;
+
+    // OidFamily is the family of types containing Postgres Object ID (Oid)
+    // values. Oids are integer values that identify some object in the database,
+    // like a type, relation, or procedure.
+    //
+    //   Canonical: types.Oid
+    //   Oid      : T_oid, T_regclass, T_regproc, T_regprocedure, T_regtype,
+    //              T_regnamespace
+    //
+    // Examples:
+    //   OID
+    //   REGCLASS
+    //   REGPROC
+    //
+    // TODO(andyk): Oids should be part of the IntFamily, since they are treated
+    //              as equivalent to ints by PG.
+    OidFamily = 12;
+
+    // UnknownFamily is a special type family that tags expressions that
+    // statically evaluate to NULL. An UnknownFamily expression *must* be NULL.
+    // But the inverse is not true, since other types allow NULL values as well.
+    // UnknownFamily types are not supported as a table column type, but can be
+    // transferred through DistSQL streams.
+    //
+    //   Canonical: types.Unknown
+    //   Oid      : T_unknown
+    //
+    UnknownFamily = 13;
+
+    // UuidFamily is the family of types containing universally unique
+    // identifiers. A UUID is a 128-bit quantity that is very unlikely to ever be
+    // generated again, and so can be relied on to be distinct from all other UUID
+    // values.
+    //
+    //   Canonical: types.Uuid
+    //   Oid      : T_uuid
+    //
+    // Examples:
+    //   UUID
+    //
+    UuidFamily = 14;
+
+    // ArrayFamily is a family of non-scalar types that contain an ordered list of
+    // elements. The elements of an array must all share the same type. Elements
+    // can have have any type, including ARRAY. However, while the types package
+    // supports nested arrays, other parts of KBDB do not currently support them.
+    // Also, the length of array dimension(s) are ignored by PG and KBDB (e.g.
+    // an array of length 11 could be inserted into a column declared as INT[11]).
+    //
+    // Array OID values are special. Rather than having a single T_array OID,
+    // Postgres defines a separate OID for each possible array element type.
+    // Here are some examples:
+    //
+    //   T__int8: array of int8 values
+    //   T__text: array of text values
+    //
+    // Notice that each array OID has double underscores to distinguish it from
+    // the OID of the scalar type it contains.
+    //
+    //   Oid          : T__int, T__text, T__numeric, etc.
+    //   ArrayContents: types.T of the array element type
+    //
+    // Examples:
+    //   INT[]
+    //   VARCHAR(10)[] COLLATE EN
+    //   DECIMAL(10,1)[]
+    //   TIMESTAMP[5]
+    //
+    ArrayFamily = 15;
+
+    // INetFamily is the family of types containing IPv4 or IPv6 network address
+    // identifiers (e.g. 192.168.100.128/25 or FE80:CD00:0:CDE:1257:0:211E:729C).
+    //
+    //   Canonical: types.INet
+    //   Oid      : T_inet
+    //
+    // Examples:
+    //   INET
+    //
+    INetFamily = 16;
+
+    // TimeFamily is the family of date types that store only hour/minute/second
+    // with no date component. There is no timezone component. Seconds can have
+    // varying precision (defaults to microsecond precision). Currently, only
+    // microsecond precision is supported.
+    //
+    //   Canonical: types.Time
+    //   Oid      : T_time
+    //   Precision: fractional seconds (3 = ms, 0,6 = us, 9 = ns, etc.)
+    //
+    // Examples:
+    //   TIME
+    //   TIME(6)
+    //
+    TimeFamily = 17;
+
+    // JsonFamily is the family of types containing JavaScript Object Notation
+    // (JSON) values. Currently, KBDB only supports JSONB values, which are stored
+    // in a decomposed binary format.
+    //
+    //   Canonical: types.Jsonb
+    //   Oid      : T_jsonb
+    //
+    // Examples:
+    //   JSON
+    //   JSONB
+    //
+    JsonFamily = 18;
+
+    // TimeTZFamily is the family of date types that store only hour/minute/second
+    // and timestamp components, with no date component. Seconds can have
+    // varying precision (defaults to microsecond precision). Currently, only
+    // microsecond precision is supported.
+    //
+    //   Canonical: types.TimeTZ
+    //   Oid      : T_timetz
+    //   Precision: fractional seconds (3 = ms, 0,6 = us, 9 = ns, etc.)
+    //
+    // Examples:
+    //   TIMETZ
+    //
+    TimeTZFamily = 19;
+
+    // TupleFamily is a family of non-scalar structural types that describes the
+    // fields of a row or record. The fields can be of any type, including nested
+    // tuple and array types. Fields can also have optional labels. Currently,
+    // KBDB does not support tuple types as column types, but it is possible to
+    // construct tuples using the ROW function or tuple construction syntax.
+    //
+    //   Oid          : T_record
+    //   TupleContents: []types.T of each tuple field
+    //   TupleLabels  : []string of each tuple label
+    //
+    // Examples:
+    //   (1, 'foo')
+    //   ((1, 'foo') AS num, str)
+    //   ROW(1, 'foo')
+    //   (ROW(1, 'foo') AS num, str)
+    //
+    TupleFamily = 20;
+
+    // BitFamily is the family of types containing ordered lists of bit values
+    // (0 or 1). Note that while VARBIT has no default width limit, BIT has a
+    // default width limit of 1.
+    //
+    //   Canonical: types.VarBit
+    //   Oid      : T_varbit, T_bit
+    //   Width    : max # of bits (0 = no specified limit)
+    //
+    // Examples:
+    //   VARBIT
+    //   VARBIT(10)
+    //   BIT
+    //   BIT(10)
+    //
+    BitFamily = 21;
+
+    // AnyFamily is a special type family used during static analysis as a
+    // wildcard type that matches any other type, including scalar, array, and
+    // tuple types. Execution-time values should never have this type. As an
+    // example of its use, many SQL builtin functions allow an input value to be
+    // of any type, and so use this type in their static definitions.
+    //
+    //   Canonical: types.Any
+    //   Oid      : T_anyelement
+    //
+    AnyFamily = 100;
+
+    // Int2VectorFamily deprecated in 19.1, since it now uses Oid.
+    reserved 200;
+
+    // OidVectorFamily deprecated in 19.1, since it now uses Oid.
+    reserved 201;
+}
+
+message TSCol {
+  optional roachpb.DataType sql_type = 1;
+  optional roachpb.DataType storage_type = 2;
+  optional uint64 storage_len = 3;
+  optional uint64 col_offset = 4;
+  optional roachpb.VariableLengthType variable_length_type = 5;
+  optional roachpb.KWDBKTSColumn.ColumnType column_type = 6;
+  optional bool nullable = 7;
+}
+
+message TSPostProcessSpec {
+
+  optional uint32 limit = 1;
+
+  optional uint32 offset = 2;
+
+  optional string filter = 3;
+
+  repeated string renders = 4;
+
+  // output columns
+  repeated uint32 outputCols = 5;
+
+  repeated KWDBTypeFamily outputtypes = 6;
+
+  optional bool projection = 7;
+
+  optional uint32 commandlimit = 8;
+}
+
+// TSSynchronizer Spec 
+message TSSynchronizerSpec{
+  // dop
+  optional int32 degree = 1;
+}
+
+// TSStatisticTableReader Spec
+message TSStatisticReaderSpec {
+  // ts span
+  repeated TsSpan tsSpans = 1;
+  // table id
+  required uint64 tableID = 2;
+  // scan columns
+  repeated uint32 cols = 3;
+  // agg types
+  repeated int32 aggTypes = 4;
+  // columns meta data
+  repeated TSCol tsCols = 5;
+
+  // table version
+  required uint32 tableVersion = 6;
+}
+
+// TSTagReader Spec
+message TSTagReaderSpec {
+  // table id
+  required uint64 tableID = 1;
+
+  repeated TSCol colMetas = 2;
+  // primary tag values
+  message TagValueArray {
+    // column id
+    optional uint32 colid = 1;
+    // values
+    repeated string tagValues = 2;
+  }
+  repeated TagValueArray primaryTags = 3;
+  required TSTableReadMode accessMode = 4;
+
+  // table version
+  required uint32 tableVersion = 5;
+}

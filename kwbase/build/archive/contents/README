@@ -1,0 +1,27 @@
+KaiwuDB is a scalable, survivable, strongly-consistent SQL database.
+
+You have downloaded a source archive, which requires a Go toolchain to compile.
+For other installation options, including pre-compiled binaries, see
+https://www.cockroachlabs.com/docs/stable/install-kwbasedb.html.
+
+To build KaiwuDB from this source archive:
+
+     $ make build
+
+See src/gitee.com/kwbasedb/kwbase/CONTRIBUTING.md for a complete list of
+build requirements.
+
+To install KaiwuDB as /usr/local/bin/kwbase:
+
+     $ make install
+
+To interact with a one-node SQL cluster:
+
+     $ kwbase start --background --insecure
+     $ kwbase sql --insecure
+     $ kwbase quit --insecure
+
+Next steps:
+
+    * Read the docs: https://cockroachlabs.com/docs/stable/
+    * Check out the GitHub repository: https://github.com/kwbasedb/kwbase

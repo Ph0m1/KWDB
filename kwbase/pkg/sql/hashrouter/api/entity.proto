@@ -1,0 +1,148 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+syntax = "proto2";
+package api;
+option go_package = "api";
+
+import "gogoproto/gogo.proto";
+
+// ReplicaType leaseHolder or follower
+enum ReplicaType {
+  LeaseHolder = 0;
+  Follower = 1;
+};
+
+// EntityRangeGroup status
+enum EntityRangeGroupStatus {
+  // available status
+  Available = 0;
+  // transferring status
+  transferring = 1;
+  // relocating status
+  relocating = 2;
+  // adding replica status
+  adding = 3;
+  // lacking replica status
+  lacking = 4;
+}
+
+// EntityRangeGroupReplica status
+enum EntityRangeGroupReplicaStatus {
+  // available status
+  available = 0;
+  // unavailable status
+  unavailable = 1;
+}
+
+// EntityRangeGroup all replicas info, including the node id of one replica.
+message EntityRangeGroupReplica{
+  option (gogoproto.equal) = true;
+  // unique in the cluster
+  optional uint64 replica_id = 1[(gogoproto.customname) = "ReplicaID", (gogoproto.nullable) = false];
+  optional int32 node_id = 2 [(gogoproto.nullable) = false, (gogoproto.customname) = "NodeID", (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/roachpb.NodeID"];
+  optional int32 store_id = 3 [(gogoproto.nullable) = false, (gogoproto.customname) = "StoreID", (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/roachpb.StoreID"];
+  optional EntityRangeGroupReplicaStatus status = 4 [(gogoproto.nullable) = false];
+}
+
+// HashPartition message when transfer hash partition
+message HashPartitionChange {
+  option (gogoproto.equal) = true;
+  // HashPartition info
+  optional HashPartition partition = 1[(gogoproto.nullable) = false];
+  // HashPartition id
+  optional uint32 partition_id = 2[(gogoproto.nullable) = false, (gogoproto.customname) = "PartitionID"];
+  // the leaseHolder's entityGroupID of one HashPartition
+  optional uint32 group_id = 3 [(gogoproto.customname) = "GroupID", (gogoproto.nullable) = false, (gogoproto.casttype) = "EntityRangeGroupID"];
+}
+
+// EntityRangeGroup struct
+message EntityRangeGroup {
+  option (gogoproto.equal) = true;
+  // EntityRangeGroupID unique
+  optional uint32 group_id = 1 [(gogoproto.customname) = "GroupID", (gogoproto.nullable) = false, (gogoproto.casttype) = "EntityRangeGroupID"];
+  // all HashPartition of one EntityRangeGroup
+  map<uint32, HashPartition>  partitions = 2[(gogoproto.nullable) = false] ;
+  // the leasHolder's EntityRangeGroupReplica of one EntityRangeGroup
+  optional EntityRangeGroupReplica lease_holder = 3 [(gogoproto.nullable) = false];
+  // all EntityRangeGroupReplica of one EntityRangeGroup
+  repeated EntityRangeGroupReplica internalReplicas = 4 [(gogoproto.nullable) = false];
+  //
+  repeated EntityRangeGroupReplica group_changes = 5 [(gogoproto.nullable) = false];
+  optional EntityRangeGroupReplica lease_holder_change = 6 [(gogoproto.nullable) = false];
+  optional EntityRangeGroupReplica previous_lease_holder = 7 [(gogoproto.nullable) = false];
+  // Changes in HashPartition migration from one group to another, where leaseHolder and follower are synchronized
+  repeated HashPartitionChange partition_changes = 8 [(gogoproto.nullable) = false];
+  // EntityRangeGroup status
+  optional EntityRangeGroupStatus  status = 9 [(gogoproto.nullable) = false];
+  // node status of the EntityRangeGroup
+  optional uint32  node_status = 10 [(gogoproto.nullable) = false, (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb.NodeLivenessStatus"];
+  // table id of the EntityRangeGroup
+  optional uint32 table_id = 11 [(gogoproto.customname) = "TableID", (gogoproto.nullable) = false];
+}
+
+// KWDBHashRouting save all EntityRangeGroups
+message KWDBHashRouting {
+  option (gogoproto.equal) = true;
+  required uint32 entity_range_group_id = 1 [(gogoproto.nullable) = false, (gogoproto.casttype) = "EntityRangeGroupID"];
+  optional uint32 tableID = 2 [(gogoproto.nullable) = false];
+  required EntityRangeGroup entity_range_group = 3 [(gogoproto.nullable) = false];
+  optional int32 ts_partition_size = 4 [(gogoproto.nullable) = false];
+}
+
+// HashPartition info
+message HashPartition {
+  option (gogoproto.equal) = true;
+  // HashPartition start point
+  optional int32 start_point = 1 [(gogoproto.nullable) = false, (gogoproto.casttype) = "HashPoint"];
+  // HashPartition end point
+  optional int32 end_point = 2 [(gogoproto.nullable) = false, (gogoproto.casttype) = "HashPoint"];
+}
+
+// EntityRangePartitionMessage is the changes of the HashPartition in need
+message EntityRangePartitionMessage {
+  option (gogoproto.equal) = true;
+  // EntityRangeGroupID is unique
+  optional uint32 group_id = 1 [(gogoproto.customname) = "GroupID", (gogoproto.nullable) = false, (gogoproto.casttype) = "EntityRangeGroupID"];
+  // partition need to transfer
+  optional HashPartition partition = 2 [(gogoproto.nullable) = false];
+  // the leaseHolder replica of one hashPartition
+  optional EntityRangeGroupReplica src_lease_holder = 3 [(gogoproto.nullable) = false];
+  // all replicas of one hashPartition
+  repeated EntityRangeGroupReplica src_internalReplicas = 4 [(gogoproto.nullable) = false];
+  // current leaseHolder replica of the hash partition
+  optional EntityRangeGroupReplica dest_lease_holder = 5 [(gogoproto.nullable) = false];
+  // all replicas of one hashPartition
+  repeated EntityRangeGroupReplica dest_internalReplicas = 6 [(gogoproto.nullable) = false];
+}
+
+// group info need to gossip
+message GossipEntityRangeGroupMessage {
+  repeated KWDBHashRouting messages = 1 [(gogoproto.nullable) = false];
+}
+
+// RangeGroup the group role
+message RangeGroup {
+	required uint32 rangeGroupID = 1 [(gogoproto.nullable) = false, (gogoproto.casttype) = "EntityRangeGroupID"];
+	required ReplicaType type = 2 [(gogoproto.nullable) = false];
+}

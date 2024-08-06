@@ -1,0 +1,138 @@
+# LogicTest: local
+
+statement ok
+CREATE TABLE x (
+  a INT PRIMARY KEY,
+  b INT,
+  INDEX (b),
+  FAMILY "primary" (a, b)
+)
+
+statement ok
+ALTER TABLE x INJECT STATISTICS '[
+  {
+    "columns": ["a"],
+    "created_at": "2018-01-01 1:00:00.00000+00:00",
+    "row_count": 123123,
+    "distinct_count": 100,
+    "histo_buckets": []
+  },
+  {
+    "columns": ["b"],
+    "created_at": "2018-01-01 1:00:00.00000+00:00",
+    "row_count": 123123,
+    "distinct_count": 123123,
+    "histo_buckets": []
+  }
+]'
+
+statement ok
+CREATE TABLE y (
+  u INT PRIMARY KEY,
+  v INT REFERENCES x,
+  INDEX (v),
+  FAMILY "primary" (u, v)
+)
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM x WHERE b = 3
+----
+eJy0ktFO2zAUhq_xU_zKDe3W0KTlYgqatFCMli2kKPUYCKHISQ31SO3KcVhgmsRD9Al5kimFdbnZtBt8caRzzv8dnd-26-JMmEpqFWCii1ujebE4OoRoRJHXspwLAysqi7tnFSGuCyO0mQuTfdNSVVkpl9JiwSvYhcBcXPO6tLjjZS0C7Ld6oXheiuxB3jzwmw31N7lWrV6vrFzKB2Gya22EvFHZrbiv_sGQSUpDRsHCw5iiQY_scEQJ20cyZUi-xPGA7OQvledsMk1mLA2jhMFZGbnk5t7BaRqdhOkFPtML9DjC2aQ_IDtRckTP0WR5JucNevnv-nF4EsUXHbzHB8j7pH9ASBgzmr7s097f3qrOS1nsNYiST3TCMGMhi2Ysmsywe0kA4McmtscpdFkvVeUEuNwWNw3ubPOrQUdvBLdinnHrBHBGnv_O9XzX8-H5gecFnvd2E50OMpeVlaqwWaFr1WK-53XaC1lZnRW6zOz9SrRTu7Cqy3ILdjGjv_8ZOBr7o_Gm93Pw3w7zV3S4Wej1TJKr3QNC6PlpHEYJetNTNgBNzvqY0bh98jc4TqcnaPD1I00pcrzH-IC4ruuSquAKzYeXP0bwtF4_rR-f1o8otKqs4VLZAMPR0A9wORzDxXB8RX4FAAD__3MvAUM=
+
+statement error ENV only supported with \(OPT\) option
+EXPLAIN (ENV) SELECT * FROM x WHERE b = 3
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM x WHERE b = 3
+----
+eJy0ktFO2zAUhq_xU_zKDe3W0KTlYgqatFCMli2kKPUYCKHISQ31SO3KcVhgmsRD9Al5kimFdbnZtBt8caRzzv8dnd-26-JMmEpqFWCii1ujebE4OoRoRJHXspwLAysqi7tnFSGuCyO0mQuTfdNSVVkpl9JiwSvYhcBcXPO6tLjjZS0C7Ld6oXheiuxB3jzwmw31N7lWrV6vrFzKB2Gya22EvFHZrbiv_sGQSUpDRsHCw5iiQY_scEQJ20cyZUi-xPGA7OQvledsMk1mLA2jhMFZGbnk5t7BaRqdhOkFPtML9DjC2aQ_IDtRckTP0WR5JucNevnv-nF4EsUXHbzHB8j7pH9ASBgzmr7s097f3qrOS1nsNYiST3TCMGMhi2Ysmsywe0kA4McmtscpdFkvVeUEuNwWNw3ubPOrQUdvBLdinnHrBHBGnv_O9XzX8-H5gecFnvd2E50OMpeVlaqwWaFr1WK-53XaC1lZnRW6zOz9SrRTu7Cqy3ILdjGjv_8ZOBr7o_Gm93Pw3w7zV3S4Wej1TJKr3QNC6PlpHEYJetNTNgBNzvqY0bh98jc4TqcnaPD1I00pcrzH-IC4ruuSquAKzYeXP0bwtF4_rR-f1o8otKqs4VLZAMPR0A9wORzDxXB8RX4FAAD__3MvAUM=
+
+#
+# Multiple Tables.
+#
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM x, y WHERE b = 3
+----
+eJy0lNFumzAUhq_rpzjipmSDhiS9mKgmjabOxpaSCljXqqosQ5zGK8GRMQw6Tar2DLnc0-VJJkjaonWttovmwpLP-X7LJ3xgmnDKZMZFasNQxNdS0Hh-dAisZHGU82TKJCiWKSg2FEKmCZIJOWWSfBU8zUjCF1zBnGag5gymbEbzREFBk5zZsF_zLKVRwsgNv7qhV03qKVykNS-Wii_4DZNkJiTjVym5ZlX2TAYNfeyEGELncIyhBB3tUHC9cB-8SQje5_HYQDvRtrLZDSdeEPqO64WgLSVfUFlpcOK7x45_Dp_wOegUnGDYMdCO6x3hMyhJRPi0BD26q4-cY3d83orr1ICogzoHCDnjEPvb-9T_394yjxIe75Xgeh_xMIQgdEI3CN1hALsXCADge7PWPy0WSb5IM82Gi_ti06Da_f7SaPGSUcWmhCrNBq1v9d6YVs-0emD1bMuyLet1s2qtyJRniqexIrHI0zrWs6xWe84zJUgsEqKqJatPbYfTPEnug-2YFN8eDuwPev1B0_th_POE0QtO2Fzo5YZEl7sHf6hY1Srmj1Qs_lPF_E65Fjq7JgWRbEZKGE187L73NmzRAR-PsI-9IQ6g1OmDwhUpNgoXTyucG1A8r3D1V4Wb2fHZydhxPdAnJ6EB2DvtQIDHNfsKRv7kGEoDKvjyAfsYIngLgwNkmqaJeJoyaTYfBj2WIss6CNarX-vV7Xp1C1lMU6geVcp321ey7vysn8B6tdoCsUgzJSlPlQ3dfrdnw0V3ACZ0B5eohc14opjMQFcyZx30OwAA__-7P2mP
+
+#
+# Same table twice should only show up once.
+#
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM x one, x two
+----
+eJy0k8Fum0wQx8_ZpxhxCXwfRJDkUJETIUSiJTiCbZQoitACG3sbvGvtLjF2VSkP4WOfzk9SgV0XqWrVSziMmP_8f6OZXa3jwB2VignuQyiqFylINbu6BNrRqmxZU1MJmioNrzsXQo4DkgpZU1l8EYyromFzpmFGFOgZhZo-k7bR8Eqalvpw3vspJ2VDizWbrsl0oP5kF7z3i4Vmc7amsngWkrIpL17oSv2FQWEWBTgCHFwmEXRgoiMCcYrPIZ1gSD8niY2Oyr2yy8JJmuMsiFMMxkKyOZErA26z-CbIHuBT9AAmgSAPLRsdxelVdA9dURas7sAsf-rXwU2cPIxwk9hQWsi6QChIcJTt5-nP72TRlg2rTjqI049RiCHHAY5zHIc5HD8iAICvQ-w_oxJNO-fK8OHxIA4FYhzyJ3vkl5RoWhdEGz4Yp673wXE9x_XA9XzX9V33_yEaI6RmSjNe6aISLe8xz3VH5RlTWhSVaAq9WtC-6xjmbdMcwDEmxfJXw9Mz7_RsqH2z_3nD8h03HAZ6vyXR0_EFQtH9bRLEKZiTW2xDlN5ZkEdJf-X_wXU2uYEOghwEp_buTy_FBXIcx0GMcyqd4XmYlRRKWQi2m-_bzdt28waqIrzHftP0UvTaZq89s0ZTqcDUsqUW-hEAAP__kQgU9Q==
+
+#
+# Set a relevant session variable to a non-default value and ensure it shows up
+# in the environment dump.
+#
+
+statement ok
+SET reorder_joins_limit = 100
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM y WHERE u = 3
+----
+eJx80M9u2kAQBvBz9ik-5RJTsSEROYFycJyldWvWaL1Ng6JotZgFthgbrf8Ic8pD8IQ8SUVJpbaHHGf0-2Y0QymejCttkQ8QFOnaFTpdPT7A7Ew6q202Nw6VKSs0Z0VIwiScKdzcOPWzsHmpMruxFe5xe3MzBCjF3Cx0nVVodFabAe4IpTC5nmVG7e1yr5e_g1jpEtXK_M-L_OSLbWU3dm-cWhTO2GWu1qYtP8iQQDBfMkj_IWJo4ZGLGiGXd-CxBP8eRV1y0bx3zlUQ80QKP-QSl1tnN9q1l5iIcOyLKb6xKbwafhJ0_qWLtWqUMwu1wygWLPzMz7bpQLARE4wHLMHO06dcyB_ZM1rVKDvfwWv-zBv54zCa_rXWq7toOqQzJMSPJBPvd5x-f72tZ5lNr1uE_CsLJBLpyzCRYZDg6uX1akgIe55EfsjhxRPZBeNPHSQsOtlPGIl4jBY_vjDBUOMe_SGhlFJSpjpHS3A8HI6Ht-PhDWmRl5XTNq8G6N0O8NLrg6LXfyW_AgAA__9ji6cn
+
+# Make sure it shows up correctly even if it matches the cluster setting.
+statement ok
+SET CLUSTER SETTING sql.defaults.reorder_joins_limit = 100
+
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM y WHERE u = 3
+----
+eJx80M9u2kAQBvBz9ik-5RJTsSEROYFycJyldWvWaL1Ng6JotZgFthgbrf8Ic8pD8IQ8SUVJpbaHHGf0-2Y0QymejCttkQ8QFOnaFTpdPT7A7Ew6q202Nw6VKSs0Z0VIwiScKdzcOPWzsHmpMruxFe5xe3MzBCjF3Cx0nVVodFabAe4IpTC5nmVG7e1yr5e_g1jpEtXK_M-L_OSLbWU3dm-cWhTO2GWu1qYtP8iQQDBfMkj_IWJo4ZGLGiGXd-CxBP8eRV1y0bx3zlUQ80QKP-QSl1tnN9q1l5iIcOyLKb6xKbwafhJ0_qWLtWqUMwu1wygWLPzMz7bpQLARE4wHLMHO06dcyB_ZM1rVKDvfwWv-zBv54zCa_rXWq7toOqQzJMSPJBPvd5x-f72tZ5lNr1uE_CsLJBLpyzCRYZDg6uX1akgIe55EfsjhxRPZBeNPHSQsOtlPGIl4jBY_vjDBUOMe_SGhlFJSpjpHS3A8HI6Ht-PhDWmRl5XTNq8G6N0O8NLrg6LXfyW_AgAA__9ji6cn
+
+statement ok
+SET enable_zigzag_join = false
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM y WHERE u = 3
+----
+eJxskM1u2kAUhdeZpzjKJqbKhERkBWLhOEPr1gzInqZBUTQazBimGA8a_wizykPwhDxJRUilVsryXn3fvTqHUjxpVxpb9BHYdO2sSlePD9A7nc5rky-0Q6XLCs2ZIiRhAk5bt9BO_ramKGVuNqbCEHe3twOAUix0puq8QqPyWvdx_-7oQs1zLfdmuVfLdxND2Cz7VLEFoRR2W5mN2WsnM-u0WRZyrdsSK1WiWulPHBLEzBcMwn-IGFp45KJGyMU9-ESA_4yia3LRfGzOUzDhiYj9kAtcbp3ZKNdeYhqHYz-e4QebwavhJ0HnfzRby0Y6nckdRpOYhV_5mW06iNmIxYwHLMHOUycv5I_sGa1spFns4DV_7438cRjN_nnr1ddoOqQzIMSPBIs_cpz6v9nW89ykNy1C_p0FAonwRZiIMEhw9fJ6NSCEPU8jP-TwJlNxDcafOkhYdGK_YBRPxmjx6xuLGWoM0RsQSiklZaoKtATHw-F4eDse3pDaoqycMkXVR_euj5duDxTd3iv5EwAA__-8qaeJ
+
+statement ok
+SET optimizer_foreign_keys = false
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM y WHERE u = 3
+----
+eJx80d9u2jwYx_Hj-ip-6knDK1Ja0SMQB2lq3nkLBjleV1RVVggO8wgxcv6IcNSL4Aq5kgnopE2admjr-7H16PF9PGtXGlsMENp07WySfn96hN7pdFGbfKkdKl1WaC4VITGVcNq6pXbqhzVFqXKzMRVGuL-7GwK-j6XOkjqv0CR5rQd4OBtdJItcq71Z7ZPVWWIEm2V_JbY4G7utzMbstVOZddqsCrXWbflvR0JBA0khg8eIooVHrmowLh_ApxL8axR1yVXzcXM5hVMeSxEwLnG9dWaTuPYaM8EmgZjjC53DqxHEYefPNFurRjmdqR3GU0HZ__zSNh0IOqaC8pDG2HnJyTH-RF_QqkaZ5Q5e8-u9cTBh0fy3b726i6ZDOkNCgkhS8THHaQe323qRm_S2BeOfaSgRy0CyWLIwxs3r282QEPoyiwLG4U1nsgvKnzuIaXRq_8NYTCdo8e0TFRQ1RugPie_7PinTpEBLcDwcjof34-EdqS3KyiWmqAbo3Q_w2uvDR6__Rn4GAAD__0_cp-s=
+
+statement ok
+RESET reorder_joins_limit
+
+statement ok
+RESET enable_zigzag_join
+
+statement ok
+RESET optimizer_foreign_keys
+
+#
+# Test sequences.
+#
+
+statement ok
+CREATE SEQUENCE seq
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM seq
+----
+eJx8zU1v4jAQxvG7P8Vz3F2tpYSXDQvqIU2nEhIJNDGIWxTCAC4hLraDWj59Rbn10NtI8_vrkRIrtk6bdozE1Edrqvrw9Ah-53rT6WbLFp6dx-WuhChIwbKxW7blq9GtKxt90h4PCINgAkiJLe-qrvG4VE3HYwyElOC22jRcXvX-Wu2_QhwqB3_g79y0N2_evD7pK9tyZyzrfVse-cP90Igkp1gRCnpZUpYQHJ-RTrNVPFsSQqTx-n7-7_X6_agX9P-NhoMoGo6CCNMsySmlTCFEoeJcIZwIQevFLJ5m-DVfqL-gbPUbBc0oUfiD53ye3iYmQkopheNzx23N0nHDtb99xGcAAAD__3ZZbNo=
+
+#
+# Test views.
+#
+
+statement ok
+CREATE VIEW v AS SELECT a, b, u, v FROM x, y WHERE b = 3
+
+query T
+EXPLAIN (OPT, ENV) SELECT * FROM v
+----
+eJy0lN9uozgUxq_rpzjipmQXGkh6sSKqtDR1dtlNSQVs_6iqLEOcxluCI2MY0tFI1TxDLufp8iQjSNrSzkw1c1EuLPmc7zv2gd_BNOGcyZyLzIGhSO6koMn85BhYxZK44OmUSVAsV1BuVQiFOALJhJwySf4XPMtJyhdcwRHYljUAME2YshktUgUlTQvmwCEyTWAZjVNG7vntPb1tjDCnOag5ey0XWa0XS8UX_J5JMhOS8duM3LFV_oYHDQPsRhgi93iMoQId7VHw_OgQ_EkE_n_jsYH24l1kuxtO_DAKXM-PQFtKvqBypcFZ4J26wRX8i69Ap-CGw46B9jz_BF9CRWLCpxXo8WN85J5646uWXacGxB3UGSDkjiMc7O5Tv8ODZRGnPDmowPP_wcMIwsiNvDDyhiHsXyMAgI_NWj9aItJikeWaA9dPwSZBtaf9jdHSS0YVmxKqNAe0nmX_YVq2adlg2Y5lOZb1e7NqLcuU54pniSKJKLLaZltWKz3nuRIkESlRqyWrq7bNWZGmT8a2TYoPzwV7fbvXb3KfjJ_uMH7HDpsLvV-T6GZ_8ArFVY1i8Q2K5S-iWDwi15LO7khJJJuRCkaTAHt_-Vtt2YEAj3CA_SEOodLpM8IrUm4RLn-McGFA-TbCq-8i3O793MMXUG7HwYCmIrghhHhc256jMAompy_Hw3h11MXfOMAQwxH0Bwjhy7Ox6_mgT84iA7B_3nks-tu2VjlApmmaiGcZk2bzp9ETKfK8g2Cz_rJZP2zWD5AnNHt5zpvZ6s_d7Neqz_Wn3qzXO3EislxJyjPlQLfXtR247vbBhG7_BrVkM54qJnPQlSxYB30NAAD__wzCido=

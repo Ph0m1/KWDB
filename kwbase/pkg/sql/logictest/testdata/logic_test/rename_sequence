@@ -1,0 +1,51 @@
+# see also file `sequences`
+
+statement ok
+CREATE SEQUENCE alter_test
+
+statement ok
+ALTER SEQUENCE alter_test RENAME TO renamed_alter_test
+
+# alter_test no longer there
+statement ok
+ALTER SEQUENCE IF EXISTS alter_test RENAME TO something
+
+statement ok
+ALTER SEQUENCE IF EXISTS renamed_alter_test RENAME TO renamed_again_alter_test
+
+statement ok
+DROP SEQUENCE renamed_again_alter_test
+
+# You can't rename a sequence with ALTER TABLE or ALTER VIEW.
+
+statement OK
+CREATE SEQUENCE foo
+
+statement error pgcode 42809 "foo" is not a table
+ALTER TABLE foo RENAME TO bar
+
+statement error pgcode 42809 "foo" is not a view
+ALTER VIEW foo RENAME TO bar
+
+# ZDP-13910
+statement OK
+use defaultdb;
+create schema defsch1;
+create database db2;
+use db2;
+create schema db2shc1;
+CREATE SEQUENCE db2.db2shc1.customer_seq;
+alter SEQUENCE db2.db2shc1.customer_seq RENAME TO defaultdb.defsch1.sequence_number;
+
+statement OK
+drop SEQUENCE defaultdb.defsch1.sequence_number;
+use defaultdb;
+set search_path=defsch1;
+
+query T
+SHOW SEQUENCES;
+----
+
+statement OK
+CREATE SEQUENCE sequence_number;
+drop SEQUENCE sequence_number;

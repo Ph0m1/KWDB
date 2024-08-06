@@ -1,0 +1,331 @@
+> create ts database db1;
+CREATE TS DATABASE
+> use db1;
+SET
+> create table t1(k_timestamp timestamp not null,e1 char(20) , e2 timestamp , e3 smallint , e4 int , e5 bigint , e6 float , e7 double) tags(tag1 int not null, tag2 int) primary tags(tag1);
+CREATE TABLE
+> insert into t1 values(1000,'a', 1667597776000, 1, 16, -1, 2.2, 10.0, 10, 11);
+INSERT 1
+> insert into t1 values(10000,'a', 1667597776000, 10, 16, -1, 2.2, 10.0, 10, 11);
+INSERT 1
+> select time_bucket_gapfill(k_timestamp,1) as ts from t1 group by ts order by ts;
+             ts
+-----------------------------
+  1970-01-01 00:00:01+00:00
+  1970-01-01 00:00:02+00:00
+  1970-01-01 00:00:03+00:00
+  1970-01-01 00:00:04+00:00
+  1970-01-01 00:00:05+00:00
+  1970-01-01 00:00:06+00:00
+  1970-01-01 00:00:07+00:00
+  1970-01-01 00:00:08+00:00
+  1970-01-01 00:00:09+00:00
+  1970-01-01 00:00:10+00:00
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), 333) from t1 group by ts order by ts;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 |         333
+  1970-01-01 00:00:03+00:00 |         333
+  1970-01-01 00:00:04+00:00 |         333
+  1970-01-01 00:00:05+00:00 |         333
+  1970-01-01 00:00:06+00:00 |         333
+  1970-01-01 00:00:07+00:00 |         333
+  1970-01-01 00:00:08+00:00 |         333
+  1970-01-01 00:00:09+00:00 |         333
+  1970-01-01 00:00:10+00:00 |          10
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), PREV) from t1 group by ts order by ts;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 |           1
+  1970-01-01 00:00:03+00:00 |           1
+  1970-01-01 00:00:04+00:00 |           1
+  1970-01-01 00:00:05+00:00 |           1
+  1970-01-01 00:00:06+00:00 |           1
+  1970-01-01 00:00:07+00:00 |           1
+  1970-01-01 00:00:08+00:00 |           1
+  1970-01-01 00:00:09+00:00 |           1
+  1970-01-01 00:00:10+00:00 |          10
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), NEXT) from t1 group by ts order by ts;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 |          10
+  1970-01-01 00:00:03+00:00 |          10
+  1970-01-01 00:00:04+00:00 |          10
+  1970-01-01 00:00:05+00:00 |          10
+  1970-01-01 00:00:06+00:00 |          10
+  1970-01-01 00:00:07+00:00 |          10
+  1970-01-01 00:00:08+00:00 |          10
+  1970-01-01 00:00:09+00:00 |          10
+  1970-01-01 00:00:10+00:00 |          10
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), LINEAR) from t1 group by ts order by ts;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 |           2
+  1970-01-01 00:00:03+00:00 |           3
+  1970-01-01 00:00:04+00:00 |           4
+  1970-01-01 00:00:05+00:00 |           5
+  1970-01-01 00:00:06+00:00 |           6
+  1970-01-01 00:00:07+00:00 |           7
+  1970-01-01 00:00:08+00:00 |           8
+  1970-01-01 00:00:09+00:00 |           9
+  1970-01-01 00:00:10+00:00 |          10
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), NULL) from t1 group by ts order by ts;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 | NULL
+  1970-01-01 00:00:03+00:00 | NULL
+  1970-01-01 00:00:04+00:00 | NULL
+  1970-01-01 00:00:05+00:00 | NULL
+  1970-01-01 00:00:06+00:00 | NULL
+  1970-01-01 00:00:07+00:00 | NULL
+  1970-01-01 00:00:08+00:00 | NULL
+  1970-01-01 00:00:09+00:00 | NULL
+  1970-01-01 00:00:10+00:00 |          10
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), NULL) from t1 group by ts order by ts limit 1;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+(1 row)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), NULL) from t1 group by ts order by ts limit 2;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 | NULL
+(2 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), NULL) from t1 group by ts order by ts limit 5;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 | NULL
+  1970-01-01 00:00:03+00:00 | NULL
+  1970-01-01 00:00:04+00:00 | NULL
+  1970-01-01 00:00:05+00:00 | NULL
+(5 rows)
+> select time_bucket_gapfill(k_timestamp,1) as ts, interpolate(max(e3), NULL) from t1 group by ts order by ts limit 10;
+             ts             | interpolate
+----------------------------+--------------
+  1970-01-01 00:00:01+00:00 |           1
+  1970-01-01 00:00:02+00:00 | NULL
+  1970-01-01 00:00:03+00:00 | NULL
+  1970-01-01 00:00:04+00:00 | NULL
+  1970-01-01 00:00:05+00:00 | NULL
+  1970-01-01 00:00:06+00:00 | NULL
+  1970-01-01 00:00:07+00:00 | NULL
+  1970-01-01 00:00:08+00:00 | NULL
+  1970-01-01 00:00:09+00:00 | NULL
+  1970-01-01 00:00:10+00:00 |          10
+(10 rows)
+> drop database db1;
+DROP DATABASE
+> create ts database t1;
+CREATE TS DATABASE
+> create table t1.d1(k_timestamp timestamptz not null ,e1 bigint  not null, e2 char(20) not null , e3 timestamp  not null , e4 int not null, e5 smallint not null, e6 float not null, e7 bigint not null, e8 smallint not null, e9 float  not null, e10 float not null )  tags(t1_d1 int not null ) primary tags(t1_d1);
+CREATE TABLE
+> INSERT INTO t1.d1  VALUES (1667590000000, 444444444, 'a', 1667597776000, 98, 1, 499.999, 111111111, 10, 10.10, 0.0001,0);
+INSERT 1
+> INSERT INTO t1.d1  VALUES  (1667591000000,111111111, 'b', 1667597777111, 100, 1, 99.999, 111111111, 10, 10.10, 0.0001,1);
+INSERT 1
+> INSERT INTO t1.d1  VALUES   (1667592000000, 222222222, 'c', 1667597778112, 99, 1, 299.999, 111111111, 10, 10.10, 0.0001,2);
+INSERT 1
+> INSERT INTO t1.d1  VALUES (1667592010000, 333333333, 'd', 1667597779000, 98, 1, 55.999, 111111111, 10, 10.10, 0.0001,3);
+INSERT 1
+> INSERT INTO t1.d1  VALUES (1667592600000, 333333333, 'd', 1667597779000, 98, 1, 20.999, 111111111, 10, 10.10, 0.0001,4);
+INSERT 1
+> select time_bucket_gapfill(k_timestamp,60),interpolate(avg(e6),'null') from t1.d1  group by time_bucket_gapfill(k_timestamp,60) order by time_bucket_gapfill(k_timestamp,60);
+     time_bucket_gapfill    |    interpolate
+----------------------------+---------------------
+  2022-11-04 19:26:00+00:00 |            499.999
+  2022-11-04 19:27:00+00:00 | NULL
+  2022-11-04 19:28:00+00:00 | NULL
+  2022-11-04 19:29:00+00:00 | NULL
+  2022-11-04 19:30:00+00:00 | NULL
+  2022-11-04 19:31:00+00:00 | NULL
+  2022-11-04 19:32:00+00:00 | NULL
+  2022-11-04 19:33:00+00:00 | NULL
+  2022-11-04 19:34:00+00:00 | NULL
+  2022-11-04 19:35:00+00:00 | NULL
+  2022-11-04 19:36:00+00:00 | NULL
+  2022-11-04 19:37:00+00:00 | NULL
+  2022-11-04 19:38:00+00:00 | NULL
+  2022-11-04 19:39:00+00:00 | NULL
+  2022-11-04 19:40:00+00:00 | NULL
+  2022-11-04 19:41:00+00:00 | NULL
+  2022-11-04 19:42:00+00:00 | NULL
+  2022-11-04 19:43:00+00:00 |             99.999
+  2022-11-04 19:44:00+00:00 | NULL
+  2022-11-04 19:45:00+00:00 | NULL
+  2022-11-04 19:46:00+00:00 | NULL
+  2022-11-04 19:47:00+00:00 | NULL
+  2022-11-04 19:48:00+00:00 | NULL
+  2022-11-04 19:49:00+00:00 | NULL
+  2022-11-04 19:50:00+00:00 | NULL
+  2022-11-04 19:51:00+00:00 | NULL
+  2022-11-04 19:52:00+00:00 | NULL
+  2022-11-04 19:53:00+00:00 | NULL
+  2022-11-04 19:54:00+00:00 | NULL
+  2022-11-04 19:55:00+00:00 | NULL
+  2022-11-04 19:56:00+00:00 | NULL
+  2022-11-04 19:57:00+00:00 | NULL
+  2022-11-04 19:58:00+00:00 | NULL
+  2022-11-04 19:59:00+00:00 | NULL
+  2022-11-04 20:00:00+00:00 | 177.99900000000002
+  2022-11-04 20:01:00+00:00 | NULL
+  2022-11-04 20:02:00+00:00 | NULL
+  2022-11-04 20:03:00+00:00 | NULL
+  2022-11-04 20:04:00+00:00 | NULL
+  2022-11-04 20:05:00+00:00 | NULL
+  2022-11-04 20:06:00+00:00 | NULL
+  2022-11-04 20:07:00+00:00 | NULL
+  2022-11-04 20:08:00+00:00 | NULL
+  2022-11-04 20:09:00+00:00 | NULL
+  2022-11-04 20:10:00+00:00 |             20.999
+(45 rows)
+> select time_bucket_gapfill(k_timestamp,3600),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,3600) order by time_bucket_gapfill(k_timestamp,3600);
+     time_bucket_gapfill    |    interpolate
+----------------------------+--------------------
+  2022-11-04 19:00:00+00:00 |           299.999
+  2022-11-04 20:00:00+00:00 | 125.6656666666667
+(2 rows)
+> select time_bucket_gapfill(k_timestamp,9999),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,9999) order by time_bucket_gapfill(k_timestamp,9999);
+     time_bucket_gapfill    |    interpolate
+----------------------------+---------------------
+  2022-11-04 17:33:45+00:00 | 195.39900000000003
+(1 row)
+> select time_bucket_gapfill(k_timestamp,300),interpolate(count(e2),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+     time_bucket_gapfill    | interpolate
+----------------------------+--------------
+  2022-11-04 19:25:00+00:00 |           1
+  2022-11-04 19:30:00+00:00 |        NULL
+  2022-11-04 19:35:00+00:00 |        NULL
+  2022-11-04 19:40:00+00:00 |           1
+  2022-11-04 19:45:00+00:00 |        NULL
+  2022-11-04 19:50:00+00:00 |        NULL
+  2022-11-04 19:55:00+00:00 |        NULL
+  2022-11-04 20:00:00+00:00 |           2
+  2022-11-04 20:05:00+00:00 |        NULL
+  2022-11-04 20:10:00+00:00 |           1
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,300),interpolate(count(e3),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+     time_bucket_gapfill    | interpolate
+----------------------------+--------------
+  2022-11-04 19:25:00+00:00 |           1
+  2022-11-04 19:30:00+00:00 |        NULL
+  2022-11-04 19:35:00+00:00 |        NULL
+  2022-11-04 19:40:00+00:00 |           1
+  2022-11-04 19:45:00+00:00 |        NULL
+  2022-11-04 19:50:00+00:00 |        NULL
+  2022-11-04 19:55:00+00:00 |        NULL
+  2022-11-04 20:00:00+00:00 |           2
+  2022-11-04 20:05:00+00:00 |        NULL
+  2022-11-04 20:10:00+00:00 |           1
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,300),interpolate(avg(e6),'null'),interpolate(max(e6),'null')from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+     time_bucket_gapfill    |    interpolate     | interpolate
+----------------------------+--------------------+--------------
+  2022-11-04 19:25:00+00:00 |            499.999 |     499.999
+  2022-11-04 19:30:00+00:00 | NULL               | NULL
+  2022-11-04 19:35:00+00:00 | NULL               | NULL
+  2022-11-04 19:40:00+00:00 |             99.999 |      99.999
+  2022-11-04 19:45:00+00:00 | NULL               | NULL
+  2022-11-04 19:50:00+00:00 | NULL               | NULL
+  2022-11-04 19:55:00+00:00 | NULL               | NULL
+  2022-11-04 20:00:00+00:00 | 177.99900000000002 |     299.999
+  2022-11-04 20:05:00+00:00 | NULL               | NULL
+  2022-11-04 20:10:00+00:00 |             20.999 |      20.999
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,300),interpolate(avg(e6),'null'),interpolate(max(e6),Prev)from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+     time_bucket_gapfill    |    interpolate     | interpolate
+----------------------------+--------------------+--------------
+  2022-11-04 19:25:00+00:00 |            499.999 |     499.999
+  2022-11-04 19:30:00+00:00 | NULL               |     499.999
+  2022-11-04 19:35:00+00:00 | NULL               |     499.999
+  2022-11-04 19:40:00+00:00 |             99.999 |      99.999
+  2022-11-04 19:45:00+00:00 | NULL               |      99.999
+  2022-11-04 19:50:00+00:00 | NULL               |      99.999
+  2022-11-04 19:55:00+00:00 | NULL               |      99.999
+  2022-11-04 20:00:00+00:00 | 177.99900000000002 |     299.999
+  2022-11-04 20:05:00+00:00 | NULL               |     299.999
+  2022-11-04 20:10:00+00:00 |             20.999 |      20.999
+(10 rows)
+> select time_bucket_gapfill(k_timestamp,9999999),interpolate(avg(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,9999999) order by time_bucket_gapfill(k_timestamp,9999999);
+     time_bucket_gapfill    |    interpolate
+----------------------------+---------------------
+  2022-08-08 23:03:54+00:00 | 195.39900000000003
+(1 row)
+> select time_bucket_gapfill(k_timestamp,300) from t1.d1;
+ERROR: time_bucket_gapfill should be use with group by time_bucket_gapfill
+SQLSTATE: 0A000
+> select time_bucket_gapfill(k_timestamp,300),interpolate(max(e2),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+SQLSTATE: 01000
+> select time_bucket_gapfill(k_timestamp,300),interpolate(max(e3),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+SQLSTATE: 01000
+> select time_bucket_gapfill(k_timestamp,300),interpolate(STRING_AGG(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
+ERROR: unknown signature: string_agg(FLOAT8)
+SQLSTATE: 42883
+> select interpolate(avg(e6),'null') from t1.d1 ;
+ERROR: interpolate should be used with time_bucket_gapfill
+SQLSTATE: 0A000
+> select time_bucket_gapfill(k_timestamp,300),interpolate(avg(e6),null) from t1.d1  order by time_bucket_gapfill(k_timestamp,300);
+ERROR: interpolate should be used with group by time_bucket_gapfill
+SQLSTATE: 0A000
+> create table t1.tb(k_timestamp timestamptz not null,e1 timestamptz,e2 int2,e3 int,e4 int8,e5 float4,e6 float8,e7 bool,e8 char,e9 char(100),e10 nchar,e11 nchar(255),e12 varchar,e13 varchar(254),e14 varchar(4096),e15 nchar(100),e16 nchar(255),e17 nchar(255),e18 varbytes,e19 varbytes(100),e20 varbytes(200),e21 varbytes(254),e22 varbytes(200)) tags (t1 int2 not null,t2 int,t3 int8,t4 bool ,t5 float4,t6 float8,t7 char,t8 char(100) ,t9 nchar,t10 nchar(254),t11 varchar,t12 varchar(128) ,t13 varbytes,t14 varbytes(100),t15 varbytes(100),t16 varbytes(200)) primary tags(t1);
+CREATE TABLE
+> insert into t1.tb values ('2020-11-06 17:10:55.123','2019-12-06 18:10:23',null,3000,40000,600000.60612,4000000.4040404,false,' ',' ',' ',' ',' ',' ',' ',null,'','','','','','',null,-32768,-2147483648,-9223372036854775808,false,-9223372036854775807.12345,100.111111,'b','test测试！！！@TEST1 ','','test测试！TEST1xaa','\0test查询  @TEST1\0',e'\\','y','test@@测试！1023_1','vwwws测试_1','cccddde');
+INSERT 1
+> insert into t1.tb values ('2020-11-06 17:11:55.123','2019-12-06 18:11:23',null,3000,40000,600000.60612,4000000.4040404,false,' ',' ',' ',' ',' ',' ',' ','nchar','','','','','','',null,-32768,-2147483648,-9223372036854775808,false,-9223372036854775807.12345,100.111111,'b','test测试！！！@TEST1 ','','test测试！TEST1xaa','\0test查询  @TEST1\0',e'\\','y','test@@测试！1023_1','vwwws测试_1','cccddde');
+INSERT 1
+> select time_bucket_gapfill(k_timestamp,10) as a,interpolate(sum(e2),60) from t1.tb  group by a order by a;
+              a             | interpolate
+----------------------------+--------------
+  2020-11-06 17:10:50+00:00 | NULL
+  2020-11-06 17:11:00+00:00 |          60
+  2020-11-06 17:11:10+00:00 |          60
+  2020-11-06 17:11:20+00:00 |          60
+  2020-11-06 17:11:30+00:00 |          60
+  2020-11-06 17:11:40+00:00 |          60
+  2020-11-06 17:11:50+00:00 | NULL
+(7 rows)
+> select time_bucket_gapfill(k_timestamp,10) as a,interpolate(max(e10),60) from t1.tb  group by a order by a;
+ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+SQLSTATE: 01000
+> select time_bucket_gapfill(k_timestamp,10) as a,interpolate(max(e12),60) from t1.tb  group by a order by a;
+ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+SQLSTATE: 01000
+> select time_bucket_gapfill(k_timestamp,10) as a,interpolate(sum(e7),60) from t1.tb  group by a order by a;
+ERROR: unknown signature: sum(BOOL)
+SQLSTATE: 42883
+> select time_bucket_gapfill(k_timestamp,10) as a,interpolate(count(e15),60) from t1.tb  group by a order by a;
+              a             | interpolate
+----------------------------+--------------
+  2020-11-06 17:10:50+00:00 |           0
+  2020-11-06 17:11:00+00:00 |          60
+  2020-11-06 17:11:10+00:00 |          60
+  2020-11-06 17:11:20+00:00 |          60
+  2020-11-06 17:11:30+00:00 |          60
+  2020-11-06 17:11:40+00:00 |          60
+  2020-11-06 17:11:50+00:00 |           1
+(7 rows)
+> select time_bucket_gapfill(k_timestamp,10) as a,interpolate(min(e15),60) from t1.tb  group by a order by a;
+ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+SQLSTATE: 01000
+> select time_bucket_gapfill(k_timestamp,0) as a,sum(e2) from t1.tb  group by a order by a;
+ERROR: time_bucket_gapfill(): second arg should be a positive integer
+> select time_bucket_gapfill(k_timestamp,0) as a,max(e2) from t1.tb  group by a order by a;
+ERROR: time_bucket_gapfill(): second arg should be a positive integer
+> select time_bucket_gapfill(k_timestamp,-1) as a,avg(e2) from t1.tb  group by a order by a;
+ERROR: second arg should be a positive integer
+> drop database t1;
+DROP DATABASE

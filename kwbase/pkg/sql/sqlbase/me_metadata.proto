@@ -1,0 +1,336 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+// Metadata architecture builds the logical framework and basic model of KaiwuDB,
+// thus determining the functional characteristics, operation mode and overall
+// performance of KWDB system operation.
+// KaiwuDB operates on the basis of metadata. Its main functions are: description function,
+// integration function, control function and agent function.
+
+syntax = "proto2";
+package kwbase.sql.sqlbase;
+
+option go_package = "sqlbase";
+
+import "gogoproto/gogo.proto";
+
+
+// Replication Type used in table KWDBReplicationService
+enum ReplicationType {
+    T_SYNC_TO_E = 0;
+    E_SYNC_TO_E = 1;
+    E_SYNC_TO_C = 2;
+    C_SYNC_TO_C = 3;
+}
+
+// Agent Type
+enum AgentType {
+    METADATA = 0;
+    RDBMS = 1;
+    TS = 2;
+    ML = 3;
+    // ...
+}
+
+// DataType
+enum DataType {
+    TIMESTAMP = 0;
+    SMALLINT = 1;
+    INT = 2;
+    BIGINT = 3;
+    FLOAT = 4;
+    DOUBLE = 5;
+    BOOL = 6;
+    CHAR = 7;
+    BYTES = 8;
+    NCHAR = 9;
+    VARCHAR = 10;
+    NVARCHAR = 11;
+    VARBYTES = 12;
+    SDECHAR = 13;
+    SDEVARCHAR = 14;
+    NULLVAL = 15;
+    UNKNOWN = 16;
+    // DECIMAL only use in push down.
+    DECIMAL = 17;
+    TIMESTAMPTZ = 18;
+    DATE = 19;
+}
+
+// VariableLengthType
+enum VariableLengthType {
+  ColStorageTypeTuple = 0;
+  ColStorageTypeTPageEnd = 1;
+  ColStorageTypeTIndependentPage = 2;
+}
+
+enum KWDBReplicationStatus {
+    UNINITIALIZED = 0;
+    RUNNING = 1;
+    STOPPED = 2;
+    STARTING = 3;
+}
+
+
+enum KWDBConnectionStatus {
+    Dead      = 0;
+    HEALTHY   = 1;
+    UNHEALTHY = 2;
+}
+
+enum KWDBReplicationLevel {
+  DATABASEREPL = 0;
+  TABLEREPL = 1;
+}
+
+enum ColumnType {
+  TYPE_DATA = 0;
+  TYPE_TAG = 1;
+  TYPE_PTAG = 2;
+}
+
+// DeleteMeMsg
+message  DeleteMeMsg {
+  // database id
+  optional string database_name = 1 [(gogoproto.nullable) = false];
+  // table id
+  optional uint32 table_id = 2 [(gogoproto.nullable) = false, (gogoproto.customname) = "TableID"];
+  // template table id. only set for instance table.
+  optional uint32 template_id = 3 [(gogoproto.nullable) = false, (gogoproto.customname) = "TemplateID"];
+  // table name
+  optional string table_name = 4 [(gogoproto.nullable) = false];
+  // TsDeleteExpiredData
+  optional int64 start_ts = 5[(gogoproto.nullable) = false];
+  optional int64 end_ts = 6[(gogoproto.nullable) = false];
+  // TsCompressTsTable
+  optional int64 compress_ts = 7[(gogoproto.nullable) = false];
+  // TsVersion
+  optional uint32 ts_version = 8 [(gogoproto.nullable) = false];
+}
+
+enum KWDBHAStatus {
+  HASTOPPED = 0;
+  HARUNNING = 1;
+  HAPAUSED  = 2;
+}
+
+// Deprecated structure, kept for version compatibility
+message KWDBHAInfo {
+  option (gogoproto.equal) = true;
+
+  // CLusterID, use the cluster id
+  required string cluster_id = 1 [(gogoproto.nullable) = false];
+  // role: 0 Default; 1 Primary; 2 Secondary
+  optional uint32 role = 2 [(gogoproto.nullable) = false];
+  // HA service status:
+  //  0，stopped；
+  //  1，running；
+  //  2，pause;
+  optional KWDBHAStatus ha_status = 3 [(gogoproto.nullable) = false];
+  // node connection status: 1 healthy, 1 unhealthy, 2 dead
+  optional KWDBConnectionStatus connection_status = 4 [(gogoproto.nullable) = false];
+}
+
+message PreRelation {
+  optional uint64 old_field = 1 [deprecated = true];
+  optional uint32 table_id = 2 [(gogoproto.nullable) = false];
+}
+
+// KWDTSTable stands for the body of the message when the instance table is created.
+message CreateCTable {
+  // dbID
+  required uint32 database_id = 1 [(gogoproto.nullable) = false];
+  // template table id.
+  optional uint32 stable_id = 2 [(gogoproto.nullable) = false];
+  // instance table id.
+  optional KWDBCTable c_table = 3  [(gogoproto.nullable) = false];
+  // pre relation
+  repeated PreRelation old_field = 4 [deprecated = true];
+}
+
+message KWDBCTable {
+  required uint32 id = 1 [(gogoproto.nullable) = false];
+  optional string name = 2 [(gogoproto.nullable) = false];
+  optional uint64 lifetime = 3 [(gogoproto.nullable) = false];
+  repeated uint64 keep_duration = 4;
+  repeated uint64 resolution = 5;
+  repeated string sample = 6;
+  optional string downsampling_creator = 7 [(gogoproto.nullable) = false];
+  optional uint64 downsampling_counter = 8 [(gogoproto.nullable) = false];
+  repeated bytes  payloads = 9;
+  repeated bytes  primaryKeys = 10;
+  repeated int32  nodeIDs = 11;
+}
+
+// KWDBTsTable, bo create table
+message KWDBTsTable {
+  // KObjectTable ID
+  required uint64 ts_table_id = 1 [(gogoproto.nullable) = false];
+  // databaseID
+  optional uint32 database_id = 3 [(gogoproto.nullable) = false];
+  // Data expiration time (maximum)
+  optional uint64 life_time = 4 [(gogoproto.nullable) = false];
+  // Data active time (maximum)
+  optional uint32 active_time = 5 [(gogoproto.nullable) = false];
+  // KColumn ID
+  repeated uint32 k_columns_id = 6;
+  // Records the number of bytes occupied
+  optional uint64 row_size = 7 [(gogoproto.nullable) = false];
+  // Used to mark whether a column value is empty
+  optional uint64 bitmap_offset = 8 [(gogoproto.nullable) = false];
+  // table name
+  optional string table_name = 10 [(gogoproto.nullable) = false];
+  // dict encoding
+  optional bool sde = 11 [(gogoproto.nullable) = false];
+  // partition interval
+  optional uint64 partition_interval = 12 [(gogoproto.nullable) = false];
+  // TsVersion
+  optional uint32 ts_version = 13 [(gogoproto.nullable) = false];
+}
+
+// KWDBKTSColumn is column of time-series table.
+message KWDBKTSColumn {
+  // column ID
+  required uint32 column_id = 1 [(gogoproto.nullable) = false];
+  // column name
+  optional string name = 2 [(gogoproto.nullable) = false];
+  // Whether it can be nullable
+  optional bool nullable = 3 [(gogoproto.nullable) = false];
+  // Storage type
+  optional DataType storage_type = 4 [(gogoproto.nullable) = false];
+  // Storage length
+  optional uint64 storage_len = 5 [(gogoproto.nullable) = false];
+  // The offset of column
+  optional uint64 col_offset = 6 [(gogoproto.nullable) = false];
+  // Variable length type storage type
+  optional VariableLengthType variable_length_type = 7 [(gogoproto.nullable) = false];
+  // default value
+  optional string default_value = 8 [(gogoproto.nullable) = false];
+  // column type
+  optional ColumnType col_type = 9 [(gogoproto.nullable) = false];
+  // The column has been marked dropped
+  optional bool dropped = 10 [(gogoproto.nullable) = false];
+}
+
+// CreateTsTable
+message CreateTsTable {
+  required KWDBTsTable ts_table = 1 [(gogoproto.nullable) = false];
+  repeated KWDBKTSColumn k_column = 2 [(gogoproto.nullable) = false];
+  optional bool old_field = 3 [deprecated = true];
+}
+
+
+message UpdateReplicationMetaData {
+  optional KWDBReplicationMetaData kwdbRepMdt = 1 [(gogoproto.nullable) = false];
+}
+
+// linked to KWDBHASet, it contains the router info of one portal
+// NOTE: the order of elements should be matched the DDL statement "create_node_info_stmt" in sql.y
+message KWDBNodeInfo {
+  option (gogoproto.equal) = true;
+  // primary key, linked to KWDBReplicaSet table
+  required string cluster_id = 1 [(gogoproto.nullable) = false];
+  // KaiwuDB Intranet address of the node/master agent
+  optional string internal_ip = 2 [(gogoproto.nullable) = false];
+  // KaiwuDB Intranet port of the node/master agent
+  optional uint32 internal_port = 3 [(gogoproto.nullable) = false];
+  // All agent Intranet ports on the node: 5555(ts), 6666(ml)
+  repeated uint32 agent_internal_port = 4;
+  // Storage internal port:3306, 9091
+  optional uint32 storage_internal_port = 5 [(gogoproto.nullable) = false];
+  // node external ip/master agent
+  optional string node_external_ip = 6 [(gogoproto.nullable) = false];
+  // node external port/master agent
+  optional uint32 node_external_port = 7 [(gogoproto.nullable) = false];
+  // agent external port
+  repeated uint32 agent_external_port = 8;
+  // storage external port
+  optional uint32 storage_external_port = 9 [(gogoproto.nullable) = false];
+  // node name
+  optional string node_name = 10 [(gogoproto.nullable) = false];
+}
+
+message KWDBReplicationMetaData {
+  required uint32 desc_id = 1 [(gogoproto.nullable) = false];
+  optional uint32 total_num_of_syncs = 2 [(gogoproto.nullable) = false];
+  repeated KWDBReplicationSync syncs  = 3;
+}
+
+message KWDBReplicationSync {
+  required uint32 sync_id = 1 [(gogoproto.nullable) = false];
+  optional string source_cluster_id = 2 [(gogoproto.nullable) = false];
+  optional string source_ip4 = 3 [(gogoproto.nullable) = false];
+  optional uint64 source_connection_id = 4 [(gogoproto.nullable) = false];
+  optional int64  source_token = 5 [(gogoproto.nullable) = false];
+  optional string destination_cluster_id = 6 [(gogoproto.nullable) = false];
+  optional uint64 destination_connection_id = 7 [(gogoproto.nullable) = false];
+  optional string destination_ip4 = 8 [(gogoproto.nullable) = false];
+  optional int64 destination_token = 9 [(gogoproto.nullable) = false];
+  optional uint32 total_agent_meta = 10 [(gogoproto.nullable) = false];
+  repeated KWDBReplicationAgentMetaData agent_meta_data = 11;
+  optional uint32 is_replicated = 12 [(gogoproto.nullable) = false];
+}
+
+message KWDBReplicationAgentMetaData {
+  required AgentType agent_type= 1 [(gogoproto.nullable) = false];
+  optional uint32 source_port = 2 [(gogoproto.nullable) = false];
+  optional uint32 desitionation_port = 3 [(gogoproto.nullable) = false];
+  optional uint32 frequency = 4 [(gogoproto.nullable) = false];
+  optional uint32 max_records = 5 [(gogoproto.nullable) = false];
+  optional KWDBReplicationStatus status = 6 [(gogoproto.nullable) = false];
+  optional string replica_desc_name = 7 [(gogoproto.nullable) = false];
+}
+
+message KWDBReplicationProgress {
+  optional uint32 txn = 1 [(gogoproto.nullable) = false]; // of Transaction
+  optional uint32 per = 2 [(gogoproto.nullable) = false]; // of percent %
+  optional uint32 min = 3 [(gogoproto.nullable) = false]; // of Minutes #latest_sent_timestamp
+  optional uint32 total = 4 [(gogoproto.nullable) = false];
+  optional uint32 completed = 5 [(gogoproto.nullable) = false];
+}
+
+message KWDBReplicationProgressSet {
+  optional uint32 portal_id = 1 [(gogoproto.nullable) = false];
+  optional string source = 2 [(gogoproto.nullable) = false]; // replication source endpoint, ip:port
+  optional string destination = 3 [(gogoproto.nullable) = false]; // replication destination endpoint, ip:port
+  optional AgentType agent_type  = 4 [(gogoproto.nullable) = false];
+  optional KWDBReplicationProgress progress  = 5;
+}
+
+message ReplicationServiceCallerFuncInputs {
+  optional AgentType agent_type = 1 [(gogoproto.nullable) = false];
+  optional ReplicationType replication_type = 2 [(gogoproto.nullable) = false];
+  optional uint32 portal_id = 3 [(gogoproto.nullable) = false];
+}
+
+// WhiteList, ts engine exec white list
+message WhiteList {
+  // Name of a function or operator
+  optional string name = 1 [(gogoproto.nullable) = false];
+  // The number of function arguments. The default value of the operator is 2.
+  optional uint32 arg_num = 2 [(gogoproto.nullable) = false];
+  // The type of each parameter.
+  // Operator: The first element records the left type;
+  // The second element records the class on the right.
+  repeated uint32 arg_type = 3;
+  // Records where functions and operators can appear
+  optional uint32 position = 4 [(gogoproto.nullable) = false];
+  // Marks whether the function and operator can be used
+  optional bool enabled = 5 [(gogoproto.nullable) = false];
+  // Optional parameter
+  optional uint32 arg_opt = 6 [(gogoproto.nullable) = false];
+}
+
+message TSInsertSelect {
+  required string sql = 1 [(gogoproto.nullable) = false];
+  required uint64 table_id = 2 [(gogoproto.nullable) = false];
+  required uint64 db_id = 3 [(gogoproto.nullable) = false];
+}

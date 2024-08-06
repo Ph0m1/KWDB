@@ -1,0 +1,52 @@
+query IITI rowsort
+SELECT * FROM system.namespace
+----
+0   0   defaultdb                        75
+0   0   postgres                         76
+0   0   system                           1
+0   0   test                             77
+1   0   public                           29
+1   29  audits                           12
+1   29  bo_black_list                    46
+1   29  comments                         24
+1   29  descriptor                       3
+1   29  eventlog                         56
+1   29  jobs                             15
+1   29  kwdb_hash_routing                54
+1   29  kwdb_replication_info            42
+1   29  kwdb_ts_table                    47
+1   29  lease                            11
+1   29  locations                        21
+1   29  namespace                        2
+1   29  namespace2                       30
+1   29  protected_ts_meta                31
+1   29  protected_ts_records             32
+1   29  rangelog                         13
+1   29  replication_constraint_stats     25
+1   29  replication_critical_localities  26
+1   29  replication_stats                27
+1   29  reports_meta                     28
+1   29  role_members                     23
+1   29  role_options                     33
+1   29  scheduled_jobs                   57
+1   29  settings                         6
+1   29  statement_bundle_chunks          34
+1   29  statement_diagnostics            36
+1   29  statement_diagnostics_requests   35
+1   29  table_statistics                 20
+1   29  ui                               14
+1   29  user_defined_function            55
+1   29  users                            4
+1   29  web_sessions                     19
+1   29  zones                            5
+75  0   public                           29
+76  0   public                           29
+77  0   public                           29
+
+# Verify format of system tables.
+query TTBTTTBB
+SHOW COLUMNS FROM system.namespace
+----
+parentID        INT8    false  NULL  ·  {primary}  false  false
+name            STRING  false  NULL  ·  {primary}  false  false
+id              INT8    true   NULL  ·  {}         false  false

@@ -1,0 +1,77 @@
+// Copyright 2020 The Cockroach Authors.
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+syntax = "proto3";
+package kwbase.jobs.jobspb;
+option go_package = "jobspb";
+
+import "google/protobuf/any.proto";
+
+// ScheduleDetails describes how to schedule and execute the job.
+message ScheduleDetails {
+  // WaitBehavior describes how to handle previously  started
+  // jobs that have not completed yet.
+  enum WaitBehavior {
+    // Wait for the previous run to complete
+    // before starting the next one.
+    WAIT = 0;
+    // Do not wait for the previous run to complete.
+    NO_WAIT = 1;
+    // If the previous run is still running, skip this run
+    // and advance schedule to the next recurrence.
+    SKIP = 2;
+  }
+
+  // ErrorHandlingBehavior describes how to handle failed job runs.
+  enum ErrorHandlingBehavior {
+    // By default, failed jobs will run again, based on their schedule.
+    RETRY_SCHED = 0;
+    // Retry failed jobs soon.
+    RETRY_SOON = 1;
+    // Stop running this schedule
+    PAUSE_SCHED = 2;
+  }
+
+  // How to handle running jobs.
+  WaitBehavior wait = 1;
+
+  // How to handle failed jobs.
+  ErrorHandlingBehavior on_error = 2;
+}
+
+// ExecutionArguments describes data needed to execute scheduled jobs.
+message ExecutionArguments {
+  google.protobuf.Any args = 1;
+}
+
+// Message representing sql statement to execute.
+message SqlStatementExecutionArg {
+  string statement = 1;
+}
+
+// ScheduleState represents mutable schedule state.
+// The members of this proto may be mutated during each schedule execution.
+message ScheduleState {
+  string status = 1;
+}

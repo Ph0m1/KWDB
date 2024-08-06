@@ -1,0 +1,43 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+syntax = "proto3";
+package kwbase.sql.importer;
+option go_package = "importer";
+
+import "gogoproto/gogo.proto";
+
+enum MVCCFilter {
+  Latest = 0;
+  All = 1;
+}
+
+// RowCount tracks the size and row/index entry counts.
+message RowCount {
+  int64 data_size = 1;
+  int64 rows = 2;
+  int64 reject_rows = 5;
+  int64 abandon_rows = 6;
+  int64 index_entries = 3;
+  reserved 4; // was BulkOpSummary's system_records.
+}
+
+// EncryptionInfo is stored IN PLAINTEXT along side collections of encrypted
+// files stored outside of cockroach, for example by BACKUP/RESTORE.
+message EncryptionInfo {
+  enum Scheme {
+    AES256GCM = 0;
+  }
+  option (gogoproto.equal) = true;
+
+  Scheme scheme = 1;
+  bytes salt = 2;
+}

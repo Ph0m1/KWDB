@@ -1,0 +1,8 @@
+.idea
+.bash
+.DS_Store
+cmake-build*
+/server/bo/
+/server/data/
+/server/log/
+/ts_data

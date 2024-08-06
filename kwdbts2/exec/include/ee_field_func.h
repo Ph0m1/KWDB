@@ -1,0 +1,705 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+#pragma once
+
+#include <list>
+#include <string>
+
+#include "ee_field.h"
+#include "ee_field_const.h"
+
+namespace kwdbts {
+
+// typedef KString (*_str_fn)(Field **);
+// Base class for operations like '+', '-', '*', '/', '%'
+class FieldFuncOp : public FieldFunc {
+ public:
+  explicit FieldFuncOp(Field *a) : FieldFunc(a) {
+    type_ = FIELD_ARITHMETIC;
+    CalcStorageType();
+  }
+  explicit FieldFuncOp(Field *a, Field *b) : FieldFunc(a, b) {
+    type_ = FIELD_ARITHMETIC;
+    CalcStorageType();
+  }
+
+  explicit FieldFuncOp(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    CalcStorageType();
+  }
+
+  void CalcStorageType();
+};
+
+class FieldFuncPlus : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return PLUS_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncMinus : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return MINUS_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncMult : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return MULT_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncDivide : public FieldFuncOp {
+ public:
+  explicit FieldFuncDivide(Field *a, Field *b) : FieldFuncOp(a, b) {
+    storage_type_ = roachpb::DataType::DOUBLE;
+    storage_len_ = sizeof(k_double64);
+  }
+
+  enum Functype functype() override { return DIV_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+
+ protected:
+  k_bool field_is_nullable() override;
+};
+
+class FieldFuncDividez : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return DIVZ_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+
+ protected:
+  k_bool field_is_nullable() override;
+};
+
+class FieldFuncRemainder : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return REMAINDER_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncPercent : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return PERCENT_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+
+ protected:
+  k_bool field_is_nullable() override;
+};
+
+class FieldFuncPower : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return POWER_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncMod : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return MOD_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncAndCal : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return ANDCAL_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncOrCal : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return ORCAL_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncNotCal : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return NOTCAL_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncLeftShift : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return ORCAL_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncRightShift : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return ORCAL_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncTimeBucket : public FieldFuncOp {
+ public:
+  using FieldFuncOp::FieldFuncOp;
+
+  enum Functype functype() override { return TIME_BUCKET_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+  k_bool field_is_nullable() override;
+
+  k_uint64 getIntervalSeconds() {
+    std::string timestring = {args_[1]->ValStr().getptr(),
+                              args_[1]->ValStr().length_};
+    std::string intervalStr = timestring.substr(0, timestring.size() - 1);
+    k_uint64 interval_seconds_ = stoll(intervalStr);
+    interval_seconds_ *= 1000;
+    nullable_ = false;
+    return interval_seconds_;
+  }
+
+  KTimestampTz getOriginalTimestamp() {
+    auto val_ptr = args_[0]->get_ptr();
+    return *reinterpret_cast<KTimestampTz*>(val_ptr);
+  }
+};
+
+class FieldFuncCurrentDate : public FieldFunc {
+ public:
+  using FieldFunc::FieldFunc;
+  FieldFuncCurrentDate() {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::TIMESTAMP;
+    storage_type_ = roachpb::DataType::TIMESTAMP;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return CURRENT_DATE_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncCurrentTimeStamp : public FieldFunc {
+ public:
+  using FieldFunc::FieldFunc;
+  explicit FieldFuncCurrentTimeStamp(Field *a, k_int8 tz) {
+    if (a != nullptr) {
+      args_[0] = a;
+      arg_count_ = 1;
+    }
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::TIMESTAMP;
+    storage_type_ = roachpb::DataType::TIMESTAMP;
+    storage_len_ = sizeof(k_int64);
+    time_zone = tz;
+  }
+  enum Functype functype() override { return CURRENT_TIMESTAMP_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+
+  k_int8 time_zone{0};
+};
+
+class FieldFuncDateTrunc : public FieldFunc {
+ public:
+  FieldFuncDateTrunc(Field *a, Field *b, k_int8 tz) : FieldFunc(a, b) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = b->get_sql_type();
+    storage_type_ = b->get_storage_type();
+    storage_len_ = b->get_storage_length();
+    time_zone = tz;
+  }
+  enum Functype functype() override { return DATE_TRUNC_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+
+  k_int8 time_zone;
+};
+
+class FieldFuncExtract : public FieldFunc {
+ public:
+  FieldFuncExtract(Field *a, Field *b, k_int8 tz) : FieldFunc(a, b) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::DOUBLE;
+    storage_type_ = roachpb::DataType::DOUBLE;
+    storage_len_ = sizeof(double);
+    time_zone = tz;
+  }
+  enum Functype functype() override { return EXTRACT_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+
+  k_int8 time_zone;
+};
+
+class FieldFuncExpStrftime : public FieldFunc {
+ public:
+  FieldFuncExpStrftime(Field *a, Field *b) : FieldFunc(a, b) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::CHAR;
+    storage_type_ = roachpb::DataType::CHAR;
+    if (b -> get_field_type() != FIELD_CONSTANT) {
+      storage_len_ = b -> get_storage_length() * 4;
+    } else {
+      std::string value(b->ValStr().c_str());
+      for (int i = 0; i < value.length(); ++i) {
+        while (value[i] != '-' && i < value.length()) {
+          if (value[i] == '%') {
+            ++i;
+            ++storage_len_;
+            if (value[i] == '%') {
+              ++i;
+              ++storage_len_;
+            } else if (value[i] == 'y' || value[i] == 'm' || value[i] == 'd' ||
+                value[i] == 'H' || value[i] == 'I' || value[i] == 'p' ||
+                value[i] == 'M' || value[i] == 'S' || value[i] == 'U' ||
+                value[i] == 'W' || value[i] == 'e' || value[i] == 'g' ||
+                value[i] == 'V') {
+              ++i;
+              storage_len_ += 2;
+            } else if (value[i] == 'a' || value[i] == 'b' || value[i] == 'Z' ||
+                value[i] == 'j' || value[i] == 'h' ) {
+              ++i;
+              storage_len_ += 3;
+            } else if (value[i] == 't' || value[i] == 'Y' || value[i] == 'G') {
+              ++i;
+              storage_len_ += 4;
+            } else if (value[i] == 'R' || value[i] == 'z') {
+              ++i;
+              storage_len_ += 5;
+            } else if (value[i] == 'f') {
+              ++i;
+              storage_len_ += 6;
+            } else if (value[i] == 'D' || value[i] == 'T' || value[i] == 'x' ||
+                value[i] == 'X') {
+              ++i;
+              storage_len_ += 8;
+            } else if (value[i] == 'A' || value[i] == 'B') {
+              ++i;
+              storage_len_ += 9;
+            } else if (value[i] == 'F' || value[i] == 's') {
+              ++i;
+              storage_len_ += 10;
+            } else if (value[i] == 'r') {
+              ++i;
+              storage_len_ += 11;
+            } else if (value[i] == 'c') {
+              ++i;
+              storage_len_ += 24;
+            } else {
+              ++i;
+              storage_len_ += 1;
+            }
+          } else {
+            ++i;
+            storage_len_ += 1;
+          }
+        }
+        storage_len_ += 1;
+      }
+    }
+  }
+  enum Functype functype() override { return EXTRACT_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncTimeOfDay : public FieldFunc {
+ public:
+  explicit FieldFuncTimeOfDay(k_int8 tz) : FieldFunc() {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::CHAR;
+    storage_type_ = roachpb::DataType::CHAR;
+    storage_len_ = 42;
+    time_zone = tz;
+  }
+  enum Functype functype() override { return TIME_OF_DAY_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+
+  k_int8 time_zone;
+};
+
+class FieldFuncNow : public FieldFunc {
+ public:
+  using FieldFunc::FieldFunc;
+  FieldFuncNow() {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::TIMESTAMP;
+    storage_type_ = roachpb::DataType::TIMESTAMP;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return NOW_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncRandom : public FieldFunc {
+ public:
+  FieldFuncRandom() {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::DOUBLE;
+    storage_type_ = roachpb::DataType::DOUBLE;
+    storage_len_ = sizeof(k_double64);
+  }
+  enum Functype functype() override { return RANDOM_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncWidthBucket : public FieldFunc {
+ public:
+  explicit FieldFuncWidthBucket(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return WIDTHBUCKET_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncAge : public FieldFunc {
+ public:
+  FieldFuncAge(Field *a, Field *b) : FieldFunc(a, b) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::TIMESTAMP;
+    storage_type_ = roachpb::DataType::TIMESTAMP;
+    storage_len_ = sizeof(k_int64);
+  }
+  explicit FieldFuncAge(Field *a) : FieldFunc(a) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::TIMESTAMP;
+    storage_type_ = roachpb::DataType::TIMESTAMP;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return AGE_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncCase : public FieldFunc {
+ public:
+  explicit FieldFuncCase(Field *a) : FieldFunc(a) {
+    type_ = FIELD_CMP;
+    sql_type_ = a->get_sql_type();
+    storage_type_ = a->get_storage_type();
+    storage_len_ = a->get_storage_length();
+  }
+  explicit FieldFuncCase(Field *a, Field *b) : FieldFunc(a, b) {
+    type_ = FIELD_CMP;
+    sql_type_ = b->get_sql_type();
+    storage_type_ = b->get_storage_type();
+    storage_len_ = b->get_storage_length();
+  }
+
+  explicit FieldFuncCase(const std::list<Field *> &fields) : FieldFunc(fields) {
+    type_ = FIELD_CMP;
+    sql_type_ = fields.front()->get_sql_type();
+    storage_type_ = fields.front()->get_storage_type();
+    storage_len_ = fields.front()->get_storage_length();
+  }
+  enum Functype functype() override { return CASE_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  k_bool is_condition_met() override;
+  Field *field_to_copy() override;
+  k_bool is_nullable() override;
+  bool condition_met{0};
+};
+
+class FieldFuncThen : public FieldFuncCase {
+ public:
+  using FieldFuncCase::FieldFuncCase;
+
+  enum Functype functype() override { return THEN_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  k_bool is_condition_met() override;
+  Field *field_to_copy() override;
+  k_bool is_nullable() override;
+};
+
+class FieldFuncElse : public FieldFunc {
+ public:
+  explicit FieldFuncElse(Field *a) : FieldFunc(a) {
+    type_ = FIELD_CMP;
+    sql_type_ = a->get_sql_type();
+    storage_type_ = a->get_storage_type();
+    storage_len_ = a->get_storage_length();
+  }
+
+  enum Functype functype() override { return ELSE_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  k_bool is_condition_met() override;
+  Field *field_to_copy() override;
+};
+
+class FieldFuncCrc32C : public FieldFunc {
+ public:
+  explicit FieldFuncCrc32C(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return CRC32C_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncCrc32I : public FieldFunc {
+ public:
+  explicit FieldFuncCrc32I(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return CRC32I_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncFnv32 : public FieldFunc {
+ public:
+  explicit FieldFuncFnv32(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return FNV32_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncFnv32a : public FieldFunc {
+ public:
+  explicit FieldFuncFnv32a(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return FNV32A_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncFnv64 : public FieldFunc {
+ public:
+  explicit FieldFuncFnv64(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return FNV64_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncFnv64a : public FieldFunc {
+ public:
+  explicit FieldFuncFnv64a(std::list<Field *> fields) : FieldFunc(fields) {
+    type_ = FIELD_ARITHMETIC;
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+    storage_len_ = sizeof(k_int64);
+  }
+  enum Functype functype() override { return FNV64A_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+
+  Field *field_to_copy() override;
+};
+
+class FieldFuncCoalesce : public FieldFunc {
+ public:
+  explicit FieldFuncCoalesce(Field *a, Field *b) : FieldFunc(a, b) {
+    type_ = FIELD_CMP;
+    sql_type_ = a->get_sql_type();
+
+    switch (a->get_storage_type()) {
+    case roachpb::DataType::SMALLINT:
+    case roachpb::DataType::INT:
+    case roachpb::DataType::BIGINT:
+      storage_type_ = roachpb::DataType::BIGINT;
+      storage_len_ =  sizeof(k_int64);
+      break;
+    case roachpb::DataType::FLOAT:
+    case roachpb::DataType::DOUBLE:
+      storage_type_ = roachpb::DataType::DOUBLE;
+      storage_len_ = sizeof(k_double64);
+      break;
+    default:
+      storage_type_ = a->get_storage_type();
+      storage_len_ = a->get_storage_length();
+    break;
+  }
+  }
+
+  enum Functype functype() override { return COALESCE_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  k_bool is_nullable() override;
+  Field *field_to_copy() override;
+};
+
+}  // namespace kwdbts

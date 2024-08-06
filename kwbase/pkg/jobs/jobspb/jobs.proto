@@ -1,0 +1,698 @@
+// Copyright 2017 The Cockroach Authors.
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+syntax = "proto3";
+package kwbase.sql.jobs.jobspb;
+option go_package = "jobspb";
+
+import "errorspb/errors.proto";
+import "gogoproto/gogo.proto";
+import "google/protobuf/timestamp.proto";
+import "roachpb/api.proto";
+import "roachpb/data.proto";
+import "roachpb/io-formats.proto";
+import "sql/sqlbase/structured.proto";
+import "util/hlc/timestamp.proto";
+import "sql/sqlbase/me_metadata.proto";
+
+message Lease {
+  option (gogoproto.equal) = true;
+
+  // The ID of the node that holds the lease.
+  uint32 node_id = 1 [
+    (gogoproto.customname) = "NodeID",
+    (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/roachpb.NodeID"
+  ];
+  // The epoch of the lease holder's node liveness entry.
+  int64 epoch = 2;
+}
+
+message ReplicationIngestionDetails {
+  message TableRewrite {
+    uint32 table_id = 1 [
+      (gogoproto.customname) = "TableID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+    ];
+    uint32 parent_id = 2 [
+      (gogoproto.customname) = "ParentID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+    ];
+  }
+  message PrefixRewrite {
+    bytes old_prefix = 1 [(gogoproto.customname) = "OldPrefix"];
+    bytes new_prefix = 2 [(gogoproto.customname) = "NewPrefix"];
+  }
+  message PrefixRewriter {
+    repeated PrefixRewrite prefixRewrite = 1 [(gogoproto.customname) = "PrefixRewrite"];
+  }
+  // StreamAddress locates the stream. It enables the client to find the
+  // addresses of the stream's partitions.
+  string stream_address = 1;
+
+  uint64 stream_id = 4 [(gogoproto.customname) = "ReplicationID"];
+
+  // Span is the keyspan into which this job will ingest KVs.
+  //
+  // The stream should emit all changes for a given span, and no changes outside
+  // a span. Note that KVs received from the stream may need to be re-keyed into
+  // this span.
+  repeated roachpb.Span span = 2 [(gogoproto.nullable) = false];
+
+  reserved 5;
+  repeated TableRekey table_rekey = 6 [(gogoproto.nullable) = false, (gogoproto.customname) = "TableRekey"];
+  map<uint32, TableRewrite> global_table_Rewrites = 7 [
+    (gogoproto.customname) = "GlobalTableRewrites",
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  map<uint32, uint32> global_db_Rewrites = 8 [
+    (gogoproto.customname) = "GlobalDBRewrites",
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  map<uint32, string> global_names = 9 [
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  map<uint32, string> global_froms = 10 [
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  map<uint32, sqlbase.TableDescriptor> global_descs = 11 [
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  map<uint32, PrefixRewriter> global_prefixes = 12 [
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  // NEXT ID 7: .
+  uint32 portal_id = 13 [(gogoproto.customname) = "PortalID"];
+  bool multi_flag = 14  [(gogoproto.customname) = "MultiFlag"];
+  // exist_system_tables means there is a system table to be replicated.
+  bool exist_system_tables = 15 ;
+  bool need_revert = 16;
+}
+
+message ReplicationIngestionCheckpoint {
+  repeated ResolvedSpan resolved_spans = 1 [(gogoproto.nullable) = false];
+}
+
+message ReplicationIngestionProgress {
+  // PartitionProgress stores fields that are related to the status of a
+  // source cluster partition.
+  message PartitionProgress {
+    reserved 1;
+    // TODO(pbardea): Add an error message so that per-partition errors can be
+    // surfaced to the user.
+
+    // Destination SQL instance that subscribes to this partition.
+    //int32 dest_sql_instance_id = 2 [(gogoproto.customname) = "DestSQLInstanceID",
+    //  (gogoproto.customtype) = "github.com/cockroachdb/cockroach/pkg/base.SQLInstanceID",
+    //  (gogoproto.nullable) = false];
+  }
+
+  // The job will ingest events from StartTime onwards during the current run.
+  // This may change when the the ingestion job gets resumed from the previous checkpoint.
+  util.hlc.Timestamp start_time = 3 [(gogoproto.nullable) = false];
+
+  // CutoverTime is set to signal to the stream ingestion job to complete its
+  // ingestion. This involves stopping any subsequent ingestion, and rolling
+  // back any additional ingested data, to bring the ingested cluster to a
+  // consistent state as of the CutoverTime.
+  util.hlc.Timestamp cutover_time = 1 [(gogoproto.nullable) = false];
+  // PartitionProgress maps partition addresses to their progress.
+  // TODO(pbardea): This could scale O(partitions) = O(nodes).
+  map<string, PartitionProgress> partition_progress = 2 [(gogoproto.nullable) = false];
+
+  // Checkpoint stores a set of resolved spans denoting completed ingestion progress
+  ReplicationIngestionCheckpoint checkpoint = 4 [(gogoproto.nullable) = false];
+
+  // ReplicationAddress are the source cluster addresses read from the latest topology.
+  repeated string replication_addresses = 5;
+}
+
+message ReplicationRecvCheckpoint {
+  repeated ResolvedSpan resolved_spans = 1 [(gogoproto.nullable) = false];
+}
+
+message BackupDetails {
+  util.hlc.Timestamp start_time = 1 [(gogoproto.nullable) = false];
+  util.hlc.Timestamp end_time = 2 [(gogoproto.nullable) = false];
+  // URI is the URI for the main backup destination. For partitioned backups,
+  // the main BACKUP manifest and files with no other specified destination are
+  // written to this location. For regular backups, all files are written to
+  // this location.
+  string uri = 3 [(gogoproto.customname) = "URI"];
+  // URIsByLocalityKV is a map of locality KVs to store URIs, used for
+  // partitioned backups.
+  map<string, string> uris_by_locality_kv = 5 [(gogoproto.customname) = "URIsByLocalityKV"];
+  bytes backup_manifest = 4;
+  roachpb.FileEncryptionOptions encryption = 6;
+
+  // ProtectedTimestampRecord is the ID of the protected timestamp record
+  // corresponding to this job. While the job ought to clean up the record
+  // when it enters a terminal state, there may be cases where it cannot or
+  // does not run the code to do so. To deal with this there is a background
+  // reconcilliation loop to ensure that protected timestamps are cleaned up.
+  bytes protected_timestamp_record = 7 [
+    (gogoproto.customname) = "ProtectedTimestampRecord",
+    (gogoproto.customtype) = "gitee.com/kwbasedb/kwbase/pkg/util/uuid.UUID"
+  ];
+}
+
+message BackupProgress {
+
+}
+
+message RestoreDetails {
+  message TableRewrite {
+    uint32 table_id = 1 [
+      (gogoproto.customname) = "TableID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+    ];
+    uint32 parent_id = 2 [
+      (gogoproto.customname) = "ParentID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+    ];
+  }
+  message BackupLocalityInfo {
+    map<string, string> uris_by_original_locality_kv = 1 [(gogoproto.customname) = "URIsByOriginalLocalityKV"];
+  }
+  reserved 1;
+  util.hlc.Timestamp end_time = 4 [(gogoproto.nullable) = false];
+  map<uint32, TableRewrite> table_rewrites = 2 [
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  // URIs contains one URI for each backup (full or incremental) corresponding
+  // to the location of the main BACKUP manifest. For partitioned backups, each
+  // backup may also have files in other stores.
+  repeated string uris = 3 [(gogoproto.customname) = "URIs"];
+  repeated BackupLocalityInfo backup_locality_info = 7 [(gogoproto.nullable) = false];
+  repeated sqlbase.TableDescriptor table_descs = 5;
+  string override_db = 6 [(gogoproto.customname) = "OverrideDB"];
+  bool prepare_completed = 8;
+  bool stats_inserted = 9;
+  bool tables_published = 10;
+  int32 descriptor_coverage = 11 [
+    (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree.DescriptorCoverage"
+  ];
+  roachpb.FileEncryptionOptions encryption = 12;
+  reserved 13, 14, 15, 16;
+  // SystemTablesRestored keeps track of dynamic states that need to happen only
+  // once during the lifetime of a job. Note, that this state may be shared
+  // between cluster versions, so updates to this map must be considered
+  // carefully. It maps system table names to whether or not they have already
+  // been restored.
+  map<string, bool> system_tables_restored = 17;
+  // NEXT ID: 18.
+}
+
+message RestoreProgress {
+  bytes high_water = 1;
+}
+
+message ImportDetails {
+  repeated sqlbase.ImportTable tables = 1 [(gogoproto.nullable) = false];
+  bool is_database = 2;
+  string database_name = 3;
+  repeated string schema_names = 4;
+  repeated string uris = 5 [(gogoproto.customname) = "URIs"];
+  roachpb.IOFileFormat format = 6 [(gogoproto.nullable) = false];
+  int64 walltime = 7;
+  bool prepare_complete = 8;
+  bool tables_published = 9;
+  // ProtectedTimestampRecord is the ID of the protected timestamp record
+  // corresponding to this job. While the job ought to clean up the record
+  // when it enters a terminal state, there may be cases where it cannot or
+  // does not run the code to do so. To deal with this there is a background
+  // reconcilliation loop to ensure that protected timestamps are cleaned up.
+  bytes protected_timestamp_record = 10 [
+    (gogoproto.customname) = "ProtectedTimestampRecord",
+    (gogoproto.customtype) = "gitee.com/kwbasedb/kwbase/pkg/util/uuid.UUID"
+  ];
+  bool time_series_import = 11 ;
+  bool only_meta = 12 ;
+  int32 time_series_ever_execute = 13;
+  bool ts_dispatch = 14;
+}
+
+message ImportProgress {
+  repeated float read_progress = 1;
+  // The spans of split keys which have had their SSTable's generated.
+  // This allows us to skip the shuffle stage for already-completed
+  // spans when resuming an import job.
+  repeated roachpb.Span span_progress = 2 [(gogoproto.nullable) = false];
+
+  // In direct-ingest import, once the KVs for i'th row of an input file have
+  // been flushed, we can advance the count here and then on resume skip over
+  // that many rows without needing to convert/process them at all.
+  map<int32, ImportResumePos> table_resume_pos = 3 [(gogoproto.nullable) = false]; // Only set by direct import.
+}
+
+message ImportResumePos {
+  repeated int64 resume_pos = 1;
+}
+
+message ResumeSpanList {
+  repeated roachpb.Span resume_spans = 1 [(gogoproto.nullable) = false];
+}
+
+enum Status {
+  DRAINING_NAMES = 0;
+  WAIT_FOR_GC_INTERVAL = 1;
+  ROCKSDB_COMPACTION = 2;
+  DONE = 10;
+}
+
+message DroppedTableDetails {
+  string name = 1;
+  uint32 ID = 2 [(gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"];
+  Status status = 3;
+}
+
+// SchemaChangeGCDetails should resemble one of the following:
+//
+// 1. Index (non-interleaved) deletions: One or more deletions of an index on a
+// table.
+//      details.Indexes -> the indexes to GC. These indexes must be
+//      non-interleaved.
+//      details.ParentID -> the table with the indexes.
+//
+// 2. Table deletions: The deletion of a single table.
+//      details.Tables -> the tables to be deleted.
+//
+// 3. Database deletions: The deletion of a database and therefore all its tables.
+//      details.Tables -> the IDs of the tables to GC.
+//      details.ParentID -> the ID of the database to drop.
+message SchemaChangeGCDetails {
+  message DroppedIndex {
+    int64 index_id = 1 [(gogoproto.customname) = "IndexID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.IndexID"];
+    int64 drop_time = 2;
+  }
+
+  message DroppedID {
+    int64 id = 1 [(gogoproto.customname) = "ID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"];
+    int64 drop_time = 2;
+  }
+
+  // Indexes to GC.
+  repeated DroppedIndex indexes = 1 [(gogoproto.nullable) = false];
+
+  // Entire tables to GC.
+  repeated DroppedID tables = 2 [(gogoproto.nullable) = false];
+
+  // If dropping indexes, the table ID which has those indexes. If dropping a
+  // database, the database ID.
+  int64 parent_id = 3 [(gogoproto.customname) = "ParentID",
+    (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"];
+}
+
+message SchemaChangeDetails {
+  reserved 1;
+  // A schema change can involve running multiple processors backfilling
+  // or deleting data. They occasionally checkpoint Spans so that the
+  // processing can resume in the event of a node failure. The spans are
+  // non-overlapping contiguous areas of the KV space that still need to
+  // be processed. The index represents the index of a mutation in a
+  // mutation list containing mutations for the same mutationID.
+  repeated ResumeSpanList resume_span_list = 2 [(gogoproto.nullable) = false];
+  repeated DroppedTableDetails dropped_tables = 3 [(gogoproto.nullable) = false];
+  // The descriptor ID of the dropped database which created this job.
+  uint32 dropped_database_id = 4 [
+    (gogoproto.customname) = "DroppedDatabaseID",
+    (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  uint32 table_id = 5 [(gogoproto.customname) = "TableID", (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"];
+  uint32 mutation_id = 6 [(gogoproto.customname) = "MutationID", (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.MutationID"];
+  // The format version of the schema change job details. This is used to
+  // distinguish between jobs as they existed in 19.2 and earlier versions
+  // (controlled and updated by a SchemaChanger) and jobs as they exist in 20.1
+  // (scheduled and run by the job registry).
+  uint32 format_version = 7 [(gogoproto.casttype) = "SchemaChangeDetailsFormatVersion"];
+  // dropped_schemas holds the set of schemas to drop as part of a DROP SCHEMA
+  // or DROP DATABASE cascade statement.
+  repeated uint32 dropped_schemas = 9 [(gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"];
+}
+
+message SchemaChangeProgress {
+
+}
+
+message SchemaChangeGCProgress {
+  enum Status {
+    // Waiting for the index/table to expire.
+    WAITING_FOR_GC = 0;
+    // The GC TTL has expired. This element is marked for imminent deletion
+    DELETING = 1;
+    // This element has been deleted. The job is done when all elements are in
+    // this state.
+    DELETED = 2;
+  }
+
+  message IndexProgress {
+    int64 index_id = 1 [(gogoproto.customname) = "IndexID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.IndexID"];
+    Status status = 2;
+  }
+
+  message TableProgress {
+    int64 id = 1 [(gogoproto.customname) = "ID",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"];
+    Status status = 2;
+  }
+
+  // Indexes to GC.
+  repeated IndexProgress indexes = 1 [(gogoproto.nullable) = false];
+
+  // Entire tables to GC.
+  repeated TableProgress tables = 2 [(gogoproto.nullable) = false];
+}
+
+message ChangefeedTarget {
+  string statement_time_name = 1;
+
+  // TODO(dan): Add partition name, ranges of primary keys.
+}
+
+message ChangefeedDetails {
+  // Targets contains the user-specified tables and databases to watch, mapping
+  // the descriptor id to the name at the time of changefeed creating. There is
+  // a 1:1 correspondance between unique targets in the original sql query and
+  // entries in this map.
+  //
+  // - A watched table is stored here under its table id
+  // - TODO(dan): A watched database is stored here under its database id
+  // - TODO(dan): A db.* expansion is treated identicially to watching the
+  //   database
+  //
+  // Note that the TODOs mean this field currently is guaranteed to only hold
+  // table ids and a cluster version check will be added when this changes.
+  //
+  // The names at resolution time are included so that table and database
+  // renames can be detected. They are also used to construct an error message
+  // if the descriptor id no longer exists when the jobs is unpaused (which can
+  // happen if it was dropped or truncated).
+  map<uint32, ChangefeedTarget> targets = 6 [
+    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID",
+    (gogoproto.casttype) = "ChangefeedTargets",
+    (gogoproto.nullable) = false
+  ];
+  string sink_uri = 3 [(gogoproto.customname) = "SinkURI"];
+  map<string, string> opts = 4;
+  util.hlc.Timestamp statement_time = 7 [(gogoproto.nullable) = false];
+
+  reserved 1, 2, 5;
+}
+
+message ResolvedSpan {
+  roachpb.Span span = 1 [(gogoproto.nullable) = false];
+  util.hlc.Timestamp timestamp = 2 [(gogoproto.nullable) = false];
+  bool boundary_reached = 3;
+}
+
+message ResolvedSpans {
+  repeated ResolvedSpan resolved_spans = 1 [(gogoproto.nullable) = false];
+
+  message Stats {
+    uint64 recent_kv_count = 1;
+  }
+
+  Stats stats = 2 [(gogoproto.nullable) = false];
+}
+
+message ChangefeedProgress {
+  reserved 1;
+  repeated ResolvedSpan resolved_spans = 2 [(gogoproto.nullable) = false];
+
+  // ProtectedTimestampRecord is the ID of the protected timestamp record
+  // corresponding to this job. While the job ought to clean up the record
+  // when it enters a terminal state, there may be cases where it cannot or
+  // does not run the code to do so. To deal with this there is a background
+  // reconcilliation loop to ensure that protected timestamps are cleaned up.
+  //
+  // A record is created with the job if the job requires an initial backfill.
+  // Furthermore, once subsequent backfills begin, record will be created and
+  // released accordingly.
+  bytes protected_timestamp_record = 3 [
+    (gogoproto.customname) = "ProtectedTimestampRecord",
+    (gogoproto.customtype) = "gitee.com/kwbasedb/kwbase/pkg/util/uuid.UUID",
+    (gogoproto.nullable) = false
+  ];
+}
+
+// CreateStatsDetails are used for the CreateStats job, which is triggered
+// whenever the `CREATE STATISTICS` SQL statement is run. The CreateStats job
+// collects table statistics, which contain info such as the number of rows in
+// the table or the number of distinct values in a column.
+message CreateStatsDetails {
+  message ColStat {
+    repeated uint32 column_ids = 1 [
+      (gogoproto.customname) = "ColumnIDs",
+      (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ColumnID"
+    ];
+
+    // Indicates whether this column stat should include a histogram.
+    bool has_histogram = 2;
+    // Indicates this column's type which is normal, Tag or PTag.
+    repeated int32 column_types = 3;
+    // Indicates that the columns are all PTag
+    bool has_allPTag = 4;
+  }
+  string name = 1;
+  sqlbase.TableDescriptor table = 2 [(gogoproto.nullable) = false];
+  repeated ColStat column_stats = 3 [(gogoproto.nullable) = false];
+  string statement = 4;
+  util.hlc.Timestamp as_of = 5;
+  double max_fraction_idle = 7;
+
+  // Fully qualified table name.
+  string fq_table_name = 6 [(gogoproto.customname) = "FQTableName"];
+  bool isTsStats = 8;
+}
+
+message CreateStatsProgress {
+
+}
+
+// SyncMetaCacheDetails are used for the SyncMetaCache job, which is triggered
+// when TS metadata needs to be synchronized. The SyncMetaCache job
+// stores KWDB object information for obtaining and sending the latest metadata
+// to syncModule.
+message SyncMetaCacheDetails {
+  // Represents the DDL type of KWDB.
+  int32 type = 1 ;
+  sqlbase.DatabaseDescriptor database_desc = 2 [(gogoproto.nullable) = false,(gogoproto.customname) = "Database"];
+  sqlbase.TableDescriptor table_desc = 3 [(gogoproto.nullable) = false,(gogoproto.customname) = "SNTable"];
+  sqlbase.CreateCTable create_ctable = 4 [(gogoproto.nullable) = false,(gogoproto.customname) = "CTable"];
+  sqlbase.ColumnDescriptor alter_tag = 5 [(gogoproto.nullable) = false,(gogoproto.customname) = "AlterTag"];
+  // DROP info
+  repeated sqlbase.DeleteMeMsg drop_me_info = 6 [(gogoproto.nullable) = false,(gogoproto.customname) = "DropMEInfo"];
+  int32 old_field = 7 [deprecated = true];
+  repeated CSTable create_child_table = 8 [(gogoproto.nullable) = false,(gogoproto.customname) = "CreateChildInfo"];
+  SetTag set_tag = 9 [(gogoproto.nullable) = false,(gogoproto.customname) = "SetTag"];
+  repeated sqlbase.TableDescriptor drop_db_info = 10 [(gogoproto.nullable) = false,(gogoproto.customname) = "DropDBInfo"];
+  bool do_nothing = 11 [(gogoproto.customname) = "DoNothing"];
+  sqlbase.ColumnDescriptor original_Column = 12 [(gogoproto.nullable) = false,(gogoproto.customname) = "OriginColumn"];
+  // MutationID is currently used for online ADD COLUMN/DROP COLUMN/ALTER TYPE of TS table.
+  uint32 mutation_id = 13 [(gogoproto.customname) = "MutationID", (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.MutationID"];
+}
+
+message SetTag {
+  string table_name = 1;
+  int64 table_id = 2;
+  string db_name = 3;
+  repeated string tag_name = 4;
+  string tag_value= 5;
+}
+
+message CSTable {
+  sqlbase.TableDescriptor table_desc = 1 [(gogoproto.nullable) = false];
+  sqlbase.CreateCTable create_ctable = 2 [(gogoproto.nullable) = false];
+  bool is_pre=3;
+}
+
+// TODO: Maybe we need to track the progress of syncMetaCache job.
+message SyncMetaCacheProgress {
+
+}
+
+message Payload {
+  string description = 1;
+  // If empty, the description is assumed to be the statement.
+  string statement = 16;
+  string username = 2;
+  // For consistency with the SQL timestamp type, which has microsecond
+  // precision, we avoid the timestamp.Timestamp WKT, which has nanosecond
+  // precision, and use microsecond integers directly.
+  int64 started_micros = 3;
+  int64 finished_micros = 4;
+  int64 error_micros = 25;
+  reserved 5;
+  repeated uint32 descriptor_ids = 6 [
+    (gogoproto.customname) = "DescriptorIDs",
+    (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase.ID"
+  ];
+  reserved 7;
+  // TODO (lucy): Deprecate the string error field and move to using the encoded
+  // errors everywhere.
+  string error = 8;
+  repeated errorspb.EncodedError resume_errors = 17;
+  repeated errorspb.EncodedError cleanup_errors = 18;
+  // FinalResumeError is set when an error occurs that requires the job to be
+  // reverted. The error is recorded so it can be handled while reverting, if
+  // needed.
+  errorspb.EncodedError final_resume_error = 19;
+  Lease lease = 9;
+  // Noncancelable is used to denote when a job cannot be canceled. This field
+  // will not be respected in mixed version clusters where some nodes have
+  // a version < 20.1, so it can only be used in cases where all nodes having
+  // versions >= 20.1 is guaranteed.
+  bool noncancelable = 20;
+  oneof details {
+    BackupDetails backup = 10;
+    RestoreDetails restore = 11;
+    SchemaChangeDetails schemaChange = 12;
+    ImportDetails import = 13;
+    ChangefeedDetails changefeed = 14;
+    CreateStatsDetails createStats = 15;
+    SchemaChangeGCDetails schemaChangeGC = 21;
+    SyncMetaCacheDetails syncMetaCache = 22;
+    ReplicationStreamDetails replicationStream = 23;
+    ReplicationIngestionDetails replicationIngestion = 24;
+    RestartDetails restartHistory =26;
+    ExportDetails export = 27;
+  }
+}
+
+message Progress {
+  oneof progress {
+    float fraction_completed = 1;
+    util.hlc.Timestamp high_water = 3;
+  }
+  int64 modified_micros = 2;
+  string running_status = 4;
+
+  oneof details {
+    BackupProgress backup = 10;
+    RestoreProgress restore = 11;
+    SchemaChangeProgress schemaChange = 12;
+    ImportProgress import = 13;
+    ChangefeedProgress changefeed = 14;
+    CreateStatsProgress createStats = 15;
+    SchemaChangeGCProgress schemaChangeGC = 16;
+    SyncMetaCacheProgress syncMetaCache = 17;
+    ReplicationStreamProgress replicationStream = 18;
+    ReplicationIngestionProgress replicationIngest = 19;
+    RestartHistoryProgress restarthistory =20;
+    ExportProgress export =21;
+  }
+}
+
+enum Type {
+  option (gogoproto.goproto_enum_prefix) = false;
+  option (gogoproto.goproto_enum_stringer) = false;
+
+  UNSPECIFIED = 0 [(gogoproto.enumvalue_customname) = "TypeUnspecified"];
+  BACKUP = 1 [(gogoproto.enumvalue_customname) = "TypeBackup"];
+  RESTORE = 2 [(gogoproto.enumvalue_customname) = "TypeRestore"];
+  SCHEMA_CHANGE = 3 [(gogoproto.enumvalue_customname) = "TypeSchemaChange"];
+  IMPORT = 4 [(gogoproto.enumvalue_customname) = "TypeImport"];
+  CHANGEFEED = 5 [(gogoproto.enumvalue_customname) = "TypeChangefeed"];
+  CREATE_STATS = 6 [(gogoproto.enumvalue_customname) = "TypeCreateStats"];
+  AUTO_CREATE_STATS = 7 [(gogoproto.enumvalue_customname) = "TypeAutoCreateStats"];
+  SCHEMA_CHANGE_GC = 8 [(gogoproto.enumvalue_customname) = "TypeSchemaChangeGC"];
+  SYNC_META_CACHE = 9 [(gogoproto.enumvalue_customname) = "TypeSyncMetaCache"];
+  REPLICATION_STREAM = 10 [(gogoproto.enumvalue_customname) = "TypeReplicationStream"];
+  REPLICATION_INGESTION = 11 [(gogoproto.enumvalue_customname) = "TypeReplicationIngestion"];
+  RESTART_HISTORY = 12 [(gogoproto.enumvalue_customname) = "TypeRestartHistory"];
+  EXPORT = 13 [(gogoproto.enumvalue_customname) = "TypeExport"];
+  COMPRESS = 14 [(gogoproto.enumvalue_customname) = "TypeCompress"];
+  RETENTION = 15 [(gogoproto.enumvalue_customname) = "TypeRetention"];
+  STATISTICS = 16 [(gogoproto.enumvalue_customname) = "TypeStatistics"];
+}
+
+message Job {
+  int64 id = 1;
+  // Keep progress first as it may bre more relevant to see when looking at a
+  // running job.
+  Progress progress = 2;
+  Payload payload = 3;
+}
+
+message ReplicationStreamDetails {
+  // Key spans we are replicating
+  repeated roachpb.Span spans = 1;
+
+  // ID of the protected timestamp record that protects the above spans
+  bytes protected_timestamp_record_id = 2 [
+    (gogoproto.customname) = "ProtectedTimestampRecordID",
+    (gogoproto.customtype) = "gitee.com/kwbasedb/kwbase/pkg/util/uuid.UUID",
+    (gogoproto.nullable) = false
+  ];
+
+  bool init_scan = 3 ;
+
+  message TargetInfo {
+    repeated sqlbase.DatabaseDescriptor database = 1;
+    repeated sqlbase.TableDescriptor tables = 2;
+    bool multiFlag = 3;
+    repeated roachpb.ReplicationTableList table_list = 4 [(gogoproto.nullable) = false];
+  }
+
+  TargetInfo targetInfo = 4;
+}
+
+message ReplicationStreamProgress {
+  // Expiration timestamp of consumer heartbeat
+  google.protobuf.Timestamp expiration = 1 [(gogoproto.nullable) = false, (gogoproto.stdtime) = true];
+
+  enum ReplicationIngestionStatus {
+    NOT_FINISHED = 0;
+    FINISHED_SUCCESSFULLY = 1;
+    FINISHED_UNSUCCESSFULLY = 2;
+  }
+
+  // Status of the corresponding stream ingestion. The producer job tracks this
+  // to determine its fate.
+  ReplicationIngestionStatus replication_ingestion_status = 2;
+}
+
+message TableRekey {
+  // OldID is the previous ID of `new_desc`.
+  uint32 old_id = 1 [(gogoproto.customname) = "OldID"];
+  // NewDesc is an encoded Descriptor message.
+  bytes new_desc = 2;
+}
+message RestartHistoryProgress {
+
+}
+
+message RestartDetails {
+  int64 time = 1;
+}
+message ExportProgress {
+
+}
+
+message ExportDetails {
+  int64 time = 1;
+}
+

@@ -1,0 +1,1335 @@
+
+1. Open source software notice for KWDB
+This software (KWDB) is licensed under Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
+You may obtain a copy of Mulan PSL v2 at:
+         http://license.coscl.org.cn/MulanPSL2
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+See the Mulan PSL v2 for more details.
+
+All the source code files including those for testing or automation purposes, unless
+otherwise explicitly claimed, are licensed under Mulan PSL v2.  The license terms and 
+conditions can be referenced by the link above.
+
+2. Third-party components in source code
+This open source project incorporates source code files from 
+the following third-party projects or components.  The open source software 
+licenses are granted by the respective right holders.
+
+2.1 CockroachDB
+Part of the source code files under the kwbase directory are introduced 
+from the CockroachDB project.  These files originated under 
+the Business Source License 1.1 (BSL), and now 
+are under the Apache 2.0 License as stated in the terms of BSL 1.1. 
+The license term of Apache 2.0 is:
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless otherwise stated, the last modification date for the modified source 
+code files is June 20th, 2024.
+
+2.2 t1ha 
+The source files from the t1ha open source project are under the zlib License. 
+And their copyright and license terms are as follows:
+
+  zlib License, see https://en.wikipedia.org/wiki/Zlib_License
+
+  Copyright (c) 2016-2020 Positive Technologies, https://www.ptsecurity.com,
+  Fast Positive Hash.
+
+  Portions Copyright (c) 2010-2013 Leonid Yuriev leo@yuriev.ru,
+  The 1Hippeus project (t1h).
+
+  This software is provided 'as-is', without any express or implied warranty. In no event will the authors 
+  be held liable for any damages arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose, including commercial applications, 
+  and to alter it and redistribute it freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not claim that you wrote the original 
+  software. If you use this software in a product, an acknowledgement in the product documentation would be 
+  appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the 
+  original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+This KWDB project did not make any modification to the source files of t1ha.
+
+2.3 execution engine lexer 
+The lexer code used in the execution engine is based on parser/lexer source code 
+from ClickHouse components, which is licensed under Apache 2.0 license:
+  http://www.apache.org/licenses/LICENSE-2.0
+
+The source code files modified by this KWDB project have copyright disclaimer 
+added in file header with copyright © Shanghai Yunxi Technology Co., Ltd. 
+Unless otherwise disclaimed, the last modification date is set to Jun 20th, 2024.
+
+
+3. Copyright and license for testing files
+All the testing files for this software (KWDB) is licensed under Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
+You may obtain a copy of Mulan PSL v2 at:
+         http://license.coscl.org.cn/MulanPSL2
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+See the Mulan PSL v2 for more details.
+
+
+4. Third-party components in packaging
+The following third-party open source projects and components are compiled and static linked into 
+final executables, which may constitute binary redistribution. The open source software licenses 
+are granted by the respective right holders.
+
+Crypto++ (Boost Software License 1.0)
+version: 5.6.5
+Compilation Copyright (c) 1995-2016 by Wei Dai. All rights reserved.
+This copyright applies only to this software distribution package
+as a compilation, and does not imply a copyright on any particular
+file in the package.
+
+All individual files in this compilation are placed in the public domain by
+Wei Dai and other contributors.
+
+The Crypto++ Library (as a compilation) is currently licensed under the Boost
+Software License 1.0 (http://www.boost.org/users/license.html).
+Boost Software License - Version 1.0 - August 17th, 2003
+
+
+googlemock (BSD 3-Clause)
+version: 1.9.0
+Copyright 2008, Google Inc.
+
+
+googletest (BSD 3-Clause)
+version: 1.9.0
+Copyright 2008, Google Inc.
+
+
+jemalloc (BSD-2-Clause)
+version: 5.3.0
+Copyright (C) 2002-2016 Jason Evans jasone@canonware.com.
+All rights reserved.
+Copyright (C) 2007-2012 Mozilla Foundation.
+Copyright (C) 2009-2016 Facebook, Inc.
+
+
+libedit (BSD 3-Clause)
+version: 3.1
+Copyright (c) 1992, 1993
+The Regents of the University of California.
+
+
+libroach (Apache 2.0)
+revision: f51e13f7885ca792236203e749b87cc89adf8d77
+Copyright 2020 The Cockroach Authors.
+Copyright 2019 The Cockroach Authors.
+Copyright 2018 The Cockroach Authors.
+Copyright 2017 The Cockroach Authors.
+Copyright 2015 The Cockroach Authors.
+
+
+rocksdb (GPL, Apache 2.0)
+version: 6.2.1
+Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+
+
+snappy (BSD 3-Clause)
+version: 1.1.7
+Copyright 2011, Google Inc.
+
+Some of the benchmark data in testdata/ is licensed differently:
+
+•	fireworks.jpeg is Copyright 2013 Steinar H. Gunderson, and
+is licensed under the Creative Commons Attribution 3.0 license
+(CC-BY-3.0). See https://creativecommons.org/licenses/by/3.0/
+for more information.
+
+•	kppkn.gtb is taken from the Gaviota chess tablebase set, and
+is licensed under the MIT License. See
+https://sites.google.com/site/gaviotachessengine/Home/endgame-tablebases-1
+for more information.
+
+•	paper-100k.pdf is an excerpt (bytes 92160 to 194560) from the paper
+“Combinatorial Modeling of Chromatin Features Quantitatively Predicts DNA
+Replication Timing in _Drosophila_” by Federico Comoglio and Renato Paro,
+which is licensed under the CC-BY license. See
+http://www.ploscompbiol.org/static/license for more ifnormation.
+
+•	alice29.txt, asyoulik.txt, plrabn12.txt and lcet10.txt are from Project
+Gutenberg. The first three have expired copyrights and are in the public
+domain; the latter does not have expired copyright, but is still in the
+public domain according to the license information
+(http://www.gutenberg.org/ebooks/53).
+
+
+libunwind (MIT)
+version: v1.8.1
+Copyright (c) 2002 Hewlett-Packard Co.
+
+
+cloud.google.com/go (Apache 2.0)
+version: v0.34.0
+Copyright 2014 Google LLC
+Copyright 2016 Google LLC
+Copyright 2017 Google LLC
+Copyright 2018 Google LLC
+
+
+github.com/abourget/teamcity (MIT)
+revision: 8ca25c33eb11b24ed691f5f8fc4ca869ef970017
+Copyright (c) 2017 Alexandre Bourget
+
+
+github.com/Azure/azure-pipeline-go (MIT)
+version: v0.1.8
+Copyright (c) Microsoft Corporation.
+
+
+github.com/Azure/azure-sdk-for-go (Apache 2.0)
+version: v33.4.0
+Microsoft Azure-SDK-for-Go
+Copyright 2014-2017 Microsoft
+
+This product includes software developed at
+the Microsoft Corporation (https://www.microsoft.com).
+
+
+github.com/Azure/azure-storage-blob-go (MIT)
+version: 0.4.0
+Copyright (c) Microsoft Corporation.
+
+
+github.com/Azure/go-autorest (Apache 2.0)
+version: v13.0.1
+Copyright 2017 Microsoft Corporation
+
+
+github.com/Azure/go-ansiterm (MIT)
+revision: d6e3b3328b783f23731bc4d058875b0371ff8109
+Copyright (c) 2015 Microsoft Corporation
+
+
+github.com/certifi/gocertifi (Mozilla Public License 2.0)
+version: 2018.01.18
+This Source Code Form is subject to the terms of the Mozilla Public License,
+v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain
+one at http://mozilla.org/MPL/2.0/.
+
+
+github.com/dgryski/go-metro (MIT)
+revision: 280f6062b5bc97ee9b9afe7f2ccb361e59845baa
+Copyright (c) 2016 Damian Gryski
+
+
+github.com/elazarl/go-bindata-assetfs (BSD 2-Clause)
+version: v1.0.0
+Copyright (c) 2014, Elazar Leibovich
+
+
+github.com/golang-commonmark/html (BSD 2-Clause)
+revision: 7d7c804e1d46042212a50ae572520f5615b171e8
+Copyright (c) 2015, The Authors
+
+
+github.com/golang-commonmark/linkify (BSD 2-Clause)
+revision: f05efb453a0efc79b586711527038dd2819b6eb1
+Copyright (c) 2015, The Authors
+
+
+github.com/golang-commonmark/markdown (BSD 2-Clause)
+revision: a8f139058164d82e67bb370994c655d8adc8f9e7
+Copyright (c) 2015, The Authors
+
+
+github.com/golang-commonmark/mdurl (BSD 2-Clause)
+revision: 8d018c6567d621cec5ab6100450e041221f42b4d
+Copyright (c) 2015, The Authors
+
+
+github.com/golang-commonmark/puny (BSD 2-Clause)
+revision: 050be392d8b8b528f9e6414514d8a2815ccee93f
+Copyright (c) 2015, The Authors
+
+
+github.com/go-sql-driver/mysql (Mozilla Public License Version 2.0)
+revision: c45f530f8e7fe40f4687eaa50d0c8c5f1b66f9e0
+Ilia Cimpoes ichimpoesh@gmail.com
+INADA Naoki songofacandy@gmail.com
+Jacek Szwec szwec.jacek@gmail.com
+James Harr james.harr@gmail.com
+Jeff Hodges jeff@somethingsimilar.com
+Jeffrey Charles jeffreycharles@gmail.com
+Jian Zhen zhenjl@gmail.com
+Joshua Prunier joshua.prunier@gmail.com
+Julien Lefevre julien.lefevr@gmail.com
+Julien Schmidt go-sql-driver@julienschmidt.com
+Justin Li jli@j-li.net
+Justin Nuß nuss.justin@gmail.com
+Kamil Dziedzic kamil@klecza.pl
+Kevin Malachowski kevin@chowski.com
+Kieron Woodhouse kieron.woodhouse@infosum.com
+Lennart Rudolph lrudolph@hmc.edu
+Leonardo YongUk Kim dalinaum@gmail.com
+Linh Tran Tuan linhduonggnu@gmail.com
+Lion Yang lion@aosc.xyz
+Luca Looz luca.looz92@gmail.com
+Lucas Liu extrafliu@gmail.com
+Luke Scott luke@webconnex.com
+Maciej Zimnoch maciej.zimnoch@codilime.com
+Michael Woolnough michael.woolnough@gmail.com
+Nicola Peduzzi thenikso@gmail.com
+Olivier Mengué dolmen@cpan.org
+oscarzhao oscarzhaosl@gmail.com
+Paul Bonser misterpib@gmail.com
+Peter Schultz peter.schultz@classmarkets.com
+Rebecca Chin rchin@pivotal.io
+Reed Allman rdallman10@gmail.com
+Richard Wilkes wilkes@me.com
+Robert Russell robert@rrbrussell.com
+Runrioter Wung runrioter@gmail.com
+Shuode Li elemount@qq.com
+Soroush Pour me@soroushjp.com
+Stan Putrya root.vagner@gmail.com
+Stanley Gunawan gunawan.stanley@gmail.com
+Steven Hartland steven.hartland@multiplay.co.uk
+Thomas Wodarek wodarekwebpage@gmail.com
+Tom Jenkinson tom@tjenkinson.me
+Xiangyu Hu xiangyu.hu@outlook.com
+Xiaobing Jiang s7v7nislands@gmail.com
+Xiuming Chen cc@cxm.cc
+Zhenye Xie xiezhenye@gmail.com
+
+Organizations
+
+Barracuda Networks, Inc.
+Counting Ltd.
+Google Inc.
+InfoSum Ltd.
+Keybase Inc.
+Percona LLC
+Pivotal Inc.
+Stripe Inc.
+Multiplay Ltd.
+
+
+github.com/jmespath/go-jmespath (Apache 2.0)
+revision: c2b33e84
+Copyright 2015 James Saryerwinnie
+
+
+github.com/leanovate/gopter (MIT)
+revision: 634a59d12406abc51545000deab7cf43ebc32378
+Copyright (c) 2016 leanovate
+
+
+github.com/Masterminds/semver (MIT)
+revision: 3c92f33da7a84de8314f3ff82e5f919b89fd1492
+Copyright (C) 2014-2015, Matt Butcher and Matt Farina
+
+
+github.com/Masterminds/vcs
+version: v1.12.0
+Copyright (C) 2014-2015, Matt Butcher and Matt Farina
+
+
+github.com/mmatczuk/go_generics (Apache 2.0)
+revision: 0aaa050f9bab8160cf684130d0afa69ff582cbe6
+Copyright 2018 Google LLC
+
+
+github.com/opentracing/opentracing-go (MIT)
+version: v1.0.2
+Copyright (c) 2016 The OpenTracing Authors
+
+
+github.com/pierrec/lz4 (BSD 3-Clause)
+version: v2.0.7
+Copyright (c) 2015, Pierre Curto
+
+
+github.com/sasha-s/go-deadlock (Apache 2.0)
+version: v0.2.0
+Authors: sasha-s, millfort, jrajahalme, h3n4l, ncw et al.
+
+
+github.com/stretchr/testify (MIT)
+version: v1.4.0
+Copyright (c) 2012-2018 Mat Ryer and Tyler Bunnell
+
+
+github.com/andybalholm/cascadia (BSD 2-Clause)
+version: v1.0.0
+Copyright (c) 2011 Andy Balholm. All rights reserved.
+
+
+github.com/benesch/cgosymbolizer (BSD, 3-clause)
+revision: 70e1ee2b39d3b616a6ab9996820dde224c27f351
+Copyright 2018 Cockroach Labs. All rights reserved.
+
+
+github.com/client9/misspell (MIT)
+version: v0.3.4
+Copyright (c) 2015-2017 Nick Galbreath
+
+
+github.com/dimchansky/utfbom (Apache 2.0)
+version: v1.1.0
+Copyright (c) 2018-2020, Dmitrij Koniajev (dimchansky@gmail.com)
+
+
+github.com/facebookgo/clock (MIT)
+revision: 600d898af40aa09a7a93ecb9265d87b0504b6f03
+Copyright (c) 2014 Ben Johnson
+
+
+github.com/go-logfmt/logfmt (MIT)
+version: v0.4.0
+Copyright (c) 2015 go-logfmt
+
+
+github.com/grpc-ecosystem/grpc-gateway (BSD 3-Clause)
+version: v1.5.1
+Copyright (c) 2015, Gengo, Inc.
+All rights reserved.
+
+
+github.com/grpc-ecosystem/grpc-opentracing (BSD 3-Clause)
+revision: 8e809c8a86450a29b90dcc9efbf062d0fe6d9746
+Copyright (c) 2016, gRPC Ecosystem
+All rights reserved.
+
+
+github.com/kevinburke/go-bindata
+version: v3.13.0
+This work is subject to the CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+license. Its contents can be found at:
+
+https://creativecommons.org/publicdomain/zero/1.0
+
+safefile.go and safefile_test.go are imported from github.com/dchest/safefile
+and contain local modifications. The license from that project is included here:
+
+Copyright (c) 2013 Dmitry Chestnykh dmitry@codingrobots.com
+All rights reserved.
+
+
+github.com/lib/pq (MIT)
+revision: 9eb3fc897d6fd97dd4aad3d0404b54e2f7cc56be
+Copyright (c) 2011-2013, 'pq' Contributors
+Portions Copyright (C) 2011 Blake Mizerany
+
+
+github.com/mattn/go-isatty (MIT)
+version: v0.0.4
+Copyright (c) Yasuhiro MATSUMOTO mattn.jp@gmail.com
+
+
+github.com/mattn/go-runewidth (MIT)
+version: v0.0.4
+Copyright (c) 2016 Yasuhiro Matsumoto
+
+
+github.com/mattn/goveralls (MIT)
+version: v0.0.2
+Copyright (c) 2022 Yasuhiro Matsumoto
+
+
+github.com/montanaflynn/stats (MIT)
+revision: 713f2944833cd694ccabaa940ffaeaebc03976a7
+Copyright (c) 2014-2015 Montana Flynn (https://anonfunction.com)
+
+
+github.com/opentracing-contrib/go-observer (Apache 2.0)
+revision: a52f2342449246d5bcc273e65cbdcfa5f7d6c63c
+Copyright (c) 2017 opentracing-contrib
+
+
+github.com/pkg/browser (BSD 2-Clause)
+revision: 0a3d74bf9ce488f035cf5bc36f753a711bc74334
+Copyright (c) 2014, Dave Cheney dave@cheney.net
+All rights reserved.
+
+
+github.com/pkg/errors (BSD 2-Clause)
+version: v0.8.1
+Copyright (c) 2015, Dave Cheney dave@cheney.net
+All rights reserved.
+
+
+github.com/sdboyer/constext (MIT)
+revision: 836a144573533ea4da4e6929c235fd348aed1c80
+Copyright (c) 2017 Sam Boyer
+
+
+github.com/VividCortex/ewma (MIT)
+revision: v1.1.1
+Copyright (c) 2013 VividCortex
+
+
+github.com/andy-kimball/arenaskl (Apache 2.0)
+revision: 6bf06cf57626e536063e9398a57dfe1417ed0799
+Copyright 2017 Dgraph Labs, Inc. and Contributors
+Modifications copyright (C) 2017 Andy Kimball and Contributors
+
+github.com/beorn7/perks (MIT)
+revision: 3a771d992973f24aa725d07868b467d1ddfceafb
+Copyright (C) 2013 Blake Mizerany
+
+
+github.com/codahale/hdrhistogram (MIT)
+revision: 3a0bb77429bd3a61596f5e8a3172445844342120
+Copyright (c) 2014 Coda Hale
+
+
+github.com/docker/distribution (Apache 2.0)
+version: v2.7.0
+authors: a-palchikov deemok@gmail.com, Aaron Lehmann alehmann@netflix.com,
+  Aaron Schlesinger aschlesinger@deis.com, Aaron Vinson avinson.public@gmail.com,
+  Adam Dobrawy ad-m@users.noreply.github.com, et al.
+
+
+github.com/docker/docker (Apache 2.0)
+revision: 0dc531243dd3779637f3279dfcca9c1d6715c823
+which includes the following in its NOTICE file:
+Docker
+Copyright 2012-2017 Docker, Inc.
+
+This product includes software developed at Docker, Inc. (https://www.docker.com).
+
+This product contains software (https://github.com/kr/pty) developed
+by Keith Rarick, licensed under the MIT License.
+
+The following is courtesy of our legal counsel:
+
+
+Use and transfer of Docker may be subject to certain restrictions by the
+United States and other governments.
+It is your responsibility to ensure that your use and/or transfer does not
+violate applicable laws.
+
+For more information, please see https://www.bis.doc.gov
+
+See also https://www.apache.org/dev/crypto.html and/or seek legal counsel.
+
+
+github.com/docker/go-connections (Apache 2.0)
+version: v0.4.0
+Copyright 2015 Docker, Inc.
+
+
+github.com/docker/go-units (Apache 2.0)
+version: v0.3.3
+Copyright 2015 Docker, Inc.
+
+
+github.com/getsentry/raven-go (BSD 3-Clause)
+revision: 221b2b44fb33f84ed3ea13f3aed62ff48c85636b
+Copyright (c) 2013 Apollic Software, LLC. All rights reserved.
+Copyright (c) 2015 Functional Software, Inc. All rights reserved.
+
+
+github.com/google/btree (Apache 2.0)
+revision: 4030bb1f1f0c35b30ca7009e9ebd06849dd45306
+Copyright 2014 Google Inc.
+
+
+github.com/google/flatbuffers (Apache 2.0)
+version: v1.10.0
+authors: dbaileychess, aardappel, vglavnyy, CasperN, rw et al.
+
+
+github.com/google/go-cmp (BSD 3-Clause)
+version: v0.3.0
+Copyright (c) 2017 The Go Authors. All rights reserved.
+
+
+github.com/google/go-github (BSD 3-Clause)
+version: v21.0.0
+Copyright (c) 2013 The go-github AUTHORS. All rights reserved.
+
+
+github.com/google/go-querystring (BSD 3-Clause)
+version: v1.0.0
+Copyright (c) 2013 Google. All rights reserved.
+
+
+github.com/google/pprof (Apache 2.0)
+revision: e84dfd68c163c45ea47aa24b3dc7eaa93f6675b1
+Copyright 2014 Google Inc. All Rights Reserved.
+
+github.com/ianlancetaylor/cgosymbolizer
+revision: f5072df9c550dc687157e5d7efb50825cdf8f0eb
+Copyright (c) 2015 The Go Authors. All rights reserved.
+
+
+github.com/ianlancetaylor/demangle (BSD 3-Clause)
+revision: 5e5cf60278f657d30daa329dd0e7e893b6b8f027
+Copyright (c) 2015 The Go Authors. All rights reserved.
+
+
+github.com/kisielk/errcheck (MIT)
+version: v1.1.0
+Copyright (c) 2013 Kamil Kisiel
+
+
+github.com/kisielk/gotool (MIT)
+version: v1.0.0
+Copyright (c) 2013 Kamil Kisiel kamil@kamilkisiel.net
+All the files in this distribution are covered under either the MIT
+license (see the file LICENSE) except some files mentioned below.
+
+match.go, match_test.go:
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+github.com/lightstep/lightstep-tracer-go (MIT)
+version: v0.15.6
+Copyright (c) 2016
+
+
+github.com/matttproud/golang_protobuf_extensions (MIT)
+version: v1.0.1
+which includes the following in its NOTICE file:
+Copyright 2012 Matt T. Proud (matt.proud@gmail.com)
+
+
+github.com/nightlyone/lockfile (MIT)
+revision: 0ad87eef1443f64d3d8c50da647e2b1552851124
+Copyright (c) 2012 Ingo Oeser
+
+
+github.com/openzipkin-contrib/zipkin-go-opentracing (MIT)
+version: v0.3.5
+Copyright (c) 2016 The OpenTracing Authors
+Copyright (c) 2016 Bas van Beek
+
+
+github.com/pmezard/go-difflib
+version: v1.0.0
+Copyright (c) 2013, Patrick Mezard
+All rights reserved.
+
+
+github.com/shirou/gopsutil (BSD)
+version: v2.18.12
+Copyright (c) 2014, WAKAYAMA Shirou
+All rights reserved.
+internal/common/binary.go in the gopsutil is copied and modifid from golang/encoding/binary.go.
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+github.com/shirou/w32
+revision: bb4de0191aa41b5507caa14b0650cdbddcd9280b
+Copyright (c) 2010-2012 The w32 Authors. All rights reserved.
+
+
+github.com/wadey/gocovmerge (BSD 2-Clause)
+revision: b5bfa59ec0adc420475f97f89b58045c721d761c
+Copyright (c) 2015, Wade Simmons
+All rights reserved.
+
+
+github.com/apache/arrow (Apache 2.0)
+revision: 338c62a2a20574072fde5c478fcd42bf27a2d4b6
+which includes the following in its NOTICE file:
+Apache Arrow
+Copyright 2016-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This product includes software from the SFrame project (BSD, 3-clause).
+•	Copyright (C) 2015 Dato, Inc.
+•	Copyright (c) 2009 Carnegie Mellon University.
+
+This product includes software from the Feather project (Apache 2.0)
+https://github.com/wesm/feather
+
+This product includes software from the DyND project (BSD 2-clause)
+https://github.com/libdynd
+
+This product includes software from the LLVM project
+•	distributed under the University of Illinois Open Source
+
+This product includes software from the google-lint project
+•	Copyright (c) 2009 Google Inc. All rights reserved.
+
+This product includes software from the mman-win32 project
+•	Copyright https://code.google.com/p/mman-win32/
+•	Licensed under the MIT License;
+
+This product includes software from the LevelDB project
+•	Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+•	Use of this source code is governed by a BSD-style license that can be
+•	Moved from Kudu http://github.com/cloudera/kudu
+
+This product includes software from the CMake project
+•	Copyright 2001-2009 Kitware, Inc.
+•	Copyright 2012-2014 Continuum Analytics, Inc.
+•	All rights reserved.
+
+This product includes software from https://github.com/matthew-brett/multibuild (BSD 2-clause)
+•	Copyright (c) 2013-2016, Matt Terry and Matthew Brett; all rights reserved.
+
+This product includes software from the Ibis project (Apache 2.0)
+•	Copyright (c) 2015 Cloudera, Inc.
+•	https://github.com/cloudera/ibis
+
+This product includes software from Dremio (Apache 2.0)
+•	Copyright (C) 2017-2018 Dremio Corporation
+•	https://github.com/dremio/dremio-oss
+
+This product includes software from Google Guava (Apache 2.0)
+•	Copyright (C) 2007 The Guava Authors
+•	https://github.com/google/guava
+
+This product include software from CMake (BSD 3-Clause)
+•	CMake - Cross Platform Makefile Generator
+•	Copyright 2000-2019 Kitware, Inc. and Contributors
+
+The web site includes files generated by Jekyll.
+
+
+
+This product includes code from Apache Kudu, which includes the following in
+its NOTICE file:
+
+  Apache Kudu
+  Copyright 2016 The Apache Software Foundation
+
+  This product includes software developed at
+  The Apache Software Foundation (http://www.apache.org/).
+
+  Portions of this software were developed at
+  Cloudera, Inc (http://www.cloudera.com/).
+
+
+github.com/apache/thrift (Apache 2.0)
+revision: 2b7365c54f823013cc6a4760798051b22743c103
+which includes the following in its NOTICE file:
+Apache Thrift
+Copyright 2006-2017 The Apache Software Foundation.
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+github.com/biogo/store (BSD 3-Clause)
+revision: 913427a1d5e89604e50ea1db0f28f34966d61602
+Copyright ©2012 The bíogo Authors. All rights reserved.
+
+
+github.com/cpuguy83/go-md2man (MIT)
+version: v1.0.8
+Copyright (c) 2014 Brian Goff
+
+
+github.com/dustin/go-humanize
+version: v1.0.0
+Copyright (c) 2005-2008  Dustin Sallings dustin@spy.net
+
+
+github.com/ghemawat/stream (Apache 2.0)
+revision: 696b145b53b9611fe9c9f189122f990171e391a0
+authors: ghemawat, akshaychhajed
+
+
+github.com/googleapis/gax-go (BSD 3-Clause)
+version: v2.0.3
+Copyright 2016, Google Inc.
+All rights reserved.
+
+
+github.com/inconshreveable/mousetrap (Apache 2.0)
+version: v1.0
+Copyright 2014 Alan Shreve
+
+
+github.com/knz/go-libedit (Apache 2.0)
+version: v1.10.1
+Copyright 2017 Raphael 'kena' Poss
+
+github.com/knz/strtime (BSD 2-Clause)
+revision: be999391ffa90a7880271a65d53f760fc1cf0151
+Copyright (c) 2017, kena
+All rights reserved.
+
+
+github.com/linkedin/goavro (Apache 2.0)
+version: v2.7.2
+Copyright [2019] LinkedIn Corp.
+
+
+github.com/mibk/dupl (MIT)
+version: v1.0.0
+Copyright (c) 2015 Michal Bohuslávek
+
+
+github.com/nlopes/slack (BSD 2-Clause)
+version: v0.4.0
+Copyright (c) 2015, Norberto Lopes
+All rights reserved.
+
+
+github.com/paulsmith/gogeos/geos (MIT)
+version: v0.1.2
+Copyright (C) 2013 Paul Smith
+
+github.com/prometheus/client_golang (Apache 2.0)
+version: v0.9.2
+which includes the following in its NOTICE file:
+Prometheus instrumentation library for Go applications
+Copyright 2012-2015 The Prometheus Authors
+
+This product includes software developed at
+SoundCloud Ltd. (http://soundcloud.com/).
+
+The following components are included in this product:
+
+perks - a fork of https://github.com/bmizerany/perks
+https://github.com/beorn7/perks
+Copyright 2013-2015 Blake Mizerany, Björn Rabenstein
+See https://github.com/beorn7/perks/blob/master/README.md for license details.
+
+Go support for Protocol Buffers - Google's data interchange format
+http://github.com/golang/protobuf/
+Copyright 2010 The Go Authors
+See source code for license details.
+
+Support for streaming Protocol Buffer messages for the Go language (golang).
+https://github.com/matttproud/golang_protobuf_extensions
+Copyright 2013 Matt T. Proud
+Licensed under the Apache License, Version 2.0
+
+
+github.com/prometheus/client_model (Apache 2.0)
+revision: 56726106282f1985ea77d5305743db7231b0c0a8
+which includes the following in its NOTICE file:
+Data model artifacts for Prometheus.
+Copyright 2012-2015 The Prometheus Authors
+
+This product includes software developed at
+SoundCloud Ltd. (http://soundcloud.com/).
+
+
+github.com/prometheus/common (Apache 2.0)
+revision: 2998b132700a7d019ff618c06a234b47c1f3f681
+which includes the following in its NOTICE file:
+Common libraries shared by Prometheus Go components.
+Copyright 2015 The Prometheus Authors
+
+This product includes software developed at
+SoundCloud Ltd. (http://soundcloud.com/).
+
+
+github.com/prometheus/procfs (Apache 2.0)
+revision: b1a0a9a36d7453ba0f62578b99712f3a6c5f82d1
+which includes the following in its NOTICE file:
+procfs provides functions to retrieve system, kernel and process
+metrics from the pseudo-filesystem proc.
+
+Copyright 2014-2015 The Prometheus Authors
+
+This product includes software developed at
+SoundCloud Ltd. (http://soundcloud.com/).
+
+
+github.com/Shopify/sarama (MIT)
+version: v1.20.1
+Copyright (c) 2013 Shopify
+
+
+github.com/Shopify/toxiproxy (MIT)
+version: v2.1.4
+Copyright (c) 2014 Shopify
+
+
+github.com/yuin/gopher-lua (MIT)
+version: v1.1.1
+Copyright (c) 2015 Yusuke Inuzuka
+
+github.com/armon/circbuf (MIT)
+revision: bbbad097214e2918d8543d5201d12bfd7bca254d
+Copyright (c) 2013 Armon Dadgar
+
+
+github.com/armon/go-radix (MIT)
+version: v1.0.0
+Copyright (c) 2014 Armon Dadgar
+
+
+github.com/boltdb/bolt (MIT)
+version: v1.3.1
+Copyright (c) 2013 Ben Johnson
+
+
+github.com/DataDog/zstd (BSD)
+version: v1.3.5
+Copyright (c) 2016, Datadog info@datadoghq.com
+All rights reserved.
+
+
+github.com/eapache/go-resiliency (MIT)
+version: v1.1.0
+Copyright (c) 2014 Evan Huus
+
+
+github.com/eapache/go-xerial-snappy (MIT)
+revision: 776d5712da21bc4762676d614db1d8a64f4238b0
+Copyright (c) 2016 Evan Huus
+
+
+github.com/eapache/queue (MIT)
+version: v1.1.0
+Copyright (c) 2014 Evan Huus
+
+
+github.com/ghodss/yaml (MIT)
+revision: 0ca9ea5df5451ffdf184b4428c902747c2c11cd7
+Copyright (c) 2014 Sam Ghods
+
+
+github.com/go-ole/go-ole (MIT)
+version: v1.2.2
+Copyright © 2013-2017 Yasuhiro Matsumoto, mattn.jp@gmail.com
+
+
+github.com/jackc/pgx (MIT)
+version: v3.6.2
+Copyright (c) 2013 Jack Christensen
+
+
+github.com/konsorten/go-windows-terminal-sequences (MIT)
+version: v1.0.1
+Copyright (c) 2017 marvin + konsorten GmbH (open-source@konsorten.de)
+
+
+github.com/lufia/iostat (BSD 3-Clause)
+revision: 9f7362b77ad333b26c01c99de52a11bdb650ded2
+Copyright (c) 2017, kadota kyohei
+All rights reserved.
+
+
+github.com/MichaelTJones/walk
+revision: 4748e29d5718c2df4028a6543edf86fd8cc0f881
+Copyright 2010 The Go Authors. All rights reserved.
+Copyright 2009 The Go Authors. All rights reserved.
+Copyright (c) 2016 Michael T Jones
+Copyright 2012 The Go Authors. All rights reserved.
+
+
+github.com/Nvveen/Gotty
+revision: cd527374f1e5bff4938207604a14f2e38a9cf512
+Copyright (c) 2012, Neal van Veen (nealvanveen@gmail.com)
+All rights reserved.
+
+
+github.com/pelletier/go-toml (MIT)
+version: v1.2.0
+Copyright (c) 2013 - 2017 Thomas Pelletier, Eric Anderton
+
+
+github.com/PuerkitoBio/goquery (BSD 3-Clause)
+version: v1.5.0
+Copyright (c) 2012-2016, Martin Angers & Contributors
+All rights reserved.
+
+
+github.com/sirupsen/logrus (MIT)
+version: v1.3.0
+Copyright (c) 2014 Simon Eskildsen
+
+
+github.com/aws/aws-sdk-go (Apache 2.0)
+version: v1.16.19
+which includes the following in its NOTICE file:
+AWS SDK for Go
+Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved. 
+Copyright 2014-2015 Stripe, Inc.
+
+
+github.com/BurntSushi/toml (MIT)
+version: v0.3.1
+Copyright (c) 2013 TOML authors
+
+
+github.com/davecgh/go-spew (ISC)
+version: v1.1.1
+Copyright (c) 2012-2016 Dave Collins dave@davec.name
+
+
+github.com/edsrzf/mmap-go
+version: v1.0.0
+Copyright (c) 2011, Evan Shaw edsrzf@gmail.com
+All rights reserved.
+
+
+github.com/gogo/protobuf
+revision: fecfd0f31404f86c8eac2794bad7d85476d26d97
+Copyright (c) 2013, The GoGo Authors. All rights reserved.
+Protocol Buffers for Go with Gadgets
+Go support for Protocol Buffers - Google's data interchange format
+Copyright 2010 The Go Authors.  All rights reserved.
+https://github.com/golang/protobuf
+
+
+github.com/gorhill/cronexpr (GPLv3, Apache 2.0)
+version: 1.0.0
+Copyright 2013 Raymond Hill
+
+github.com/jaegertracing/jaeger (Apache 2.0)
+version: v1.17.1
+which includes the following in its NOTICE file:
+Jaeger, Distributed Tracing Platform.
+
+Copyright 2015-2019 The Jaeger Project Authors
+
+Licensed under Apache License 2.0.  See LICENSE for terms.
+
+Includes software developed at Uber Technologies, Inc. (https://eng.uber.com/).
+
+
+github.com/kr/logfmt (MIT)
+revision: b84e30acd515aadc4b783ad4ff83aff3299bdfe0
+Copyright (c) 2013 Keith Rarick, Blake Mizerany
+
+
+github.com/kr/pretty (MIT)
+version: v0.1.0
+Copyright 2012 Keith Rarick
+
+
+github.com/kr/text (MIT)
+version: v0.1.0
+Copyright 2012 Keith Rarick
+
+
+github.com/maruel/panicparse (Apache 2.0)
+revision: f20d4c4d746f810c9110e21928d4135e1f2a3efa
+Copyright 2015 Marc-Antoine Ruel. All rights reserved.
+
+github.com/Microsoft/go-winio (MIT)
+version: v0.4.11
+Copyright (c) 2015 Microsoft
+
+
+github.com/olekukonko/tablewriter (MIT)
+revision: bd15540e88470a2a7abfd3d457874fbee6702218
+Copyright (C) 2014 by Oleku Konko
+
+
+github.com/petar/GoLLRB (BSD 3-Clause)
+revision: 53be0d36a84c2a886ca057d34b6aa4468df9ccb4
+Copyright (c) 2010, Petar Maymounkov
+All rights reserved.
+
+
+github.com/rcrowley/go-metrics
+revision: 3113b8401b8a98917cde58f8bbd42a1b1c03b1fd
+Copyright 2012 Richard Crowley. All rights reserved.
+
+
+github.com/spf13/cobra (Apache 2.0)
+version: v0.0.3
+Copyright © 2013 Steve Francia spf@spf13.com.
+
+
+github.com/spf13/pflag (BSD 3-Clause)
+version: v1.0.3
+Copyright (c) 2012 Alex Ogier. All rights reserved.
+Copyright (c) 2012 The Go Authors. All rights reserved.
+
+
+github.com/axiomhq/hyperloglog (MIT)
+revision: 4b99d0c2c99ec77eb3a42344d206a88997957495
+Copyright (c) 2017 Axiom Inc. seif@axiom.sh
+
+
+github.com/cenkalti/backoff (MIT)
+version: v2.1.1
+Copyright (c) 2014 Cenk Altı
+
+
+github.com/dgrijalva/jwt-go (MIT)
+version: v3.2.0
+Copyright (c) 2012 Dave Grijalva
+
+
+github.com/elastic/gosigar (Apache 2.0)
+version: v0.10.0
+which includes the following in its NOTICE file:
+Copyright (c) [2009-2011] VMware, Inc. All Rights Reserved. 
+
+This product is licensed to you under the Apache License, Version 2.0 (the "License").  
+You may not use this product except in compliance with the License.  
+
+This product includes a number of subcomponents with
+separate copyright notices and license terms. Your use of these
+subcomponents is subject to the terms and conditions of the 
+subcomponent's license, as noted in the LICENSE file.
+
+
+github.com/golang/dep (BSD 3-Clause)
+revision: 22125cfaa6ddc71e145b1535d4b7ee9744fefff2
+Copyright (c) 2014 The Go Authors. All rights reserved.
+
+
+github.com/golang/glog (Apache 2.0)
+revision: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
+Copyright 2013 Google Inc. All Rights Reserved.
+
+
+github.com/golang/protobuf (BSD 3-Clause)
+version: v1.2.0
+Copyright 2010 The Go Authors.  All rights reserved.
+
+
+github.com/golang/snappy (BSD 3-Clause)
+revision: 2e65f85255dbc3072edf28d6b5b8efc472979f5a
+Copyright (c) 2011 The Snappy-Go Authors. All rights reserved.
+
+
+github.com/gorilla/websocket (BSD 3-Clause)
+version: v1.4.0
+Copyright (c) 2013 The Gorilla WebSocket Authors. All rights reserved.
+
+
+github.com/jmank88/nuts (MIT)
+version: v0.3.0
+Copyright (c) 2017 Jordan Krage
+
+
+github.com/cockroachdb/apd (Apache 2.0)
+version: v2.0.0
+Copyright 2016 The Cockroach Authors.
+
+
+github.com/cockroachdb/circuitbreaker (MIT)
+revision: a614b14ccf63dd2311d4ff646c30c61b8ed34aa8
+Copyright (c) 2014 Scott Barron
+
+
+github.com/cockroachdb/cmux (Apache 2.0)
+revision: 30d10be492927e2dcae0089c374c455d42414fcb
+Copyright 2016 The CMux Authors. All rights reserved.
+
+
+github.com/cockroachdb/crlfmt (Apache 2.0)
+revision: a78e1c207bc03184df89a2f3f0eba3014863b919
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+github.com/cockroachdb/datadriven (Apache 2.0)
+revision: aca09668cb243672cb82f3cbeec73b3871e13cc9
+Copyright 2018 The Cockroach Authors.
+
+
+github.com/cockroachdb/errors (Apache 2.0)
+revision: c0fc9576112100df3c37384a7768283971388874
+Copyright 2019 The Cockroach Authors.
+
+
+github.com/cockroachdb/cockroach-go (Apache 2.0)
+revision: 5fb5f80c026c39f4063fa688693063cc48af3e44
+Copyright 2016 The Cockroach Authors.
+
+
+github.com/cockroachdb/logtags (Apache 2.0)
+revision: eb05cc24525fa45bcdbaaeec3e431a82099f9ad4
+Copyright 2018 The Cockroach Authors.
+
+
+github.com/cockroachdb/pebble
+revision: 6d1d018e9bc737980abd3161e422d2f0693ed10e
+Copyright (c) 2011 The LevelDB-Go Authors. All rights reserved.
+
+
+github.com/cockroachdb/returncheck (Apache 2.0)
+revision: e91bb28baf9de4a530d3ae7f041953b23dcce9be
+Author: Kenji Kaneda
+
+
+github.com/cockroachdb/stress
+revision: 29b5d31b4c3a949cb3a726750bc34c4d58ec15e8
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+github.com/cockroachdb/ttycolor (Apache 2.0)
+revision: a1d5aaeb377d139ee5a6eae5f2885752e417b522
+Copyright 2013 Google Inc. All Rights Reserved.
+Copyright 2017 The Cockroach Authors.
+
+
+github.com/marusama/semaphore (MIT)
+version: 2.3.0
+Copyright (c) 2017 marusama
+
+
+github.com/mitchellh/go-homedir (MIT)
+version: v1.1.0
+Copyright (c) 2013 Mitchell Hashimoto
+
+
+github.com/mitchellh/reflectwalk (MIT)
+version: v1.0.0
+Copyright (c) 2013 Mitchell Hashimoto
+
+
+github.com/opencontainers/go-digest (Apache 2.0)
+version: v1.0.0-rc1
+Copyright 2017 Docker, Inc.
+
+
+github.com/opencontainers/image-spec (Apache 2.0)
+version: v1.0.1
+Copyright 2016 The Linux Foundation
+
+
+github.com/petermattis/goid (Apache 2.0)
+revision: b0b1615b78e5ee59739545bb38426383b2cda4c9
+Copyright 2016 Peter Mattis.
+
+
+github.com/russross/blackfriday (BSD)
+version: v1.5.2
+Copyright © 2011 Russ Ross
+
+
+github.com/StackExchange/wmi (MIT)
+version: 1.0.0
+Copyright (c) 2013 Stack Exchange
+
+
+go.etcd.io/etcd (Apache 2.0)
+revision: 4a2b4c8f7e0a3754fdd5a3341a27c2431c2a5385
+which includes the following in its NOTICE file:
+CoreOS Project
+Copyright 2014 CoreOS, Inc
+
+This product includes software developed at CoreOS, Inc.
+(http://www.coreos.com/).
+
+
+golang.org/x/crypto (BSD-3-Clause)
+revision: ff983b9c42bc9fbf91556e191cc8efb585c16908
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/exp (BSD-3-Clause)
+revision: 01c40f57f5f67e0faa42df53dbcfb58f5a65bb4e
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/lint (BSD-3-Clause)
+revision: 959b441ac422379a43da2230f62be024250818b0
+Copyright (c) 2013 The Go Authors. All rights reserved.
+
+
+golang.org/x/net (BSD-3-Clause)
+revision: a8b05e9114ab0cb08faec337c959aed24b68bf50
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/oauth2 (BSD-3-Clause)
+revision: 5dab4167f31cbd76b407f1486c86b40748bc5073
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/perf (BSD-3-Clause)
+revision: 6e6d33e29852650cab301f4dbeac9b7d67c6d542
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/sync (BSD-3-Clause)
+revision: 37e7f081c4d4c64e13b10787722085407fe5d15f
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/sys (BSD-3-Clause)
+revision: a457fd036447854c0c02e89ea439481bdcf941a2
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/text (BSD-3-Clause)
+revision: 75a595aef632b07c6eeaaa805adb6f0f66e4130e
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/time (BSD-3-Clause)
+revision: 85acf8d2951cb2a3bde7632f9ff273ef0379bcbd
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+golang.org/x/tools (BSD-3-Clause)
+version: v0.0.0-20190311212946-11955173bddd
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+
+google.golang.org/api (BSD-3-Clause)
+revision: c09e1094624e83069fd785fd1699a2ae58730e90
+Copyright (c) 2011 Google Inc. All rights reserved.
+
+
+google.golang.org/appengine (Apache 2.0)
+version: v1.4.0
+Copyright 2011 Google Inc. All rights reserved.
+
+
+google.golang.org/genproto (Apache 2.0)
+revision: db91494dd46c1fdcbbde05e5ff5eb56df8f7d79a
+Copyright 2011 Google Inc. All rights reserved.
+
+
+google.golang.org/grpc (Apache 2.0)
+version: v1.21.2
+Copyright 2017 gRPC authors.
+
+
+go.opencensus.io (Apache 2.0)
+version: v0.18.0
+Copyright 2017, OpenCensus Authors
+
+
+gopkg.in/yaml.v2 (Apache 2.0)
+revision: 0e28229486410d12d38f6d1288433104dc166775
+The following files were ported to Go from C files of libyaml, and thus
+are still covered by their original copyright and license:
+
+    apic.go
+    emitterc.go
+    parserc.go
+    readerc.go
+    scannerc.go
+    writerc.go
+    yamlh.go
+    yamlprivateh.go
+
+Copyright (c) 2006 Kirill Simonov
+
+which includes the following in its NOTICE file:
+Copyright 2011-2016 Canonical Ltd.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
+honnef.co/go/tools (MIT)
+revision: 1f0868a609b73436e79b066f93c7f1a28c5dbae2
+Copyright (c) 2016 Dominik Honnef
+
+
+vitess.io/vitess (Apache 2.0)
+revision: 1740ce8b3188b99cd3c88fb38ad734eda711519f
+Copyright 2017 Google Inc.
+

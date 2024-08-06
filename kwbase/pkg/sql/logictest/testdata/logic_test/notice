@@ -1,0 +1,9 @@
+# LogicTest: local
+
+# Test multiple notices all display at once.
+query T noticetrace
+SELECT kwdb_internal.notice('hi'), kwdb_internal.notice('i am....'), kwdb_internal.notice('otan!!!')
+----
+NOTICE: hi
+NOTICE: i am....
+NOTICE: otan!!!

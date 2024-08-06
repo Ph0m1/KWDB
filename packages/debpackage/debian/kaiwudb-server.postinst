@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# directory
+bin_link_dir="/usr/bin"
+lib_link_dir="/usr/lib"
+install_main_dir="/usr/local/kaiwudb"
+bin_dir="${install_main_dir}/bin"
+lib_dir="${install_main_dir}/lib"
+
+# Execute the commands with sudo perimission
+csudo=""
+if command -v sudo > /dev/null; then
+    csudo="sudo "
+fi
+
+# Remove links
+${csudo}rm -f ${bin_link_dir}/kwbase
+${csudo}rm -f ${lib_link_dir}/libkwdbts2.so
+
+# Make links
+${csudo}ln -s ${bin_dir}/kwbase ${bin_link_dir}/kwbase
+${csudo}ln -s ${lib_dir}/libkwdbts2.so ${lib_link_dir}/libkwdbts2.so
+
+${csudo}echo "/usr/local/kaiwudb/lib" > /etc/ld.so.conf.d/kaiwudb.conf
+${csudo}/sbin/ldconfig &> /dev/null

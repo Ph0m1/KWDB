@@ -1,0 +1,115 @@
+statement ok
+CREATE TABLE c (
+	a INT NOT NULL,
+	b INT NULL,
+	INDEX c_a_b_idx (a ASC, b ASC),
+	FAMILY fam_0_a_rowid (a, rowid),
+	FAMILY fam_1_b (b)
+)
+
+statement ok
+COMMENT ON TABLE c IS 'table'
+
+statement ok
+COMMENT ON COLUMN c.a IS 'column'
+
+statement ok
+COMMENT ON INDEX c_a_b_idx IS 'index'
+
+query TT colnames
+SHOW CREATE c
+----
+table_name  create_statement
+c           CREATE TABLE c (
+            a INT4 NOT NULL,
+            b INT4 NULL,
+            INDEX c_a_b_idx (a ASC, b ASC),
+            FAMILY fam_0_a_rowid (a, rowid),
+            FAMILY fam_1_b (b)
+);
+COMMENT ON TABLE c IS 'table';
+COMMENT ON COLUMN c.a IS 'column';
+COMMENT ON INDEX c@c_a_b_idx IS 'index'
+
+statement ok
+CREATE DATABASE up_d1
+
+statement ok
+CREATE TABLE up_d1.t1(c1 int primary key)
+
+statement ok
+CREATE INDEX ON up_d1.t1(c1)
+
+statement ok
+COMMENT ON INDEX up_d1.public.t1_c1_idx IS 'COMMENT_idx'
+
+statement ok
+COMMENT ON COLUMN up_d1.t1.c1 IS 'COMMENT_c1'
+
+query T
+SELECT comment from [SHOW COLUMNS FROM up_d1.t1 WITH COMMENT] where column_name = 'c1'
+----
+COMMENT_c1
+
+query T
+SELECT comment from [SHOW INDEXES FROM up_d1.t1 WITH COMMENT] where index_name = 't1_c1_idx'
+----
+COMMENT_idx
+
+statement ok
+DROP DATABASE up_d1
+
+statement ok
+DROP DATABASE IF EXISTS db1
+
+statement ok
+CREATE DATABASE db1
+
+statement ok
+COMMENT ON DATABASE db1 IS 'db1'
+
+query T
+select comment from [SHOW DATABASES WITH COMMENT] where database_name='db1'
+----
+db1
+
+statement ok
+ALTER DATABASE db1 RENAME TO db2
+
+query T
+select comment from [SHOW DATABASES WITH COMMENT] where database_name='db2'
+----
+db1
+
+statement ok
+DROP DATABASE db2
+
+statement ok
+DROP DATABASE IF existS db1
+
+statement ok
+CREATE DATABASE db1
+
+statement ok
+CREATE TABLE db1.test(a INT)
+
+statement ok
+COMMENT ON TABLE db1.test IS '""''"check""''?？~`!@#$%^&*()_+,./<>;:[]{}\！￥……（）——+、；：《》，。/|"'
+
+query T
+select comment from [SHOW TABLES FROM db1.public WITH COMMENT] where table_name = 'test'
+----
+""'"check""'?？~`!@#$%^&*()_+,./<>;:[]{}\！￥……（）——+、；：《》，。/|"
+
+query TT colnames
+SHOW CREATE TABLE db1.test
+----
+table_name      create_statement
+db1.public.test CREATE TABLE test (
+                a INT4 NULL,
+                FAMILY "primary" (a, rowid)
+);
+COMMENT ON TABLE test IS '""''"check""''?？~`!@#$%^&*()_+,./<>;:[]{}\！￥……（）——+、；：《》，。/|"'
+
+statement ok
+DROP DATABASE db1

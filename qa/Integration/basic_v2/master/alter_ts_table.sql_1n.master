@@ -1,0 +1,1231 @@
+> drop database if exists test_alter cascade;
+DROP DATABASE
+> create ts database test_alter;
+CREATE TS DATABASE
+> create table test_alter.t1(ts timestamp not null, a int) tags(b int not null) primary tags(b);
+CREATE TABLE
+> insert into test_alter.t1 values(1672531201000, 111, 1);
+INSERT 1
+> insert into test_alter.t1 values(1672531202000, 222, 1);
+INSERT 1
+> insert into test_alter.t1 values(1672531203000, 333, 2);
+INSERT 1
+> insert into test_alter.t1 values(1672531204000, 444, 3);
+INSERT 1
+> insert into test_alter.t1 values(1672531205000, 555, 3);
+INSERT 1
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  | b
+----------------------------+-----+----
+  2023-01-01 00:00:01+00:00 | 111 | 1
+  2023-01-01 00:00:02+00:00 | 222 | 1
+  2023-01-01 00:00:03+00:00 | 333 | 2
+  2023-01-01 00:00:04+00:00 | 444 | 3
+  2023-01-01 00:00:05+00:00 | 555 | 3
+(5 rows)
+> set sql_safe_updates = false;
+SET
+> SET CLUSTER SETTING ts.dedup.rule = 'merge';
+SET CLUSTER SETTING
+> alter table test_alter.t1 add column c int;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  |  c   | b
+----------------------------+-----+------+----
+  2023-01-01 00:00:01+00:00 | 111 | NULL | 1
+  2023-01-01 00:00:02+00:00 | 222 | NULL | 1
+  2023-01-01 00:00:03+00:00 | 333 | NULL | 2
+  2023-01-01 00:00:04+00:00 | 444 | NULL | 3
+  2023-01-01 00:00:05+00:00 | 555 | NULL | 3
+(5 rows)
+> alter table test_alter.t1 drop column c;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  | b
+----------------------------+-----+----
+  2023-01-01 00:00:01+00:00 | 111 | 1
+  2023-01-01 00:00:02+00:00 | 222 | 1
+  2023-01-01 00:00:03+00:00 | 333 | 2
+  2023-01-01 00:00:04+00:00 | 444 | 3
+  2023-01-01 00:00:05+00:00 | 555 | 3
+(5 rows)
+> alter table test_alter.t1 add column c int;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  |  c   | b
+----------------------------+-----+------+----
+  2023-01-01 00:00:01+00:00 | 111 | NULL | 1
+  2023-01-01 00:00:02+00:00 | 222 | NULL | 1
+  2023-01-01 00:00:03+00:00 | 333 | NULL | 2
+  2023-01-01 00:00:04+00:00 | 444 | NULL | 3
+  2023-01-01 00:00:05+00:00 | 555 | NULL | 3
+(5 rows)
+> insert into test_alter.t1 values(1672531205000, 556, NULL, 3);
+INSERT 1
+> insert into test_alter.t1 values(1672531206000, 666, 11, 1);
+INSERT 1
+> insert into test_alter.t1 values(1672531207000, 777, NULL, 2);
+INSERT 1
+> insert into test_alter.t1 values(1672531207000, NULL, 0, 2);
+INSERT 1
+> insert into test_alter.t1 values(1672531208000, 888, 33, 3);
+INSERT 1
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  |  c   | b
+----------------------------+-----+------+----
+  2023-01-01 00:00:01+00:00 | 111 | NULL | 1
+  2023-01-01 00:00:02+00:00 | 222 | NULL | 1
+  2023-01-01 00:00:03+00:00 | 333 | NULL | 2
+  2023-01-01 00:00:04+00:00 | 444 | NULL | 3
+  2023-01-01 00:00:05+00:00 | 556 | NULL | 3
+  2023-01-01 00:00:06+00:00 | 666 |   11 | 1
+  2023-01-01 00:00:07+00:00 | 777 |    0 | 2
+  2023-01-01 00:00:08+00:00 | 888 |   33 | 3
+(8 rows)
+> alter table test_alter.t1 add column d float;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  |  c   |  d   | b
+----------------------------+-----+------+------+----
+  2023-01-01 00:00:01+00:00 | 111 | NULL | NULL | 1
+  2023-01-01 00:00:02+00:00 | 222 | NULL | NULL | 1
+  2023-01-01 00:00:03+00:00 | 333 | NULL | NULL | 2
+  2023-01-01 00:00:04+00:00 | 444 | NULL | NULL | 3
+  2023-01-01 00:00:05+00:00 | 556 | NULL | NULL | 3
+  2023-01-01 00:00:06+00:00 | 666 |   11 | NULL | 1
+  2023-01-01 00:00:07+00:00 | 777 |    0 | NULL | 2
+  2023-01-01 00:00:08+00:00 | 888 |   33 | NULL | 3
+(8 rows)
+> alter table test_alter.t1 drop column d;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  |  c   | b
+----------------------------+-----+------+----
+  2023-01-01 00:00:01+00:00 | 111 | NULL | 1
+  2023-01-01 00:00:02+00:00 | 222 | NULL | 1
+  2023-01-01 00:00:03+00:00 | 333 | NULL | 2
+  2023-01-01 00:00:04+00:00 | 444 | NULL | 3
+  2023-01-01 00:00:05+00:00 | 556 | NULL | 3
+  2023-01-01 00:00:06+00:00 | 666 |   11 | 1
+  2023-01-01 00:00:07+00:00 | 777 |    0 | 2
+  2023-01-01 00:00:08+00:00 | 888 |   33 | 3
+(8 rows)
+> alter table test_alter.t1 add column d float;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a  |  c   |  d   | b
+----------------------------+-----+------+------+----
+  2023-01-01 00:00:01+00:00 | 111 | NULL | NULL | 1
+  2023-01-01 00:00:02+00:00 | 222 | NULL | NULL | 1
+  2023-01-01 00:00:03+00:00 | 333 | NULL | NULL | 2
+  2023-01-01 00:00:04+00:00 | 444 | NULL | NULL | 3
+  2023-01-01 00:00:05+00:00 | 556 | NULL | NULL | 3
+  2023-01-01 00:00:06+00:00 | 666 |   11 | NULL | 1
+  2023-01-01 00:00:07+00:00 | 777 |    0 | NULL | 2
+  2023-01-01 00:00:08+00:00 | 888 |   33 | NULL | 3
+(8 rows)
+> insert into test_alter.t1 values(1672531209000, 999, 44, 1.1, 1);
+INSERT 1
+> insert into test_alter.t1 values(1672531209000, NULL, 45, 2.2, 2);
+INSERT 1
+> insert into test_alter.t1 values(1672531209000, 1111, 46, NULL, 3);
+INSERT 1
+> insert into test_alter.t1 values(1672531209000, NULL, NULL, 4.4, 4);
+INSERT 1
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   | b
+----------------------------+------+------+------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | 4
+(12 rows)
+> alter table test_alter.t1 add column e char(20);
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |  e   | b
+----------------------------+------+------+------+------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL | 4
+(12 rows)
+> alter table test_alter.t1 drop column e;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   | b
+----------------------------+------+------+------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | 4
+(12 rows)
+> alter table test_alter.t1 add column e char(20);
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |  e   | b
+----------------------------+------+------+------+------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL | 4
+(12 rows)
+> insert into test_alter.t1 values(1672531210000, 3333, 55, 5.5, 'chartest1', 1);
+INSERT 1
+> insert into test_alter.t1 values(1672531210000, 4444, 56, 6.6, 'chartest2', 2);
+INSERT 1
+> insert into test_alter.t1 values(1672531210000, 5555, 57, 7.7, 'chartest3', 3);
+INSERT 1
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |     e     | b
+----------------------------+------+------+------+-----------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL      | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL      | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL      | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL      | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL      | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL      | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL      | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL      | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL      | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL      | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL      | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL      | 4
+  2023-01-01 00:00:10+00:00 | 3333 |   55 |  5.5 | chartest1 | 1
+  2023-01-01 00:00:10+00:00 | 4444 |   56 |  6.6 | chartest2 | 2
+  2023-01-01 00:00:10+00:00 | 5555 |   57 |  7.7 | chartest3 | 3
+(15 rows)
+> alter table test_alter.t1 add column f varchar(100);
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |     e     |  f   | b
+----------------------------+------+------+------+-----------+------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL      | NULL | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL      | NULL | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL      | NULL | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL      | NULL | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL      | NULL | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL      | NULL | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL      | NULL | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL      | NULL | 4
+  2023-01-01 00:00:10+00:00 | 3333 |   55 |  5.5 | chartest1 | NULL | 1
+  2023-01-01 00:00:10+00:00 | 4444 |   56 |  6.6 | chartest2 | NULL | 2
+  2023-01-01 00:00:10+00:00 | 5555 |   57 |  7.7 | chartest3 | NULL | 3
+(15 rows)
+> alter table test_alter.t1 drop column f;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |     e     | b
+----------------------------+------+------+------+-----------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL      | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL      | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL      | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL      | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL      | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL      | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL      | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL      | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL      | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL      | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL      | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL      | 4
+  2023-01-01 00:00:10+00:00 | 3333 |   55 |  5.5 | chartest1 | 1
+  2023-01-01 00:00:10+00:00 | 4444 |   56 |  6.6 | chartest2 | 2
+  2023-01-01 00:00:10+00:00 | 5555 |   57 |  7.7 | chartest3 | 3
+(15 rows)
+> select ts, a from test_alter.t1 order by ts, a;
+             ts             |  a
+----------------------------+-------
+  2023-01-01 00:00:01+00:00 |  111
+  2023-01-01 00:00:02+00:00 |  222
+  2023-01-01 00:00:03+00:00 |  333
+  2023-01-01 00:00:04+00:00 |  444
+  2023-01-01 00:00:05+00:00 |  556
+  2023-01-01 00:00:06+00:00 |  666
+  2023-01-01 00:00:07+00:00 |  777
+  2023-01-01 00:00:08+00:00 |  888
+  2023-01-01 00:00:09+00:00 | NULL
+  2023-01-01 00:00:09+00:00 | NULL
+  2023-01-01 00:00:09+00:00 |  999
+  2023-01-01 00:00:09+00:00 | 1111
+  2023-01-01 00:00:10+00:00 | 3333
+  2023-01-01 00:00:10+00:00 | 4444
+  2023-01-01 00:00:10+00:00 | 5555
+(15 rows)
+> alter table test_alter.t1 add column f varchar(100);
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |     e     |  f   | b
+----------------------------+------+------+------+-----------+------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL      | NULL | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL      | NULL | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL      | NULL | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL      | NULL | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL      | NULL | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL      | NULL | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL      | NULL | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL      | NULL | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL      | NULL | 4
+  2023-01-01 00:00:10+00:00 | 3333 |   55 |  5.5 | chartest1 | NULL | 1
+  2023-01-01 00:00:10+00:00 | 4444 |   56 |  6.6 | chartest2 | NULL | 2
+  2023-01-01 00:00:10+00:00 | 5555 |   57 |  7.7 | chartest3 | NULL | 3
+(15 rows)
+> insert into test_alter.t1 values(1672531211000, 6666, 66, 8.8, 'chartest1', 'aa', 1);
+INSERT 1
+> insert into test_alter.t1 values(1672531211000, 7777, 67, 9.9, 'chartest2', 'bbbbb', 2);
+INSERT 1
+> insert into test_alter.t1 values(1672531211000, 8888, 68, 0.1, 'chartest3', 'ccccccccccc', 3);
+INSERT 1
+> select * from test_alter.t1 order by ts, b;
+             ts             |  a   |  c   |  d   |     e     |      f      | b
+----------------------------+------+------+------+-----------+-------------+----
+  2023-01-01 00:00:01+00:00 |  111 | NULL | NULL | NULL      | NULL        | 1
+  2023-01-01 00:00:02+00:00 |  222 | NULL | NULL | NULL      | NULL        | 1
+  2023-01-01 00:00:03+00:00 |  333 | NULL | NULL | NULL      | NULL        | 2
+  2023-01-01 00:00:04+00:00 |  444 | NULL | NULL | NULL      | NULL        | 3
+  2023-01-01 00:00:05+00:00 |  556 | NULL | NULL | NULL      | NULL        | 3
+  2023-01-01 00:00:06+00:00 |  666 |   11 | NULL | NULL      | NULL        | 1
+  2023-01-01 00:00:07+00:00 |  777 |    0 | NULL | NULL      | NULL        | 2
+  2023-01-01 00:00:08+00:00 |  888 |   33 | NULL | NULL      | NULL        | 3
+  2023-01-01 00:00:09+00:00 |  999 |   44 |  1.1 | NULL      | NULL        | 1
+  2023-01-01 00:00:09+00:00 | NULL |   45 |  2.2 | NULL      | NULL        | 2
+  2023-01-01 00:00:09+00:00 | 1111 |   46 | NULL | NULL      | NULL        | 3
+  2023-01-01 00:00:09+00:00 | NULL | NULL |  4.4 | NULL      | NULL        | 4
+  2023-01-01 00:00:10+00:00 | 3333 |   55 |  5.5 | chartest1 | NULL        | 1
+  2023-01-01 00:00:10+00:00 | 4444 |   56 |  6.6 | chartest2 | NULL        | 2
+  2023-01-01 00:00:10+00:00 | 5555 |   57 |  7.7 | chartest3 | NULL        | 3
+  2023-01-01 00:00:11+00:00 | 6666 |   66 |  8.8 | chartest1 | aa          | 1
+  2023-01-01 00:00:11+00:00 | 7777 |   67 |  9.9 | chartest2 | bbbbb       | 2
+  2023-01-01 00:00:11+00:00 | 8888 |   68 |  0.1 | chartest3 | ccccccccccc | 3
+(18 rows)
+> create table test_alter.t2(
+                            k_timestamp timestamp not null,
+                            e1 int2
+) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
+CREATE TABLE
+> alter table test_alter.t2 add tag a1 timestamp;
+ERROR: unsupported tag type timestamp in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a2 timestamptz;
+ERROR: unsupported tag type timestamptz in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a3 bytea;
+ERROR: unsupported tag type bytes in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a4 blob;
+ERROR: unsupported tag type bytes in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a5 string;
+ERROR: unsupported tag type string in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a6 decimal;
+ERROR: unsupported tag type decimal in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a7 time;
+ERROR: unsupported tag type time in timeseries table
+SQLSTATE: 42809
+> alter table test_alter.t2 add tag a8 data;
+ERROR: at or near "data": syntax error
+SQLSTATE: 42601
+DETAIL: source SQL:
+alter table test_alter.t2 add tag a8 data
+                                     ^
+HINT: try \h ALTER TABLE
+> alter table test_alter.t2 add tag a9 serial2;
+ERROR: serial tag is not supported in timeseries table
+SQLSTATE: 0A000
+> show tags from test_alter.t2;
+   tag   |     type      | is_primary | nullable
+---------+---------------+------------+-----------
+  attr1  | INT2          |    true    |  false
+  attr2  | INT4          |   false    |   true
+  attr3  | INT8          |   false    |   true
+  attr4  | FLOAT4        |   false    |   true
+  attr5  | FLOAT8        |   false    |   true
+  attr6  | BOOL          |   false    |   true
+  attr11 | CHAR(1)       |   false    |   true
+  attr12 | CHAR(254)     |   false    |   true
+  attr13 | NCHAR(1)      |   false    |   true
+  attr14 | NCHAR(254)    |   false    |   true
+  attr15 | VARCHAR(254)  |   false    |   true
+  attr16 | VARCHAR(1023) |   false    |   true
+(12 rows)
+> alter table test_alter.t2 drop tag a1;
+ERROR: tag "a1" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a2;
+ERROR: tag "a2" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a3;
+ERROR: tag "a3" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a4;
+ERROR: tag "a4" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a5;
+ERROR: tag "a5" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a6;
+ERROR: tag "a6" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a7;
+ERROR: tag "a7" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a8;
+ERROR: tag "a8" does not exist
+SQLSTATE: 42704
+> alter table test_alter.t2 drop tag a9;
+ERROR: tag "a9" does not exist
+SQLSTATE: 42704
+> show tags from test_alter.t2;
+   tag   |     type      | is_primary | nullable
+---------+---------------+------------+-----------
+  attr1  | INT2          |    true    |  false
+  attr2  | INT4          |   false    |   true
+  attr3  | INT8          |   false    |   true
+  attr4  | FLOAT4        |   false    |   true
+  attr5  | FLOAT8        |   false    |   true
+  attr6  | BOOL          |   false    |   true
+  attr11 | CHAR(1)       |   false    |   true
+  attr12 | CHAR(254)     |   false    |   true
+  attr13 | NCHAR(1)      |   false    |   true
+  attr14 | NCHAR(254)    |   false    |   true
+  attr15 | VARCHAR(254)  |   false    |   true
+  attr16 | VARCHAR(1023) |   false    |   true
+(12 rows)
+> create table test_alter.t3(
+                            k_timestamp timestamp not null,
+                            e1 int2
+) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
+CREATE TABLE
+> alter table test_alter.t3 add tag attr17_a1 smallint;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> alter table test_alter.t3 add tag attr17_a1 smallint;
+ERROR: duplicate tag name: "attr17_a1"
+SQLSTATE: 42701
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> alter table test_alter.t3 drop tag attr17_a1;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> alter table test_alter.t3 add tag attr17_a1 smallint;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> alter table test_alter.t3 add tag attr17_a1 smallint;
+ERROR: duplicate tag name: "attr17_a1"
+SQLSTATE: 42701
+> create table test_alter.t4(
+                            k_timestamp timestamptz not null,
+                            e1 int8,
+                            e2 int4,
+                            e3 int2,
+                            e4 float4,
+                            e5 float8,
+                            e6 bool,
+                            e7 timestamp,
+                            e8 char(50),
+                            e9 nchar(50),
+                            e10 varchar(50),
+                            e11 char,
+                            e12 nchar,
+                            e13 varchar,
+                            e14 varbytes,
+                            e15 varbytes(50),
+                            e16 timestamptz
+) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
+CREATE TABLE
+> alter table test_alter.t4 add tag attr17_a1 smallint;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr18_a1 int;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr19_a1 bigint;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr20_a1 float4;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr21_a1 double;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr22_a1 bool;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr25_a1 char;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr26_a1 char(254);
+ALTER TABLE
+> alter table test_alter.t4 add tag attr27_a1 nchar;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr28_a1 nchar(10);
+ALTER TABLE
+> alter table test_alter.t4 add tag attr29_a1 nchar(254);
+ALTER TABLE
+> alter table test_alter.t4 add tag attr30_a1 varchar;
+ALTER TABLE
+> alter table test_alter.t4 add tag attr31_a1 varchar(1023);
+ALTER TABLE
+> insert into test_alter.t4 (k_timestamp, e1, code1, attr17_a1, attr18_a1, attr19_a1, attr20_a1, attr21_a1, attr22_a1, attr25_a1, attr26_a1, attr27_a1, attr28_a1, attr29_a1, attr30_a1, attr31_a1) values ('2024-01-01t00:00:03+00:00',1,1, 1, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f','l');
+INSERT 1
+> delete from test_alter.t4 where code1 = 1;
+DELETE 1
+> alter table test_alter.t4 add column if not exists c1 int8 null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c2 int4 null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c3 int2 null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c4 float4 null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c5 float8 null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c6 bool null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c7 timestamp null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c8 char(50) null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c9 nchar(50) null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c10 varchar(50) null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c11 char null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c12 nchar null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c13 varchar null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c14 varbytes null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c15 varbytes(50) null;
+ALTER TABLE
+> alter table test_alter.t4 add column if not exists c16 timestamptz null;
+ALTER TABLE
+> insert into test_alter.t4(k_timestamp, code1, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16) values ('2024-01-01t00:00:00+01:00', 2, 461, 849,123, -3623.3289748095276, -9555.69188725292, true, '2024-01-23 09:53:25', 'h', 't', 'y', 'o', 'b', 'k', 'e', '4', '2024-01-23 09:53:25');
+INSERT 1
+> insert into test_alter.t4 (k_timestamp, e1, code1, attr17_a1, attr18_a1, attr19_a1, attr20_a1, attr21_a1, attr22_a1, attr25_a1, attr26_a1, attr27_a1, attr28_a1, attr29_a1, attr30_a1, attr31_a1) values ('2024-01-01t00:00:03+00:00',1,1, 1, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f','l');
+INSERT 1
+> create table test_alter.t5(
+                            k_timestamp timestamptz not null,
+                            e1 int8,
+                            e2 int4,
+                            e3 int2,
+                            e4 float4,
+                            e5 float8,
+                            e6 bool,
+                            e7 timestamp,
+                            e8 char(50),
+                            e9 nchar(50),
+                            e10 varchar(50),
+                            e11 char,
+                            e12 nchar,
+                            e13 varchar,
+                            e14 varbytes,
+                            e15 varbytes(50),
+                            e16 timestamptz
+) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
+CREATE TABLE
+> alter table test_alter.t5 add column c1 decimal;
+ERROR: unsupported column type decimal in timeseries table
+SQLSTATE: 42809
+> create table test_alter.t6(
+                            k_timestamp timestamp not null,
+                            e1 int2  not null
+) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
+CREATE TABLE
+> alter table test_alter.t6 add tag attr27_a1 nchar;
+ALTER TABLE
+> show tag values from test_alter.t6;
+  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16 | attr27_a1
+--------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+------------
+(0 rows)
+> alter table test_alter.t6 drop tag attr27_a1;
+ALTER TABLE
+> show tag values from test_alter.t6;
+  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
+--------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+---------
+(0 rows)
+> alter table test_alter.t6 add tag attr27_a1 nchar;
+ALTER TABLE
+> insert into test_alter.t6 (k_timestamp, e1, attr1, attr27_a1) values ('2018-10-10 10:00:00',1,2,'1');
+INSERT 1
+> show tag values from test_alter.t6;
+  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16 | attr27_a1
+--------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+------------
+      2 | NULL  |  NULL | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | 1
+(1 row)
+> alter table test_alter.t6 drop tag attr27_a1;
+ALTER TABLE
+> show tag values from test_alter.t6;
+  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
+--------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+---------
+      2 | NULL  |  NULL | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL
+(1 row)
+> create table test_alter.t7(
+                            k_timestamp timestamptz not null,
+                            e1 int8,
+                            e2 int4,
+                            e3 int2,
+                            e4 float4,
+                            e5 float8,
+                            e6 bool,
+                            e7 timestamp,
+                            e8 char(50),
+                            e9 nchar(50),
+                            e10 varchar(50),
+                            e11 char,
+                            e12 nchar,
+                            e13 varchar,
+                            e14 varbytes,
+                            e15 varbytes(50),
+                            e16 timestamptz
+) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
+CREATE TABLE
+> alter table test_alter.t7 add if not exists c1 int8;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> show tag values from test_alter.t7;
+  code1 | code2 | code3 | flag | val1 | val2 | location | color | age | sex | year | type
+--------+-------+-------+------+------+------+----------+-------+-----+-----+------+-------
+(0 rows)
+> create table test_alter.t8(
+                            k_timestamp timestamp not null,
+                            e1 int2  not null
+) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
+CREATE TABLE
+> insert into test_alter.t8 (k_timestamp, e1, attr1, attr2, attr3, attr4, attr5, attr6, attr11, attr12, attr13, attr14, attr15, attr16) values ('2024-01-01t00:00:00+00:00', 935, 1, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f');
+INSERT 1
+> insert into test_alter.t8 (k_timestamp, e1, attr1, attr2, attr3, attr4, attr5, attr6, attr11, attr12, attr13, attr14, attr15, attr16) values ('2024-01-01t00:00:00+01:00', 935, 2, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f');
+INSERT 1
+> insert into test_alter.t8 (k_timestamp, e1, attr1, attr2, attr3, attr4, attr5, attr6, attr11, attr12, attr13, attr14, attr15, attr16) values ('2024-01-01t00:00:00+02:00', 935, 3, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f');
+INSERT 1
+> alter table test_alter.t8 add c1 int8 null;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> alter table test_alter.t8 drop c1;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> alter table test_alter.t8 add c1 int8 null;
+ALTER TABLE
+> CREATE TABLE test_alter.newtable_2 (
+	column1 timestamptz NOT NULL,
+	column2 varchar NULL
+) TAGS (
+	 newtag1 varchar NOT NULL )
+ PRIMARY TAGS (
+	newtag1 )
+ RETENTIONS 100d;
+CREATE TABLE
+> ALTER TABLE test_alter.newtable_2 ADD column4 varchar NULL;
+ALTER TABLE
+> create table test_alter.t9(
+                             k_timestamp timestamptz not null,
+                             e1 int8,
+                             e2 int4,
+                             e3 int2,
+                             e4 float4,
+                             e5 float8,
+                             e6 bool,
+                             e7 timestamp,
+                             e8 char(50),
+                             e9 nchar(50),
+                             e10 varchar(50),
+                             e11 char,
+                             e12 nchar,
+                             e13 varchar,
+                             e14 varbytes,
+                             e15 varbytes(50),
+                             e16 timestamptz
+) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
+CREATE TABLE
+> set sql_safe_updates = false;
+SET
+> alter table test_alter.t9 drop column e1;
+ALTER TABLE
+> alter table test_alter.t9 drop column e3;
+ALTER TABLE
+> alter table test_alter.t9 drop column e4;
+ALTER TABLE
+> alter table test_alter.t9 drop column e5;
+ALTER TABLE
+> alter table test_alter.t9 drop column e6;
+ALTER TABLE
+> alter table test_alter.t9 drop column e7;
+ALTER TABLE
+> alter table test_alter.t9 drop column e8;
+ALTER TABLE
+> alter table test_alter.t9 drop column e9;
+ALTER TABLE
+> alter table test_alter.t9 drop column e10;
+ALTER TABLE
+> alter table test_alter.t9 drop column e11;
+ALTER TABLE
+> alter table test_alter.t9 drop column e12;
+ALTER TABLE
+> alter table test_alter.t9 drop column e13;
+ALTER TABLE
+> alter table test_alter.t9 drop column e14;
+ALTER TABLE
+> alter table test_alter.t9 drop column e15;
+ALTER TABLE
+> alter table test_alter.t9 drop column e16;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e1 int2;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e2 int8;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e3 int4;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e4 float8;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e5 float4;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e6 timestamp;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e7 bool;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e8 nchar(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e9 char(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e10 char;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e11 varchar(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e12 varchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e13 nchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e14 nvarchar(100);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e15 nvarchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e16 varbytes;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e17 varbytes(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e18 varbytes;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e19 varbytes(60);
+ALTER TABLE
+> alter table test_alter.t9 drop column e1;
+ALTER TABLE
+> alter table test_alter.t9 drop column e3;
+ALTER TABLE
+> alter table test_alter.t9 drop column e4;
+ALTER TABLE
+> alter table test_alter.t9 drop column e5;
+ALTER TABLE
+> alter table test_alter.t9 drop column e6;
+ALTER TABLE
+> alter table test_alter.t9 drop column e7;
+ALTER TABLE
+> alter table test_alter.t9 drop column e8;
+ALTER TABLE
+> alter table test_alter.t9 drop column e9;
+ALTER TABLE
+> alter table test_alter.t9 drop column e10;
+ALTER TABLE
+> alter table test_alter.t9 drop column e11;
+ALTER TABLE
+> alter table test_alter.t9 drop column e12;
+ALTER TABLE
+> alter table test_alter.t9 drop column e13;
+ALTER TABLE
+> alter table test_alter.t9 drop column e14;
+ALTER TABLE
+> alter table test_alter.t9 drop column e15;
+ALTER TABLE
+> alter table test_alter.t9 drop column e16;
+ALTER TABLE
+> alter table test_alter.t9 drop column e17;
+ALTER TABLE
+> alter table test_alter.t9 drop column e18;
+ALTER TABLE
+> alter table test_alter.t9 drop column e19;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e1 int2;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e2 int8;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e3 int4;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e4 float8;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e5 float4;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e6 timestamp;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e7 bool;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e8 nchar(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e9 char(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e10 char;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e11 varchar(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e12 varchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e13 nchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e14 nvarchar(100);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e15 nvarchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e16 varbytes;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e17 varbytes(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e18 varbytes;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e19 varbytes(60);
+ALTER TABLE
+> alter table test_alter.t9 drop column e1;
+ALTER TABLE
+> alter table test_alter.t9 drop column e3;
+ALTER TABLE
+> alter table test_alter.t9 drop column e4;
+ALTER TABLE
+> alter table test_alter.t9 drop column e5;
+ALTER TABLE
+> alter table test_alter.t9 drop column e6;
+ALTER TABLE
+> alter table test_alter.t9 drop column e7;
+ALTER TABLE
+> alter table test_alter.t9 drop column e8;
+ALTER TABLE
+> alter table test_alter.t9 drop column e9;
+ALTER TABLE
+> alter table test_alter.t9 drop column e10;
+ALTER TABLE
+> alter table test_alter.t9 drop column e11;
+ALTER TABLE
+> alter table test_alter.t9 drop column e12;
+ALTER TABLE
+> alter table test_alter.t9 drop column e13;
+ALTER TABLE
+> alter table test_alter.t9 drop column e14;
+ALTER TABLE
+> alter table test_alter.t9 drop column e15;
+ALTER TABLE
+> alter table test_alter.t9 drop column e16;
+ALTER TABLE
+> alter table test_alter.t9 drop column e17;
+ALTER TABLE
+> alter table test_alter.t9 drop column e18;
+ALTER TABLE
+> alter table test_alter.t9 drop column e19;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e1 int2;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e2 int8;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e3 int4;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e4 float8;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e5 float4;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e6 timestamp;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e7 bool;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e8 nchar(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e9 char(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e10 char;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e11 varchar(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e12 varchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e13 nchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e14 nvarchar(100);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e15 nvarchar;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e16 varbytes;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e17 varbytes(50);
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e18 varbytes;
+ALTER TABLE
+> alter table test_alter.t9 add if not exists e19 varbytes(60);
+ALTER TABLE
+> alter table test_alter.t9 drop column e1;
+ALTER TABLE
+> alter table test_alter.t9 drop column e3;
+ALTER TABLE
+> alter table test_alter.t9 drop column e4;
+ALTER TABLE
+> alter table test_alter.t9 drop column e5;
+ALTER TABLE
+> alter table test_alter.t9 drop column e6;
+ALTER TABLE
+> alter table test_alter.t9 drop column e7;
+ALTER TABLE
+> alter table test_alter.t9 drop column e8;
+ALTER TABLE
+> alter table test_alter.t9 drop column e9;
+ALTER TABLE
+> alter table test_alter.t9 drop column e10;
+ALTER TABLE
+> alter table test_alter.t9 drop column e11;
+ALTER TABLE
+> alter table test_alter.t9 drop column e12;
+ALTER TABLE
+> alter table test_alter.t9 drop column e13;
+ALTER TABLE
+> alter table test_alter.t9 drop column e14;
+ALTER TABLE
+> alter table test_alter.t9 drop column e15;
+ALTER TABLE
+> alter table test_alter.t9 drop column e16;
+ALTER TABLE
+> alter table test_alter.t9 drop column e17;
+ALTER TABLE
+> alter table test_alter.t9 drop column e18;
+ALTER TABLE
+> alter table test_alter.t9 drop column e19;
+ALTER TABLE
+> insert into test_alter.t9(k_timestamp, e2, code1, code2) values(100023, 1, 1, 1);
+INSERT 1
+> insert into test_alter.t9(k_timestamp, e2, e14, e15, e16, code1, code2) values(100023, 1, '1', '1', '1', 1, 1);
+ERROR: column "e14" does not exist
+SQLSTATE: 42703
+> CREATE TABLE test_alter.t10(
+k_timestamp TIMESTAMPTZ not null,
+ e1 INT8,
+ e2 INT4,
+ e3 INT2,
+ e4 FLOAT4,
+ e5 FLOAT8,
+ e6 BOOL,
+ e7 TIMESTAMP,
+ e8 CHAR(50),
+ e9 NCHAR(50),
+ e10 VARCHAR(50),
+ e11 CHAR,
+ e12 NCHAR,
+ e13 VARCHAR,
+ e14 varbytes,
+ e15 varbytes(50),
+ e16 TIMESTAMPTZ
+ ) tagS (code1 int2 not null,code2 int ,code3 int8 ,flag BOOL ,val1 float ,val2 float8 ,location VARCHAR ,color VARCHAR(65536) ,age CHAR ,sex CHAR(1023) ,year NCHAR ,type NCHAR(254) ) PRIMARY TAGS(code1);
+CREATE TABLE
+> INSERT INTO test_alter.t10 values (50000008,9223372036854775807,2147483647,32767,2.712882,3.14159267890796,true,50000011,'test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','t','中','test时间精度通用查询测试！！！@TEST1',b'\xaa',b'\xaabbccdd',50000011,4,2147483647,9223372036854775807,true,2.712882,3.14159267890796,'test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','t','test时间精度通用查询测试！！！@TEST1','1','test时间精度通用查询测试！！！@TEST1');
+INSERT 1
+> INSERT INTO test_alter.t10 values (50000009,-9223372036854775808,-2147483648,-32768,-2.712882,-3.14159267890796,true,50000011,'test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','t','中','test时间精度通用查询测试！！！@TEST1',b'\xaa',b'\xaabbccdd',50000011,5,2147483647,9223372036854775807,true,2.712882,3.14159267890796,'test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','t','test时间精度通用查询测试！！！@TEST1','1','test时间精度通用查询测试！！！@TEST1');
+INSERT 1
+> INSERT INTO test_alter.t10 values (50000010,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,6,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT 1
+> select * from test_alter.t10 where code1 = 6;
+          k_timestamp          |  e1  |  e2  |  e3  |  e4  |  e5  |  e6  |  e7  |  e8  |  e9  | e10  | e11  | e12  | e13  | e14  | e15  | e16  | code1 | code2 | code3 | flag | val1 | val2 | location | color | age  | sex  | year | type
+-------------------------------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+------+-------+-------+-------+------+------+------+----------+-------+------+------+------+-------
+  1970-01-01 13:53:20.01+00:00 | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL |     6 | NULL  |  NULL | NULL | NULL | NULL | NULL     | NULL  | NULL | NULL | NULL | NULL
+(1 row)
+> ALTER TABLE test_alter.t10 DROP COLUMN e1;
+ALTER TABLE
+> ALTER TABLE test_alter.t10 DROP COLUMN e3;
+ALTER TABLE
+> ALTER TABLE test_alter.t10 DROP COLUMN e4;
+ALTER TABLE
+> ALTER TABLE test_alter.t10 DROP COLUMN e5;
+ALTER TABLE
+> ALTER TABLE test_alter.t10 DROP COLUMN e6;
+ALTER TABLE
+> ALTER TABLE test_alter.t10 DROP COLUMN e7;
+ALTER TABLE
+> ALTER TABLE test_alter.t10 DROP COLUMN e8;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select * from test_alter.t10 where code1 = 6;
+          k_timestamp          |  e2  |  e9  | e10  | e11  | e12  | e13  | e14  | e15  | e16  | code1 | code2 | code3 | flag | val1 | val2 | location | color | age  | sex  | year | type
+-------------------------------+------+------+------+------+------+------+------+------+------+-------+-------+-------+------+------+------+----------+-------+------+------+------+-------
+  1970-01-01 13:53:20.01+00:00 | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL |     6 | NULL  |  NULL | NULL | NULL | NULL | NULL     | NULL  | NULL | NULL | NULL | NULL
+(1 row)
+> create table test_alter.t11(ts timestamp not null, a varchar(10), b int) tags(c int not null) primary tags(c);
+CREATE TABLE
+> insert into test_alter.t11 values(1672531201000, '111', 100, 1);
+INSERT 1
+> SET CLUSTER SETTING ts.dedup.rule = 'merge';
+SET CLUSTER SETTING
+> alter table test_alter.t11 add column d int;
+ALTER TABLE
+> alter table test_alter.t11 drop column d;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> insert into test_alter.t11 values(1672531201000, NULL, 101, 1);
+INSERT 1
+> select * from test_alter.t11;
+             ts             |  a  |  b  | c
+----------------------------+-----+-----+----
+  2023-01-01 00:00:01+00:00 | 111 | 101 | 1
+(1 row)
+> create table test_alter.t12(
+k_timestamp timestamp not null,
+e1 int2
+) tagS (attr1 smallint not null,attr2 int ,attr3 bigint ,attr4 float4 ,attr5 double ,attr6 BOOL ,attr7 VARBYTES ,attr8 VARBYTES(1023) ,attr11 char ,attr12 char(254) ,attr13 nchar ,attr14 nchar(254) ,attr15 varchar , attr16 varchar(1023)) PRIMARY TAGS(attr1);
+CREATE TABLE
+> INSERT INTO test_alter.t12 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:00:00+00:00', 935, 1, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
+INSERT 1
+> INSERT INTO test_alter.t12 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:01:00+00:00', 935, 2, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
+INSERT 1
+> INSERT INTO test_alter.t12 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:02:00+00:00', 935, 3, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
+INSERT 1
+> alter table test_alter.t12 add tag attr17_a1 smallint;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr18_a1 int;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr19_a1 bigint;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr20_a1 float4;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr21_a1 double;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr22_a1 bool;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr23_a1 VARBYTES;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr24_a1 VARBYTES(10);
+ALTER TABLE
+> alter table test_alter.t12 add tag attr25_a1 char;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr26_a1 char(254);
+ALTER TABLE
+> alter table test_alter.t12 add tag attr27_a1 nchar;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr28_a1 nchar(10);
+ALTER TABLE
+> alter table test_alter.t12 add tag attr29_a1 nchar(254);
+ALTER TABLE
+> alter table test_alter.t12 add tag attr30_a1 varchar;
+ALTER TABLE
+> alter table test_alter.t12 add tag attr31_a1 varchar(1023);
+ALTER TABLE
+> select attr17_a1,attr18_a1,attr19_a1,attr20_a1,attr21_a1,attr22_a1,attr23_a1,attr24_a1,attr27_a1,attr28_a1,attr29_a1,attr30_a1,attr31_a1 from test_alter.t12 order by k_timestamp;
+  attr17_a1 | attr18_a1 | attr19_a1 | attr20_a1 | attr21_a1 | attr22_a1 | attr23_a1 | attr24_a1 | attr27_a1 | attr28_a1 | attr29_a1 | attr30_a1 | attr31_a1
+------------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+------------
+  NULL      | NULL      |      NULL | NULL      | NULL      |   NULL    | NULL      | NULL      | NULL      | NULL      | NULL      | NULL      | NULL
+  NULL      | NULL      |      NULL | NULL      | NULL      |   NULL    | NULL      | NULL      | NULL      | NULL      | NULL      | NULL      | NULL
+  NULL      | NULL      |      NULL | NULL      | NULL      |   NULL    | NULL      | NULL      | NULL      | NULL      | NULL      | NULL      | NULL
+(3 rows)
+> create table test_alter.t13(
+k_timestamp timestamp not null,
+e1 int2
+) tags (attr1 smallint not null,attr2 varchar(32)) PRIMARY TAGS(attr1);;
+CREATE TABLE
+> insert into test_alter.t13 (k_timestamp, e1,attr1, attr2) VALUES('2024-01-01T00:00:00+00:00', 935, 1,'1111');
+INSERT 1
+> insert into test_alter.t13 (k_timestamp, e1,attr1) VALUES('2024-01-02T00:00:00+00:00', 935, 2);
+INSERT 1
+> insert into test_alter.t13 (k_timestamp, e1,attr1, attr2) VALUES('2024-01-03T00:00:00+00:00', 935, 3,'3333');
+INSERT 1
+> select * from test_alter.t13 order by k_timestamp,attr1;
+         k_timestamp        | e1  | attr1 | attr2
+----------------------------+-----+-------+--------
+  2024-01-01 00:00:00+00:00 | 935 |     1 | 1111
+  2024-01-02 00:00:00+00:00 | 935 |     2 | NULL
+  2024-01-03 00:00:00+00:00 | 935 |     3 | 3333
+(3 rows)
+> create table test_alter.t14(
+                k_timestamp timestamp not null,
+                e1 int2 ) tagS (attr1 smallint not null,attr2 int ,attr3 bigint ,attr4 float4 ,attr5 double ,attr6 BOOL ,attr7 VARBYTES ,attr8 VARBYTES(1023) ,attr11 char ,attr12 char(254) ,attr13 nchar ,attr14 nchar(254) ,attr15 varchar , attr16 varchar(1023)) PRIMARY TAGS(attr1);
+CREATE TABLE
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:00:00+00:00', 935, 1, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
+INSERT 1
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:01:00+00:00', 935, 2, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
+INSERT 1
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:02:00+00:00', 935, 3, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
+INSERT 1
+> alter table test_alter.t14 add tag attr23_a1 VARBYTES;
+ALTER TABLE
+> alter table test_alter.t14 add tag attr24_a1 VARBYTES(10);
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:03+00:00',1,6,'F','l');
+INSERT 1
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:04+00:00',1,7,'E','l');
+INSERT 1
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:05+00:00',1,8,'S','o');
+INSERT 1
+> INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:06+00:00',1,9,NULL,NULL);
+INSERT 1
+> show tag values from test_alter.t14;
+  attr1 | attr2 | attr3 |   attr4    |       attr5        | attr6 | attr7 | attr8 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16 | attr23_a1 | attr24_a1
+--------+-------+-------+------------+--------------------+-------+-------+-------+--------+--------+--------+--------+--------+--------+-----------+------------
+      1 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F      | NULL      | NULL
+      2 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F      | NULL      | NULL
+      3 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F      | NULL      | NULL
+      6 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | \x46      | \x6c
+      7 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | \x45      | \x6c
+      8 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | \x53      | \x6f
+      9 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | NULL      | NULL
+(7 rows)
+> drop database test_alter cascade;
+DROP DATABASE
+> CREATE DATABASE rdb1;
+CREATE DATABASE
+> CREATE TS DATABASE tsdb1;
+CREATE TS DATABASE
+> CREATE TABLE tsdb1.t_r_table1(
+                                 ts TIMESTAMPTZ NOT NULL,
+                                 col1 varchar NOT NULL,
+                                 col2 varchar NOT NULL
+)
+    ATTRIBUTES (
+tag1 INT NOT NULL,
+tag2 INT
+)
+PRIMARY TAGS(tag1);
+CREATE TABLE
+> ALTER TABLE tsdb1.t_r_table1 RENAME TO rdb1.t_r_table1;
+ERROR: can not change ts table t_r_table1 to relational database rdb1
+SQLSTATE: 42809
+> CREATE TABLE rdb1.t1(a int);
+CREATE TABLE
+> ALTER TABLE rdb1.t1 RENAME TO tsdb1.test;
+ERROR: can not change relational table t1 to ts database tsdb1
+SQLSTATE: 42809
+> DROP DATABASE tsdb1;
+DROP DATABASE
+> DROP DATABASE rdb1;
+DROP DATABASE

@@ -1,0 +1,290 @@
+// Copyright 2019 The Cockroach Authors.
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+//
+// Processor definitions for distributed SQL APIs. See
+// docs/RFCS/distributed_sql.md.
+// All the concepts here are "physical plan" concepts.
+
+syntax = "proto2";
+// Beware! This package name must not be changed, even though it doesn't match
+// the Go package name, because it defines the Protobuf message names which
+// can't be changed without breaking backward compatibility.
+package kwbase.sql.distsqlrun;
+option go_package = "execinfrapb";
+
+import "jobs/jobspb/jobs.proto";
+import "roachpb/io-formats.proto";
+import "sql/sqlbase/structured.proto";
+import "sql/execinfrapb/processors_base.proto";
+import "util/hlc/timestamp.proto";
+import "gogoproto/gogo.proto";
+import "roachpb/data.proto";
+
+// BackfillerSpec is the specification for a "schema change backfiller".
+// The created backfill processor runs a backfill for the first mutations in
+// the table descriptor mutation list with the same mutation id and type.
+// A backfiller processor performs KV operations to retrieve rows for a
+// table and backfills the new indexes/columns contained in the table
+// descriptor. It checkpoints its progress by updating the table
+// descriptor in the database, and doesn't emit any rows nor support
+// any post-processing.
+message BackfillerSpec {
+  enum Type {
+    Invalid = 0;
+    Column = 1;
+    Index = 2;
+  }
+  optional Type type = 1 [(gogoproto.nullable) = false];
+  optional sqlbase.TableDescriptor table = 2 [(gogoproto.nullable) = false];
+
+  // Sections of the table to be backfilled.
+  repeated TableReaderSpan spans = 3 [(gogoproto.nullable) = false];
+
+  // Run the backfill for approximately this duration.
+  // The backfill will always process at least one backfill chunk.
+  optional int64 duration = 4 [(gogoproto.nullable) = false, (gogoproto.casttype) = "time.Duration"];
+
+  // The backfill involves a complete table scan in chunks,
+  // where each chunk is a transactional read of a set of rows
+  // along with a backfill for the rows. This is the maximum number
+  // of entries backfilled per chunk.
+  optional int64 chunk_size = 5 [(gogoproto.nullable) = false];
+
+  // Any other (leased) table descriptors necessary for the
+  // backfiller to do its job, such as the descriptors for tables with fk
+  // relationships to the table being modified.
+  repeated sqlbase.TableDescriptor other_tables = 6 [(gogoproto.nullable) = false];
+
+  // The timestamp to perform index backfill historical scans at.
+  optional util.hlc.Timestamp readAsOf = 7 [(gogoproto.nullable) = false];
+}
+
+
+// JobProgress identifies the job to report progress on. This reporting
+// happens outside this package.
+message JobProgress {
+  optional int64 job_id = 1 [(gogoproto.nullable) = false,
+    (gogoproto.customname) = "JobID"];
+  // slot is the index into the job details for this processor's completion.
+  optional int32 slot = 2 [(gogoproto.nullable) = false];
+}
+
+message ReadImportDataSpec {
+  optional roachpb.IOFileFormat format = 1 [(gogoproto.nullable) = false];
+
+  // tables supports input formats that can read multiple tables. If it is
+  // non-empty, the keys specify the names of tables for which the processor
+  // should read and emit data (ignoring data for any other tables that is
+  // present in the input).
+  //
+  // TODO(dt): If a key has a nil value, the schema for that table should be
+  // determined from the input on-the-fly (e.g. by parsing a CREATE TABLE in a
+  // dump file) and the processor should emit a key/value for the generated
+  // TableDescriptor with the corresponding descriptor ID key. If tables is
+  // empty (and table_desc above is not specified), the processor should read
+  // all tables in the input, determining their schemas on the fly.
+  optional sqlbase.ImportTable table = 2 [(gogoproto.nullable) = false];
+
+  // uri is a cloud.ExternalStorage URI pointing to the CSV files to be
+  // read. The map key must be unique across the entire IMPORT job.
+  map<int32, string> uri = 3;
+
+  // resume_pos specifies a map from an input ID to an offset in that
+  // input from which the processing should continue.
+  // The meaning of offset is specific to each processor.
+  map<int32, int64> resume_pos = 4;
+
+  optional JobProgress progress = 5 [(gogoproto.nullable) = false];
+
+  // walltimeNanos is the MVCC time at which the created KVs will be written.
+  optional int64 walltimeNanos = 6 [(gogoproto.nullable) = false];
+  optional bool optimizedDispatch = 7 [(gogoproto.nullable) = false];
+}
+
+// CSVWriterSpec is the specification for a processor that consumes rows and
+// writes them to CSV files at uri. It outputs a row per file written with
+// the file name, row count and byte size.
+message CSVWriterSpec {
+  // destination as a cloud.ExternalStorage URI pointing to an export store
+  // location (directory).
+  optional string destination = 1 [(gogoproto.nullable) = false];
+  optional string name_pattern = 2 [(gogoproto.nullable) = false];
+  optional roachpb.CSVOptions options = 3 [(gogoproto.nullable) = false];
+  // chunk_rows is num rows to write per file. 0 = no limit.
+  optional int64 chunk_rows = 4 [(gogoproto.nullable) = false];
+  optional string query_name = 5 [(gogoproto.nullable) = false];
+  optional bool only_meta = 6 [(gogoproto.nullable) = false];
+  optional bool only_data = 7 [(gogoproto.nullable) = false];
+  optional bool isTS = 8 [(gogoproto.nullable) = false];
+  repeated string colNames = 9;
+}
+
+// BulkRowWriterSpec is the specification for a processor that consumes rows and
+// writes them to a target table using AddSSTable. It outputs a BulkOpSummary.
+message BulkRowWriterSpec {
+  optional sqlbase.TableDescriptor table = 1 [(gogoproto.nullable) = false];
+}
+
+// ReplicationIngestionPartitionSpec contains information about a partition and how
+// to connect to it.
+message ReplicationIngestionPartitionSpec {
+  optional string partition_id = 1 [(gogoproto.nullable) = false, (gogoproto.customname) = "PartitionID"];
+  optional string subscription_token = 2 [(gogoproto.nullable) = false];
+  optional string address = 3 [(gogoproto.nullable) = false];
+  repeated roachpb.Span spans = 4 [(gogoproto.nullable) = false];
+}
+
+message ReplicationIngestionDataSpec {
+  reserved 1;
+
+  // ReplicationID is the ID of the stream (which is shared across the producer and consumer).
+  optional uint64 stream_id = 5 [(gogoproto.nullable) = false, (gogoproto.customname) = "ReplicationID"];
+
+  // PartitionSpecs maps partition IDs to their specifications.
+  map<string, ReplicationIngestionPartitionSpec> partition_specs = 6 [(gogoproto.nullable) = false];
+
+  // The processor will ingest events from StartTime onwards.
+  optional util.hlc.Timestamp start_time = 2 [(gogoproto.nullable) = false];
+  // StreamAddress locate the stream so that a stream client can be initialized.
+  optional string stream_address = 3 [(gogoproto.nullable) = false];
+  // JobID is the job ID of the stream ingestion job.
+  optional int64 job_id = 4 [(gogoproto.nullable) = false, (gogoproto.customname) = "JobID"];
+
+  // The processor will rekey the tenant's keyspace to a new tenant based on 'tenant_rekey'.
+  //optional TenantRekey tenant_rekey = 9 [(gogoproto.nullable) = false, (gogoproto.customname) = "TenantRekey"];
+  repeated jobs.jobspb.TableRekey table_rekey = 9 [(gogoproto.nullable) = false, (gogoproto.customname) = "TableRekey"];
+
+  // Checkpoint stores a set of resolved spans denoting completed progress.
+  optional jobs.jobspb.ReplicationIngestionCheckpoint checkpoint = 10 [(gogoproto.nullable) = false];
+
+  // PortalID is the ID of the E id.
+  optional uint32 portal_id = 11 [(gogoproto.nullable) = false, (gogoproto.customname) = "PortalID"];
+  optional bool multi_flag = 12 [(gogoproto.nullable) = false, (gogoproto.customname) = "MultiFlag"];
+  // exist_system_tables means there is a system table to be replicated.
+  optional bool exist_system_tables = 13[(gogoproto.nullable) = false] ;
+}
+
+message ReplicationIngestionFrontierSpec {
+  // HighWaterAtStart is set by the ingestion job when initializing the frontier
+  // processor. It is used as sanity check by the frontier processor to ensure
+  // that it does not receive updates at a timestamp lower than this field. This
+  // consequently prevents the job progress from regressing during ingestion.
+  optional util.hlc.Timestamp high_water_at_start = 1 [(gogoproto.nullable) = false];
+  // TrackedSpans is the entire span set being watched. The spans do not really
+  // represent KV spans but uniquely identify the partitions in the ingestion
+  // stream. Once all the partitions in the ingestion stream have been resolved
+  // at a certain timestamp, then it's safe to resolve the ingestion at that
+  // timestamp.
+  repeated roachpb.Span tracked_spans = 2 [(gogoproto.nullable) = false];
+
+  // Mapping between a source cluster partition ID and its subscribing sql instance ID
+  // in the destination cluster. This describes the flow topology of the replication stream.
+  map<string, uint32> subscribing_sql_instances = 6 [(gogoproto.nullable) = false,
+    (gogoproto.customname) = "SubscribingSQLInstances"];
+
+  // JobID is the job ID of the stream ingestion job.
+  optional int64 job_id = 3 [(gogoproto.nullable) = false, (gogoproto.customname) = "JobID"];
+
+  // ReplicationID is the ID of the stream.
+  optional uint64 stream_id = 4 [(gogoproto.nullable) = false, (gogoproto.customname) = "ReplicationID"];
+  reserved 5;
+
+  // Checkpoint stores a set of resolved spans denoting completed progress
+  optional jobs.jobspb.ReplicationIngestionCheckpoint checkpoint = 7 [(gogoproto.nullable) = false];
+
+  // ReplicationAddress are the addresses that can be connected to to interact with the source job
+  repeated string replication_addresses = 8;
+}
+
+// ReplicationRecvPartitionSpec contains information about a partition and how
+// to connect to it.
+message ReplicationRecvPartitionSpec {
+  optional string partition_id = 1 [(gogoproto.nullable) = false, (gogoproto.customname) = "PartitionID"];
+  optional string subscription_token = 2 [(gogoproto.nullable) = false];
+  optional string address = 3 [(gogoproto.nullable) = false];
+  repeated roachpb.Span spans = 4 [(gogoproto.nullable) = false];
+}
+
+message ReplicationRecvDataSpec {
+  reserved 1;
+
+  // ReplicationID is the ID of the stream (which is shared across the producer and consumer).
+  optional uint64 stream_id = 5 [(gogoproto.nullable) = false, (gogoproto.customname) = "ReplicationID"];
+
+  // PartitionSpecs maps partition IDs to their specifications.
+  map<string, ReplicationRecvPartitionSpec> partition_specs = 6 [(gogoproto.nullable) = false];
+
+  // The processor will recv events from StartTime onwards.
+  optional util.hlc.Timestamp start_time = 2 [(gogoproto.nullable) = false];
+  // StreamAddress locate the stream so that a stream client can be initialized.
+  optional string stream_address = 3 [(gogoproto.nullable) = false];
+  // JobID is the job ID of the stream recv job.
+  optional int64 job_id = 4 [(gogoproto.nullable) = false, (gogoproto.customname) = "JobID"];
+
+  // The processor will rekey the tenant's keyspace to a new tenant based on 'tenant_rekey'.
+  //optional TenantRekey tenant_rekey = 9 [(gogoproto.nullable) = false, (gogoproto.customname) = "TenantRekey"];
+  repeated jobs.jobspb.TableRekey table_rekey = 9 [(gogoproto.nullable) = false, (gogoproto.customname) = "TableRekey"];
+
+  // Checkpoint stores a set of resolved spans denoting completed progress.
+  optional jobs.jobspb.ReplicationRecvCheckpoint checkpoint = 10 [(gogoproto.nullable) = false];
+
+  // PortalID is the ID of the E id.
+  optional uint32 portal_id = 11 [(gogoproto.nullable) = false, (gogoproto.customname) = "PortalID"];
+  optional bool multi_flag = 12 [(gogoproto.nullable) = false, (gogoproto.customname) = "MultiFlag"];
+  // exist_system_tables means there is a system table to be replicated.
+  optional bool exist_system_tables = 13[(gogoproto.nullable) = false] ;
+}
+
+message ReplicationRecvFrontierSpec {
+  // HighWaterAtStart is set by the recv job when initializing the frontier
+  // processor. It is used as sanity check by the frontier processor to ensure
+  // that it does not receive updates at a timestamp lower than this field. This
+  // consequently prevents the job progress from regressing during recv.
+  optional util.hlc.Timestamp high_water_at_start = 1 [(gogoproto.nullable) = false];
+  // TrackedSpans is the entire span set being watched. The spans do not really
+  // represent KV spans but uniquely identify the partitions in the recv
+  // stream. Once all the partitions in the recv stream have been resolved
+  // at a certain timestamp, then it's safe to resolve the recv at that
+  // timestamp.
+  repeated roachpb.Span tracked_spans = 2 [(gogoproto.nullable) = false];
+
+  // Mapping between a source cluster partition ID and its subscribing sql instance ID
+  // in the destination cluster. This describes the flow topology of the replication stream.
+  map<string, uint32> subscribing_sql_instances = 6 [(gogoproto.nullable) = false,
+    (gogoproto.customname) = "SubscribingSQLInstances"];
+
+  // JobID is the job ID of the stream recv job.
+  optional int64 job_id = 3 [(gogoproto.nullable) = false, (gogoproto.customname) = "JobID"];
+
+  // ReplicationID is the ID of the stream.
+  optional uint64 stream_id = 4 [(gogoproto.nullable) = false, (gogoproto.customname) = "ReplicationID"];
+  reserved 5;
+
+  // Checkpoint stores a set of resolved spans denoting completed progress
+  optional jobs.jobspb.ReplicationRecvCheckpoint checkpoint = 7 [(gogoproto.nullable) = false];
+
+  // ReplicationAddress are the addresses that can be connected to to interact with the source job
+  repeated string replication_addresses = 8;
+}
+

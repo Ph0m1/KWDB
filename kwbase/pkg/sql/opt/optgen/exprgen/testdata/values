@@ -1,0 +1,54 @@
+expr
+(Values
+  [
+    (Tuple [ (Const 1 "int") (Const 1 "int") ] "tuple{int, int}" )
+    (Tuple [ (Const 2 "int") (Const 2 "int") ] "tuple{int, int}" )
+  ]
+  [ (Cols [ (NewColumn "a" "int") (NewColumn "b" "int") ]) ]
+)
+----
+values
+ ├── columns: a:1(int4!null) b:2(int4!null)
+ ├── cardinality: [2 - 2]
+ ├── stats: [rows=2]
+ ├── cost: 0.03
+ ├── prune: (1,2)
+ ├── tuple [type=tuple{int4, int4}]
+ │    ├── const: 1 [type=int4]
+ │    └── const: 1 [type=int4]
+ └── tuple [type=tuple{int4, int4}]
+      ├── const: 2 [type=int4]
+      └── const: 2 [type=int4]
+
+expr
+(Project
+  (Values
+    [ (Tuple [ (Const 1 "int") ] "tuple{int}" ) ]
+    [ (Cols [ (NewColumn "x" "int") ]) ]
+  )
+  [ (ProjectionsItem (Plus (Var "x") (Const 10 "int")) (NewColumn "y" "int")) ]
+  "x"
+)
+----
+project
+ ├── columns: y:2(int4!null) x:1(int4!null)
+ ├── cardinality: [1 - 1]
+ ├── stats: [rows=1]
+ ├── cost: 0.05
+ ├── key: ()
+ ├── fd: ()-->(1,2)
+ ├── prune: (1,2)
+ ├── values
+ │    ├── columns: x:1(int4!null)
+ │    ├── cardinality: [1 - 1]
+ │    ├── stats: [rows=1]
+ │    ├── cost: 0.02
+ │    ├── key: ()
+ │    ├── fd: ()-->(1)
+ │    ├── prune: (1)
+ │    └── tuple [type=tuple{int4}]
+ │         └── const: 1 [type=int4]
+ └── projections
+      └── plus [as=y:2, type=int, outer=(1)]
+           ├── variable: x:1 [type=int4]
+           └── const: 10 [type=int4]

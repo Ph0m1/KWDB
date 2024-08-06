@@ -1,0 +1,32 @@
+build
+SELECT catalog_name, sql_path
+FROM (SELECT * FROM information_schema.schemata WHERE SCHEMA_NAME='public')
+LEFT JOIN information_schema.tables
+ON CATALOG_NAME=TABLE_CATALOG AND SCHEMA_NAME=TABLE_SCHEMA
+----
+project
+ ├── columns: catalog_name:1(string) sql_path:6(string)
+ ├── prune: (1,6)
+ └── left-join (cross)
+      ├── columns: catalog_name:1(string) schema_name:2(string!null) catalog_id:3(int4) schema_id:4(int4) default_character_set_name:5(string) sql_path:6(string) engine_type:7(string) retentions:8(int) partition_interval:9(int) table_catalog:10(string) table_schema:11(string) table_name:12(string) table_type:13(string) is_insertable_into:14(string) version:15(int) namespace_oid:16(oid)
+      ├── fd: ()-->(2)
+      ├── reject-nulls: (10-16)
+      ├── select
+      │    ├── columns: catalog_name:1(string) schema_name:2(string!null) catalog_id:3(int4) schema_id:4(int4) default_character_set_name:5(string) sql_path:6(string) engine_type:7(string) retentions:8(int) partition_interval:9(int)
+      │    ├── fd: ()-->(2)
+      │    ├── virtual-scan information_schema.schemata
+      │    │    └── columns: catalog_name:1(string) schema_name:2(string) catalog_id:3(int4) schema_id:4(int4) default_character_set_name:5(string) sql_path:6(string) engine_type:7(string) retentions:8(int) partition_interval:9(int)
+      │    └── filters
+      │         └── eq [type=bool, outer=(2), constraints=(/2: [/'public' - /'public']; tight), fd=()-->(2)]
+      │              ├── variable: schema_name:2 [type=string]
+      │              └── const: 'public' [type=string]
+      ├── virtual-scan information_schema.tables
+      │    └── columns: table_catalog:10(string) table_schema:11(string) table_name:12(string) table_type:13(string) is_insertable_into:14(string) version:15(int) namespace_oid:16(oid)
+      └── filters
+           └── and [type=bool, outer=(1,2,10,11), constraints=(/1: (/NULL - ]; /2: (/NULL - ]; /10: (/NULL - ]; /11: (/NULL - ])]
+                ├── eq [type=bool]
+                │    ├── variable: catalog_name:1 [type=string]
+                │    └── variable: table_catalog:10 [type=string]
+                └── eq [type=bool]
+                     ├── variable: schema_name:2 [type=string]
+                     └── variable: table_schema:11 [type=string]

@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# directory
+bin_link_dir="/usr/bin"
+lib_link_dir="/usr/lib"
+install_main_dir="/usr/local/kaiwudb"
+bin_dir="${install_main_dir}/bin"
+lib_dir="${install_main_dir}/lib"
+
+# Execute the commands with sudo perimission
+csudo=""
+if command -v sudo > /dev/null; then
+    csudo="sudo "
+fi
+
+# Stop the service if running
+#pid=$(ps -ef | grep "kwbase" | grep -v "grep" | awk '{print $2}')
+#if [ -n "$pid" ]; then
+#   ${csudo}kill -9 $pid
+#fi
+
+# Remove links
+${csudo}rm -f ${bin_link_dir}/kwbase
+${csudo}rm -f ${lib_link_dir}/libkwdbts2.so

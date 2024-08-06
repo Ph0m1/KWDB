@@ -1,0 +1,1 @@
+CREATE TABLE db1.t (a INT8 PRIMARY KEY, b STRING, INDEX (b), INDEX (a, b));

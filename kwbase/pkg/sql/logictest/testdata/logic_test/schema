@@ -1,0 +1,315 @@
+statement ok
+CREATE SCHEMA IF NOT EXISTS public
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS kwdb_internal
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS pg_catalog
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS information_schema
+
+statement ok
+CREATE SCHEMA derp
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS derp
+
+statement error schema .* already exists
+CREATE SCHEMA derp
+
+statement ok
+DROP SCHEMA derp
+
+statement error schema .* already exists
+CREATE SCHEMA public
+
+statement error schema .* already exists
+CREATE SCHEMA kwdb_internal
+
+statement error schema .* already exists
+CREATE SCHEMA pg_catalog
+
+statement error schema .* already exists
+CREATE SCHEMA information_schema
+
+statement ok
+SET experimental_enable_temp_tables = true;
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS public
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS kwdb_internal
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS pg_catalog
+
+statement ok
+CREATE SCHEMA IF NOT EXISTS information_schema
+
+statement error schema .* already exists
+CREATE SCHEMA public
+
+statement error schema .* already exists
+CREATE SCHEMA kwdb_internal
+
+statement error schema .* already exists
+CREATE SCHEMA pg_catalog
+
+statement error schema .* already exists
+CREATE SCHEMA information_schema
+
+statement error pq: unacceptable schema name \"pg_temp\"
+CREATE SCHEMA pg_temp
+
+# Create some tables in a user defined schema, and resolve them.
+statement ok
+CREATE SCHEMA myschema;
+CREATE TABLE myschema.tb (x INT);
+CREATE VIEW myschema.v AS SELECT x FROM myschema.tb;
+CREATE SEQUENCE myschema.s;
+INSERT INTO myschema.tb VALUES(111)
+
+query TITTI rowsort
+SELECT
+  database_name, parent_id, schema_name, name, table_id
+FROM kwdb_internal.tables
+WHERE database_name = 'test'
+----
+test  77  myschema  tb  80
+test  77  myschema  v   81
+test  77  myschema  s   82
+
+query I
+SELECT * FROM myschema.tb
+----
+111
+
+query I
+SELECT * FROM myschema.v
+----
+111
+
+query I
+SELECT last_value FROM myschema.s
+----
+0
+
+# Set the search path to have myschema at the front.
+statement ok
+SET search_path TO myschema,public
+
+# Now we should be able to resolve tb without qualification.
+query I
+SELECT * FROM tb
+----
+111
+
+# Reset the search path.
+statement ok
+SET search_path TO public
+
+# Try to create a temp table in a user defined schema.
+statement error pq: cannot create temporary relation in non-temporary schema
+CREATE TEMP TABLE myschema.tmp (x int)
+
+# We should error out trying to modify any virtual schemas.
+statement error pq: schema cannot be modified: "pg_catalog"
+CREATE TABLE pg_catalog.bad (x int)
+
+# The names should be drained after executing, so we should be able
+# to make another schema with the old name.
+statement ok
+CREATE SCHEMA myschema2;
+DROP SCHEMA myschema2;
+
+statement ok
+CREATE SCHEMA myschema2;
+DROP SCHEMA myschema2;
+
+# We should be able to drop an empty schema without CASCADE.
+statement ok
+CREATE SCHEMA empty;
+DROP SCHEMA empty
+
+let $schema_id
+SELECT id FROM system.namespace WHERE name = 'myschema'
+
+# Create some objects under myschema, and have them reference some objects
+# in other schemas.
+statement ok
+CREATE TABLE myschema.myschema_t1 (x INT);
+CREATE TABLE myschema.myschema_t2 (x INT);
+CREATE SEQUENCE myschema.myschema_seq1;
+CREATE TABLE myschema.myschema_t3 (x INT DEFAULT nextval('myschema.myschema_seq1'));
+CREATE SCHEMA otherschema;
+CREATE VIEW otherschema.otherschema_v1 AS SELECT x FROM myschema.myschema_t1;
+CREATE TABLE otherschema.otherschema_t1 (x INT);
+CREATE SEQUENCE otherschema.otherschema_seq1 OWNED BY myschema.myschema_t1.x;
+
+statement error pq: schema "myschema" is not empty and CASCADE was not specified
+DROP SCHEMA myschema
+
+# Now drop with cascade.
+statement ok
+DROP SCHEMA myschema CASCADE
+
+query T
+SELECT table_name FROM [SHOW TABLES FROM otherschema] WHERE table_name LIKE 'myschema%' OR table_name LIKE 'otherschema%'
+----
+otherschema_t1
+
+# The schema should be gone.
+query I
+SELECT id FROM system.namespace WHERE name = 'myschema'
+
+query IT
+SELECT * FROM system.descriptor WHERE id = $schema_id
+
+# We can't resolve a schema dropped in the same transaction.
+statement ok
+CREATE SCHEMA dropped;
+BEGIN
+
+statement ok
+DROP SCHEMA dropped
+
+statement error pq: cannot create "dropped.t" because the target database or schema does not exist
+CREATE TABLE dropped.t (x INT)
+
+statement ok
+ROLLBACK
+
+# We shouldn't be able to create a conflicting schema name in the same transaction
+# that it is dropped in.
+statement ok
+BEGIN
+
+statement ok
+DROP SCHEMA dropped
+
+statement ok
+CREATE SCHEMA dropped
+
+statement ok
+ROLLBACK
+
+statement error pq: schema "dropped" already exists
+CREATE SCHEMA dropped
+
+statement ok
+DROP SCHEMA dropped
+
+# Test that we can drop multiple schemas as part of a single DROP statement.
+statement ok
+CREATE SCHEMA scdrop1;
+CREATE SCHEMA scdrop2;
+CREATE SCHEMA scdrop3;
+CREATE TABLE scdrop1.scdrop1_t1 (x INT);
+CREATE TABLE scdrop1.scdrop1_t2 (x INT);
+CREATE TABLE scdrop2.scdrop2_t1 (x INT);
+CREATE VIEW scdrop2.scdrop2_v1 AS SELECT x FROM scdrop1.scdrop1_t1;
+CREATE VIEW scdrop3.scdrop3_v1 AS SELECT x FROM scdrop2.scdrop2_v1;
+
+query T
+SHOW SCHEMAS
+----
+information_schema
+kwdb_internal
+otherschema
+pg_catalog
+public
+scdrop1
+scdrop2
+scdrop3
+
+statement ok
+DROP SCHEMA scdrop1, scdrop2, scdrop3 CASCADE
+
+query T
+SELECT table_name FROM [SHOW TABLES] WHERE table_name LIKE 'scdrop%'
+
+subtest drop_database
+
+# Ensure that user defined schemas are dropped when dropping the parent database.
+statement ok
+CREATE DATABASE with_schemas;
+USE with_schemas;
+CREATE SCHEMA dropschema1;
+CREATE SCHEMA dropschema2;
+CREATE TABLE dropschema1.dropschema1_tb (x INT);
+CREATE TABLE dropschema2.dropschema2_tb (y INT);
+USE test
+
+statement ok
+DROP DATABASE with_schemas CASCADE
+
+# There shouldn't be any left over namespace entries from the schemas
+# or elements within the schemas.
+query I
+SELECT id FROM system.namespace WHERE name LIKE 'dropschema%'
+
+# Test privilege interactions with schemas.
+
+# Have root create a schema.
+statement ok
+CREATE SCHEMA privs
+
+statement ok
+GRANT CREATE ON DATABASE test TO testuser
+
+# Test user shouldn't be able to create in privs yet.
+user testuser
+
+statement error pq: user testuser does not have CREATE privilege on schema privs
+CREATE TABLE privs.denied (x INT)
+
+user root
+
+statement ok
+GRANT CREATE ON SCHEMA privs TO testuser
+
+user testuser
+
+# Now the testuser can create objects.
+statement ok
+CREATE TABLE privs.tbl (x INT)
+
+# Now revoke the permissions.
+user root
+
+statement ok
+REVOKE CREATE ON SCHEMA privs FROM testuser
+
+user testuser
+
+statement error pq: user testuser does not have CREATE privilege on schema privs
+CREATE TABLE privs.denied (x INT)
+
+statement error pq: user testuser does not have DROP privilege on schema privs
+DROP SCHEMA privs
+
+statement error pq: user testuser does not have DROP privilege on database test
+DROP DATABASE test
+
+user root
+
+statement ok
+GRANT DROP ON DATABASE test TO testuser
+
+user testuser
+
+statement error pq: user testuser does not have DROP privilege on schema
+DROP DATABASE test
+
+user root
+
+statement ok
+GRANT DROP ON SCHEMA otherschema,privs TO testuser
+
+user testuser
+
+statement error pq: user testuser does not have DROP privilege on relation
+DROP DATABASE test

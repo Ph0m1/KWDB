@@ -1,0 +1,222 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+#ifndef KWDBTS2_EXEC_TESTS_EE_ITERATOR_CREATE_TEST_H_
+#define KWDBTS2_EXEC_TESTS_EE_ITERATOR_CREATE_TEST_H_
+
+#include <memory>
+
+#include "ee_iterator_data_test.h"
+#include "ee_metadata_data_test.h"
+#include "ee_noop_op.h"
+#include "ee_scan_op.h"
+#include "ee_sort_op.h"
+#include "ee_aggregate_op.h"
+#include "ee_distinct_op.h"
+#include "ee_statistic_scan_op.h"
+#include "ee_tag_scan_op.h"
+#include "ee_synchronizer_op.h"
+
+namespace kwdbts {
+
+class CreateEngine {
+ public:
+  void SetUp(kwdbContext_p ctx, string db_path, k_uint32 table_id) {
+    table_id_ = table_id;
+    CreateTestTsEngine(ctx, db_path, table_id);
+  }
+
+  void TearDown(kwdbContext_p ctx) {
+    DropTsTable(ctx, table_id_);
+    CloseTestTsEngine(ctx);
+  }
+
+  k_uint32 table_id_{0};
+};
+
+class CreateIterator {
+ public:
+  CreateIterator() {}
+  ~CreateIterator() {}
+  TSPostProcessSpec *post_{nullptr};
+  BaseOperator *iter_{nullptr};
+  TABLE *table_{nullptr};
+  void TearDown() {
+    SafeDelete(post_);
+    SafeDelete(iter_);
+  }
+};
+
+class CreateTagReader : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    CreateTagReaderSpec(&spec_, table_id);
+    post_ = KNEW TSPostProcessSpec();
+    table_ = KNEW TABLE(1, table_id);
+    table_->Init(ctx, spec_);
+    iter_ = NewIterator<TagScanOperator>(spec_, post_, table_, 0);
+  }
+  void TearDown() {
+    SafeDelete(spec_);
+    SafeDelete(table_);
+    CreateIterator::TearDown();
+  }
+  TSTagReaderSpec *spec_{nullptr};
+};
+class CreateTableReader : public CreateIterator {
+ public:
+  CreateTableReader() : CreateIterator() {}
+  ~CreateTableReader() {}
+
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    tag_reader_.SetUp(ctx, table_id);
+    CreateReaderSpec(&spec_, table_id);
+    CreateReaderTSPostProcessSpec(&post_);
+    table_ = tag_reader_.table_;
+    iter_ =
+        NewIterator<TableScanOperator>(spec_, post_, table_, tag_reader_.iter_, 0);
+  }
+
+  void TearDown() {
+    tag_reader_.TearDown();
+    SafeDelete(spec_);
+    CreateIterator::TearDown();
+  }
+  CreateTagReader tag_reader_;
+  TSReaderSpec *spec_{nullptr};
+};
+
+class CreateDistinct : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    table_reader_.SetUp(ctx, table_id);
+    CreateDistinctSpecs(&spec_, &post_);
+    table_ = table_reader_.table_;
+    iter_ = NewIterator<DistinctOperator>(table_reader_.iter_, spec_,
+                                               post_, table_, 0);
+  }
+
+  void TearDown() {
+    table_reader_.TearDown();
+    SafeDelete(iter_);
+    SafeDelete(spec_);
+    SafeDelete(post_);
+  }
+
+  CreateTableReader table_reader_;
+  DistinctSpec *spec_{nullptr};
+};
+
+
+class CreateAggregate : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    table_reader_.SetUp(ctx, table_id);
+    CreateAggSpecs(&spec_, &post_);
+    table_ = table_reader_.table_;
+    iter_ = NewIterator<HashAggregateOperator>(table_reader_.iter_, spec_,
+                                               post_, table_, 0);
+  }
+
+  void TearDown() {
+    table_reader_.TearDown();
+    SafeDelete(iter_);
+    SafeDelete(spec_);
+    SafeDelete(post_);
+  }
+
+  CreateTableReader table_reader_;
+  TSAggregatorSpec *spec_{nullptr};
+};
+
+class CreateSort : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    table_reader_.SetUp(ctx, table_id);
+    CreateSortSpecs(&spec_, &post_);
+    table_ = table_reader_.table_;
+    iter_ =
+        NewIterator<SortOperator>(table_reader_.iter_, spec_, post_, table_, 0);
+  }
+
+  void TearDown(kwdbContext_p ctx) {
+    table_reader_.TearDown();
+    SafeDelete(spec_);
+    CreateIterator::TearDown();
+  }
+
+  CreateTableReader table_reader_;
+  TSSorterSpec *spec_{nullptr};
+};
+
+class CreateSynchronizerIterator : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    table_reader_.SetUp(ctx, table_id);
+    CreateMergeSpecs(&spec_, &post_);
+    table_ = table_reader_.table_;
+    iter_ = NewIterator<SynchronizerOperator>(table_reader_.iter_, spec_, post_,
+                                              table_, 0);
+  }
+
+  void TearDown() {
+    CreateIterator::TearDown();
+    table_reader_.TearDown();
+    SafeDelete(spec_);
+    SafeDelete(post_);
+  }
+
+  CreateTableReader table_reader_;
+  TSSynchronizerSpec *spec_{nullptr};
+};
+class CreateSortAggregate : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    sync_iter_.SetUp(ctx, table_id);
+    CreateAggSpecs(&spec_, &post_);
+    table_ = sync_iter_.table_;
+    iter_ = NewIterator<OrderedAggregateOperator>(sync_iter_.iter_, spec_, post_,
+                                               table_, 0);
+  }
+
+  void TearDown() {
+    CreateIterator::TearDown();
+    sync_iter_.TearDown();
+    SafeDelete(spec_);
+    SafeDelete(post_);
+  }
+
+  CreateSynchronizerIterator sync_iter_;
+  TSAggregatorSpec *spec_{nullptr};
+};
+
+class CreateNoop : public CreateIterator {
+ public:
+  void SetUp(kwdbContext_p ctx, k_uint32 table_id) {
+    table_reader_.SetUp(ctx, table_id);
+    CreateNoopSpecs(&spec_, &post_);
+    table_ = table_reader_.table_;
+    iter_ =
+        NewIterator<NoopOperator>(table_reader_.iter_, spec_, post_, table_, 0);
+  }
+
+  void TearDown(kwdbContext_p ctx) {
+    table_reader_.TearDown();
+    SafeDelete(spec_);
+    CreateIterator::TearDown();
+  }
+
+  CreateTableReader table_reader_;
+  TSNoopSpec *spec_{nullptr};
+};
+
+}  // namespace kwdbts
+#endif  // KWDBTS2_EXEC_TESTS_EE_ITERATOR_CREATE_TEST_H_

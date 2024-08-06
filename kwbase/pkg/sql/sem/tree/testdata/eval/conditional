@@ -1,0 +1,106 @@
+# Conditional expressions.
+
+eval
+IF(true, 1, 2)
+----
+1
+
+eval
+IF(false, 1, 2)
+----
+2
+
+eval
+IF(NULL, 1, 2)
+----
+2
+
+eval
+IFERROR((-1 << 63) + (-1 << 63), 123)
+----
+123
+
+eval
+IFERROR((-1 << 63) + (-1 << 63), 123)
+----
+123
+
+eval
+IFERROR(1, 123, '22012')
+----
+1
+
+eval
+ISERROR(2)
+----
+false
+
+eval
+(ISERROR(((-1 << 63) + (-1 << 63))::STRING, '22012'), IFERROR(((-1 << 63) + (-1 << 63))::STRING, '22012'))
+----
+integer out of range
+
+eval
+ISERROR(1)
+----
+false
+
+eval
+ISERROR(1, '22012')
+----
+false
+
+eval
+NULLIF(1, 1)
+----
+NULL
+
+eval
+NULLIF(1, 2)
+----
+1
+
+eval
+NULLIF(2, 1)
+----
+2
+
+eval
+IFNULL(1, 2)
+----
+1
+
+eval
+IFNULL(NULL, 2)
+----
+2
+
+eval
+IFNULL(1, NULL)
+----
+1
+
+eval
+IFNULL(NULL, NULL)
+----
+NULL
+
+eval
+COALESCE(1, 2, 3, 4)
+----
+1
+
+eval
+COALESCE(NULL, 2, 3, 4)
+----
+2
+
+eval
+COALESCE(NULL, NULL, NULL, 4)
+----
+4
+
+eval
+COALESCE(NULL, NULL, NULL, NULL)
+----
+NULL

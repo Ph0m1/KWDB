@@ -1,0 +1,114 @@
+// Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd.
+//
+// This software (KWDB) is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          http://license.coscl.org.cn/MulanPSL2
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+
+// Metadata architecture builds the logical framework and basic model of KaiwuDB,
+// thus determining the functional characteristics, operation mode and overall
+// performance of KWDB system operation.
+// KaiwuDB operates on the basis of metadata. Its main functions are: description function,
+// integration function, control function and agent function.
+
+syntax = "proto2";
+package roachpb;
+
+// DataType
+enum DataType {
+  TIMESTAMP = 0;
+  SMALLINT = 1;
+  INT = 2;
+  BIGINT = 3;
+  FLOAT = 4;
+  DOUBLE = 5;
+  BOOL = 6;
+  CHAR = 7;
+  BINARY = 8;
+  NCHAR = 9;
+  VARCHAR = 10;
+  NVARCHAR = 11;
+  VARBINARY = 12;
+  SDECHAR = 13;
+  SDEVARCHAR = 14;
+  NULLVAL = 15;
+  UNKNOWN = 16;
+  // DECIMAL only use in push down.
+  DECIMAL = 17;
+  TIMESTAMPTZ = 18;
+  DATE = 19;
+}
+
+// VariableLengthType
+enum VariableLengthType {
+  ColStorageTypeTuple = 0;
+  ColStorageTypeTPageEnd = 1;
+  ColStorageTypeTIndependentPage = 2;
+}
+
+// KWDBTsTable, bo create table
+message KWDBTsTable {
+  // table id
+  required uint64 ts_table_id = 1;
+  // databaseID
+  optional uint32 database_id = 3;
+  // Data expiration time (maximum)
+  optional uint64 life_time = 4;
+  // Data active time (maximum)
+  optional uint32 active_time = 5;
+  // KColumn ID
+  repeated uint32 k_columns_id = 6;
+  // Records the number of bytes occupied
+  optional uint64 row_size = 7;
+  // Used to mark whether a column value is empty
+  optional uint64 bitmap_offset = 8;
+  // table name
+  optional string table_name = 10;
+  // dict encoding
+  optional bool sde = 11;
+  // partition interval
+  optional uint64 partition_interval = 12;
+  // TsVersion
+  optional uint32 ts_version = 13;
+}
+
+// KWDBKTSColumn, TS table column
+message KWDBKTSColumn {
+  // ColumnType
+  enum ColumnType {
+    TYPE_DATA = 0;
+    TYPE_TAG = 1;
+    TYPE_PTAG = 2;
+  }
+  // column ID
+  required uint32 column_id = 1;
+  // column name
+  optional string name = 2;
+  // Whether it can be nullable
+  optional bool nullable = 3;
+  // Storage type
+  optional DataType storage_type = 4;
+  // Storage length
+  optional uint64 storage_len = 5;
+  // The offset of column
+  optional uint64 col_offset = 6;
+  // Variable length type storage type
+  optional VariableLengthType variable_length_type = 7;
+  // default value
+  optional string default_value = 8;
+  // column type
+  optional ColumnType col_type = 9;
+  // The column has been marked dropped
+  optional bool dropped = 10;
+}
+
+// CreateTsTable
+message CreateTsTable {
+  required KWDBTsTable ts_table = 1;
+  repeated KWDBKTSColumn k_column = 2;
+  optional bool old_field = 3 [deprecated = true];
+}
