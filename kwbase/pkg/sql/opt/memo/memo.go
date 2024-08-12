@@ -1591,7 +1591,8 @@ func (m *Memo) checkGroupBy(
 // child is the child of (memo.GroupByExpr or memo.ScalarGroupByExpr).
 // hasSynchronizer is true when the child have added the flag.
 func (m *Memo) setSynchronizerForChild(child RelExpr, hasSynchronizer *bool) {
-	if m.CheckFlag(opt.OrderGroupBy) {
+	if _, ok := child.(*SortExpr); ok {
+		// case: OrderGroupBy, set sortExpr to ts engine when single node and set AddSynchronizer of child of sort.
 		// only single node, order by can exec in ts engine.
 		if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
 			child.SetEngineTS()
