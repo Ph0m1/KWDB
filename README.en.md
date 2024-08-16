@@ -17,7 +17,7 @@ KWDB is the community version of KaiwuDB, a distributed multi-model database dev
 
 **Keywords**
 
-IoT, multi-model database, distributed, time-series data processing, native AI, cloud-edge synchronization.
+IoT, multi-model database, distributed, time-series data processing, cloud-edge synchronization.
 
 ## Resource Download
 
