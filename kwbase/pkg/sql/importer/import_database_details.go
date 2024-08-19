@@ -31,61 +31,144 @@ import (
 // If time series data is imported, all SQL statements are written in the meta.sql directory in the root directory.
 // If the data is imported relationally, the SQL of each table is written in the meta.sql directory of the corresponding subdirectory/.
 func checkAndGetDetailsInDatabase(
-	ctx context.Context, p sql.PlanHookState, files []string,
-) (bool, string, []string, []sqlbase.ImportTable, error) {
+	ctx context.Context, p sql.PlanHookState, files []string, withComment bool,
+) (bool, string, []string, []sqlbase.ImportTable, string, error) {
 	var err error
 	// The whole database import supports only one file directory
 	if len(files) != 1 {
-		return false, "", nil, nil, errors.Errorf("Database import does not support multiple file paths，%q", files)
+		return false, "", nil, nil, "", errors.Errorf("Database import does not support multiple file paths，%q", files)
 	}
 	dbPath := files[0]
 
 	externalStorageFromURI := p.ExecCfg().DistSQLSrv.ExternalStorageFromURI
 	dbStore, err := externalStorageFromURI(ctx, dbPath+string(os.PathSeparator))
 	if err != nil {
-		return false, "", nil, nil, err
+		return false, "", nil, nil, "", err
 	}
 	defer dbStore.Close()
 	// read DB SQL file
 	reader, err := dbStore.ReadFile(ctx, "meta.sql")
 	if err != nil {
-		return false, "", nil, nil, err
+		return false, "", nil, nil, "", err
 	}
 	defer reader.Close()
 	databaseDefStr, err := ioutil.ReadAll(reader)
 	if err != nil {
-		return false, "", nil, nil, err
+		return false, "", nil, nil, "", err
 	}
 	stmts, err := parser.Parse(string(databaseDefStr))
 	if err != nil {
-		return false, "", nil, nil, err
+		return false, "", nil, nil, "", err
 	}
 	dbCreate, ok := stmts[0].AST.(*tree.CreateDatabase)
 	if !ok {
-		return false, "", nil, nil, errors.New("The first sql CREATE DATABASE SQL has errors")
+		return false, "", nil, nil, "", errors.New("The first sql CREATE DATABASE SQL has errors")
 	}
 	// timeseries database
 	if dbCreate.EngineType == tree.EngineTypeTimeseries {
 		var tableDetails []sqlbase.ImportTable
+		databaseComment := ""
+		var hasComment bool
 		for i := range stmts {
 			if i == 0 {
 				// skip create db stmt
 				continue
 			}
+			// Determine if there is a table creation statement
 			tbCreate, ok := stmts[i].AST.(*tree.CreateTable)
-			if !ok {
-				return false, "", nil, nil, errors.New("expected CREATE TABLE statement in database file")
+			if ok {
+				// The name of the database needs to be semantically parsed before it can be obtained.
+				// The current location obtained is the result of syntax parsing,
+				// so it is impossible to determine whether the database name is consistent
+				var columnName []string
+				for _, def := range tbCreate.Defs {
+					if d, ok := def.(*tree.ColumnTableDef); ok {
+						columnName = append(columnName, string(d.Name))
+					}
+				}
+				for _, tag := range tbCreate.Tags {
+					if tag.TagName != "" {
+						columnName = append(columnName, string(tag.TagName))
+					}
+				}
+				tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[i].SQL, IsNew: true, TableName: tbCreate.Table.Table(), UsingSource: tbCreate.UsingSource.Table(), TableType: tbCreate.TableType, ColumnName: columnName})
+				continue
 			}
-			tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[i].SQL, IsNew: true, TableName: tbCreate.Table.Table(), UsingSource: tbCreate.UsingSource.Table(), TableType: tbCreate.TableType})
+			// Check and obtain comments in the SQL file if WITH COMMENT
+			if withComment {
+				// Check if there is a COMMENT ON DATABASE, and if so, whether the database has been established
+				dbComment, ok := stmts[i].AST.(*tree.CommentOnDatabase)
+				if ok {
+					if dbComment.Name == dbCreate.Name {
+						databaseComment = stmts[i].SQL
+						hasComment = true
+						continue
+					} else {
+						return false, "", nil, nil, "", errors.New("The database for COMMENT ON was not created")
+					}
+				}
+				// Check if there is a COMMENT ON TABLE, and if so, whether the table has been established
+				tbComment, ok := stmts[i].AST.(*tree.CommentOnTable)
+				if ok {
+					n, hasTable := isTableCreated(tbComment.Table.ToTableName().TableName, tableDetails)
+					if !hasTable {
+						return false, "", nil, nil, "", errors.New("The table for COMMENT ON was not created")
+					}
+					tableDetails[n].TableComment = stmts[i].SQL
+					hasComment = true
+					continue
+				}
+
+				// Check if there is a COMMENT ON COLUMN, and if so, whether the column has been established
+				colComment, ok := stmts[i].AST.(*tree.CommentOnColumn)
+				if ok {
+					n, hasTable := isTableCreated(colComment.TableName.ToTableName().TableName, tableDetails)
+					if !hasTable {
+						return false, "", nil, nil, "", errors.New("The table containing this column for COMMENT has not been created")
+					}
+					hasColumn := isColumnCreated(colComment.ColumnName, tableDetails[n])
+					if !hasColumn {
+						return false, "", nil, nil, "", errors.New("The column for COMMENT ON was not created")
+					}
+					tableDetails[n].ColumnComment = append(tableDetails[n].ColumnComment, stmts[i].SQL)
+					hasComment = true
+					continue
+				}
+			}
 		}
-		return true, dbCreate.Name.String(), nil, tableDetails, nil
+		// Check if there are comments in SQL
+		if withComment && !hasComment {
+			return false, "", nil, nil, "", errors.New("NO COMMENT statement in the SQL file")
+		}
+		return true, dbCreate.Name.String(), nil, tableDetails, databaseComment, nil
 	}
 	// relational database
 	scNames, tableDetails, err := readTablesInDbFromStore(ctx, p, dbPath, stmts)
 	if err != nil {
-		return false, "", nil, nil, err
+		return false, "", nil, nil, "", err
 	}
-	return false, dbCreate.Name.String(), scNames, tableDetails, nil
+	return false, dbCreate.Name.String(), scNames, tableDetails, "", nil
+}
+
+// isTableCreated used to determine whether a table with a specific name has a table creation statement,
+// if so, Return his position in the array.
+func isTableCreated(tableName tree.Name, tableDetails []sqlbase.ImportTable) (int, bool) {
+	for i, tableDetail := range tableDetails {
+		if string(tableName) == tableDetail.TableName {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// isColumnCreated used to determine whether a column with a specific name exists in a specific table creation statement.
+func isColumnCreated(columnName tree.Name, tableDetail sqlbase.ImportTable) bool {
+	for _, column := range tableDetail.ColumnName {
+		if string(columnName) == column {
+			return true
+		}
+	}
+	return false
 }
 
 // readTablesInDbFromStore reads the SQL file from the subdirectory and generate tableDetails.

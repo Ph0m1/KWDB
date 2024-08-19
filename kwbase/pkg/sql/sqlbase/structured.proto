@@ -1142,6 +1142,9 @@ message ImportTable {
   optional uint32 table_type = 7[(gogoproto.nullable) = false,
     (gogoproto.casttype) = "gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree.TableType"];
   repeated string intoCols = 8;
+  optional string TableComment = 9 [(gogoproto.nullable) = false];
+  repeated string ColumnComment = 10;
+  repeated string columnName = 11;
 }
 
 message KWDBTagValue {

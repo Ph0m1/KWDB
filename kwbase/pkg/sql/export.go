@@ -84,6 +84,7 @@ const (
 	exportOptionEscaped     = "escaped"
 	exportOptionColumnsName = "column_name"
 	exportOptionCharset     = "charset"
+	exportOptionComment     = "comment"
 )
 
 var exportOptionExpectValues = map[string]KVStringOptValidate{
@@ -97,6 +98,7 @@ var exportOptionExpectValues = map[string]KVStringOptValidate{
 	exportOptionEscaped:     KVStringOptRequireValue,
 	exportOptionColumnsName: KVStringOptRequireNoValue,
 	exportOptionCharset:     KVStringOptRequireValue,
+	exportOptionComment:     KVStringOptRequireNoValue,
 }
 
 // ExportChunkSizeDefault The default limit for the number of rows in an exported file
@@ -323,6 +325,7 @@ func writeTimeSeriesMeta(
 	file string,
 	tableType tree.TableType,
 	res RestrictedCommandResult,
+	withComment bool,
 ) error {
 	tableName := p.tableName.TableName.String()
 	catalog := p.tableName.Catalog()
@@ -355,8 +358,21 @@ func writeTimeSeriesMeta(
 			return errors.Errorf("table %v maybe has been deleted", tableName)
 		}
 		create := string(tree.MustBeDString(row[0]))
-		if _, err := writer.GetBufio().WriteString(create + ";" + "\n"); err != nil {
-			return err
+		if withComment {
+			str := "COMMENT ON"
+			if !strings.Contains(create, str) {
+				return errors.Errorf("TABLE or COLUMN without COMMENTS cannot be used 'WITH COMMENT'")
+			}
+			if _, err := writer.GetBufio().WriteString(create + ";" + "\n"); err != nil {
+				return err
+			}
+		} else {
+			tableCreate := strings.Split(create, ";")
+			// Since comment is controlled by "with comment", it is not exported by default,
+			// only sql of creating table is exported.
+			if _, err := writer.GetBufio().WriteString(tableCreate[0] + ";" + "\n"); err != nil {
+				return err
+			}
 		}
 	// write itself and it's all child
 	case tree.TemplateTable:

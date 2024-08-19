@@ -250,6 +250,8 @@ message ImportDetails {
   bool only_meta = 12 ;
   int32 time_series_ever_execute = 13;
   bool ts_dispatch = 14;
+  bool with_comment = 15;
+  string database_comment = 16;
 }
 
 message ImportProgress {

@@ -982,7 +982,7 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 				// export more than one table can't export metadata
 				// export from select either.
 				if !expOpts.onlyData && exp.Database == "" && onlyOneTable && getTableSelect(stmt.AST) {
-					if err = writeTimeSeriesMeta(ctx, planner, exp.File.(*tree.StrVal).RawString(), tsTable.TableType, res); err != nil {
+					if err = writeTimeSeriesMeta(ctx, planner, exp.File.(*tree.StrVal).RawString(), tsTable.TableType, res, expOpts.withComment); err != nil {
 						res.SetError(err)
 						return nil
 					}

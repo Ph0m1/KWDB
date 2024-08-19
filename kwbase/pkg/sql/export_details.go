@@ -22,6 +22,7 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -34,11 +35,12 @@ import (
 )
 
 type exportOptions struct {
-	csvOpts   roachpb.CSVOptions
-	chunkSize int
-	onlyMeta  bool
-	onlyData  bool
-	colName   bool
+	csvOpts     roachpb.CSVOptions
+	chunkSize   int
+	onlyMeta    bool
+	onlyData    bool
+	colName     bool
+	withComment bool
 }
 
 // checkBeforeExport is used to check some roles of export before running, such as privilege and options.
@@ -357,6 +359,12 @@ func checkExportOptions(
 		}
 		Charset = override
 	}
+
+	comment := false
+	_, hasWithComment := opts[exportOptionComment]
+	if hasWithComment {
+		comment = true
+	}
 	optInfo := roachpb.CSVOptions{Comma: delimiter, NullEncoding: &NullEncoding, Enclosed: Enclosed, Escaped: Escaped, Charset: Charset}
 	if err := CheckImpExpInfoConflict(optInfo); err != nil {
 		return expOpts, err
@@ -367,6 +375,7 @@ func checkExportOptions(
 		onlyMeta,
 		onlyData,
 		colName,
+		comment,
 	}
 	return expOpts, nil
 }
@@ -412,11 +421,52 @@ func (ex *connExecutor) dispatchExportTSDB(
 			res.SetError(err)
 			return nil
 		}
-		for _, create := range creates {
-			if _, err = writer.GetBufio().WriteString(*create + ";" + "\n"); err != nil {
-				res.SetError(err)
+
+		findComment := false
+		if expOpts.withComment {
+			// add database comment
+			selectStmt := fmt.Sprintf("select shobj_description(oid, 'pg_database') from pg_catalog.pg_database where datname = '%s';", string(exp.Database))
+			row, err := ex.planner.ExecCfg().InternalExecutor.QueryRowEx(ctx, "select database comment statement", nil,
+				sqlbase.InternalExecutorSessionDataOverride{Database: "defaultdb", User: security.RootUser}, selectStmt)
+			if err != nil {
+				res.SetError(errors.Errorf("%v error: %v", selectStmt, err.Error()))
 				return nil
 			}
+			if len(row) == 0 {
+				res.SetError(errors.Errorf("The database %v has not been created or has been deleted.", string(exp.Database)))
+				return nil
+			}
+			if row[0] != tree.DNull {
+				comments := string(tree.MustBeDString(row[0]))
+				if _, err := writer.GetBufio().WriteString("COMMENT ON DATABASE " + string(exp.Database) + " IS '" + comments + "';" + "\n"); err != nil {
+					res.SetError(err)
+					return nil
+				}
+				findComment = true
+			}
+		}
+
+		for _, create := range creates {
+			if expOpts.withComment {
+				str := "COMMENT ON"
+				if !findComment && strings.Contains(*create, str) {
+					findComment = true
+				}
+				if _, err = writer.GetBufio().WriteString(*create + ";" + "\n"); err != nil {
+					res.SetError(err)
+					return nil
+				}
+			} else {
+				tableCreate := strings.Split(*create, ";")
+				if _, err = writer.GetBufio().WriteString(tableCreate[0] + ";" + "\n"); err != nil {
+					res.SetError(err)
+					return nil
+				}
+			}
+		}
+		if expOpts.withComment && !findComment {
+			res.SetError(errors.Errorf("DATABASE or TABLE or COLUMN without COMMENTS cannot be used 'WITH COMMENT'"))
+			return nil
 		}
 		writer.Flush()
 		if err = es.WriteFile(ctx, fileName, bytes.NewReader(buf.Bytes())); err != nil {

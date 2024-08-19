@@ -492,7 +492,6 @@ func SetCsvOpt(csvReader *csv.Reader, opts roachpb.CSVOptions) {
 	if opts.Comma != 0 {
 		csvReader.Comma = opts.Comma
 	}
-	csvReader.Comment = opts.Comment
 	if opts.Enclosed != 0 {
 		csvReader.Enclose = opts.Enclosed
 	}

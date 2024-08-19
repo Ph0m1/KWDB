@@ -141,7 +141,6 @@ func readAndConvertFiles(
 				csvReader.Comma = opts.Comma
 			}
 			csvReader.FieldsPerRecord = -1
-			csvReader.Comment = opts.Comment
 			if opts.Enclosed != 0 {
 				csvReader.Enclose = opts.Enclosed
 			}

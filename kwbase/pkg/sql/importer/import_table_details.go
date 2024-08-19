@@ -225,7 +225,7 @@ func checkTableMetaFile(
 
 // checkAndGetTSDetailsInTableNew generate ts tables' tableDetails and return.
 func checkAndGetTSDetailsInTableNew(
-	ctx context.Context, p sql.PlanHookState, stmts parser.Statements,
+	ctx context.Context, p sql.PlanHookState, stmts parser.Statements, OptComment bool,
 ) (string, []sqlbase.ImportTable, error) {
 	tbCreate, _ := stmts[0].AST.(*tree.CreateTable)
 	prefix, err := sql.ResolveTargetObject(ctx, p, &tbCreate.Table)
@@ -235,10 +235,57 @@ func checkAndGetTSDetailsInTableNew(
 	dbName := prefix.Database.Name
 	var tableDetails []sqlbase.ImportTable
 	// Gets information about all instance tables in the template table's meta.sql.
+	var hasComment bool
 	for i, stmt := range stmts {
 		if tb, ok := stmt.AST.(*tree.CreateTable); ok {
-			tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[i].SQL, IsNew: true, TableName: tbCreate.Table.Table(), UsingSource: tb.UsingSource.Table(), TableType: tb.TableType})
+			var columnName []string
+			for _, def := range tbCreate.Defs {
+				if d, ok := def.(*tree.ColumnTableDef); ok {
+					columnName = append(columnName, string(d.Name))
+				}
+			}
+			for _, tag := range tbCreate.Tags {
+				if tag.TagName != "" {
+					columnName = append(columnName, string(tag.TagName))
+				}
+			}
+			tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[i].SQL, IsNew: true, TableName: tbCreate.Table.Table(), UsingSource: tb.UsingSource.Table(), TableType: tb.TableType, ColumnName: columnName})
+			continue
 		}
+		// Check and obtain comments in the SQL file if WITH COMMENT
+		if OptComment {
+			// Check if there is a COMMENT ON TABLE, and if so, whether the table has been established
+			tableComment, comment := stmts[i].AST.(*tree.CommentOnTable)
+			if comment {
+				n, hasTable := isTableCreated(tableComment.Table.ToTableName().TableName, tableDetails)
+				if !hasTable {
+					return "", nil, errors.New("The table for COMMENT ON was not created")
+				}
+				tableDetails[n].TableComment = stmts[i].SQL
+				hasComment = true
+				continue
+			}
+
+			// Check if there is a COMMENT ON COLUMN, and if so, whether the column has been established
+			columnComment, comment := stmts[i].AST.(*tree.CommentOnColumn)
+			if comment {
+				n, hasTable := isTableCreated(columnComment.TableName.ToTableName().TableName, tableDetails)
+				if !hasTable {
+					return "", nil, errors.New("The table containing this column for COMMENT has not been created")
+				}
+				hasColumn := isColumnCreated(columnComment.ColumnName, tableDetails[n])
+				if !hasColumn {
+					return "", nil, errors.New("The column for COMMENT ON was not created")
+				}
+				tableDetails[n].ColumnComment = append(tableDetails[n].ColumnComment, stmts[i].SQL)
+				hasComment = true
+				continue
+			}
+		}
+	}
+	// Check if there are comments in SQL
+	if OptComment && !hasComment {
+		return "", nil, errors.New("NO COMMENT statement in the SQL file")
 	}
 	return dbName, tableDetails, nil
 }
@@ -250,6 +297,19 @@ func execCreateTableMeta(
 	p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: dbName})
 	defer p.ExecCfg().InternalExecutor.SetSessionData(new(sessiondata.SessionData))
 	_, err := p.ExecCfg().InternalExecutor.Exec(ctx, "create table", nil, create)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// execCommentOnMeta exec create comments sql use InternalExecutor.
+func execCommentOnMeta(
+	ctx context.Context, p sql.PlanHookState, comment string, dbName string,
+) error {
+	p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: dbName})
+	defer p.ExecCfg().InternalExecutor.SetSessionData(new(sessiondata.SessionData))
+	_, err := p.ExecCfg().InternalExecutor.Exec(ctx, "comment on", nil, comment)
 	if err != nil {
 		return err
 	}

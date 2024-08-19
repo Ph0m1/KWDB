@@ -53,7 +53,7 @@ import (
 
 const (
 	csvOptionDelimiter = "delimiter"
-	csvOptionComment   = "comment"
+	optionComment      = "comment"
 	csvOptionNullIf    = "nullif"
 	csvOptionSkip      = "skip"
 	csvOptionEscaped   = "escaped"
@@ -68,7 +68,7 @@ const (
 
 var importOptionExpectValues = map[string]sql.KVStringOptValidate{
 	csvOptionDelimiter: sql.KVStringOptRequireValue,
-	csvOptionComment:   sql.KVStringOptRequireValue,
+	optionComment:      sql.KVStringOptRequireNoValue,
 	csvOptionNullIf:    sql.KVStringOptRequireValue,
 	csvOptionSkip:      sql.KVStringOptRequireValue,
 	csvOptionEscaped:   sql.KVStringOptRequireValue,
@@ -133,6 +133,7 @@ func importPlanHook(
 			return nil, nil, nil, false, err
 		}
 	}
+	_, hasComment := opts[optionComment]
 
 	fn := func(ctx context.Context, _ []sql.PlanNode, resultsCh chan<- tree.Datums) error {
 		// TODO(dan): Move this span into sql.
@@ -161,6 +162,7 @@ func importPlanHook(
 		var scNames []string
 		var tableDetails []sqlbase.ImportTable
 		var files []string
+		var databaseComment string
 		files, err = filesFn()
 		if err != nil {
 			return err
@@ -168,7 +170,7 @@ func importPlanHook(
 		var timeSeriesImport bool
 		// 3.do some check and get tableDetails in different IMPORT
 		if importStmt.IsDatabase {
-			timeSeriesImport, dbName, scNames, tableDetails, err = checkAndGetDetailsInDatabase(ctx, p, files)
+			timeSeriesImport, dbName, scNames, tableDetails, databaseComment, err = checkAndGetDetailsInDatabase(ctx, p, files, hasComment)
 			if err != nil {
 				return err
 			}
@@ -176,6 +178,9 @@ func importPlanHook(
 			p.SetAuditTargetAndType(0, dbName, nil, targetType)
 		} else { /* Single table import */
 			if importStmt.Into {
+				if hasComment {
+					return errors.New("'WITH COMMENT' can only be used for the 'IMPORT CREATE USING' and 'IMPORT DATABASE', the current syntax is 'IMPORT INTO'")
+				}
 				var tableDesc *sql.MutableTableDescriptor
 				intoCols := make([]string, 0, len(importStmt.IntoCols))
 				if len(importStmt.IntoCols) > 0 {
@@ -229,7 +234,7 @@ func importPlanHook(
 					}
 					if tbCreate.IsTS() {
 						timeSeriesImport = true
-						if dbName, tableDetails, err = checkAndGetTSDetailsInTableNew(ctx, p, stmts); err != nil {
+						if dbName, tableDetails, err = checkAndGetTSDetailsInTableNew(ctx, p, stmts, hasComment); err != nil {
 							return err
 						}
 					}
@@ -270,6 +275,8 @@ func importPlanHook(
 			SchemaNames:      scNames,
 			TimeSeriesImport: timeSeriesImport,
 			OnlyMeta:         importStmt.OnlyMeta,
+			WithComment:      hasComment,
+			DatabaseComment:  databaseComment,
 		}
 		walltime := p.ExecCfg().Clock.Now().WallTime
 		// Prepare the protected timestamp record.
@@ -427,14 +434,6 @@ func getOptsParas(fileFormat string, opts map[string]string) (roachpb.IOFileForm
 			return ioFileFormat, err
 		}
 		ioFileFormat.Csv.Enclosed = enclosed
-	}
-
-	if override, ok := opts[csvOptionComment]; ok {
-		comment, err := util.GetSingleRune(override)
-		if err != nil {
-			return ioFileFormat, pgerror.Wrap(err, pgcode.Syntax, "invalid comment value")
-		}
-		ioFileFormat.Csv.Comment = comment
 	}
 
 	if err := sql.CheckImpExpInfoConflict(ioFileFormat.Csv); err != nil {
@@ -912,11 +911,31 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 		if _, err := p.ExecCfg().InternalExecutor.Exec(ctx, `import-create-ts-database`, nil, createDatabase); err != nil {
 			return err
 		}
+		// Add COMMENT to the database
+		if details.DatabaseComment != "" {
+			if err = execCommentOnMeta(ctx, p, details.DatabaseComment, dbName); err != nil {
+				return err
+			}
+		}
 	}
 	for i, table := range details.Tables {
 		if table.IsNew {
 			if err = execCreateTableMeta(ctx, p, table.Create, dbName); err != nil {
 				return err
+			}
+			// Add COMMENT to the table
+			if table.TableComment != "" {
+				if err = execCommentOnMeta(ctx, p, table.TableComment, dbName); err != nil {
+					return err
+				}
+			}
+			// Add COMMENT to the column
+			if table.ColumnComment != nil {
+				for _, colComment := range table.ColumnComment {
+					if err = execCommentOnMeta(ctx, p, colComment, dbName); err != nil {
+						return err
+					}
+				}
 			}
 			// set table desc count+1
 			tbName := tree.MakeTableName(tree.Name(dbName), tree.Name(table.TableName))
