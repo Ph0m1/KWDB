@@ -4,7 +4,7 @@
 
 ## 了解 KWDB
 
-KWDB 是一款**面向 AIoT 场景的分布式多模**数据库产品，支持在同一实例同时建立时序库和关系库并融合处理多模数据，具备千万级设备接入、百万级数据秒级写入、亿级数据秒级读取等时序数据高效处理能力，具有稳定安全、高可用、易运维等特点。KWDB 支持的所有特性见[功能概览](https://kaiwudb.com/kaiwudb_docs/#/about-kaiwudb/supported-features.html)。
+KWDB 是一款 **面向 AIoT 场景的分布式多模数据库** 产品，支持在同一实例同时建立时序库和关系库并融合处理多模数据，具备千万级设备接入、百万级数据秒级写入、亿级数据秒级读取等时序数据高效处理能力，具有稳定安全、高可用、易运维等特点。KWDB 支持的所有特性见[功能概览](https://kaiwudb.com/kaiwudb_docs/#/about-kaiwudb/supported-features.html)。
 
 ![img](./static/arch.png)
 
@@ -241,7 +241,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
 
 ### 社区贡献
 
-欢迎大家来参与贡献，详情请参阅我们的[社区贡献](https://gitee.com/kwdb/community/blob/master/Contribute_process.md)。
+欢迎大家参与贡献，详情请参阅我们的[社区贡献](https://gitee.com/kwdb/community/blob/master/Contribute_process.md)。
 
 ## 案例
 
