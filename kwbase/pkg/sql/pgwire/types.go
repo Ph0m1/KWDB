@@ -243,12 +243,12 @@ func (b *writeBuffer) writeTextDatumWithOid(
 	case *tree.DBytes:
 		tmpbuf, err := ClientEncoding(conv.ClientEncoding, []byte(*v))
 		if err != nil && log.V(2) {
-			log.Infof(ctx, "EEClientEncoding failed %v", err)
+			log.Infof(ctx, "ClientEncoding failed %v", err)
 		}
 		result := lex.EncodeByteArrayToRawBytes(
 			string(tmpbuf), conv.BytesEncodeFormat, false /* skipHexPrefix */)
 		if err != nil && log.V(2) {
-			log.Infof(ctx, "EEClientEncoding failed %v", err)
+			log.Infof(ctx, "ClientEncoding failed %v", err)
 		}
 		b.putInt32(int32(len(result)))
 		b.write([]byte(result))
@@ -266,14 +266,14 @@ func (b *writeBuffer) writeTextDatumWithOid(
 	case *tree.DString:
 		tmpbuf, err := ClientEncoding(conv.ClientEncoding, []byte(*v))
 		if err != nil && log.V(2) {
-			log.Infof(ctx, "EEClientEncoding failed %v", err)
+			log.Infof(ctx, "ClientEncoding failed %v", err)
 		}
 		b.writeLengthPrefixedString(string(tmpbuf))
 
 	case *tree.DCollatedString:
 		tmpbuf, err := ClientEncoding(conv.ClientEncoding, []byte(v.Contents))
 		if err != nil && log.V(2) {
-			log.Infof(ctx, "EEClientEncoding failed %v", err)
+			log.Infof(ctx, "ClientEncoding failed %v", err)
 		}
 		b.writeLengthPrefixedString(string(tmpbuf))
 
@@ -312,7 +312,7 @@ func (b *writeBuffer) writeTextDatumWithOid(
 	case *tree.DJSON:
 		tmpbuf, err := ClientEncoding(conv.ClientEncoding, []byte(v.JSON.String()))
 		if err != nil && log.V(2) {
-			log.Infof(ctx, "EEClientEncoding failed %v", err)
+			log.Infof(ctx, "ClientEncoding failed %v", err)
 		}
 		b.writeLengthPrefixedString(string(tmpbuf))
 
@@ -326,7 +326,7 @@ func (b *writeBuffer) writeTextDatumWithOid(
 		_, _ = b.textFormatter.Buffer.Read(tmpbuf)
 		tmpbuf, err := ClientEncoding(conv.ClientEncoding, tmpbuf)
 		if err != nil {
-			fmt.Printf("EEClientEncoding failed %v", err)
+			fmt.Printf("ClientEncoding failed %v", err)
 		}
 		b.textFormatter.Buffer.Write(tmpbuf)
 
@@ -335,6 +335,16 @@ func (b *writeBuffer) writeTextDatumWithOid(
 	case *tree.DArray:
 		// Arrays have custom formatting depending on their OID.
 		b.textFormatter.FormatNode(d)
+		//encode ctx with client_encoding
+		var bufLen int
+		bufLen = b.textFormatter.Buffer.Len()
+		tmpbuf := make([]byte, bufLen)
+		_, _ = b.textFormatter.Buffer.Read(tmpbuf)
+		tmpbuf, err := ClientEncoding(conv.ClientEncoding, tmpbuf)
+		if err != nil {
+			fmt.Printf("ClientEncoding failed %v", err)
+		}
+		b.textFormatter.Buffer.Write(tmpbuf)
 		b.writeFromFmtCtx(b.textFormatter)
 
 	case *tree.DOid:

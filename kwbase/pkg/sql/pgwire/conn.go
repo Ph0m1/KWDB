@@ -444,13 +444,6 @@ Loop:
 
 		//为了能使session对写入写出都生效，需要把session写入到conn里
 		c.sessionArgs.SessionDefaults.Set("client_encoding", ClientEncoding)
-		c.readBuf.Msg, err = ClientDecoding(ClientEncoding, c.readBuf.Msg)
-		if err != nil && log.V(2) {
-			log.Infof(ctx, "ClientDecoding failed %v", err)
-		}
-		if err != nil && log.V(2) {
-			log.Infof(ctx, "ClientDecoding failed %v", err)
-		}
 		log.VEventf(ctx, 2, "pgwire: processing %s", typ)
 
 		if !authDone {
@@ -486,6 +479,7 @@ Loop:
 
 		switch typ {
 		case pgwirebase.ClientMsgPassword:
+			c.ClientEncode(ctx, ClientEncoding)
 			// This messages are only acceptable during the auth phase, handled above.
 			err = pgwirebase.NewProtocolViolationErrorf("unexpected authentication data")
 			_ /* err */ = writeErr(
@@ -493,6 +487,7 @@ Loop:
 				&c.msgBuilder, &c.writerState.buf)
 			break Loop
 		case pgwirebase.ClientMsgSimpleQuery:
+			c.ClientEncode(ctx, ClientEncoding)
 			if err = c.handleSimpleQuery(
 				ctx, &c.readBuf, timeReceived, intSizer.GetUnqualifiedIntSize(), intSizer, sqlServer,
 			); err != nil {
@@ -501,22 +496,30 @@ Loop:
 			err = c.stmtBuf.Push(ctx, sql.Sync{})
 
 		case pgwirebase.ClientMsgExecute:
+			c.ClientEncode(ctx, ClientEncoding)
 			err = c.handleExecute(ctx, &c.readBuf, timeReceived)
 		case pgwirebase.ClientMsgParse:
+			c.ClientEncode(ctx, ClientEncoding)
 			err = c.handleParse(ctx, &c.readBuf, intSizer.GetUnqualifiedIntSize(), intSizer, sqlServer)
+
 		case pgwirebase.ClientMsgDescribe:
+			c.ClientEncode(ctx, ClientEncoding)
 			err = c.handleDescribe(ctx, &c.readBuf)
 
 		case pgwirebase.ClientMsgBind:
-			err = c.handleBind(ctx, &c.readBuf)
+			err = c.handleBind(ctx, &c.readBuf, ClientEncoding)
+
 		case pgwirebase.ClientMsgClose:
+			c.ClientEncode(ctx, ClientEncoding)
 			err = c.handleClose(ctx, &c.readBuf)
 
 		case pgwirebase.ClientMsgTerminate:
+			c.ClientEncode(ctx, ClientEncoding)
 			terminateSeen = true
 			break Loop
 
 		case pgwirebase.ClientMsgSync:
+			c.ClientEncode(ctx, ClientEncoding)
 			// We're starting a batch here. If the client continues using the extended
 			// protocol and encounters an error, everything until the next sync
 			// message has to be skipped. See:
@@ -525,6 +528,7 @@ Loop:
 			err = c.stmtBuf.Push(ctx, sql.Sync{})
 
 		case pgwirebase.ClientMsgFlush:
+			c.ClientEncode(ctx, ClientEncoding)
 			err = c.handleFlush(ctx)
 
 		case pgwirebase.ClientMsgCopyData, pgwirebase.ClientMsgCopyDone, pgwirebase.ClientMsgCopyFail:
@@ -533,8 +537,10 @@ Loop:
 			// operation: the server will send an error and a ready message back to
 			// the client, and must then ignore further copy messages. See:
 			// https://github.com/postgres/postgres/blob/6e1dd2773eb60a6ab87b27b8d9391b756e904ac3/src/backend/tcop/postgres.c#L4295
+			c.ClientEncode(ctx, ClientEncoding)
 
 		default:
+			c.ClientEncode(ctx, ClientEncoding)
 			err = c.stmtBuf.Push(
 				ctx,
 				sql.SendError{Err: pgwirebase.NewUnrecognizedMsgTypeErr(typ)})
@@ -581,6 +587,16 @@ Loop:
 			newAdminShutdownErr(ErrDrainingExistingConn), &c.msgBuilder, &c.writerState.buf)
 		_ /* n */, _ /* err */ = c.writerState.buf.WriteTo(c.conn)
 	}
+}
+
+// ClientEncode support GBK,GB18030 TO UTF8 client encoding
+func (c *conn) ClientEncode(ctx context.Context, ClientEncoding string) {
+	var err error
+	c.readBuf.Msg, err = ClientDecoding(ClientEncoding, c.readBuf.Msg)
+	if err != nil && log.V(2) {
+		log.Infof(ctx, "ClientDecoding failed %v", err)
+	}
+	return
 }
 
 // unqualifiedIntSizer is used by a conn to get the SQL session's current int size
@@ -1307,7 +1323,9 @@ var formatCodesAllText = []pgwirebase.FormatCode{pgwirebase.FormatText}
 // statement.
 // An error is returned iff the statement buffer has been closed. In that case,
 // the connection should be considered toast.
-func (c *conn) handleBind(ctx context.Context, buf *pgwirebase.ReadBuffer) error {
+func (c *conn) handleBind(
+	ctx context.Context, buf *pgwirebase.ReadBuffer, ClientEncoding string,
+) error {
 	portalName, err := buf.GetString()
 	if err != nil {
 		return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
@@ -1374,6 +1392,10 @@ func (c *conn) handleBind(ctx context.Context, buf *pgwirebase.ReadBuffer) error
 		b, err := buf.GetBytes(int(plen))
 		if err != nil {
 			return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
+		}
+		b, err = ClientDecoding(ClientEncoding, b)
+		if err != nil && log.V(2) {
+			log.Infof(ctx, "ClientDecoding failed %v", err)
 		}
 		qargs[i] = b
 	}
