@@ -528,7 +528,9 @@ func (s *adminServer) TableDetails(
 		return nil, status.Errorf(codes.NotFound, "%s", err)
 	}
 	if err != nil {
-		return nil, s.serverError(err)
+		// Because 'SHOW INDEX FROM tsTable' is not supported, an error will occur when running 'SHOW INDEX FROM tsTable'.
+		// If an error occurs, only log the error and do not terminate this function because other table info needs to be returned.
+		log.Warningf(ctx, "Unable to get index of table %s, error: %s", escQualTable, err)
 	}
 	{
 		const (
