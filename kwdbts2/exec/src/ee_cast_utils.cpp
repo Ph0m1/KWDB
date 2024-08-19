@@ -18,6 +18,7 @@
 #include "ee_global.h"
 #include "kwdb_type.h"
 #include "pgcode.h"
+#include "ts_common.h"
 
 namespace kwdbts {
 
@@ -396,16 +397,6 @@ void deleteZero(double input, char *str, int32_t length) {
       break;
     }
   }
-}
-
-int numDigit(double v) {
-  double x = std::abs(v);
-  int d = 0;
-  while (x > 1.0) {
-    x = x / 10;
-    d++;
-  }
-  return d + (v < 0);
 }
 
 #define MAX_DOUBLE_STR_LEN 18

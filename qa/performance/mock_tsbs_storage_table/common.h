@@ -38,9 +38,7 @@ class TestCommon {
   void create_db() {
     setenv("KW_HOME", kw_home_.c_str(), 1);
     setenv("KW_IOT_INTERVAL", std::to_string(iot_interval_).c_str(), 1);
-    setenv("KW_IOT_MODE", "TRUE", 0);
-    BigObjectConfig* config = BigObjectConfig::getBigObjectConfig();
-    config->readConfig();
+    kwdbts::EngineOptions::init();
     ErrorInfo err_info;
     std::filesystem::remove_all(kw_home_);
     initBigObjectApplication(err_info);
@@ -50,7 +48,7 @@ class TestCommon {
       cerr << "BOEINVALIDNAME" << endl;
       return;
     }
-    string dir_path = makeDirectoryPath(BigObjectConfig::home() + ws);
+    string dir_path = makeDirectoryPath(kwdbts::EngineOptions::home() + ws);
     MakeDirectory(dir_path);
   }
 

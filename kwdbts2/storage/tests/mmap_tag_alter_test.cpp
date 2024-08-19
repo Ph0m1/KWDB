@@ -12,10 +12,9 @@
 #include <gtest/gtest.h>
 #include <random>
 #include "test_util.h"
-#include "mmap/MMapTagColumnTable.h"
-#include "mmap/MMapTagColumnTableAux.h"
-#include "BigObjectApplication.h"
-#include "BigObjectUtils.h"
+#include "mmap/mmap_tag_column_table.h"
+#include "mmap/mmap_tag_column_table_aux.h"
+#include "utils/big_table_utils.h"
 #include "test_tag_util.h"
 #include "payload_generator.h"
 
@@ -86,7 +85,7 @@ TEST_F(TestTagAlterTable, add_drop_tag_column) {
   // add tag
   TagInfo newtag = {8, DATATYPE::INT32, 4, 0, 4, GENERAL_TAG};
   ASSERT_EQ(bt->AddTagColumn(newtag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   size_t cnt1 = cnt;
@@ -121,7 +120,7 @@ TEST_F(TestTagAlterTable, add_drop_tag_column) {
   // add tag
   newtag = {9, DATATYPE::VARSTRING, 20, 0, 20, GENERAL_TAG};
   ASSERT_EQ(bt->AddTagColumn(newtag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   cnt1 = cnt;
@@ -157,7 +156,7 @@ TEST_F(TestTagAlterTable, add_drop_tag_column) {
   // drop tag
   newtag = {3, DATATYPE::VARSTRING, 32, 0, 8, GENERAL_TAG};
   ASSERT_EQ(bt->DropTagColumn(newtag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   cnt1 = cnt;
@@ -203,7 +202,7 @@ TEST_F(TestTagAlterTable, add_drop_tag_column) {
   // drop tag
   newtag = {8, DATATYPE::INT32, 4, 0, 4, GENERAL_TAG};
   ASSERT_EQ(bt->DropTagColumn(newtag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   cnt1 = cnt;
@@ -311,7 +310,7 @@ TEST_F(TestTagAlterTable, alter_tag_type) {
   TagInfo old_tag = {8, DATATYPE::INT16, 2, 0, 2, GENERAL_TAG};
   TagInfo new_tag = {8, DATATYPE::INT64, 8, 0, 8, GENERAL_TAG};
   ASSERT_EQ(bt->AlterTagType(old_tag, new_tag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   // check
@@ -325,7 +324,7 @@ TEST_F(TestTagAlterTable, alter_tag_type) {
   old_tag = {8, DATATYPE::INT64, 8, 0, 8, GENERAL_TAG};
   new_tag = {8, DATATYPE::VARSTRING, 32, 0, 8, GENERAL_TAG};
   ASSERT_EQ(bt->AlterTagType(old_tag, new_tag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   // check
@@ -339,7 +338,7 @@ TEST_F(TestTagAlterTable, alter_tag_type) {
   old_tag = {6, DATATYPE::CHAR, 20, 0, 20, GENERAL_TAG};
   new_tag = {6, DATATYPE::VARSTRING, 32, 0, 8, GENERAL_TAG};
   ASSERT_EQ(bt->AlterTagType(old_tag, new_tag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   // check
@@ -353,7 +352,7 @@ TEST_F(TestTagAlterTable, alter_tag_type) {
   old_tag = {3, DATATYPE::VARSTRING, 32, 0, 8, GENERAL_TAG};
   new_tag = {3, DATATYPE::INT64, 8, 0, 8, GENERAL_TAG};
   ASSERT_EQ(bt->AlterTagType(old_tag, new_tag, err_info), 0);
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 12, 101);
 
   // check

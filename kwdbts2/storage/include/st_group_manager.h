@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 #include "libkwdbts2.h"
-#include "mmap/MMapMetricsTable.h"
+#include "mmap/mmap_metrics_table.h"
 #include "st_subgroup.h"
 #include "lt_rw_latch.h"
 
@@ -57,8 +57,8 @@ class SubEntityGroupManager : public TSObject {
    *
    * @return KStatus
    */
-  MMapPartitionTable* CreatePartitionTable(timestamp64 ts, SubGroupID subgroup_id,
-                                           ErrorInfo& err_info = getDummyErrorInfo());
+  TsTimePartition* CreatePartitionTable(timestamp64 ts, SubGroupID subgroup_id,
+                                        ErrorInfo& err_info = getDummyErrorInfo());
 
   /**
    * @brief Create a SubGroupTable with the specified id.
@@ -94,7 +94,7 @@ class SubEntityGroupManager : public TSObject {
    *
    * @return KStatus
    */
-  MMapPartitionTable* GetPartitionTable(timestamp64 ts, SubGroupID sub_group_id, ErrorInfo& err_info, bool for_new = false);
+  TsTimePartition* GetPartitionTable(timestamp64 ts, SubGroupID sub_group_id, ErrorInfo& err_info, bool for_new = false);
 
   /**
    * @brief Filter partition table instances that meet the conditions based on ts span
@@ -103,7 +103,7 @@ class SubEntityGroupManager : public TSObject {
    *
    * @return the collection of MMapPartitionTable instances that meet the conditions
    */
-  vector<MMapPartitionTable*> GetPartitionTables(const KwTsSpan& ts_span, SubGroupID subgroup_id, ErrorInfo& err_info);
+  vector<TsTimePartition*> GetPartitionTables(const KwTsSpan& ts_span, SubGroupID subgroup_id, ErrorInfo& err_info);
 
   int DropSubGroup(SubGroupID subgroup_id, bool if_exist, ErrorInfo &err_info);
 
@@ -128,7 +128,7 @@ class SubEntityGroupManager : public TSObject {
    */
   void Compress(const timestamp64& compress_ts, ErrorInfo& err_info);
 
-  void ReleasePartitionTable(MMapPartitionTable* e_bt, bool is_force = false);
+  void ReleasePartitionTable(TsTimePartition* e_bt, bool is_force = false);
 
   /**
    * @brief Obtain the next available groupId and EntityID

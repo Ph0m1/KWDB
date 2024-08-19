@@ -61,7 +61,7 @@ bool MakeDirectory(const string& dir_path, ErrorInfo& error_info) {
       }
     } else {
       if (!S_ISDIR(st.st_mode)) {
-        error_info.errcode = BOEOTHER;
+        error_info.errcode = KWEOTHER;
         error_info.errmsg = std::string(path) + " is not directory";
         LOG_ERROR("%s mkdir failed: %s", path, error_info.errmsg.c_str());
         return false;

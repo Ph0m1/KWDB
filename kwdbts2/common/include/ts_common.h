@@ -20,13 +20,13 @@
 #include <utility>
 #include <vector>
 
-#include "DataType.h"
+#include "data_type.h"
 #include "kwdb_type.h"
 #include "lg_commonv2.h"
 #include "libkwdbts2.h"
 #include "me_metadata.pb.h"
 #include "lt_rw_latch.h"
-#include "utils/ObjectUtils.h"
+#include "utils/compress_utils.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "lg_api.h"
 
@@ -778,6 +778,21 @@ inline int64_t convertToTimestamp(std::string& ts_str) {
     LOG_ERROR("Convert string to timestamp failed.");
     abort();
   }
+}
+
+inline string booleanToString(bool v) {
+  return (v) ? s_true : s_false;
+}
+inline string tableTypeToString(int type) { return s_row; }
+
+inline int numDigit(double v) {
+  double x = std::abs(v);
+  int d = 0;
+  while (x > 1.0) {
+    x = x / 10;
+    d++;
+  }
+  return d + (v < 0);
 }
 
 }  //  namespace kwdbts

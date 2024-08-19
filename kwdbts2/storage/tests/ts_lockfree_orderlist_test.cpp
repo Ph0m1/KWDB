@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include <thread>
-#include "mmap/TSLockfreeOrderList.h"
+#include "TSLockfreeOrderList.h"
 
 class TestTsLockfreeOrderList : public ::testing::Test {
  public:

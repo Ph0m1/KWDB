@@ -18,15 +18,27 @@
 
 namespace kwdbts {
 
+#define ENV_KW_HOME                 "KW_HOME"
+#define ENV_CLUSTER_CONFIG_HOME     "KW_CLUSTER_HOME"
+#define ENV_KW_IOT_INTERVAL         "KW_IOT_INTERVAL"
+
 enum WALMode : uint8_t {
   OFF = 0,
   ON = 1,
   SYNC = 2
 };
 
+inline const string& s_defaultDateFormat()
+{ static string s = "%Y-%m-%d"; return s; }
+inline const string& s_defaultDateTimeFormat()
+{ static string s = "%Y-%m-%d %H:%M:%S"; return s; }
+inline const string& s_defaultTimeFormat()
+{ static string s = "%H:%M:%S"; return s; }
+
 struct EngineOptions {
-  EngineOptions() {
-  }
+  EngineOptions() {}
+
+  static void init();
 
   std::string db_path;
   // WAL work level: 0:off, 1:on, 2:sync, default is sync.
@@ -45,6 +57,30 @@ struct EngineOptions {
   char* wal_archive_command = nullptr;
   TsEngineLogOption lg_opts = {"", 0, 0, DEBUG, ""};
   std::vector<RangeGroup> ranges;  // record engine hash value range
+
+  static int32_t iot_interval;
+  static const char slash_;
+  static size_t ps_;
+
+  static int ns_align_size_;
+  static int table_type_;
+  static int precision_;
+  static int dt32_base_year_;           // DateTime32 base year.
+  static bool zero_if_null_;
+  static int  double_precision_;
+  static int  float_precision_;
+  static int64_t max_anon_memory_size_;
+  static string home_;  // NOLINT
+  static const string & dateFormat() { return s_defaultDateFormat(); }
+  static const string & dateTimeFormat() { return s_defaultDateTimeFormat(); }
+  static size_t pageSize() { return ps_; }
+  static char directorySeperator() { return slash_; }
+  static bool zeroIfNull() { return zero_if_null_; }
+  static int precision() { return double_precision_; }
+  static int float_precision() { return float_precision_; }
+  static int64_t max_anon_memory_size() {return max_anon_memory_size_;}
+  static const string & home() { return home_; }
 };
+extern std::atomic<int64_t> kw_used_anon_memory_size;
 
 }  // namespace kwdbts

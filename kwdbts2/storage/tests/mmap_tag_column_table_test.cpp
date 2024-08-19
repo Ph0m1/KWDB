@@ -12,9 +12,8 @@
 #include <gtest/gtest.h>
 #include <random>
 #include "test_util.h"
-#include "mmap/MMapTagColumnTable.h"
-#include "BigObjectApplication.h"
-#include "BigObjectUtils.h"
+#include "mmap/mmap_tag_column_table.h"
+#include "utils/big_table_utils.h"
 #include "test_tag_util.h"
 #include "payload_generator.h"
 

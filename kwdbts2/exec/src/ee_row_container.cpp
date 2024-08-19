@@ -15,10 +15,11 @@
 #include <chrono>
 #include <cmath>
 
-#include "BigObjectApplication.h"
 #include "ee_exec_pool.h"
 #include "ee_aggregate_func.h"
 #include "lg_api.h"
+#include "big_table.h"
+#include "utils/big_table_utils.h"
 
 namespace kwdbts {
 
@@ -319,7 +320,7 @@ KStatus DiskRowContainer::GenAttributeInfo(const ColumnInfo &col_info,
 
   col_var->length = col_var->size;
   col_var->max_len = col_var->size;
-  col_var->attr_type = ATTR_TS_DATA;
+  col_var->col_flag = COL_TS_DATA;
 
   return KStatus::SUCCESS;
 }

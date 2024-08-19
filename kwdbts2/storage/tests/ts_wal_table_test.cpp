@@ -55,7 +55,7 @@ class TestTSWALTable : public TestBigTableInstance {
       const auto& col = meta_.k_column(i);
       struct AttributeInfo col_var;
       TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
-      if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
         schema.push_back(std::move(col_var));
       }
     }
@@ -69,11 +69,11 @@ class TestTSWALTable : public TestBigTableInstance {
       const auto& col = meta_.k_column(i);
       struct AttributeInfo col_var;
       TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         schema.push_back(TagInfo{col.column_id(), col_var.type,
                                     static_cast<uint32_t>(col_var.length), 0,
                                     static_cast<uint32_t>(col_var.length),
-                                    static_cast<TagType>(col_var.attr_type)});
+                                    static_cast<TagType>(col_var.col_flag)});
       }
     }
 
@@ -90,11 +90,11 @@ class TestTSWALTable : public TestBigTableInstance {
       struct AttributeInfo col_var;
       s = TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
       EXPECT_EQ(s, KStatus::SUCCESS);
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_schema.push_back(TagInfo{col.column_id(), col_var.type,
                                     static_cast<uint32_t>(col_var.length), 0,
                                     static_cast<uint32_t>(col_var.length),
-                                    static_cast<TagType>(col_var.attr_type)});
+                                    static_cast<TagType>(col_var.col_flag)});
       } else {
         metric_schema.push_back(std::move(col_var));
       }
@@ -1231,7 +1231,6 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   ResultSet res{(k_uint32) scan_tags.size()};
   k_uint64 ptag = 0;
   k_uint32 count = 0;
-  k_uint32 all_idx = 0;
   k_uint32 tag_val = 0;
 
   ASSERT_EQ(iter->Next(&entity_id_list, &res, &count), KStatus::SUCCESS);

@@ -21,8 +21,8 @@
 #include "kwdb_type.h"
 #include "libkwdbts2.h"
 #include "lt_rw_latch.h"
-#include "mmap/MMapPartitionTable.h"
-#include "mmap/MMapSegmentTableIterator.h"
+#include "ts_time_partition.h"
+#include "mmap/mmap_segment_table_iterator.h"
 #include "ts_common.h"
 
 namespace kwdbts {
@@ -41,7 +41,7 @@ class TsIterator {
 
   virtual ~TsIterator();
 
-  virtual KStatus Init(std::vector<MMapPartitionTable*>& p_bts, bool is_reversed);
+  virtual KStatus Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed);
 
   /**
    * @brief An internally implemented iterator query interface that provides a subgroup data query result to the TsTableIterator class
@@ -85,7 +85,7 @@ class TsIterator {
   std::vector<k_uint32> ts_scan_cols_;
   // column attributes
   vector<AttributeInfo> attrs_;
-  std::vector<MMapPartitionTable*> p_bts_;
+  std::vector<TsTimePartition*> p_bts_;
   // save all BlockItem objects in the partition table being queried
   std::deque<BlockItem*> block_item_queue_;
   // save the data offset within the BlockItem object being queried, used for traversal
@@ -152,7 +152,7 @@ class TsAggIterator : public TsIterator {
     }
   }
 
-  KStatus Init(std::vector<MMapPartitionTable*>& p_bts, bool is_reversed) override;
+  KStatus Init(std::vector<TsTimePartition*>& p_bts, bool is_reverse) override;
   /**
    * @brief The internally implemented aggregate data query interface returns the aggregate query result of an entity
    *        when called once. When is_finished is true, it indicates that the query has ended.
@@ -350,7 +350,7 @@ class TsAggIterator : public TsIterator {
    * @param ts_col           queried col index
    * @param b                Batch objects that encapsulate data
    */
-  int getActualColAggBatch(MMapPartitionTable* p_bt, MetricRowID real_row, uint32_t ts_col, Batch** b);
+  int getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t ts_col, Batch** b);
 
  private:
   // The aggregation type corresponding to each column.

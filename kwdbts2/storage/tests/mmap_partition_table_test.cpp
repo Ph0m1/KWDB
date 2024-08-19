@@ -11,9 +11,8 @@
 
 #include <gtest/gtest.h>
 
-#include "BigObjectApplication.h"
-#include "DateTime.h"
-#include "mmap/MMapPartitionTable.h"
+#include "date_time_util.h"
+#include "ts_time_partition.h"
 #include "test_util.h"
 
 const string TestBigTableInstance::kw_home_ = "./data_kw/";  // NOLINT
@@ -50,35 +49,35 @@ class TestPartitionBigTable : public TestBigTableInstance {
  * @brief Test the basic functions of MMapEntityMeta
  */
 TEST_F(TestPartitionBigTable, base) {
-  EntityMetaManager meta_manager;
-  int error_code = meta_manager.Open("t1.meta", db_path_, "20231110", true);
+  TsEntityIdxManager entity_idx;
+  int error_code = entity_idx.Open("t1.meta", db_path_, "20231110", true);
   EXPECT_EQ(error_code, 0);
 
   // Assign and create block items for each entity
   size_t entity_group_max = 100;
   for (int i = 1; i <= entity_group_max; i++) {
-    EntityItem* entity_item = meta_manager.getEntityItem(i);
+    EntityItem* entity_item = entity_idx.getEntityItem(i);
     entity_item->entity_id = i;
     entity_item->row_written = i + 1000;
     entity_item->cur_block_id = 0;
     BlockItem* block_item = nullptr;
-    meta_manager.AddBlockItem(i, &block_item);
-    meta_manager.UpdateEnityItem(i, block_item);
+    entity_idx.AddBlockItem(i, &block_item);
+    entity_idx.UpdateEnityItem(i, block_item);
 
     ASSERT_EQ(block_item->entity_id, i);
-    ASSERT_EQ(meta_manager.getEntityItem(i)->cur_block_id, i);
+    ASSERT_EQ(entity_idx.getEntityItem(i)->cur_block_id, i);
   }
 
   // First entity appends 10 block items
   int entity_id = 1;
   for (int i = 1; i <= 10; i++) {
     BlockItem* block_item = nullptr;
-    meta_manager.AddBlockItem(entity_id, &block_item);
-    meta_manager.UpdateEnityItem(entity_id, block_item);
-    EXPECT_EQ(meta_manager.getEntityItem(entity_id)->cur_block_id, entity_group_max + i);
+    entity_idx.AddBlockItem(entity_id, &block_item);
+    entity_idx.UpdateEnityItem(entity_id, block_item);
+    EXPECT_EQ(entity_idx.getEntityItem(entity_id)->cur_block_id, entity_group_max + i);
   }
   // Get the result
-  meta_manager.getEntityItem(entity_id)->to_string(std::cout);
+  entity_idx.getEntityItem(entity_id)->to_string(std::cout);
 }
 
 /*
@@ -102,7 +101,7 @@ TEST_F(TestPartitionBigTable, insert) {
   vector<string> key{};
 
   // Instantiate a new partition table with a limit on entities per subgroup.
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
 
   // Insert a batch of data with a starting entity ID of 1, consisting of 10 rows,
@@ -145,7 +144,7 @@ TEST_F(TestPartitionBigTable, disorder) {
   vector<string> key{};
 
   // Instantiate a Partition Table with a specified entity capacity
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -193,7 +192,7 @@ TEST_F(TestPartitionBigTable, override) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -258,7 +257,7 @@ TEST_F(TestPartitionBigTable, reject) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);  // Set permissions
 
   // Instantiate and open a partition table with a specified capacity for entities per subgroup
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -331,7 +330,7 @@ TEST_F(TestPartitionBigTable, discard) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -381,7 +380,7 @@ TEST_F(TestPartitionBigTable, merge) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -434,7 +433,7 @@ TEST_F(TestPartitionBigTable, varColumnMerge) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -483,7 +482,7 @@ TEST_F(TestPartitionBigTable, keepToMerge) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -534,7 +533,7 @@ TEST_F(TestPartitionBigTable, bigdata) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -572,7 +571,7 @@ TEST_F(TestPartitionBigTable, undoPut) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
 
   // Set the current entity id to 1 and write 100 pieces of data
@@ -652,7 +651,7 @@ TEST_F(TestPartitionBigTable, redoPut) {
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   uint32_t entity_id = 1;
   uint32_t row_num = 10;

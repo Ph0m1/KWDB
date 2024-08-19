@@ -22,9 +22,8 @@
 #include <utility>
 #include <string>
 #include <vector>
-#include "BigObjectUtils.h"
-#include "BigObjectApplication.h"
-#include "mmap/MMapPartitionTable.h"
+#include "utils/big_table_utils.h"
+#include "ts_time_partition.h"
 #include "payload.h"
 #include "cm_func.h"
 #include "sys_utils.h"
@@ -35,11 +34,11 @@
 #define Def_Column(col_var, col_id, pname, ptype, poffset, psize, plength, pencoding, \
        pflag, pmax_len, pversion, pattrtype)      \
     struct AttributeInfo col_var;          \
-    {col_var.id = col_id; col_var.name = pname; col_var.type = ptype; col_var.offset = poffset; }  \
+    {col_var.id = col_id; strcpy(col_var.name, pname); col_var.type = ptype; col_var.offset = poffset; }  \
     {col_var.size = psize; col_var.length = plength; }      \
     {col_var.encoding = pencoding; col_var.flag = pflag; }      \
     {col_var.max_len = pmax_len; col_var.version = pversion; }      \
-    {col_var.attr_type = (AttrType)pattrtype; }
+    {col_var.col_flag = (ColumnFlag)pattrtype; }
 
 #define Def_Tag(tag_var, id, data_type, data_length, tag_type)    \
     struct TagInfo tag_var;          \
@@ -51,11 +50,11 @@
 
 int IsDbNameValid(const string& db) {
   if (db.size() > MAX_DATABASE_NAME_LEN)  // can`t longer than 63
-    return BOELENLIMIT;
+    return KWELENLIMIT;
   for (char c : db) {
     if (c == '?' || c == '*' || c == ':' || c == '|' || c == '"' || c == '<'
         || c == '>' || c == '.')
-      return BOEINVALIDNAME;
+      return KWEINVALIDNAME;
   }
   return 0;
 }
@@ -93,22 +92,6 @@ bool RemoveDirectory(const char* path) {
   }
 
   return true;
-}
-
-std::string GetPartitionDb(const string& db, timestamp64 ts, bool& is_sqfs) {
-  string pt_name = db + "/" + uintToString(ts);
-  string path = BigObjectConfig::home() + pt_name;
-  string sqfs_file = path + ".sqfs";
-  if (access(sqfs_file.c_str(), F_OK) == 0) {
-    struct statfs sfs;
-    statfs(path.c_str(), &sfs);
-    if (sfs.f_type == SQUASHFS_MAGIC) {
-      is_sqfs = true;
-      return pt_name;
-    }
-  }
-  is_sqfs = false;
-  return pt_name + "_";
 }
 
 struct ZTableColumnMeta {
@@ -172,7 +155,6 @@ class BtUtil {
     DataHelper* rec_helper = bt->getRecordHelper();
     int rec_size = bt->recordSize();
     char* rec = new char[rec_size];
-    getDeletableColumn(bt, rec_helper, rec);
     int start_col = bt->firstDataColumn();
     int num_col = bt->numColumn();
     int col_idx = start_col;
@@ -202,7 +184,7 @@ class BtUtil {
       col_idx++;
     }
     for (; col_idx < num_col; ++col_idx) {
-      if (rec_helper->stringToColumn(col_idx, const_cast<char*>(s_emptyString().c_str()),
+      if (rec_helper->stringToColumn(col_idx, const_cast<char*>(kwdbts::s_emptyString.c_str()),
                                      rec) < 0)
         break;
     }
@@ -318,57 +300,15 @@ class BtUtil {
     return value;
   }
 
-  static ErrorInfo GetRawData(BigTable* bt, int64_t row_num, char* rec) {
-    int start_col = bt->firstDataColumn();
-    int num_col = bt->numColumn();
-    DataHelper* rec_helper = bt->getRecordHelper();
-    getDeletableColumn(bt, rec_helper, rec);
-
-    for (int col_idx = start_col; col_idx < num_col; col_idx++) {
-      bt->getColumnValue(row_num, col_idx, rec_helper->columnAddr(col_idx, rec));
-    }
-
-    ErrorInfo err_info(false);
-    return err_info;
-  }
-
-  static ErrorInfo GetRawData(BigTable* bt, int64_t row_num, std::vector<std::any>& batch) {
-    int start_col = bt->firstDataColumn();
-    int num_col = bt->numColumn();
-
-    for (int col_idx = start_col; col_idx < num_col; col_idx++) {
-      char rec[1024] = {0};
-      bt->getColumnValue(row_num, col_idx, rec);
-      int d_type = bt->getSchemaInfo()[col_idx].type;
-      switch (d_type) {
-        case DATATYPE::TIMESTAMP64:
-          batch.push_back(KTimestamp(rec));
-          break;
-        case DATATYPE::INT64:
-          batch.push_back(KInt64(rec));
-          break;
-        case DATATYPE::DOUBLE:
-          batch.push_back(KDouble64(rec));
-          break;
-        default:
-          fprintf(stderr, "unsupported data type:%d \n", d_type);
-      }
-    }
-
-    ErrorInfo err_info(false);
-    return err_info;
-  }
-
-
   static int CreateDB(const std::string& db, size_t life_cycle, ErrorInfo& err_info) {
     string db_path = normalizePath(db);
     string ws = worksapceToDatabase(db_path);
     if (ws == "")
-      return err_info.setError(BOEINVALIDNAME, db);
+      return err_info.setError(KWEINVALIDNAME, db);
     int err_code = IsDbNameValid(ws);
     if (err_code != 0)
       err_info.setError(err_code, db);
-    string dir_path = makeDirectoryPath(BigObjectConfig::home() + ws);
+    string dir_path = makeDirectoryPath(kwdbts::EngineOptions::home() + ws);
     MakeDirectory(dir_path, err_info);
     return err_info.errcode;
   }
@@ -397,9 +337,9 @@ class BtUtil {
     MMapMetricsTable* root_bt = new MMapMetricsTable();
     string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
     if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
-        err_info.errcode == BOECORR) {
+        err_info.errcode == KWECORR) {
       root_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                      s_emptyString(), BigObjectConfig::iot_interval,
+                      kwdbts::s_emptyString, kwdbts::EngineOptions::iot_interval,
                       encoding, err_info, true);
     }
 
@@ -419,7 +359,7 @@ class BtUtil {
     Def_Column(col_1, 1, "k_ts", DATATYPE::TIMESTAMP64_LSN, 0, 0, 1, 0, AINFO_NOT_NULL, 3, 1, 0);
     Def_Column(col_2, 2, "v1_value", DATATYPE::INT64, 0, 0, 1, 0, 0, 0, 1, 0);
     Def_Column(col_3, 3, "v2_value", DATATYPE::DOUBLE, 0, 0, 1, 0, 0, 0, 1, 0);
-    //  Def_Column(col_4, bigobject::s_deletable(), DATATYPE::INT32, 0, 0, 1, 0, 0, 0, 1, 0);
+    //  Def_Column(col_4, kwdbts::s_deletable(), DATATYPE::INT32, 0, 0, 1, 0, 0, 0, 1, 0);
 
     vector<AttributeInfo> schema = {std::move(col_1), std::move(col_2), std::move(col_3)};
     vector<string> key = {};
@@ -438,9 +378,9 @@ class BtUtil {
     MMapMetricsTable* root_bt = new MMapMetricsTable();
     string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
     if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
-        err_info.errcode == BOECORR) {
+        err_info.errcode == KWECORR) {
       root_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                      s_emptyString(), 86400, encoding, err_info, true);
+                      kwdbts::s_emptyString, 86400, encoding, err_info, true);
     }
 
     if (err_info.errcode < 0) {
@@ -459,7 +399,7 @@ class BtUtil {
     Def_Column(col_1, 1, "k_ts", DATATYPE::TIMESTAMP64, 0, 0, 1, 0, AINFO_NOT_NULL, 3, 1, 0);
     Def_Column(col_2, 2, "v1_value", DATATYPE::INT64, 0, 0, 1, 0, 0, 0, 1, 0);
     Def_Column(col_3, 3, "v2_value", DATATYPE::VARSTRING, 0, 0, 1, 0, 0, 0, 1, 0);
-    //  Def_Column(col_4, bigobject::s_deletable(), DATATYPE::INT32, 0, 0, 1, 0, 0, 0, 1, 0);
+    //  Def_Column(col_4, kwdbts::s_deletable(), DATATYPE::INT32, 0, 0, 1, 0, 0, 0, 1, 0);
 
     vector<AttributeInfo> schema = {std::move(col_1), std::move(col_2), std::move(col_3)};
     vector<string> key = {};
@@ -478,9 +418,9 @@ class BtUtil {
     MMapMetricsTable* root_bt = new MMapMetricsTable();
     string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
     if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
-        err_info.errcode == BOECORR) {
+        err_info.errcode == KWECORR) {
       root_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                      s_emptyString(), BigObjectConfig::iot_interval,
+                      kwdbts::s_emptyString, kwdbts::EngineOptions::iot_interval,
                       encoding, err_info, true);
     }
 
@@ -501,7 +441,7 @@ class BtUtil {
   }
 
 
-  static void PrintTable(MMapPartitionTable* bt, uint32_t entity_id) {
+  static void PrintTable(TsTimePartition* bt, uint32_t entity_id) {
     fprintf(stdout, "----------Print Table Data----------\n");
     for (int r = 1; r <= bt->size(entity_id); r++) {
       bt->printRecord(entity_id, std::cout, r);
@@ -520,19 +460,13 @@ class TestBigTableInstance : public ::testing::Test {
   void SetUp() override {
     setenv("KW_HOME", kw_home_.c_str(), 1);
     setenv("KW_IOT_INTERVAL", std::to_string(iot_interval_).c_str(), 1);
-    setenv("KW_IOT_MODE", "TRUE", 0);
-    BigObjectConfig* config = BigObjectConfig::getBigObjectConfig();
-    config->readConfig();
+
+    kwdbts::EngineOptions::init();
     ErrorInfo err_info;
     ASSERT_NE(kw_home_, ".");
     ASSERT_NE(kw_home_, "");
     system(("rm -rf " + kw_home_ + "/*").c_str());
     system(("rm -rf " + kw_home_ + DIR_SEP + db_name_ + "*").c_str());
-
-    if (!config) {
-      exit(-1);
-    }
-    config->readConfig();
 
     err_info.clear();
     BtUtil::CreateDB(TestBigTableInstance::db_name_, iot_interval_ * 10, err_info);
@@ -542,7 +476,7 @@ class TestBigTableInstance : public ::testing::Test {
   void TearDown() override {
   }
 
-  static void initData2(kwdbts::kwdbContext_p ctx, MMapPartitionTable* bt, uint32_t entity_id, timestamp64 start_ts, int
+  static void initData2(kwdbts::kwdbContext_p ctx, TsTimePartition* bt, uint32_t entity_id, timestamp64 start_ts, int
   row_num, DedupResult* dedup_result, kwdbts::DedupRule dedup_rule = kwdbts::DedupRule::KEEP, int value = 11) {
     timestamp64 ts = start_ts;
     int count = row_num;
@@ -565,7 +499,7 @@ class TestBigTableInstance : public ::testing::Test {
     } while (count > 0);
   }
 
-  static void initDataWithNull(kwdbts::kwdbContext_p ctx, MMapPartitionTable* bt, uint32_t entity_id,
+  static void initDataWithNull(kwdbts::kwdbContext_p ctx, TsTimePartition* bt, uint32_t entity_id,
                                timestamp64 start_ts, int row_num, DedupResult* dedup_result,
                                kwdbts::DedupRule dedup_rule = kwdbts::DedupRule::KEEP) {
     timestamp64 ts = start_ts;
@@ -601,7 +535,7 @@ class TestBigTableInstance : public ::testing::Test {
     }
   }
 
-  static void printTable(MMapPartitionTable* bt, uint32_t entity_id) {
+  static void printTable(TsTimePartition* bt, uint32_t entity_id) {
     fprintf(stdout, "----------Print Table Data----------\n");
     for (int r = 1; r <= bt->size(entity_id); r++) {
       bt->printRecord(entity_id, std::cout, r);

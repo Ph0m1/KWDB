@@ -20,7 +20,7 @@
 #endif
 #include "st_subgroup.h"
 #include "sys_utils.h"
-#include "mmap/MMapMetricsTable.h"
+#include "mmap/mmap_metrics_table.h"
 #include "lt_rw_latch.h"
 
 namespace kwdbts {
@@ -38,9 +38,9 @@ TsSubEntityGroup::TsSubEntityGroup(MMapMetricsTable*& root_tbl)
 TsSubEntityGroup::~TsSubEntityGroup() {
   partition_cache_.Clear();
   // pthread_rwlock_destroy(&partition_lk_);
-  if (entity_meta_ != nullptr) {
-    delete entity_meta_;
-    entity_meta_ = nullptr;
+  if (entity_block_idx_ != nullptr) {
+    delete entity_block_idx_;
+    entity_block_idx_ = nullptr;
   }
 
   for (auto& mtx : entity_mutexes_) {
@@ -69,9 +69,9 @@ int TsSubEntityGroup::unLock() {
 }
 
 int TsSubEntityGroup::ReOpenInit(ErrorInfo& err_info) {
-  if (entity_meta_ != nullptr) {
-    delete entity_meta_;
-    entity_meta_ = nullptr;
+  if (entity_block_idx_ != nullptr) {
+    delete entity_block_idx_;
+    entity_block_idx_ = nullptr;
   }
   partitions_ts_.clear();
   return OpenInit(subgroup_id_, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
@@ -81,7 +81,7 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
                                int flags, ErrorInfo& err_info) {
   wrLock();
   Defer defer{[&]() { unLock(); }};
-  if (entity_meta_ != nullptr) {
+  if (entity_block_idx_ != nullptr) {
     // err_info.setError(BOEPERM, tbl_sub_path + " already opened.");
     LOG_WARN("SubEntityGroup[%s] already opened.", tbl_sub_path.c_str());
     return 0;
@@ -98,15 +98,15 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
         return err_info.errcode;
       }
     } else {
-      err_info.setError(BOENOOBJ, real_path_);
+      err_info.setError(KWENOOBJ, real_path_);
       return err_info.errcode;
     }
   }
   subgroup_id_ = subgroup_id;
 
-  entity_meta_ = new MMapEntityMeta(true, true);
+  entity_block_idx_ = new MMapEntityIdx(true, true);
   string meta_path = table_name_ + ".et";
-  int ret = entity_meta_->open(meta_path, db_path_, tbl_sub_path_, flags, false, 0);
+  int ret = entity_block_idx_->init(meta_path, db_path_, tbl_sub_path_, flags, false, 0);
   if (ret < 0) {
     err_info.setError(ret, tbl_sub_path);
     return ret;
@@ -128,7 +128,7 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
       int64_t p_ts = convertToTimestamp(partition_dir);
       if (strcmp(partition_dir.c_str(), std::to_string(p_ts).c_str()) == 0) {
         // Load the partition table and obtain the minimum and maximum timestamps for the partition
-        MMapPartitionTable* p_table = getPartitionTable(p_ts, p_ts, err_info, false);
+        TsTimePartition* p_table = getPartitionTable(p_ts, p_ts, err_info, false);
         if (err_info.errcode < 0) {
           delete p_table;
           break;
@@ -149,7 +149,7 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
     partitions_ts_.clear();
   }
 
-  for (int i = 0; i <= entity_meta_->GetConfigSubgroupEntities(); i++) {
+  for (int i = 0; i <= entity_block_idx_->GetConfigSubgroupEntities(); i++) {
     entity_mutexes_.push_back(std::move(new TsSubEntityGroupEntityLatch(LATCH_ID_TSSUBENTITY_GROUP_ENTITYS_MUTEX)));
   }
 
@@ -157,13 +157,13 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
 }
 
 EntityID TsSubEntityGroup::AllocateEntityID(const string& primary_tag, ErrorInfo& err_info) {
-  assert(entity_meta_ != nullptr);
-  return entity_meta_->allocateEntity();
+  assert(entity_block_idx_ != nullptr);
+  return entity_block_idx_->addEntity();
 }
 
 std::vector<uint32_t> TsSubEntityGroup::GetEntities() {
-  assert(entity_meta_ != nullptr);
-  return entity_meta_->getEntities();
+  assert(entity_block_idx_ != nullptr);
+  return entity_block_idx_->getEntities();
 }
 
 int TsSubEntityGroup::SetEntityNum(uint32_t entity_num) {
@@ -231,18 +231,18 @@ timestamp64 TsSubEntityGroup::MaxPartitionTime() {
   return 0;
 }
 
-MMapPartitionTable* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
-                                                      bool create_if_not_exist, bool lru_push_back) {
+TsTimePartition* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
+                                                     bool create_if_not_exist, bool lru_push_back) {
   timestamp64 max_ts;
   timestamp64 p_time = PartitionTime(ts, max_ts);
-  MMapPartitionTable* mt_table = partition_cache_.Get(p_time);
+  TsTimePartition* mt_table = partition_cache_.Get(p_time);
   if (mt_table != nullptr) {
     return mt_table;
   }
 
   if (deleted_partitions_.find(p_time) != deleted_partitions_.end()) {
     LOG_WARN("Partition is deleted.");
-    err_info.setError(BOENOOBJ, "No such partition:" + db_path_ + partitionTblSubPath(ts));
+    err_info.setError(KWENOOBJ, "No such partition:" + db_path_ + partitionTblSubPath(ts));
     return nullptr;
   }
 
@@ -254,7 +254,7 @@ MMapPartitionTable* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInf
   return mt_table;
 }
 
-vector<MMapPartitionTable*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info) {
+vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info) {
   std::vector<int64_t> p_times;
   {
     // First, traverse the partitions that meet the criteria: the start and end ranges of the partitions are within ts_span
@@ -269,12 +269,12 @@ vector<MMapPartitionTable*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan&
       }
     }
   }
-  vector<MMapPartitionTable*> results;
+  vector<TsTimePartition*> results;
   for (int i = 0 ; i < p_times.size() ; i++) {
     wrLock();
     Defer defer{[&]() { unLock(); }};
-    MMapPartitionTable* p_table = getPartitionTable(p_times[i], p_times[i], err_info, false, false);
-    if (!err_info.isOK() && err_info.errcode != BOENOOBJ) {
+    TsTimePartition* p_table = getPartitionTable(p_times[i], p_times[i], err_info, false, false);
+    if (!err_info.isOK() && err_info.errcode != KWENOOBJ) {
       break;
     }
     results.emplace_back(p_table);
@@ -291,14 +291,14 @@ vector<MMapPartitionTable*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan&
   return std::move(results);
 }
 
-MMapPartitionTable* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timestamp64 max_ts, ErrorInfo& err_info,
-                                                      bool create_if_not_exist, bool lru_push_back) {
-  MMapPartitionTable* mt_table = partition_cache_.Get(p_time);
+TsTimePartition* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timestamp64 max_ts, ErrorInfo& err_info,
+                                                     bool create_if_not_exist, bool lru_push_back) {
+  TsTimePartition* mt_table = partition_cache_.Get(p_time);
   if (mt_table != nullptr) {
     return mt_table;
   }
   string pt_tbl_sub_path = partitionTblSubPath(p_time);
-  mt_table = new MMapPartitionTable(root_tbl_, entity_meta_->GetConfigSubgroupEntities());
+  mt_table = new TsTimePartition(root_tbl_, entity_block_idx_->GetConfigSubgroupEntities());
   mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_OPEN_NORECURSIVE, err_info);
   if (err_info.errcode < 0 && create_if_not_exist) {
     err_info.clear();
@@ -318,7 +318,7 @@ MMapPartitionTable* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, time
   return mt_table;
 }
 
-MMapPartitionTable* TsSubEntityGroup::CreatePartitionTable(timestamp64 ts, ErrorInfo& err_info) {
+TsTimePartition* TsSubEntityGroup::CreatePartitionTable(timestamp64 ts, ErrorInfo& err_info) {
   timestamp64 max_ts;
   timestamp64 p_time = PartitionTime(ts, max_ts);
   string pt_tbl_sub_path = partitionTblSubPath(p_time);
@@ -326,10 +326,10 @@ MMapPartitionTable* TsSubEntityGroup::CreatePartitionTable(timestamp64 ts, Error
   wrLock();
   Defer defer{[&]() { unLock(); }};
   if (partitions_ts_.find(p_time) != partitions_ts_.end()) {
-    err_info.setError(BOEEXIST, pt_tbl_sub_path);
+    err_info.setError(KWEEXIST, pt_tbl_sub_path);
     return nullptr;
   }
-  MMapPartitionTable* mt_table = createPartitionTable(pt_tbl_sub_path, p_time, max_ts, err_info);
+  TsTimePartition* mt_table = createPartitionTable(pt_tbl_sub_path, p_time, max_ts, err_info);
   if (mt_table != nullptr) {
     mt_table->incRefCount();
     partitions_ts_[mt_table->minTimestamp()] = mt_table->maxTimestamp();
@@ -338,15 +338,15 @@ MMapPartitionTable* TsSubEntityGroup::CreatePartitionTable(timestamp64 ts, Error
   return mt_table;
 }
 
-MMapPartitionTable* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
-                                                         ErrorInfo& err_info) {
+TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
+                                                        ErrorInfo& err_info) {
   // Create partition directory
   if (!MakeDirectory(db_path_ + pt_tbl_sub_path, err_info)) {
     return nullptr;
   }
   vector<string> key{};
 
-  MMapPartitionTable* mt_table = new MMapPartitionTable(root_tbl_, entity_meta_->GetConfigSubgroupEntities());
+  TsTimePartition* mt_table = new TsTimePartition(root_tbl_, entity_block_idx_->GetConfigSubgroupEntities());
   mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   if (!err_info.isOK()) {
     delete mt_table;
@@ -370,7 +370,7 @@ int TsSubEntityGroup::RemovePartitionTable(timestamp64 ts, ErrorInfo& err_info, 
     LOG_WARN("Partition[%ld] not exist.", p_time);
     return 0;
   }
-  MMapPartitionTable* mt_table = getPartitionTable(p_time, max_ts, err_info, false);
+  TsTimePartition* mt_table = getPartitionTable(p_time, max_ts, err_info, false);
   if (mt_table == nullptr) {
     return err_info.errcode;
   }
@@ -425,7 +425,7 @@ int TsSubEntityGroup::RemoveExpiredPartition(int64_t end_ts, ErrorInfo& err_info
   return err_info.errcode;
 }
 
-int TsSubEntityGroup::removePartitionTable(MMapPartitionTable* mt_table, bool is_force, ErrorInfo& err_info,
+int TsSubEntityGroup::removePartitionTable(TsTimePartition* mt_table, bool is_force, ErrorInfo& err_info,
                                            bool skip_busy) {
   mt_table->setObjectStatus(OBJ_READY_TO_CHANGE);
   string pt_path = db_path_ + partitionTblSubPath(mt_table->minTimestamp());
@@ -476,11 +476,11 @@ int TsSubEntityGroup::RemoveAll(bool is_force, ErrorInfo& err_info) {
   wrLock();
   Defer defer{[&]() { unLock(); }};
   // Load all partition tables
-  std::vector<MMapPartitionTable*> tables;
+  std::vector<TsTimePartition*> tables;
   for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
     err_info.clear();
-    MMapPartitionTable* mt_table = getPartitionTable(it->first, it->second, err_info, false);
-    if (err_info.errcode == BOENOOBJ) {  // Ignoring non-existent partition tables (deleted or file corrupted)
+    TsTimePartition* mt_table = getPartitionTable(it->first, it->second, err_info, false);
+    if (err_info.errcode == KWENOOBJ) {  // Ignoring non-existent partition tables (deleted or file corrupted)
       err_info.clear();
       continue;
     }
@@ -500,9 +500,9 @@ int TsSubEntityGroup::RemoveAll(bool is_force, ErrorInfo& err_info) {
       tables[i] = nullptr;
     }
     // Delete metadata and subgroup directory
-    err_info.errcode = entity_meta_->remove();
-    delete entity_meta_;
-    entity_meta_ = nullptr;
+    err_info.errcode = entity_block_idx_->remove();
+    delete entity_block_idx_;
+    entity_block_idx_ = nullptr;
     partitions_ts_.clear();
 
     err_info.errcode = fs::remove_all(real_path_.c_str());
@@ -528,7 +528,7 @@ int TsSubEntityGroup::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint6
   map<int64_t, int64_t> partitions = allPartitions();
   for (auto it = partitions.begin() ; it != partitions.end() ; it++) {
     uint64_t num = 0;
-    MMapPartitionTable* p_table = GetPartitionTable(it->first, err_info, false);
+    TsTimePartition* p_table = GetPartitionTable(it->first, err_info, false);
     if (p_table != nullptr) {
       p_table->DeleteEntity(entity_id, lsn, &num, err_info);
     }
@@ -547,7 +547,7 @@ int TsSubEntityGroup::AlterTable(AttributeInfo& attr_info, ErrorInfo& err_info) 
   map<int64_t, int64_t> partitions = allPartitions();
 
   for (auto it = partitions.begin() ; it != partitions.end() ; it++) {
-    MMapPartitionTable* p_table = GetPartitionTable(it->first, err_info, false);
+    TsTimePartition* p_table = GetPartitionTable(it->first, err_info, false);
     if (err_info.errcode < 0) {
       LOG_ERROR("alter table [%s] failed: %s", table_name_.c_str(), err_info.errmsg.c_str());
       break;
@@ -569,7 +569,7 @@ int TsSubEntityGroup::UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, u
   map<int64_t, int64_t> partitions = allPartitions();
   for (auto it = partitions.begin(); it != partitions.end(); it++) {
     uint64_t num = 0;
-    MMapPartitionTable* p_table = GetPartitionTable(it->first, err_info, false);
+    TsTimePartition* p_table = GetPartitionTable(it->first, err_info, false);
     if (p_table != nullptr) {
       p_table->UndoDeleteEntity(entity_id, lsn, &num, err_info);
     }
@@ -579,7 +579,7 @@ int TsSubEntityGroup::UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, u
     }
     *count = *count + num;
   }
-  EntityItem* entity_item = entity_meta_->getEntityItem(entity_id);
+  EntityItem* entity_item = entity_block_idx_->getEntityItem(entity_id);
   entity_item->is_deleted = false;
 
   return err_info.errcode;
@@ -589,7 +589,7 @@ void TsSubEntityGroup::sync(int flags) {
   map<int64_t, int64_t> partitions = allPartitions();
   ErrorInfo err_info;
   for (auto it = partitions.begin() ; it != partitions.end() ; it++) {
-    MMapPartitionTable* p_table = GetPartitionTable(it->first, err_info, false);
+    TsTimePartition* p_table = GetPartitionTable(it->first, err_info, false);
     if (p_table != nullptr) {
       p_table->sync(flags);
     }

@@ -10,7 +10,7 @@
 // See the Mulan PSL v2 for more details.
 #pragma once
 
-#include <mmap/MMapTagColumnTableAux.h>
+#include <mmap/mmap_tag_column_table_aux.h>
 #include <map>
 #include <vector>
 #include <string>
@@ -19,7 +19,7 @@
 #include <utility>
 #include "ts_table.h"
 #include "st_logged_entity_group.h"
-#include "mmap/MMapTagColumnTable.h"
+#include "mmap/mmap_tag_column_table.h"
 
 namespace kwdbts {
 class LoggedTsTable : public TsTable {

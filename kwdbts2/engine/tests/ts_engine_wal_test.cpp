@@ -93,7 +93,7 @@ class TestEngineWAL : public TestBigTableInstance {
       const auto& col = meta.k_column(i);
       struct AttributeInfo col_var;
       TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
-      if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
         schema.push_back(std::move(col_var));
       }
     }

@@ -15,7 +15,6 @@
 #include "ts_snapshot.h"
 #include "ts_table.h"
 #include "st_group_manager.h"
-#include "BigObjectApplication.h"
 #include "payload_builder.h"
 #include "sys_utils.h"
 
@@ -57,7 +56,7 @@ KStatus TsTableSnapshot::Init(kwdbContext_p ctx) {
       return KStatus::FAIL;
     }
   }
-  schema_ = entity_bt_->getSchemaInfo();
+  schema_ = entity_bt_->getSchemaInfoWithHidden();
   return KStatus::SUCCESS;
 }
 
@@ -84,7 +83,7 @@ KStatus TsTableSnapshot::BuildSnapshot(kwdbContext_p ctx, TS_LSN lsn) {
 
 KStatus TsTableSnapshot::CompressSnapshot(kwdbContext_p ctx, size_t* total) {
   // sync data to disk.
-  static_cast<MMapFile*>(snapshot_group_->GetSubEntityGroupTagbt())->sync(O_MATERIALIZATION);
+  static_cast<MMapTagColumnTable*>(snapshot_group_->GetSubEntityGroupTagbt())->sync(O_MATERIALIZATION);
   snapshot_group_->GetSubEntityGroupManager()->sync(O_MATERIALIZATION);
   // construct snapshot directory path
   KString dir_path = db_path_ + tbl_sub_path_ + std::to_string(snapshot_group_->HashRange().range_group_id) + "_" +
@@ -256,7 +255,7 @@ KStatus TsTableSnapshot::getMigratedTagRows() {
 KStatus TsTableSnapshot::applyTagData(int row_id, const EntityID& entity_id, const SubGroupID& subgroup_id) {
   ErrorInfo err_info;
   std::vector<TagColumn*> tag_attribute_info = entity_group_->GetSubEntityGroupTagbt()->getSchemaInfo();
-  vector<AttributeInfo> metrics_attribute_info = entity_bt_->getActualSchemaInfo();
+  vector<AttributeInfo> metrics_attribute_info = entity_bt_->getSchemaInfoWithoutHidden();
 
   ResultSet tag_res{(k_uint32)tag_attribute_info.size()};
   std::vector<uint32_t> scan_tags;
@@ -343,10 +342,10 @@ KStatus TsTableSnapshot::applyEntityData(uint32_t& subgroup_id, SubGroupID& snap
       // By calling the GetPartitionTable, the subgroup is recorded in the memory of the entity group
       string partition_dir = entry->d_name;
       timestamp64 ts = convertToTimestamp(partition_dir);
-      MMapPartitionTable* p_bt = subgroup->GetPartitionTable(ts, err_info);
+      TsTimePartition* p_bt = subgroup->GetPartitionTable(ts, err_info);
       ReleaseTable(p_bt);
 
-      MMapPartitionTable* snapshot_partition_bt = snapshot_subgroup->GetPartitionTable(ts, err_info);
+      TsTimePartition* snapshot_partition_bt = snapshot_subgroup->GetPartitionTable(ts, err_info);
       ReleaseTable(snapshot_partition_bt);
 
       // update root table's min/max timestamp
@@ -374,9 +373,9 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
   }
 
   std::vector<k_uint32> scan_cols;
-  vector<AttributeInfo> metrics_attribute_info = entity_bt_->getActualSchemaInfo();
+  vector<AttributeInfo> metrics_attribute_info = entity_bt_->getSchemaInfoWithoutHidden();
   k_uint32 num_col = metrics_attribute_info.size();
-  auto actual_cols = entity_bt_->getActualCols();
+  auto actual_cols = entity_bt_->getColsIdxForHidden();
   std::vector<k_uint32> ts_scan_cols;
   for (int i = 0; i < num_col; i++) {
     scan_cols.push_back(i);
@@ -471,7 +470,7 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
           batch->isNull(batch_data_index, &is_null);
           if (is_null) {
             LOG_INFO("The data is null at column[%ld:%s] batch[%d]",
-                     column, metrics_attribute_info[column].name.c_str(), batch_data_index);
+                     column, metrics_attribute_info[column].name, batch_data_index);
             pl_builder.SetColumnNull(batch_data_index, column);
             continue;
           }

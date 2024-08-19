@@ -21,7 +21,6 @@
 #include "st_worker.h"
 #include "st_meta.h"
 #include "ts_table.h"
-#include "ds_hazard_pointer.h"
 
 using namespace kwdbts;
 

@@ -16,8 +16,8 @@
 #include <vector>
 #include <utility>
 #include "lru_cache.h"
-#include "mmap/MMapMetricsTable.h"
-#include "mmap/MMapPartitionTable.h"
+#include "mmap/mmap_metrics_table.h"
+#include "ts_time_partition.h"
 #include "libkwdbts2.h"
 
 namespace kwdbts {
@@ -121,9 +121,9 @@ class TsSubEntityGroup : public TSObject {
  *
  * @return 
  */
-  MMapPartitionTable* GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
-                                        bool create_if_not_exist = false,
-                                        bool lru_push_back = false);
+  TsTimePartition* GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
+                                     bool create_if_not_exist = false,
+                                     bool lru_push_back = false);
 
   /**
  * @brief  Filter partition table instances based on ts span
@@ -131,7 +131,7 @@ class TsSubEntityGroup : public TSObject {
  *
  * @return 
  */
-  vector<MMapPartitionTable*> GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info);
+  vector<TsTimePartition*> GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info);
 
   /**
  * @brief Create MMapPartitionTable in the time partition directory
@@ -139,7 +139,7 @@ class TsSubEntityGroup : public TSObject {
  *
  * @return MMapPartitionTable
  */
-  MMapPartitionTable* CreatePartitionTable(timestamp64 ts, ErrorInfo& err_info);
+  TsTimePartition* CreatePartitionTable(timestamp64 ts, ErrorInfo& err_info);
 
 /**
  * @brief Remove partition table within the ts.
@@ -203,8 +203,8 @@ class TsSubEntityGroup : public TSObject {
   MMapMetricsTable*& root_tbl_;
   std::string table_name_;
   SubGroupID subgroup_id_;
-  // The meta of subgroup is mainly used to manage the allocation of EntityIDs
-  MMapEntityMeta* entity_meta_{nullptr};
+  // The block index of subgroup is mainly used to manage the allocation of EntityIDs
+  MMapEntityIdx* entity_block_idx_{nullptr};
   // The set of all partition times: key=minimum partition time, value=maximum partition time
   map<timestamp64, timestamp64> partitions_ts_;
   // deleted but skipped partitions
@@ -231,15 +231,15 @@ class TsSubEntityGroup : public TSObject {
  *
  * @return 
  */
-  MMapPartitionTable* getPartitionTable(timestamp64 p_time, timestamp64 max_ts, ErrorInfo& err_info,
-                                      bool create_if_not_exist = false, bool lru_push_back = false);
+  TsTimePartition* getPartitionTable(timestamp64 p_time, timestamp64 max_ts, ErrorInfo& err_info,
+                                     bool create_if_not_exist = false, bool lru_push_back = false);
   /**
   * @brief Internal method for creating MMapPartitionTable
   *
   * @return 
   */
-  MMapPartitionTable* createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
-                                           ErrorInfo& err_info);
+  TsTimePartition* createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
+                                        ErrorInfo& err_info);
 
   /**
   * @brief internal functions of RemoveMMapPartitionTable
@@ -247,7 +247,7 @@ class TsSubEntityGroup : public TSObject {
   *
   * @return error code
   */
-  int removePartitionTable(MMapPartitionTable* mt_table, bool is_force, ErrorInfo& err_info, bool skip_busy = false);
+  int removePartitionTable(TsTimePartition* mt_table, bool is_force, ErrorInfo& err_info, bool skip_busy = false);
 
   inline string partitionTblSubPath(timestamp64 p_time) {
     if (p_time >= 0) {
@@ -259,7 +259,7 @@ class TsSubEntityGroup : public TSObject {
 
   //
   void deleteEntityItem(uint entity_id) {
-    entity_meta_->deleteEntity(entity_id);
+    entity_block_idx_->deleteEntity(entity_id);
   }
 
   // Internal method to obtain all partition information: Lock, copy partitions.ts_, and return

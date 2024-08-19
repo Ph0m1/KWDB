@@ -61,9 +61,9 @@ class TestEntityTableManager : public TestBigTableInstance {
       MMapMetricsTable* tmp_bt = new MMapMetricsTable();
       string bt_url = nameToEntityBigTableURL(std::to_string(table_id_));
       if (tmp_bt->open(bt_url, kDbPath, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 ||
-          err_info.errcode == BOECORR) {
+          err_info.errcode == KWECORR) {
         tmp_bt->create(schema_, key, key_order, tbl_sub_path_, "", tbl_sub_path_,
-                       s_emptyString(), BigObjectConfig::iot_interval,
+                       s_emptyString, kwdbts::EngineOptions::iot_interval,
                        encoding, err_info, false);
       }
       if (err_info.errcode < 0) {
@@ -101,7 +101,7 @@ TEST_F(TestEntityTableManager, group) {
   ASSERT_EQ(err_info.errmsg, "");
   ASSERT_EQ(g1_bt->GetID(), 0);
   // et_manager_->ReleasePartitionTable(g1_bt);
-  MMapPartitionTable* sg1_bt = et_manager_->CreatePartitionTable(1704280045000, 0, err_info);
+  TsTimePartition* sg1_bt = et_manager_->CreatePartitionTable(1704280045000, 0, err_info);
   ASSERT_EQ(err_info.errmsg, "");
   ASSERT_EQ(sg1_bt->getSchemaInfo().size(), 3);
   et_manager_->ReleasePartitionTable(sg1_bt);
@@ -110,7 +110,7 @@ TEST_F(TestEntityTableManager, group) {
   ASSERT_EQ(err_info.errmsg, "");
   ASSERT_EQ(g2_bt->GetID(), 1);
   // et_manager_->ReleasePartitionTable(g2_bt);
-  MMapPartitionTable* sg2_bt = et_manager_->CreatePartitionTable(1704280045000, 1, err_info);
+  TsTimePartition* sg2_bt = et_manager_->CreatePartitionTable(1704280045000, 1, err_info);
   ASSERT_EQ(err_info.errmsg, "");
   ASSERT_EQ(sg2_bt->getSchemaInfo().size(), 3);
   et_manager_->ReleasePartitionTable(sg2_bt);
@@ -152,7 +152,7 @@ TEST_F(TestEntityTableManager, partition) {
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(g1_bt->GetID(), 0);
     // et_manager_->ReleasePartitionTable(g1_bt);
-    MMapPartitionTable* sg1_bt = et_manager_->CreatePartitionTable(p1_time, 0, err_info);
+    TsTimePartition* sg1_bt = et_manager_->CreatePartitionTable(p1_time, 0, err_info);
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(sg1_bt->getSchemaInfo().size(), 3);
     et_manager_->ReleasePartitionTable(sg1_bt);
@@ -161,7 +161,7 @@ TEST_F(TestEntityTableManager, partition) {
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(g2_bt->GetID(), 1);
     // et_manager_->ReleasePartitionTable(g2_bt);
-    MMapPartitionTable* sg2_bt = et_manager_->CreatePartitionTable(p1_time, 1, err_info);
+    TsTimePartition* sg2_bt = et_manager_->CreatePartitionTable(p1_time, 1, err_info);
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(sg2_bt->getSchemaInfo().size(), 3);
     et_manager_->ReleasePartitionTable(sg2_bt);
@@ -170,13 +170,13 @@ TEST_F(TestEntityTableManager, partition) {
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(g3_bt->GetID(), 2);
     // et_manager_->ReleasePartitionTable(g3_bt);
-    MMapPartitionTable* sg3_bt = et_manager_->CreatePartitionTable(p1_time, 2, err_info);
+    TsTimePartition* sg3_bt = et_manager_->CreatePartitionTable(p1_time, 2, err_info);
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(sg3_bt->getSchemaInfo().size(), 3);
     et_manager_->ReleasePartitionTable(sg3_bt);
 
     // recreate group1 failed
-    MMapPartitionTable* g2_bt2 = et_manager_->CreatePartitionTable(p1_time, 1, err_info);
+    TsTimePartition* g2_bt2 = et_manager_->CreatePartitionTable(p1_time, 1, err_info);
     ASSERT_LT(err_info.errcode, 0);
     ASSERT_EQ(g2_bt2, nullptr);
     err_info.clear();
@@ -184,7 +184,7 @@ TEST_F(TestEntityTableManager, partition) {
   {
     timestamp64 p2_time = 7200;
     // SubGroup1 create SubGroupTable, partition 7200
-    MMapPartitionTable* g2_bt = et_manager_->CreatePartitionTable(p2_time, 1, err_info);
+    TsTimePartition* g2_bt = et_manager_->CreatePartitionTable(p2_time, 1, err_info);
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ(g2_bt->getSchemaInfo().size(), 3);
     et_manager_->ReleasePartitionTable(g2_bt);
@@ -202,14 +202,14 @@ TEST_F(TestEntityTableManager, cache) {
   ASSERT_EQ(err_info.errmsg, "");
   ASSERT_EQ(g1_bt->GetID(), group_id);
   {
-    MMapPartitionTable* tbl1 = et_manager_->CreatePartitionTable(p1_time, group_id, err_info);
+    TsTimePartition* tbl1 = et_manager_->CreatePartitionTable(p1_time, group_id, err_info);
     ASSERT_EQ(err_info.errmsg, "");
     ReleaseTable(tbl1);
   }
   {
-    MMapPartitionTable* table1 = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
+    TsTimePartition* table1 = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
     ASSERT_EQ(err_info.errmsg, "");
-    MMapPartitionTable* table2 = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
+    TsTimePartition* table2 = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
     ASSERT_EQ(err_info.errmsg, "");
     ASSERT_EQ((intptr_t)table1, (intptr_t)table2);
     ASSERT_EQ(table1->refCount(), 3);
@@ -220,22 +220,22 @@ TEST_F(TestEntityTableManager, cache) {
   {
     intptr_t p1_mem = 0 ;
     {
-      MMapPartitionTable* p1_tbl = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
+      TsTimePartition* p1_tbl = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
       p1_mem = (intptr_t) p1_tbl;
       ReleaseTable(p1_tbl);
     }
 
     timestamp64 p_time = p1_time + iot_interval_;
     for (int i = 0 ; i < TsSubEntityGroup::cache_capacity_ ; i++) {
-      MMapPartitionTable* m_table = et_manager_->CreatePartitionTable(p_time, group_id, err_info);
+      TsTimePartition* m_table = et_manager_->CreatePartitionTable(p_time, group_id, err_info);
       ASSERT_EQ(err_info.errmsg, "");
       ReleaseTable(m_table);
       p_time += iot_interval_;
     }
     {
-      MMapPartitionTable* tmp = new MMapPartitionTable(root_bt_, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+      TsTimePartition* tmp = new TsTimePartition(root_bt_, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
       // Test to prevent partition MMapMetricsTable from using the same memory address
-      MMapPartitionTable* p1_tbl = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
+      TsTimePartition* p1_tbl = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
       ASSERT_NE(p1_mem, (intptr_t) p1_tbl);
       ReleaseTable(p1_tbl);
       delete tmp;

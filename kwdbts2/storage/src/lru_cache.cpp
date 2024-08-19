@@ -29,7 +29,7 @@ PartitionLRUCache::~PartitionLRUCache() {
   lru_cache_rwlock_ = nullptr;
 }
 
-void PartitionLRUCache::Put(const timestamp64& key, MMapPartitionTable*& value, bool push_back) {
+void PartitionLRUCache::Put(const timestamp64& key, TsTimePartition*& value, bool push_back) {
   wrLock();
   Defer defer{[&]() {
     unLock();
@@ -66,7 +66,7 @@ void PartitionLRUCache::Put(const timestamp64& key, MMapPartitionTable*& value, 
   }
 }
 
-MMapPartitionTable* PartitionLRUCache::Get(const timestamp64& key) {
+TsTimePartition* PartitionLRUCache::Get(const timestamp64& key) {
   wrLock();
   Defer defer{[&]() { unLock(); }};
   try {
@@ -84,10 +84,10 @@ MMapPartitionTable* PartitionLRUCache::Get(const timestamp64& key) {
   }
 }
 
-std::vector<MMapPartitionTable*> PartitionLRUCache::GetAll(bool inc_ref) {
+std::vector<TsTimePartition*> PartitionLRUCache::GetAll(bool inc_ref) {
   rdLock();
   Defer defer{[&]() { unLock(); }};
-  std::vector<MMapPartitionTable*> tables;
+  std::vector<TsTimePartition*> tables;
   try {
     auto it = cache_items_map_.begin();
     for (; it != cache_items_map_.end() ; it++) {

@@ -17,8 +17,6 @@
 #include "../statistics.h"
 #include "st_entitygroup_worker.h"
 
-extern DedupRule g_dedup_rule_;
-
 namespace kwdbts {
 
 KBStatus TSEntityGroupWriteWorker::do_work(KTimestamp  new_ts) {
@@ -46,7 +44,7 @@ KBStatus TSEntityGroupWriteWorker::do_work(KTimestamp  new_ts) {
   {
       KWDB_START();
       DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-      stat = entity_group_->PutData(ctx, payload, 0, &dedup_result, g_dedup_rule_);
+      stat = entity_group_->PutData(ctx, payload, 0, &dedup_result, StInstance::Get()->GetDedupRule());
       KWDB_DURATION(_row_put_time);
   }
   delete[] payload.data;
@@ -106,7 +104,7 @@ KBStatus TSEntityGroupWriteWorkerWithScan::do_work(KTimestamp  new_ts) {
         return KBStatus(StatusCode::RError, "iterator next failed.");
       }
       if (ret_cnt > 0 && !checkColValue(data_schema_, res, ret_cnt, params_.time_inc)) {
-        return KBStatus(StatusCode::RError, "colume value check failed.");
+        return KBStatus(StatusCode::RError, "column value check failed.");
       }
       total_rows += ret_cnt;
     } while (!is_finished);
@@ -179,7 +177,7 @@ KBStatus TSEntityGroupScanWorker::do_work(KTimestamp  new_ts) {
       s = iter1->Next(&res, &ret_cnt, &is_finished);
       assert(s == KStatus::SUCCESS);
       if (ret_cnt > 0 && !checkColValue(data_schema_, res, ret_cnt, params_.time_inc)) {
-        return KBStatus(StatusCode::RError, "colume value check failed.");
+        return KBStatus(StatusCode::RError, "column value check failed.");
       }
       total_rows += ret_cnt;
     } while (!is_finished);

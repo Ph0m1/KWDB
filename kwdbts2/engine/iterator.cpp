@@ -91,7 +91,7 @@ void TsIterator::fetchBlockItems(k_uint32 entity_id) {
   p_bts_[cur_p_bts_idx_]->GetAllBlockItems(entity_id, block_item_queue_, is_reversed_);
 }
 
-KStatus TsIterator::Init(std::vector<MMapPartitionTable*>& p_bts, bool is_reversed) {
+KStatus TsIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) {
   p_bts_ = std::move(p_bts);
   is_reversed_ = is_reversed;
   if (!p_bts_.empty() && is_reversed_) {
@@ -163,7 +163,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
       }
       continue;
     }
-    MMapPartitionTable* cur_pt = p_bts_[cur_p_bts_idx_];
+    TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         // 此时确定没有比ts更小的数据存在，直接返回-1，查询结束
@@ -241,7 +241,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
 
 // Used to update the value of the first/first_row member variable during the traversal process
 void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id) {
-  MMapPartitionTable* cur_pt = p_bts_[cur_first_idx_];
+  TsTimePartition* cur_pt = p_bts_[cur_first_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
     LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item_->block_id, cur_pt->GetPath().c_str());
@@ -265,7 +265,7 @@ void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id) {
 
 // Used to update the value of the last/last_row member variable during the traversal process
 void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id) {
-  MMapPartitionTable* cur_pt = p_bts_[cur_last_idx_];
+  TsTimePartition* cur_pt = p_bts_[cur_last_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
     LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item_->block_id, cur_pt->GetPath().c_str());
@@ -289,7 +289,7 @@ void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id) {
 
 // Used to update the value of the last/last_row member variable during the traversal process
 void TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id) {
-  MMapPartitionTable* cur_pt = p_bts_[cur_p_bts_idx_];
+  TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
     LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item_->block_id, cur_pt->GetPath().c_str());
@@ -338,7 +338,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
     return KStatus::SUCCESS;
   }
   for ( ; cur_first_idx_ < p_bts_.size(); ++cur_first_idx_) {
-    MMapPartitionTable* cur_pt = p_bts_[cur_first_idx_];
+    TsTimePartition* cur_pt = p_bts_[cur_first_idx_];
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         // 此时确定没有比ts更小的数据存在，跳出循环
@@ -471,7 +471,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
         } else {
           MetricRowID real_row = first_row_pair_.second.second;
           timestamp64 first_row_ts = first_row_pair_.second.first;
-          MMapPartitionTable* cur_pt = p_bts_[pt_idx];
+          TsTimePartition* cur_pt = p_bts_[pt_idx];
           std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -537,7 +537,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
     return KStatus::SUCCESS;
   }
   for ( ; cur_last_idx_ >= 0; --cur_last_idx_) {
-    MMapPartitionTable* cur_pt = p_bts_[cur_last_idx_];
+    TsTimePartition* cur_pt = p_bts_[cur_last_idx_];
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         // 此时确定没有比ts更小的数据存在，跳出循环
@@ -670,7 +670,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
         } else {
           MetricRowID real_row = last_row_pair_.second.second;
           timestamp64 last_row_ts = last_row_pair_.second.first;
-          MMapPartitionTable* cur_pt = p_bts_[pt_idx];
+          TsTimePartition* cur_pt = p_bts_[pt_idx];
           std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -745,7 +745,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
       continue;
     }
     BlockItem* cur_block = cur_block_item_;
-    MMapPartitionTable* cur_pt = p_bts_[cur_p_bts_idx_];
+    TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         // 此时确定没有比ts更小的数据存在，直接返回-1，查询结束
@@ -844,15 +844,15 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             !colTypeHasAggResult((DATATYPE)attrs_[ts_col].type, scan_agg_types_[i])) {
           continue;
         }
-        AttributeInfo actual_col = segment_tbl->GetActualCol(ts_col);
+        AttributeInfo col_info = segment_tbl->GetColInfo(ts_col);
         Batch* b;
         if (*count < cur_block->publish_row_count || !cur_block->is_agg_res_available ||
-            actual_col.type != attrs_[ts_col].type || actual_col.size != attrs_[ts_col].size) {
+            col_info.type != attrs_[ts_col].type || col_info.size != attrs_[ts_col].size) {
           switch (scan_agg_types_[i]) {
             case Sumfunctype::MAX: {
               void* mem = segment_tbl->columnAddr(first_real_row, ts_col);
               void* bitmap = segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col);
-              if (actual_col.type != attrs_[ts_col].type || actual_col.size != attrs_[ts_col].size) {
+              if (col_info.type != attrs_[ts_col].type || col_info.size != attrs_[ts_col].size) {
                 std::shared_ptr<void> new_mem;
                 std::vector<std::shared_ptr<void>> new_var_mem;
                 int error_code = getActualColMem(segment_tbl, first_row, ts_col, *count, &new_mem, new_var_mem);
@@ -901,7 +901,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             case Sumfunctype::MIN: {
               void* mem = segment_tbl->columnAddr(first_real_row, ts_col);
               void* bitmap = segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col);
-              if (actual_col.type != attrs_[ts_col].type || actual_col.size != attrs_[ts_col].size) {
+              if (col_info.type != attrs_[ts_col].type || col_info.size != attrs_[ts_col].size) {
                 std::shared_ptr<void> new_mem;
                 std::vector<std::shared_ptr<void>> new_var_mem;
                 int error_code = getActualColMem(segment_tbl, first_row, ts_col, *count, &new_mem, new_var_mem);
@@ -950,7 +950,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             case Sumfunctype::SUM: {
               AggCalculator agg_cal(segment_tbl->columnAddr(first_real_row, ts_col),
                                     segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col), first_row,
-                                    DATATYPE(actual_col.type), actual_col.size, *count);
+                                    DATATYPE(col_info.type), col_info.size, *count);
               void* sum;
               bool is_overflow = agg_cal.GetSum(&sum);
               b = CreateAggBatch(sum, nullptr);
@@ -978,7 +978,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             // If a type overflow is identified, the SUM result needs to be recalculated and cannot be read directly.
             AggCalculator agg_cal(segment_tbl->columnAddr(first_real_row, ts_col),
                                   segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col), first_row,
-                                  DATATYPE(actual_col.type), actual_col.size, *count);
+                                  DATATYPE(col_info.type), col_info.size, *count);
             void* sum;
             bool is_overflow = agg_cal.GetSum(&sum);
             b = CreateAggBatch(sum, nullptr);
@@ -1017,7 +1017,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
   return SUCCESS;
 }
 
-int TsAggIterator::getActualColAggBatch(MMapPartitionTable* p_bt, MetricRowID real_row, uint32_t ts_col, Batch** b) {
+int TsAggIterator::getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t ts_col, Batch** b) {
   std::shared_ptr<MMapSegmentTable> segment_tbl = p_bt->getSegmentTable(real_row.block_id);
   if (segment_tbl == nullptr) {
     LOG_ERROR("Can not find segment use block [%d], in path [%s]", real_row.block_id, p_bt->GetPath().c_str());
@@ -1118,7 +1118,7 @@ int TsAggIterator::getActualColMem(std::shared_ptr<MMapSegmentTable> segment_tbl
   return KStatus::SUCCESS;
 }
 
-KStatus TsAggIterator::Init(std::vector<MMapPartitionTable*>& p_bts, bool is_reversed) {
+KStatus TsAggIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) {
   TsIterator::Init(p_bts, is_reversed);
   only_first_type_ = onlyHasFirstAggType();
   only_last_type_ = onlyHasLastAggType();
@@ -1330,7 +1330,7 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
         } else {
           MetricRowID real_row = first_row_pair_.second.second;
           timestamp64 first_row_ts = first_row_pair_.second.first;
-          MMapPartitionTable* cur_pt = p_bts_[pt_idx];
+          TsTimePartition* cur_pt = p_bts_[pt_idx];
           std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -1362,7 +1362,7 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
         } else {
           MetricRowID real_row = last_row_pair_.second.second;
           timestamp64 last_row_ts = last_row_pair_.second.first;
-          MMapPartitionTable* cur_pt = p_bts_[pt_idx];
+          TsTimePartition* cur_pt = p_bts_[pt_idx];
 
           std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {

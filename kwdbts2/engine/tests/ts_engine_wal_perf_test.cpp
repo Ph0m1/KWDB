@@ -62,7 +62,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
   }
 
   void ConstructTestRoachpbTable(roachpb::CreateTsTable* meta, const KString& prefix_table_name, KTableKey table_id,
-                                 uint64_t partition_interval = BigObjectConfig::iot_interval) {
+                                 uint64_t partition_interval = kwdbts::EngineOptions::iot_interval) {
     // create table :  TIMESTAMP | FLOAT | INT | CHAR(char_len) | BOOL | BINARY(binary_len)
     roachpb::KWDBTsTable* table = KNEW roachpb::KWDBTsTable();
     table->set_ts_table_id(table_id);
@@ -114,7 +114,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
     char* tag_data_start_ptr = payload.GetTagAddr() + (tag_schema.size() + 7) / 8;
     for (int i = 0; i < tag_schema.size(); i++) {
       // generate primary tag
-      if (tag_schema[i].isAttrType(ATTR_PRIMARY_TAG)) {
+      if (tag_schema[i].isAttrType(COL_PRIMARY_TAG)) {
         switch (tag_schema[i].type) {
           case DATATYPE::TIMESTAMP64:
             KTimestamp(primary_start_ptr) = start_ts;
@@ -184,7 +184,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
       const auto& col = meta.k_column(i);
       struct AttributeInfo col_var;
       TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i==0);
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_value_len += col_var.size;
         tag_schema.emplace_back(std::move(col_var));
       } else {
@@ -368,7 +368,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
       const auto& col = meta.k_column(i);
       struct AttributeInfo col_var;
       TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
-      if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
         schema.push_back(std::move(col_var));
       }
     }

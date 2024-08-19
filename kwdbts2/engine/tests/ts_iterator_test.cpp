@@ -189,7 +189,7 @@ TEST_F(TestIterator, disorder) {
 // Write data from multiple partitions and meta blocks
 TEST_F(TestIterator, multi_partition) {
   // Increase partition time
-  BigObjectConfig::iot_interval = 360000;
+  kwdbts::EngineOptions::iot_interval = 360000;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1002;
@@ -211,7 +211,7 @@ TEST_F(TestIterator, multi_partition) {
   int write_count = block_item_max * block_item_row_max + 1;
   for (int i = 1; i <= partition_num; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
@@ -219,7 +219,7 @@ TEST_F(TestIterator, multi_partition) {
     data_value = nullptr;
   }
 
-  KTimestamp start_ts = BigObjectConfig::iot_interval * 1000;
+  KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
   std::vector<k_uint32> scan_cols = {0, 1, 2, 3};
@@ -236,14 +236,14 @@ TEST_F(TestIterator, multi_partition) {
     bool is_finished = false;
     ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
     ASSERT_EQ(count, block_item_row_max);
-    ASSERT_EQ(KTimestamp(res.data[0][0]->mem), BigObjectConfig::iot_interval * 1000 + i * block_item_row_max);
+    ASSERT_EQ(KTimestamp(res.data[0][0]->mem), kwdbts::EngineOptions::iot_interval * 1000 + i * block_item_row_max);
   }
   ResultSet res1{(k_uint32) scan_cols.size()};
   bool is_finished = false;
   ASSERT_EQ(iter->Next(&res1, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
   ASSERT_EQ(KTimestamp(res1.data[0][0]->mem),
-            BigObjectConfig::iot_interval * 1000 + block_item_max * block_item_row_max);
+            kwdbts::EngineOptions::iot_interval * 1000 + block_item_max * block_item_row_max);
 
   // Second partition table data
   for (int i = 0; i < block_item_max; ++i) {
@@ -251,13 +251,13 @@ TEST_F(TestIterator, multi_partition) {
     bool is_finished = false;
     ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
     ASSERT_EQ(count, block_item_row_max);
-    ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * BigObjectConfig::iot_interval * 1000 + i * block_item_row_max);
+    ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * kwdbts::EngineOptions::iot_interval * 1000 + i * block_item_row_max);
   }
   ResultSet res2{(k_uint32) scan_cols.size()};
   ASSERT_EQ(iter->Next(&res2, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
   ASSERT_EQ(KTimestamp(res2.data[0][0]->mem),
-            2 * BigObjectConfig::iot_interval * 1000 + block_item_max * block_item_row_max);
+            2 * kwdbts::EngineOptions::iot_interval * 1000 + block_item_max * block_item_row_max);
 
   ResultSet res3{(k_uint32) scan_cols.size()};
   ASSERT_EQ(iter->Next(&res3, &count, &is_finished), KStatus::SUCCESS);
@@ -270,7 +270,7 @@ TEST_F(TestIterator, multi_partition) {
 // Test reading aggregation results
 TEST_F(TestIterator, aggregation1) {
   size_t block_item_row_max = 1000;
-  BigObjectConfig::iot_interval = 12000;
+  kwdbts::EngineOptions::iot_interval = 12000;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1003;
@@ -406,7 +406,7 @@ TEST_F(TestIterator, aggregation1) {
 // Test reading the same column aggregation result
 TEST_F(TestIterator, aggregation2) {
   size_t block_item_row_max = 1000;
-  BigObjectConfig::iot_interval = 12000;
+  kwdbts::EngineOptions::iot_interval = 12000;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1003;
@@ -573,7 +573,7 @@ TEST_F(TestIterator, aggregation2) {
 // Test the results of sum calculation overflow
 TEST_F(TestIterator, sum_overflow) {
   roachpb::CreateTsTable meta;
-  BigObjectConfig::iot_interval = 3600;
+  kwdbts::EngineOptions::iot_interval = 3600;
 
   KTableKey cur_table_id = 1003;
   ConstructRoachpbTable(&meta, "test_table", cur_table_id);
@@ -683,7 +683,7 @@ TEST_F(TestIterator, sum_overflow) {
 // Test first/last/last_row
 TEST_F(TestIterator, last_row) {
   size_t block_item_row_max = 1000;
-  BigObjectConfig::iot_interval = 12000;
+  kwdbts::EngineOptions::iot_interval = 12000;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1003;
@@ -889,7 +889,7 @@ TEST_F(TestIterator, last_row) {
 // Test Special handling when only reading first/las
 TEST_F(TestIterator, fast_first_last) {
   size_t block_item_row_max = 1000;
-  BigObjectConfig::iot_interval = 3600;
+  kwdbts::EngineOptions::iot_interval = 3600;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1003;
@@ -1114,7 +1114,7 @@ TEST_F(TestIterator, delete_data) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -1560,7 +1560,7 @@ TEST_F(TestIterator, tstable) {
 // Test the concurrent read function of TsTableIterator
 TEST_F(TestIterator, multi_thread) {
   size_t block_item_row_max = 1000;
-  BigObjectConfig::iot_interval = 12000;
+  kwdbts::EngineOptions::iot_interval = 12000;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1007;

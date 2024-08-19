@@ -17,12 +17,11 @@
 #include <random>
 #include <utility>
 #include "test_util.h"
-#include "mmap/MMapTagColumnTable.h"
-#include "mmap/MMapTagColumnTableAux.h"
-#include "BigObjectApplication.h"
-#include "BigObjectUtils.h"
+#include "mmap/mmap_tag_column_table.h"
+#include "mmap/mmap_tag_column_table_aux.h"
+#include "utils/big_table_utils.h"
 #include "test_tag_util.h"
-#include "DataType.h"
+#include "data_type.h"
 #include "payload.h"
 
 const string TestBigTableInstance::kw_home_ = "./data_kw/";  // NOLINT
@@ -76,7 +75,7 @@ class TestTagRuTable : public TestBigTableInstance {
       for (int i = 0; i < schema.size(); i++) {
         AttributeInfo info;
         info.id = i;
-        info.name = "";
+        strcpy(info.name, "");
         info.type = schema[i].m_data_type;
         info.offset = 0;
         info.size = schema[i].m_size;
@@ -85,9 +84,7 @@ class TestTagRuTable : public TestBigTableInstance {
         info.flag = 0;
         info.max_len = 0;
         info.version = 1;
-        info.attr_type = (schema[i].m_tag_type == PRIMARY_TAG) ? ATTR_PRIMARY_TAG : ATTR_GENERAL_TAG;
-        info.lastFlag = (LASTAGGFLAG)1;
-        info.default_str = "";
+        info.col_flag = (schema[i].m_tag_type == PRIMARY_TAG) ? COL_PRIMARY_TAG : COL_GENERAL_TAG;
         schema_.push_back(std::move(info));
       }
 
@@ -122,10 +119,10 @@ class TestTagRuTable : public TestBigTableInstance {
       }
 
       while (cur_operand_ < schema_.size()) {
-	AttributeInfo info = schema_[cur_operand_];
-	if ((flag_ == 1) && (info.attr_type == ATTR_GENERAL_TAG)) {
+  AttributeInfo info = schema_[cur_operand_];
+	if ((flag_ == 1) && (info.col_flag == COL_GENERAL_TAG)) {
 	  cur_operand_++; //skip general tag
-	} else if ((flag_ == 2) && (info.attr_type == ATTR_TS_DATA)) {
+	} else if ((flag_ == 2) && (info.col_flag == COL_TS_DATA)) {
 	  cur_operand_++; // skip data
 	} else {
 	  break;
@@ -133,10 +130,10 @@ class TestTagRuTable : public TestBigTableInstance {
       }
 
       AttributeInfo info = schema_[cur_operand_++];
-      if (info.attr_type == ATTR_PRIMARY_TAG) {
+      if (info.col_flag == COL_PRIMARY_TAG) {
 	  cur_tag_operand_++;
 	  fillPrimary(val, len, info.length);
-      } else if (info.attr_type == ATTR_GENERAL_TAG) {
+      } else if (info.col_flag == COL_GENERAL_TAG) {
 	cur_tag_operand_++;
 	if (info.type == DATATYPE::VARSTRING) {
 	  fillTag(val, len, info.length, true);
@@ -198,11 +195,11 @@ class TestTagRuTable : public TestBigTableInstance {
       size_t fix_len = 0;
       size_t var_len = 0;
       for (auto & i : schema_) {
-        if (i.attr_type == ATTR_PRIMARY_TAG) {
+        if (i.col_flag == COL_PRIMARY_TAG) {
           tag_col_num += 1;
           pri_len += i.length;
           fix_len += i.length;
-        } else if (i.attr_type == ATTR_GENERAL_TAG) {
+        } else if (i.col_flag == COL_GENERAL_TAG) {
           tag_col_num += 1;
           if (i.type == DATATYPE::VARSTRING) {
             fix_len += 8;
@@ -797,7 +794,7 @@ TEST_F(TestTagRuTable, cleanTagFiles) {
   EXPECT_EQ(err_info.errcode, 0);
 
   bt->setDrop();
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 110, 101);
 
   string filename(db_path_ + db_name_ + "/110.tag.pt");
@@ -842,7 +839,7 @@ TEST_F(TestTagRuTable, cleanTagFiles) {
   EXPECT_GE(rc, 0);
 
   bt->setDrop();
-  bt->flush(100);
+  bt->sync_with_lsn(100);
   CleanTagFiles(db_path_ + db_name_, 110, 101);
 
   filename = db_path_ + db_name_ + "/110.tag.1.old";

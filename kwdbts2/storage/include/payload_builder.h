@@ -14,10 +14,10 @@
 
 #include <memory>
 #include <vector>
-#include "DataType.h"
+#include "data_type.h"
 #include "kwdb_type.h"
 #include "payload.h"
-#include "mmap/MMapTagColumnTable.h"
+#include "mmap/mmap_tag_column_table.h"
 
 namespace kwdbts {
 

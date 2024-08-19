@@ -6,8 +6,7 @@
 #include <filesystem>
 #include <utility>
 #include <memory>
-#include "BigObjectApplication.h"
-#include "BigObjectUtils.h"
+#include "utils/big_table_utils.h"
 #include "ts_table.h"
 #include "payload_generator.h"
 #include "common.h"

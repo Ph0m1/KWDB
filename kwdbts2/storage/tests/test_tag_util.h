@@ -22,9 +22,8 @@
 #include <vector>
 #include <string>
 #include <utility>
-#include "BigObjectUtils.h"
-#include "BigObjectApplication.h"
-#include "mmap/MMapTagColumnTable.h"
+#include "utils/big_table_utils.h"
+#include "mmap/mmap_tag_column_table.h"
 
 // change char* memory to KTimestamp.
 #define KTimestamp(buf) (*(static_cast<timestamp64 *>(static_cast<void *>(buf))))

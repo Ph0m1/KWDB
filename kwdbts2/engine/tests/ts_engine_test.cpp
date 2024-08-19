@@ -337,7 +337,7 @@ TEST_F(TestEngine, DeleteEntities) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -421,7 +421,7 @@ TEST_F(TestEngine, DeleteData) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -474,7 +474,7 @@ TEST_F(TestEngine, DeleteData) {
 
 TEST_F(TestEngine, DeleteExpiredData) {
   // Increase the partition interval
-  BigObjectConfig::iot_interval = 360000;
+  kwdbts::EngineOptions::iot_interval = 360000;
   roachpb::CreateTsTable meta;
 
   KTableKey cur_table_id = 1002;
@@ -494,7 +494,7 @@ TEST_F(TestEngine, DeleteExpiredData) {
   int write_count = block_item_max * block_item_row_max + 1;
   for (int i = 1; i <= partition_num; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
@@ -502,9 +502,9 @@ TEST_F(TestEngine, DeleteExpiredData) {
   }
 
   // delete expired data
-  ASSERT_EQ(ts_table->DeleteExpiredData(ctx_, 2 * BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->DeleteExpiredData(ctx_, 2 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
-  KTimestamp start_ts = BigObjectConfig::iot_interval * 1000;
+  KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -518,18 +518,18 @@ TEST_F(TestEngine, DeleteExpiredData) {
   bool is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, block_item_row_max);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * BigObjectConfig::iot_interval * 1000);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * kwdbts::EngineOptions::iot_interval * 1000);
 
   delete iter;
   // delete expired data
-  ASSERT_EQ(ts_table->DeleteExpiredData(ctx_, 2.5 * BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->DeleteExpiredData(ctx_, 2.5 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter, tbl_range),
             KStatus::SUCCESS);
   is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, block_item_row_max);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * BigObjectConfig::iot_interval * 1000);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * kwdbts::EngineOptions::iot_interval * 1000);
 
   delete iter;
 
@@ -537,7 +537,7 @@ TEST_F(TestEngine, DeleteExpiredData) {
 }
 
 TEST_F(TestEngine, CompressTsTable) {
-  BigObjectConfig::iot_interval = 360000;
+  kwdbts::EngineOptions::iot_interval = 360000;
   roachpb::CreateTsTable meta;
   std::vector<string> primary_tags;
 
@@ -549,7 +549,7 @@ TEST_F(TestEngine, CompressTsTable) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -568,7 +568,7 @@ TEST_F(TestEngine, CompressTsTable) {
   int write_count = block_item_max * block_item_row_max + 1;
   for (int i = 1; i <= partition_num; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     if (i == 1) {
@@ -580,18 +580,19 @@ TEST_F(TestEngine, CompressTsTable) {
   }
 
   // Compress the partition of 360000
-  ASSERT_EQ(ts_table->Compress(ctx_, 2 * BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Due to not being fully written, it will not be truly compressed until the second schedule
-  ASSERT_EQ(ts_table->Compress(ctx_, 2 * BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
   // Close the table and reopen it to verify the mount function
   tbl_range.reset();
   TSEngineImpl::CloseTSEngine(ctx_, ts_engine_);
   TSEngineImpl::OpenTSEngine(ctx_, kDbPath, opts_, &ts_engine_);
+  kwdbts::EngineOptions::iot_interval = 360000;
   ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
   ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
 
-  KTimestamp start_ts = BigObjectConfig::iot_interval * 1000;
+  KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -604,7 +605,7 @@ TEST_F(TestEngine, CompressTsTable) {
   delete iter;
 
   // Actual uncompressed partition
-  ASSERT_EQ(ts_table->Compress(ctx_, 2.5 * BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 2.5 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Data check
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter, tbl_range),
             KStatus::SUCCESS);
@@ -625,7 +626,7 @@ TEST_F(TestEngine, CompressTsTable) {
   // Write a new batch of data
   for (int i = 1; i <= partition_num; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
@@ -633,7 +634,7 @@ TEST_F(TestEngine, CompressTsTable) {
   }
 
   // Compress 360000 and 720000 partitions
-  ASSERT_EQ(ts_table->Compress(ctx_, 3 * BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 3 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Data check
   entity_id = 2;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter, tbl_range),
@@ -700,8 +701,8 @@ TEST_F(TestEngine, DropColumn) {
 }
 
 TEST_F(TestEngine, LazyMount) {
-  BigObjectConfig::iot_interval = 3600;
-  bigobject::g_max_mount_cnt_ = 10;
+  kwdbts::EngineOptions::iot_interval = 3600;
+  kwdbts::g_max_mount_cnt_ = 10;
   roachpb::CreateTsTable meta;
   std::vector<string> primary_tags;
 
@@ -713,7 +714,7 @@ TEST_F(TestEngine, LazyMount) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -730,7 +731,7 @@ TEST_F(TestEngine, LazyMount) {
   int write_count = 1;
   for (int i = 1; i <= partition_num; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     if (i == 1) {
@@ -742,9 +743,9 @@ TEST_F(TestEngine, LazyMount) {
   }
 
   // Compress all partitions
-  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Due to not being fully written, it will not be truly compressed until the second schedule
-  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
   // Close the table and reopen it to verify the mount function
   tbl_range.reset();
@@ -753,7 +754,7 @@ TEST_F(TestEngine, LazyMount) {
   ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
   ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
 
-  KTimestamp start_ts = BigObjectConfig::iot_interval * 1000;
+  KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -766,13 +767,13 @@ TEST_F(TestEngine, LazyMount) {
   delete iter;
 
   // Compress all partitions and trigger lruchache elimination
-  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*BigObjectConfig::iot_interval), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
   // Verify the number of mounted partitions
   string cmd = "cat /proc/mounts | grep $(pwd)/test_db | wc -l";
   string cnt_str;
   executeShell(cmd, cnt_str);
-  EXPECT_LE(stoi(cnt_str), bigobject::g_max_mount_cnt_);
+  EXPECT_LE(stoi(cnt_str), kwdbts::g_max_mount_cnt_);
   EXPECT_NE(stoi(cnt_str), 0);
 
   ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
@@ -791,7 +792,7 @@ TEST_F(TestEngine, partition_interval) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -970,7 +971,7 @@ TEST_F(TestEngine, partition_interval) {
 
   // Verify partition status
   ErrorInfo err_info;
-  std::vector<MMapPartitionTable*> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({-22400, 22400}, group_id, err_info);
+  std::vector<TsTimePartition*> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({-22400, 22400}, group_id, err_info);
   EXPECT_EQ(p_tables.size(), 9);
   EXPECT_EQ(p_tables[0]->minTimestamp(), -1400);
   EXPECT_EQ(p_tables[0]->maxTimestamp(), 1599);
@@ -1000,8 +1001,8 @@ TEST_F(TestEngine, partition_interval) {
 }
 
 TEST_F(TestEngine, ClusterSetting) {
-  BigObjectConfig::iot_interval = 3600;
-  bigobject::g_max_mount_cnt_ = 10;
+  kwdbts::EngineOptions::iot_interval = 3600;
+  kwdbts::g_max_mount_cnt_ = 10;
   roachpb::CreateTsTable meta;
   std::vector<string> primary_tags;
 
@@ -1013,7 +1014,7 @@ TEST_F(TestEngine, ClusterSetting) {
     const auto& col = meta.k_column(i);
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
-    if (!col_var.isAttrType(ATTR_GENERAL_TAG) && !col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
       schema.push_back(std::move(col_var));
     }
   }
@@ -1035,7 +1036,7 @@ TEST_F(TestEngine, ClusterSetting) {
   int write_count = 17;
   for (int i = 1; i <= partition_id; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     if (i == 1) {
@@ -1047,9 +1048,9 @@ TEST_F(TestEngine, ClusterSetting) {
   }
 
   // Compress the current partition
-  ASSERT_EQ(ts_table->Compress(ctx_, BigObjectConfig::iot_interval + 1), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1), KStatus::SUCCESS);
   // Due to the first segment not being filled to 90%, it will not be compressed
-  ASSERT_EQ(ts_table->Compress(ctx_, BigObjectConfig::iot_interval + 1), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1), KStatus::SUCCESS);
 
   // Check the number of compressed files
   string cmd = "ls -lR | grep sqfs | wc -l";
@@ -1062,7 +1063,7 @@ TEST_F(TestEngine, ClusterSetting) {
   write_count = 13;
   for (int i = 1; i <= partition_id; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000 + 17;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000 + 17;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
@@ -1070,10 +1071,10 @@ TEST_F(TestEngine, ClusterSetting) {
   }
 
   // Compress the current partition
-  ASSERT_EQ(ts_table->Compress(ctx_, BigObjectConfig::iot_interval + 1), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1), KStatus::SUCCESS);
   // Due to the first segment being 90% full, it will be compressed
   // The second segment is not filled to 90% and will not be compressed
-  ASSERT_EQ(ts_table->Compress(ctx_, BigObjectConfig::iot_interval + 1), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1), KStatus::SUCCESS);
 
   // Check query results
   k_uint32 entity_id = 1;
@@ -1095,8 +1096,8 @@ TEST_F(TestEngine, ClusterSetting) {
   // Check configuration information
   ErrorInfo err_info;
   {
-    std::vector<MMapPartitionTable *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
-                                                                                                           1, err_info);
+    std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
+                                                                                                        1, err_info);
     EXPECT_EQ(p_tables.size(), 1);
     EXPECT_EQ(p_tables[0]->getBlockMaxRows(), CLUSTER_SETTING_MAX_ROWS_PER_BLOCK);
     EXPECT_EQ(p_tables[0]->getBlockMaxNum(), CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT);
@@ -1130,7 +1131,7 @@ TEST_F(TestEngine, ClusterSetting) {
   partition_id = 2;
   for (int i = 2; i <= partition_id; ++i) {
     k_uint32 p_len = 0;
-    KTimestamp start_ts = i * BigObjectConfig::iot_interval * 1000;
+    KTimestamp start_ts = i * kwdbts::EngineOptions::iot_interval * 1000;
     char* data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta, 1);
     TSSlice payload{data_value, p_len};
     ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
@@ -1145,8 +1146,8 @@ TEST_F(TestEngine, ClusterSetting) {
 
   // Check configuration information
   {
-    std::vector<MMapPartitionTable *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
-                                                                                                           1, err_info);
+    std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
+                                                                                                        1, err_info);
     EXPECT_EQ(p_tables.size(), 2);
     EXPECT_EQ(p_tables[0]->getBlockMaxRows(), 10);
     EXPECT_EQ(p_tables[0]->getBlockMaxNum(), 2);

@@ -26,8 +26,8 @@
 #include "iterator.h"
 #include "tag_iterator.h"
 #include "payload.h"
-#include "mmap/MMapMetricsTable.h"
-#include "mmap/MMapTagColumnTable.h"
+#include "mmap/mmap_metrics_table.h"
+#include "mmap/mmap_tag_column_table.h"
 #include "st_group_manager.h"
 #include "st_wal_internal_log_structure.h"
 #include "lt_rw_latch.h"
@@ -89,7 +89,7 @@ class TsTable {
    * @return KStatus
    */
   virtual KStatus Create(kwdbContext_p ctx, vector<AttributeInfo>& metric_schema,
-                         uint64_t partition_interval = BigObjectConfig::iot_interval);
+                         uint64_t partition_interval = kwdbts::EngineOptions::iot_interval);
 
   /**
    * @brief Create an EntityGroup corresponding to Range
@@ -920,8 +920,9 @@ class TsEntityGroup {
    * @param cur_alloc_spans The currently allocated BlockSpan set.
    * @param to_deleted_real_rows The set of actual row IDs to be deleted indicates the rows that need to be removed from the table.
    */
-  void recordPutAfterProInfo(unordered_map<MMapPartitionTable*, PutAfterProcessInfo*>& after_process_info,
-     MMapPartitionTable* p_bt, std::vector<BlockSpan>& cur_alloc_spans, std::vector<MetricRowID>& to_deleted_real_rows);
+  void recordPutAfterProInfo(unordered_map<TsTimePartition*, PutAfterProcessInfo*>& after_process_info,
+                             TsTimePartition* p_bt, std::vector<BlockSpan>& cur_alloc_spans,
+                             std::vector<MetricRowID>& to_deleted_real_rows);
 
   /**
    * @brief PutAfterProcess processes the pending data for all partitions. If pushback is not successful, it marks all requested spaces as deleted.
@@ -931,7 +932,7 @@ class TsEntityGroup {
    * @param entity_id  entity id.
    * @param all_success Boolean value indicating whether all processing was successful.
    */
-  void putAfterProcess(unordered_map<MMapPartitionTable*, PutAfterProcessInfo*>& after_process_info,
+  void putAfterProcess(unordered_map<TsTimePartition*, PutAfterProcessInfo*>& after_process_info,
                        uint32_t entity_id, bool all_success);
 
   virtual KStatus putTagData(kwdbContext_p ctx, int32_t groupid, int32_t entity_id, Payload& payload);

@@ -151,7 +151,7 @@ KStatus LoggedTsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint
   // replace it in TsEntityGroup.PutEntity\PutData at the same time
   MUTEX_LOCK(logged_mutex_);
   ErrorInfo err_info;
-  Payload pd(root_bt_->getSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithHidden(), payload);
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     MUTEX_UNLOCK(logged_mutex_);
     return KStatus::FAIL;
@@ -212,7 +212,7 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
   uint32_t group_id, entity_id;
 
   // payload verification
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   pd.dedup_rule_ = dedup_rule;
 
   // split the payload to Tag part and Metrics part
@@ -378,7 +378,7 @@ KStatus LoggedTsEntityGroup::CreateCheckpointInternal(kwdbContext_p ctx) {
   }
 
   // call Tag.flush, pass Checkpoint_LSN as parameter
-  if (tag_bt_->flush(checkpoint_lsn) != 0) {
+  if (tag_bt_->sync_with_lsn(checkpoint_lsn) != 0) {
     LOG_ERROR("Failed to flush the Tag table.")
     Return(FAIL)
   }
@@ -397,7 +397,7 @@ KStatus LoggedTsEntityGroup::CreateCheckpointInternal(kwdbContext_p ctx) {
   **/
   ErrorInfo err_info;
   map<uint32_t, uint64_t> rows;
-  if (root_bt_->Flush(checkpoint_lsn, err_info) != 0) {
+  if (root_bt_->Sync(checkpoint_lsn, err_info) != 0) {
     LOG_ERROR("Failed to flush the Metrics table.")
     Return(FAIL)
   }
@@ -718,7 +718,7 @@ KStatus LoggedTsEntityGroup::rollback(kwdbContext_p ctx, LogEntry* wal_log) {
 }
 
 KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload) {
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   auto primary_tag = pd.GetPrimaryTag();
   uint32_t entity_id, group_id;
   ErrorInfo err_info;
@@ -750,7 +750,7 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
   }};
 
   timestamp64 last_p_time = INVALID_TS;
-  MMapPartitionTable* p_bt = nullptr;
+  TsTimePartition* p_bt = nullptr;
   int batch_start = pd.GetStartRowId();
   timestamp64 p_time = 0;
 
@@ -774,7 +774,7 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
-      err_info.setError(DEDUPREJECT, "Partition is invalid.");
+      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
       continue;
     }
     last_p_time = p_time;
@@ -801,7 +801,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   if (res) {
     return KStatus::FAIL;
   }
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
 
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
@@ -815,14 +815,14 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   }};
 
   timestamp64 last_p_time = INVALID_TS;
-  MMapPartitionTable* p_bt = nullptr;
+  TsTimePartition* p_bt = nullptr;
   int batch_start = pd.GetStartRowId();
   timestamp64 p_time = 0;
 
   bool all_success = true;
   std::vector<BlockSpan> alloc_spans;
 
-  unordered_map<MMapPartitionTable*, PutAfterProcessInfo*> after_process_info;
+  unordered_map<TsTimePartition*, PutAfterProcessInfo*> after_process_info;
   std::unordered_set<timestamp64> dup_set;
 
   // Examine the timestamp of the first piece of data within the payload to verify the partition being written to
@@ -846,7 +846,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
-      err_info.setError(DEDUPREJECT, "Partition is invalid.");
+      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
       continue;
     }
     last_p_time = p_time;
@@ -879,7 +879,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   putAfterProcess(after_process_info, entity_id, all_success);
 
   if (!all_success) {
-    if (err_info.errcode == DEDUPREJECT) {
+    if (err_info.errcode == KWEDUPREJECT) {
       return KStatus::SUCCESS;
     }
     return KStatus::FAIL;
@@ -907,10 +907,10 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
   }
 
   for (auto& del_rows : partition_del_rows) {
-    MMapPartitionTable* p_bt;
+    TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
-      if (err_info.errcode == BOENOOBJ) {
+      if (err_info.errcode == KWENOOBJ) {
         err_info.clear();
         continue;
       }
@@ -919,7 +919,7 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
-      err_info.setError(DEDUPREJECT, "Partition is invalid.");
+      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
       continue;
     }
     int res = p_bt->UndoDelete(entity_id, log_lsn, &(del_rows.second), err_info);
@@ -951,10 +951,10 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
   }
 
   for (auto& del_rows : partition_del_rows) {
-    MMapPartitionTable* p_bt;
+    TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
-      if (err_info.errcode == BOENOOBJ) {
+      if (err_info.errcode == KWENOOBJ) {
         err_info.clear();
         continue;
       }
@@ -963,7 +963,7 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
-      err_info.setError(DEDUPREJECT, "Partition is invalid.");
+      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
       continue;
     }
     int res = p_bt->RedoDelete(entity_id, log_lsn, &(del_rows.second), err_info);
@@ -979,7 +979,7 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
 }
 
 KStatus LoggedTsEntityGroup::undoPutTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload) {
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;
@@ -998,7 +998,7 @@ KStatus LoggedTsEntityGroup::undoPutTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSli
 }
 
 KStatus LoggedTsEntityGroup::redoPutTag(kwdbContext_p ctx, kwdbts::TS_LSN log_lsn, const TSSlice& payload) {
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;
@@ -1021,7 +1021,7 @@ KStatus LoggedTsEntityGroup::redoPutTag(kwdbContext_p ctx, kwdbts::TS_LSN log_ls
 }
 
 KStatus LoggedTsEntityGroup::undoUpdateTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload, TSSlice old_payload) {
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;
@@ -1040,7 +1040,7 @@ KStatus LoggedTsEntityGroup::undoUpdateTag(kwdbContext_p ctx, TS_LSN log_lsn, TS
 }
 
 KStatus LoggedTsEntityGroup::redoUpdateTag(kwdbContext_p ctx, kwdbts::TS_LSN log_lsn, const TSSlice& payload) {
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;

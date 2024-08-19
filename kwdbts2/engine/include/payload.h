@@ -18,12 +18,12 @@
 #include <unordered_map>
 #include <memory>
 #include "kwdb_type.h"
-#include "mmap/MMapEntityMeta.h"
-#include "mmap/TSLockfreeOrderList.h"
+#include "mmap/mmap_entity_idx.h"
+#include "TSLockfreeOrderList.h"
 #include "ts_common.h"
 #include "libkwdbts2.h"
 #include "st_wal_types.h"
-#include "mmap/TSTableMMapObject.h"
+#include "ts_table_object.h"
 
 namespace kwdbts {
 
@@ -303,7 +303,7 @@ class Payload {
     for (int row = 0; row < GetRowCount(); row++) {
       for (int col = 0; col < schema_.size(); col++) {
         if (IsNull(col, row)) {
-          os << cstr_null << ' ';
+          os << s_NULL << ' ';
         } else if (schema_[col].type == VARSTRING) {
           os << std::string(GetVarColumnAddr(row, col) + MMapStringFile::kStringLenLen, GetVarColumnLen(row, col)) << ' ';
         } else {

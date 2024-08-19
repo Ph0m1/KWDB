@@ -19,22 +19,20 @@
   namespace fs = std::filesystem;
 #endif
 #include "engine.h"
-#include "mmap/MMapMetricsTable.h"
-#include "BigObjectApplication.h"
-#include "mmap/MMapTagColumnTable.h"
-#include "mmap/MMapTagColumnTableAux.h"
+#include "mmap/mmap_metrics_table.h"
+#include "mmap/mmap_tag_column_table.h"
+#include "mmap/mmap_tag_column_table_aux.h"
 #include "ts_snapshot.h"
 #include "ts_table.h"
 #include "perf_stat.h"
 #include "sys_utils.h"
 #include "lt_cond.h"
 #include "ee_global.h"
-#include "pgcode.h"
 
 namespace kwdbts {
 
 string IdToEntityBigTableUrl(const KTableKey& table_id) {
-  return nameToEntityBigTableURL(std::to_string(table_id), s_bt() + "_1");
+  return nameToEntityBigTableURL(std::to_string(table_id), s_bt + "_1");
 }
 
 TsEntityGroup::TsEntityGroup(kwdbContext_p ctx, MMapMetricsTable*& root_table, const string& db_path,
@@ -70,7 +68,9 @@ KStatus TsEntityGroup::Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema) {
   }
   ErrorInfo err_info;
   // TODO(jiadx): create individual Tag table under the range directory
+  MUTEX_LOCK(mutex_);
   tag_bt_ = CreateTagTable(tag_schema, db_path_, tbl_sub_path_, table_id_, range_.range_group_id, TAG_TABLE, err_info);
+  MUTEX_UNLOCK(mutex_);
   if (tag_bt_ == nullptr) {
     LOG_ERROR("TsTableRange create error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
@@ -107,7 +107,7 @@ KStatus TsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint64_t m
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   KStatus status = SUCCESS;
   ErrorInfo err_info;
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     return KStatus::FAIL;
   }
@@ -154,7 +154,7 @@ KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_t
   // Create a Payload object pd to prepare for subsequent writing.
   // The payload object includes both the tag and the payload data.
   // The data to be written can be retrieved using GetColumnAddr() and GetVarColumnAddr() methods.
-  Payload pd(root_bt_->getActualSchemaInfo(), payload);
+  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
   pd.dedup_rule_ = dedup_rule;
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     return KStatus::FAIL;
@@ -271,7 +271,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
   // To enhance data writing performance, batch data writing can utilize memory copying methods directly,
   // based on the data column.
   timestamp64 last_p_time = INVALID_TS;
-  MMapPartitionTable* p_bt = nullptr;
+  TsTimePartition* p_bt = nullptr;
   int batch_start = payload.GetStartRowId();
   timestamp64 p_time = INVALID_TS;
 
@@ -283,7 +283,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     return KStatus::FAIL;
   }
 
-  unordered_map<MMapPartitionTable*, PutAfterProcessInfo*> after_process_info;
+  unordered_map<TsTimePartition*, PutAfterProcessInfo*> after_process_info;
   bool payload_dup = false;
   std::unordered_set<timestamp64> dup_set;
 
@@ -307,7 +307,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
-      err_info.setError(DEDUPREJECT, "Partition is invalid.");
+      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
       continue;
     }
     last_p_time = p_time;
@@ -347,7 +347,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
   putAfterProcess(after_process_info, entity_id, all_success);
 
   if (!all_success) {
-    if (err_info.errcode == DEDUPREJECT) {
+    if (err_info.errcode == KWEDUPREJECT) {
       return KStatus::SUCCESS;
     }
     return KStatus::FAIL;
@@ -355,8 +355,8 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
   return KStatus::SUCCESS;
 }
 
-void TsEntityGroup::recordPutAfterProInfo(unordered_map<MMapPartitionTable*, PutAfterProcessInfo*>& after_process_info,
-                                          MMapPartitionTable* p_bt, std::vector<BlockSpan>& cur_alloc_spans,
+void TsEntityGroup::recordPutAfterProInfo(unordered_map<TsTimePartition*, PutAfterProcessInfo*>& after_process_info,
+                                          TsTimePartition* p_bt, std::vector<BlockSpan>& cur_alloc_spans,
                                           std::vector<MetricRowID>& to_deleted_real_rows) {
   if (after_process_info.find(p_bt) != after_process_info.end()) {
     ebt_manager_->ReleasePartitionTable(p_bt);
@@ -371,7 +371,7 @@ void TsEntityGroup::recordPutAfterProInfo(unordered_map<MMapPartitionTable*, Put
                                                  to_deleted_real_rows.begin(), to_deleted_real_rows.end());
 }
 
-void TsEntityGroup::putAfterProcess(unordered_map<MMapPartitionTable*, PutAfterProcessInfo*>& after_process_info,
+void TsEntityGroup::putAfterProcess(unordered_map<TsTimePartition*, PutAfterProcessInfo*>& after_process_info,
                                     uint32_t entity_id, bool all_success) {
   for (auto iter : after_process_info) {
     iter.first->publish_payload_space((iter.second)->spans, (iter.second)->del_real_rows, entity_id, all_success);
@@ -441,13 +441,14 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
     max_ts = (max_ts < span.end) ? span.end : max_ts;
   }
   ErrorInfo err_info;
-  vector<MMapPartitionTable*> p_tables = ebt_manager_->GetPartitionTables({min_ts/1000, max_ts/1000}, subgroup_id, err_info);
+  vector<TsTimePartition*> p_tables =
+      ebt_manager_->GetPartitionTables({min_ts / 1000, max_ts / 1000}, subgroup_id, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
   bool del_failed = false;
-  for (MMapPartitionTable* p_bt : p_tables) {
+  for (TsTimePartition* p_bt : p_tables) {
     if (del_failed) {
       ebt_manager_->ReleasePartitionTable(p_bt);
       continue;
@@ -641,7 +642,7 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
   timestamp64 min_ts = INT64_MAX, max_ts = INT64_MIN;
   getMaxAndMinTs(ts_spans, &min_ts, &max_ts);
   KwTsSpan p_span{min_ts / 1000, max_ts / 1000};
-  std::vector<MMapPartitionTable*> p_bts = ebt_manager_->GetPartitionTables(p_span, sub_group_id, err_info);
+  std::vector<TsTimePartition*> p_bts = ebt_manager_->GetPartitionTables(p_span, sub_group_id, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("GetPartitionTables error : %s", err_info.errmsg.c_str());
     delete ts_iter;
@@ -887,7 +888,7 @@ TsEntityGroup::CheckAlterValid(kwdbContext_p ctx, const std::map<uint32_t, std::
   KwTsSpan span{INT64_MIN, INT64_MAX};
   // Iteratively check whether the column types of all subgroups' entity ids in the current entity group can be modified
   for (auto& subgroup_entities : entities) {
-    std::vector<MMapPartitionTable*> p_bts = ebt_manager_->GetPartitionTables(span, subgroup_entities.first, err_info);
+    std::vector<TsTimePartition*> p_bts = ebt_manager_->GetPartitionTables(span, subgroup_entities.first, err_info);
     Defer defer{[&]() { for (auto& p_bt : p_bts) { ebt_manager_->ReleasePartitionTable(p_bt); } }};
     for (auto& p_bt : p_bts) {
       if (p_bt->CheckAlterValid(subgroup_entities.second, col_index, new_type, is_valid, err_info) < 0) {
@@ -960,7 +961,7 @@ TsEntityGroup::GetColAttributeInfo(kwdbContext_p ctx, const roachpb::KWDBKTSColu
 
   attr_info.size = getDataTypeSize(attr_info);
   attr_info.id = col.column_id();
-  attr_info.name = col.name();
+  strncpy(attr_info.name, col.name().c_str(), COLUMNATTR_LEN);
   attr_info.length = col.storage_len();
   if (!col.nullable()) {
     attr_info.setFlag(AINFO_NOT_NULL);
@@ -968,7 +969,7 @@ TsEntityGroup::GetColAttributeInfo(kwdbContext_p ctx, const roachpb::KWDBKTSColu
   if (col.dropped()) {
     attr_info.setFlag(AINFO_DROPPED);
   }
-  attr_info.attr_type = (AttrType) col.col_type();
+  attr_info.col_flag = (ColumnFlag) col.col_type();
   attr_info.version = 1;
 
   return KStatus::SUCCESS;
@@ -1040,7 +1041,7 @@ TsEntityGroup::GetMetricColumnInfo(kwdbContext_p ctx, struct AttributeInfo& attr
   if (attr_info.isFlag(AINFO_DROPPED)) {
     col.set_dropped(true);
   }
-  col.set_col_type((roachpb::KWDBKTSColumn_ColumnType)(attr_info.attr_type));
+  col.set_col_type((roachpb::KWDBKTSColumn_ColumnType)(attr_info.col_flag));
   return KStatus::SUCCESS;
 }
 
@@ -1049,7 +1050,7 @@ TsEntityGroup::GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roa
   col.clear_storage_len();
   col.set_storage_len(tag_info.m_length);
   col.set_column_id(tag_info.m_id);
-  col.set_col_type((roachpb::KWDBKTSColumn_ColumnType)((AttrType)tag_info.m_tag_type));
+  col.set_col_type((roachpb::KWDBKTSColumn_ColumnType)((ColumnFlag)tag_info.m_tag_type));
   switch (tag_info.m_data_type) {
     case DATATYPE::TIMESTAMP64_LSN:
       col.set_storage_type(roachpb::TIMESTAMPTZ);
@@ -1120,9 +1121,9 @@ MMapMetricsTable* TsTable::CreateMMapEntityBigTable(string& db_path, string& tbl
   MMapMetricsTable* tmp_bt = new MMapMetricsTable();
   string bt_url = IdToEntityBigTableUrl(table_id);
   if (tmp_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
-      err_info.errcode == BOECORR) {
+      err_info.errcode == KWECORR) {
     tmp_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                   s_emptyString(), partition_interval, encoding, err_info, false);
+                   s_emptyString, partition_interval, encoding, err_info, false);
   }
 
   if (err_info.errcode < 0) {
@@ -1152,7 +1153,7 @@ MMapMetricsTable* TsTable::OpenMMapEntityBigTable(string& db_path, string& tbl_s
   }
   // Compatible with older versions
   if (tmp_bt->partitionInterval() == 0) {
-    tmp_bt->partitionInterval() = BigObjectConfig::iot_interval;
+    tmp_bt->partitionInterval() = kwdbts::EngineOptions::iot_interval;
   }
   return tmp_bt;
 }
@@ -1208,7 +1209,7 @@ KStatus TsTable::Init(kwdbContext_p ctx, std::unordered_map<uint64_t, int8_t>& r
   // Check path
   string dir_path = db_path_ + tbl_sub_path_;
   if (access(dir_path.c_str(), 0)) {
-    err_info.setError(BOENOOBJ, "invalid path: " + db_path_ + tbl_sub_path_);
+    err_info.setError(KWENOOBJ, "invalid path: " + db_path_ + tbl_sub_path_);
     LOG_ERROR("invalid path : %s", ((db_path_ + tbl_sub_path_)).c_str())
     return KStatus::FAIL;
   }
@@ -1305,7 +1306,7 @@ KStatus TsTable::GetDataSchema(kwdbContext_p ctx, std::vector<AttributeInfo>* da
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
   }
-  *data_schema = entity_bt_->getSchemaInfo();
+  *data_schema = entity_bt_->getSchemaInfoWithHidden();
   return KStatus::SUCCESS;
 }
 
@@ -1590,7 +1591,7 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
   }};
 
   entity_bt_->rdLock();
-  auto actual_cols = entity_bt_->getActualCols();
+  auto actual_cols = entity_bt_->getColsIdxForHidden();
   std::vector<k_uint32> ts_scan_cols;
   for (auto col : scan_cols) {
     if (col >= actual_cols.size()) {
@@ -2077,7 +2078,7 @@ KStatus TsTable::AddColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column, st
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  if (attr_info.isAttrType(ATTR_GENERAL_TAG)) {
+  if (attr_info.isAttrType(COL_GENERAL_TAG)) {
     // Only general tag can be added
     TagInfo new_tag_schema = {column->column_id(), attr_info.type,
                               static_cast<uint32_t>(attr_info.length), 0,
@@ -2117,7 +2118,7 @@ KStatus TsTable::DropColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column, s
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  if (attr_info.isAttrType(ATTR_GENERAL_TAG)) {
+  if (attr_info.isAttrType(COL_GENERAL_TAG)) {
     // Only general tag can be dropped
     TagInfo old_tag_schema = {column->column_id(), attr_info.type,
                               static_cast<uint32_t>(attr_info.length), 0,
@@ -2153,7 +2154,7 @@ KStatus TsTable::DropColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column, s
 KStatus TsTable::addMetricsTableColumn(kwdbContext_p ctx, AttributeInfo& attr_info, ErrorInfo& err_info) {
   entity_bt_->rdLock();
   // Get original schema information.
-  vector<AttributeInfo> new_schema = entity_bt_->getSchemaInfo();
+  vector<AttributeInfo> new_schema = entity_bt_->getSchemaInfoWithHidden();
   entity_bt_->unLock();
   // Add attribute information.
   new_schema.emplace_back(attr_info);
@@ -2161,12 +2162,12 @@ KStatus TsTable::addMetricsTableColumn(kwdbContext_p ctx, AttributeInfo& attr_in
   int encoding = ENTITY_TABLE | NO_DEFAULT_TABLE;
 
   // Delete same name table file that may exist.
-  ::remove((entity_bt_->realFilePath() + s_new()).c_str());
+  ::remove((entity_bt_->realFilePath() + s_new).c_str());
   // Create new table files
   auto* new_bt = new MMapMetricsTable();
-  if (new_bt->open(entity_bt_->URL() + s_new(), db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 ||
-      err_info.errcode == BOECORR) {
-    new_bt->create(new_schema, key, "", tbl_sub_path_, "", tbl_sub_path_, s_emptyString(),
+  if (new_bt->open(entity_bt_->URL() + s_new, db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 ||
+      err_info.errcode == KWECORR) {
+    new_bt->create(new_schema, key, "", tbl_sub_path_, "", tbl_sub_path_, s_emptyString,
       entity_bt_->metaData()->partition_interval, encoding, err_info, false);
   }
   if (err_info.errcode < 0) {
@@ -2188,7 +2189,7 @@ KStatus TsTable::addMetricsTableColumn(kwdbContext_p ctx, AttributeInfo& attr_in
   // Release the old `.bt`, and rename to `.bt.old`
   string file_path = entity_bt_->filePath();
   string bt_path = entity_bt_->realFilePath();
-  string bt_path_bak = bt_path + s_old();
+  string bt_path_bak = bt_path + s_old;
 
   // Change the entity table pointer to point to the new table
   entity_bt_ = new_bt;
@@ -2196,7 +2197,7 @@ KStatus TsTable::addMetricsTableColumn(kwdbContext_p ctx, AttributeInfo& attr_in
   // Delete old table file that may exist.
   ::remove(bt_path_bak.c_str());
   // Rename old table file
-  if (auto err = old_bt->rename(bt_path_bak, file_path + s_old()) < 0) {
+  if (auto err = old_bt->rename(bt_path_bak, file_path + s_old) < 0) {
     entity_bt_ = old_bt;
     old_bt->unLock();
     new_bt->unLock();
@@ -2286,7 +2287,7 @@ KStatus TsTable::AlterColumnType(kwdbContext_p ctx, roachpb::KWDBKTSColumn* colu
   }
   getDataTypeSize(new_attr);  // update max_len
   // Alter tag column type
-  if (new_attr.isAttrType(ATTR_GENERAL_TAG)) {
+  if (new_attr.isAttrType(COL_GENERAL_TAG)) {
     // Only general tag can be modified
     TagInfo new_tag_schema = {column->column_id(), new_attr.type,
                               static_cast<uint32_t>(new_attr.length), 0,
@@ -2310,7 +2311,7 @@ KStatus TsTable::AlterColumnType(kwdbContext_p ctx, roachpb::KWDBKTSColumn* colu
     }
     bool is_valid = true;
     // Check whether we can change the column type in a database table
-    s = checkAlterValid(ctx, col_index, static_cast<DATATYPE>(entity_bt_->getSchemaInfo()[col_index].type),
+    s = checkAlterValid(ctx, col_index, static_cast<DATATYPE>(entity_bt_->getSchemaInfoWithHidden()[col_index].type),
                         static_cast<DATATYPE>(new_attr.type), is_valid, err_info);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("CheckAlterValid error: table id = %lu",  table_id_);
@@ -2350,7 +2351,7 @@ KStatus TsTable::undoAddColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  if (attr_info.isAttrType(ATTR_GENERAL_TAG)) {
+  if (attr_info.isAttrType(COL_GENERAL_TAG)) {
     // Undo operation of tag column.
     TagInfo new_tag_schema = {column->column_id(), attr_info.type,
                               static_cast<uint32_t>(attr_info.length), 0,
@@ -2379,7 +2380,7 @@ KStatus TsTable::undoDropColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* colum
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  if (attr_info.isAttrType(ATTR_GENERAL_TAG)) {
+  if (attr_info.isAttrType(COL_GENERAL_TAG)) {
     // Undo operation of tag column.
     TagInfo old_tag_schema = {column->column_id(), attr_info.type,
                               static_cast<uint32_t>(attr_info.length), 0,
@@ -2492,7 +2493,7 @@ KStatus TsTable::undoAlterColumnType(kwdbContext_p ctx, roachpb::KWDBKTSColumn* 
     return s;
   }
   getDataTypeSize(origin_attr_info);  // update max_len
-  if (origin_attr_info.isAttrType(ATTR_GENERAL_TAG)) {
+  if (origin_attr_info.isAttrType(COL_GENERAL_TAG)) {
     // Undo operation of tag column.
     TagInfo origin_tag_schema = {origin_column->column_id(), origin_attr_info.type,
                                  static_cast<uint32_t>(origin_attr_info.length), 0,

@@ -11,7 +11,6 @@
 
 #include "engine.h"
 
-#include <sys/stat.h>
 #include <dirent.h>
 #include <iostream>
 #include <utility>
@@ -22,7 +21,6 @@
 #include "st_wal_table.h"
 #include "sys_utils.h"
 #include "ts_table.h"
-#include "lg_commonv2.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "ee_exec_pool.h"
 
@@ -31,6 +29,40 @@ extern DedupRule g_dedup_rule;
 extern std::shared_mutex g_settings_mutex;
 
 namespace kwdbts {
+int32_t EngineOptions::iot_interval  = 864000;
+string EngineOptions::home_;  // NOLINT
+size_t EngineOptions::ps_ = sysconf(_SC_PAGESIZE);
+
+#define DEFAULT_NS_ALIGN_SIZE       2  // 16GB name service
+
+int EngineOptions::ns_align_size_ = DEFAULT_NS_ALIGN_SIZE;
+int EngineOptions::table_type_ = ROW_TABLE;
+int EngineOptions::double_precision_ = 12;
+int EngineOptions::float_precision_ = 6;
+int64_t EngineOptions::max_anon_memory_size_ = 1*1024*1024*1024;  // 1G
+int EngineOptions::dt32_base_year_ = 2000;
+bool EngineOptions::zero_if_null_ = false;
+#if defined(_WINDOWS_)
+const char BigObjectConfig::slash_ = '\\';
+#else
+const char EngineOptions::slash_ = '/';
+#endif
+
+std::atomic<int64_t> kw_used_anon_memory_size;
+
+void EngineOptions::init() {
+  char * env_var = getenv(ENV_KW_HOME);
+  if (env_var) {
+    home_ = string(env_var);
+  } else {
+    home_ =  getenv(ENV_CLUSTER_CONFIG_HOME);;
+  }
+
+  env_var = getenv(ENV_KW_IOT_INTERVAL);
+  if (env_var) {
+    setInteger(iot_interval, string(env_var), 30);
+  }
+}
 
 TSEngineImpl::TSEngineImpl(kwdbContext_p ctx, std::string dir_path,
                            const EngineOptions& engine_options) : options_(engine_options) {
@@ -85,7 +117,7 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   if (s != KStatus::SUCCESS) {
     Return(s);
   }
-  uint64_t partition_interval = BigObjectConfig::iot_interval;
+  uint64_t partition_interval = EngineOptions::iot_interval;
   if (meta->ts_table().has_partition_interval()) {
     partition_interval = meta->ts_table().partition_interval();
   }
@@ -123,7 +155,7 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
     ErrorInfo err_info;
     KStatus s = GetTsTable(ctx, table_id, table, err_info);
     if (s == FAIL) {
-      s = err_info.errcode == BOENOOBJ ? SUCCESS : FAIL;
+      s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
       if (s == FAIL) {
         LOG_INFO("drop table %ld failed", table_id);
       } else {
@@ -238,7 +270,7 @@ KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id, 
   ErrorInfo err_info;
   KStatus s = GetTsTable(ctx, table_id, table, err_info);
   if (s == FAIL) {
-    s = err_info.errcode == BOENOOBJ ? SUCCESS : FAIL;
+    s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
     Return(s);
   }
 
@@ -454,8 +486,7 @@ KStatus TSEngineImpl::Init(kwdbContext_p ctx) {
     return s;
   }
 
-  // initial BigObjectConfig
-  BigObjectConfig::getBigObjectConfig();
+  EngineOptions::init();
   return KStatus::SUCCESS;
 }
 
@@ -998,11 +1029,11 @@ KStatus TSEngineImpl::parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable*
       Return(s);
     }
 
-    if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
       tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
                                              static_cast<uint32_t>(col_var.length), 0,
                                              static_cast<uint32_t>(col_var.size),
-                                             col_var.isAttrType(ATTR_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG}));
+                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG}));
     } else {
       metric_schema.push_back(std::move(col_var));
     }

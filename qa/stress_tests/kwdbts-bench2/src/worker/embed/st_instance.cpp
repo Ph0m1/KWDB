@@ -71,15 +71,15 @@ void StInstance::SetInputParams(const std::string& key, const std::string& value
     setenv("KW_PARTITION_ROWS", value.c_str(), 0);
   } else if (key == "ts.dedup.rule") {
     if ("override" == value) {
-      g_dedup_rule_ = kwdbts::DedupRule::OVERRIDE;
+      dedup_rule_ = kwdbts::DedupRule::OVERRIDE;
     } else if ("merge" == value) {
-      g_dedup_rule_ = kwdbts::DedupRule::MERGE;
+      dedup_rule_ = kwdbts::DedupRule::MERGE;
     } else if ("keep" == value) {
-      g_dedup_rule_ = kwdbts::DedupRule::KEEP;
+      dedup_rule_ = kwdbts::DedupRule::KEEP;
     } else if ("reject" == value) {
-      g_dedup_rule_ = kwdbts::DedupRule::REJECT;
+      dedup_rule_ = kwdbts::DedupRule::REJECT;
     } else if ("discard" == value) {
-      g_dedup_rule_ = kwdbts::DedupRule::DISCARD;
+      dedup_rule_ = kwdbts::DedupRule::DISCARD;
     }
   } else {
     std::cout << "error: cannot parse key: " << key << ", value: " << value << std::endl;
@@ -88,7 +88,6 @@ void StInstance::SetInputParams(const std::string& key, const std::string& value
 
 KBStatus StInstance::Init(BenchParams params, std::vector<uint32_t> table_ids_) {
   params_ = params;
-  setenv("KW_IOT_MODE", "TRUE", 0);
   ParseInputParams();
 
   if (g_contet_p != nullptr) {
@@ -267,15 +266,12 @@ KBStatus StEngityGroupInstance::Init(BenchParams params) {
   }
 
   // set storage directory
-  BigObjectConfig* config = BigObjectConfig::getBigObjectConfig();
-  assert(config != nullptr);
-  config->readConfig();
-  config->readConfig();
+  EngineOptions::init();
 
   string db_path = normalizePath("entitygp_bench");
   string ws = worksapceToDatabase(db_path);
   assert(!ws.empty());
-  string dir_path = makeDirectoryPath(BigObjectConfig::home() + ws);
+  string dir_path = makeDirectoryPath(EngineOptions::home() + ws);
   bool ret = MakeDirectory(dir_path);
   assert(ret == true);
 
@@ -301,11 +297,11 @@ TsTable* CreateTable(kwdbts::kwdbContext_p ctx, roachpb::CreateTsTable* meta, st
     struct AttributeInfo col_var;
     s = TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i==0);
     assert(s == KStatus::SUCCESS);
-    if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
       tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
                                             static_cast<uint32_t>(col_var.length),
                                             0, static_cast<uint32_t>(col_var.length),
-                                            static_cast<TagType>(col_var.attr_type)}));
+                                            static_cast<TagType>(col_var.col_flag)}));
     } else {
       metric_schema.push_back(std::move(col_var));
     }

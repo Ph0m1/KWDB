@@ -11,7 +11,7 @@
 
 #include <unistd.h>
 #include <gtest/gtest.h>
-#include <mmap/MMapEntityMeta.h>
+#include <mmap/mmap_entity_idx.h>
 
 class TestDeleteFlagSet : public ::testing::Test {};
 

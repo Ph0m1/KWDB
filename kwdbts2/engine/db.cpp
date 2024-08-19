@@ -16,7 +16,6 @@
 #include "cm_backtrace.h"
 #include "cm_fault_injection.h"
 #include "cm_task.h"
-#include "lg_commonv2.h"
 #include "perf_stat.h"
 #include "lru_cache_manager.h"
 

@@ -14,7 +14,7 @@
 
 #include <string>
 #include "lg_api.h"
-#include "BigObjectError.h"
+#include "ts_object_error.h"
 
 /*
  * @Description: Check whether the file or directory exists

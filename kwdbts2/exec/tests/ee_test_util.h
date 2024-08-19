@@ -21,9 +21,8 @@
 #include <any>
 #include <iostream>
 
-#include "BigObjectApplication.h"
-#include "BigObjectUtils.h"
-#include "DataType.h"
+#include "utils/big_table_utils.h"
+#include "data_type.h"
 #include "engine.h"
 #include "payload.h"
 #include "sys_utils.h"
@@ -58,12 +57,12 @@ bool __attribute__((weak)) isCanceledCtx(uint64_t goCtxPtr) { return false; }
 
 int IsDbNameValid(const string& db) {
   if (db.size() > MAX_DATABASE_NAME_LEN)  // can`t longer than 63
-    return BOELENLIMIT;
+    return KWELENLIMIT;
   for (size_t i = 0; i < db.size(); ++i) {
     char c = db[i];
     if (c == '?' || c == '*' || c == ':' || c == '|' || c == '"' || c == '<' ||
         c == '>' || c == '.')
-      return BOEINVALIDNAME;
+      return KWEINVALIDNAME;
   }
   return 0;
 }
@@ -110,136 +109,17 @@ bool RemoveDirectory(const char* path) {
   return true;
 }
 
-std::string GetPartitionDb(const string& db, timestamp64 ts, bool& is_sqfs) {
-  string pt_name = db + "/" + uintToString(ts);
-  string path = BigObjectConfig::home() + pt_name;
-  // Check if the sqfs file exists
-  string sqfs_file = path + ".sqfs";
-  if (access(sqfs_file.c_str(), F_OK) == 0) {
-    // if or not mount
-    struct statfs sfs;
-    statfs(path.c_str(), &sfs);
-    if (sfs.f_type == SQUASHFS_MAGIC) {
-      is_sqfs = true;
-      return pt_name;
-    }
-  }
-  // raw
-  is_sqfs = false;
-  return pt_name + "_";
-}
-
 class BtUtil {
  public:
-  static ErrorInfo InsertRawData(BigTable* bt, std::vector<std::any>& batch) {
-    DataHelper* rec_helper = bt->getRecordHelper();
-    int rec_size = bt->recordSize();
-    char* rec = new char[rec_size];
-    getDeletableColumn(bt, rec_helper, rec);
-    int start_col = bt->firstDataColumn();
-    int num_col = bt->numColumn();
-    int ts_col = -1;
-    if (is_timestamp(bt->type())) {
-      ts_col = bt->getColumnNumber(bigobject::s_cts());
-    }
-
-    int64_t row_num;
-    int col_idx = start_col;
-    for (int i = 0; i < batch.size(); i++) {
-      if (col_idx >= num_col) {
-        break;
-      }
-      int d_type = bt->getSchemaInfo()[col_idx].type;
-      switch (d_type) {
-        case DATATYPE::TIMESTAMP64:
-        case DATATYPE::TIMESTAMP64_LSN:
-          KTimestamp(rec_helper->columnAddr(col_idx, rec)) =
-              std::any_cast<uint64_t>(batch[i]);
-          break;
-        case DATATYPE::INT64:
-          KInt64(rec_helper->columnAddr(col_idx, rec)) =
-              std::any_cast<int64_t>(batch[i]);
-          break;
-        case DATATYPE::DOUBLE:
-          KDouble64(rec_helper->columnAddr(col_idx, rec)) =
-              std::any_cast<double>(batch[i]);
-          break;
-        default:
-          fprintf(stderr, "unsupported data type:%d \n", d_type);
-      }
-      col_idx++;
-    }
-    // Fill in column values for which there is no data
-    for (; col_idx < num_col; ++col_idx) {
-      if (rec_helper->stringToColumn(col_idx, (char*)s_emptyString().c_str(),
-                                     rec) < 0)
-        break;
-    }
-    ErrorInfo err_info(false);
-    if ((row_num = bt->push_back(rec)) <
-        0) {  // $$ push_back is the function to write table in table
-      fprintf(stderr, "Fail to insert TS table,error_code:%ld \n", row_num);
-      err_info.errcode = row_num;
-    } else {
-#if defined(IOT_MODE)
-      rec_helper->setLatestRow(row_num);
-#endif
-    }
-    delete[] rec;
-    return err_info;
-  }
-
-  static ErrorInfo GetRawData(BigTable* bt, int64_t row_num, char* rec) {
-    int start_col = bt->firstDataColumn();
-    int num_col = bt->numColumn();
-    DataHelper* rec_helper = bt->getRecordHelper();
-    getDeletableColumn(bt, rec_helper, rec);
-
-    for (int col_idx = start_col; col_idx < num_col; col_idx++) {
-      bt->getColumnValue(row_num, col_idx,
-                         rec_helper->columnAddr(col_idx, rec));
-    }
-
-    ErrorInfo err_info(false);
-    return err_info;
-  }
-
-  static ErrorInfo GetRawData(BigTable* bt, int64_t row_num,
-                              std::vector<std::any>& batch) {
-    int start_col = bt->firstDataColumn();
-    int num_col = bt->numColumn();
-
-    for (int col_idx = start_col; col_idx < num_col; col_idx++) {
-      char rec[1024] = {0};
-      bt->getColumnValue(row_num, col_idx, rec);
-      int d_type = bt->getSchemaInfo()[col_idx].type;
-      switch (d_type) {
-        case DATATYPE::TIMESTAMP64:
-          batch.push_back(KTimestamp(rec));
-          break;
-        case DATATYPE::INT64:
-          batch.push_back(KInt64(rec));
-          break;
-        case DATATYPE::DOUBLE:
-          batch.push_back(KDouble64(rec));
-          break;
-        default:
-          fprintf(stderr, "unsupported data type:%d \n", d_type);
-      }
-    }
-
-    ErrorInfo err_info(false);
-    return err_info;
-  }
 
   static int CreateDB(const std::string& db, size_t life_cycle,
                       ErrorInfo& err_info) {
     string db_path = normalizePath(db);
     string ws = worksapceToDatabase(db_path);
-    if (ws == "") return err_info.setError(BOEINVALIDNAME, db);
+    if (ws == "") return err_info.setError(KWEINVALIDNAME, db);
     int err_code = IsDbNameValid(ws);
     if (err_code != 0) err_info.setError(err_code, db);
-    string dir_path = makeDirectoryPath(BigObjectConfig::home() + ws);
+    string dir_path = makeDirectoryPath(kwdbts::EngineOptions::home() + ws);
     MakeDirectory(dir_path, err_info);
     return err_info.errcode;
   }
@@ -300,7 +180,7 @@ void ConstructVarColumnMetas(std::vector<ZTableColumnMeta>* metas) {
 void constructRoachpbTable(roachpb::CreateTsTable* meta,
                            const kwdbts::KString& prefix_table_name,
                            kwdbts::KTableKey table_id,
-                           uint64_t partition_interval = BigObjectConfig::iot_interval) {
+                           uint64_t partition_interval = kwdbts::EngineOptions::iot_interval) {
   // create table :  TIMESTAMP | FLOAT | INT | CHAR(char_len) | BOOL |
   // BINARY(binary_len)
   roachpb::KWDBTsTable* table = KNEW roachpb::KWDBTsTable();
@@ -397,54 +277,16 @@ class TestBigTableInstance : public ::testing::Test {
     // The current directory is the storage directory of the big table
     setenv("KW_HOME", kw_home.c_str(), 1);
     setenv("KW_IOT_INTERVAL", std::to_string(iot_interval).c_str(), 1);
-    setenv("KW_IOT_MODE", "TRUE", 0);
-    BigObjectConfig* config = BigObjectConfig::getBigObjectConfig();
-    // ASSERT_NE(config, nullptr);
-    config->readConfig();
+    EngineOptions::init();
     ErrorInfo err_info;
     // clean database data
     system(("rm -rf " + kw_home + "default*").c_str());
     system(("rm -rf " + kw_home + DIR_SEP + db_name + "*").c_str());
 
-    // init
-    // initBigObjectApplication(err_info);
-
     err_info.clear();
-    // BtUtil::CreateDB(TestBigTableInstance::db_name, iot_interval * 10,
-    // err_info); BtUtil::CheckError("createDB failed :", err_info);
   }
 
   virtual void TearDown() {}
-
-  static void initData(BigTable* bt, uint64_t start_ts, int row_num,
-                       int interval = 1) {
-    uint64_t ts = start_ts;
-    for (int i = 0; i < row_num; i++) {
-      std::vector<std::any> batch = {ts, (int64_t)100 + i,
-                                     static_cast<double>(1.1 + i)};
-      BtUtil::InsertRawData(bt, batch);
-      ts = (ts + interval);
-    }
-  }
-
-  static void initData2(BigTable* bt, uint64_t start_ts, int row_num,
-                        int64_t begin_v, int interval = 1) {
-    uint64_t ts = start_ts;
-    for (int i = 0; i < row_num; i++) {
-      std::vector<std::any> batch = {ts, (int64_t)begin_v + i,
-                                     static_cast<double>(1.1 + i)};
-      BtUtil::InsertRawData(bt, batch);
-      ts = (ts + interval);
-    }
-  }
-
-  static void printTable(BigTable* bt) {
-    fprintf(stdout, "----------Print Table Data----------\n");
-    for (int r = 1; r <= bt->size(); r++) {
-      bt->printRecord(std::cout, r);
-      fprintf(stdout, "\n");
-    }
-  }
 };
 
 // payload
@@ -464,7 +306,7 @@ void genPayloadTagData(kwdbts::Payload& payload,
   std::string var_str = std::to_string(start_ts);
   for (int i = 0; i < tag_schema.size(); i++) {
     // generate primary tag
-    if (tag_schema[i].isAttrType(ATTR_PRIMARY_TAG)) {
+    if (tag_schema[i].isAttrType(COL_PRIMARY_TAG)) {
       switch (tag_schema[i].type) {
         case DATATYPE::TIMESTAMP64:
           KTimestamp(primary_start_ptr) = start_ts;
@@ -530,7 +372,7 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count,
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i == 0);
     payload_length += col_var.size;
-    if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
       tag_value_len += col_var.size;
       col_var.offset = tag_offset;
       tag_offset += col_var.size;
@@ -636,8 +478,8 @@ char* GenPayloadDataWithNull(kwdbContext_p ctx, k_uint32 count,
     struct AttributeInfo col_var;
     TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i == 0);
     payload_length += col_var.size;
-    if (col_var.isAttrType(ATTR_GENERAL_TAG) ||
-        col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+    if (col_var.isAttrType(COL_GENERAL_TAG) ||
+        col_var.isAttrType(COL_PRIMARY_TAG)) {
       tag_value_len += col_var.size;
       tag_schema.push_back(std::move(col_var));
     } else {

@@ -25,7 +25,7 @@
 namespace kwdbts {
 
 void constructRoachpbTable(roachpb::CreateTsTable* meta, uint64_t table_id, const BenchParams& params,
-                           uint64_t partition_interval = BigObjectConfig::iot_interval);
+                           uint64_t partition_interval = EngineOptions::iot_interval);
 TsTable* CreateTable(kwdbts::kwdbContext_p ctx, roachpb::CreateTsTable* meta,
                      std::string db_path, const std::vector<RangeGroup>& range_groups);
 
@@ -72,6 +72,14 @@ class StInstance {
   KStatus GetSchemaInfo(kwdbContext_p ctx, uint32_t table_id, std::vector<TagColumn*>* tag_schema,
            std::vector<AttributeInfo>* data_schema);
 
+  DedupRule GetDedupRule() {
+    return dedup_rule_;
+  }
+
+  void SetDedupRule(DedupRule dedup_rule) {
+    dedup_rule_ = dedup_rule;
+  }
+
  private:
   BenchParams params_;
   kwdbts::kwdbContext_t g_context;
@@ -81,6 +89,7 @@ class StInstance {
   TSEngine* ts_engine_{nullptr};
   TSOptions ts_opts_;
   vector<roachpb::CreateTsTable> table_metas;
+  DedupRule dedup_rule_ = DedupRule::OVERRIDE;
 };
 
 class StEngityGroupInstance {

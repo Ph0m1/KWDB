@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include "libkwdbts2.h"
 #include "kwdb_type.h"
-#include "mmap/MMapTagColumnTable.h"
+#include "mmap/mmap_tag_column_table.h"
 #include "ts_common.h"
 #include "ts_table.h"
 

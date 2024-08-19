@@ -52,11 +52,11 @@ class TestTsPayloadBuilder : public TestBigTableInstance {
       struct AttributeInfo col_var;
       s = TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
       EXPECT_EQ(s, KStatus::SUCCESS);
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
                                                static_cast<uint32_t>(col_var.length), 0,
                                                static_cast<uint32_t>(col_var.length),
-                                               static_cast<TagType>(col_var.attr_type)}));
+                                               static_cast<TagType>(col_var.col_flag)}));
       }
     }
     return tag_schema;
@@ -72,11 +72,11 @@ class TestTsPayloadBuilder : public TestBigTableInstance {
       struct AttributeInfo col_var;
       s = TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
       EXPECT_EQ(s, KStatus::SUCCESS);
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
                                                static_cast<uint32_t>(col_var.length), 0,
                                                static_cast<uint32_t>(col_var.length),
-                                               static_cast<TagType>(col_var.attr_type)}));
+                                               static_cast<TagType>(col_var.col_flag)}));
       } else {
         metric_schema.push_back(std::move(col_var));
       }

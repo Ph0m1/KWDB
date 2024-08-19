@@ -160,7 +160,7 @@ class BaseSchema {
     std::string var_str = std::to_string(start_ts);
     for (auto& info : tag_schema) {
       // Generate the Primaritag part
-      if (info.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (info.isAttrType(COL_PRIMARY_TAG)) {
         switch (info.type) {
           case DATATYPE::TIMESTAMP64:
             KTimestamp(primary_start_ptr) = start_ts;
@@ -229,7 +229,7 @@ class BaseSchema {
         TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, false);
       }
       payload_length += col_var.size;
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_value_len += col_var.size;
         col_var.offset = tag_offset;
         tag_offset += col_var.size;
@@ -337,8 +337,8 @@ class BaseSchema {
         TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, false);
       }
       payload_length += col_var.size;
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) ||
-          col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) ||
+          col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_value_len += col_var.size;
         tag_schema.push_back(std::move(col_var));
       } else {
@@ -423,7 +423,7 @@ class TSBSSchema {
   }
 
   static void constructTableMetadata(roachpb::CreateTsTable& meta, const KString& prefix_table_name,
-                                     KTableKey table_id, uint64_t partition_interval = BigObjectConfig::iot_interval) {
+                                     KTableKey table_id, uint64_t partition_interval = kwdbts::EngineOptions::iot_interval) {
     // create table :  TIMESTAMP | FLOAT | INT | CHAR(char_len) | BOOL | BINARY(binary_len)
     roachpb::KWDBTsTable* table = KNEW roachpb::KWDBTsTable();
     table->set_ts_table_id(table_id);
@@ -475,7 +475,7 @@ class TSBSSchema {
     char* tag_data_start_ptr = payload.GetTagAddr() + (tag_schema.size() + 7) / 8;
     for (int i = 0; i < tag_schema.size(); i++) {
       // Generate the Primaritag part
-      if (tag_schema[i].isAttrType(ATTR_PRIMARY_TAG)) {
+      if (tag_schema[i].isAttrType(COL_PRIMARY_TAG)) {
         switch (tag_schema[i].type) {
           case DATATYPE::TIMESTAMP64:
             KTimestamp(primary_start_ptr) = start_ts;
@@ -552,7 +552,7 @@ class TSBSSchema {
       } else {
         TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, false);
       }
-      if (col_var.isAttrType(ATTR_GENERAL_TAG) || col_var.isAttrType(ATTR_PRIMARY_TAG)) {
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
         tag_value_len += col_var.size;
         tag_schema.emplace_back(std::move(col_var));
       } else {

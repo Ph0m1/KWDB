@@ -15,17 +15,15 @@
 #include <vector>
 #include <list>
 #include <utility>
-#include "mmap/MMapPartitionTable.h"
+#include "ts_time_partition.h"
 
-inline int ReleaseTable(MMapPartitionTable* rls_obj) {
+inline int ReleaseTable(TsTimePartition* rls_obj) {
   if (rls_obj == nullptr) {
     return 0;
   }
   int ref_cnt;
   MUTEX_LOCK(rls_obj->m_ref_cnt_mtx_);
   ref_cnt = --(rls_obj->refCount());
-
-  LogObject(OBJ_RLS, rls_obj);
   MUTEX_UNLOCK(rls_obj->m_ref_cnt_mtx_);
   if (ref_cnt <= 1) {
     // notify the waiting drop thread if any
@@ -47,7 +45,7 @@ class PartitionLRUCache {
  public:
   // Define key/value pair type.
   // key=timestamp64 value, value=pointer to MMapPartitionTable.
-  typedef typename std::pair<timestamp64, MMapPartitionTable*> key_value_pair_t;
+  typedef typename std::pair<timestamp64, TsTimePartition*> key_value_pair_t;
   // Define the list iterator type
   typedef typename std::list<key_value_pair_t>::iterator list_iterator_t;
 
@@ -73,21 +71,21 @@ class PartitionLRUCache {
    * @param[in] value pointer to MMapPartitionTable.
    * @param[in] push_back Whether to insert key-value pairs at the end of the list.
    */
-  void Put(const timestamp64& key, MMapPartitionTable*& value, bool push_back = false);
+  void Put(const timestamp64& key, TsTimePartition*& value, bool push_back = false);
 
   /**
    * @brief Retrieve the key-value pairs in the cache.
    * @param[in] key timestamp64 value.
    * @return pointer to MMapPartitionTable.
    */
-  MMapPartitionTable* Get(const timestamp64& key);
+  TsTimePartition* Get(const timestamp64& key);
 
   /**
    * @brief Gets all key-value pairs in the cache.
    * @param[in] inc_ref Whether to increment the reference count of MMapPartitionTable.
    * @return List of Pointers to MMapPartitionTable
    */
-  std::vector<MMapPartitionTable*> GetAll(bool inc_ref = false);
+  std::vector<TsTimePartition*> GetAll(bool inc_ref = false);
 
   /**
    * @brief Checks the cache for the presence of the specified key.

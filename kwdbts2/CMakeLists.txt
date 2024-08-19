@@ -133,8 +133,6 @@ if (ENABLE_COVERAGE)
 endif ()
 
 # Add code compilation options for mmap
-add_definitions(-DKAIWU)
-add_definitions(-DIOT_MODE)
 add_definitions(-DTHREAD_SAFE)
 add_definitions(-DNDEBUG)
 add_definitions(-DNEW_COUNT)

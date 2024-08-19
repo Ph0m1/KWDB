@@ -12,10 +12,10 @@
 #include <dirent.h>
 #include <iostream>
 #include "lg_api.h"
-#include "mmap/MMapPartitionTable.h"
+#include "ts_time_partition.h"
 #include "st_group_manager.h"
-#include "BigObjectUtils.h"
-#include "utils/ObjectUtils.h"
+#include "utils/big_table_utils.h"
+#include "utils/compress_utils.h"
 #include "perf_stat.h"
 #include "sys_utils.h"
 
@@ -39,7 +39,7 @@ int SubEntityGroupManager::OpenInit(const std::string& db_path, const std::strin
   wrLock();
   Defer defer{[&]() { unLock(); }};
   if (subgroups_.size() > 0) {
-    err_info.setError(BOEPERM, tbl_sub_path + " already opened.");
+    err_info.setError(KWEPERM, tbl_sub_path + " already opened.");
     return err_info.errcode;
   }
   db_path_ = db_path;
@@ -100,7 +100,7 @@ TsSubEntityGroup* SubEntityGroupManager::CreateSubGroup(SubGroupID subgroup_id, 
   Defer defer{[&]() { unLock(); }};
   auto it = subgroups_.find(subgroup_id);
   if (it != subgroups_.end()) {
-    err_info.setError(BOEEXIST, "SubEntityGroup : " + std::to_string(subgroup_id));
+    err_info.setError(KWEEXIST, "SubEntityGroup : " + std::to_string(subgroup_id));
     return it->second;
   }
 
@@ -172,8 +172,8 @@ TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, Er
   return sub_group;
 }
 
-MMapPartitionTable* SubEntityGroupManager::CreatePartitionTable(timestamp64 ts, SubGroupID subgroup_id,
-                                                              ErrorInfo& err_info) {
+TsTimePartition* SubEntityGroupManager::CreatePartitionTable(timestamp64 ts, SubGroupID subgroup_id,
+                                                             ErrorInfo& err_info) {
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
     return nullptr;
@@ -181,8 +181,8 @@ MMapPartitionTable* SubEntityGroupManager::CreatePartitionTable(timestamp64 ts, 
   return sub_group->CreatePartitionTable(ts, err_info);
 }
 
-MMapPartitionTable* SubEntityGroupManager::GetPartitionTable(timestamp64 ts, SubGroupID sub_group_id,
-                                                           ErrorInfo& err_info, bool for_new) {
+TsTimePartition* SubEntityGroupManager::GetPartitionTable(timestamp64 ts, SubGroupID sub_group_id,
+                                                          ErrorInfo& err_info, bool for_new) {
   KWDB_DURATION(StStatistics::Get().get_partition);
   TsSubEntityGroup* sub_group = GetSubGroup(sub_group_id, err_info, false);
   if (sub_group == nullptr) {
@@ -191,17 +191,17 @@ MMapPartitionTable* SubEntityGroupManager::GetPartitionTable(timestamp64 ts, Sub
   return sub_group->GetPartitionTable(ts, err_info, for_new);
 }
 
-vector<MMapPartitionTable*> SubEntityGroupManager::GetPartitionTables(const KwTsSpan& ts_span, SubGroupID subgroup_id,
-                                                                      ErrorInfo& err_info) {
+vector<TsTimePartition*> SubEntityGroupManager::GetPartitionTables(const KwTsSpan& ts_span, SubGroupID subgroup_id,
+                                                                   ErrorInfo& err_info) {
   KWDB_DURATION(StStatistics::Get().get_partitions);
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
-    return vector<MMapPartitionTable*> ();
+    return vector<TsTimePartition*> ();
   }
   return sub_group->GetPartitionTables(ts_span, err_info);
 }
 
-void SubEntityGroupManager::ReleasePartitionTable(MMapPartitionTable* e_bt, bool is_force) {
+void SubEntityGroupManager::ReleasePartitionTable(TsTimePartition* e_bt, bool is_force) {
   ReleaseTable(e_bt);
 }
 
@@ -209,7 +209,7 @@ int SubEntityGroupManager::DropSubGroup(SubGroupID subgroup_id, bool if_exist,
                                         ErrorInfo& err_info) {
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
-    return BOENOOBJ;
+    return KWENOOBJ;
   }
   err_info.clear();
   wrLock();
@@ -224,7 +224,7 @@ int SubEntityGroupManager::DropPartitionTable(timestamp64 p_time, SubGroupID sub
                                               ErrorInfo& err_info) {
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
-    err_info.setError(BOENOOBJ, tbl_sub_path_ + std::to_string(p_time));
+    err_info.setError(KWENOOBJ, tbl_sub_path_ + std::to_string(p_time));
     return err_info.errcode;
   }
   return sub_group->RemovePartitionTable(p_time, err_info);
@@ -257,11 +257,11 @@ int SubEntityGroupManager::DropAll(bool is_force, ErrorInfo& err_info) {
 }
 
 void SubEntityGroupManager::Compress(const timestamp64& compress_ts, ErrorInfo& err_info) {
-  std::vector<MMapPartitionTable*> compress_tables;
+  std::vector<TsTimePartition*> compress_tables;
   // Gets all the compressible partitions in the [INT64_MIN, ts] time range under subgroup
   rdLock();
   for (auto & subgroup : subgroups_) {
-    vector<MMapPartitionTable*> p_tables = subgroup.second->GetPartitionTables({INT64_MIN, compress_ts}, err_info);
+    vector<TsTimePartition*> p_tables = subgroup.second->GetPartitionTables({INT64_MIN, compress_ts}, err_info);
     if (err_info.errcode < 0) {
       LOG_ERROR("SubEntityGroupManager GetPartitionTable error : %s", err_info.errmsg.c_str());
       break;
@@ -400,11 +400,8 @@ void SubEntityGroupManager::CopyMetaData(MMapMetricsTable* dst_bt, MMapMetricsTa
   dst_bt->metaData()->has_data = src_bt->metaData()->has_data;
   dst_bt->metaData()->actul_size = src_bt->metaData()->actul_size;
   dst_bt->metaData()->life_time = src_bt->metaData()->life_time;
-  // dst_bt->metaData()->active_time = src_bt->metaData()->active_time;
   dst_bt->metaData()->partition_interval = src_bt->metaData()->partition_interval;
   dst_bt->metaData()->num_node = src_bt->metaData()->num_node;
-  dst_bt->metaData()->is_deleted = src_bt->metaData()->is_deleted;
-//  dst_bt->metaData()->num_leaf_node = src_bt->metaData()->num_leaf_node;
   dst_bt->metaData()->life_cycle = src_bt->metaData()->life_cycle;
   dst_bt->metaData()->min_ts = src_bt->metaData()->min_ts;
   dst_bt->metaData()->max_ts = src_bt->metaData()->max_ts;

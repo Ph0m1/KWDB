@@ -134,7 +134,7 @@ bool PayloadBuilder::SetColumnNull(int row_num, int col_idx) {
   int col_data_bitmap_offset = row_offset * count_ + col_idx * batch_bitmap_size;
   char* fix_data_col_batch = fix_data_mem_ + col_data_bitmap_offset;
   set_null_bitmap((unsigned  char*)fix_data_col_batch, row_num);
-  LOG_INFO("Set data to null at column[%d:%s] row_num[%d]", col_idx, data_schema_[col_idx].name.c_str(), row_num)
+  LOG_INFO("Set data to null at column[%d:%s] row_num[%d]", col_idx, data_schema_[col_idx].name, row_num)
   return true;
 }
 

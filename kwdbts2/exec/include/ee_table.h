@@ -18,7 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "DataOperation.h"
 #include "ee_encoding.h"
 #include "ee_global.h"
 #include "ee_pb_plan.pb.h"

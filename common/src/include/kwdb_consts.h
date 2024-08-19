@@ -14,7 +14,10 @@
 #ifndef COMMON_SRC_INCLUDE_KWDB_CONSTS_H_
 #define COMMON_SRC_INCLUDE_KWDB_CONSTS_H_
 
+#include <string>
 #include "kwdb_type.h"
+
+using namespace std;
 
 namespace kwdbts {
 /************************ KWDB widely useful constants ************************/
@@ -44,6 +47,22 @@ const k_double64 kDouble64Max = 1.7976931348623158e+308;
 const k_double64 kDouble64Min = 2.2250738585072014e-308;
 const k_float64 kFloat64Max = 1.7976931348623158e+308;
 const k_float64 kFloat64Min = 2.2250738585072014e-308;
+
+
+const static string& s_emptyString = "";
+const static string& s_NULL = "NULL";
+const static string& s_true = "true";
+const static string& s_false = "false";
+const static string& s_deletable = "_d";
+const static string& s_bt = ".bt";
+const static string& s_new = "-new";
+const static string& s_old = "-old";
+const static string& s_kaiwudb = "kaiwudb";
+const static string& s_row = "row";
+const static string& s_inf = "inf";
+const static string& s_n_inf = "-inf";
+const static string& s_default = "default";
+
 }  // namespace kwdbts
 
 #endif  // COMMON_SRC_INCLUDE_KWDB_CONSTS_H_
