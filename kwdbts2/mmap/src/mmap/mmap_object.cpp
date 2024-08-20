@@ -224,7 +224,7 @@ int MMapObject::writeAttributeURL(
     }
     assign(meta_data_->attribute_offset, col_off);
 #else
-    tmp = writeColumnInfo(hrchy_info_, err_code);
+    tmp = writeColumnInfo(col_info_, err_code);
     assign(meta_data_->attribute_offset, tmp);
 #endif
 
