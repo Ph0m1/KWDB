@@ -8,7 +8,7 @@ function rename_directory() {
 }
 
 function upgrade_verify_files() {
-  local packages_array=(kaiwudb-server kaiwudb-libcommon)
+  local packages_array=(server libcommon)
   local files=$(ls $g_deploy_path/packages)
   # determine the package manager tool
   if [ "$1" == "bare" ];then
@@ -44,11 +44,15 @@ function rollback() {
   if [ "$g_package_tool" == "dpkg" ];then
     eval $kw_cmd_prefix dpkg -r kaiwudb-server >/dev/null 2>&1
     eval $kw_cmd_prefix dpkg -r kaiwudb-libcommon >/dev/null 2>&1
+    eval $kw_cmd_prefix dpkg -r kwdb-server >/dev/null 2>&1
+    eval $kw_cmd_prefix dpkg -r kwdb-libcommon >/dev/null 2>&1
     eval $kw_cmd_prefix dpkg -r libopentelemetry-kw >/dev/null 2>&1
     eval $kw_cmd_prefix dpkg -r libopentelemetry-kaiwudb >/dev/null 2>&1
   elif [ "$g_package_tool" == "rpm" ];then
     eval $kw_cmd_prefix rpm -e kaiwudb-server >/dev/null 2>&1
     eval $kw_cmd_prefix rpm -e kaiwudb-libcommon >/dev/null 2>&1
+    eval $kw_cmd_prefix rpm -e kwdb-server >/dev/null 2>&1
+    eval $kw_cmd_prefix rpm -e kwdb-libcommon >/dev/null 2>&1
     eval $kw_cmd_prefix rpm -e libopentelemetry-kw >/dev/null 2>&1
     eval $kw_cmd_prefix rpm -e libopentelemetry-kaiwudb >/dev/null 2>&1
   fi
@@ -80,7 +84,7 @@ function version_compare() {
       exit 1
     fi
     cd $g_deploy_path/packages
-    local pac_server=`ls $g_deploy_path/packages | grep "kaiwudb-server"`
+    local pac_server=`ls $g_deploy_path/packages | grep "server"`
     if [ "$g_package_tool" == "dpkg" ];then
       local new_version=`$g_package_tool --info ./$pac_server | awk -F": " '{if($1~/Version/){print $2}}' | awk -F"-" '{print $1}'`
       dpkg --compare-versions $new_version gt $old_version
@@ -117,14 +121,16 @@ function upgrade() {
   if [ "$ins_type" == "bare" ];then
     # get package name
     g_kw_user=$(user_name)
-    local kw_server=`ls $g_deploy_path/packages | grep "kaiwudb-server"`
-    local kw_libcommon=`ls $g_deploy_path/packages | grep "kaiwudb-libcommon"`
+    local kw_server=`ls $g_deploy_path/packages | grep "server"`
+    local kw_libcommon=`ls $g_deploy_path/packages | grep "libcommon"`
     if [ "$g_package_tool" == "dpkg" ];then
       cd $g_deploy_path/packages
-      eval $kw_cmd_prefix dpkg -r libopentelemetry-kw >/dev/null 2>&1
-      eval $kw_cmd_prefix dpkg -r libopentelemetry-kaiwudb >/dev/null 2>&1
 			eval $kw_cmd_prefix dpkg -r kaiwudb-server >/dev/null 2>&1
 			eval $kw_cmd_prefix dpkg -r kaiwudb-libcommon >/dev/null 2>&1
+			eval $kw_cmd_prefix dpkg -r kwdb-server >/dev/null 2>&1
+			eval $kw_cmd_prefix dpkg -r kwdb-libcommon >/dev/null 2>&1
+      eval $kw_cmd_prefix dpkg -r libopentelemetry-kw >/dev/null 2>&1
+      eval $kw_cmd_prefix dpkg -r libopentelemetry-kaiwudb >/dev/null 2>&1
       ret=`eval $kw_cmd_prefix dpkg -i ./$kw_libcommon 2>&1`
       if [ $? -ne 0 ];then
         log_err_without_console $ret
@@ -139,10 +145,12 @@ function upgrade() {
       fi
     elif [ "$g_package_tool" == "rpm" ];then
       cd $g_deploy_path/packages
-      eval $kw_cmd_prefix rpm -e libopentelemetry-kw >/dev/null 2>&1
-      eval $kw_cmd_prefix rpm -e libopentelemetry-kaiwudb >/dev/null 2>&1
 			eval $kw_cmd_prefix rpm -e kaiwudb-server >/dev/null 2>&1
 			eval $kw_cmd_prefix rpm -e kaiwudb-libcommon >/dev/null 2>&1
+			eval $kw_cmd_prefix rpm -e kwdb-server >/dev/null 2>&1
+			eval $kw_cmd_prefix rpm -e kwdb-libcommon >/dev/null 2>&1
+      eval $kw_cmd_prefix rpm -e libopentelemetry-kw >/dev/null 2>&1
+      eval $kw_cmd_prefix rpm -e libopentelemetry-kaiwudb >/dev/null 2>&1
       ret=`eval $kw_cmd_prefix rpm -ivh ./$kw_libcommon ./$kw_server 2>&1`
       if [ $? -ne 0 ];then
         log_err_without_console $ret
@@ -316,10 +324,14 @@ function rollback() {
   if [ \"$g_package_tool\" == \"dpkg\" ];then
     eval $g_node_prefix dpkg -r kaiwudb-server >/dev/null 2>&1
     eval $g_node_prefix dpkg -r kaiwudb-libcommon >/dev/null 2>&1
+    eval $g_node_prefix dpkg -r kwdb-server >/dev/null 2>&1
+    eval $g_node_prefix dpkg -r kwdb-libcommon >/dev/null 2>&1
     eval $g_node_prefix dpkg -r libopentelemetry-kw >/dev/null 2>&1
   elif [ \"$g_package_tool\" == \"rpm\" ];then
     eval $g_node_prefix rpm -e kaiwudb-server >/dev/null 2>&1
     eval $g_node_prefix rpm -e kaiwudb-libcommon >/dev/null 2>&1
+    eval $g_node_prefix rpm -e kwdb-server >/dev/null 2>&1
+    eval $g_node_prefix rpm -e kwdb-libcommon >/dev/null 2>&1
     eval $g_node_prefix rpm -e libopentelemetry-kw >/dev/null 2>&1
   fi
   local kw_data_dir=\$(sed -n \"4p\" /etc/kaiwudb/info/MODE)
@@ -332,19 +344,16 @@ function upgrade() {
     # get package name
     g_kw_user=\$(sed -n \"7p\" /etc/kaiwudb/info/MODE)
     cd ~/kaiwudb_files
-    local kw_server=\`ls | grep \"kaiwudb-server\"\`
-    local kw_libcommon=\`ls | grep \"kaiwudb-libcommon\"\`
+    local kw_server=\`ls | grep \"server\"\`
+    local kw_libcommon=\`ls | grep \"libcommon\"\`
     local kw_opentelemetry=\`ls $g_deploy_path/packages | grep \"libopentelemetry\"\`
     if [ \"$g_package_tool\" == \"dpkg\" ];then
-      $g_node_prefix dpkg -r libopentelemetry-kw >/dev/null 2>&1
-      $g_node_prefix dpkg -r libopentelemetry-kaiwudb >/dev/null 2>&1
 			$g_node_prefix dpkg -r kaiwudb-server >/dev/null 2>&1
 			$g_node_prefix dpkg -r kaiwudb-libcommon >/dev/null 2>&1
-      $g_node_prefix dpkg -i ./\$kw_opentelemetry 2>&1
-      if [ \$? -ne 0 ];then
-        rollback
-        exit 3
-      fi
+			$g_node_prefix dpkg -r kwdb-server >/dev/null 2>&1
+			$g_node_prefix dpkg -r kwdb-libcommon >/dev/null 2>&1
+      $g_node_prefix dpkg -r libopentelemetry-kw >/dev/null 2>&1
+      $g_node_prefix dpkg -r libopentelemetry-kaiwudb >/dev/null 2>&1
       $g_node_prefix dpkg -i ./\$kw_libcommon 2>&1
       if [ \$? -ne 0 ];then
         rollback
@@ -357,11 +366,13 @@ function upgrade() {
       fi
     elif [ \"$g_package_tool\" == \"rpm\" ];then
       cd ~/kaiwudb_files
-      $g_node_prefix rpm -e libopentelemetry-kw >/dev/null 2>&1
-      $g_node_prefix rpm -e libopentelemetry-kaiwudb >/dev/null 2>&1
 			$g_node_prefix rpm -e kaiwudb-server >/dev/null 2>&1
 			$g_node_prefix rpm -e kaiwudb-libcommon >/dev/null 2>&1
-      $g_node_prefix rpm -ivh ./\$kw_opentelemetry ./\$kw_libcommon ./\$kw_server 2>&1
+			$g_node_prefix rpm -e kwdb-server >/dev/null 2>&1
+			$g_node_prefix rpm -e kwdb-libcommon >/dev/null 2>&1
+      $g_node_prefix rpm -e libopentelemetry-kw >/dev/null 2>&1
+      $g_node_prefix rpm -e libopentelemetry-kaiwudb >/dev/null 2>&1
+      $g_node_prefix rpm -ivh  ./\$kw_libcommon ./\$kw_server 2>&1
       if [ \$? -ne 0 ];then
         rollback
         exit 4
@@ -418,7 +429,7 @@ if [ \"$ins_type\" == \"bare\" ];then
     exit 1
   fi
   cd ~/kaiwudb_files
-  pkg_server=\`ls | grep \"kaiwudb-server\"\`
+  pkg_server=\`ls | grep \"server\"\`
   if [ \"$g_package_tool\" == \"dpkg\" ];then
     new_version=\`dpkg --info ./\$pkg_server | awk -F\": \" '{if(\$1~/Version/){print \$2}}' | awk -F\"-\" '{print \$1}'\`
     dpkg --compare-versions \$new_version gt \$old_version

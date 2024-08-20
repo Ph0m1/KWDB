@@ -10,7 +10,7 @@ function verify_files() {
   else
     g_deploy_type="container"
   fi
-  local packages_array=(kaiwudb-server kaiwudb-libcommon)
+  local packages_array=(server libcommon)
   # determine the package manager tool
   if [ "$g_deploy_type" == "bare" ];then
     dpkg --help >/dev/null 2>&1
@@ -38,9 +38,13 @@ function rollback() {
     if [ "$g_package_tool" == "dpkg" ];then
       eval $kw_cmd_prefix dpkg -r kaiwudb-server >/dev/null 2>&1
       sudo dpkg -r kaiwudb-libcommon >/dev/null 2>&1
+      eval $kw_cmd_prefix dpkg -r kwdb-server >/dev/null 2>&1
+      sudo dpkg -r kwdb-libcommon >/dev/null 2>&1
     elif [ "$g_package_tool" == "rpm" ];then
       eval $kw_cmd_prefix rpm -e kaiwudb-server >/dev/null 2>&1
       sudo rpm -e kaiwudb-libcommon >/dev/null 2>&1
+      eval $kw_cmd_prefix rpm -e kwdb-server >/dev/null 2>&1
+      sudo rpm -e kwdb-libcommon >/dev/null 2>&1
     fi
     sudo rm -rf /etc/kaiwudb $g_data_root /etc/systemd/system/kaiwudb.service
     sudo userdel -r kaiwudb >/dev/null 2>&1
@@ -116,9 +120,13 @@ function node_rollback() {
     if [ "$g_package_tool" == "dpkg" ];then
       $g_node_prefix dpkg -r kaiwudb-server >/dev/null 2>&1
       sudo dpkg -r kaiwudb-libcommon >/dev/null 2>&1
+      $g_node_prefix dpkg -r kwdb-server >/dev/null 2>&1
+      sudo dpkg -r kwdb-libcommon >/dev/null 2>&1
     elif [ "$g_package_tool" == "rpm" ];then
       $g_node_prefix rpm -e kaiwudb-server >/dev/null 2>&1
       sudo rpm -e kaiwudb-libcommon >/dev/null 2>&1
+      $g_node_prefix rpm -e kwdb-server >/dev/null 2>&1
+      sudo rpm -e kwdb-libcommon >/dev/null 2>&1
     fi
     sudo rm -rf /etc/kaiwudb $g_data_root ~/kaiwudb_files
     sudo userdel -r kaiwudb >/dev/null 2>&1
@@ -247,8 +255,8 @@ function install() {
   if [ "$g_deploy_type" == "bare" ];then
     # get package name
     log_info_without_console "start install binaries and libraries to /usr/local/kaiwudb"
-    local kw_server=`ls $g_deploy_path/packages | grep "kaiwudb-server"`
-    local kw_libcommon=`ls $g_deploy_path/packages | grep "kaiwudb-libcommon"`
+    local kw_server=`ls $g_deploy_path/packages | grep "server"`
+    local kw_libcommon=`ls $g_deploy_path/packages | grep "libcommon"`
     if [ "$g_package_tool" == "dpkg" ];then
       cd $g_deploy_path/packages
       ret=`eval $kw_cmd_prefix dpkg -i ./$kw_libcommon 2>&1`
@@ -319,8 +327,8 @@ function node_install() {
   ssh -t -p $2 $3@$1 >/dev/null 2>$g_deploy_path/log/err-$1 "
 cd ~/kaiwudb_files
 if [ \"$g_deploy_type\" == \"bare\" ];then
-  kw_server=\`ls | grep \"kaiwudb-server\"\`
-  kw_libcommon=\`ls | grep \"kaiwudb-libcommon\"\`
+  kw_server=\`ls | grep \"server\"\`
+  kw_libcommon=\`ls | grep \"libcommon\"\`
   if [ \"$g_package_tool\" == \"dpkg\" ];then
     $g_node_prefix dpkg -i ./\$kw_libcommon
     if [ \$? -ne 0 ];then

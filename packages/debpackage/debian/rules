@@ -24,7 +24,9 @@ install-stamp:
 	mkdir -p debian/kaiwudb-server/usr/local/kaiwudb/bin
 	mkdir -p debian/kaiwudb-server/usr/local/kaiwudb/lib
 	mkdir -p debian/kaiwudb-libcommon/usr/local/kaiwudb/lib
+	mkdir -p debian/kaiwudb-libcommon/usr/share/doc/kaiwudb
 #kaiwudb-libcommon
+	install -m 755 ../../NOTICE.txt debian/kaiwudb-libcommon/usr/share/doc/kaiwudb
 	install -m 755 ../../install/lib/libcommon.so debian/kaiwudb-libcommon/usr/local/kaiwudb/lib
 #kaiwudb-server
 	install -m 755 ../../install/bin/kwbase debian/kaiwudb-server/usr/local/kaiwudb/bin

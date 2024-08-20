@@ -4,14 +4,14 @@ Standards-Version: ${KAIWUDB_VERSION}
 
 Package: kaiwudb-server
 Architecture: any
-Depends: libprotobuf17|libprotobuf23, libssl1.1(>= 1.1.1d)|libssl3, libatomic1, libgomp1, libc6, libgcc-s1, libstdc++6, kaiwudb-libcommon(>= ${binary:Version}), squashfs-tools, liblzma5
+Depends: ${shlibs:Depends}, kaiwudb-libcommon(>= ${binary:Version}), squashfs-tools
 Suggests: libgeos-c1v5, squashfuse
 Description: KaiwuDB server binaries and libraries.
  KaiwuDB is a distributed multi-model database for AIoT, offering top-notch performance, reliability, and cost-effectiveness. It integrates various computing engines like adaptive time series, transaction processing, and machine learning to manage diverse data models efficiently. With advanced capabilities in distributed storage, efficient compression, and fast read/write operations, KaiwuDB is ideal for applications in Industrial IoT, Digital Energy, Vehicle-to-Everything, and Smart Industries. This package provides the essential infrastructure for setting up KaiwuDB.
 
 Package: kaiwudb-libcommon
 Architecture: any
-Depends: libprotobuf17|libprotobuf23, libc6, libgcc-s1, libstdc++6
+Depends: ${shlibs:Depends}
 Description: KaiwuDB common library.
  KaiwuDB is a distributed multi-model database for AIoT, offering top-notch performance, reliability, and cost-effectiveness. It integrates various computing engines like adaptive time series, transaction processing, and machine learning to manage diverse data models efficiently. With advanced capabilities in distributed storage, efficient compression, and fast read/write operations, KaiwuDB is ideal for applications in Industrial IoT, Digital Energy, Vehicle-to-Everything, and Smart Industries. This package provides the essential infrastructure for setting up KaiwuDB.
  This package includes the common library.

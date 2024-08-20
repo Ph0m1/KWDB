@@ -1,4 +1,4 @@
-Name:        kaiwudb
+Name:        %(echo ${KAIWUDB_PKG_NAME})
 Version:     %(echo ${KAIWUDB_VERSION})
 Release:     %{_vendor}
 Summary:     KaiwuDB  bin and lib
@@ -16,9 +16,9 @@ This package contains the infrastructure needed to setup system databases.
 %package server
 Summary: KaiwuDB server binaries and libraries
 Group: System Environment/Libraries
-Requires: openssl >= 1.1.1  protobuf >= 3.5.0
-Requires: boost-atomic squashfs-tools libgomp xz-libs
-Requires: kaiwudb-libcommon = %{version}
+Requires: protobuf >= 3.5.0
+Requires: squashfs-tools libgomp xz-libs
+Requires: %(echo ${KAIWUDB_PKG_NAME})-libcommon = %{version}
 Suggests: squashfuse geos
 Requires: libgcc
 Autoprov: no
@@ -31,7 +31,7 @@ This package contains the infrastructure needed to setup system databases.
 %package libcommon
 Summary: KaiwuDB common library
 Group: System Environment/Libraries
-Requires: openssl >= 1.1.1 protobuf >= 3.5.0
+Requires: protobuf >= 3.5.0
 Requires: libgcc
 Autoprov: no
 Autoreq: no
@@ -72,12 +72,12 @@ mkdir -p %{buildroot}%{_KaiwudbLinkLibDir}
 
 mkdir -p %{buildroot}%{_KaiwudbPreBinInstall}
 mkdir -p %{buildroot}%{_KaiwudbPreLibInstall}
+mkdir -p %{buildroot}%{_Kaiwudbdocdir}
 
-mkdir -p %{buildroot}%{_Kaiwudbdocdir}/jemalloc
 #server
 cp -rf  %{_KaiwudbSourceDir}/install/bin/kwbase %{buildroot}%{_KaiwudbPreBinInstall}
 cp -rf  %{_KaiwudbSourceDir}/install/lib/libkwdbts2.so %{buildroot}%{_KaiwudbPreLibInstall}
-cp -rf  %{_KaiwudbSourceDir}/kwbase/c-deps/jemalloc/COPYING %{buildroot}%{_Kaiwudbdocdir}/jemalloc/
+cp -rf  %{_KaiwudbSourceDir}/NOTICE.txt %{buildroot}%{_Kaiwudbdocdir}/
 
 #kaiwudbcommon
 cp -rf  %{_KaiwudbSourceDir}/install/lib/libcommon.so %{buildroot}%{_KaiwudbPreLibInstall}
@@ -93,7 +93,7 @@ cp -rf  %{_KaiwudbSourceDir}/install/lib/libcommon.so %{buildroot}%{_KaiwudbPreL
 %defattr(-,root,root)
 %{_KaiwudbPreBinInstall}/kwbase
 %{_KaiwudbPreLibInstall}/libkwdbts2.so
-%license %{_Kaiwudbdocdir}/jemalloc/COPYING
+%license %{_Kaiwudbdocdir}/NOTICE.txt
 
 %files libcommon
 %defattr(-,root,root)
