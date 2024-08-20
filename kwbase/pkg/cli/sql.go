@@ -40,7 +40,6 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/cli/cliflags"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
@@ -58,7 +57,7 @@ import (
 
 const (
 	welcomeMessage = `#
-# Welcome to the KwDB SQL shell.
+# Welcome to the KWDB SQL shell.
 # All statements must be terminated by a semicolon.
 # To exit, type: \q.
 #
@@ -78,10 +77,11 @@ Type:
   \dt               show the tables of the current schema in the current database.
   \du               list the users for all databases.
   \d [TABLE]        show details about columns in the specified table, or alias for '\dt' if no table is specified.
-%s
-More documentation about our SQL dialect and the CLI shell is available online:
-%s
 %s`
+	// DOC TODO: hike online doc link before KWDB has one
+	// More documentation about our SQL dialect and the CLI shell is available online:
+	// %s
+	// %s`
 
 	demoCommandsHelp = `
 Commands specific to the demo shell (EXPERIMENTAL):
@@ -237,8 +237,9 @@ func (c *cliState) printCliHelp() {
 	}
 	fmt.Printf(helpMessageFmt,
 		demoHelpStr,
-		base.DocsURL("sql-statements.html"),
-		base.DocsURL("use-the-built-in-sql-client.html"),
+		// DOC TODO: hide below link before KWDB has an online doc site
+		// base.DocsURL("sql-statements.html"),
+		// base.DocsURL("use-the-built-in-sql-client.html"),
 	)
 	fmt.Println()
 }

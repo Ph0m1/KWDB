@@ -32,4 +32,6 @@ var DocsURLBase = "https://www.cockroachlabs.com/docs/" + build.VersionPrefix()
 
 // DocsURL generates the URL to pageName in the version of the docs associated
 // with this binary.
-func DocsURL(pageName string) string { return DocsURLBase + "/" + pageName }
+// func DocsURL(pageName string) string { return DocsURLBase + "/" + pageName }
+// DOC TODO: hide doc website before KWDB has one
+func DocsURL(pageName string) string { return "on KWDB web site" }

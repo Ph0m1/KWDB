@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -159,7 +160,7 @@ const (
 	hMisc         = "miscellaneous"
 	hCfg          = "configuration"
 	hExperimental = "experimental"
-	hCCL          = "enterprise features"
+	hTOOLS        = "database tooling"
 )
 
 // HelpMessageBody defines the body of a help text. The messages are
@@ -183,10 +184,13 @@ var HelpMessages = func(h map[string]HelpMessageBody) map[string]HelpMessageBody
 		}
 		return newItem
 	}
+	// DOC TODO: KWDB has NOT an external doc website for now.
+	// we disable showing the original CockroachDB website before we have one.
+	webdoc := regexp.MustCompile(`WEBDOCS.*`)
 	reformatSeeAlso := func(seeAlso string) string {
-		return strings.Replace(
-			strings.Replace(seeAlso, ", ", "\n  ", -1),
-			"WEBDOCS", base.DocsURLBase, -1)
+		return webdoc.ReplaceAllString(
+			strings.Replace(seeAlso, ",", "\n ", -1),
+			"")
 	}
 	srcMsg := h["<SOURCE>"]
 	srcMsg.SeeAlso = reformatSeeAlso(strings.TrimSpace(srcMsg.SeeAlso))

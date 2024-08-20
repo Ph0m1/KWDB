@@ -1211,7 +1211,7 @@ func setupAndInitializeLoggingAndProfiling(
 				"- Any user, even root, can log in without providing a password.\n"+
 				"- Any user, connecting as root, can read or write any data in your cluster.\n"+
 				"- There is no network encryption nor authentication, and thus no confidentiality.\n\n"+
-				"Check out how to secure your cluster: "+base.DocsURL("secure-a-cluster.html"))
+				"Check out how to secure your cluster on KWDB website")
 	}
 
 	maybeWarnMemorySizes(ctx)

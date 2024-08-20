@@ -7,7 +7,7 @@ start_server $argv
 spawn $argv sql
 
 start_test "Check that the client starts with the welcome message."
-eexpect "# Welcome to the KwDB SQL shell."
+eexpect "# Welcome to the KWDB SQL shell."
 end_test
 
 start_test "Check that the client reports the server version, and correctly detects the version is the same as the client."

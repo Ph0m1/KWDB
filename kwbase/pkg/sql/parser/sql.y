@@ -2083,7 +2083,7 @@ audit_able:
   }
 
 // %Help: BACKUP - back up data to external storage
-// %Category: CCL
+// %Category: TOOLS
 // %Text:
 // BACKUP <targets...> TO <location...>
 //        [ AS OF SYSTEM TIME <expr> ]
@@ -2114,7 +2114,7 @@ backup_stmt:
 | BACKUP error // SHOW HELP: BACKUP
 
 // %Help: RESTORE - restore data from external storage
-// %Category: CCL
+// %Category: TOOLS
 // %Text:
 // RESTORE <targets...> FROM <location...>
 //         [ AS OF SYSTEM TIME <expr> ]
@@ -2170,7 +2170,7 @@ import_format:
   }
 
 // %Help: IMPORT - load data from file in a distributed manner
-// %Category: CCL
+// %Category: TOOLS
 // %Text:
 // -- Import both schema and table data:
 // IMPORT [ TABLE <tablename> FROM ]
@@ -2231,7 +2231,7 @@ import_stmt:
 | IMPORT error // SHOW HELP: IMPORT
 
 // %Help: EXPORT - export data to file in a distributed manner
-// %Category: CCL
+// %Category: TOOLS
 // %Text:
 // EXPORT INTO <format> <datafile> [WITH <option> [= value] [,...]] FROM <query>
 //
@@ -4025,7 +4025,7 @@ show_schedule_stmt:
 | SHOW SCHEDULE error // SHOW HELP: SHOW SCHEDULE
 
 // %Help: SHOW BACKUP - list backup contents
-// %Category: CCL
+// %Category: TOOLS
 // %Text: SHOW BACKUP [SCHEMAS|FILES|RANGES] <location>
 // %SeeAlso: WEBDOCS/show-backup.html
 show_backup_stmt:
