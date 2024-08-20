@@ -38,7 +38,6 @@ $(BUILDDIR):
 	@rm -rf $@ && mkdir -p $(BUILDDIR)
 
 build: export GO111MODULE = off
-build: export NODE_OPTIONS = --openssl-legacy-provider
 build: .ALWAYS_REBUILD | bin/.submodules-initialized
 	$(info ========== $@ ==========)
 	GOPATH=$(GOPATH) cmake -B $(BUILDDIR) -S $(BASEDIR) $(CMAKE_CONFIG_OPTIONS)
