@@ -67,7 +67,7 @@ func (n *alterScheduleNode) startExec(params runParams) error {
 			return err
 		}
 		return pgerror.Newf(pgcode.InsufficientPrivilege,
-			"%s is not superuser or membership of admin, has no privilege to PAUSE SCHEDULE",
+			"%s is not superuser or membership of admin, has no privilege to ALTER SCHEDULE",
 			n.p.User())
 	}
 
@@ -77,7 +77,10 @@ func (n *alterScheduleNode) startExec(params runParams) error {
 	}
 
 	if schedule == nil {
-		return nil // not an error if schedule does not exist
+		if n.n.IfExists {
+			return nil
+		}
+		return pgerror.Newf(pgcode.UndefinedObject, "schedule %s does not exist", n.n.ScheduleName)
 	}
 
 	if n.n.Recurrence == nil {

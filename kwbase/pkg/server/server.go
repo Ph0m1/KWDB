@@ -59,7 +59,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
 	"gitee.com/kwbasedb/kwbase/pkg/gossip"
 	"gitee.com/kwbasedb/kwbase/pkg/jobs"
-	"gitee.com/kwbasedb/kwbase/pkg/jobs/compress"
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobsprotectedts"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -2291,14 +2290,19 @@ func (s *Server) Start(ctx context.Context) error {
 	})
 
 	jobs.RegisterScheduledJobExecutorFactory(
-		compress.CompressExecutorName,
+		sql.CompressExecutorName,
 		func() (jobs.ScheduledJobExecutor, error) {
-			return &compress.ScheduledCompressExecutor{}, nil
+			return &sql.ScheduledCompressExecutor{}, nil
 		})
 	jobs.RegisterScheduledJobExecutorFactory(
-		compress.RetentionExecutorName,
+		sql.RetentionExecutorName,
 		func() (jobs.ScheduledJobExecutor, error) {
-			return &compress.ScheduledRetentionExecutor{}, nil
+			return &sql.ScheduledRetentionExecutor{}, nil
+		})
+	jobs.RegisterScheduledJobExecutorFactory(
+		sql.SQLExecutorName,
+		func() (jobs.ScheduledJobExecutor, error) {
+			return &sql.ScheduledSQLExecutor{}, nil
 		})
 	// Start scheduled jobs daemon.
 	jobs.StartJobSchedulerDaemon(

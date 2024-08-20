@@ -9,7 +9,7 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
-package compress
+package sql
 
 import (
 	"context"
@@ -19,23 +19,22 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/scheduledjobs"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
-	"gitee.com/kwbasedb/kwbase/pkg/sql"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/metric"
 )
 
-// CompressExecutorName is the name associated with scheduled job executor which
+// RetentionExecutorName is the name associated with scheduled job executor which
 // runs jobs outstanding -- that is, it doesn't spawn external system.job to do its work.
-const CompressExecutorName = "scheduled-compress-executor"
+const RetentionExecutorName = "scheduled-retention-executor"
 
-// ScheduledCompressExecutor implements ScheduledJobExecutor interface.
-type ScheduledCompressExecutor struct{}
+// ScheduledRetentionExecutor implements ScheduledJobExecutor interface.
+type ScheduledRetentionExecutor struct{}
 
-var _ jobs.ScheduledJobExecutor = &ScheduledCompressExecutor{}
+var _ jobs.ScheduledJobExecutor = &ScheduledRetentionExecutor{}
 
 // ExecuteJob implements ScheduledJobExecutor interface.
-func (e *ScheduledCompressExecutor) ExecuteJob(
+func (e *ScheduledRetentionExecutor) ExecuteJob(
 	ctx context.Context,
 	cfg *scheduledjobs.JobExecutionConfig,
 	env scheduledjobs.JobSchedulerEnv,
@@ -43,16 +42,16 @@ func (e *ScheduledCompressExecutor) ExecuteJob(
 	txn *kv.Txn,
 ) error {
 	user := security.NodeUser
-	phs, cleanup := cfg.PlanHookMaker(CompressExecutorName, txn, user)
+	phs, cleanup := cfg.PlanHookMaker(RetentionExecutorName, txn, user)
 	defer cleanup()
-	innerPlaner := phs.(sql.PlanHookState)
+	innerPlaner := phs.(PlanHookState)
 	// create a job and start it
 	jobRegistry := innerPlaner.ExecCfg().JobRegistry
 	syncDetail := jobspb.SyncMetaCacheDetails{
-		Type: sql.Compress,
+		Type: deleteExpiredData,
 	}
 	jobRecord := jobs.Record{
-		Description: "compress ts tables",
+		Description: "retention ts tables",
 		Username:    user,
 		CreatedBy: &jobs.CreatedByInfo{
 			Name: schedule.ScheduleLabel(),
@@ -86,7 +85,7 @@ func (e *ScheduledCompressExecutor) ExecuteJob(
 	}()
 	if err := job.Run(ctx); err != nil {
 		jobStatus = jobs.StatusFailed
-		log.Error(ctx, "start compress job failed")
+		log.Error(ctx, "start retention job failed")
 		return err
 	}
 	jobStatus = jobs.StatusSucceeded
@@ -99,7 +98,7 @@ func (e *ScheduledCompressExecutor) ExecuteJob(
 }
 
 // NotifyJobTermination implements ScheduledJobExecutor interface.
-func (e *ScheduledCompressExecutor) NotifyJobTermination(
+func (e *ScheduledRetentionExecutor) NotifyJobTermination(
 	ctx context.Context,
 	jobID int64,
 	jobStatus jobs.Status,
@@ -117,6 +116,6 @@ func (e *ScheduledCompressExecutor) NotifyJobTermination(
 }
 
 // Metrics implements ScheduledJobExecutor interface
-func (e *ScheduledCompressExecutor) Metrics() metric.Struct {
+func (e *ScheduledRetentionExecutor) Metrics() metric.Struct {
 	return nil
 }

@@ -43,6 +43,7 @@ var _ Details = CreateStatsDetails{}
 var _ Details = SchemaChangeGCDetails{}
 var _ Details = RestartDetails{}
 var _ Details = ExportDetails{}
+var _ Details = SqlScheduleDetails{}
 
 // ProgressDetails is a marker interface for job progress details proto structs.
 type ProgressDetails interface{}
@@ -55,6 +56,7 @@ var _ ProgressDetails = CreateStatsProgress{}
 var _ ProgressDetails = SchemaChangeGCProgress{}
 var _ ProgressDetails = RestartHistoryProgress{}
 var _ ProgressDetails = ExportProgress{}
+var _ ProgressDetails = SqlScheduleProgress{}
 
 // Type returns the payload's job type.
 func (p *Payload) Type() Type {
@@ -92,6 +94,8 @@ func DetailsType(d isPayload_Details) Type {
 		return TypeRestartHistory
 	case *Payload_Export:
 		return TypeExport
+	case *Payload_SqlSchedule:
+		return TypeSqlSchedule
 	default:
 		panic(fmt.Sprintf("Payload.Type called on a payload with an unknown details type: %T", d))
 	}
@@ -130,6 +134,8 @@ func WrapProgressDetails(details ProgressDetails) interface {
 		return &Progress_Restarthistory{Restarthistory: &d}
 	case ExportProgress:
 		return &Progress_Export{Export: &d}
+	case SqlScheduleProgress:
+		return &Progress_SqlSchedule{SqlSchedule: &d}
 	default:
 		panic(fmt.Sprintf("WrapProgressDetails: unknown details type %T", d))
 	}
@@ -159,6 +165,8 @@ func (p *Payload) UnwrapDetails() Details {
 		return *d.ReplicationIngestion
 	case *Payload_ReplicationStream:
 		return *d.ReplicationStream
+	case *Payload_SqlSchedule:
+		return *d.SqlSchedule
 	default:
 		return nil
 	}
@@ -228,6 +236,8 @@ func WrapPayloadDetails(details Details) interface {
 		return &Payload_RestartHistory{RestartHistory: &d}
 	case ExportDetails:
 		return &Payload_Export{Export: &d}
+	case SqlScheduleDetails:
+		return &Payload_SqlSchedule{SqlSchedule: &d}
 	default:
 		panic(fmt.Sprintf("jobs.WrapPayloadDetails: unknown details type %T", d))
 	}

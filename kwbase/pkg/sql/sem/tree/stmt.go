@@ -788,7 +788,7 @@ func (*DropRole) cclOnlyStatement() {}
 func (*DropRole) hiddenFromShowQueries() {}
 
 // StatementType implements the Statement interface.
-func (*DropSchedule) StatementType() StatementType { return DDL }
+func (*DropSchedule) StatementType() StatementType { return RowsAffected }
 
 // StatementTag implements the Statement interface.
 func (*DropSchedule) StatementTag() string { return "DROP SCHEDULE" }

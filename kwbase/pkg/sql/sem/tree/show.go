@@ -179,12 +179,16 @@ const (
 	ScheduledRetentionExecutor
 	// ScheduledCompressExecutor is an executor responsible for the execution of the scheduled compress
 	ScheduledCompressExecutor
+	// ScheduledExecSQLExecutor is an executor responsible for
+	// the execution of the scheduled SQL.
+	ScheduledExecSQLExecutor
 )
 
 var scheduleExecutorInternalNames = map[ScheduledJobExecutorType]string{
 	InvalidExecutor:            "unknown-executor",
 	ScheduledRetentionExecutor: "scheduled-retention-executor",
 	ScheduledCompressExecutor:  "scheduled-compress-executor",
+	ScheduledExecSQLExecutor:   "scheduled-sql-executor",
 }
 
 // InternalName returns an internal executor name.
@@ -200,6 +204,8 @@ func (t ScheduledJobExecutorType) UserName() string {
 		return "RETENTION"
 	case ScheduledCompressExecutor:
 		return "COMPRESS"
+	case ScheduledExecSQLExecutor:
+		return "SQL"
 	}
 	return "unsupported-executor"
 }
@@ -283,11 +289,15 @@ func (n *ShowSchedule) Format(ctx *FmtCtx) {
 // PauseSchedule represents a SHOW SCHEDULE statement.
 type PauseSchedule struct {
 	ScheduleName Name
+	IfExists     bool
 }
 
 // Format implements the NodeFormatter interface.
 func (n *PauseSchedule) Format(ctx *FmtCtx) {
 	ctx.WriteString("PAUSE SCHEDULE ")
+	if n.IfExists {
+		ctx.WriteString("IF EXISTS ")
+	}
 	ctx.WriteString(string(n.ScheduleName))
 }
 
@@ -296,11 +306,15 @@ var _ Statement = &PauseSchedule{}
 // ResumeSchedule represents a SHOW SCHEDULE statement.
 type ResumeSchedule struct {
 	ScheduleName Name
+	IfExists     bool
 }
 
 // Format implements the NodeFormatter interface.
 func (n *ResumeSchedule) Format(ctx *FmtCtx) {
 	ctx.WriteString("RESUME SCHEDULE ")
+	if n.IfExists {
+		ctx.WriteString("IF EXISTS ")
+	}
 	ctx.WriteString(string(n.ScheduleName))
 }
 
@@ -308,13 +322,26 @@ var _ Statement = &ResumeSchedule{}
 
 // DropSchedule represents a SHOW SCHEDULE statement.
 type DropSchedule struct {
-	ScheduleName Name
+	ScheduleName *Name
+	Schedules    *Select
+	IfExists     bool
 }
 
 // Format implements the NodeFormatter interface.
 func (n *DropSchedule) Format(ctx *FmtCtx) {
-	ctx.WriteString("DROP SCHEDULE ")
-	ctx.WriteString(string(n.ScheduleName))
+	if n.ScheduleName != nil {
+		ctx.WriteString("DROP SCHEDULE ")
+		if n.IfExists {
+			ctx.WriteString("IF EXISTS ")
+		}
+		ctx.WriteString(string(*n.ScheduleName))
+	} else if n.Schedules != nil {
+		ctx.WriteString("DROP SCHEDULES ")
+		if n.IfExists {
+			ctx.WriteString("IF EXISTS ")
+		}
+		n.Schedules.Format(ctx)
+	}
 }
 
 var _ Statement = &DropSchedule{}

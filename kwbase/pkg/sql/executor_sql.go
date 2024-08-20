@@ -1,15 +1,18 @@
 // Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
 //
-// This software (KWDB) is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-//          http://license.coscl.org.cn/MulanPSL2
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-package compress
+package sql
 
 import (
 	"context"
@@ -19,47 +22,54 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/scheduledjobs"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
-	"gitee.com/kwbasedb/kwbase/pkg/sql"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/metric"
+	"github.com/gogo/protobuf/types"
 )
 
-// RetentionExecutorName is the name associated with scheduled job executor which
-// runs jobs outstanding -- that is, it doesn't spawn external system.job to do its work.
-const RetentionExecutorName = "scheduled-retention-executor"
+// SQLExecutorName is the name associated with scheduled job executor which
+// create by user to execute sql statement.
+const SQLExecutorName = "scheduled-sql-executor"
 
-// ScheduledRetentionExecutor implements ScheduledJobExecutor interface.
-type ScheduledRetentionExecutor struct{}
+// ScheduledSQLExecutor implements ScheduledJobExecutor interface.
+type ScheduledSQLExecutor struct{}
 
-var _ jobs.ScheduledJobExecutor = &ScheduledRetentionExecutor{}
+var _ jobs.ScheduledJobExecutor = &ScheduledSQLExecutor{}
 
 // ExecuteJob implements ScheduledJobExecutor interface.
-func (e *ScheduledRetentionExecutor) ExecuteJob(
+func (e *ScheduledSQLExecutor) ExecuteJob(
 	ctx context.Context,
 	cfg *scheduledjobs.JobExecutionConfig,
 	env scheduledjobs.JobSchedulerEnv,
 	schedule *jobs.ScheduledJob,
 	txn *kv.Txn,
 ) error {
+	args := &jobspb.SqlStatementExecutionArg{}
+	if err := types.UnmarshalAny(schedule.ExecutionArgs().Args, args); err != nil {
+		return err
+	}
+	stmt := args.Statement
+
 	user := security.NodeUser
-	phs, cleanup := cfg.PlanHookMaker(RetentionExecutorName, txn, user)
+	phs, cleanup := cfg.PlanHookMaker(SQLExecutorName, txn, user)
 	defer cleanup()
-	innerPlaner := phs.(sql.PlanHookState)
+	innerPlaner := phs.(PlanHookState)
 	// create a job and start it
 	jobRegistry := innerPlaner.ExecCfg().JobRegistry
-	syncDetail := jobspb.SyncMetaCacheDetails{
-		Type: sql.Retention,
+	sqlScheduleDetail := jobspb.SqlScheduleDetails{
+		ScheduleType: sqlSchedule,
+		Statement:    stmt,
 	}
 	jobRecord := jobs.Record{
-		Description: "retention ts tables",
+		Description: stmt,
 		Username:    user,
 		CreatedBy: &jobs.CreatedByInfo{
 			Name: schedule.ScheduleLabel(),
 			ID:   schedule.ScheduleID(),
 		},
-		Details:  syncDetail,
-		Progress: jobspb.SyncMetaCacheProgress{},
+		Details:  sqlScheduleDetail,
+		Progress: jobspb.SqlScheduleProgress{},
 	}
 	var job *jobs.StartableJob
 	var err1 error
@@ -86,7 +96,7 @@ func (e *ScheduledRetentionExecutor) ExecuteJob(
 	}()
 	if err := job.Run(ctx); err != nil {
 		jobStatus = jobs.StatusFailed
-		log.Error(ctx, "start compress job failed")
+		log.Error(ctx, "start sqlSchedule job failed")
 		return err
 	}
 	jobStatus = jobs.StatusSucceeded
@@ -99,7 +109,7 @@ func (e *ScheduledRetentionExecutor) ExecuteJob(
 }
 
 // NotifyJobTermination implements ScheduledJobExecutor interface.
-func (e *ScheduledRetentionExecutor) NotifyJobTermination(
+func (e *ScheduledSQLExecutor) NotifyJobTermination(
 	ctx context.Context,
 	jobID int64,
 	jobStatus jobs.Status,
@@ -117,6 +127,6 @@ func (e *ScheduledRetentionExecutor) NotifyJobTermination(
 }
 
 // Metrics implements ScheduledJobExecutor interface
-func (e *ScheduledRetentionExecutor) Metrics() metric.Struct {
+func (e *ScheduledSQLExecutor) Metrics() metric.Struct {
 	return nil
 }

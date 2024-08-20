@@ -39,8 +39,8 @@ func TestScheduleControl(t *testing.T) {
 
 	t.Run("non-existent", func(t *testing.T) {
 		for _, command := range []string{
-			"PAUSE SCHEDULE schedule1",
-			"RESUME SCHEDULE schedule1",
+			"PAUSE SCHEDULE IF EXISTS schedule1",
+			"RESUME SCHEDULE IF EXISTS schedule1",
 		} {
 			t.Run(command, func(t *testing.T) {
 				th.sqlDB.ExecRowsAffected(t, 0, command)

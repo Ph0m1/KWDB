@@ -357,7 +357,16 @@ func (s *jobScheduler) executeSchedules(
 func (s *jobScheduler) runDaemon(ctx context.Context, stopper *stop.Stopper) {
 	stopper.RunWorker(ctx, func(ctx context.Context) {
 		var initialDelay time.Duration
-		if s.StartMode != startSingleNode {
+		var testPace time.Duration
+		var isTest = false
+		// TestRetentionsInterval is only used for regression test to set a pace period.
+		// So that we can get a pace period of less than 60s.It will not be set in production.
+		TestRetentionsInterval := envutil.EnvOrDefaultInt("KWDB_RETENTIONS_INTERVAL", -1)
+		if TestRetentionsInterval != -1 {
+			isTest = true
+			testPace = time.Duration(TestRetentionsInterval) * time.Second
+		}
+		if !isTest {
 			initialDelay = getInitialScanDelay(s.TestingKnobs)
 		}
 		log.Infof(ctx, "waiting %v before scheduled jobs daemon start", initialDelay)
@@ -365,13 +374,18 @@ func (s *jobScheduler) runDaemon(ctx context.Context, stopper *stop.Stopper) {
 		if err := RegisterExecutorsMetrics(s.registry); err != nil {
 			log.Errorf(ctx, "error registering executor metrics: %+v", err)
 		}
-
-		for timer := time.NewTimer(initialDelay); ; timer.Reset(
-			getWaitPeriod(&s.Settings.SV, s.TestingKnobs)) {
+		pace := getWaitPeriod(&s.Settings.SV, s.TestingKnobs)
+		for timer := time.NewTimer(initialDelay); ; {
 			select {
 			case <-stopper.ShouldQuiesce():
 				return
 			case <-timer.C:
+				if isTest {
+					timer.Reset(testPace)
+				} else {
+					timer.Reset(pace)
+				}
+				pace = getWaitPeriod(&s.Settings.SV, s.TestingKnobs)
 				if !schedulerEnabledSetting.Get(&s.Settings.SV) {
 					log.Info(ctx, "scheduled job daemon disabled")
 					continue
@@ -434,10 +448,6 @@ func getWaitPeriod(sv *settings.Values, knobs base.ModuleTestingKnobs) time.Dura
 
 	if !schedulerEnabledSetting.Get(sv) {
 		return recheckEnabledAfterPeriod
-	}
-	TestRetentionsInterval := envutil.EnvOrDefaultInt("KWDB_RETENTIONS_INTERVAL", -1)
-	if TestRetentionsInterval != -1 {
-		return time.Duration(TestRetentionsInterval) * time.Second
 	}
 	pace := schedulerPaceSetting.Get(sv)
 	if pace < minPacePeriod {

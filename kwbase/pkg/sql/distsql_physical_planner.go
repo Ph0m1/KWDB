@@ -2147,7 +2147,7 @@ func (dsp *DistSQLPlanner) operateTSData(
 	p.GateNoopInput = len(n.nodeID)
 
 	tsPro.TsOperator = execinfrapb.OperatorType_TsDeleteExpiredData
-	if n.operateType == Compress {
+	if n.operateType == compress {
 		tsPro.TsOperator = execinfrapb.OperatorType_TsCompressTsTable
 	}
 	for _, table := range n.desc {

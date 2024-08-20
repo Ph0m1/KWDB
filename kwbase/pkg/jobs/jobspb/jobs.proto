@@ -494,6 +494,19 @@ message CreateStatsProgress {
 
 }
 
+// ScheduleJobDetails are used for the sql schedule job, which is triggered
+// when user create sql schedule and then we will create a job to execute sql
+// by schedule.
+message SqlScheduleDetails {
+  int32  schedule_type = 1;
+  string statement = 2;
+}
+
+// TODO: Maybe we need to track the progress of SqlSchedule job.
+message SqlScheduleProgress {
+
+}
+
 // SyncMetaCacheDetails are used for the SyncMetaCache job, which is triggered
 // when TS metadata needs to be synchronized. The SyncMetaCache job
 // stores KWDB object information for obtaining and sending the latest metadata
@@ -581,6 +594,7 @@ message Payload {
     ReplicationIngestionDetails replicationIngestion = 24;
     RestartDetails restartHistory =26;
     ExportDetails export = 27;
+    SqlScheduleDetails sqlSchedule = 28;
   }
 }
 
@@ -605,6 +619,7 @@ message Progress {
     ReplicationIngestionProgress replicationIngest = 19;
     RestartHistoryProgress restarthistory =20;
     ExportProgress export =21;
+    SqlScheduleProgress sqlSchedule = 22;
   }
 }
 
@@ -629,6 +644,7 @@ enum Type {
   COMPRESS = 14 [(gogoproto.enumvalue_customname) = "TypeCompress"];
   RETENTION = 15 [(gogoproto.enumvalue_customname) = "TypeRetention"];
   STATISTICS = 16 [(gogoproto.enumvalue_customname) = "TypeStatistics"];
+  SQL_SCHEDULE = 17 [(gogoproto.enumvalue_customname) = "TypeSqlSchedule"];
 }
 
 message Job {

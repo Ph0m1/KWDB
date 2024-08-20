@@ -140,6 +140,7 @@ func TestContextualHelp(t *testing.T) {
 		{`CREATE VIEW blah AS SELECT c FROM x ??`, `SELECT`},
 		{`CREATE VIEW blah AS (??`, `<SELECTCLAUSE>`},
 
+		{`CREATE SCHEDULE ??`, `CREATE SCHEDULE FOR SQL`},
 		{`CREATE SEQUENCE ??`, `CREATE SEQUENCE`},
 
 		{`CREATE FUNCTION ??`, `CREATE FUNCTION`},
@@ -194,6 +195,9 @@ func TestContextualHelp(t *testing.T) {
 		{`DROP ROLE ??`, `DROP ROLE`},
 		{`DROP ROLE IF ??`, `DROP ROLE`},
 		{`DROP ROLE IF EXISTS bluh ??`, `DROP ROLE`},
+
+		{`DROP SCHEDULE ??`, `DROP SCHEDULES`},
+		{`DROP SCHEDULES ??`, `DROP SCHEDULES`},
 
 		{`DROP SEQUENCE blah ??`, `DROP SEQUENCE`},
 		{`DROP SEQUENCE IF ??`, `DROP SEQUENCE`},

@@ -132,6 +132,7 @@ type AlterSchedule struct {
 	ScheduleName    Name
 	Recurrence      Expr
 	ScheduleOptions KVOptions
+	IfExists        bool
 }
 
 var _ Statement = &AlterSchedule{}
@@ -139,7 +140,9 @@ var _ Statement = &AlterSchedule{}
 // Format implements the NodeFormatter interface.
 func (node *AlterSchedule) Format(ctx *FmtCtx) {
 	ctx.WriteString("ALTER SCHEDULE")
-
+	if node.IfExists {
+		ctx.WriteString(" IF EXISTS")
+	}
 	if node.ScheduleName != "" {
 		ctx.WriteString(" ")
 		node.ScheduleName.Format(ctx)
@@ -164,6 +167,7 @@ type CreateSchedule struct {
 	ScheduleName    Expr
 	Recurrence      Expr
 	ScheduleOptions KVOptions
+	IfNotExists     bool
 }
 
 var _ Statement = &CreateSchedule{}
@@ -171,7 +175,9 @@ var _ Statement = &CreateSchedule{}
 // Format implements the NodeFormatter interface.
 func (node *CreateSchedule) Format(ctx *FmtCtx) {
 	ctx.WriteString("CREATE SCHEDULE")
-
+	if node.IfNotExists {
+		ctx.WriteString(" IF NOT EXISTS")
+	}
 	if node.ScheduleName != nil {
 		ctx.WriteString(" ")
 		node.ScheduleName.Format(ctx)

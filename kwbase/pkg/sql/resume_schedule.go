@@ -26,6 +26,8 @@ package sql
 import (
 	"context"
 
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"github.com/cockroachdb/errors"
 )
@@ -57,7 +59,10 @@ func (n *resumeScheduleNode) startExec(params runParams) error {
 	}
 
 	if schedule == nil {
-		return nil // not an error if schedule does not exist
+		if n.n.IfExists {
+			return nil
+		}
+		return pgerror.Newf(pgcode.UndefinedObject, "schedule %s does not exist", n.n.ScheduleName)
 	}
 	err = schedule.ScheduleNextRun()
 	if err == nil {

@@ -812,6 +812,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <tree.Statement> create_index_stmt
 %type <tree.Statement> create_role_stmt
 %type <tree.Statement> create_schema_stmt
+%type <tree.Statement> create_schedule_for_sql_stmt
 %type <tree.Statement> create_table_stmt
 %type <tree.Statement> create_table_as_stmt
 //%type <tree.Statement> create_super_table_stmt
@@ -839,6 +840,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <tree.Statement> drop_table_stmt
 %type <tree.Statement> drop_view_stmt
 %type <tree.Statement> drop_sequence_stmt
+%type <tree.Statement> drop_schedule_stmt
 %type <tree.Statement> drop_audit_stmt
 %type <tree.Statement> drop_function_stmt
 
@@ -2489,6 +2491,7 @@ comment_text:
 create_stmt:
   create_role_stmt     // EXTEND WITH HELP: CREATE ROLE
 | create_ddl_stmt      // help texts in sub-rule
+| create_schedule_for_sql_stmt // EXTEND WITH HELP: CREATE SCHEDULE FOR SQL
 | create_stats_stmt    // EXTEND WITH HELP: CREATE STATISTICS
 | create_audit_stmt    // EXTEND WITH HELP: CREATE AUDIT
 | create_unsupported   {}
@@ -2735,6 +2738,76 @@ opt_changefeed_sink:
     $$.val = nil
   }
 
+// %Help: CREATE SCHEDULE FOR SQL - exec sql periodically
+// %Text:
+// CREATE SCHEDULE [<description>]
+// FOR SQL [<sql>]
+// RECURRING [crontab|NEVER]
+// [WITH EXPERIMENTAL SCHEDULE OPTIONS <schedule_option>[= <value>] [, ...] ]
+//
+// Description:
+//   Optional description (or name) for this schedule
+//
+// SQL:
+//   A complete executable sql
+//
+// RECURRING <crontab>:
+//   The RECURRING expression specifies when we exec.
+//
+//   Schedule specified as a string in crontab format.
+//   All times in UTC.
+//     "5 0 * * *": run schedule 5 minutes past midnight.
+//     "@daily": run daily, at midnight
+//   See https://en.wikipedia.org/wiki/Cron
+//
+//   RECURRING NEVER indicates that the schedule is non recurring.
+//   If, in addition to 'NEVER', the 'first_run' schedule option is specified,
+//   then the schedule will execute once at that time (that is: it's a one-off execution).
+//   If the 'first_run' is not specified, then the created scheduled will be in 'PAUSED' state,
+//   and will need to be unpaused before it can execute.
+//
+// EXPERIMENTAL SCHEDULE OPTIONS:
+//   The schedule can be modified by specifying the following options (which are considered
+//   to be experimental at this time):
+//   * first_run=TIMESTAMPTZ:
+//     execute the schedule at the specified time. If not specified, the default is to execute
+//     the scheduled based on it's next RECURRING time.
+//   * on_execution_failure='[retry|reschedule|pause]':
+//     If an error occurs during the execution, handle the error based as:
+//     * retry: retry execution right away
+//     * reschedule: retry execution by rescheduling it based on its RECURRING expression.
+//       This is the default.
+//     * pause: pause this schedule.  Requires manual intervention to unpause.
+//   * on_previous_running='[start|skip|wait]':
+//     If the previous backup started by this schedule still running, handle this as:
+//     * start: start this execution anyway, even if the previous one still running.
+//     * skip: skip this execution, reschedule it based on RECURRING (or change_capture_period)
+//       expression.
+//     * wait: wait for the previous execution to complete.  This is the default.
+//
+create_schedule_for_sql_stmt:
+  CREATE SCHEDULE /*$3=*/opt_description FOR
+  SQL /*$6=*/SCONST /*$7=*/cron_expr /*$8=*/opt_with_schedule_options
+  {
+    $$.val = &tree.CreateSchedule{
+      ScheduleName:     $3.expr(),
+      SQL:       				$6,
+      Recurrence:       $7.expr(),
+      ScheduleOptions:  $8.kvOptions(),
+    }
+  }
+|	CREATE SCHEDULE IF NOT EXISTS string_or_placeholder FOR SQL SCONST cron_expr opt_with_schedule_options
+	{
+		$$.val = &tree.CreateSchedule{
+			ScheduleName:     $6.expr(),
+			SQL:       				$9,
+			Recurrence:       $10.expr(),
+			ScheduleOptions:  $11.kvOptions(),
+			IfNotExists: 			true,
+		}
+	}
+| CREATE SCHEDULE error // SHOW HELP: CREATE SCHEDULE FOR SQL
+
 // %Help: DELETE - delete rows from a table
 // %Category: DML
 // %Text: DELETE FROM <tablename> [WHERE <expr>]
@@ -2783,6 +2856,7 @@ discard_stmt:
 drop_stmt:
   drop_ddl_stmt      // help texts in sub-rule
 | drop_role_stmt     // EXTEND WITH HELP: DROP ROLE
+| drop_schedule_stmt // EXTEND WITH HELP: DROP SCHEDULES
 | drop_audit_stmt
 | drop_unsupported   {}
 | DROP error         // SHOW HELP: DROP
@@ -4764,8 +4838,8 @@ pause_stmt:
 // %Help: PAUSE SCHEDULE - pause specified scheduled job
 // %Category: Misc
 // %Text:
-// PAUSE SCHEDULE <jobid>
-// %SeeAlso: SHOW SCHEDULES, CANCEL SCHEDULE, PAUSE SCHEDULE, RESUME SCHEDULE
+// PAUSE SCHEDULE <schedule_name>
+// %SeeAlso: SHOW SCHEDULES, PAUSE SCHEDULE, RESUME SCHEDULE
 pause_schedule_stmt:
   PAUSE SCHEDULE schedule_name
   {
@@ -4773,13 +4847,20 @@ pause_schedule_stmt:
        ScheduleName:     tree.Name($3),
     }
   }
+| PAUSE SCHEDULE IF EXISTS schedule_name
+  {
+    $$.val = &tree.PauseSchedule{
+       ScheduleName:     tree.Name($5),
+			 IfExists:         true,
+    }
+  }
 | PAUSE SCHEDULE error // SHOW HELP: PAUSE SCHEDULE
 
 // %Help: RESUME SCHEDULE - resume background scheduled job
 // %Category: Misc
 // %Text:
-// RESUME SCHEDULE <jobid>
-// %SeeAlso: SHOW SCHEDULES, CANCEL SCHEDULE, PAUSE SCHEDULE, RESUME SCHEDULE
+// RESUME SCHEDULE <schedule_name>
+// %SeeAlso: SHOW SCHEDULES, PAUSE SCHEDULE, RESUME SCHEDULE
 resume_schedule_stmt:
   RESUME SCHEDULE schedule_name
   {
@@ -4787,7 +4868,53 @@ resume_schedule_stmt:
     			ScheduleName:     tree.Name($3),
     }
   }
+| RESUME SCHEDULE IF EXISTS schedule_name
+  {
+    $$.val = &tree.ResumeSchedule{
+    			ScheduleName:     tree.Name($5),
+    			IfExists:         true,
+    }
+  }
 | RESUME SCHEDULE error // SHOW HELP: RESUME SCHEDULE
+
+// %Help: DROP SCHEDULES - destroy specified schedule
+// %Category: Misc
+// %Text:
+// DROP SCHEDULES <selectclause>
+//  selectclause: select statement returning schedule names to drop.
+//
+// DROP SCHEDULE <schedule_name>
+drop_schedule_stmt:
+  DROP SCHEDULE schedule_name
+  {
+  	name := tree.Name($3)
+    $$.val = &tree.DropSchedule{
+    	ScheduleName: &name,
+    }
+  }
+| DROP SCHEDULE IF EXISTS schedule_name
+	{
+		name := tree.Name($5)
+		$$.val = &tree.DropSchedule{
+			ScheduleName: &name,
+			IfExists: true,
+		}
+	}
+| DROP SCHEDULE error // SHOW HELP: DROP SCHEDULES
+| DROP SCHEDULES select_stmt
+  {
+    $$.val = &tree.DropSchedule{
+      Schedules: $3.slct(),
+    }
+  }
+| DROP SCHEDULES IF EXISTS select_stmt
+	{
+    $$.val = &tree.DropSchedule{
+      Schedules: $5.slct(),
+      IfExists: true,
+    }
+	}
+| DROP SCHEDULES error // SHOW HELP: DROP SCHEDULES
 
 // %Help: CREATE SCHEMA - create a new schema
 // %Category: DDL
@@ -5924,7 +6051,16 @@ alter_schedule_stmt:
           ScheduleOptions:  $5.kvOptions(),
        }
    }
-| ALTER SCHEDULE opt_description error // SHOW HELP: ALTER SCHEDULE
+|  ALTER SCHEDULE IF EXISTS schedule_name cron_expr opt_with_schedule_options
+   {
+   $$.val = &tree.AlterSchedule {
+          ScheduleName:     tree.Name($5),
+          Recurrence:       $6.expr(),
+          ScheduleOptions:  $7.kvOptions(),
+          IfExists:					true,
+       }
+   }
+| ALTER SCHEDULE error // SHOW HELP: ALTER SCHEDULE
 
 opt_description:
   string_or_placeholder

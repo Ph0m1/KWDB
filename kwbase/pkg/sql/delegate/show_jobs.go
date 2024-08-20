@@ -28,6 +28,8 @@ import (
 	"fmt"
 
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 )
@@ -56,7 +58,7 @@ func (d *delegator) delegateShowJobs(n *tree.ShowJobs) (tree.Statement, error) {
 		// - first all the running jobs sorted in order of start time,
 		// - then all completed jobs sorted in order of completion time.
 		whereClause = fmt.Sprintf(
-			`WHERE %s AND (finished IS NULL OR finished > now() - '12h':::interval)`, typePredicate)
+			`WHERE %s AND (finished IS NULL OR finished > now() - '7d':::interval)`, typePredicate)
 		// The "ORDER BY" clause below exploits the fact that all
 		// running jobs have finished = NULL.
 		orderbyClause = `ORDER BY COALESCE(finished, now()) DESC, started DESC`
@@ -75,10 +77,19 @@ func (d *delegator) delegateShowJobs(n *tree.ShowJobs) (tree.Statement, error) {
 			    ) = 0`, sqlStmt)
 	}
 	if n.Name != "" {
+		queryRow := `SELECT schedule_id FROM system.scheduled_jobs WHERE schedule_name = $1`
+		row, err := d.evalCtx.InternalExecutor.QueryRow(d.ctx, "get-schedule-id", d.evalCtx.Txn, queryRow, n.Name)
+		if err != nil {
+			return nil, err
+		}
+		if row == nil {
+			return nil, pgerror.Newf(pgcode.UndefinedObject, "schedule %s does not exist", n.Name)
+		}
+		scheduleID := int(tree.MustBeDInt(row[0]))
 		sqlStmt = fmt.Sprintf(
 			`SELECT job_id, job_type, description, statement, user_name, status, running_status, 
 			  created, started, finished, modified, fraction_completed, error, coordinator_id
-	          FROM kwdb_internal.jobs where created_by_type = '%s'`, n.Name)
+	          FROM kwdb_internal.jobs where created_by_id = %d AND (finished IS NULL OR finished > now() - '7d':::interval)`, scheduleID)
 	}
 	return parse(sqlStmt)
 }

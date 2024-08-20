@@ -62,10 +62,8 @@ const (
 	alterKwdbDropColumn
 	alterKwdbAlterColumnType
 	alterKwdbAlterPartitionInterval
-	// Compress compress
-	Compress
-	// Retention retention
-	Retention
+	compress
+	deleteExpiredData
 	alterCompressInterval
 )
 
@@ -835,7 +833,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 			allNodePayloadInfos: [][]*sqlbase.SinglePayloadInfo{payInfo},
 		}
 		newPlanNode = tsIns
-	case Compress, Retention:
+	case compress, deleteExpiredData:
 		log.Infof(ctx, "%s job start, jobID: %d", opType, sw.job.ID())
 		var desc []sqlbase.TableDescriptor
 		var allDesc []sqlbase.DescriptorProto
@@ -1016,9 +1014,9 @@ func getDDLOpType(op int32) string {
 		return "alter column type"
 	case alterKwdbAlterPartitionInterval:
 		return "alter partition interval"
-	case Compress:
+	case compress:
 		return "compress"
-	case Retention:
+	case deleteExpiredData:
 		return "clean up expired data"
 	case alterCompressInterval:
 		return "alter compress interval"

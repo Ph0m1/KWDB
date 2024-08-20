@@ -28,38 +28,82 @@ package sql
 import (
 	"context"
 
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 )
 
 type dropScheduleNode struct {
-	n *tree.DropSchedule
-	p *planner
+	scheduleNames []tree.Name
+	numRow        int
+	ifExists      bool
 }
 
 // DropSchedule resumes a Schedule.
 func (p *planner) DropSchedule(ctx context.Context, n *tree.DropSchedule) (planNode, error) {
-	return &dropScheduleNode{
-		n: n,
-		p: p,
-	}, nil
+	if isAdmin, err := p.HasAdminRole(ctx); !isAdmin {
+		if err != nil {
+			return nil, err
+		}
+		return nil, pgerror.Newf(pgcode.InsufficientPrivilege,
+			"%s is not superuser or membership of admin, has no privilege to DROP SCHEDULE", p.User())
+	}
+	var scheduleNames []tree.Name
+
+	if n.ScheduleName != nil {
+		if *n.ScheduleName == ScheduleCompress || *n.ScheduleName == ScheduleRetention {
+			return nil, pgerror.Newf(pgcode.DataException, "can not drop system schedule %s", *n.ScheduleName)
+		}
+		scheduleNames = append(scheduleNames, *n.ScheduleName)
+	}
+
+	if n.Schedules != nil {
+		rows, err := p.EvalContext().InternalExecutor.Query(ctx, "select schedules", p.txn, n.Schedules.String())
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if len(row) != 1 {
+				return nil, pgerror.Newf(pgcode.DataException, "expects a single column source, got %d columns", len(row))
+			}
+			name, ok := tree.AsDString(row[0])
+			if !ok {
+				return nil, pgerror.New(pgcode.DataException, "expects a string column source")
+			}
+			if name == ScheduleCompress || name == ScheduleRetention {
+				return nil, pgerror.Newf(pgcode.DataException, "can not drop system schedule %s", name)
+			}
+			scheduleNames = append(scheduleNames, tree.Name(name))
+		}
+	}
+
+	return &dropScheduleNode{scheduleNames: scheduleNames, ifExists: n.IfExists}, nil
 }
 
 func (n *dropScheduleNode) startExec(params runParams) error {
-	schedule, err := loadSchedule(params, n.n.ScheduleName)
-	if err != nil {
-		return err
-	}
-
-	if schedule == nil {
-		return nil // not an error if schedule does not exist
-	}
-	err = deleteSchedule(params, schedule.ScheduleID())
-
-	if err != nil {
-		return err
+	for _, name := range n.scheduleNames {
+		schedule, err := loadSchedule(params, name)
+		if err != nil {
+			return err
+		}
+		if schedule == nil {
+			if n.ifExists {
+				continue
+			}
+			return pgerror.Newf(pgcode.UndefinedObject, "schedule %s does not exist", name)
+		}
+		err = deleteSchedule(params, schedule.ScheduleID())
+		if err != nil {
+			return err
+		}
+		n.numRow++
 	}
 	return nil
+}
 
+// FastPathResults implements the planNodeFastPath interface.
+func (n *dropScheduleNode) FastPathResults() (int, bool) {
+	return n.numRow, true
 }
 
 func (*dropScheduleNode) Next(runParams) (bool, error) { return false, nil }
