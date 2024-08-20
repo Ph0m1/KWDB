@@ -35,10 +35,13 @@ all: build
 $(BUILDDIR):
 	@rm -rf $@ && mkdir -p $(BUILDDIR)
 
-build: .ALWAYS_REBUILD
+build: export GO111MODULE = off
+build: export NODE_OPTIONS = --openssl-legacy-provider
+build: .ALWAYS_REBUILD | bin/.submodules-initialized
 	$(info ========== $@ ==========)
 	GOPATH=$(GOPATH) cmake -B $(BUILDDIR) -S $(BASEDIR) $(CMAKE_CONFIG_OPTIONS)
-	$(MAKE) -C $(BUILDDIR)
+	$(MAKE) -C $(BUILDDIR) \
+		BUILDTYPE=$(if $(findstring $(BUILD_TYPE),debug Debug),development,release)
 
 ################################################################
 #                                                              #
@@ -52,7 +55,7 @@ cpplint: .ALWAYS_REBUILD
 		--filter=-build/c++11,-build/include_subdir,-runtime/references,-readability/fn_size \
 		--linelength=125 $(BASEDIR)/kwdbts2
 
-kwdbts2-test: BUILDDIR := $(addsuffix -build-kwdbts2-test, $(BUILDDIR))
+kwdbts2-test: BUILDDIR := $(addsuffix -kwdbts2-test, $(BUILDDIR))
 kwdbts2-test: CMAKE_CONFIG_OPTIONS := -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DWITH_TESTS=ON -DBUILD_KWBASE=OFF
 kwdbts2-test: .ALWAYS_REBUILD build | $(BUILDDIR)
@@ -61,7 +64,7 @@ kwdbts2-test: .ALWAYS_REBUILD build | $(BUILDDIR)
 
 kwbase-test: export KWBASE_LOGIC_TEST_SKIP = true
 kwbase-test: export KWBASE_NIGHTLY_STRESS = true
-kwbase-test: BUILDDIR := $(addsuffix -build-kwbase-test, $(BUILDDIR))
+kwbase-test: BUILDDIR := $(addsuffix -kwbase-test, $(BUILDDIR))
 kwbase-test: CMAKE_CONFIG_OPTIONS := -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 	-DCMAKE_INSTALL_PREFIX=$(INSTALL_PATH) -DWITH_TESTS=OFF -DBUILD_KWBASE=ON
 kwbase-test: .ALWAYS_REBUILD build | $(BUILDDIR)
@@ -82,7 +85,7 @@ test: .ALWAYS_REBUILD $(ALL_TESTS) | $(BUILDDIR)
 #                                                              #
 ################################################################
 MEMCHECK_FILES := \
-	$(wildcard $(addsuffix -build_kwdbts2_test, $(BUILDDIR))/tests/*)
+	$(wildcard $(addsuffix -kwdbts2-test, $(BUILDDIR))/tests/*)
 $(MEMCHECK_FILES): .ALWAYS_REBUILD
 	$(info ========== $@ ==========)
 	cd $@ && valgrind --tool=memcheck --leak-check=full --max-threads=10000 \
@@ -100,7 +103,7 @@ TEST_NAME ?= TEST_v2_integration_basic_v2.sh
 TEST_TOPOLOGIES ?= 1n 5c 5cr
 
 regression-test: T ?= *.sql
-regression-test: BUILDDIR := $(addsuffix -build-regression-test, $(BUILDDIR))
+regression-test: BUILDDIR := $(addsuffix -regression-test, $(BUILDDIR))
 regression-test: .ALWAYS_REBUILD | install
 	$(info ========== $@ ==========)
 	cd $(BASEDIR) && qa/run_test_local_v2.sh $(TEST_NAME) $(T) $(TEST_TOPOLOGIES)
@@ -119,8 +122,15 @@ install: .ALWAYS_REBUILD | build
 	$(info ========== $@ ==========)
 	$(MAKE) -C $(BUILDDIR) install
 
-.PHONY: .ALWAYS_REBUILD install clean help
+.PHONY: .ALWAYS_REBUILD install clean help bin/.submodules-initialized
 .ALWAYS_REBUILD:
+
+bin/.submodules-initialized:
+	gitdir=$$(git rev-parse --git-dir 2>/dev/null || true); \
+	if test -n "$$gitdir"; then \
+	   git submodule update --init --recursive --remote; \
+	fi
+
 clean:
 	rm -rf build*
 	rm -rf log/
