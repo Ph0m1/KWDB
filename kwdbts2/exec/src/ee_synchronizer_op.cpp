@@ -102,7 +102,9 @@ void SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
     parallelGroup->SetDegree(degree_);
     group_num_++;
     parallel_groups_[i] = parallelGroup;
-    ExecPool::GetInstance().PushTask(parallelGroup);
+  }
+  for (k_uint32 i = 0; i < degree_; ++i) {
+    ExecPool::GetInstance().PushTask(pipe_groups_[i]);
   }
 }
 
