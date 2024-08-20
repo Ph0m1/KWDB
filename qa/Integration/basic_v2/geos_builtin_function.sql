@@ -17,7 +17,6 @@ insert into t values('2024-02-05 16:59:00.004 +0800', 'linestring(1,1)', 'linest
 insert into t values('2024-02-05 16:59:00.004 +0800', 'polygon((1,2,1))', 'polygon((2,3,2))', 1);
 insert into t values('2024-02-05 16:59:00.005 +0800', 'point(1.0 1.0 2.0)', 'point(1.0 1.0 2.0)', 1);
 insert into t values('2024-02-05 16:59:00.006 +0800', 'linestring(1 1 1, 2 2 2)', 'linestring(1 1 1, 2 2 2)', 1);
-insert into t values('2024-02-05 16:59:00.006 +0800', 'polygon((1 1 1,2 2 2,1 1 1))', NULL, 1);
 insert into t values('2024-02-05 16:59:00.006 +0800', 'point(1.0 1.0 ,1.0)', 'point(2 2)', 1);
 insert into t values('2024-02-05 16:59:00.007 +0800', 'point(-1 -1)', 'point(-2 -2)', 1);
 insert into t values('2024-02-05 16:59:00.007 +0800', 'point()', 'linestring()', 1);

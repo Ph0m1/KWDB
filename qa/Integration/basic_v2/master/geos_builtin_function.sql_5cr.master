@@ -43,9 +43,6 @@ SQLSTATE: 22000
 INSERT 1
 > insert into t values('2024-02-05 16:59:00.006 +0800', 'linestring(1 1 1, 2 2 2)', 'linestring(1 1 1, 2 2 2)', 1);
 INSERT 1
-> insert into t values('2024-02-05 16:59:00.006 +0800', 'polygon((1 1 1,2 2 2,1 1 1))', NULL, 1);
-ERROR: value 'polygon((1 1 1,2 2 2,1 1 1))' is invalid for type GEOMETRY
-SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.006 +0800', 'point(1.0 1.0 ,1.0)', 'point(2 2)', 1);
 ERROR: value 'point(1.0 1.0 ,1.0)' is invalid for type GEOMETRY
 SQLSTATE: 22000

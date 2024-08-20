@@ -165,7 +165,7 @@ func initTsSamplerSpec(
 		col := &tsConfig.TabDesc.Columns[i]
 		if !col.IsTagCol() {
 			tsCols = append(tsCols, col.TsCol)
-			tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.TsCol.ColumnType}
+			tsColMap[col.ID] = tsColIndex{idx: len(tsCols) - 1, colType: col.TsCol.ColumnType}
 		}
 	}
 
@@ -174,7 +174,7 @@ func initTsSamplerSpec(
 		col := &tsConfig.TabDesc.Columns[i]
 		if col.IsTagCol() {
 			tsCols = append(tsCols, col.TsCol)
-			tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.TsCol.ColumnType}
+			tsColMap[col.ID] = tsColIndex{idx: len(tsCols) - 1, colType: col.TsCol.ColumnType}
 		}
 	}
 	// Populate sketches based on the column metadata.

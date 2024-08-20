@@ -1399,8 +1399,9 @@ func makeResultTypeForAggFuncs(aggTyps [][]types.T, aggFns []int32) ([]types.T, 
 // add tsColIndex in add-delete columns, init in createReaders,
 // record indexs of column after add of delete columns
 type tsColIndex struct {
-	idx     int                // index of column
-	colType sqlbase.ColumnType // type of column
+	idx          int                // index of column
+	internalType types.T            // internal type of column
+	colType      sqlbase.ColumnType // type of column ( data,tag,ptag)
 }
 
 // buildTSStatisticColsAndTSColMap build tsCols and tsColMap by cols
@@ -1449,7 +1450,7 @@ func buildTSColsAndTSColMap(
 			col.TsCol.Nullable = n.Table.Column(i).IsNullable()
 			if !col.IsTagCol() {
 				tsCols = append(tsCols, col.TsCol)
-				tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.TsCol.ColumnType}
+				tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.Type, col.TsCol.ColumnType}
 			}
 		}
 	}
@@ -1458,7 +1459,7 @@ func buildTSColsAndTSColMap(
 			col.TsCol.Nullable = n.Table.Column(i).IsNullable()
 			if col.IsTagCol() {
 				tsCols = append(tsCols, col.TsCol)
-				tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.TsCol.ColumnType}
+				tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.Type, col.TsCol.ColumnType}
 			}
 		}
 	}
@@ -1771,8 +1772,8 @@ func (p *PhysicalPlan) buildPhyPlanForTSStatisticReaders(
 	outCols := make([]uint32, len(n.ScanAggArray))
 	for i := range n.ScanAggArray {
 		planToStreamColMap[i] = i
-		idx := tsColMap[sqlbase.ColumnID(n.ScanAggArray[i].ColID)].idx
-		argTypeArray[i] = []types.T{typs[uint32(idx)]}
+		typ := tsColMap[sqlbase.ColumnID(n.ScanAggArray[i].ColID)].internalType
+		argTypeArray[i] = []types.T{typ}
 
 		funcType[i] = int32(n.ScanAggArray[i].AggTyp)
 		outCols[i] = uint32(i)
