@@ -183,11 +183,17 @@ add_subdirectory(kwdbts2)
 
 # compile kwbase
 if (BUILD_KWBASE)
+    option(KWBASE_MAKEFILE "kwbase build makefile" Makefile)
+    if(NOT KWBASE_MAKEFILE)
+        set(KWBASE_MAKEFILE Makefile)
+    endif()
+
     add_custom_target(
             kwbase ALL
-            COMMAND make build OUTPUT_PATH=${CMAKE_BINARY_DIR}/bin
+            COMMAND make build -f ${KWBASE_MAKEFILE}
+                OUTPUT_PATH=${CMAKE_BINARY_DIR}/bin
                 KWDB_LIB_DIR=${CMAKE_BINARY_DIR}/lib WITH_ASAN=${WITH_ASAN}
-                GOPATH=$ENV{GOPATH}
+                GOPATH=$ENV{GOPATH} KWBASE_MAKEFILE=${KWBASE_MAKEFILE}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/kwbase
             COMMENT "compile kwbase"
             DEPENDS kwdbts2 common

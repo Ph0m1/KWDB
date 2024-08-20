@@ -40,7 +40,7 @@ override xgo := GOFLAGS= $(GO)
 # This needs to be the first rule because we're including build/defs.mk
 # first thing below, and Make needs to know how to build it.
 .SECONDARY: build/defs.mk
-build/defs.mk: Makefile build/defs.mk.sig remove_obsolete_execgen
+build/defs.mk: $(MAKEFILE_LIST) build/defs.mk.sig remove_obsolete_execgen
 ifndef IGNORE_GOVERS
 	@build/go-version-check.sh $(GO) || { echo "Disable this check with IGNORE_GOVERS=1." >&2; exit 1; }
 endif
@@ -523,7 +523,7 @@ CGO_SUFFIXED_FLAGS_FILES   := $(addprefix ./,$(addsuffix /zcgo_flags_$(native-ta
 BASE_CGO_FLAGS_FILES := $(CGO_UNSUFFIXED_FLAGS_FILES) $(CGO_SUFFIXED_FLAGS_FILES)
 CGO_FLAGS_FILES := $(BASE_CGO_FLAGS_FILES) vendor/github.com/knz/go-libedit/unix/zcgo_flags_extra.go
 
-$(BASE_CGO_FLAGS_FILES): Makefile build/defs.mk.sig | bin/.submodules-initialized
+$(BASE_CGO_FLAGS_FILES): $(MAKEFILE_LIST) build/defs.mk.sig | bin/.submodules-initialized
 	@echo "regenerating $@"
 	@echo '// GENERATED FILE DO NOT EDIT' > $@
 	@echo >> $@
@@ -535,7 +535,7 @@ $(BASE_CGO_FLAGS_FILES): Makefile build/defs.mk.sig | bin/.submodules-initialize
 	@echo '// #cgo LDFLAGS: $(addprefix -L,$(CRYPTOPP_DIR) $(if $(findstring aarch64,$(TARGET_TRIPLE)),,$(LIBUNWIND_DIR)/src/.libs) $(JEMALLOC_DIR)/lib $(SNAPPY_DIR) $(LIBEDIT_DIR)/src/.libs $(ROCKSDB_DIR) $(LIBROACH_DIR) $(KRB_DIR)) $(if $(findstring aarch64,$(TARGET_TRIPLE)),,-lunwind -llzma) -ldl' >> $@
 	@echo 'import "C"' >> $@
 
-vendor/github.com/knz/go-libedit/unix/zcgo_flags_extra.go: Makefile | bin/.submodules-initialized
+vendor/github.com/knz/go-libedit/unix/zcgo_flags_extra.go: $(MAKEFILE_LIST) | bin/.submodules-initialized
 	@echo "regenerating $@"
 	@echo '// GENERATED FILE DO NOT EDIT' > $@
 	@echo >> $@
@@ -1494,14 +1494,3 @@ bin/%.d: ;
 include $(wildcard bin/*.d)
 endif
 
-# Print an error if the user specified any variables on the command line that
-# don't appear in this Makefile. The list of valid variables is automatically
-# rebuilt on the first successful `make` invocation after the Makefile changes.
-#
-# TODO(peter): Figure out how to disallow overriding of variables that
-# are not in the valid list from the environment. The problem is that
-# any environment variable becomes a make variable and environments
-# are dirty. For instance, my includes GREP_COLOR.
-include build/variables.mk
-$(foreach v,$(filter-out $(strip $(VALID_VARS)),$(.VARIABLES)),\
-	$(if $(findstring command line,$(origin $v)),$(error Variable '$v' is not recognized by this Makefile)))
