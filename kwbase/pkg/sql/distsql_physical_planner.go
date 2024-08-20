@@ -1771,7 +1771,9 @@ func (p *PhysicalPlan) buildPhyPlanForTSStatisticReaders(
 	outCols := make([]uint32, len(n.ScanAggArray))
 	for i := range n.ScanAggArray {
 		planToStreamColMap[i] = i
-		argTypeArray[i] = []types.T{typs[uint32(n.ScanAggArray[i].ColID)-1]}
+		idx := tsColMap[sqlbase.ColumnID(n.ScanAggArray[i].ColID)].idx
+		argTypeArray[i] = []types.T{typs[uint32(idx)]}
+
 		funcType[i] = int32(n.ScanAggArray[i].AggTyp)
 		outCols[i] = uint32(i)
 		post.Renders[i] = fmt.Sprintf("@%d", i+1)
@@ -2283,7 +2285,8 @@ func (dsp *DistSQLPlanner) createTSDDL(planCtx *PlanningCtx, n *tsDDLNode) (Phys
 
 			tsAlterColumn.Column = colMeta
 			tsAlterColumn.TsTableID = uint64(n.d.SNTable.ID)
-			tsAlterColumn.TsVersion = uint32(n.d.SNTable.TsTable.GetTsVersion())
+			tsAlterColumn.NextTSVersion = uint32(n.d.SNTable.TsTable.GetNextTsVersion())
+			tsAlterColumn.CurrentTSVersion = uint32(n.d.SNTable.TsTable.GetTsVersion())
 			tsAlterColumn.TxnID = n.txnID
 			proc.Spec.Core = execinfrapb.ProcessorCoreUnion{TsAlter: tsAlterColumn}
 			p.TsOperator = tsAlterColumn.TsOperator

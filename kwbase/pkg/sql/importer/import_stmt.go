@@ -204,11 +204,10 @@ func importPlanHook(
 					}
 				} else {
 					timeSeriesImport = true
-					ImmutableDesc, err := p.ResolveImmutableTableDescriptor(ctx, importStmt.Table, true, sql.ResolveRequireTableDesc)
+					tableDesc, err = p.ResolveMutableTableDescriptor(ctx, importStmt.Table, true, sql.ResolveRequireTableDesc)
 					if err != nil {
 						return err
 					}
-					tableDesc = sqlbase.NewMutableExistingTableDescriptor(ImmutableDesc.TableDescriptor)
 					if tableDetails, err = checkAndGetTSDetailsInTableInto(ctx, p, importStmt, tableDesc, files, intoCols); err != nil {
 						return err
 					}
@@ -918,7 +917,7 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 			}
 		}
 	}
-	for i, table := range details.Tables {
+	for _, table := range details.Tables {
 		if table.IsNew {
 			if err = execCreateTableMeta(ctx, p, table.Create, dbName); err != nil {
 				return err
@@ -937,19 +936,6 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 					}
 				}
 			}
-			// set table desc count+1
-			tbName := tree.MakeTableName(tree.Name(dbName), tree.Name(table.TableName))
-			lookupFlags := tree.ObjectLookupFlags{
-				CommonLookupFlags: tree.CommonLookupFlags{Required: true},
-			}
-			var tbl *sqlbase.ImmutableTableDescriptor
-			if err := p.ExecCfg().DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				tbl, err = p.ExtendedEvalContext().Tables.GetTableVersion(ctx, txn, &tbName, lookupFlags)
-				return err
-			}); err != nil {
-				return err
-			}
-			details.Tables[i].Desc = tbl.TableDesc()
 		}
 	}
 	return p.ExecCfg().DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
@@ -958,8 +944,14 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 		var err error
 		var desc *sqlbase.TableDescriptor
 		for i, table := range details.Tables {
-			desc = table.Desc
-			importDetails.Tables[i].Desc = desc
+			if table.IsNew {
+				if desc, err = sqlbase.GetTableDescriptorUseTxn(txn, dbName, tree.PublicSchema, table.TableName); err != nil {
+					return err
+				}
+				importDetails.Tables[i].Desc = desc
+			} else {
+				importDetails.Tables[i].Desc = table.Desc
+			}
 		}
 		importDetails.PrepareComplete = true
 		// Update the job once all descs have been prepared for ingestion.

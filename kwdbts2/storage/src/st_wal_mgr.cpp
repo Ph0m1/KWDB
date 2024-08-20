@@ -306,9 +306,10 @@ KStatus WALMgr::WriteDDLDropWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t objec
   return status;
 }
 
-KStatus WALMgr::WriteDDLAlterWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t object_id,
-                                 WALAlterType alter_ype, TSSlice& column_meta) {
-  auto* wal_log = DDLAlterEntry::construct(WALLogType::DDL_ALTER_COLUMN, x_id, object_id, alter_ype, column_meta);
+KStatus WALMgr::WriteDDLAlterWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t object_id, AlterType alter_type,
+                                 uint32_t cur_version, uint32_t new_version, TSSlice& column_meta) {
+  auto* wal_log = DDLAlterEntry::construct(WALLogType::DDL_ALTER_COLUMN, x_id, object_id, alter_type,
+                                           cur_version, new_version, column_meta);
   size_t log_len = DDLAlterEntry::fixed_length + column_meta.len;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 

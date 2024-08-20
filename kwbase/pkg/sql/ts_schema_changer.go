@@ -31,11 +31,12 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/protoutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // In order to ensure the consistency of schema changes of time-series objects,
@@ -77,6 +78,8 @@ var _ jobs.Resumer = &tsSchemaChangeResumer{}
 
 // TSSchemaChangeWorker is used to change the schema on a ts table.
 type TSSchemaChangeWorker struct {
+	tableID        sqlbase.ID
+	mutationID     sqlbase.MutationID
 	nodeID         roachpb.NodeID
 	db             *kv.DB
 	leaseMgr       *LeaseManager
@@ -91,6 +94,8 @@ type TSSchemaChangeWorker struct {
 	settings *cluster.Settings
 	execCfg  *ExecutorConfig
 	clock    *hlc.Clock
+
+	healthyNodes []roachpb.NodeID
 }
 
 // Resume is part of the jobs.Resumer interface.
@@ -98,6 +103,7 @@ func (r *tsSchemaChangeResumer) Resume(
 	ctx context.Context, phs interface{}, resultsCh chan<- tree.Datums,
 ) error {
 	p := phs.(PlanHookState)
+	details := r.job.Details().(jobspb.SyncMetaCacheDetails)
 	sw := TSSchemaChangeWorker{
 		nodeID:         p.ExecCfg().NodeID.Get(),
 		db:             p.ExecCfg().DB,
@@ -110,6 +116,10 @@ func (r *tsSchemaChangeResumer) Resume(
 		execCfg:        p.ExecCfg(),
 		clock:          p.ExecCfg().Clock,
 	}
+	if details.MutationID != sqlbase.InvalidMutationID {
+		sw.tableID = details.SNTable.ID
+		sw.mutationID = details.MutationID
+	}
 	return sw.exec(ctx)
 }
 
@@ -120,39 +130,67 @@ func (sw *TSSchemaChangeWorker) exec(ctx context.Context) error {
 	// we need to handle the outcome of async DDL action
 	defer func() {
 		// handle the intermediate state of metadata
-		sw.handleResult(ctx, d, syncErr)
+		sw.handleResult(ctx, &d, syncErr)
 	}()
-	// some DDL does not need AE operation
-	if d.DoNothing {
-		return nil
+	opts := retry.Options{
+		InitialBackoff: 100 * time.Millisecond,
+		MaxBackoff:     10 * time.Second,
+		Multiplier:     1.5,
 	}
-	opType := getDDLOpType(d.Type)
-	// make distributed exec plan and run
-	// if failed, rollback WAL
-	// if succeeded, commit WAL
-	if syncErr = sw.makeAndRunDistPlan(ctx, d); syncErr != nil {
-		log.Infof(ctx, "%s start rollback, jobID: %d", opType, sw.job.ID())
-		if err := sw.retryTsTxn(ctx, txnRollback); err != nil {
-			log.Infof(ctx, "%s rollback failed, reason: %s, jobID: %d", opType, err.Error(), sw.job.ID())
-			return err
+	for r := retry.StartWithCtx(ctx, opts); r.Next(); {
+		done := false
+		// Note that r.Next always returns true on first run so exec will be
+		// called at least once before there is a chance for this loop to exit.
+		// make distributed exec plan and run
+		// if failed, rollback WAL
+		// if succeeded, commit WAL
+		syncErr = sw.makeAndRunDistPlan(ctx, d)
+		switch {
+		case syncErr == nil:
+			done = true
+		case errors.Is(syncErr, sqlbase.ErrDescriptorNotFound):
+			// If the table descriptor for the ID can't be found, we assume that
+			// another job to drop the table got to it first, and consider this job
+			// finished.
+			log.Infof(
+				ctx,
+				"descriptor %d not found for ts schema change processing mutation %d;"+
+					"assuming it was dropped, and exiting",
+				sw.tableID, sw.mutationID,
+			)
+			done = true
+		case !isPermanentSchemaChangeError(syncErr):
+			// Check if the error is on a whitelist of errors we should retry on,
+			// including the schema change not having the first mutation in line.
+			log.Warningf(ctx, "error while running ts schema change, retrying: %v", syncErr)
+		default:
+			// All other errors lead to a failed job.
+			done = true
 		}
-		return syncErr
+		if done {
+			break
+		}
 	}
-	if err := sw.retryTsTxn(ctx, txnCommit); err != nil {
-		return err
-	}
+	syncErr = sw.completeTsTxn(ctx, syncErr)
 
-	return nil
+	return syncErr
 }
 
-// retryTsTxn is used to rollback/commit WAL
-func (sw *TSSchemaChangeWorker) retryTsTxn(ctx context.Context, event txnEvent) error {
+// completeTsTxn is used to rollback/commit WAL
+func (sw *TSSchemaChangeWorker) completeTsTxn(ctx context.Context, syncErr error) error {
 	d := sw.job.Details().(jobspb.SyncMetaCacheDetails)
+	opType := getDDLOpType(d.Type)
 	retryOpts := retry.Options{
 		InitialBackoff: 500 * time.Millisecond,
 		MaxBackoff:     30 * time.Second,
 		Multiplier:     2,
-		MaxRetries:     100,
+		MaxRetries:     10,
+	}
+	var event txnEvent
+	event = txnCommit
+	if syncErr != nil {
+		event = txnRollback
+		log.Infof(ctx, "%s start rollback, jobID: %d, syncErr: %s", opType, sw.job.ID(), syncErr.Error())
 	}
 	var err error
 	for opt := retry.Start(retryOpts); opt.Next(); {
@@ -160,9 +198,12 @@ func (sw *TSSchemaChangeWorker) retryTsTxn(ctx context.Context, event txnEvent) 
 		if err == nil {
 			break
 		}
-		log.Error(ctx, err)
+		log.Infof(ctx, "%s rollback failed, reason: %s, jobID: %d", opType, err.Error(), sw.job.ID())
 	}
-	return err
+	if err != nil && syncErr == nil {
+		syncErr = err
+	}
+	return syncErr
 }
 
 // makeKObjectTableForTs make KObjectTable for AE
@@ -212,7 +253,7 @@ func makeKObjectTableForTs(d jobspb.SyncMetaCacheDetails) sqlbase.CreateTsTable 
 // If the execution is successful, it modifies the metadata and changes the intermediate state to public.
 // If the execution fails, it rolls back the metadata and changes the intermediate state to public.
 func (sw *TSSchemaChangeWorker) handleResult(
-	ctx context.Context, d jobspb.SyncMetaCacheDetails, syncErr error,
+	ctx context.Context, d *jobspb.SyncMetaCacheDetails, syncErr error,
 ) {
 	opType := getDDLOpType(d.Type)
 	log.Infof(ctx, "%s initial ddl job finished, jobID: %d", opType, sw.job.ID())
@@ -254,10 +295,9 @@ func (sw *TSSchemaChangeWorker) handleResult(
 				d.DropMEInfo[0].TableID,
 				syncErr,
 			)
-		case alterKwdbAddTag, alterKwdbAddColumn:
-			updateErr = p.handleAddTsColumn(ctx, d.SNTable.ID, d.AlterTag, syncErr)
-		case alterKwdbDropTag, alterKwdbDropColumn:
-			updateErr = p.handleDropTsColumn(ctx, d.SNTable.ID, d.AlterTag, syncErr)
+		case alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbAlterColumnType,
+			alterKwdbAddTag, alterKwdbDropTag, alterKwdbAlterTagType:
+			updateErr = sw.handleMutationForTSTable(ctx, d, syncErr)
 		case alterKwdbAlterPartitionInterval:
 			updateErr = p.handleAlterPartitionInterval(
 				ctx,
@@ -279,8 +319,6 @@ func (sw *TSSchemaChangeWorker) handleResult(
 				},
 			}
 			updateErr = p.handleSetTagValue(ctx, d.SNTable, insTable, syncErr)
-		case alterKwdbAlterTagType, alterKwdbAlterColumnType:
-			updateErr = p.handleAlterTsColumnType(ctx, d.SNTable.ID, d.AlterTag, syncErr)
 		default:
 		}
 		if updateErr == nil {
@@ -288,6 +326,9 @@ func (sw *TSSchemaChangeWorker) handleResult(
 		} else {
 			log.Infof(ctx, "handle metadata failed: ", updateErr)
 		}
+	}
+	if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
+		log.Warningf(ctx, "ts schema change on table (%d) wait one version error: %s", sw.tableID, err.Error())
 	}
 	log.Infof(ctx, "%s metadata retry job finished, jobID: %d", opType, sw.job.ID())
 }
@@ -328,103 +369,6 @@ func (p *planner) handleAlterPartitionInterval(
 			if syncErr == nil {
 				tableDesc.TsTable.PartitionInterval = partitionInterval
 				tableDesc.TsTable.PartitionIntervalInput = input
-			}
-			return nil
-		},
-		func(txn *kv.Txn) error { return nil })
-	return updateDescErr
-}
-
-// handleDropTsColumn drops tag/column from time-series table metadata,
-// when the time-series engine completes deleting the tag/column.
-func (p *planner) handleDropTsColumn(
-	ctx context.Context, tableID sqlbase.ID, tag sqlbase.ColumnDescriptor, syncErr error,
-) error {
-	_, updateDescErr := p.ExecCfg().LeaseManager.Publish(
-		ctx,
-		tableID,
-		func(desc *sqlbase.MutableTableDescriptor) error {
-			desc.State = sqlbase.TableDescriptor_PUBLIC
-			if syncErr == nil {
-				for i := range desc.Columns {
-					if tag.Name == desc.Columns[i].Name {
-						// Removes the tag from the Columns/ColumnNames/ColumnIDs queue.
-						// The tags in the middle of the queue and at the end of the queue are processed respectively.
-						if i == len(desc.Columns)-1 {
-							desc.Columns = desc.Columns[:i]
-							desc.Families[0].ColumnNames = desc.Families[0].ColumnNames[:i]
-							desc.Families[0].ColumnIDs = desc.Families[0].ColumnIDs[:i]
-						} else {
-							desc.Columns = append(desc.Columns[:i], desc.Columns[i+1:]...)
-							desc.Families[0].ColumnNames = append(desc.Families[0].ColumnNames[:i], desc.Families[0].ColumnNames[i+1:]...)
-							desc.Families[0].ColumnIDs = append(desc.Families[0].ColumnIDs[:i], desc.Families[0].ColumnIDs[i+1:]...)
-						}
-						break
-					}
-				}
-			}
-			return nil
-		},
-		func(txn *kv.Txn) error {
-			if syncErr == nil {
-				if err := p.removeColumnComment(ctx, txn, tableID, tag.ID); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	return updateDescErr
-}
-
-// handleAlterTsColumnType modifies tag/column type from time-series table metadata,
-// when the time-series engine completes modifying the tag/column type.
-func (p *planner) handleAlterTsColumnType(
-	ctx context.Context, tableID sqlbase.ID, tag sqlbase.ColumnDescriptor, syncErr error,
-) error {
-	_, updateDescErr := p.ExecCfg().LeaseManager.Publish(
-		ctx,
-		tableID,
-		func(tableDesc *sqlbase.MutableTableDescriptor) error {
-			tableDesc.State = sqlbase.TableDescriptor_PUBLIC
-			if syncErr == nil {
-				// get old-version tag
-				oldTag, dropped, err := tableDesc.FindColumnByName(tag.ColName())
-				if err != nil {
-					return err
-				}
-				if dropped {
-					return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
-						"column %q in the middle of being dropped", tag.ColName())
-				}
-				// change oldTag type to new Tag type
-				oldTag.Type = tag.Type
-				oldTag.TsCol = tag.TsCol
-			}
-			return nil
-		},
-		func(txn *kv.Txn) error { return nil })
-	return updateDescErr
-}
-
-// handleAddTsColumn add tag/column for time-series table metadata,
-// when the time-series engine completes adding the tag/column.
-func (p *planner) handleAddTsColumn(
-	ctx context.Context, tableID sqlbase.ID, tag sqlbase.ColumnDescriptor, syncErr error,
-) error {
-	_, updateDescErr := p.ExecCfg().LeaseManager.Publish(
-		ctx,
-		tableID,
-		func(tableDesc *sqlbase.MutableTableDescriptor) error {
-			tableDesc.State = sqlbase.TableDescriptor_PUBLIC
-			if syncErr == nil {
-				// add new tag to tableDesc.ColumnDescriptors
-				if tag.ID == 0 {
-					tag.ID = tableDesc.GetNextColumnID()
-					tableDesc.NextColumnID++
-				}
-				tableDesc.AddColumn(&tag)
-				tableDesc.Families[0].ColumnNames = append(tableDesc.Families[0].ColumnNames, tag.Name)
-				tableDesc.Families[0].ColumnIDs = append(tableDesc.Families[0].ColumnIDs, tag.ID)
 			}
 			return nil
 		},
@@ -767,15 +711,39 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 			log.Infof(ctx, "%s, jobID: %d, checkReplica finished", opType, sw.job.ID())
 		}
 		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList}
-	case alterKwdbAddTag, alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbDropTag,
-		alterKwdbAlterColumnType, alterKwdbAlterTagType, alterKwdbAlterPartitionInterval:
-		if d.Type == alterKwdbAlterPartitionInterval {
-			log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
-				opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
-		} else {
-			log.Infof(ctx, "%s job start, name: %s, id: %d, column/tag name: %s, jobID: %d",
-				opType, d.SNTable.Name, d.SNTable.ID, d.AlterTag.Name, sw.job.ID())
+	case alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbAlterColumnType,
+		alterKwdbAddTag, alterKwdbDropTag, alterKwdbAlterTagType:
+		log.Infof(ctx, "%s job start, name: %s, id: %d, column/tag name: %s, jobID: %d",
+			opType, d.SNTable.Name, d.SNTable.ID, d.AlterTag.Name, sw.job.ID())
+		tableDesc, notFirst, err := sw.notFirstInLine(ctx)
+		if err != nil {
+			return err
 		}
+		if notFirst {
+			log.Infof(ctx,
+				"schema change on ts table %q (v%d): another change is still in progress",
+				tableDesc.Name, tableDesc.Version,
+			)
+			return errSchemaChangeNotFirstInLine
+		}
+		d.SNTable = *tableDesc
+		// Get all healthy nodes.
+		nodeList, err := api.GetHealthyNodeIDs(ctx)
+		if err != nil {
+			return err
+		}
+		sw.healthyNodes = nodeList
+		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
+			return err
+		}
+		if err := sw.checkReplica(ctx, d.SNTable.ID); err != nil {
+			return err
+		}
+		txnID := strconv.AppendInt([]byte{}, *sw.job.ID(), 10)
+		miniTxn := tsTxn{txnID: txnID, txnEvent: txnStart}
+		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList, tsTxn: miniTxn}
+	case alterKwdbAlterPartitionInterval:
+		log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d", opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
 		// Get all healthy nodes.
 		nodeList, err := api.GetHealthyNodeIDs(ctx)
 		if err != nil {
@@ -955,10 +923,7 @@ func (sw *TSSchemaChangeWorker) sendTsTxn(
 	switch d.Type {
 	case alterKwdbAddTag, alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbDropTag,
 		alterKwdbAlterTagType, alterKwdbAlterColumnType:
-		nodeList, err := api.GetHealthyNodeIDs(ctx)
-		if err != nil {
-			return err
-		}
+		nodeList := sw.healthyNodes
 		txnID := strconv.AppendInt([]byte{}, *sw.job.ID(), 10)
 		tsTxn := tsTxn{txnID: txnID, txnEvent: event}
 		newPlanNode := &tsDDLNode{d: d, nodeID: nodeList, tsTxn: tsTxn}
@@ -1022,4 +987,183 @@ func getDDLOpType(op int32) string {
 		return "alter compress interval"
 	}
 	return ""
+}
+
+// notFirstInLine returns true whenever the schema change has been queued
+// up for execution after another schema change.
+func (sw *TSSchemaChangeWorker) notFirstInLine(
+	ctx context.Context,
+) (*sqlbase.TableDescriptor, bool, error) {
+	var notFirst bool
+	var desc *sqlbase.TableDescriptor
+	err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+		notFirst = false
+		var err error
+		desc, err = sqlbase.GetTableDescFromID(ctx, txn, sw.tableID)
+		if err != nil {
+			return err
+		}
+		for i, mutation := range desc.Mutations {
+			if mutation.MutationID == sw.mutationID {
+				notFirst = i != 0
+				break
+			}
+		}
+		return nil
+	})
+	return desc, notFirst, err
+}
+
+// handleMutationForTSTable processes completed mutations in the time-series table,
+// removing them from the queue of mutations.
+func (sw *TSSchemaChangeWorker) handleMutationForTSTable(
+	ctx context.Context, d *jobspb.SyncMetaCacheDetails, syncErr error,
+) error {
+	var updateFn func(desc *sqlbase.MutableTableDescriptor) error
+	var eventFn func(txn *kv.Txn) error
+	isSucceeded := syncErr == nil
+	switch d.Type {
+	case alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbAddTag, alterKwdbDropTag:
+		updateFn = func(tableDesc *sqlbase.MutableTableDescriptor) error {
+			i := 0
+			for _, mutation := range tableDesc.Mutations {
+				if mutation.MutationID != sw.mutationID {
+					// Mutations are applied in a FIFO order. Only apply the first set of
+					// mutations if they have the mutation ID we're looking for.
+					break
+				}
+				if isSucceeded {
+					if err := tableDesc.MakeMutationComplete(mutation); err != nil {
+						return err
+					}
+				} else if mutation.Direction == sqlbase.DescriptorMutation_ADD {
+					// If adding columns fails, roll back ColumnFamilyDescriptor.
+					tableDesc.RemoveColumnFromFamily(mutation.GetColumn().ID)
+				}
+				// If isSucceeded = true, increase TsVersion and NextTsVersion.
+				// If isSucceeded = false, just increase NextTsVersion.
+				tableDesc.MaybeIncrementTSVersion(ctx, isSucceeded)
+				i++
+			}
+			if i == 0 {
+				// The table descriptor is unchanged. Don't let Publish() increment
+				// the version.
+				return errDidntUpdateDescriptor
+			}
+			if d.AlterTag.IsTagCol() {
+				tableDesc.State = sqlbase.TableDescriptor_PUBLIC
+			}
+			// Trim the executed mutations from the descriptor.
+			tableDesc.Mutations = tableDesc.Mutations[i:]
+			for n, g := range tableDesc.MutationJobs {
+				if g.MutationID == sw.mutationID {
+					// Trim the executed mutation group from the descriptor.
+					tableDesc.MutationJobs = append(tableDesc.MutationJobs[:n], tableDesc.MutationJobs[n+1:]...)
+					break
+				}
+			}
+			return nil
+		}
+	case alterKwdbAlterColumnType, alterKwdbAlterTagType:
+		updateFn = func(tableDesc *sqlbase.MutableTableDescriptor) error {
+			i := 0
+			for _, mutation := range tableDesc.Mutations {
+				if mutation.MutationID != sw.mutationID {
+					// Mutations are applied in a FIFO order. Only apply the first set of
+					// mutations if they have the mutation ID we're looking for.
+					break
+				}
+				if isSucceeded {
+					mutaCol := mutation.GetColumn()
+					// get origin column
+					originCol, dropped, err := tableDesc.FindColumnByName(mutaCol.ColName())
+					if err != nil {
+						return err
+					}
+					if dropped {
+						return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+							"column %q in the middle of being dropped", mutaCol.ColName())
+					}
+					// change origin type to new type
+					originCol.Type = mutaCol.Type
+					originCol.TsCol = mutaCol.TsCol
+				}
+				// If isSucceeded = true, increase TsVersion and NextTsVersion.
+				// If isSucceeded = false, just increase NextTsVersion.
+				tableDesc.MaybeIncrementTSVersion(ctx, isSucceeded)
+				i++
+			}
+			if i == 0 {
+				// The table descriptor is unchanged. Don't let Publish() increment
+				// the version.
+				return errDidntUpdateDescriptor
+			}
+			if d.AlterTag.IsTagCol() {
+				tableDesc.State = sqlbase.TableDescriptor_PUBLIC
+			}
+			// Trim the executed mutations from the descriptor.
+			tableDesc.Mutations = tableDesc.Mutations[i:]
+			for i, g := range tableDesc.MutationJobs {
+				if g.MutationID == sw.mutationID {
+					// Trim the executed mutation group from the descriptor.
+					tableDesc.MutationJobs = append(tableDesc.MutationJobs[:i], tableDesc.MutationJobs[i+1:]...)
+					break
+				}
+			}
+			return nil
+		}
+	default:
+		return errors.Errorf("unsupported online DDL type")
+	}
+
+	if isSucceeded {
+		if d.Type == alterKwdbDropColumn ||
+			d.Type == alterKwdbDropTag {
+			// remove comment on column
+			eventFn = func(txn *kv.Txn) error {
+				if err := sw.p.removeColumnComment(
+					ctx, txn, sw.tableID, d.AlterTag.ID,
+				); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+	}
+
+	_, updateDescErr := sw.p.ExecCfg().LeaseManager.Publish(
+		ctx,
+		sw.tableID,
+		// update table descriptor
+		updateFn,
+		eventFn,
+	)
+
+	if err := sw.waitToUpdateLeases(ctx, sw.tableID); err != nil {
+		log.Warningf(ctx, "waiting to update ts table(%d) lease error: %+v", sw.tableID, err)
+		if errors.Is(err, sqlbase.ErrDescriptorNotFound) {
+			return err
+		}
+		// As we are dismissing the error, go through the recording motions.
+		// This ensures that any important error gets reported to Sentry, etc.
+		sqltelemetry.RecordError(ctx, err, &sw.settings.SV)
+	}
+
+	return updateDescErr
+}
+
+// Wait until the entire cluster has been updated to the latest version
+// of the table descriptor.
+func (sw *TSSchemaChangeWorker) waitToUpdateLeases(ctx context.Context, tableID sqlbase.ID) error {
+	// Aggressively retry because there might be a user waiting for the
+	// schema change to complete.
+	retryOpts := retry.Options{
+		InitialBackoff: 20 * time.Millisecond,
+		MaxBackoff:     200 * time.Millisecond,
+		Multiplier:     2,
+	}
+	log.Infof(ctx, "waiting for a single version on ts table(%d)...", tableID)
+	version, err := sw.leaseMgr.WaitForOneVersion(ctx, tableID, retryOpts)
+	log.Infof(ctx, "waiting for a single version on ts table(%d)... done (at v %d)", tableID, version)
+	return err
 }

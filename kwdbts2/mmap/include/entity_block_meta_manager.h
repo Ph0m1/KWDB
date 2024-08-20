@@ -10,18 +10,18 @@
 // See the Mulan PSL v2 for more details.
 
 #pragma once
-#include "mmap/mmap_entity_idx.h"
+#include "mmap/mmap_entity_block_meta.h"
 
 /**
- * @brief TsEntityIdxManager used for managing entity block index data in TsTimePartition.
- *        block index data store in  xxxx.meta.n files. n starts from 0, increasing.
- *        each index file has fixed size, and cannot remap.
+ * @brief EntityBlockMetaManager used for managing entity block data in TsTimePartition.
+ *        Entity block meta data store in  xxxx.meta.n files. n starts from 0, increasing.
+ *        each meta file has fixed size, and cannot remap.
  *        if meta space not enough, new meta file created.
 */
-class TsEntityIdxManager {
+class EntityBlockMetaManager {
  public:
-  TsEntityIdxManager();
-  ~TsEntityIdxManager();
+  EntityBlockMetaManager();
+  ~EntityBlockMetaManager();
 
   // opening meta files, and generating meta data struct in memory, using mmap mechanism.
   int Open(const string &file_path, const std::string &db_path, const string &tbl_sub_path, bool alloc_block_item);
@@ -31,16 +31,16 @@ class TsEntityIdxManager {
   inline uint64_t getBlockMaxNum() { return max_blocks_per_segment_;}
 
   // mark entity deleted by entityMeta object.
-  inline void deleteEntity(uint32_t entity_id) { return entity_block_idxs_[0]->deleteEntity(entity_id);}
+  inline void deleteEntity(uint32_t entity_id) { return entity_block_metas_[0]->deleteEntity(entity_id);}
 
   // get entityItem object in current partition.
-  inline EntityItem* getEntityItem(uint entity_id) const { return entity_block_idxs_[0]->getEntityItem(entity_id);}
+  inline EntityItem* getEntityItem(uint entity_id) const { return entity_block_metas_[0]->getEntityItem(entity_id);}
 
-  inline int64_t& minTimestamp() { return entity_block_idxs_[0]->minTimestamp(); }
+  inline int64_t& minTimestamp() { return entity_block_metas_[0]->minTimestamp(); }
 
-  inline int64_t& maxTimestamp() { return entity_block_idxs_[0]->maxTimestamp(); }
+  inline int64_t& maxTimestamp() { return entity_block_metas_[0]->maxTimestamp(); }
 
-  inline EntityHeader* getEntityHeader() { return entity_block_idxs_[0]->getEntityHeader(); }
+  inline EntityHeader* getEntityHeader() { return entity_block_metas_[0]->getEntityHeader(); }
 
   // segment can store data row num.
   uint64_t getReservedRows() { return max_rows_per_block_ * max_blocks_per_segment_; }
@@ -53,14 +53,24 @@ class TsEntityIdxManager {
   // if current block item is full, new block item and add to entity.
   int AddBlockItem(uint entity_id, BlockItem** blk_item);
 
-  // update  entity struct info with blockitem.
-  void UpdateEnityItem(uint entity_id, BlockItem* blk_item);
+  // update  entity struct info with block item.
+  void UpdateEntityItem(uint entity_id, BlockItem* blk_item);
+
+  /**
+    * @brief Update meta based on the reorganized blockItem
+    * @param[in] obsolete_max_block: map[entity_id]block_id, record the latest block_id of the entity at the time of
+    *           reorganization initiation, which is used to concatenate metas
+    * @param[in] compacted_block_items: map[entity_id]{BlockItem...}, the block items from snapshot will replace the
+    *           original block items
+   */
+  int updateCompactMeta(std::map<uint32_t, BLOCK_ID> &obsolete_max_block,
+                        std::map<uint32_t, std::deque<BlockItem*>> &compacted_block_items);
 
   // sync data to file.
   int sync(int flags);
 
-  std::vector<uint32_t> getEntities() { return entity_block_idxs_[0]->getEntities(); }
-  MMapEntityIdx* GetFirstMeta() { return entity_block_idxs_[0]; }
+  std::vector<uint32_t> getEntities() { return entity_block_metas_[0]->getEntities(); }
+  MMapEntityBlockMeta* GetFirstMeta() { return entity_block_metas_[0]; }
 
   /**
    * @brief	get all blockitem objects of entity.
@@ -83,9 +93,9 @@ class TsEntityIdxManager {
 
   inline int GetMetaIndex(BLOCK_ID block_item_id){
     int idx = (block_item_id -1) / META_BLOCK_ITEM_MAX;
-    assert(idx < entity_block_idxs_.size());
+    assert(idx < entity_block_metas_.size());
     assert(idx < meta_num_);
-    assert(entity_block_idxs_[idx] != nullptr);
+    assert(entity_block_metas_[idx] != nullptr);
     return idx;
   }
 
@@ -103,7 +113,7 @@ class TsEntityIdxManager {
   uint16_t  config_subgroup_entities = 500;   // configure item: entity max num in subgroup
 
  protected:
-  std::vector<MMapEntityIdx*> entity_block_idxs_;
+  std::vector<MMapEntityBlockMeta*> entity_block_metas_;
   std::string file_path_base_;
   std::string db_path_;
   std::string tbl_sub_path_;
@@ -112,5 +122,5 @@ class TsEntityIdxManager {
   uint16_t max_rows_per_block_ = 1000;      // configure item
   pthread_mutex_t obj_mutex_;
   std::shared_mutex entity_block_item_mutex_;  // control entity item / block item
-  uint32_t meta_num_ = 1;
+  uint32_t meta_num_ = 1;  // number of meta, not meta's amount
 };

@@ -242,14 +242,16 @@ void TSFree(void* ptr);
 
 void TSRegisterExceptionHandler();
 
-TSStatus TSAddColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column);
+TSStatus TSAddColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column,
+                     uint32_t cur_version, uint32_t new_version);
 
-TSStatus TSDropColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column);
-
-TSStatus TSAlterPartitionInterval(TSEngine* engine, TSTableID table_id, uint64_t partition_interval);
+TSStatus TSDropColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column,
+                      uint32_t cur_version, uint32_t new_version);
 
 TSStatus TSAlterColumnType(TSEngine* engine, TSTableID table_id, char* transaction_id,
-                           TSSlice new_column, TSSlice origin_column);
+                           TSSlice new_column, TSSlice origin_column, uint32_t cur_version, uint32_t new_version);
+
+TSStatus TSAlterPartitionInterval(TSEngine* engine, TSTableID table_id, uint64_t partition_interval);
 
 void UpdateTsTraceConfig(TSSlice cfg);
 /**

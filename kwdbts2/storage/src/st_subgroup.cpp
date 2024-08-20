@@ -11,6 +11,7 @@
 
 #include <lg_api.h>
 #include <dirent.h>
+#include <map>
 #if defined(__GNUC__) && (__GNUC__ < 8)
   #include <experimental/filesystem>
   namespace fs = std::experimental::filesystem;
@@ -25,22 +26,23 @@
 
 namespace kwdbts {
 
-TsSubEntityGroup::TsSubEntityGroup(MMapMetricsTable*& root_tbl)
-    : TSObject(), root_tbl_(root_tbl) {
-  table_name_ = root_tbl->name();
+TsSubEntityGroup::TsSubEntityGroup(MMapRootTableManager*& root_tbl_manager)
+    : TSObject(), root_tbl_manager_(root_tbl_manager) {
+  table_name_ = root_tbl_manager->GetTableName();
   // pthread_rwlock_init(&partition_lk_, NULL);
   partition_cache_.SetCapacity(cache_capacity_);  // Each subgroup can have up to 10 active partitions
 
   sub_entity_group_mutex_ = new TsSubEntityGroupLatch(LATCH_ID_TSSUBENTITY_GROUP_MUTEX);
   sub_entity_group_rwlock_ = new TsSubEntityGroupRWLatch(RWLATCH_ID_TS_SUB_ENTITY_GROUP_RWLOCK);
+  subgroup_id_ = 0;
 }
 
 TsSubEntityGroup::~TsSubEntityGroup() {
   partition_cache_.Clear();
   // pthread_rwlock_destroy(&partition_lk_);
-  if (entity_block_idx_ != nullptr) {
-    delete entity_block_idx_;
-    entity_block_idx_ = nullptr;
+  if (entity_block_meta_ != nullptr) {
+    delete entity_block_meta_;
+    entity_block_meta_ = nullptr;
   }
 
   for (auto& mtx : entity_mutexes_) {
@@ -68,10 +70,114 @@ int TsSubEntityGroup::unLock() {
   return RW_LATCH_UNLOCK(sub_entity_group_rwlock_);
 }
 
+
+std::vector <timestamp64> TsSubEntityGroup::GetPartitionTsInSpan(KwTsSpan ts_span) {
+  vector<timestamp64> parts;
+  rdLock();
+  Defer defer{[&]() { unLock(); }};
+  timestamp64 tmp_max_ts;
+
+  auto start_it = partitions_ts_.find(PartitionTime(ts_span.begin, tmp_max_ts));
+  if (start_it == partitions_ts_.end()) {
+    start_it = partitions_ts_.begin();
+  }
+
+  // To include ts_span.end, so the next partition must be the endpoint
+  auto end_it = partitions_ts_.find(PartitionTime(ts_span.end, tmp_max_ts));
+  if (end_it != partitions_ts_.end()) {
+    // ts_span.end fall into partition, so we take the next partition as endpoint
+    end_it++;
+  }
+  for (auto it = start_it; it != end_it ; it++) {
+    parts.push_back(it->first);
+  }
+  return parts;
+}
+
+int TsSubEntityGroup::ClearPartitionCache() {
+  partition_cache_.Clear();
+  return 0;
+}
+
+int TsSubEntityGroup::ErasePartitionCache(timestamp64 pt_ts) {
+  partition_cache_.Erase(pt_ts);
+  return 0;
+}
+
+int TsSubEntityGroup::ApplyCompactData(std::map<timestamp64, std::map<uint32_t, BLOCK_ID>> &obsolete_max_block,
+                               std::map<timestamp64, std::vector<BLOCK_ID>> &obsolete_segment_ids,
+                               std::map<timestamp64, std::map<uint32_t, std::deque<BlockItem*>>> &compacted_block_items,
+                               string snapshot_dir) {
+  wrLock();
+  Defer defer{[&]() {
+    unLock();
+  }};
+
+  ErrorInfo err_info;
+  for (auto & it : obsolete_segment_ids) {
+    timestamp64 pt_ts = it.first;
+    std::vector<BLOCK_ID> &obsolete_segment_id = it.second;
+    int err_code = 0;
+    TsTimePartition* p_bt = getPartitionTable(pt_ts, 0, err_info);
+    if (err_info.errcode < 0) {
+      LOG_ERROR("getPartitionTable fail, subgroup %d, pt_ts %ld, msg: %s", subgroup_id_, pt_ts, err_info.errmsg.c_str());
+      return err_info.errcode;
+    }
+
+    if (p_bt->isUsedWithCache()) {
+      LOG_WARN("Partition %s is being used, couldn't be reorganized.", (db_path_ + partitionTblSubPath(pt_ts)).c_str());
+      ReleaseTable(p_bt);
+      continue;
+    }
+    p_bt->setObjectStatus(OBJ_READY_TO_CHANGE);
+    err_code = p_bt->DropSegmentDir(obsolete_segment_id);
+    if (err_code < 0) {
+      // These segment_id have already been reorganized and stored in the snapshot, so you can delete them first,
+      // and then copy them from the snapshot.
+      ReleaseTable(p_bt);
+      LOG_ERROR("DropSegmentDir fail, subgroup %d, pt_ts %ld", subgroup_id_, pt_ts);
+      return err_code;
+    }
+
+    ReleaseTable(p_bt);
+
+    // compact_dir: ./test_db/1007/101_1711693218324/1007_1
+    // ./test_db/1007/101/1007_1/timestamp
+    string entity_group_part_dir = db_path_ + tbl_sub_path_ + "/" + std::to_string(pt_ts);
+    // find ./test_db/1007/101_1711693218324/1007_1/timestamp -mindepth 1 -maxdepth 1 -type d -exec
+    //        mv {} ./test_db/1007/101/1007_1/timestamp
+    string cmd2 = "find " + snapshot_dir + "/" + std::to_string(pt_ts) + " -mindepth 1 -maxdepth 1 -type d -exec "
+                  + "mv -t " + entity_group_part_dir + " {} +";
+    if (system(cmd2.c_str()) == -1) {
+      LOG_ERROR("cmd fail: %s", cmd2.c_str());
+      return -1;
+    }
+
+    p_bt = getPartitionTable(pt_ts, 0, err_info);
+    if (err_info.errcode < 0) {
+      ReleaseTable(p_bt);
+      LOG_ERROR("getPartitionTable fail, subgroup %d, pt_ts %ld, msg: %s", subgroup_id_, pt_ts, err_info.errmsg.c_str());
+      return err_info.errcode;
+    }
+
+    // Modify meta so that the un-reorganized block items will connect to the reorganized blocks
+    err_code = p_bt->UpdateCompactMeta(obsolete_max_block[pt_ts], compacted_block_items[pt_ts]);
+    if (err_code < 0) {
+      ReleaseTable(p_bt);
+      return err_code;
+    }
+    p_bt->setObjectStatus(OBJ_READY);
+    ReleaseTable(p_bt);
+    ErasePartitionCache(pt_ts);
+  }
+
+  return 0;
+}
+
 int TsSubEntityGroup::ReOpenInit(ErrorInfo& err_info) {
-  if (entity_block_idx_ != nullptr) {
-    delete entity_block_idx_;
-    entity_block_idx_ = nullptr;
+  if (entity_block_meta_ != nullptr) {
+    delete entity_block_meta_;
+    entity_block_meta_ = nullptr;
   }
   partitions_ts_.clear();
   return OpenInit(subgroup_id_, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
@@ -81,7 +187,7 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
                                int flags, ErrorInfo& err_info) {
   wrLock();
   Defer defer{[&]() { unLock(); }};
-  if (entity_block_idx_ != nullptr) {
+  if (entity_block_meta_ != nullptr) {
     // err_info.setError(BOEPERM, tbl_sub_path + " already opened.");
     LOG_WARN("SubEntityGroup[%s] already opened.", tbl_sub_path.c_str());
     return 0;
@@ -104,9 +210,9 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
   }
   subgroup_id_ = subgroup_id;
 
-  entity_block_idx_ = new MMapEntityIdx(true, true);
+  entity_block_meta_ = new MMapEntityBlockMeta(true, true);
   string meta_path = table_name_ + ".et";
-  int ret = entity_block_idx_->init(meta_path, db_path_, tbl_sub_path_, flags, false, 0);
+  int ret = entity_block_meta_->init(meta_path, db_path_, tbl_sub_path_, flags, false, 0);
   if (ret < 0) {
     err_info.setError(ret, tbl_sub_path);
     return ret;
@@ -149,7 +255,7 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
     partitions_ts_.clear();
   }
 
-  for (int i = 0; i <= entity_block_idx_->GetConfigSubgroupEntities(); i++) {
+  for (int i = 0; i <= entity_block_meta_->GetConfigSubgroupEntities(); i++) {
     entity_mutexes_.push_back(std::move(new TsSubEntityGroupEntityLatch(LATCH_ID_TSSUBENTITY_GROUP_ENTITYS_MUTEX)));
   }
 
@@ -157,13 +263,13 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
 }
 
 EntityID TsSubEntityGroup::AllocateEntityID(const string& primary_tag, ErrorInfo& err_info) {
-  assert(entity_block_idx_ != nullptr);
-  return entity_block_idx_->addEntity();
+  assert(entity_block_meta_ != nullptr);
+  return entity_block_meta_->addEntity();
 }
 
 std::vector<uint32_t> TsSubEntityGroup::GetEntities() {
-  assert(entity_block_idx_ != nullptr);
-  return entity_block_idx_->getEntities();
+  assert(entity_block_meta_ != nullptr);
+  return entity_block_meta_->getEntities();
 }
 
 int TsSubEntityGroup::SetEntityNum(uint32_t entity_num) {
@@ -173,7 +279,7 @@ int TsSubEntityGroup::SetEntityNum(uint32_t entity_num) {
 timestamp64 TsSubEntityGroup::PartitionTime(timestamp64 ts, timestamp64& max_ts) {
   rdLock();
   Defer defer{[&]() { unLock(); }};
-  int64_t interval = root_tbl_->partitionInterval();
+  int64_t interval = root_tbl_manager_->GetPartitionInterval();
   if (!partitions_ts_.empty()) {
     auto it = --partitions_ts_.end();
     if (ts >= it->first && ts <= it->second) {  // Latest partition
@@ -298,7 +404,7 @@ TsTimePartition* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timesta
     return mt_table;
   }
   string pt_tbl_sub_path = partitionTblSubPath(p_time);
-  mt_table = new TsTimePartition(root_tbl_, entity_block_idx_->GetConfigSubgroupEntities());
+  mt_table = new TsTimePartition(root_tbl_manager_, entity_block_meta_->GetConfigSubgroupEntities());
   mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_OPEN_NORECURSIVE, err_info);
   if (err_info.errcode < 0 && create_if_not_exist) {
     err_info.clear();
@@ -314,7 +420,6 @@ TsTimePartition* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timesta
   mt_table->incRefCount();
   partitions_ts_[mt_table->minTimestamp()] = mt_table->maxTimestamp();
   partition_cache_.Put(p_time, mt_table, lru_push_back);
-
   return mt_table;
 }
 
@@ -346,7 +451,7 @@ TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path,
   }
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_tbl_, entity_block_idx_->GetConfigSubgroupEntities());
+  TsTimePartition* mt_table = new TsTimePartition(root_tbl_manager_, entity_block_meta_->GetConfigSubgroupEntities());
   mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   if (!err_info.isOK()) {
     delete mt_table;
@@ -500,9 +605,9 @@ int TsSubEntityGroup::RemoveAll(bool is_force, ErrorInfo& err_info) {
       tables[i] = nullptr;
     }
     // Delete metadata and subgroup directory
-    err_info.errcode = entity_block_idx_->remove();
-    delete entity_block_idx_;
-    entity_block_idx_ = nullptr;
+    err_info.errcode = entity_block_meta_->remove();
+    delete entity_block_meta_;
+    entity_block_meta_ = nullptr;
     partitions_ts_.clear();
 
     err_info.errcode = fs::remove_all(real_path_.c_str());
@@ -543,27 +648,6 @@ int TsSubEntityGroup::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint6
   return err_info.errcode;
 }
 
-int TsSubEntityGroup::AlterTable(AttributeInfo& attr_info, ErrorInfo& err_info) {
-  map<int64_t, int64_t> partitions = allPartitions();
-
-  for (auto it = partitions.begin() ; it != partitions.end() ; it++) {
-    TsTimePartition* p_table = GetPartitionTable(it->first, err_info, false);
-    if (err_info.errcode < 0) {
-      LOG_ERROR("alter table [%s] failed: %s", table_name_.c_str(), err_info.errmsg.c_str());
-      break;
-    }
-    if (p_table != nullptr) {
-      p_table->AlterTable(attr_info, err_info);
-      ReleaseTable(p_table);
-      if (err_info.errcode < 0) {
-        LOG_ERROR("alter table [%s] failed: %s", table_name_.c_str(), err_info.errmsg.c_str());
-        break;
-      }
-    }
-  }
-  return err_info.errcode;
-}
-
 int TsSubEntityGroup::UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t* count, ErrorInfo& err_info) {
   // Firstly, undo the deleted Entity in each partition table
   map<int64_t, int64_t> partitions = allPartitions();
@@ -579,7 +663,7 @@ int TsSubEntityGroup::UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, u
     }
     *count = *count + num;
   }
-  EntityItem* entity_item = entity_block_idx_->getEntityItem(entity_id);
+  EntityItem* entity_item = entity_block_meta_->getEntityItem(entity_id);
   entity_item->is_deleted = false;
 
   return err_info.errcode;

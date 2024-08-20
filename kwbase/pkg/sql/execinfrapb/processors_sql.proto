@@ -250,7 +250,8 @@ message TsAlterProSpec {
   optional uint64 partitionInterval = 5 [(gogoproto.nullable) = false];
   optional bytes originalCol = 6;
   optional bytes compressInterval = 7;
-  optional uint32 tsVersion = 8 [(gogoproto.nullable) = false];
+  optional uint32 nextTSVersion = 8 [(gogoproto.nullable) = false];
+  optional uint32 currentTSVersion = 9 [(gogoproto.nullable) = false];
 }
 
 // IndexSkipTableReaderSpec is the specification for a table reader that

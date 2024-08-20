@@ -95,7 +95,7 @@ int SubEntityGroupManager::OpenInit(const std::string& db_path, const std::strin
 
 
 TsSubEntityGroup* SubEntityGroupManager::CreateSubGroup(SubGroupID subgroup_id, ErrorInfo& err_info) {
-  assert(root_table_ != nullptr);
+  assert(root_table_manager_ != nullptr);
   wrLock();
   Defer defer{[&]() { unLock(); }};
   auto it = subgroups_.find(subgroup_id);
@@ -104,9 +104,9 @@ TsSubEntityGroup* SubEntityGroupManager::CreateSubGroup(SubGroupID subgroup_id, 
     return it->second;
   }
 
-  root_table_->rdLock();
-  TsSubEntityGroup* sub_group = new TsSubEntityGroup(root_table_);
-  root_table_->unLock();
+  root_table_manager_->rdLock();
+  TsSubEntityGroup* sub_group = new TsSubEntityGroup(root_table_manager_);
+  root_table_manager_->unLock();
   string group_sanbox = GetSubGroupTblSubPath(subgroup_id);
   if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_CREAT_EXCL, err_info) < 0) {
     delete sub_group;
@@ -150,9 +150,9 @@ TsSubEntityGroup* SubEntityGroupManager::GetSubGroup(SubGroupID subgroup_id, Err
 
 TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, ErrorInfo& err_info,
                                                       bool create_not_exist) {
-  root_table_->rdLock();
-  TsSubEntityGroup* sub_group = new TsSubEntityGroup(root_table_);
-  root_table_->unLock();
+  root_table_manager_->rdLock();
+  TsSubEntityGroup* sub_group = new TsSubEntityGroup(root_table_manager_);
+  root_table_manager_->unLock();
   string group_sanbox = GetSubGroupTblSubPath(subgroup_id);
   if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_OPEN_NORECURSIVE, err_info) < 0) {
     delete sub_group;
@@ -160,10 +160,10 @@ TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, Er
   }
   if (err_info.errcode < 0 && create_not_exist) {
     err_info.clear();
-    root_table_->rdLock();
-    sub_group = new TsSubEntityGroup(root_table_);
+    root_table_manager_->rdLock();
+    sub_group = new TsSubEntityGroup(root_table_manager_);
     sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_CREAT_EXCL, err_info);
-    root_table_->unLock();
+    root_table_manager_->unLock();
   }
   if (err_info.errcode < 0) {
     delete sub_group;
@@ -215,6 +215,7 @@ int SubEntityGroupManager::DropSubGroup(SubGroupID subgroup_id, bool if_exist,
   wrLock();
   Defer defer{[&]() { unLock(); }};
   if (sub_group->RemoveAll(false, err_info) >= 0) {
+    delete sub_group;
     subgroups_.erase(subgroup_id);
   }
   return err_info.errcode;
@@ -374,37 +375,12 @@ int SubEntityGroupManager::ReuseEntities(SubGroupID group_id, std::vector<Entity
   return 0;
 }
 
-int SubEntityGroupManager::AlterSubGroupColumn(AttributeInfo& attr_info, ErrorInfo& err_info) {
-  rdLock();
-  Defer defer{[&]() { unLock(); }};
-  // Traversal and alter table in every subgroup.
-  for (auto it = subgroups_.begin() ; it != subgroups_.end() ; it++) {
-    it->second->AlterTable(attr_info, err_info);
-    if (err_info.errcode < 0) {
-      break;
-    }
-  }
-
-  return err_info.errcode;
-}
-
 void SubEntityGroupManager::sync(int flags) {
   wrLock();
   Defer defer{[&]() { unLock(); }};
   for (auto it = subgroups_.begin() ; it != subgroups_.end() ; it++) {
     it->second->sync(flags);
   }
-}
-
-void SubEntityGroupManager::CopyMetaData(MMapMetricsTable* dst_bt, MMapMetricsTable* src_bt) {
-  dst_bt->metaData()->has_data = src_bt->metaData()->has_data;
-  dst_bt->metaData()->actul_size = src_bt->metaData()->actul_size;
-  dst_bt->metaData()->life_time = src_bt->metaData()->life_time;
-  dst_bt->metaData()->partition_interval = src_bt->metaData()->partition_interval;
-  dst_bt->metaData()->num_node = src_bt->metaData()->num_node;
-  dst_bt->metaData()->life_cycle = src_bt->metaData()->life_cycle;
-  dst_bt->metaData()->min_ts = src_bt->metaData()->min_ts;
-  dst_bt->metaData()->max_ts = src_bt->metaData()->max_ts;
 }
 
 void SubEntityGroupManager::SetSubgroupAvailable() {

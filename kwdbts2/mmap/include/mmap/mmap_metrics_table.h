@@ -17,8 +17,8 @@
 #include "big_table.h"
 #include "mmap_object.h"
 #include "mmap_segment_table.h"
-#include "mmap_entity_idx.h"
-#include "payload.h"
+#include "mmap_entity_block_meta.h"
+#include "ts_table_object.h"
 #include "ts_common.h"
 
 class MMapMetricsTable : public TSObject, public TsTableObject {
@@ -27,7 +27,7 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
 
  protected:
   string name_;
-  MMapEntityIdx* entity_block_idx_{nullptr};
+  MMapEntityBlockMeta* entity_block_meta_{nullptr};
 
  public:
   MMapMetricsTable() : TSObject(), rw_latch_(RWLATCH_ID_MMAP_METRICS_TABLE_RWLOCK) {}
@@ -52,15 +52,8 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
 
   int openInitEntityMeta(const int flags);
 
-  int create(const vector<AttributeInfo>& schema,
-             const vector<string>& key, const string& key_order,
-             const string& ns_url,
-             const string& description,
-             const string& tbl_sub_path,
-             const string& source_url,
-             uint64_t partition_interval,
-             int encoding, ErrorInfo& err_info,
-             bool init_data);
+  int create(const vector<AttributeInfo>& schema, const uint32_t& table_version, const string& tbl_sub_path,
+             uint64_t partition_interval, int encoding, ErrorInfo& err_info, bool init_data);
 
   int init(const vector<AttributeInfo>& schema, ErrorInfo& err_info);
 
@@ -72,8 +65,8 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
     return cols_info_without_hidden_;
   }
 
-  const vector<uint32_t>& getColsIdxForHidden() const {
-    return cols_idx_for_hidden_;
+  const vector<uint32_t>& getColsIdx() const {
+    return cols_idx_;
   }
 
   virtual const string& tbl_sub_path() const { return tbl_sub_path_; }
@@ -94,6 +87,8 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
 
   timestamp64& maxTimestamp() { return meta_data_->max_ts; }
 
+  uint32_t& tableVersionOfLatestData() { return meta_data_->schema_version_of_latest_data;}
+
   virtual int reserve(size_t size) {
     return KWEPERM;
   }
@@ -102,16 +97,5 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
 
   int Sync(kwdbts::TS_LSN check_lsn, map<uint32_t, uint64_t>& rows, ErrorInfo& err_info) ;
 
-  int UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t hint_row, kwdbts::Payload* payload,
-              ErrorInfo& err_info);
-
   int UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t* count, ErrorInfo& err_info) ;
-
-  int DropColumn(const AttributeInfo& attr_info, ErrorInfo& err_info);
-
-  int AlterColumnType(int col_index, const AttributeInfo& attr_info);
-
-  int UndoAddColumn(const uint32_t& col_id, ErrorInfo &err_info);
-
-  int UndoDropColumn(const uint32_t& col_id, ErrorInfo &err_info);
 };

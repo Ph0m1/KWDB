@@ -954,7 +954,7 @@ TEST_F(TestWalManagerWriter, TestWALDDL) {
   KStatus s = wal_->WriteDDLCreateWAL(ctx_, x_id, table_id_, &meta, &ranges);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
-  s = wal_->WriteDDLAlterWAL(ctx_, x_id, table_id_, WALAlterType::ADD_COLUMN, column_slice);
+  s = wal_->WriteDDLAlterWAL(ctx_, x_id, table_id_, AlterType::ADD_COLUMN, 1, 2, column_slice);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
   delete[] buffer;

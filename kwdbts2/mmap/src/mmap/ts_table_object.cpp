@@ -74,11 +74,11 @@ int TsTableObject::open(const string& file_path, const std::string& db_path, con
     }
 
     cols_info_without_hidden_.clear();
-    cols_idx_for_hidden_.clear();
+    cols_idx_.clear();
     for (int i = 0; i < cols_info_with_hidden_.size(); ++i) {
       if(!cols_info_with_hidden_[i].isFlag(AINFO_DROPPED)) {
         cols_info_without_hidden_.emplace_back(cols_info_with_hidden_[i]);
-        cols_idx_for_hidden_.emplace_back(i);
+        cols_idx_.emplace_back(i);
       }
     }
 

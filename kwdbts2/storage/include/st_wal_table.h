@@ -42,7 +42,7 @@ class LoggedTsTable : public TsTable {
                             const RangeGroup& hash_range,
                             const string& range_tbl_sub_path,
                             std::shared_ptr<TsEntityGroup>* entity_group) override {
-    auto t_range = std::make_shared<LoggedTsEntityGroup>(ctx, entity_bt_, db_path_, table_id_, hash_range,
+    auto t_range = std::make_shared<LoggedTsEntityGroup>(ctx, entity_bt_manager_, db_path_, table_id_, hash_range,
                                                          range_tbl_sub_path, engine_opt_);
     *entity_group = std::move(t_range);
   }

@@ -627,6 +627,9 @@ func CheckTableStatusOk(
 			} else {
 				return errors.Errorf("the state of table %v is %v, wait and try again", table.ID, table.State)
 			}
+		} else if len(table.Mutations) > 0 {
+			log.Warningf(ctx, "the table %v has schema changes in progress", table.ID)
+			continue
 		}
 		break
 	}

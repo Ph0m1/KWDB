@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <atomic>
 #include "libkwdbts2.h"
 #include "kwdb_type.h"
 #include "ts_common.h"
@@ -29,6 +30,11 @@
 
 using namespace kwdbts; // NOLINT
 const TSStatus kTsSuccess = {NULL, 0};
+
+extern std::condition_variable g_setting_changed_cv;
+extern std::mutex setting_changed_lock;  // protect g_setting_changed_cv
+extern std::atomic<bool> g_setting_changed;
+extern int64_t g_input_autovacuum_interval;  // catch user's ts.autovaccum.interval input
 
 inline TSStatus ToTsStatus(const char* s, size_t len) {
   TSStatus result;
@@ -58,7 +64,7 @@ struct TSEngine {
 
   /**
    * @brief create ts table
-   * @param[in] table_id 
+   * @param[in] table_id
    * @param[in] meta     schema info with protobuf
    *
    * @return KStatus
@@ -68,7 +74,7 @@ struct TSEngine {
 
   /**
  * @brief drop ts table
- * @param[in] table_id  
+ * @param[in] table_id
  *
  * @return KStatus
  */
@@ -85,7 +91,7 @@ struct TSEngine {
 
   /**
    * @brief get ts table object
-   * @param[in] table_id  
+   * @param[in] table_id
    * @param[out] ts_table
    *
    * @return KStatus
@@ -95,7 +101,7 @@ struct TSEngine {
 
   /**
   * @brief get meta info of ts table
-  * @param[in] table_id 
+  * @param[in] table_id
   * @param[in] meta
   *
   * @return KStatus
@@ -105,9 +111,9 @@ struct TSEngine {
 
   /**
    * @brief Entity tags insert ,support update
-   *            if primary tag no exists in ts table, insert to 
-   *            if primary tag exists in ts table, and payload has tag value, update 
-   * @param[in] table_id  
+   *            if primary tag no exists in ts table, insert to
+   *            if primary tag exists in ts table, and payload has tag value, update
+   * @param[in] table_id
    * @param[in] range_group_id RangeGroup ID
    * @param[in] payload    payload stores primary tag
    * @param[in] mtr_id Mini-transaction id for TS table.
@@ -153,7 +159,7 @@ struct TSEngine {
    * @param[in] table_id       ID
    * @param[in] range_group_id RangeGroup ID
    * @param[in] primary_tag    entity
-   * @param[in] ts_spans  
+   * @param[in] ts_spans
    * @param[out] count         delete row num
    * @param[in] mtr_id Mini-transaction id for TS table.
    *
@@ -178,7 +184,7 @@ struct TSEngine {
 
   /**
   * @brief get batch data in tmp memroy
-  * @param[out] TsWriteBatch 
+  * @param[out] TsWriteBatch
   *
   * @return KStatus
   */
@@ -186,7 +192,7 @@ struct TSEngine {
 
   /**
   * @brief TsWriteBatch store to storage engine.
-  * @param[in] TsWriteBatch 
+  * @param[in] TsWriteBatch
   *
   * @return KStatus
   */
@@ -195,7 +201,7 @@ struct TSEngine {
   /**
    * @brief  create new EntityGroup, if no table_id, should give meta object.
    * @param[in] table_id   ID
-   * @param[in] meta 
+   * @param[in] meta
    * @param[in] range RangeGroup info
    *
    * @return KStatus
@@ -228,7 +234,7 @@ struct TSEngine {
   }
 
   /**
-   * @brief  delete range group ,used for snapshot 
+   * @brief  delete range group ,used for snapshot
    * @param[in] table_id   ID
    * @param[in] range      RangeGroup
    *
@@ -243,7 +249,7 @@ struct TSEngine {
    * @param[in] table_id   ID
     * @param[in] range_group_id RangeGroup ID
     * @param[in] begin_hash,end_hash Entity primary tag hashID
-    * @param[out] path 
+    * @param[out] path
     *
     * @return KStatus
     */
@@ -257,7 +263,7 @@ struct TSEngine {
    * @param[in] range_group_id RangeGroup ID
    * @param[in] table_id   ID
    * @param[in] range_group_id RangeGroup ID
-   * @param[in] path 
+   * @param[in] path
    *
    * @return KStatus
    */
@@ -272,7 +278,7 @@ struct TSEngine {
   * @param[in] range_group_id RangeGroup ID
   * @param[in] path   path stores snapshot
   * @param[in] offset, limit current batch return snapshot data info
-  * @param[out] data 
+  * @param[out] data
   * @param[out] total snapshot total size
   *
   * @return KStatus
@@ -343,7 +349,7 @@ struct TSEngine {
   /**
  * @brief  calculate pushdown
  * @param[in] req
- * @param[out]  resp 
+ * @param[out]  resp
  *
  * @return KStatus
  */
@@ -448,8 +454,8 @@ struct TSEngine {
     *
     * @return KStatus
     */
-  virtual KStatus AddColumn(kwdbContext_p ctx, const KTableKey& table_id,
-                            char* transaction_id, TSSlice column, string& msg) = 0;
+  virtual KStatus AddColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
+                            TSSlice column, uint32_t cur_version, uint32_t new_version, string& msg) = 0;
 
   /**
     * @brief Drop a column from the time series table
@@ -461,8 +467,8 @@ struct TSEngine {
     *
     * @return KStatus
     */
-  virtual KStatus DropColumn(kwdbContext_p ctx, const KTableKey& table_id,
-                             char* transaction_id, TSSlice column, string& msg) = 0;
+  virtual KStatus DropColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
+                             TSSlice column, uint32_t cur_version, uint32_t new_version, string& msg) = 0;
 
   virtual KStatus AlterPartitionInterval(kwdbContext_p ctx, const KTableKey& table_id, uint64_t partition_interval) = 0;
 
@@ -478,7 +484,14 @@ struct TSEngine {
     * @return KStatus
     */
   virtual KStatus AlterColumnType(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
-                                  TSSlice new_column, TSSlice origin_column, string& msg) = 0;
+                                  TSSlice new_column, TSSlice origin_column,
+                                  uint32_t cur_version, uint32_t new_version, string& msg) = 0;
+
+  virtual KStatus SettingChangedSensor() = 0;
+
+  virtual KStatus CloseSettingChangedSensor() = 0;
+
+  virtual KStatus CompactData(kwdbContext_p ctx) = 0;
 
   /**
    * @brief : Gets the number of remaining threads from the thread pool and
@@ -564,6 +577,11 @@ class TSEngineImpl : public TSEngine {
   KStatus EnableSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                         uint64_t snapshot_id) override;
 
+  KStatus SettingChangedSensor() override;  // detect if setting is changed, and take the setting's corresponding actions
+
+  KStatus CloseSettingChangedSensor() override;
+
+  KStatus CompactData(kwdbContext_p ctx) override;
 
   KStatus DeleteRangeEntities(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t& range_group_id,
                               const HashIdSpan& hash_span, uint64_t* count, uint64_t& mtr_id) override;
@@ -597,16 +615,17 @@ class TSEngineImpl : public TSEngine {
 
   KStatus LogInit();
 
-  KStatus AddColumn(kwdbContext_p ctx, const KTableKey& table_id,
-                     char* transaction_id, TSSlice column, string& msg) override;
+  KStatus AddColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
+                    TSSlice column, uint32_t cur_version, uint32_t new_version, string& err_msg) override;
 
-  KStatus DropColumn(kwdbContext_p ctx, const KTableKey& table_id,
-                     char* transaction_id, TSSlice column, string& msg) override;
+  KStatus DropColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
+                     TSSlice column, uint32_t cur_version, uint32_t new_version, string& err_msg) override;
 
   KStatus AlterPartitionInterval(kwdbContext_p ctx, const KTableKey& table_id, uint64_t partition_interval) override;
 
   KStatus AlterColumnType(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
-                          TSSlice new_column, TSSlice origin_column, string& msg) override;
+                          TSSlice new_column, TSSlice origin_column,
+                          uint32_t cur_version, uint32_t new_version, string& err_msg) override;
 
   /**
   * @brief : Gets the number of remaining threads from the thread pool
@@ -622,7 +641,7 @@ class TSEngineImpl : public TSEngine {
 
   /**
    * @brief open ts engine
-   * @param[out] engine 
+   * @param[out] engine
    *
    * @return KStatus
    */
@@ -634,7 +653,7 @@ class TSEngineImpl : public TSEngine {
 
   /**
    * @brief close ts engine
-   * @param[out] engine 
+   * @param[out] engine
    *
    * @return KStatus
    */
@@ -659,6 +678,8 @@ class TSEngineImpl : public TSEngine {
   WALMgr* wal_sys_{nullptr};
   TSxMgr* tsx_manager_sys_{nullptr};
   std::map<uint64_t, uint64_t> range_indexes_map_{};
+  uint64_t engine_autovacuum_interval_ = 0;  // compaction interval
+  bool wait_setting_ = true;  // SettingChangedSensor is waiting for setting to be changed
 
   KStatus parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,
                           std::vector<TagInfo>& tag_schema);
@@ -687,9 +708,11 @@ class TSEngineImpl : public TSEngine {
   */
   KStatus checkpoint(kwdbContext_p ctx);
 
+  KStatus resetCompactTimer(kwdbContext_p ctx);  // let SettingChangedSensor control the compactTimer
+
   /**
    * @brief get wal mode desc string
-   * @return 
+   * @return
   */
   std::string getWalModeString(WALMode mode) {
     switch (mode) {

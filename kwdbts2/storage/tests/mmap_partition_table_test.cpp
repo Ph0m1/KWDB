@@ -49,35 +49,38 @@ class TestPartitionBigTable : public TestBigTableInstance {
  * @brief Test the basic functions of MMapEntityMeta
  */
 TEST_F(TestPartitionBigTable, base) {
-  TsEntityIdxManager entity_idx;
-  int error_code = entity_idx.Open("t1.meta", db_path_, "20231110", true);
+  EntityBlockMetaManager meta_manager;
+  // Create a partition directory with specific permissions.
+  std::string pt_tbl_sub_path = "20231110/";
+  ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  int error_code = meta_manager.Open("t1.meta", db_path_, pt_tbl_sub_path, true);
   EXPECT_EQ(error_code, 0);
 
   // Assign and create block items for each entity
   size_t entity_group_max = 100;
   for (int i = 1; i <= entity_group_max; i++) {
-    EntityItem* entity_item = entity_idx.getEntityItem(i);
+    EntityItem* entity_item = meta_manager.getEntityItem(i);
     entity_item->entity_id = i;
     entity_item->row_written = i + 1000;
     entity_item->cur_block_id = 0;
     BlockItem* block_item = nullptr;
-    entity_idx.AddBlockItem(i, &block_item);
-    entity_idx.UpdateEnityItem(i, block_item);
+    meta_manager.AddBlockItem(i, &block_item);
+    meta_manager.UpdateEntityItem(i, block_item);
 
     ASSERT_EQ(block_item->entity_id, i);
-    ASSERT_EQ(entity_idx.getEntityItem(i)->cur_block_id, i);
+    ASSERT_EQ(meta_manager.getEntityItem(i)->cur_block_id, i);
   }
 
   // First entity appends 10 block items
   int entity_id = 1;
   for (int i = 1; i <= 10; i++) {
     BlockItem* block_item = nullptr;
-    entity_idx.AddBlockItem(entity_id, &block_item);
-    entity_idx.UpdateEnityItem(entity_id, block_item);
-    EXPECT_EQ(entity_idx.getEntityItem(entity_id)->cur_block_id, entity_group_max + i);
+    meta_manager.AddBlockItem(entity_id, &block_item);
+    meta_manager.UpdateEntityItem(entity_id, block_item);
+    EXPECT_EQ(meta_manager.getEntityItem(entity_id)->cur_block_id, entity_group_max + i);
   }
   // Get the result
-  entity_idx.getEntityItem(entity_id)->to_string(std::cout);
+  meta_manager.getEntityItem(entity_id)->to_string(std::cout);
 }
 
 /*
@@ -93,15 +96,16 @@ TEST_F(TestPartitionBigTable, insert) {
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   // Verify that no error occurred during table creation.
   ASSERT_EQ(err_info.errmsg, "");
-  string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
 
+  string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   // Create a partition directory with specific permissions.
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   // Declare a vector to hold keys, though it remains unused in this snippet.
   vector<string> key{};
 
-  // Instantiate a new partition table with a limit on entities per subgroup.
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
 
   // Insert a batch of data with a starting entity ID of 1, consisting of 10 rows,
@@ -125,7 +129,7 @@ TEST_F(TestPartitionBigTable, insert) {
 
   // Clean up allocated resources.
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -138,13 +142,15 @@ TEST_F(TestPartitionBigTable, disorder) {
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   // Create the root table and ensure no errors occurred during creation
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   // Create the partition directory with appropriate permissions
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
   // Instantiate a Partition Table with a specified entity capacity
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -176,7 +182,7 @@ TEST_F(TestPartitionBigTable, disorder) {
 
   // Clean up allocated resources
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -188,11 +194,13 @@ TEST_F(TestPartitionBigTable, override) {
   TableType table_type = TableType::ENTITY_TABLE;
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -237,7 +245,7 @@ TEST_F(TestPartitionBigTable, override) {
 
   // Clean up allocated resources
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -252,12 +260,13 @@ TEST_F(TestPartitionBigTable, reject) {
   // Create the root metrics table
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   // Create the partition directory
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);  // Set permissions
 
-  // Instantiate and open a partition table with a specified capacity for entities per subgroup
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -312,7 +321,7 @@ TEST_F(TestPartitionBigTable, reject) {
 
   // Clean up resources
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -326,11 +335,13 @@ TEST_F(TestPartitionBigTable, discard) {
   TableType table_type = TableType::ENTITY_TABLE; // Table type as entity table
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -363,7 +374,7 @@ TEST_F(TestPartitionBigTable, discard) {
     ASSERT_FALSE(is_deleted); // Initial records should not be marked as deleted
   }
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -376,11 +387,14 @@ TEST_F(TestPartitionBigTable, merge) {
   // Create the root table utilizing the provided database name and path, table name, type, with error tracking.
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -417,7 +431,7 @@ TEST_F(TestPartitionBigTable, merge) {
 
   // Clean up allocated resources.
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -429,11 +443,14 @@ TEST_F(TestPartitionBigTable, varColumnMerge) {
   TableType table_type = TableType::ENTITY_TABLE;
   MMapMetricsTable* root_bt = BtUtil::CreateRootTableVarCol(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -466,7 +483,7 @@ TEST_F(TestPartitionBigTable, varColumnMerge) {
   }
 
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -478,11 +495,13 @@ TEST_F(TestPartitionBigTable, keepToMerge) {
   TableType table_type = TableType::ENTITY_TABLE;
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -517,7 +536,7 @@ TEST_F(TestPartitionBigTable, keepToMerge) {
   // Ensure the minimum timestamp remains unchanged after merge
   ASSERT_EQ(segment_tbl->getBlockMinTs(block_item->block_id), ts_now);
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -529,11 +548,13 @@ TEST_F(TestPartitionBigTable, bigdata) {
   TableType table_type = TableType::ENTITY_TABLE;
   MMapMetricsTable* root_bt = BtUtil::CreateRootTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
   EXPECT_EQ(err_info.errmsg, "");
 
@@ -554,7 +575,7 @@ TEST_F(TestPartitionBigTable, bigdata) {
 
   ASSERT_EQ(segment_tbl->getBlockMinTs(block_item->block_id), ts_now);
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -567,11 +588,13 @@ TEST_F(TestPartitionBigTable, undoPut) {
   TableType table_type = TableType::ENTITY_TABLE;
   MMapMetricsTable* root_bt = BtUtil::CreateLsnTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
 
   // Set the current entity id to 1 and write 100 pieces of data
@@ -584,8 +607,8 @@ TEST_F(TestPartitionBigTable, undoPut) {
   uint32_t payload_len = 0;
   std::vector<BlockSpan> cur_alloc_spans;
   std::vector<MetricRowID> to_del_rows;
-  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), row_num, payload_len, ts_now + 10000, false);
-  kwdbts::Payload pd(mt_table->getSchemaInfo(), {data, payload_len});
+  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now + 10000, false);
+  kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
   mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &dedup_result);
@@ -634,7 +657,7 @@ TEST_F(TestPartitionBigTable, undoPut) {
 
   delete[]data;
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }
 
 /*
@@ -647,12 +670,16 @@ TEST_F(TestPartitionBigTable, redoPut) {
   TableType table_type = TableType::ENTITY_TABLE;
   MMapMetricsTable* root_bt = BtUtil::CreateLsnTable(db_name_, db_path_, table_name, table_type, err_info);
   ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
   string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
   ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   vector<string> key{};
 
-  TsTimePartition* mt_table = new TsTimePartition(root_bt, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
   mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
+
+  // 设置当前entity id为1，写入100条数据
   uint32_t entity_id = 1;
   uint32_t row_num = 10;
   timestamp64 ts_now = time(nullptr) * 1000 + 1000000;
@@ -662,8 +689,8 @@ TEST_F(TestPartitionBigTable, redoPut) {
   uint32_t payload_len = 0;
   std::vector<BlockSpan> cur_alloc_spans;
   std::vector<MetricRowID> to_del_rows;
-  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), row_num, payload_len, ts_now + 10000, false);
-  kwdbts::Payload pd(mt_table->getSchemaInfo(), {data, payload_len});
+  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now + 10000, false);
+  kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
   mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &dedup_result);
@@ -702,5 +729,5 @@ TEST_F(TestPartitionBigTable, redoPut) {
 
   delete[]data;
   delete mt_table;
-  delete root_bt;
+  delete root_bt_manager;
 }

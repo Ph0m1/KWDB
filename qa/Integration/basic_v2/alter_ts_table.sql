@@ -14,13 +14,10 @@ set sql_safe_updates = false;
 SET CLUSTER SETTING ts.dedup.rule = 'merge';
 
 alter table test_alter.t1 add column c int;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 alter table test_alter.t1 drop column c;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 alter table test_alter.t1 add column c int;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 insert into test_alter.t1 values(1672531205000, 556, NULL, 3);
 insert into test_alter.t1 values(1672531206000, 666, 11, 1);
@@ -30,13 +27,10 @@ insert into test_alter.t1 values(1672531208000, 888, 33, 3);
 select * from test_alter.t1 order by ts, b;
 
 alter table test_alter.t1 add column d float;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 alter table test_alter.t1 drop column d;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 alter table test_alter.t1 add column d float;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 
 insert into test_alter.t1 values(1672531209000, 999, 44, 1.1, 1);
@@ -46,13 +40,10 @@ insert into test_alter.t1 values(1672531209000, NULL, NULL, 4.4, 4);
 select * from test_alter.t1 order by ts, b;
 
 alter table test_alter.t1 add column e char(20);
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 alter table test_alter.t1 drop column e;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 alter table test_alter.t1 add column e char(20);
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 
 insert into test_alter.t1 values(1672531210000, 3333, 55, 5.5, 'chartest1', 1);
@@ -61,15 +52,11 @@ insert into test_alter.t1 values(1672531210000, 5555, 57, 7.7, 'chartest3', 3);
 select * from test_alter.t1 order by ts, b;
 
 alter table test_alter.t1 add column f varchar(100);
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
-
 alter table test_alter.t1 drop column f;
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 select ts, a from test_alter.t1 order by ts, a;
 alter table test_alter.t1 add column f varchar(100);
-select pg_sleep(1);
 select * from test_alter.t1 order by ts, b;
 
 insert into test_alter.t1 values(1672531211000, 6666, 66, 8.8, 'chartest1', 'aa', 1);
@@ -117,7 +104,7 @@ select pg_sleep(1);
 alter table test_alter.t3 add tag attr17_a1 smallint;
 select pg_sleep(1);
 alter table test_alter.t3 add tag attr17_a1 smallint;
-
+select pg_sleep(1);
 
 -- ZDP-32020
 create table test_alter.t4(
@@ -232,7 +219,6 @@ create table test_alter.t7(
                             e16 timestamptz
 ) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
 alter table test_alter.t7 add if not exists c1 int8;
-select pg_sleep(1);
 show tag values from test_alter.t7;
 
 -- ZDP-31999: After inserting a value into the tag, adding a field crashes
@@ -244,9 +230,7 @@ insert into test_alter.t8 (k_timestamp, e1, attr1, attr2, attr3, attr4, attr5, a
 insert into test_alter.t8 (k_timestamp, e1, attr1, attr2, attr3, attr4, attr5, attr6, attr11, attr12, attr13, attr14, attr15, attr16) values ('2024-01-01t00:00:00+01:00', 935, 2, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f');
 insert into test_alter.t8 (k_timestamp, e1, attr1, attr2, attr3, attr4, attr5, attr6, attr11, attr12, attr13, attr14, attr15, attr16) values ('2024-01-01t00:00:00+02:00', 935, 3, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f');
 alter table test_alter.t8 add c1 int8 null;
-select pg_sleep(1);
 alter table test_alter.t8 drop c1;
-select pg_sleep(1);
 alter table test_alter.t8 add c1 int8 null;
 
 
@@ -456,7 +440,7 @@ ALTER TABLE test_alter.t10 DROP COLUMN e5;
 ALTER TABLE test_alter.t10 DROP COLUMN e6;
 ALTER TABLE test_alter.t10 DROP COLUMN e7;
 ALTER TABLE test_alter.t10 DROP COLUMN e8;
-select pg_sleep(1);
+
 select * from test_alter.t10 where code1 = 6;
 
 -- ZDP-34366
@@ -466,7 +450,6 @@ insert into test_alter.t11 values(1672531201000, '111', 100, 1);
 SET CLUSTER SETTING ts.dedup.rule = 'merge';
 alter table test_alter.t11 add column d int;
 alter table test_alter.t11 drop column d;
-select pg_sleep(1);
 insert into test_alter.t11 values(1672531201000, NULL, 101, 1);
 select * from test_alter.t11;
 
@@ -516,6 +499,7 @@ INSERT INTO test_alter.t14 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, a
 alter table test_alter.t14 add tag attr23_a1 VARBYTES;
 alter table test_alter.t14 add tag attr24_a1 VARBYTES(10);
 select pg_sleep(1);
+
 INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:03+00:00',1,6,'F','l');
 INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:04+00:00',1,7,'E','l');
 INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:05+00:00',1,8,'S','o');

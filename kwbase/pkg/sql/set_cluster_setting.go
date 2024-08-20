@@ -221,6 +221,10 @@ func (n *setClusterSettingNode) startExec(params runParams) error {
 				if value < 10 || value > 1000 {
 					return errors.New("invalid value, the range of ts.rows_per_block.max_limit is [10, 1000]")
 				}
+			case "ts.autovacuum.interval":
+				if expectedEncodedValue[:1] == "-" {
+					return errors.New("invalid value, the value of ts.autovacuum.interval can't be set to a negative number")
+				}
 			}
 			if _, err = execCfg.InternalExecutor.ExecEx(
 				ctx, "update-setting", txn,

@@ -28,6 +28,55 @@ extern std::map<std::string, std::string> g_cluster_settings;
 extern DedupRule g_dedup_rule;
 extern std::shared_mutex g_settings_mutex;
 
+std::thread compact_timer_thread;  // thread for timer of compaction
+std::thread compact_thread;  // thread for running compaction
+std::atomic<bool> compact_timer_running(false);  // compaction timer is running
+std::atomic<bool> compact_running(false);  // compaction is running
+std::condition_variable compact_timer_cv;  // to stop compactTimer
+std::mutex setting_changed_lock;
+std::mutex compact_mtx;
+
+void runCompact(kwdbts::kwdbContext_p ctx, TSEngineImpl *engine) {
+  compact_running.store(true);
+  auto now = std::chrono::system_clock::now();
+  auto t_c = std::chrono::system_clock::to_time_t(now);
+  auto ts1 = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+  LOG_INFO("Reorganization start at: %s, timestamp: %ld", std::ctime(&t_c), ts1);
+  engine->CompactData(ctx);
+  now = std::chrono::system_clock::now();
+  t_c = std::chrono::system_clock::to_time_t(now);
+  auto ts2 = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+  auto ts = ts2 - ts1;
+  LOG_INFO("Reorganization finish at: %s, timestamp: %ld", std::ctime(&t_c), ts2);
+  LOG_INFO("Time: %ld ms", ts);
+  compact_running.store(false);
+}
+
+void compactTimer(kwdbts::kwdbContext_p ctx, TSEngineImpl *engine, int64_t sec) {
+  while (true) {
+    if (compact_running.load()) {  // compaction is running, wait for the next time up
+      LOG_INFO("compaction is running, wait for the next time up");
+    } else {  // compaction is not running, then join the last run and start the next run
+      if (compact_thread.joinable()) {
+        compact_thread.join();
+      }
+      compact_thread = std::thread(runCompact, ctx, engine);
+    }
+
+    std::unique_lock<std::mutex> lock(compact_mtx);
+    // escape wait_for only when time up or compact_timer_running
+    compact_timer_cv.wait_for(lock, std::chrono::seconds(sec), [] { return !compact_timer_running.load(); });
+    if (!compact_timer_running.load()) {
+      LOG_INFO("%ld sec Timer stop", sec);
+      if (compact_thread.joinable()) {  // join thread and stop
+        compact_thread.join();
+      }
+      return;
+    }
+    LOG_INFO("%ld Timer is up!", sec);
+  }
+}
+
 namespace kwdbts {
 int32_t EngineOptions::iot_interval  = 864000;
 string EngineOptions::home_;  // NOLINT
@@ -118,11 +167,15 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   if (s != KStatus::SUCCESS) {
     Return(s);
   }
+  uint32_t ts_version = 1;
+  if (meta->ts_table().has_ts_version()) {
+    ts_version = meta->ts_table().ts_version();
+  }
   uint64_t partition_interval = EngineOptions::iot_interval;
   if (meta->ts_table().has_partition_interval()) {
     partition_interval = meta->ts_table().partition_interval();
   }
-  s = table->Create(ctx, metric_schema, partition_interval);
+  s = table->Create(ctx, metric_schema, ts_version, partition_interval);
   if (s != KStatus::SUCCESS) {
     Return(s);
   }
@@ -279,6 +332,7 @@ KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id, 
   // Set table configures.
   auto ts_table = meta->mutable_ts_table();
   ts_table->set_ts_table_id(table_id);
+  ts_table->set_ts_version(table->GetCurrentTableVersion());
   ts_table->set_partition_interval(table->GetPartitionInterval());
 
   // Get table data schema.
@@ -845,7 +899,7 @@ KStatus TSEngineImpl::TSMtrRollback(kwdbContext_p ctx, const KTableKey& table_id
   std::shared_ptr<TsEntityGroup> table_range;
   s = table->GetEntityGroup(ctx, range_group_id, &table_range);
   if (s == KStatus::FAIL) {
-    LOG_ERROR("TSMtrRollback failed, GetEntityGroup failed, range group id: %lu", range_group_id)
+    LOG_ERROR("TSMtrCommit failed, GetEntityGroup failed, range group id: %lu", range_group_id)
     Return(s)
   }
 
@@ -1089,13 +1143,13 @@ KStatus TSEngineImpl::GetClusterSetting(kwdbContext_p ctx, const std::string& ke
   }
 }
 
-KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id,
-                                char* transaction_id, TSSlice column, string& msg) {
-  EnterFunc();
+KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
+                                TSSlice column, uint32_t cur_version, uint32_t new_version, string& err_msg) {
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
-    Return(s);
+    err_msg = "Table does not exist";
+    return s;
   }
 
   // Get transaction ID.
@@ -1105,26 +1159,30 @@ KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id,
   roachpb::KWDBKTSColumn column_meta;
   if (!column_meta.ParseFromArray(column.data, column.len)) {
     LOG_ERROR("ParseFromArray Internal Error");
+    err_msg = "Parse protobuf error";
     Return(KStatus::FAIL);
   }
   // Write Alter DDL into WAL, which type is ADD_COLUMN.
-  s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, WALAlterType::ADD_COLUMN, column);
+  s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, AlterType::ADD_COLUMN, cur_version, new_version, column);
   if (s != KStatus::SUCCESS) {
-    Return(s);
+    err_msg = "Write WAL error";
+    return s;
   }
 
-  // Table adds column.
-  s = table->AddColumn(ctx, &column_meta, msg);
-  Return(s);
+  s = table->AlterTable(ctx, AlterType::ADD_COLUMN, &column_meta, cur_version, new_version, err_msg);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
+
+  return KStatus::SUCCESS;
 }
 
-KStatus TSEngineImpl::DropColumn(kwdbContext_p ctx, const KTableKey& table_id,
-                                 char* transaction_id, TSSlice column, string& msg) {
-  EnterFunc();
+KStatus TSEngineImpl::DropColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
+                                 TSSlice column, uint32_t cur_version, uint32_t new_version, string& err_msg) {
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
-    Return(s);
+    return s;
   }
 
   // Get transaction id.
@@ -1138,14 +1196,17 @@ KStatus TSEngineImpl::DropColumn(kwdbContext_p ctx, const KTableKey& table_id,
   }
 
   // Write Alter DDL into WAL, which type is DROP_COLUMN.
-  s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, WALAlterType::DROP_COLUMN, column);
+  s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, AlterType::DROP_COLUMN, cur_version, new_version, column);
   if (s == KStatus::FAIL) {
-    Return(s);
+    return s;
   }
 
-  // Table drops column.
-  s = table->DropColumn(ctx, &column_meta, msg);
-  Return(s);
+  s = table->AlterTable(ctx, AlterType::DROP_COLUMN, &column_meta, cur_version, new_version, err_msg);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
+
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::AlterPartitionInterval(kwdbContext_p ctx, const KTableKey& table_id, uint64_t partition_interval) {
@@ -1180,31 +1241,35 @@ KStatus TSEngineImpl::GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) {
 }
 
 KStatus TSEngineImpl::AlterColumnType(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
-                                      TSSlice new_column, TSSlice origin_column, string& msg) {
-  EnterFunc()
+                                      TSSlice new_column, TSSlice origin_column,
+                                      uint32_t cur_version, uint32_t new_version, string& err_msg) {
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
-    Return(s)
+    return s;
   }
 
   // Get transaction id.
   uint64_t x_id = tsx_manager_sys_->getMtrID(transaction_id);
 
   // Write Alter DDL into WAL, which type is ALTER_COLUMN_TYPE.
-  s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, WALAlterType::ALTER_COLUMN_TYPE, origin_column);
+  s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, AlterType::ALTER_COLUMN_TYPE, cur_version, new_version, origin_column);
   if (s == KStatus::FAIL) {
-    Return(s)
+    return s;
   }
+
   // Convert TSSlice to roachpb::KWDBKTSColumn.
   roachpb::KWDBKTSColumn new_col_meta;
   if (!new_col_meta.ParseFromArray(new_column.data, new_column.len)) {
     LOG_ERROR("ParseFromArray Internal Error");
     Return(KStatus::FAIL);
   }
-  // Table alters column type.
-  s = table->AlterColumnType(ctx, &new_col_meta, msg);
-  Return(s);
+  s = table->AlterTable(ctx, AlterType::ALTER_COLUMN_TYPE, &new_col_meta, cur_version, new_version, err_msg);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
+
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::generateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta,
@@ -1238,6 +1303,89 @@ KStatus TSEngineImpl::generateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTab
     }
   }
 
+  Return(KStatus::SUCCESS);
+}
+
+KStatus TSEngineImpl::SettingChangedSensor() {
+  while (wait_setting_) {  // false only when CloseSettingChangedSensor
+    std::unique_lock<std::mutex> lock(setting_changed_lock);
+    // waiting for the setting is changed
+    // wait() will release setting_changed_lock, and lock it back when waking up.
+    g_setting_changed_cv.wait(lock, [this] { return g_setting_changed.load() || !wait_setting_; } );
+    if (!wait_setting_) {
+      break;
+    }
+    g_setting_changed.store(false);
+
+    // check which setting is changed
+    if (engine_autovacuum_interval_ != g_input_autovacuum_interval) {
+      engine_autovacuum_interval_ = g_input_autovacuum_interval;
+      kwdbContext_t context;
+      kwdbContext_p ctx_p = &context;
+      resetCompactTimer(ctx_p);
+    }
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TSEngineImpl::CloseSettingChangedSensor() {
+  {
+    std::unique_lock<std::mutex> lock(setting_changed_lock);
+    wait_setting_ = false;
+    g_setting_changed.store(true);
+  }
+  g_setting_changed_cv.notify_one();  // let SettingChangedSensor escape while loop
+  return KStatus::SUCCESS;
+}
+
+KStatus TSEngineImpl::resetCompactTimer(kwdbContext_p ctx) {
+  EnterFunc();
+  // Coming to this point indicates that engine_autovacuum_interval_ is different from the original
+  if (compact_timer_running.load()) {  // stop the running timer
+    compact_timer_running.store(false);
+    compact_timer_cv.notify_one();  // notify compactTimer to stop.
+    if (compact_timer_thread.joinable()) {
+      compact_timer_thread.join();
+    }
+  }
+
+  if (engine_autovacuum_interval_ > 0) {
+    compact_timer_running.store(true);
+    compact_timer_thread = std::thread(compactTimer, ctx, this, engine_autovacuum_interval_);
+  }
+  Return(KStatus::SUCCESS);
+}
+
+KStatus TSEngineImpl::CompactData(kwdbContext_p ctx) {
+  EnterFunc();
+  KwTsSpan ts_span = KwTsSpan{INT64_MIN, INT64_MAX};
+
+  std::vector<TSTableID> table_id_list;
+  GetTableIDList(ctx, table_id_list);
+  for (TSTableID table_id : table_id_list) {
+    std::shared_ptr<TsTable> table;
+    ErrorInfo err_info;
+
+    KStatus s = GetTsTable(ctx, table_id, table, err_info);
+    if (s != KStatus::SUCCESS) {
+      s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
+      Return(s);
+    }
+    RangeGroups groups;
+    Defer defer{[&]() {
+      free(groups.ranges);
+    }};
+    s = table->GetEntityGroups(ctx, &groups);
+    if (s != KStatus::SUCCESS) {
+      Return(s);
+    }
+    for (int i = 0; i < groups.len; i++) {
+      s = table->CompactData(ctx, groups.ranges[i].range_group_id, ts_span);
+      if (s != KStatus::SUCCESS) {
+        Return(s);
+      }
+    }
+  }
   Return(KStatus::SUCCESS);
 }
 
@@ -1299,7 +1447,7 @@ void* AggCalculator::GetMax(void* base, bool need_to_new) {
   if (base && cmp(base, max)) {
     max = base;
   }
-  if (need_to_new) {
+  if (need_to_new && max) {
     void* new_max = malloc(size_);
     memcpy(new_max, max, size_);
     max = new_max;
@@ -1321,7 +1469,7 @@ void* AggCalculator::GetMin(void* base, bool need_to_new) {
   if (base && !cmp(base, min)) {
     min = base;
   }
-  if (need_to_new) {
+  if (need_to_new && min) {
     void* new_min = malloc(size_);
     memcpy(new_min, min, size_);
     min = new_min;

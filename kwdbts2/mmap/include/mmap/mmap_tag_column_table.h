@@ -189,7 +189,7 @@ class TagColumn : public MMapFile {
 };
 
   // primary tags struct
-struct  TagTableMeatData {
+struct  TagTableMetaData {
   uint32_t    m_magic;
   uint32_t    m_record_size;       // record size bitmap+primarytags+tags
   uint32_t    m_record_store_size;  // storage record size delmark+bitmap+entity+group+primarytags+tags
@@ -234,7 +234,7 @@ class MMapTagColumnTable: public TSObject {
   std::string m_tbl_sub_path_;
   int m_flags_;
  protected:
-  TagTableMeatData*        m_meta_data_{nullptr};
+  TagTableMetaData*        m_meta_data_{nullptr};
   MMapFile*                m_ptag_file_{nullptr};
   std::vector<TagColumn*>  m_cols_;
   TagColumn*               m_bitmap_file_{nullptr};
@@ -258,9 +258,9 @@ class MMapTagColumnTable: public TSObject {
 
   int initColumn(const std::vector<TagInfo> &schema, ErrorInfo &err_info);
 
-  int writeColumnInfo(uint64_t start_offset, const std::vector<TagColumn*>& tag_schemas);
+  int writeTagInfo(uint64_t start_offset, const std::vector<TagInfo>& tag_schemas);
 
-  int readColumnInfo(ErrorInfo &err_info);
+  int readTagInfo(ErrorInfo &err_info);
 
   int initBitMapColumn(ErrorInfo &err_info);
 
@@ -345,11 +345,11 @@ class MMapTagColumnTable: public TSObject {
                       kwdbts::ResultSet* res, uint32_t* count);
 
   inline void setMetaData() {
-    m_meta_data_ = reinterpret_cast<TagTableMeatData*>(m_meta_file_->startAddr());
+    m_meta_data_ = reinterpret_cast<TagTableMetaData*>(m_meta_file_->startAddr());
   }
-  TagTableMeatData& metaData() { return *m_meta_data_; }
+  TagTableMetaData& metaData() { return *m_meta_data_; }
   inline size_t metaDataSize() {
-    return sizeof(TagTableMeatData);
+    return sizeof(TagTableMetaData);
   }
 
   int reserve(size_t n, ErrorInfo &err_info);
@@ -513,11 +513,19 @@ class MMapTagColumnTable: public TSObject {
 
   int DeleteTagRecord(const char *primary_tags, int len, ErrorInfo& err_info);
 
-  int AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info);
+  int AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version = 1);
 
-  int DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info);
+  int DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version = 1);
 
-  int AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_schema, ErrorInfo& err_info);
+  int AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_schema, ErrorInfo& err_info, uint32_t new_table_version = 1);
+
+  inline void SetTableVersion(uint32_t new_table_version) {
+    m_meta_data_->m_ts_version = new_table_version;
+  }
+
+  inline bool IsValidVersion(uint32_t request_table_version) {
+    return (m_meta_data_->m_ts_version == request_table_version);
+  }
 
   string name() const override { return m_name_; }
   const string& sandbox() const { return m_db_name_; }
@@ -560,6 +568,12 @@ class MMapTagColumnTable: public TSObject {
 			TagInfo& oldInfo, TagInfo& newInfo, int opCode);
   int AlterTableForRedo(uint32_t groupid, uint32_t entityid,
 			TagInfo& oldInfo, TagInfo& newInfo, int opCode);
+
+  inline void UpdateTagVersionForUndo(uint32_t new_table_version) {
+     if (UNLIKELY(m_meta_data_->m_ts_version == new_table_version)) {
+      m_meta_data_->m_ts_version = new_table_version - 1;
+     }
+  }
 
 private:
   TagInfo* getTagInfo(uint32_t colId, int &colIdx);

@@ -474,6 +474,7 @@ class FieldFunc : public FieldFuncBase {
     TIME_BUCKET_FUNC,
     TIME_OF_DAY_FUNC,
     AGE_FUNC,
+    CAST_CHECK_TS,
     CURRENT_DATE_FUNC,
     CURRENT_TIMESTAMP_FUNC,
     DATE_TRUNC_FUNC,

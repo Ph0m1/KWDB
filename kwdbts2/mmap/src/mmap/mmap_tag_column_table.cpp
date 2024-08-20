@@ -142,43 +142,80 @@ int TagColumn::getColumnValue(size_t row,  void *data) const {
 
 int TagColumn::rename(std::string& new_col_file_name) {
   int err_code = 0;
+  MMapFile old_str_file;
+  MMapFile old_col_file;
   if (m_str_file_) {
      std::string new_str_file_name = new_col_file_name + ".s";
      size_t lastSep = new_col_file_name.find_last_of('.');
      if (lastSep != new_col_file_name.npos) {
        std::string suffix = new_col_file_name.substr(lastSep + 1);
        if (suffix == "bak") {
-         new_str_file_name = new_col_file_name.substr(0, lastSep) + ".s.bak";
+	       new_str_file_name = new_col_file_name.substr(0, lastSep) + ".s.bak";
        }
      }
-
+    // backup old info
     std::string new_str_file_path = m_db_path_ + m_db_name_ + new_str_file_name;
-    if ((m_str_file_->rename(new_str_file_path)) < 0) {
-      LOG_ERROR("failed to rename the tag string file %s to %s",
-        m_str_file_->realFilePath().c_str(), new_str_file_path.c_str());
+    old_str_file.copyMember(*m_str_file_);
+    // rename to new file name
+    if ((err_code = m_str_file_->rename(new_str_file_path)) < 0) {
+      LOG_ERROR("failed to rename the tag string file %s to %s .",
+                old_str_file.realFilePath().c_str(), (m_db_path_ + m_db_name_ + new_str_file_name).c_str());
+      //reopen old string file
+      if ((err_code = m_str_file_->open(old_str_file.filePath(), m_db_path_ + m_db_name_ + old_str_file.filePath(),
+                                        MMAP_OPEN)) < 0) {
+        LOG_ERROR("failed to open the tag string file for rollback. %s", m_str_file_->realFilePath().c_str());
+      }
       return -1;
     }
-    if ((m_str_file_->open(new_str_file_name, m_db_path_ + m_db_name_ + new_str_file_name, MMAP_OPEN)) < 0) {
-      LOG_ERROR("failed to open the tag string file %s after renaming",
-        m_str_file_->realFilePath().c_str());
-      return -1;
+    // open new string file
+    if ((err_code = m_str_file_->open(new_str_file_name, m_db_path_ + m_db_name_ + new_str_file_name, MMAP_OPEN)) < 0) {
+      LOG_ERROR(" failed to open the tag string file %s after renaming", m_str_file_->realFilePath().c_str());
+      goto str_file_error;
     }
   }
-
-  std::string new_file_path = m_db_path_ + m_db_name_ + new_col_file_name;
-  if ((err_code = MMapFile::rename(new_file_path)) < 0) {
-    LOG_ERROR("failed to rename the tag file %s to %s",
-      realFilePath().c_str(), new_file_path.c_str());
-    return -1;
+  // backup old col info
+  old_col_file.copyMember(*this);
+  // rename new col file
+  if ((err_code = MMapFile::rename(m_db_path_ + m_db_name_ + new_col_file_name)) < 0) {
+    LOG_ERROR("failed to rename mmap file %s to %s .",
+              old_col_file.realFilePath().c_str(), (m_db_path_ + m_db_name_ + new_col_file_name).c_str());
+    // reopen old col file
+    if ((err_code = MMapFile::open(old_col_file.filePath(), old_col_file.realFilePath(), MMAP_OPEN)) < 0) {
+    LOG_ERROR("failed to open mmap file %s after renaming failed.", realFilePath().c_str());
+   }
+   // rollback string file
+   goto str_file_error;
   }
   this->setFlags(MMAP_OPEN);
   this->file_path_ = new_col_file_name;
-  if ((MMapFile::open()) < 0) {
-    LOG_ERROR("failed to open the tag file %s after renaming",
-      realFilePath().c_str());
-    return -1;
+  // open new col file
+  if ((err_code = MMapFile::open()) < 0) {
+    LOG_ERROR("failed open mmap file %s after renaming.", realFilePath().c_str());
+    goto col_file_error;
   }
-  return err_code;
+  return 0;
+
+col_file_error:
+  if ((err_code = MMapFile::rename(m_db_path_ + m_db_name_ + old_col_file.filePath())) < 0) {
+    LOG_ERROR("mmap file rename rollback rename %s to %s failed",
+              realFilePath().c_str(), old_col_file.realFilePath().c_str());
+  }
+  if ((err_code = MMapFile::open(old_col_file.filePath(), old_col_file.realFilePath(), MMAP_OPEN) < 0)) {
+    LOG_ERROR("mmap file rename rollback open failed. %s ", realFilePath().c_str());
+    return err_code;
+  }
+str_file_error:
+ if(m_str_file_) {
+  if ((err_code = m_str_file_->rename(m_db_path_ + m_db_name_ + old_str_file.filePath())) < 0) {
+    LOG_ERROR("string file rename rollback rename %s to %s failed.",
+              m_str_file_->realFilePath().c_str(), old_str_file.realFilePath().c_str());
+  }
+  if ((err_code = m_str_file_->open(old_str_file.filePath(), m_db_path_ + m_db_name_ + old_str_file.filePath(),
+                                    MMAP_OPEN)) < 0) {
+    LOG_ERROR("string file rename rollback open failed. %s", m_str_file_->realFilePath().c_str());
+  }
+ }
+return -1;
 }
 
 int TagColumn::sync(int flags) {
@@ -322,7 +359,7 @@ int MMapTagColumnTable::open_(const string &url, const std::string &db_path,
     return -1;
   }
   if (m_ptag_file_->fileLen() > metaDataSize()) {
-    if ((error_code = readColumnInfo(err_info)) < 0) {
+    if ((error_code = readTagInfo(err_info)) < 0) {
       err_info.setError(error_code);
       return error_code;
     }
@@ -396,7 +433,7 @@ int MMapTagColumnTable::initIndex(ErrorInfo& err_info) {
   return err_info.errcode;
 }
 
-int MMapTagColumnTable::readColumnInfo(ErrorInfo& err_info) {
+int MMapTagColumnTable::readTagInfo(ErrorInfo& err_info) {
   TagColumn* tag_col = nullptr;
   uint32_t store_offset = 0;
   TagInfo* cols = reinterpret_cast<TagInfo*>(static_cast<uint8_t*>(m_meta_file_->startAddr()) +
@@ -493,19 +530,10 @@ int MMapTagColumnTable::initColumn(const std::vector<TagInfo>& schema, ErrorInfo
 }
 
 
-int MMapTagColumnTable::writeColumnInfo(uint64_t start_offset, const std::vector<TagColumn*>& tag_schemas) {
+int MMapTagColumnTable::writeTagInfo(uint64_t start_offset, const std::vector<TagInfo>& tag_schemas) {
   uint64_t len = tag_schemas.size() * sizeof(TagInfo);
   uint64_t new_mem_len = start_offset + len;
-  if (new_mem_len > kwdbts::EngineOptions::pageSize()) {
-    //TODO(zhuderun): error
-    LOG_ERROR("failed to write tag info for the tag table %s%s, new memory "
-      "length %lu > pageSize(%lu bytes), [new_mem_len=start_offset: %lu + tags: "
-      "%lu * sizeof(Taginfo): %lu ]",
-      m_db_name_.c_str(), m_name_.c_str(),
-      new_mem_len, kwdbts::EngineOptions::pageSize(),
-      start_offset, tag_schemas.size(), sizeof(TagInfo));
-    return -1;
-  }
+
   if (m_meta_file_->fileLen() < new_mem_len) {
     size_t old_row_count = m_meta_file_->fileLen() / kwdbts::EngineOptions::pageSize();
     size_t new_row_count = (getPageOffset(new_mem_len)) / kwdbts::EngineOptions::pageSize();
@@ -519,16 +547,13 @@ int MMapTagColumnTable::writeColumnInfo(uint64_t start_offset, const std::vector
   }
   TagInfo* col_attr = reinterpret_cast<TagInfo*>(static_cast<uint8_t*>(m_meta_file_->startAddr()) + start_offset);
   for (size_t i = 0; i < tag_schemas.size(); ++i) {
-    memcpy(&(col_attr[i]), &(tag_schemas[i]->attributeInfo()), sizeof(TagInfo));
+    memcpy(&(col_attr[i]), &(tag_schemas[i]), sizeof(TagInfo));
   }
   return 0;
 }
 
 int MMapTagColumnTable::init(const vector<TagInfo>& schema, ErrorInfo& err_info) {
-  // err_info.errcode = initMetaData();
-  // if (err_info.errcode < 0) {
-  //  return err_info.setError(err_info.errcode);
-  // }
+
   // initColumn
   err_info.errcode = initColumn(schema, err_info);
   if (err_info.errcode < 0) {
@@ -551,9 +576,13 @@ int MMapTagColumnTable::init(const vector<TagInfo>& schema, ErrorInfo& err_info)
   m_meta_data_->m_record_size += m_meta_data_->m_bitmap_size;
   m_meta_data_->m_column_count = m_cols_.size();
 
-  m_meta_data_->m_column_info_offset = metaDataSize();  // sizeof(TagTableMeatData);
+  m_meta_data_->m_column_info_offset = metaDataSize();  // sizeof(TagTableMetaData);
 
-  err_info.errcode = writeColumnInfo(m_meta_data_->m_column_info_offset, m_cols_);
+  std::vector<TagInfo> tag_infos;
+  for (const auto it : m_cols_) {
+    tag_infos.push_back(it->attributeInfo());
+  }
+  err_info.errcode = writeTagInfo(m_meta_data_->m_column_info_offset, tag_infos);
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
   }
@@ -593,7 +622,7 @@ int MMapTagColumnTable::open(const string& url, const std::string& db_path,
 
 int MMapTagColumnTable::remove() {
   int err_code = 0;
-  
+
   if (!m_ptag_file_ || !m_ptag_file_->memAddr()) {
     return 0;
   }
@@ -663,6 +692,8 @@ TagColumn* MMapTagColumnTable::cloneMetaData(ErrorInfo& err_info) {
     err_info.errmsg = "extend MetaData failed.";
     LOG_ERROR("failed to extend the meta file %s%s, error: %s",
               m_tbl_sub_path_.c_str(), meta_file_name.c_str(), err_info.errmsg.c_str());
+    tmp_meta_file->remove();
+    delete tmp_meta_file;
     return nullptr;
   }
 
@@ -1046,22 +1077,12 @@ TagColumn* MMapTagColumnTable::addNewColumn(TagInfo& tag_schema, bool need_ext, 
     return nullptr;
   }
 
-  // 3. set null flag
-  /*if (!need_ext) {
-    size_t row_count = size();
-    for (size_t row = 1; row <= row_count; ++row) {
-      tag_column->setNull(row);
-      if (tag_column->isVarTag()) {
-        tag_column->writeNullVarOffset(row);
-      }
-    }
-  }*/
   tag_column->setFlags(MMAP_OPEN);
 
   return tag_column;
 }
 
-int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) {
+int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version) {
   if (!isValid()) {
     LOG_ERROR("adding new tag to an invalid tag table %s%s is not allowed",
       m_db_name_.c_str(), m_name_.c_str());
@@ -1070,11 +1091,9 @@ int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) {
   }
   int err_code = 0;
   mutexLock();    // mutex lock
-  startWrite();
   // 1. add new tag
   TagColumn* tag_col = addNewColumn(tag_schema, false, err_info);
   if (!tag_col) {
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "add new column file failed.";
     return -1;
@@ -1082,17 +1101,17 @@ int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) {
   // 2. backup meta data
   TagColumn* backup_meta_file = cloneMetaData(err_info);
   if (backup_meta_file == nullptr) {
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "backup meta data file failed.";
     return -1;
   }
 
   // 3. set meta
+  startWrite();
   tag_col->attributeInfo().m_offset = m_cols_.back()->attributeInfo().m_offset + m_cols_.back()->attributeInfo().m_size;
   uint64_t start_offset = m_meta_data_->m_column_info_offset + m_meta_data_->m_column_count * sizeof(TagInfo);
-  std::vector<TagColumn*> tag_schemas = {tag_col};
-  if ((err_code = writeColumnInfo(start_offset, tag_schemas)) < 0) {
+  std::vector<TagInfo> tag_schemas = {tag_col->attributeInfo()};
+  if ((err_code = writeTagInfo(start_offset, tag_schemas)) < 0) {
     LOG_ERROR("faild to write tag info for the tag table %s%s, no space",
       m_db_name_.c_str(), m_name_.c_str());
     stopWrite();
@@ -1109,6 +1128,7 @@ int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) {
     m_meta_data_->m_bitmap_size += 1;
     m_meta_data_->m_record_size += 1;
   }
+  m_meta_data_->m_ts_version = new_table_version;
   // 4. sync meta data
   m_meta_file_->sync(MS_SYNC);
 
@@ -1125,7 +1145,7 @@ int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) {
   return 0;
 }
 
-int MMapTagColumnTable::DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) {
+int MMapTagColumnTable::DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version) {
   if (!isValid()) {
     LOG_ERROR("dropping tag to an invalid tag table %s%s is not allowed",
       m_db_name_.c_str(), m_name_.c_str());
@@ -1134,29 +1154,26 @@ int MMapTagColumnTable::DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) 
   }
   int err_code = 0;
   mutexLock();    // mutex lock
-  startWrite();
   // 1. find tag col & change offset
   TagColumn* tag_col = nullptr;
-  std::vector<TagColumn*> new_cols;
+  std::vector<TagInfo> new_cols;
   uint32_t col_offset = 0;
-  uint32_t rec_size = 0;
+  std::vector<TagColumn*>::iterator pos;
   for (std::vector<TagColumn*>::iterator it = m_cols_.begin(); it != m_cols_.end(); ++it) {
     if ((*it)->attributeInfo().m_id == tag_schema.m_id) {
       // found
       tag_col = *it;
+      pos = it;
       continue;
     }
-    (*it)->attributeInfo().m_offset = col_offset;
-    rec_size += (*it)->attributeInfo().m_size;
+    TagInfo tmp_tag_info = (*it)->attributeInfo();
+    tmp_tag_info.m_offset = col_offset;
     col_offset += (*it)->attributeInfo().m_size;
-    new_cols.emplace_back(std::move(*it));
+    new_cols.emplace_back(tmp_tag_info);
   }
   if (!tag_col) {
     LOG_ERROR("failed to get tag %u in the tag table %s%s",
       tag_schema.m_id, m_db_name_.c_str(), m_name_.c_str());
-    m_cols_.clear();
-    m_cols_ = new_cols;
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "tag schema is not exist";
     return -1;
@@ -1166,29 +1183,36 @@ int MMapTagColumnTable::DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) 
   // 2.1 backup meta data
   TagColumn* backup_meta_file = cloneMetaData(err_info);
   if (nullptr == backup_meta_file) {
-    m_cols_.clear();
-    m_cols_ = new_cols;
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "backup meta data failed.";
     return -1;
   }
   // 2.2 write data
   uint64_t start_offset = m_meta_data_->m_column_info_offset;
-  if ((err_code = writeColumnInfo(start_offset, new_cols)) < 0) {
+  if ((err_code = writeTagInfo(start_offset, new_cols)) < 0) {
     LOG_ERROR("faild to write tag info for the tag table %s%s, no space",
       m_db_name_.c_str(), m_name_.c_str());
-    m_cols_.clear();
-    m_cols_ = new_cols;
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "write tag info has no space.";
     return err_code;
   }
 
-  // 3. change metadata
-  m_cols_.clear();
-  m_cols_ = new_cols;
+  // 3. rename tag file
+  startWrite();
+  std::string new_file_name = tag_col->filePath() + ".bak";
+  if ((err_code = tag_col->rename(new_file_name)) < 0) {
+    LOG_ERROR("tag file rename failed, file name: %s", new_file_name.c_str());
+    stopWrite();
+    mutexUnlock();
+    err_info.errmsg = "tag file rename " +  new_file_name + " failed.";
+    return -1;
+  }
+
+  // 4. change metadata
+  m_cols_.erase(pos);
+  for (size_t idx = 0; idx < m_cols_.size(); ++idx) {
+    m_cols_[idx]->attributeInfo() = new_cols[idx];
+  }
   m_meta_data_->m_record_store_size -= tag_col->attributeInfo().m_size;
   m_meta_data_->m_record_size -= tag_col->attributeInfo().m_size;
   m_meta_data_->m_column_count--;
@@ -1197,19 +1221,8 @@ int MMapTagColumnTable::DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info) 
     m_meta_data_->m_bitmap_size -= 1;
     m_meta_data_->m_record_size -= 1;
   }
+  m_meta_data_->m_ts_version = new_table_version;
   m_meta_file_->sync(MS_SYNC);
-
-  // 4. rename tag file
-  std::string new_file_name = tag_col->filePath() + ".bak";
-  if ((err_code = tag_col->rename(new_file_name)) < 0) {
-    LOG_ERROR("failed to rename tag file %s in the tag table %s%s",
-      new_file_name.c_str(), m_db_name_.c_str(), m_name_.c_str());
-    stopWrite();
-    mutexUnlock();
-    err_info.errmsg = "tag file rename " +  new_file_name + " failed.";
-    return -1;
-  }
-
   // 5. remove tag file
 // After the wal is complete, switch to setDrop mode.
 #if 1
@@ -1307,7 +1320,8 @@ int MMapTagColumnTable::convertData(int32_t col, TagColumn* new_tag_col, CONVERT
   return 0;
 }
 
-int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_schema, ErrorInfo& err_info) {
+int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_schema,
+                                    ErrorInfo& err_info, uint32_t new_table_version) {
   if (!isValid()) {
     LOG_ERROR("alter tag to an invalid tag table %s%s is not allowed",
       m_db_name_.c_str(), m_name_.c_str());
@@ -1328,7 +1342,7 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
     return -1;
   }
   mutexLock();    // mutex lock
-  startWrite();
+
   // 2. found && open new tag file
   TagColumn* old_tag_col = nullptr;
   int32_t col_idx = 0;
@@ -1343,7 +1357,6 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
   if (!old_tag_col) {
     LOG_ERROR("failed to get tag %u in the tag table %s%s",
       old_tag_schema.m_id, m_db_name_.c_str(), m_name_.c_str());
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "tag id is invalid";
     return -1;
@@ -1352,7 +1365,6 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
   if (!new_tag_col) {
     LOG_ERROR("failed to add new column to the tag table %s%s",
       m_db_name_.c_str(), m_name_.c_str());
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "add new column failed";
     return -1;
@@ -1366,7 +1378,6 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
       LOG_WARN("failed to remove the tag file %s, please remove it manually",
         new_tag_col->realFilePath().c_str());
     }
-    stopWrite();
     mutexUnlock();
     delete new_tag_col;
     return -1;
@@ -1377,8 +1388,7 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
     Please refer AlterAlterRU
   */
 
-  // 4. change metadata
-  // 1) backup meta data file
+  // 4. backup meta data file
   TagColumn* backup_meta_file = cloneMetaData(err_info);
   if (nullptr == backup_meta_file) {
     LOG_ERROR("failed to backup meta data of the tag table %s%s",
@@ -1388,13 +1398,32 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
         new_tag_col->realFilePath().c_str());
     }
     delete new_tag_col;
-    stopWrite();
     mutexUnlock();
     err_info.errmsg = "backup meta data failed";
     return -1;
   }
 
-  // 5. rename file old -> old.lsn , new->old
+  // 5. write column info
+  uint32_t col_offset = 0;
+  std::vector<TagInfo> tag_infos;
+  for (size_t idx = 0; idx < m_cols_.size(); ++idx) {
+    TagInfo tmp_tag_info = m_cols_[idx]->attributeInfo();
+    if (idx == col_idx) {
+      tmp_tag_info = new_tag_col->attributeInfo();
+    }
+    tmp_tag_info.m_offset = col_offset;
+    col_offset += tmp_tag_info.m_size;
+    tag_infos.emplace_back(std::move(tmp_tag_info));
+  }
+  uint64_t start_offset = m_meta_data_->m_column_info_offset;
+  if ((err_code = writeTagInfo(start_offset, tag_infos)) < 0) {
+    mutexUnlock();
+    err_info.errmsg = "write tag info has no space";
+    return err_code;
+  }
+
+  // 6. rename file old -> old.lsn , new->old
+  startWrite();
   std::string old_tag_file_name = old_tag_col->filePath();
   std::string old_tag_new_name = old_tag_file_name + ".bak";
   if ((err_code = old_tag_col->rename(old_tag_new_name)) < 0) {
@@ -1417,24 +1446,12 @@ int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_s
 
   // 2) change meta data
   m_cols_[col_idx] = new_tag_col;
-  uint32_t col_offset = 0;
-  uint32_t rec_size = 0;
-  for (auto it : m_cols_) {
-    it->attributeInfo().m_offset = col_offset;
-    col_offset += it->attributeInfo().m_size;
-    rec_size += it->attributeInfo().m_size;
+  for (size_t idx = 0; idx < m_cols_.size(); ++idx) {
+    m_cols_[idx]->attributeInfo() = tag_infos[idx];
   }
   m_meta_data_->m_record_size += (new_tag_col->attributeInfo().m_size - old_tag_col->attributeInfo().m_size);
   m_meta_data_->m_record_store_size += (new_tag_col->attributeInfo().m_size - old_tag_col->attributeInfo().m_size);
-
-  // 6. write column info
-  uint64_t start_offset = m_meta_data_->m_column_info_offset;
-  if ((err_code = writeColumnInfo(start_offset, m_cols_)) < 0) {
-    stopWrite();
-    mutexUnlock();
-    err_info.errmsg = "write tag info has no space";
-    return err_code;
-  }
+  m_meta_data_->m_ts_version = new_table_version;
   m_meta_file_->sync(MS_SYNC);
 
   // 7. drop backup file

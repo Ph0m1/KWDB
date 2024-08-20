@@ -220,11 +220,21 @@ int MMapFile::rename(const string &new_fp) {
     munmap();
     if (!absolute_file_path_.empty()) {
       err_code = ::rename(absolute_file_path_.c_str(), new_fp.c_str());
-      absolute_file_path_ = new_fp;
-      if (err_code != 0)
+      if (err_code != 0) {
         err_code = errnoToErrorCode();
+      } else {
+        absolute_file_path_ = new_fp;
+      }
+
     }
   }
   return err_code;
 }
 
+void MMapFile::copyMember(MMapFile& other) {
+  absolute_file_path_ = other.absolute_file_path_;
+  file_length_ = other.file_length_;
+  new_length_ = other.new_length_;
+  file_path_ = other.file_path_;
+  flags_ = other.flags_;
+}

@@ -1460,6 +1460,7 @@ func buildTSTableDesc(
 	}
 	desc.TsTable.PartitionInterval = uint64(partitionInterval)
 	desc.TsTable.TsVersion = 1
+	desc.TsTable.NextTsVersion = desc.TsTable.TsVersion + 1
 
 	// The default primary tag for template tables is the instance table name
 	if len(n.PrimaryTagList) == 0 {

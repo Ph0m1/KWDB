@@ -177,6 +177,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
                            k_uint32 ms_interval = 10, int test_value = 0, bool fix_entity_id = true) {
     vector<AttributeInfo> schema;
     vector<AttributeInfo> tag_schema;
+    vector<uint32_t> actual_cols;
     k_int32 tag_value_len = 0;
     payload_length = 0;
     string test_str = "abcdefghijklmnopqrstuvwxyz";
@@ -192,6 +193,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
         if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
           payload_length += (test_str.size() + 2);
         }
+        actual_cols.push_back(schema.size());
         schema.push_back(std::move(col_var));
       }
     }
@@ -210,13 +212,14 @@ class TestEngineWALPerf : public TestBigTableInstance {
     char* value = new char[data_length];
     memset(value, 0, data_length);
     KInt32(value + Payload::row_num_offset_) = count;
+    KUint32(value + Payload::ts_version_offset_) = 1;
     // set primary_len_len
     KInt16(value + header_size_) = primary_tag_len;
     // set tag_len_len
     KInt32(value + header_len + primary_len_len + primary_tag_len) = tag_value_len;
     // set data_len_len
     KInt32(value + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
-    Payload p(schema, {value, data_length});
+    Payload p(schema, actual_cols, {value, data_length});
     int16_t len = 0;
     GenPayloadTagData(p, tag_schema, start_ts, fix_entity_id);
     uint64_t var_exist_len = 0;
@@ -376,6 +379,19 @@ class TestEngineWALPerf : public TestBigTableInstance {
     return schema;
   }
 
+  vector<uint32_t> GetActualCols(roachpb::CreateTsTable& meta) const {
+    vector<uint32_t> actual_cols;
+    for (int i = 0; i < meta.k_column_size(); i++) {
+      const auto& col = meta.k_column(i);
+      struct AttributeInfo col_var;
+      TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
+      if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
+        actual_cols.push_back(actual_cols.size());
+      }
+    }
+    return actual_cols;
+  }
+
   void AddPutLog(KTableKey table_id, uint64_t range_group_id, roachpb::CreateTsTable meta) {
     TS_LSN mtr_id = 0;
     auto wal2 = new WALMgr(kDbPath + "/", table_id, range_group_id, &opts_);
@@ -391,7 +407,7 @@ class TestEngineWALPerf : public TestBigTableInstance {
       k_uint32 p_len = 0;
       char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta);
       TSSlice payload{data_value, p_len};
-      auto pd = Payload(GetSchema(meta), payload);
+      auto pd = Payload(GetSchema(meta), GetActualCols(meta), payload);
       //if (i == 0)
       //  wal2->WriteInsertWAL(ctx_, mtr_id, 0, 0, payload);
 

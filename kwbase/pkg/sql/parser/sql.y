@@ -620,7 +620,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %token <str> BUCKET_COUNT
 %token <str> BLOB BOOL BOOLEAN BOTH BUNDLE BY BYTEA BYTES
 
-%token <str> CACHE CANCEL CASCADE CASE CAST CHANGEFEED CHAR
+%token <str> CACHE CANCEL CASCADE CASE CAST CAST_CHECK CHANGEFEED CHAR
 %token <str> CHARACTER CHARACTERISTICS CHECK
 %token <str> CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMNS COMMENT COMMIT
 %token <str> COMMITTED COMPACT COMPLETE CONCAT CONCURRENTLY CONFIG CONFIGS CONFIGURATION CONFIGURATIONS CONFIGURE
@@ -918,7 +918,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <tree.Statement> show_schedules_stmt
 %type <tree.Statement> show_audits_stmt
 
-%type <str> session_var
+%type <str> session_var numeric_typename
 %type <*string> comment_text
 
 %type <tree.Statement> transaction_stmt
@@ -3876,6 +3876,22 @@ session_var:
 // TIME ZONE is special: it is two tokens, but is really the identifier "TIME ZONE".
 | TIME ZONE { $$ = "timezone" }
 | TIME error // SHOW HELP: SHOW SESSION
+
+numeric_typename:
+  INT
+| INT2
+| INT4
+| INT8
+| INTEGER
+| SMALLINT
+| BIGINT
+| INT64
+| FLOAT4
+| REAL
+| FLOAT
+| FLOAT8
+| DOUBLE PRECISION
+| DOUBLE
 
 // %Help: SHOW STATISTICS - display table statistics (experimental)
 // %Category: Experimental
@@ -10332,6 +10348,12 @@ func_expr_common_subexpr:
   {
     $$.val = &tree.CastExpr{Expr: $3.expr(), Type: $5.colType(), SyntaxMode: tree.CastExplicit}
   }
+| CAST_CHECK '(' a_expr AS numeric_typename ')'
+  {
+  	temp:= tree.StrVal{}
+    temp.AssignString($5)
+    $$.val = &tree.FuncExpr{Func: tree.WrapFunction("cast_check_ts"), Exprs: tree.Exprs{$3.expr(), &temp}}
+  }
 | ANNOTATE_TYPE '(' a_expr ',' typename ')'
   {
     $$.val = &tree.AnnotateTypeExpr{Expr: $3.expr(), Type: $5.colType(), SyntaxMode: tree.AnnotateExplicit}
@@ -12130,6 +12152,7 @@ reserved_keyword:
 | BOTH
 | CASE
 | CAST
+| CAST_CHECK
 | CHECK
 | COLLATE
 | COLUMN

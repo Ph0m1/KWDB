@@ -192,8 +192,9 @@ class BtUtil {
   }
 
   const static int header_size_ = kwdbts::Payload::header_size_;  // NOLINT
-  static char* GenSomePayloadData(const std::vector<AttributeInfo>& schema, uint32_t count, uint32_t& payload_length,
-                                  KTimestamp start_ts, bool set_null = false, int insert_value = 11) {
+  static char* GenSomePayloadData(const std::vector<AttributeInfo>& schema, const std::vector<uint32_t>& actual_cols,
+                                  uint32_t count, uint32_t& payload_length, KTimestamp start_ts, bool set_null = false,
+                                  int insert_value = 11) {
     uint32_t ms_interval = 10;
     string test_str = "abcdefghijklmnopqrstuvwxyz";
     int32_t tag_value_len = 8;
@@ -219,13 +220,14 @@ class BtUtil {
     char* value = new char[data_length];
     memset(value, 0, data_length);
     KInt32(value + kwdbts::Payload::row_num_offset_) = count;
+    KUint32(value + kwdbts::Payload::ts_version_offset_) = 1;
     // set primary_len_len
     KInt16(value + header_size_) = primary_tag_len;
     // set tag_len_len
     KInt32(value + header_len + primary_len_len + primary_tag_len) = tag_value_len;
     // set data_len_len
     KInt32(value + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
-    kwdbts::Payload p(schema, {value, data_length});
+    kwdbts::Payload p(schema, actual_cols, {value, data_length});
     int16_t len = 0;
     uint64_t var_exist_len = 0;
     for (int i = 0; i < schema.size(); i++) {
@@ -321,9 +323,6 @@ class BtUtil {
     Def_Column(col_3, 3, "v2_value", DATATYPE::DOUBLE, 0, 0, 1, 0, 0, 0, 1, 0);
 
     vector<AttributeInfo> schema = {std::move(col_1), std::move(col_2), std::move(col_3)};
-    vector<string> key = {};
-    string key_order = "";
-    string ns_url = "default";
     kwdbts::KTableKey cur_table_id = 123456789;
     string tbl_sub_path = std::to_string(cur_table_id) + "/";
 
@@ -338,9 +337,7 @@ class BtUtil {
     string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
     if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
         err_info.errcode == KWECORR) {
-      root_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                      kwdbts::s_emptyString, kwdbts::EngineOptions::iot_interval,
-                      encoding, err_info, true);
+      root_bt->create(schema, 1, tbl_sub_path, kwdbts::EngineOptions::iot_interval, encoding, err_info, true);
     }
 
     if (err_info.errcode < 0) {
@@ -362,9 +359,6 @@ class BtUtil {
     //  Def_Column(col_4, kwdbts::s_deletable(), DATATYPE::INT32, 0, 0, 1, 0, 0, 0, 1, 0);
 
     vector<AttributeInfo> schema = {std::move(col_1), std::move(col_2), std::move(col_3)};
-    vector<string> key = {};
-    string key_order = "";
-    string ns_url = "default";
     kwdbts::KTableKey cur_table_id = 123456789;
     string tbl_sub_path = std::to_string(cur_table_id) + "/";
 
@@ -374,13 +368,11 @@ class BtUtil {
       system(cmd.c_str());
     }
 
-
     MMapMetricsTable* root_bt = new MMapMetricsTable();
     string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
     if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
         err_info.errcode == KWECORR) {
-      root_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                      kwdbts::s_emptyString, 86400, encoding, err_info, true);
+      root_bt->create(schema, 1, tbl_sub_path, 86400, encoding, err_info, true);
     }
 
     if (err_info.errcode < 0) {
@@ -402,9 +394,6 @@ class BtUtil {
     //  Def_Column(col_4, kwdbts::s_deletable(), DATATYPE::INT32, 0, 0, 1, 0, 0, 0, 1, 0);
 
     vector<AttributeInfo> schema = {std::move(col_1), std::move(col_2), std::move(col_3)};
-    vector<string> key = {};
-    string key_order = "";
-    string ns_url = "default";
     kwdbts::KTableKey cur_table_id = 123456789;
     string tbl_sub_path = std::to_string(cur_table_id) + "/";
 
@@ -414,14 +403,11 @@ class BtUtil {
       system(cmd.c_str());
     }
 
-
     MMapMetricsTable* root_bt = new MMapMetricsTable();
     string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
     if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
         err_info.errcode == KWECORR) {
-      root_bt->create(schema, key, key_order, tbl_sub_path, "", tbl_sub_path,
-                      kwdbts::s_emptyString, kwdbts::EngineOptions::iot_interval,
-                      encoding, err_info, true);
+      root_bt->create(schema, 1, tbl_sub_path, kwdbts::EngineOptions::iot_interval, encoding, err_info, true);
     }
 
     if (err_info.errcode < 0) {
@@ -486,8 +472,8 @@ class TestBigTableInstance : public ::testing::Test {
       uint32_t payload_len = 0;
       std::vector<BlockSpan> cur_alloc_spans;
       std::vector<MetricRowID> del_rows;
-      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfo(), insert_num, payload_len, ts, false, value);
-      kwdbts::Payload pd(bt->getSchemaInfo(), {data, payload_len});
+      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfo(), bt->getActualCols(), insert_num, payload_len, ts, false, value);
+      kwdbts::Payload pd(bt->getSchemaInfo(), bt->getActualCols(), {data, payload_len});
       pd.dedup_rule_ = dedup_rule;
       bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, dedup_result);
       if (err_info.errcode >= 0) {
@@ -510,8 +496,8 @@ class TestBigTableInstance : public ::testing::Test {
       uint32_t payload_len = 0;
       std::vector<BlockSpan> cur_alloc_spans;
       std::vector<MetricRowID> del_rows;
-      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfo(), insert_num, payload_len, ts, true);
-      kwdbts::Payload pd(bt->getSchemaInfo(), {data, payload_len});
+      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfo(), bt->getActualCols(), insert_num, payload_len, ts, true);
+      kwdbts::Payload pd(bt->getSchemaInfo(), bt->getActualCols(), {data, payload_len});
       pd.dedup_rule_ = dedup_rule;
       bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, dedup_result);
       if (err_info.errcode >= 0) {

@@ -11,7 +11,7 @@
 
 #include <thread>
 #include "utils/big_table_utils.h"
-#include <mmap/mmap_entity_idx.h>
+#include <mmap/mmap_entity_block_meta.h>
 #include <mmap/mmap_segment_table.h>
 #include "utils/string_utils.h"
 #include "utils/compress_utils.h"
@@ -126,7 +126,7 @@ void setBatchValid(char* delete_flags, size_t start_row, size_t del_rows_count) 
   memset(delete_flags + memset_start, 0, memset_length);
 }
 
-bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
+bool isAllNull(char* bitmap, size_t start_row, size_t rows_count) {
   size_t byte_start = (start_row - 1) >> 3;
   size_t bit_start = (start_row - 1) & 7;
   size_t byte_end = (start_row - 1 + rows_count - 1) >> 3;
@@ -139,7 +139,7 @@ bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
       del_flag <<= 1;
       del_flag += 1;
     }
-    if (((delete_flags[byte_start] >> bit_start) & del_flag) != del_flag) {
+    if (((bitmap[byte_start] >> bit_start) & del_flag) != del_flag) {
       return false;
     }
     return true;
@@ -157,7 +157,7 @@ bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
       del_flag <<= 1;
       del_flag += 1;
     }
-    if (((delete_flags[byte_start] >> bit_start) & del_flag) != del_flag) {
+    if (((bitmap[byte_start] >> bit_start) & del_flag) != del_flag) {
       return false;
     }
   }
@@ -170,32 +170,32 @@ bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
       del_flag <<= 1;
       del_flag += 1;
     }
-    if ((delete_flags[byte_end] & del_flag) != del_flag) {
+    if ((bitmap[byte_end] & del_flag) != del_flag) {
       return false;
     }
   }
   // check other bytes
   for (size_t i = 0; i < bytes_length; i++) {
-    if (delete_flags[bytes_start + i] != static_cast<char>(0xFF)) {
+    if (bitmap[bytes_start + i] != static_cast<char>(0xFF)) {
       return false;
     }
   }
   return true;
 }
 
-MMapEntityIdx::MMapEntityIdx(): MMapFile() {
+MMapEntityBlockMeta::MMapEntityBlockMeta(): MMapFile() {
   obj_mutex_ = new MMapEntityMetaLatch(LATCH_ID_MMAP_ENTITY_META_MUTEX);
   entity_blockitem_mutex_ = new MMapEntityMetaRWLatch(RWLATCH_ID_MMAP_ENTITY_META_RWLOCK);
 }
 
-MMapEntityIdx::MMapEntityIdx(bool is_et, bool first_meta): MMapFile() {
+MMapEntityBlockMeta::MMapEntityBlockMeta(bool is_et, bool first_meta): MMapFile() {
   is_et_ = is_et;
   first_meta_ = first_meta;
   obj_mutex_ = new MMapEntityMetaLatch(LATCH_ID_MMAP_ENTITY_META_MUTEX);
   entity_blockitem_mutex_ = new MMapEntityMetaRWLatch(RWLATCH_ID_MMAP_ENTITY_META_RWLOCK);
 }
 
-MMapEntityIdx::~MMapEntityIdx() {
+MMapEntityBlockMeta::~MMapEntityBlockMeta() {
   if (obj_mutex_) {
     delete obj_mutex_;
     obj_mutex_ = nullptr;
@@ -207,8 +207,8 @@ MMapEntityIdx::~MMapEntityIdx() {
 }
 
 
-int MMapEntityIdx::init(const string &file_path, const std::string &db_path, const string &tbl_sub_path,
-                        int flags, bool alloc_block_item, uint16_t config_subgroup_entities) {
+int MMapEntityBlockMeta::init(const string &file_path, const std::string &db_path, const string &tbl_sub_path,
+                              int flags, bool alloc_block_item, uint16_t config_subgroup_entities) {
   int err_code = MMapFile::open(file_path, db_path + tbl_sub_path + file_path, flags);
   if (err_code < 0)
     return err_code;
@@ -270,7 +270,7 @@ int MMapEntityIdx::init(const string &file_path, const std::string &db_path, con
   return 0;
 }
 
-int MMapEntityIdx::incSize_(size_t len) {
+int MMapEntityBlockMeta::incSize_(size_t len) {
   if (len > static_cast<size_t>(fileLen()) - size()) {
     return -1;
   }
@@ -278,7 +278,7 @@ int MMapEntityIdx::incSize_(size_t len) {
   return 0;
 }
 
-void MMapEntityIdx::to_string() {
+void MMapEntityBlockMeta::to_string() {
   printf("Meta File Size:%ld\n", size());
   if (!first_meta_) return;
   printf("=== EntityItem Begin ===\n");
@@ -296,7 +296,7 @@ void MMapEntityIdx::to_string() {
   printf("=== BlockItem End ===\n");
 }
 
-void MMapEntityIdx::to_string(uint entity_id) {
+void MMapEntityBlockMeta::to_string(uint entity_id) {
   assert(entity_id > 0);
 
   printf("Meta File Size:%ld\n", size());
@@ -320,7 +320,7 @@ void MMapEntityIdx::to_string(uint entity_id) {
   printf("=== BlockItem End ===\n");
 }
 
-int MMapEntityIdx::GetBlockItem(uint meta_block_id, uint item_id, BlockItem* blk_item) {
+int MMapEntityBlockMeta::GetBlockItem(uint meta_block_id, uint item_id, BlockItem* blk_item) {
   RW_LATCH_S_LOCK(entity_blockitem_mutex_);
   BlockItem* b_item = GetBlockItem(item_id);
   *blk_item = *b_item;

@@ -217,20 +217,26 @@ func (n *alterTableNode) startExec(params runParams) error {
 				if err != nil {
 					return err
 				}
-				if TSColumn.ID == 0 {
-					TSColumn.ID = n.tableDesc.GetNextColumnID()
-					n.tableDesc.NextColumnID++
+				n.tableDesc.AddColumnMutation(TSColumn, sqlbase.DescriptorMutation_ADD)
+				// Allocate IDs now, so new IDs are available to subsequent commands
+				if err := n.tableDesc.AllocateIDs(); err != nil {
+					return err
 				}
-				n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+				mutationID := n.tableDesc.ClusterVersion.NextMutationID
 				// Create a Job to perform the second stage of ts DDL.
 				syncDetail := jobspb.SyncMetaCacheDetails{
-					Type:     alterKwdbAddColumn,
-					SNTable:  n.tableDesc.TableDescriptor,
-					AlterTag: *TSColumn,
+					Type:       alterKwdbAddColumn,
+					SNTable:    n.tableDesc.TableDescriptor,
+					AlterTag:   *TSColumn,
+					MutationID: mutationID,
 				}
 				jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, tree.AsStringWithFQNames(n.n, params.Ann()))
 				if err != nil {
 					return err
+				}
+				if mutationID != sqlbase.InvalidMutationID {
+					n.tableDesc.MutationJobs = append(n.tableDesc.MutationJobs, sqlbase.TableDescriptor_MutationJob{
+						MutationID: mutationID, JobID: jobID})
 				}
 				if err = params.p.writeTableDesc(params.ctx, n.tableDesc); err != nil {
 					return err
@@ -540,16 +546,23 @@ func (n *alterTableNode) startExec(params runParams) error {
 				if columnCount == 2 {
 					return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only data column besides the timestamp column")
 				}
-				n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+				// n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+				n.tableDesc.AddColumnMutation(colToDrop, sqlbase.DescriptorMutation_DROP)
+				mutationID := n.tableDesc.ClusterVersion.NextMutationID
 				// Create a Job to perform the second stage of ts DDL.
 				syncDetail := jobspb.SyncMetaCacheDetails{
-					Type:     alterKwdbDropColumn,
-					SNTable:  n.tableDesc.TableDescriptor,
-					AlterTag: *colToDrop,
+					Type:       alterKwdbDropColumn,
+					SNTable:    n.tableDesc.TableDescriptor,
+					AlterTag:   *colToDrop,
+					MutationID: mutationID,
 				}
 				jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, tree.AsStringWithFQNames(n.n, params.Ann()))
 				if err != nil {
 					return err
+				}
+				if mutationID != sqlbase.InvalidMutationID {
+					n.tableDesc.MutationJobs = append(n.tableDesc.MutationJobs, sqlbase.TableDescriptor_MutationJob{
+						MutationID: mutationID, JobID: jobID})
 				}
 				if err = params.p.writeTableDesc(params.ctx, n.tableDesc); err != nil {
 					return err
@@ -866,11 +879,12 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 					"column %q in the middle of being dropped", t.GetColumn())
 			}
+			isOnlyMetaChange := false
 			// Apply mutations to copy of column descriptor.
-			if err := applyColumnMutation(n.tableDesc, col, t, params); err != nil {
+			if isOnlyMetaChange, err = applyColumnMutation(n.tableDesc, col, t, params); err != nil {
 				return err
 			}
-			if isTSAlterColumnType {
+			if isTSAlterColumnType && !isOnlyMetaChange {
 				return nil
 			}
 			descriptorChanged = true
@@ -907,13 +921,14 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return nil
 			}
 			// type cast validation
-			doNothing := false
 			newType := prepareAlterType(t.ToType)
 			isDoNothing, err := validateAlterTSType(&tagColumn.Type, newType, sqlbase.ColumnType_TYPE_TAG)
 			if err != nil {
 				return err
 			}
-			doNothing = isDoNothing
+			if isDoNothing {
+				return nil
+			}
 
 			alteringTag, err := sqlbase.MakeTSColumnDefDescs(tagColumn.Name, newType, tagColumn.Nullable, false, sqlbase.ColumnType_TYPE_TAG)
 			if err != nil {
@@ -922,17 +937,23 @@ func (n *alterTableNode) startExec(params runParams) error {
 			alteringTag.ID = tagColumn.ID
 
 			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+			n.tableDesc.AddColumnMutation(alteringTag, sqlbase.DescriptorMutation_NONE)
+			mutationID := n.tableDesc.ClusterVersion.NextMutationID
 			// Create a Job to perform the second stage of ts DDL.
 			syncDetail := jobspb.SyncMetaCacheDetails{
 				Type:         alterKwdbAlterTagType,
 				SNTable:      n.tableDesc.TableDescriptor,
 				AlterTag:     *alteringTag,
-				DoNothing:    doNothing,
 				OriginColumn: *tagColumn,
+				MutationID:   mutationID,
 			}
 			jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, tree.AsStringWithFQNames(n.n, params.Ann()))
 			if err != nil {
 				return err
+			}
+			if mutationID != sqlbase.InvalidMutationID {
+				n.tableDesc.MutationJobs = append(n.tableDesc.MutationJobs, sqlbase.TableDescriptor_MutationJob{
+					MutationID: mutationID, JobID: jobID})
 			}
 			if err = params.p.writeTableDesc(params.ctx, n.tableDesc); err != nil {
 				return err
@@ -1102,15 +1123,26 @@ func (n *alterTableNode) startExec(params runParams) error {
 				n.tableDesc.NextColumnID++
 			}
 			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+			n.tableDesc.AddColumnMutation(tagCol, sqlbase.DescriptorMutation_ADD)
+			// Allocate IDs now, so new IDs are available to subsequent commands
+			if err := n.tableDesc.AllocateIDs(); err != nil {
+				return err
+			}
+			mutationID := n.tableDesc.ClusterVersion.NextMutationID
 			// Create a Job to perform the second stage of ts DDL.
 			syncDetail := jobspb.SyncMetaCacheDetails{
-				Type:     alterKwdbAddTag,
-				SNTable:  n.tableDesc.TableDescriptor,
-				AlterTag: *tagCol,
+				Type:       alterKwdbAddTag,
+				SNTable:    n.tableDesc.TableDescriptor,
+				AlterTag:   *tagCol,
+				MutationID: mutationID,
 			}
 			jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, tree.AsStringWithFQNames(n.n, params.Ann()))
 			if err != nil {
 				return err
+			}
+			if mutationID != sqlbase.InvalidMutationID {
+				n.tableDesc.MutationJobs = append(n.tableDesc.MutationJobs, sqlbase.TableDescriptor_MutationJob{
+					MutationID: mutationID, JobID: jobID})
 			}
 			if err = params.p.writeTableDesc(params.ctx, n.tableDesc); err != nil {
 				return err
@@ -1168,15 +1200,22 @@ func (n *alterTableNode) startExec(params runParams) error {
 				}
 			}
 			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+			n.tableDesc.AddColumnMutation(tagColumn, sqlbase.DescriptorMutation_DROP)
+			mutationID := n.tableDesc.ClusterVersion.NextMutationID
 			// Create a Job to perform the second stage of ts DDL.
 			syncDetail := jobspb.SyncMetaCacheDetails{
-				Type:     alterKwdbDropTag,
-				SNTable:  n.tableDesc.TableDescriptor,
-				AlterTag: *tagColumn,
+				Type:       alterKwdbDropTag,
+				SNTable:    n.tableDesc.TableDescriptor,
+				AlterTag:   *tagColumn,
+				MutationID: mutationID,
 			}
 			jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, tree.AsStringWithFQNames(n.n, params.Ann()))
 			if err != nil {
 				return err
+			}
+			if mutationID != sqlbase.InvalidMutationID {
+				n.tableDesc.MutationJobs = append(n.tableDesc.MutationJobs, sqlbase.TableDescriptor_MutationJob{
+					MutationID: mutationID, JobID: jobID})
 			}
 			if err = params.p.writeTableDesc(params.ctx, n.tableDesc); err != nil {
 				return err
@@ -1465,7 +1504,8 @@ func applyColumnMutation(
 	col *sqlbase.ColumnDescriptor,
 	mut tree.ColumnMutationCmd,
 	params runParams,
-) error {
+) (bool, error) {
+	isOnlyMetaChanged := false
 	switch t := mut.(type) {
 	case *tree.AlterTableAlterColumnType:
 		typ := t.ToType
@@ -1473,77 +1513,86 @@ func applyColumnMutation(
 		if tableDesc.IsTSTable() {
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", tableDesc.Name, tableDesc.ID, mut)
 			if t.Using != nil || t.Collation != "" {
-				return pgerror.New(pgcode.Syntax, "column and tag in timeseries table does not support USING or COLLATION")
+				return false, pgerror.New(pgcode.Syntax, "column and tag in timeseries table does not support USING or COLLATION")
 			}
 			if tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not alter tag type on instance table")
+				return false, pgerror.New(pgcode.WrongObjectType, "can not alter tag type on instance table")
 			}
 			if col.IsTagCol() {
-				return pgerror.Newf(pgcode.WrongObjectType, "%s is a tag", col.Name)
+				return false, pgerror.Newf(pgcode.WrongObjectType, "%s is a tag", col.Name)
 			}
 			if col.ID == 1 {
-				return pgerror.New(pgcode.InvalidColumnDefinition, "cannot alter the first ts column")
+				return false, pgerror.New(pgcode.InvalidColumnDefinition, "cannot alter the first ts column")
 			}
-
 			if col.Type.Identical(typ) {
-				return nil
+				return false, nil
 			}
 
 			// type cast validation
 			// if converting timestamp to timestamptz or reverse, we will not send this to AE.
-			doNothing := false
 			newType := prepareAlterType(t.ToType)
-			isDoNothing, err := validateAlterTSType(&col.Type, newType, sqlbase.ColumnType_TYPE_DATA)
+			isStorageDoNothing, err := validateAlterTSType(&col.Type, newType, sqlbase.ColumnType_TYPE_DATA)
 			if err != nil {
-				return err
+				return false, err
 			}
-			doNothing = isDoNothing
-
-			//var alteringTag sqlbase.ColumnDescriptor
-			alteringCol, err := sqlbase.MakeTSColumnDefDescs(col.Name, newType, col.Nullable, false, sqlbase.ColumnType_TYPE_DATA)
-			if err != nil {
-				return err
-			}
-			alteringCol.ID = col.ID
-			tableDesc.State = sqlbase.TableDescriptor_ALTER
-			// Create a Job to perform the second stage of ts DDL.
-			syncDetail := jobspb.SyncMetaCacheDetails{
-				Type:         alterKwdbAlterColumnType,
-				SNTable:      tableDesc.TableDescriptor,
-				AlterTag:     *alteringCol,
-				DoNothing:    doNothing,
-				OriginColumn: *col,
-			}
-			jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, params.p.stmt.SQL)
-			if err != nil {
-				return err
-			}
-			if err = params.p.writeTableDesc(params.ctx, tableDesc); err != nil {
-				return err
-			}
-			// Actively commit a transaction, and read/write system table operations
-			// need to be performed before this.
-			if err = params.p.txn.Commit(params.ctx); err != nil {
-				return err
+			if isStorageDoNothing {
+				isOnlyMetaChanged = true
 			}
 
-			// After the transaction commits successfully, execute the Job and wait for it to complete.
-			if err = params.p.ExecCfg().JobRegistry.Run(
-				params.ctx,
-				params.p.extendedEvalCtx.InternalExecutor.(*InternalExecutor),
-				[]int64{jobID},
-			); err != nil {
-				return err
+			if !isOnlyMetaChanged {
+				//var alteringTag sqlbase.ColumnDescriptor
+				alteringCol, err := sqlbase.MakeTSColumnDefDescs(col.Name, newType, col.Nullable, false, sqlbase.ColumnType_TYPE_DATA)
+				if err != nil {
+					return false, err
+				}
+				alteringCol.ID = col.ID
+				// TODO(ZXY): Temporary use DescriptorMutation_NONE for alter type mutation
+				tableDesc.AddColumnMutation(alteringCol, sqlbase.DescriptorMutation_NONE)
+				mutationID := tableDesc.ClusterVersion.NextMutationID
+				//tableDesc.State = sqlbase.TableDescriptor_ALTER
+				// Create a Job to perform the second stage of ts DDL.
+				syncDetail := jobspb.SyncMetaCacheDetails{
+					Type:         alterKwdbAlterColumnType,
+					SNTable:      tableDesc.TableDescriptor,
+					AlterTag:     *alteringCol,
+					OriginColumn: *col,
+					MutationID:   mutationID,
+				}
+				jobID, err := params.p.createTSSchemaChangeJob(params.ctx, syncDetail, params.p.stmt.SQL)
+				if err != nil {
+					return false, err
+				}
+				if mutationID != sqlbase.InvalidMutationID {
+					tableDesc.MutationJobs = append(tableDesc.MutationJobs, sqlbase.TableDescriptor_MutationJob{
+						MutationID: mutationID, JobID: jobID})
+				}
+				if err = params.p.writeTableDesc(params.ctx, tableDesc); err != nil {
+					return false, err
+				}
+				// Actively commit a transaction, and read/write system table operations
+				// need to be performed before this.
+				if err = params.p.txn.Commit(params.ctx); err != nil {
+					return false, err
+				}
+
+				// After the transaction commits successfully, execute the Job and wait for it to complete.
+				if err = params.p.ExecCfg().JobRegistry.Run(
+					params.ctx,
+					params.p.extendedEvalCtx.InternalExecutor.(*InternalExecutor),
+					[]int64{jobID},
+				); err != nil {
+					return false, err
+				}
+				log.Infof(params.ctx, "alter ts table %s 1st txn finished, id: %d, content: %s", tableDesc.Name, tableDesc.ID, mut)
+				return false, nil
 			}
-			log.Infof(params.ctx, "alter ts table %s 1st txn finished, id: %d, content: %s", tableDesc.Name, tableDesc.ID, mut)
-			return nil
 		}
 
 		version := params.ExecCfg().Settings.Version.ActiveVersionOrEmpty(params.ctx)
 		if supported, err := isTypeSupportedInVersion(version, typ); err != nil {
-			return err
+			return false, err
 		} else if !supported {
-			return pgerror.Newf(
+			return false, pgerror.Newf(
 				pgcode.FeatureNotSupported,
 				"type %s is not supported until version upgrade is finalized",
 				typ.SQLString(),
@@ -1554,25 +1603,25 @@ func applyColumnMutation(
 			if types.IsStringType(typ) {
 				typ = types.MakeCollatedString(typ, t.Collation)
 			} else {
-				return pgerror.New(pgcode.Syntax, "COLLATE can only be used with string types")
+				return false, pgerror.New(pgcode.Syntax, "COLLATE can only be used with string types")
 			}
 		}
 
 		err := sqlbase.ValidateColumnDefType(typ)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		// No-op if the types are Identical.  We don't use Equivalent here because
 		// the user may be trying to change the type of the column without changing
 		// the type family.
 		if col.Type.Identical(typ) {
-			return nil
+			return false, nil
 		}
 
 		kind, err := schemachange.ClassifyConversion(&col.Type, typ)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		switch kind {
@@ -1580,13 +1629,13 @@ func applyColumnMutation(
 			// We're not going to make it impossible for the user to perform
 			// this conversion, but we do want them to explicit about
 			// what they're going for.
-			return pgerror.Newf(pgcode.CannotCoerce,
+			return false, pgerror.Newf(pgcode.CannotCoerce,
 				"the requested type conversion (%s -> %s) requires an explicit USING expression",
 				col.Type.SQLString(), typ.SQLString())
 		case schemachange.ColumnConversionTrivial:
 			col.Type = *typ
 		case schemachange.ColumnConversionGeneral:
-			return unimplemented.NewWithIssueDetailf(
+			return false, unimplemented.NewWithIssueDetailf(
 				9851,
 				fmt.Sprintf("%s->%s", col.Type.SQLString(), typ.SQLString()),
 				"type conversion from %s to %s requires overwriting existing values which is not yet implemented",
@@ -1594,7 +1643,7 @@ func applyColumnMutation(
 				typ.SQLString(),
 			)
 		default:
-			return unimplemented.NewWithIssueDetail(9851,
+			return false, unimplemented.NewWithIssueDetail(9851,
 				fmt.Sprintf("%s->%s", col.Type.SQLString(), typ.SQLString()),
 				"type conversion not yet implemented")
 		}
@@ -1602,7 +1651,7 @@ func applyColumnMutation(
 	case *tree.AlterTableSetDefault:
 		if len(col.UsesSequenceIds) > 0 {
 			if err := params.p.removeSequenceDependencies(params.ctx, tableDesc, col); err != nil {
-				return err
+				return false, err
 			}
 		}
 		if t.Default == nil {
@@ -1613,7 +1662,7 @@ func applyColumnMutation(
 				t.Default, colDatumType, "DEFAULT", &params.p.semaCtx, true /* allowImpure */, false,
 			)
 			if err != nil {
-				return err
+				return false, err
 			}
 			s := tree.Serialize(t.Default)
 			col.DefaultExpr = &s
@@ -1623,21 +1672,21 @@ func applyColumnMutation(
 				params.ctx, params.p, tableDesc, col, expr, nil, /* backrefs */
 			)
 			if err != nil {
-				return err
+				return false, err
 			}
 			for _, changedSeqDesc := range changedSeqDescs {
 				// TODO (lucy): Have more consistent/informative names for dependent jobs.
 				if err := params.p.writeSchemaChange(
 					params.ctx, changedSeqDesc, sqlbase.InvalidMutationID, "updating dependent sequence",
 				); err != nil {
-					return err
+					return false, err
 				}
 			}
 		}
 
 	case *tree.AlterTableSetNotNull:
 		if !col.Nullable {
-			return nil
+			return false, nil
 		}
 		// See if there's already a mutation to add a not null constraint
 		for i := range tableDesc.Mutations {
@@ -1645,17 +1694,17 @@ func applyColumnMutation(
 				constraint.ConstraintType == sqlbase.ConstraintToUpdate_NOT_NULL &&
 				constraint.NotNullColumn == col.ID {
 				if tableDesc.Mutations[i].Direction == sqlbase.DescriptorMutation_ADD {
-					return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+					return false, pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 						"constraint in the middle of being added")
 				}
-				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+				return false, pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 					"constraint in the middle of being dropped, try again later")
 			}
 		}
 
 		info, err := tableDesc.GetConstraintInfo(params.ctx, nil)
 		if err != nil {
-			return err
+			return false, err
 		}
 		inuseNames := make(map[string]struct{}, len(info))
 		for k := range info {
@@ -1666,12 +1715,12 @@ func applyColumnMutation(
 
 	case *tree.AlterTableDropNotNull:
 		if col.Nullable {
-			return nil
+			return false, nil
 		}
 
 		// Prevent a column in a primary key from becoming non-null.
 		if tableDesc.PrimaryIndex.ContainsColumnID(col.ID) {
-			return pgerror.Newf(pgcode.InvalidTableDefinition,
+			return false, pgerror.Newf(pgcode.InvalidTableDefinition,
 				`column "%s" is in a primary index`, col.Name)
 		}
 
@@ -1681,16 +1730,16 @@ func applyColumnMutation(
 				constraint.ConstraintType == sqlbase.ConstraintToUpdate_NOT_NULL &&
 				constraint.NotNullColumn == col.ID {
 				if tableDesc.Mutations[i].Direction == sqlbase.DescriptorMutation_ADD {
-					return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+					return false, pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 						"constraint in the middle of being added, try again later")
 				}
-				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+				return false, pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 					"constraint in the middle of being dropped")
 			}
 		}
 		info, err := tableDesc.GetConstraintInfo(params.ctx, nil)
 		if err != nil {
-			return err
+			return false, err
 		}
 		inuseNames := make(map[string]struct{}, len(info))
 		for k := range info {
@@ -1706,12 +1755,12 @@ func applyColumnMutation(
 
 	case *tree.AlterTableDropStored:
 		if !col.IsComputed() {
-			return pgerror.Newf(pgcode.InvalidColumnDefinition,
+			return false, pgerror.Newf(pgcode.InvalidColumnDefinition,
 				"column %q is not a computed column", col.Name)
 		}
 		col.ComputeExpr = nil
 	}
-	return nil
+	return isOnlyMetaChanged, nil
 }
 
 func labeledRowValues(cols []sqlbase.ColumnDescriptor, values tree.Datums) string {

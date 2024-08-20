@@ -63,6 +63,20 @@ class TestTSWALTable : public TestBigTableInstance {
     return schema;
   }
 
+  vector<uint32_t> getActualCols() const {
+    vector<uint32_t> actual_cols;
+    for (int i = 0; i < meta_.k_column_size(); i++) {
+      const auto& col = meta_.k_column(i);
+      struct AttributeInfo col_var;
+      TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i == 0);
+      if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
+        actual_cols.push_back(actual_cols.size());
+      }
+    }
+
+    return actual_cols;
+  }
+
   vector<TagInfo> getTagSchema() const {
     std::vector<TagInfo> schema;
     for (int i = 0; i < meta_.k_column_size(); i++) {
@@ -120,7 +134,7 @@ class TestTSWALTable : public TestBigTableInstance {
       SubGroupID group_id = 1;
       while (entity_id <= entity_num) {
         TsIterator* iter1;
-        entity_group->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter1, entity_group);
+        entity_group->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group);
         total_rows += GetIterRows(iter1, scan_cols.size());
         entity_id++;
         delete iter1;
@@ -174,7 +188,7 @@ TEST_F(TestTSWALTable, PutData) {
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
   TsIterator* iter1;
-  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter1, log_eg),
+  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg),
             KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_cols.size()};
@@ -218,7 +232,7 @@ TEST_F(TestTSWALTable, batchPutData) {
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
   TsIterator* iter1;
-  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter1, log_eg),
+  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg),
             KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_cols.size()};
@@ -289,7 +303,7 @@ TEST_F(TestTSWALTable, mulitiInsert) {
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
   TsIterator* iter1;
-  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, &iter1, log_eg),
+  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg),
             KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_cols.size()};
@@ -350,7 +364,7 @@ TEST_F(TestTSWALTable, DeleteData) {
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num * 2);
 
   // delete
-  Payload pd(getSchema(), payload);
+  Payload pd(getSchema(), getActualCols(), payload);
   std::string primary_tag(pd.GetPrimaryTag().data, pd.GetPrimaryTag().len);
 
   uint64_t  count = 0;
@@ -419,7 +433,7 @@ TEST_F(TestTSWALTable, DeleteDataRollback) {
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num * 2);
 
   // delete
-  Payload pd(getSchema(), payload);
+  Payload pd(getSchema(), getActualCols(), payload);
   std::string primary_tag(pd.GetPrimaryTag().data, pd.GetPrimaryTag().len);
 
   TS_LSN mtr_id = 0;
@@ -468,7 +482,7 @@ TEST_F(TestTSWALTable, putDeleteRollback) {
 
   uint64_t count = 0;
 
-  Payload pd(getSchema(), payload);
+  Payload pd(getSchema(), getActualCols(), payload);
   std::string primary_tag(pd.GetPrimaryTag().data, pd.GetPrimaryTag().len);
 
   TS_LSN mtr_id = 0;
@@ -523,7 +537,7 @@ TEST_F(TestTSWALTable, DeleteEntitiesRollback) {
   // check result
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
 
-  Payload pd(getSchema(), payload);
+  Payload pd(getSchema(), getActualCols(), payload);
   std::vector<string> primary_tags;
   primary_tags.emplace_back(pd.GetPrimaryTag().data, pd.GetPrimaryTag().len);
   // delete entities
@@ -563,7 +577,7 @@ TEST_F(TestTSWALTable, putDeleteEntityRollback) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
-  Payload pd(getSchema(), payload);
+  Payload pd(getSchema(), getActualCols(), payload);
 
   TS_LSN mtr_id = 0;
   ASSERT_EQ(log_eg->MtrBegin(ctx_, range_group_id_, 1, mtr_id), KStatus::SUCCESS);
@@ -610,7 +624,7 @@ TEST_F(TestTSWALTable, putRecover) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
   s = log_eg->PutData(ctx_, &payload, 1, 0, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
   table_->FlushBuffer(ctx_);
@@ -626,7 +640,7 @@ TEST_F(TestTSWALTable, putRecover) {
 
   char* data_value2 = GenSomePayloadData(ctx_, 10, p_len, start_ts + 1000, &meta_);
   TSSlice payload2{data_value2, p_len};
-  auto pd2 = Payload(getSchema(), payload2);
+  auto pd2 = Payload(getSchema(), getActualCols(), payload2);
 
   s = wal2->WriteInsertWAL(ctx_, mtr_id, 0, 0, payload2);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -637,7 +651,7 @@ TEST_F(TestTSWALTable, putRecover) {
 
   char* data_value3 = GenSomePayloadData(ctx_, 10, p_len, start_ts + 2000, &meta_);
   TSSlice payload3{data_value3, p_len};
-  auto pd3 = Payload(getSchema(), payload3);
+  auto pd3 = Payload(getSchema(), getActualCols(), payload3);
 
   s = wal2->WriteInsertWAL(ctx_, mtr_id, 0, 0, pd3.GetPrimaryTag(), payload3, entry_lsn);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -695,7 +709,7 @@ TEST_F(TestTSWALTable, putRollbackRecover) {
   EXPECT_EQ(s, KStatus::SUCCESS);
   auto lsn = wal2->FetchCurrentLSN();
   auto sc = getSchema();
-  auto pd1 = Payload(sc, payload);
+  auto pd1 = Payload(sc, getActualCols(), payload);
   pd1.dedup_rule_ = DedupRule::KEEP;
   pd1.SetLsn(lsn);
   TS_LSN entry_lsn;
@@ -741,7 +755,7 @@ TEST_F(TestTSWALTable, deleteEntitiesRecover) {
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
 
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
 
   TS_LSN mtr_id = 0;
   auto wal2 = new WALMgr(kDbPath + "/", table_id_, range_group_id_, &opt_);
@@ -799,7 +813,7 @@ TEST_F(TestTSWALTable, deleteDataRecover) {
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
 
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
   TS_LSN mtr_id = 0;
   s = log_eg->PutData(ctx_, payload, mtr_id, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -863,7 +877,7 @@ TEST_F(TestTSWALTable, incompleteRecover) {
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
 
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
 
   TS_LSN mtr_id = 0;
   auto wal2 = new WALMgr(kDbPath + "/", table_id_, range_group_id_, &opt_);
@@ -932,7 +946,7 @@ TEST_F(TestTSWALTable, incompleteRollbackRecover) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
   s = log_eg->PutData(ctx_, payload, mtr_id, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
@@ -1005,7 +1019,7 @@ TEST_F(TestTSWALTable, deleteRollbackRecover) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
   // First insert 10 rows of data
   s = log_eg->PutData(ctx_, payload, mtr_id, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -1119,7 +1133,7 @@ TEST_F(TestTSWALTable, putEntityRecover) {
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_, 10, 0, false);
 
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(getSchema(), payload);
+  auto pd1 = Payload(getSchema(), getActualCols(), payload);
 
   TS_LSN mtr_id = 0;
   auto wal2 = new WALMgr(kDbPath + "/", table_id_, range_group_id_, &opt_);
@@ -1259,7 +1273,7 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   iter->Close();
   delete iter;
 
-  Payload pd(getSchema(), payload);
+  Payload pd(getSchema(), getActualCols(), payload);
   std::vector<string> primary_tags;
   primary_tags.emplace_back(pd.GetPrimaryTag().data, pd.GetPrimaryTag().len);
   // put entity

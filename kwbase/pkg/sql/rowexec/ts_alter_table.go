@@ -38,11 +38,13 @@ import (
 type tsAlterTable struct {
 	execinfra.ProcessorBase
 
-	tsOperator    execinfrapb.OperatorType
-	columnMeta    []byte
-	oriColumnMeta []byte
-	tableID       uint64
-	txnID         []byte
+	tsOperator       execinfrapb.OperatorType
+	columnMeta       []byte
+	oriColumnMeta    []byte
+	tableID          uint64
+	txnID            []byte
+	currentTSVersion uint32
+	newTSVersion     uint32
 
 	partitionInterval uint64
 	compressInterval  []byte
@@ -70,6 +72,8 @@ func newTsAlterColumn(
 		columnMeta:        tst.Column,
 		oriColumnMeta:     tst.OriginalCol,
 		txnID:             tst.TxnID,
+		currentTSVersion:  tst.CurrentTSVersion,
+		newTSVersion:      tst.NextTSVersion,
 		partitionInterval: tst.PartitionInterval,
 		compressInterval:  tst.CompressInterval,
 	}
@@ -105,7 +109,7 @@ func (tct *tsAlterTable) Start(ctx context.Context) context.Context {
 			tct.err = err
 			return ctx
 		}
-		if err := tct.FlowCtx.Cfg.TsEngine.AddTSColumn(tct.tableID, tct.txnID, tct.columnMeta); err != nil {
+		if err := tct.FlowCtx.Cfg.TsEngine.AddTSColumn(tct.tableID, tct.currentTSVersion, tct.newTSVersion, tct.txnID, tct.columnMeta); err != nil {
 			tct.alterTsColumnSuccess = false
 			tct.err = err
 			return ctx
@@ -117,7 +121,7 @@ func (tct *tsAlterTable) Start(ctx context.Context) context.Context {
 			tct.err = err
 			return ctx
 		}
-		if err := tct.FlowCtx.Cfg.TsEngine.DropTSColumn(tct.tableID, tct.txnID, tct.columnMeta); err != nil {
+		if err := tct.FlowCtx.Cfg.TsEngine.DropTSColumn(tct.tableID, tct.currentTSVersion, tct.newTSVersion, tct.txnID, tct.columnMeta); err != nil {
 			tct.alterTsColumnSuccess = false
 			tct.err = err
 			return ctx
@@ -150,7 +154,7 @@ func (tct *tsAlterTable) Start(ctx context.Context) context.Context {
 			tct.err = err
 			return ctx
 		}
-		if err := tct.FlowCtx.Cfg.TsEngine.AlterTSColumnType(tct.tableID, tct.txnID, tct.columnMeta, tct.oriColumnMeta); err != nil {
+		if err := tct.FlowCtx.Cfg.TsEngine.AlterTSColumnType(tct.tableID, tct.currentTSVersion, tct.newTSVersion, tct.txnID, tct.columnMeta, tct.oriColumnMeta); err != nil {
 			tct.alterTsColumnSuccess = false
 			tct.err = err
 			return ctx

@@ -79,10 +79,10 @@ KStatus LoggedTsTable::FlushBuffer(kwdbContext_p ctx) {
   return SUCCESS;
 }
 
-LoggedTsEntityGroup::LoggedTsEntityGroup(kwdbContext_p ctx, MMapMetricsTable*& root_table, const string& db_path,
-                                         const KTableKey& table_id, const RangeGroup& range, const string& tbl_sub_path,
-                                         EngineOptions* opt)
-    : TsEntityGroup(ctx, root_table, db_path, table_id, range, tbl_sub_path), engine_opt_(opt) {
+LoggedTsEntityGroup::LoggedTsEntityGroup(kwdbContext_p ctx, MMapRootTableManager*& root_bt_manager,
+                                         const string& db_path, const KTableKey& table_id, const RangeGroup& range,
+                                         const string& tbl_sub_path, EngineOptions* opt)
+    : TsEntityGroup(ctx, root_bt_manager, db_path, table_id, range, tbl_sub_path), engine_opt_(opt) {
   wal_manager_ = KNEW WALMgr(db_path, table_id, range.range_group_id, opt);
   tsx_manager_ = KNEW TSxMgr(wal_manager_);
   optimistic_read_lsn_ = wal_manager_->FetchCurrentLSN();
@@ -151,7 +151,7 @@ KStatus LoggedTsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint
   // replace it in TsEntityGroup.PutEntity\PutData at the same time
   MUTEX_LOCK(logged_mutex_);
   ErrorInfo err_info;
-  Payload pd(root_bt_->getSchemaInfoWithHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     MUTEX_UNLOCK(logged_mutex_);
     return KStatus::FAIL;
@@ -212,7 +212,7 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
   uint32_t group_id, entity_id;
 
   // payload verification
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   pd.dedup_rule_ = dedup_rule;
 
   // split the payload to Tag part and Metrics part
@@ -372,7 +372,7 @@ KStatus LoggedTsEntityGroup::CreateCheckpointInternal(kwdbContext_p ctx) {
   // get checkpoint_lsn
   TS_LSN checkpoint_lsn = wal_manager_->FetchCurrentLSN();
 
-  if (tag_bt_ == nullptr || root_bt_ == nullptr) {
+  if (tag_bt_ == nullptr || root_bt_manager_ == nullptr) {
     LOG_ERROR("Failed to fetch current LSN.")
     Return(FAIL)
   }
@@ -397,7 +397,7 @@ KStatus LoggedTsEntityGroup::CreateCheckpointInternal(kwdbContext_p ctx) {
   **/
   ErrorInfo err_info;
   map<uint32_t, uint64_t> rows;
-  if (root_bt_->Sync(checkpoint_lsn, err_info) != 0) {
+  if (root_bt_manager_->Sync(checkpoint_lsn, err_info) != 0) {
     LOG_ERROR("Failed to flush the Metrics table.")
     Return(FAIL)
   }
@@ -718,16 +718,11 @@ KStatus LoggedTsEntityGroup::rollback(kwdbContext_p ctx, LogEntry* wal_log) {
 }
 
 KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload) {
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   auto primary_tag = pd.GetPrimaryTag();
   uint32_t entity_id, group_id;
   ErrorInfo err_info;
   int res = tag_bt_->getEntityIdGroupId(primary_tag.data, primary_tag.len, entity_id, group_id);
-  if (res) {
-    return KStatus::FAIL;
-  }
-
-  res = root_bt_->UndoPut(entity_id, group_id, 0, &pd, err_info);
   if (res) {
     return KStatus::FAIL;
   }
@@ -801,7 +796,8 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   if (res) {
     return KStatus::FAIL;
   }
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+
+  Payload pd(root_bt_manager_, payload);
 
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
@@ -851,13 +847,6 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
     }
     last_p_time = p_time;
 
-    // Update the minimum and maximum timestamps, and record the maximum and minimum partition times.
-    if (root_bt_->minTimestamp() == 0 || root_bt_->minTimestamp() > p_time) {
-      root_bt_->minTimestamp() = p_time;
-    }
-    if (root_bt_->maxTimestamp() < p_time) {
-      root_bt_->maxTimestamp() = p_time;
-    }
     std::vector<BlockSpan> cur_alloc_spans;
     std::vector<MetricRowID> to_deleted_real_rows;
 
@@ -979,7 +968,7 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
 }
 
 KStatus LoggedTsEntityGroup::undoPutTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload) {
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;
@@ -998,13 +987,13 @@ KStatus LoggedTsEntityGroup::undoPutTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSli
 }
 
 KStatus LoggedTsEntityGroup::redoPutTag(kwdbContext_p ctx, kwdbts::TS_LSN log_lsn, const TSSlice& payload) {
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;
   ErrorInfo err_info;
   int res = tag_bt_->getEntityIdGroupId(p_tag.data, p_tag.len, entity_id, group_id);
-  if (res < 0) {
+  if (res) {
     std::string tmp_str = std::to_string(table_id_);
     uint64_t tag_hash = TsTable::GetConsistentHashId(tmp_str.data(), tmp_str.size());
     std::string primary_tags;
@@ -1021,7 +1010,7 @@ KStatus LoggedTsEntityGroup::redoPutTag(kwdbContext_p ctx, kwdbts::TS_LSN log_ls
 }
 
 KStatus LoggedTsEntityGroup::undoUpdateTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload, TSSlice old_payload) {
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;
@@ -1040,7 +1029,7 @@ KStatus LoggedTsEntityGroup::undoUpdateTag(kwdbContext_p ctx, TS_LSN log_lsn, TS
 }
 
 KStatus LoggedTsEntityGroup::redoUpdateTag(kwdbContext_p ctx, kwdbts::TS_LSN log_lsn, const TSSlice& payload) {
-  Payload pd(root_bt_->getSchemaInfoWithoutHidden(), payload);
+  Payload pd(root_bt_manager_, payload);
   auto p_tag = pd.GetPrimaryTag();
 
   uint32_t entity_id, group_id;

@@ -10,6 +10,7 @@
 // See the Mulan PSL v2 for more details.
 
 #pragma once
+
 #include <assert.h>
 #include <mutex>
 #include <shared_mutex>
@@ -54,6 +55,7 @@ struct MetricRowID {
     offset_row++;
     return *this;
   }
+
   MetricRowID operator++(int) {
     offset_row++;
     return *this;
@@ -63,6 +65,7 @@ struct MetricRowID {
     offset_row--;
     return *this;
   }
+
   MetricRowID operator--(int) {
     offset_row--;
     return *this;
@@ -71,37 +74,42 @@ struct MetricRowID {
   size_t operator()(const MetricRowID& rowId) const {
     return std::hash<BLOCK_ID>()(rowId.block_id) ^ std::hash<uint32_t>()(rowId.offset_row);
   }
+
   bool operator==(const MetricRowID& rowId) const {
     return (block_id == rowId.block_id) && (offset_row == rowId.offset_row);
   }
 
-  bool operator<(const MetricRowID & rowId) const{
+  bool operator!=(const MetricRowID& rowId) const {
+    return (offset_row != rowId.offset_row) || (block_id != rowId.block_id);
+  }
+
+  bool operator<(const MetricRowID& rowId) const {
     return (block_id < rowId.block_id) || (block_id == rowId.block_id && offset_row < rowId.offset_row);
   }
 
-  bool operator>(const MetricRowID & rowId) const{
+  bool operator>(const MetricRowID& rowId) const {
     return (block_id > rowId.block_id) || (block_id == rowId.block_id && offset_row > rowId.offset_row);
   }
 };
 
 /**
- * @brief EntityHeader records  entities status in current paritition.
+ * @brief EntityHeader records  entities status in current partition.
  *        
  *       id = 0 means is initialing.
  */
 struct EntityHeader {
   int magic;
   int version;
-  uint16_t  compressed_datafile_id;   // max data file that already compressed.
-  uint16_t  cur_entity_id;            // max entity id in using.
-  BLOCK_ID  cur_datafile_id;          // max data file id in using.
-  BLOCK_ID  cur_block_id;             // max block id in using.
-  uint16_t  partition_interval;       // configure item
-  uint16_t  max_rows_per_block;       // configure item
-  uint16_t  max_entities_per_subgroup;   // configure item
-  int64_t  minTimestamp;              // max ts and min ts in current partition.
-  int64_t  maxTimestamp;
-  uint32_t  max_blocks_per_segment;   // configure item
+  uint16_t compressed_datafile_id;   // max data file that already compressed.
+  uint16_t cur_entity_id;            // max entity id in using.
+  BLOCK_ID cur_datafile_id;          // max data file id in using.
+  BLOCK_ID cur_block_id;             // max block id in using.
+  uint16_t partition_interval;       // configure item
+  uint16_t max_rows_per_block;       // configure item
+  uint16_t max_entities_per_subgroup;   // configure item
+  int64_t minTimestamp;              // max ts and min ts in current partition.
+  int64_t maxTimestamp;
+  uint32_t max_blocks_per_segment;   // configure item
   bool deleted = false;
   char user_defined[31];  // < reserved for user-defined information.
 
@@ -114,7 +122,7 @@ struct EntityHeader {
               << " cur_meta_block_id:" << cur_block_id
               << " partition_interval:" << partition_interval
               << " max_rows_per_block:" << max_rows_per_block
-        << std::endl;
+              << std::endl;
     return os;
   }
 };
@@ -131,20 +139,21 @@ struct EntityItem {
   uint32_t entity_id;
   BLOCK_ID block_count;             // block count for current entity.
   BLOCK_ID cur_block_id;            // block id that is allocating space for writing.
-  int64_t max_ts;                   // max ts of current entity in this Partition 
-  int64_t min_ts;                   // min ts of current entity in this Partition 
+  int64_t max_ts;                   // max ts of current entity in this Partition
+  int64_t min_ts;                   // min ts of current entity in this Partition
   bool is_deleted;                  // entity delete flag.
   bool is_disordered = false;
-  char user_defined[32];  // reserved for user-defined information.
+  BLOCK_ID max_compacting_block;
+  char user_defined[28];  // reserved for user-defined information.
 
   ostream& to_string(ostream& os) {
     os << " entity_id:" << entity_id
        << " block_count:" << block_count
        << " cur_block_id:" << cur_block_id
        << " cloumns_varchar_offset:" << cloumns_varchar_offset
-        << " row_written:" << row_written
-        << " lasted_checkpoint:" << lasted_checkpoint
-        << std::endl;
+       << " row_written:" << row_written
+       << " lasted_checkpoint:" << lasted_checkpoint
+       << std::endl;
     return os;
   }
 };
@@ -184,13 +193,13 @@ void setBatchDeleted(char* delete_flags, size_t start_row, size_t del_rows_count
 void setBatchValid(char* delete_flags, size_t start_row, size_t del_rows_count);
 
 /**
- * @brief check if all rows that continuous deleted.
- * @param[in] delete_flags  bitmap addr of blockItem.
+ * @brief check if all rows is null for a column.
+ * @param[in] bitmap  bitmap addr.
  * @param[in] start_row     row num of bitmap. start from 1.
  * @param[in] rows_count    check count.
  * 
 */
-bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count);
+bool isAllNull(char* bitmap, size_t start_row, size_t rows_count);
 
 /**
  * @brief  BlockItem managing BLock status, block has fixed row num used for store entity data.
@@ -212,13 +221,13 @@ struct BlockItem {
   char user_defined[32];      // reserved for user-defined information.
 
   MetricRowID getRowID(uint32_t offset) {
-    return std::move(MetricRowID{ block_id, offset });
+    return std::move(MetricRowID{block_id, offset});
   }
 
   // count deleted rows in current block.
   size_t getDeletedCount() {
     size_t count = 0;
-    for (int i = 0; i < alloc_row_count; ) {
+    for (int i = 0; i < alloc_row_count;) {
       size_t byte = i >> 3;
       size_t bit = 1 << (i & 7);
       if (0 == rows_delete_flags[byte]) {
@@ -233,7 +242,7 @@ struct BlockItem {
     return count;
   }
 
-  int isDeleted(size_t row_idx, bool *is_deleted) {
+  int isDeleted(size_t row_idx, bool* is_deleted) {
     if (row_idx > alloc_row_count) {
       return -1;
     }
@@ -273,9 +282,9 @@ struct BlockItem {
        << " read_only:" << read_only
        << " data_block_id:" << block_id
        << " prev_block_id:" << prev_block_id
-        << " publish_row_count:" << publish_row_count
-        << " alloc_row_count:" << alloc_row_count
-        << std::endl;
+       << " publish_row_count:" << publish_row_count
+       << " alloc_row_count:" << alloc_row_count
+       << std::endl;
     return os;
   }
 };
@@ -284,20 +293,21 @@ struct BlockItem {
 struct BlockSpan {
   BlockItem* block_item = nullptr;
   uint32_t start_row;             // first row is 0
-  uint32_t row_num;               // continous num
+  uint32_t row_num = 0;               // continuous num
 };
 
 /**
- * @brief  MMapEntityBlockIdx used for managing entity block index for current partition.
- *          EntityBlockIdxManager is managing MMapEntityBlockIdx objects.
+ * @brief  MMapEntityBlockMeta used for managing entity block for current time partition.
+ *          EntityBlockMetaManager is managing MMapBlockMeta objects.
 */
-class MMapEntityIdx: public MMapFile {
-  friend class TsEntityIdxManager;
+class MMapEntityBlockMeta : public MMapFile {
+  friend class EntityBlockMetaManager;
+
  private:
   using MMapEntityMetaLatch = KLatch;
   using MMapEntityMetaRWLatch = KRWLatch;
-  MMapEntityMetaLatch*    obj_mutex_;
-  MMapEntityMetaRWLatch*  entity_blockitem_mutex_;   // control entity item / block item
+  MMapEntityMetaLatch* obj_mutex_;
+  MMapEntityMetaRWLatch* entity_blockitem_mutex_;   // control entity item / block item
  protected:
 
   size_t block_item_offset_;  // the first blockitem offset in meta file.
@@ -313,23 +323,28 @@ class MMapEntityIdx: public MMapFile {
   int incSize_(size_t len);
 
  public:
-  MMapEntityIdx();
-  MMapEntityIdx(bool is_et, bool first_meta);
-  virtual ~MMapEntityIdx();
+  MMapEntityBlockMeta();
 
-  int init(const string &file_path, const std::string &db_path, const string &tbl_sub_path, int flags,
+  MMapEntityBlockMeta(bool is_et, bool first_meta);
+
+  virtual ~MMapEntityBlockMeta();
+
+  int init(const string& file_path, const std::string& db_path, const string& tbl_sub_path, int flags,
            bool alloc_block_item, uint16_t config_subgroup_entities);
+
   // 32bit system: 4-bytes for size & pointers
   // 64bit system: 8-bytes
-  size_t & size() { return ((reinterpret_cast<size_t *>(mem_))[1]); }
+  size_t& size() { return ((reinterpret_cast<size_t*>(mem_))[1]); }
+
   inline int startLoc() const { return 16; }
+
   inline EntityHeader* getEntityHeader() {
     return entity_header_;
   }
 
   inline void initAddr() {
     if (first_meta_) {
-      entity_header_ = reinterpret_cast<EntityHeader*>((intptr_t)memAddr() + startLoc());
+      entity_header_ = reinterpret_cast<EntityHeader*>((intptr_t) memAddr() + startLoc());
       entity_item_offset_ = reinterpret_cast<EntityItem*>((intptr_t) memAddr() + startLoc() + sizeof(EntityHeader));
     } else {
       entity_header_ = nullptr;
@@ -339,7 +354,7 @@ class MMapEntityIdx: public MMapFile {
 
   inline EntityItem* getEntityItem(uint entity_id) {
     assert(entity_id > 0);
-    EntityItem* ent_ptr = &entity_item_offset_[(entity_id-1) % entity_header_->max_entities_per_subgroup];
+    EntityItem* ent_ptr = &entity_item_offset_[(entity_id - 1) % entity_header_->max_entities_per_subgroup];
     return ent_ptr;
   }
 
@@ -367,6 +382,7 @@ class MMapEntityIdx: public MMapFile {
   void deleteEntity(uint32_t entity_id) {
     EntityItem* entity_item = getEntityItem(entity_id);
     entity_item->is_deleted = true;
+    entity_item->is_disordered = true;
   }
 
   std::vector<uint32_t> getEntities() {
@@ -383,19 +399,21 @@ class MMapEntityIdx: public MMapFile {
   }
 
   inline void* getBlockItemOffset() {
-    return reinterpret_cast<void*>((intptr_t)memAddr() + block_item_offset_);
+    return reinterpret_cast<void*>((intptr_t) memAddr() + block_item_offset_);
   }
 
   inline BlockItem* GetBlockItem(BLOCK_ID item_id) {
     assert(item_id > 0);
     return reinterpret_cast<BlockItem*>((intptr_t) getBlockItemOffset() +
-          (item_id-block_item_offset_num_-1) * sizeof(BlockItem));
+                                        (item_id - block_item_offset_num_ - 1) * sizeof(BlockItem));
   }
 
   void to_string();
+
   void to_string(uint entity_id);
 
   void lock() { MUTEX_LOCK(obj_mutex_); }
+
   void unlock() { MUTEX_UNLOCK(obj_mutex_); }
 
   uint16_t getBlockAggNum() {

@@ -37,7 +37,8 @@ class TsIterator {
  public:
   TsIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
              vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
-             std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols);
+             std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
+             uint32_t table_version);
 
   virtual ~TsIterator();
 
@@ -85,6 +86,8 @@ class TsIterator {
   std::vector<k_uint32> ts_scan_cols_;
   // column attributes
   vector<AttributeInfo> attrs_;
+  // table version
+  uint32_t table_version_;
   std::vector<TsTimePartition*> p_bts_;
   // save all BlockItem objects in the partition table being queried
   std::deque<BlockItem*> block_item_queue_;
@@ -96,8 +99,10 @@ class TsIterator {
   k_uint32 cur_entity_idx_ = 0;
   MMapSegmentTableIterator* segment_iter_{nullptr};
   std::shared_ptr<TsEntityGroup> entity_group_;
-  // 标识迭代器是否逆序返回block
+  // Identifies whether the iterator returns blocks in reverse order
   bool is_reversed_ = false;
+  // need sorting
+  bool sort_flag_ = false;
 };
 
 // used for raw data queries
@@ -105,9 +110,9 @@ class TsRawDataIterator : public TsIterator {
  public:
   TsRawDataIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                     vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
-                    std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols) :
+                    std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols, uint32_t table_version) :
                     TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
-                               kw_scan_cols, ts_scan_cols) {}
+                               kw_scan_cols, ts_scan_cols, table_version) {}
 
   /**
    * @brief The internal implementation of the row data query interface returns the maximum number of consecutive data
@@ -121,15 +126,62 @@ class TsRawDataIterator : public TsIterator {
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
 };
 
+class TsSortedRowDataIterator : public TsIterator {
+ public:
+  TsSortedRowDataIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+                          vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
+                          std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
+                          uint32_t table_version, SortOrder order_type = ASC, bool compaction = false) :
+      TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
+                 kw_scan_cols, ts_scan_cols, table_version), order_type_(order_type), compaction_(compaction) {}
+
+  KStatus Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) override;
+  KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
+
+ private:
+  int nextBlockSpan(k_uint32 entity_id);
+  void fetchBlockSpans(k_uint32 entity_id);
+
+  KStatus GetBatch(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item, size_t block_start_idx,
+                   ResultSet* res, k_uint32 count);
+
+  std::deque<BlockSpan> block_spans_;
+  BlockSpan cur_block_span_;
+  SortOrder order_type_ = SortOrder::ASC;
+  bool compaction_ = false;
+};
+
+struct BlockBitmap {
+  uint32_t col_idx;
+  BLOCK_ID block_id;
+  void* bitmap;
+  bool need_free_bitmap;
+  BlockBitmap(BLOCK_ID id, uint32_t idx, void* mem, bool need_free) : block_id(id), col_idx(idx),
+                                                                      bitmap(mem), need_free_bitmap(need_free) { }
+  ~BlockBitmap() {
+    if (need_free_bitmap) {
+      free(bitmap);
+      bitmap = nullptr;
+    }
+  }
+
+  bool IsNull(uint32_t row_idx) const {
+    if (!bitmap) {
+      return true;
+    }
+    return kwdbts::IsObjectColNull(reinterpret_cast<char*>(bitmap), row_idx);
+  }
+};
+
 // used for aggregate queries
 class TsAggIterator : public TsIterator {
  public:
   TsAggIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                 vector<uint32_t>& entity_ids, vector<KwTsSpan>& ts_spans,
                 std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
-                std::vector<Sumfunctype>& scan_agg_types) :
+                std::vector<Sumfunctype>& scan_agg_types, uint32_t table_version) :
                 TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, kw_scan_cols,
-                           ts_scan_cols), scan_agg_types_(scan_agg_types) {
+                           ts_scan_cols, table_version), scan_agg_types_(scan_agg_types) {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
@@ -311,12 +363,18 @@ class TsAggIterator : public TsIterator {
   // partition table.
   // 2. For last related queries, start traversing from the end of the partition table array, which is the largest
   // partition table.
-  void updateFirstCols(timestamp64 ts, MetricRowID row_id);
-  void updateLastCols(timestamp64 ts, MetricRowID row_id);
-  void updateFirstLastCols(timestamp64 ts, MetricRowID row_id);
+  void updateFirstCols(timestamp64 ts, MetricRowID row_id,
+                       const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+  void updateLastCols(timestamp64 ts, MetricRowID row_id,
+                      const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+  void updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
+                           const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
   KStatus findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts);
   KStatus findLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
   KStatus findFirstLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
+
+  KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
+                         std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
 
   /**
    * @brief Used internally in the Next function, which returns the aggregated result of the most consecutive data in a BlockItem
@@ -333,13 +391,19 @@ class TsAggIterator : public TsIterator {
    *
    * @param segment_tbl     segment table pointer, where stores the continuous piece of data
    * @param start_row       the starting row id of this continuous piece of data
-   * @param ts_col          queried col index
+   * @param col_idx         queried col index
    * @param count           the number of rows in this continuous piece of data
    * @param mem             memory address for storing converted fixed length data
    * @param var_mem         memory address for storing variable length data after conversion
+   * @param bitmap          memory address of bitmap for the data
+   * @param need_free_bitmap need free bitmap if the bitmap address is generated using malloc
    */
-  int getActualColMem(std::shared_ptr<MMapSegmentTable> segment_tbl, size_t start_row, uint32_t ts_col,
-                      k_uint32 count, std::shared_ptr<void>* mem, std::vector<std::shared_ptr<void>>& var_mem);
+  KStatus getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+                                   uint32_t col_idx, k_uint32 count, std::shared_ptr<void>* mem,
+                                   std::vector<std::shared_ptr<void>>& var_mem, void** bitmap, bool& need_free_bitmap);
+
+  KStatus getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+                             uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap);
   /**
    * @brief Used to obtain the actual Batch object for a specific row of data, if a column type conversion occurs,
    *        the corresponding conversion needs to be performed on the row of data first.
@@ -347,10 +411,10 @@ class TsAggIterator : public TsIterator {
    *
    * @param p_bt             partition table pointer, where stores the row of data
    * @param real_row         row id
-   * @param ts_col           queried col index
+   * @param col_idx          queried col index
    * @param b                Batch objects that encapsulate data
    */
-  int getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t ts_col, Batch** b);
+  int getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t col_idx, Batch** b);
 
  private:
   // The aggregation type corresponding to each column.

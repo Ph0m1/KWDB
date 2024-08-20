@@ -394,6 +394,10 @@ DDLAlterEntry::DDLAlterEntry(TS_LSN lsn, WALLogType type, char* data) : DDLEntry
   read_offset += sizeof(object_id_);
   memcpy(&alter_type_, data + read_offset, sizeof(alter_type_));
   read_offset += sizeof(alter_type_);
+  memcpy(&cur_version_, data + read_offset, sizeof(cur_version_));
+  read_offset += sizeof(cur_version_);
+  memcpy(&new_version_, data + read_offset, sizeof(new_version_));
+  read_offset += sizeof(new_version_);
   memcpy(&length_, data + read_offset, sizeof(length_));
 
   data_ = KNEW char[length_];
@@ -420,8 +424,16 @@ TSSlice DDLAlterEntry::getColumnMeta() const {
   return  TSSlice{data_, length_};
 }
 
-WALAlterType DDLAlterEntry::getAlterType() const {
+AlterType DDLAlterEntry::getAlterType() const {
   return alter_type_;
+}
+
+uint32_t DDLAlterEntry::getCurVersion() const {
+  return cur_version_;
+}
+
+uint32_t DDLAlterEntry::getNewVersion() const {
+  return new_version_;
 }
 
 void InsertLogTagsEntry::prettyPrint() {

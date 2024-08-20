@@ -195,6 +195,11 @@ var (
 		"ts.rows_per_block.max_limit",
 		"the maximum number of rows that can be held in a block item",
 		1000)
+
+	autovacuumInterval = settings.RegisterPublicDurationSetting(
+		"ts.autovacuum.interval",
+		"data compaction interval (sec)",
+		0)
 )
 
 // TODO(peter): Until go1.11, ServeMux.ServeHTTP was not safe to call

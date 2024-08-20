@@ -298,6 +298,38 @@ var builtins = map[string]builtinDefinition{
 		},
 	),
 
+	"cast_check_ts": makeBuiltin(tree.FunctionProperties{Category: categoryComparison},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"col", types.String}, {"target_type", types.String}},
+			ReturnType: tree.FixedReturnType(types.Bool),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				typStr := strings.ToLower(string(tree.MustBeDString(args[1])))
+
+				var typ *types.T
+				switch typStr {
+				case "int", "int4", "integer":
+					typ = types.Int4
+				case "int2", "smallint":
+					typ = types.Int2
+				case "int8", "int64", "bigint":
+					typ = types.Int
+				case "float4", "real":
+					typ = types.Float4
+				case "float", "float8", "double", "double precision":
+					typ = types.Float
+				default:
+					return nil, pgerror.Newf(pgcode.WrongObjectType, "invalid type: %s", string(tree.MustBeDString(args[1])))
+				}
+				str := tree.UnwrapDatum(evalCtx, args[0])
+				if _, err := tree.PerformCast(evalCtx, str, typ); err != nil {
+					return tree.DBoolFalse, nil
+				}
+				return tree.DBoolTrue, nil
+			},
+			Info: "cast_check_ts is used for invalidating type cast before altering column/tag type",
+		},
+	),
+
 	// https://www.postgresql.org/docs/10/static/functions-string.html#FUNCTIONS-STRING-OTHER
 	"convert_from": makeBuiltin(tree.FunctionProperties{Category: categoryString},
 		tree.Overload{

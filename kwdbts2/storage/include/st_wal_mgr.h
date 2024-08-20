@@ -179,12 +179,13 @@ class WALMgr {
    * @param ctx
    * @param x_id Mini-transaction ID, default value is 0.
    * @param object_id table ID
-   * @param alter_ype  alter ype
+   * @param alter_type  alter type
    * @param meta  Time-series table new schema
+   * @param new_version  next schema version after succeed
    * @return
    */
   KStatus WriteDDLAlterWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t object_id,
-                           WALAlterType alter_ype, TSSlice& column_meta);
+                           AlterType alter_type, uint32_t cur_version, uint32_t new_version, TSSlice& column_meta);
 
   /**
    * Construct the log entry for the Mini-transaction.

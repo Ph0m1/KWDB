@@ -37,7 +37,7 @@ class TestEntityTableManager : public TestBigTableInstance {
   SubEntityGroupManager* et_manager_;
   vector<AttributeInfo> schema_;
   string tbl_sub_path_;
-  MMapMetricsTable* root_bt_;
+  MMapRootTableManager* root_bt_manager_;
 
   TestEntityTableManager() {
     ctx_ = &context_;
@@ -55,16 +55,12 @@ class TestEntityTableManager : public TestBigTableInstance {
     ErrorInfo err_info;
     {
       MakeDirectory(kDbPath + tbl_sub_path_);
-      vector<string> key = {};
-      string key_order = "";
       int encoding = ENTITY_TABLE | NO_DEFAULT_TABLE;
       MMapMetricsTable* tmp_bt = new MMapMetricsTable();
       string bt_url = nameToEntityBigTableURL(std::to_string(table_id_));
       if (tmp_bt->open(bt_url, kDbPath, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 ||
           err_info.errcode == KWECORR) {
-        tmp_bt->create(schema_, key, key_order, tbl_sub_path_, "", tbl_sub_path_,
-                       s_emptyString, kwdbts::EngineOptions::iot_interval,
-                       encoding, err_info, false);
+        tmp_bt->create(schema_, 1, tbl_sub_path_, kwdbts::EngineOptions::iot_interval, encoding, err_info, false);
       }
       if (err_info.errcode < 0) {
         tmp_bt->setObjectReady();
@@ -72,12 +68,12 @@ class TestEntityTableManager : public TestBigTableInstance {
         delete tmp_bt;
         fprintf(stderr, "createTable fail, table_id[%lu], msg[%s]", table_id_, err_info.errmsg.c_str());
       } else {
-        root_bt_ = tmp_bt;
+        tmp_bt->incRefCount();
+        root_bt_manager_ = new MMapRootTableManager(kDbPath, tbl_sub_path_, table_id_);
+        root_bt_manager_->PutTable(1, tmp_bt);
       }
     }
-
-    root_bt_->incRefCount();
-    et_manager_ = new SubEntityGroupManager(root_bt_);
+    et_manager_ = new SubEntityGroupManager(root_bt_manager_);
     et_manager_->OpenInit(kDbPath, tbl_sub_path_, table_id_, err_info);
     ASSERT_EQ(err_info.errmsg, "");
   }
@@ -85,7 +81,7 @@ class TestEntityTableManager : public TestBigTableInstance {
   virtual void TearDown() {
     delete et_manager_;
     et_manager_ = nullptr;
-    delete root_bt_;
+    delete root_bt_manager_;
   }
 
   ~TestEntityTableManager() {
@@ -121,7 +117,7 @@ TEST_F(TestEntityTableManager, group) {
   // reopen et_manager
   {
     delete et_manager_;
-    et_manager_ = new SubEntityGroupManager(root_bt_);
+    et_manager_ = new SubEntityGroupManager(root_bt_manager_);
     et_manager_->OpenInit(kDbPath, tbl_sub_path_, table_id_, err_info);
   }
   {
@@ -233,7 +229,7 @@ TEST_F(TestEntityTableManager, cache) {
       p_time += iot_interval_;
     }
     {
-      TsTimePartition* tmp = new TsTimePartition(root_bt_, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+      TsTimePartition* tmp = new TsTimePartition(root_bt_manager_, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP); // 测试防止分区MMapMetricsTable使用相同内存地址
       // Test to prevent partition MMapMetricsTable from using the same memory address
       TsTimePartition* p1_tbl = et_manager_->GetPartitionTable(p1_time, group_id, err_info);
       ASSERT_NE(p1_mem, (intptr_t) p1_tbl);

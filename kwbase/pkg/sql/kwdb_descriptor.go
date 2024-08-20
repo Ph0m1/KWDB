@@ -1082,6 +1082,7 @@ var InitWhiteList = []sqlbase.WhiteList{
 	{"substring", 2, []uint32{uint32(oid.T_bpchar), uint32(oid.T_int4)}, PosWhere, true, TypeConstAndColumn},
 	{"substring", 3, []uint32{uint32(oid.T_bpchar), uint32(oid.T_int4), uint32(oid.T_int4)}, PosWhere, true, TypeConstAndColumn},
 	{"upper", 1, []uint32{uint32(oid.T_bpchar)}, PosWhere, true, TypeConstAndColumn},
+	{"cast_check_ts", 2, []uint32{uint32(oid.T_varchar), uint32(oid.T_text)}, PosWhere, true, TypeConstAndColumn},
 	{"concat", 2, []uint32{uint32(oid.T_bpchar), uint32(oid.T_bpchar)}, PosAll, true, TypeConstAndColumn},
 	{"concat", 2, []uint32{uint32(oid.T_bpchar), uint32(types.T_nchar)}, PosAll, true, TypeConstAndColumn},
 	{"concat", 2, []uint32{uint32(oid.T_bpchar), uint32(oid.T_varchar)}, PosAll, true, TypeConstAndColumn},

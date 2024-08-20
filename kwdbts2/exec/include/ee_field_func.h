@@ -245,8 +245,26 @@ class FieldFuncTimeBucket : public FieldFuncOp {
 
   KTimestampTz getOriginalTimestamp() {
     auto val_ptr = args_[0]->get_ptr();
-    return *reinterpret_cast<KTimestampTz*>(val_ptr);
+    return *reinterpret_cast<KTimestampTz *>(val_ptr);
   }
+};
+
+class FieldFuncCastCheckTs : public FieldFunc {
+ public:
+  FieldFuncCastCheckTs(Field *left, Field *right);
+
+  enum Functype functype() override { return Functype::CAST_CHECK_TS; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+
+ private:
+  void CalcDataType();
+
+ private:
+  DATATYPE datatype_{DATATYPE::NO_TYPE};
 };
 
 class FieldFuncCurrentDate : public FieldFunc {
@@ -337,8 +355,8 @@ class FieldFuncExpStrftime : public FieldFunc {
     type_ = FIELD_ARITHMETIC;
     sql_type_ = roachpb::DataType::CHAR;
     storage_type_ = roachpb::DataType::CHAR;
-    if (b -> get_field_type() != FIELD_CONSTANT) {
-      storage_len_ = b -> get_storage_length() * 4;
+    if (b->get_field_type() != FIELD_CONSTANT) {
+      storage_len_ = b->get_storage_length() * 4;
     } else {
       std::string value(b->ValStr().c_str());
       for (int i = 0; i < value.length(); ++i) {
@@ -350,14 +368,14 @@ class FieldFuncExpStrftime : public FieldFunc {
               ++i;
               ++storage_len_;
             } else if (value[i] == 'y' || value[i] == 'm' || value[i] == 'd' ||
-                value[i] == 'H' || value[i] == 'I' || value[i] == 'p' ||
-                value[i] == 'M' || value[i] == 'S' || value[i] == 'U' ||
-                value[i] == 'W' || value[i] == 'e' || value[i] == 'g' ||
-                value[i] == 'V') {
+                       value[i] == 'H' || value[i] == 'I' || value[i] == 'p' ||
+                       value[i] == 'M' || value[i] == 'S' || value[i] == 'U' ||
+                       value[i] == 'W' || value[i] == 'e' || value[i] == 'g' ||
+                       value[i] == 'V') {
               ++i;
               storage_len_ += 2;
             } else if (value[i] == 'a' || value[i] == 'b' || value[i] == 'Z' ||
-                value[i] == 'j' || value[i] == 'h' ) {
+                       value[i] == 'j' || value[i] == 'h') {
               ++i;
               storage_len_ += 3;
             } else if (value[i] == 't' || value[i] == 'Y' || value[i] == 'G') {
@@ -370,7 +388,7 @@ class FieldFuncExpStrftime : public FieldFunc {
               ++i;
               storage_len_ += 6;
             } else if (value[i] == 'D' || value[i] == 'T' || value[i] == 'x' ||
-                value[i] == 'X') {
+                       value[i] == 'X') {
               ++i;
               storage_len_ += 8;
             } else if (value[i] == 'A' || value[i] == 'B') {
@@ -675,22 +693,22 @@ class FieldFuncCoalesce : public FieldFunc {
     sql_type_ = a->get_sql_type();
 
     switch (a->get_storage_type()) {
-    case roachpb::DataType::SMALLINT:
-    case roachpb::DataType::INT:
-    case roachpb::DataType::BIGINT:
-      storage_type_ = roachpb::DataType::BIGINT;
-      storage_len_ =  sizeof(k_int64);
-      break;
-    case roachpb::DataType::FLOAT:
-    case roachpb::DataType::DOUBLE:
-      storage_type_ = roachpb::DataType::DOUBLE;
-      storage_len_ = sizeof(k_double64);
-      break;
-    default:
-      storage_type_ = a->get_storage_type();
-      storage_len_ = a->get_storage_length();
-    break;
-  }
+      case roachpb::DataType::SMALLINT:
+      case roachpb::DataType::INT:
+      case roachpb::DataType::BIGINT:
+        storage_type_ = roachpb::DataType::BIGINT;
+        storage_len_ = sizeof(k_int64);
+        break;
+      case roachpb::DataType::FLOAT:
+      case roachpb::DataType::DOUBLE:
+        storage_type_ = roachpb::DataType::DOUBLE;
+        storage_len_ = sizeof(k_double64);
+        break;
+      default:
+        storage_type_ = a->get_storage_type();
+        storage_len_ = a->get_storage_length();
+        break;
+    }
   }
 
   enum Functype functype() override { return COALESCE_FUNC; }

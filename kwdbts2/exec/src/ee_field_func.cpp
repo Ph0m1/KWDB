@@ -23,6 +23,7 @@
 #include "ee_field_common.h"
 #include "ee_fnv.h"
 #include "ee_global.h"
+#include "ts_time_partition.h"
 #include "pgcode.h"
 
 namespace kwdbts {
@@ -758,6 +759,48 @@ k_bool FieldFuncTimeBucket::field_is_nullable() {
   return false;
 }
 
+FieldFuncCastCheckTs::FieldFuncCastCheckTs(Field *left, Field *right)
+    : FieldFunc(left, right) {
+  sql_type_ = roachpb::DataType::BOOL;
+  storage_type_ = roachpb::DataType::BOOL;
+  storage_len_ = sizeof(k_bool);
+  CalcDataType();
+}
+
+k_int64 FieldFuncCastCheckTs::ValInt() {
+  String str = args_[0]->ValStr();
+  ErrorInfo err;
+  int ret = TsTimePartition::tryAlterType({str.ptr_, str.length_}, datatype_, err);
+  return 0 == ret ? 1 : 0;
+}
+
+k_double64 FieldFuncCastCheckTs::ValReal() { return ValInt(); }
+
+String FieldFuncCastCheckTs::ValStr() { return String(); }
+
+Field *FieldFuncCastCheckTs::field_to_copy() {
+  FieldFuncCastCheckTs *field = new FieldFuncCastCheckTs(*this);
+
+  return field;
+}
+
+void FieldFuncCastCheckTs::CalcDataType() {
+  String str = args_[1]->ValStr();
+  if (0 == str.compare("int2", strlen("int2")) || 0 == str.compare("smallint", strlen("smallint"))) {
+    datatype_ = DATATYPE::INT16;
+  } else if (0 == str.compare("int4", strlen("int4")) || 0 == str.compare("int", strlen("int"))
+                        || 0 == str.compare("integer", strlen("integer"))) {
+    datatype_ = DATATYPE::INT32;
+  } else if (0 == str.compare("int8", strlen("int8")) || 0 == str.compare("bigint", strlen("bigint")) ||
+                        0 == str.compare("int64", strlen("int64"))) {
+    datatype_ = DATATYPE::INT64;
+  } else if (0 == str.compare("real", strlen("real")) || 0 == str.compare("float4", strlen("float4"))) {
+    datatype_ = DATATYPE::FLOAT;
+  } else {
+    datatype_ = DATATYPE::DOUBLE;
+  }
+}
+
 k_int64 FieldFuncCurrentDate::ValInt() {
   time_t t = time(nullptr);
   struct tm ltm;
@@ -1144,7 +1187,8 @@ String FieldFuncExpStrftime::ValStr() {
   try {
     std::strftime(
         s.ptr_, kArraySize,
-        std::string(args_[1]->ValStr().getptr(), args_[1]->ValStr().length_).c_str(),
+        std::string(args_[1]->ValStr().getptr(), args_[1]->ValStr().length_)
+            .c_str(),
         &ltm);
   } catch (const std::exception &e) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_DATETIME_FORMAT,

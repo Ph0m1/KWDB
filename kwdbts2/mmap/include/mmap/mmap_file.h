@@ -114,4 +114,6 @@ class MMapFile {
   void setFlags(int flags) { flags_ = flags; }
 
   bool readOnly() const { return !(flags_ & O_RDWR); }
+
+  void copyMember(MMapFile& other);
 };

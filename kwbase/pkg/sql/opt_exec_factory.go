@@ -192,7 +192,8 @@ func (ef *execFactory) ConstructTSScan(
 
 	// Convert logical column ID  in ScanAggs of memo.TSScanExpr into physical column ID and bind them to tsScanNode.
 	for _, v := range private.ScanAggs {
-		physicsID := private.Table.ColumnOrdinal(v.ParamColID) + 1
+		physicsIdx := private.Table.ColumnOrdinal(v.ParamColID)
+		physicsID := int(table.Column(physicsIdx).ColID())
 		scanAgg := ScanAgg{ColID: physicsID, AggTyp: v.AggSpecTyp}
 		tsScan.ScanAggArray = append(tsScan.ScanAggArray, scanAgg)
 	}

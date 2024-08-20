@@ -29,7 +29,7 @@ KStatus TsTableSnapshot::Init(kwdbContext_p ctx) {
   // construct snapshot file name
   string snapshot_str = to_string(hash_range.range_group_id) + "_" + to_string(snapshot_info_.id);
   string range_tbl_sub_path = tbl_sub_path_ + snapshot_str +  + "/";
-  snapshot_group_ = new TsEntityGroup(ctx, entity_bt_, db_path_, table_id_, hash_range, range_tbl_sub_path);
+  snapshot_group_ = new TsEntityGroup(ctx, entity_bt_manager_, db_path_, table_id_, hash_range, range_tbl_sub_path);
 
   if (snapshot_info_.type == 0) {
     // type = 0, create new snapshot and its directory in source node
@@ -56,7 +56,7 @@ KStatus TsTableSnapshot::Init(kwdbContext_p ctx) {
       return KStatus::FAIL;
     }
   }
-  schema_ = entity_bt_->getSchemaInfoWithHidden();
+  schema_ = entity_bt_manager_->GetSchemaInfoWithHidden();
   return KStatus::SUCCESS;
 }
 
@@ -69,9 +69,12 @@ KStatus TsTableSnapshot::BuildSnapshot(kwdbContext_p ctx, TS_LSN lsn) {
     return s;
   }
 
+  KTimestamp start_ts = INT64_MIN;
+  KTimestamp end_ts = INT64_MAX;
+  KwTsSpan ts_span = {start_ts, end_ts };
   for (uint32_t row_num : tag_row_nums_) {
     // construct payload and write into snapshot
-    s = genMigratePayloadByBuilder(ctx, row_num);
+    s = genMigratePayloadByBuilder(ctx, row_num, ts_span);
     if (s == KStatus::FAIL) {
       LOG_ERROR("MigrateEntityData failed, range_group_id=%lu", snapshot_group_->HashRange().range_group_id);
       return s;
@@ -207,6 +210,181 @@ KStatus TsTableSnapshot::Apply() {
   return KStatus::SUCCESS;
 }
 
+KStatus TsTableSnapshot::PrepareCompactData(kwdbContext_p ctx,
+                          std::map<SubGroupID, std::map<timestamp64, std::map<uint32_t, BLOCK_ID>>> &obsolete_max_block,
+                          std::map<SubGroupID, std::map<timestamp64, std::vector<BLOCK_ID>>> &obsolete_segment_ids,
+                          std::map<SubGroupID, std::vector<uint32_t>> &subgroup_row,
+                          std::map<SubGroupID, std::vector<KwTsSpan>> &subgroup_ts_span) {
+  snapshot_mutex_.lock();
+  Defer defer{[&]() {
+    snapshot_mutex_.unlock();
+  }};
+
+  ErrorInfo err_info;
+  KStatus s;
+  auto entity_tag_bt = entity_group_->GetSubEntityGroupTagbt();
+  if (entity_tag_bt == nullptr) {
+    LOG_ERROR("openMMapTagColumnBigTable error : %s" , err_info.errmsg.c_str());
+    return KStatus::FAIL;
+  }
+
+  SubEntityGroupManager* ebt_manager = entity_group_->GetSubEntityGroupManager();
+  auto ts_span = KwTsSpan{snapshot_info_.partition_ts.begin/1000, snapshot_info_.partition_ts.end/1000};
+
+  for (size_t row_num = 1; ; row_num++) {
+    // Get all tag rows in the range to be reorganized, and find out them belong to which subgroup
+    // Don't check row_num in for loop statement!!! Because entity_tag_bt->size() may be changed when processing for loop,
+    // and the compiler optimizes the size to the value it was when the for loop statement was first executed.
+    if (row_num > entity_tag_bt->size()) {
+      break;
+    }
+
+    uint64_t tag_hash = TsTable::GetConsistentHashId(reinterpret_cast<char*>(entity_tag_bt->record(row_num)),
+                                                     entity_tag_bt->primaryTagSize());
+    if (tag_hash < snapshot_info_.begin_hash || tag_hash > snapshot_info_.end_hash) {
+      continue;  // not in compaction range
+    }
+    std::vector<kwdbts::EntityResultIndex> entity_id_list;
+    entity_tag_bt->getEntityIdByRownum(row_num, &entity_id_list);
+    if (entity_id_list.empty()) {
+      LOG_ERROR("getEntityIdByRownum failed during PrepareCompactData");
+      return KStatus::FAIL;
+    }
+    SubGroupID subgroup_id = entity_id_list[0].subGroupId;
+    EntityID entity_id = entity_id_list[0].entityId;
+    subgroup_row[subgroup_id].push_back(row_num);  // for BuildCompactData
+
+    std::vector<TsTimePartition*> p_bts = ebt_manager->GetPartitionTables(ts_span, subgroup_id, err_info);
+    if (err_info.errcode < 0) {
+      return KStatus::FAIL;
+    }
+    for (TsTimePartition *p_bt : p_bts) {
+      timestamp64 ts = p_bt->minTimestamp();
+      timestamp64 max_ts = p_bt->maxTimestamp();
+
+      // when interval is altered, skip this partition
+      if (p_bt->PartitionInterval() != entity_bt_manager_->GetPartitionInterval()) {
+        EntityItem *entity = p_bt->getEntityItem(entity_id);
+        entity->is_disordered = false;
+        ebt_manager->ReleasePartitionTable(p_bt);
+        continue;
+      }
+      // this subgroup + partition is not set status
+      if (obsolete_segment_ids[subgroup_id].find(ts) == obsolete_segment_ids[subgroup_id].end()
+          && (snapshot_info_.partition_ts.begin <= ts * 1000 && snapshot_info_.partition_ts.end >= max_ts * 1000)
+          && p_bt->NeedCompaction(entity_id)) {
+        p_bt->CompactingStatus(obsolete_max_block[subgroup_id][ts], obsolete_segment_ids[subgroup_id][ts]);
+        if (obsolete_max_block[subgroup_id][ts].empty()) {
+          obsolete_max_block[subgroup_id].erase(ts);
+        }
+        if (obsolete_segment_ids[subgroup_id][ts].empty()) {
+          obsolete_segment_ids[subgroup_id].erase(ts);
+        } else {
+          subgroup_ts_span[subgroup_id].push_back(KwTsSpan {ts * 1000, max_ts * 1000});
+        }
+      }
+      ebt_manager->ReleasePartitionTable(p_bt);
+    }
+
+    if (obsolete_segment_ids[subgroup_id].empty()) {
+      obsolete_segment_ids.erase(subgroup_id);
+    }
+    if (obsolete_max_block[subgroup_id].empty()) {
+      obsolete_max_block.erase(subgroup_id);
+    }
+
+    // tag row is invalid, continue
+  }
+  return KStatus::SUCCESS;
+}
+
+// refer to BuildSnapshot
+KStatus TsTableSnapshot::BuildCompactData(kwdbContext_p ctx, std::vector<uint32_t> &tag_rows,
+                                          std::vector<KwTsSpan> &partition_ts) {
+  snapshot_mutex_.lock();
+  for (unsigned int row_num : tag_rows) {
+    // Split ts_span, data reorganization takes place only within one time partition
+    for (KwTsSpan &ts_span : partition_ts) {
+      KStatus s = genMigratePayloadByBuilder(ctx, row_num, ts_span);
+      if (s == KStatus::FAIL) {
+        LOG_ERROR("Compaction failed, range_group_id=%lu", snapshot_group_->HashRange().range_group_id);
+        snapshot_mutex_.unlock();
+        return s;
+      }
+    }
+  }
+  snapshot_mutex_.unlock();
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTableSnapshot::ApplyCompactData(kwdbContext_p ctx, SubGroupID entity_group_subgroup_id,
+                                          std::map<timestamp64, std::map<uint32_t, BLOCK_ID>> &obsolete_max_block,
+                                          std::map<timestamp64, std::vector<BLOCK_ID>> &obsolete_segment_ids) {
+  if (!snapshot_info_.reorder) {
+    return KStatus::FAIL;
+  }
+
+  KStatus s;
+  ErrorInfo err_info;
+  snapshot_mutex_.lock();
+  Defer defer{[&]() {
+    snapshot_mutex_.unlock();
+  }};
+
+  // map[partition_ts][entity_id of source table] {blockItems}
+  std::map<timestamp64, std::map<uint32_t, std::deque<BlockItem*>>> compacted_block_items;
+
+  KwTsSpan ts_span = KwTsSpan{snapshot_info_.partition_ts.begin/1000, snapshot_info_.partition_ts.end/1000};
+  SubEntityGroupManager *snapshot_manager = snapshot_group_->GetSubEntityGroupManager();
+
+  auto snapshot_tag_bt = snapshot_group_->GetSubEntityGroupTagbt();
+  SubGroupID snapshot_subgroup_id = 0;
+  // Get block items from snapshot, and use entity_id from source table as key in compacted_block_items
+  for (size_t row_num = 1; row_num <= snapshot_tag_bt->size(); row_num++) {
+    TSSlice primary_tag {reinterpret_cast<char*>(snapshot_tag_bt->record(row_num)), snapshot_tag_bt->primaryTagSize()};
+    EntityID snapshot_entity_id = 0;
+    if (snapshot_tag_bt->getEntityIdGroupId(primary_tag.data, primary_tag.len,
+                                            snapshot_entity_id, snapshot_subgroup_id) < 0) {
+      return KStatus::FAIL;
+    }
+
+    EntityID entity_id = 0;
+    SubGroupID subgroup_id = 0;  // retrieved subgroup_id should be equal to entity_group_subgroup_id
+    if (entity_group_->GetSubEntityGroupTagbt()->getEntityIdGroupId(primary_tag.data, primary_tag.len,
+                                                                    entity_id, subgroup_id) < 0) {
+      continue;  // this tag could be deleted
+    }
+
+    std::vector<TsTimePartition*> p_bts = snapshot_manager->GetPartitionTables(ts_span, snapshot_subgroup_id, err_info);
+    for (auto p_bt : p_bts) {
+      std::deque<BlockItem*> block_item_queue;
+      p_bt->GetAllBlockItems(snapshot_entity_id, block_item_queue);
+      if (!block_item_queue.empty()) {
+        compacted_block_items[p_bt->minTimestamp()][entity_id] = block_item_queue;
+      }
+      ReleaseTable(p_bt);
+    }
+  }
+
+  string entity_group_dir = db_path_ + std::to_string(table_id_) + "/"
+                            + std::to_string(entity_group_->HashRange().range_group_id);
+
+  string snapshot_dir = entity_group_dir + "_" + std::to_string(snapshot_info_.id);
+
+  string snapshot_part_dir = snapshot_dir + "/" + std::to_string(table_id_) + "_" + std::to_string(snapshot_subgroup_id);
+
+  TsSubEntityGroup *subgroup = entity_group_->GetSubEntityGroupManager()->GetSubGroup(entity_group_subgroup_id, err_info);
+  if (err_info.errcode < 0) {
+    return KStatus::FAIL;
+  }
+  if (subgroup->ApplyCompactData(obsolete_max_block, obsolete_segment_ids, compacted_block_items, snapshot_part_dir) < 0) {
+    LOG_ERROR("ApplyCompactData fail, snapshot subgroup %u", snapshot_subgroup_id);
+    return KStatus::FAIL;
+  }
+
+  return KStatus::SUCCESS;
+}
+
 KStatus TsTableSnapshot::DropAll() {
   KString dir_path = db_path_ + tbl_sub_path_ + to_string(snapshot_group_->HashRange().range_group_id) + "_" +
                      to_string(snapshot_info_.id);
@@ -225,6 +403,7 @@ KStatus TsTableSnapshot::DropAll() {
 
 KStatus TsTableSnapshot::getMigratedTagRows() {
   ErrorInfo err_info;
+  tag_row_nums_.clear();  // clear it before push_back
   // get tag table from original ts table
   auto entity_tag_bt = entity_group_->GetSubEntityGroupTagbt();
   if (entity_tag_bt == nullptr) {
@@ -255,7 +434,7 @@ KStatus TsTableSnapshot::getMigratedTagRows() {
 KStatus TsTableSnapshot::applyTagData(int row_id, const EntityID& entity_id, const SubGroupID& subgroup_id) {
   ErrorInfo err_info;
   std::vector<TagColumn*> tag_attribute_info = entity_group_->GetSubEntityGroupTagbt()->getSchemaInfo();
-  vector<AttributeInfo> metrics_attribute_info = entity_bt_->getSchemaInfoWithoutHidden();
+  vector<AttributeInfo> metrics_attribute_info = entity_bt_manager_->GetSchemaInfoWithoutHidden();
 
   ResultSet tag_res{(k_uint32)tag_attribute_info.size()};
   std::vector<uint32_t> scan_tags;
@@ -348,20 +527,15 @@ KStatus TsTableSnapshot::applyEntityData(uint32_t& subgroup_id, SubGroupID& snap
       TsTimePartition* snapshot_partition_bt = snapshot_subgroup->GetPartitionTable(ts, err_info);
       ReleaseTable(snapshot_partition_bt);
 
-      // update root table's min/max timestamp
-      if (ts < entity_bt_->minTimestamp() || entity_bt_->minTimestamp() == 0) {
-        entity_bt_->minTimestamp() = ts;
-      }
-      if (ts > entity_bt_->maxTimestamp()) {
-        entity_bt_->maxTimestamp() = ts;
-      }
+      // update root table's partition interval
+      entity_bt_manager_->SetPartitionInterval(p_bt->PartitionInterval());
     }
   }
   closedir(dir_ptr);
   return KStatus::SUCCESS;
 }
 
-KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t row_id) {
+KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t row_id, KwTsSpan ts_span) {
   ErrorInfo err_info;
   std::vector<kwdbts::EntityResultIndex> entity_id_list;
   // Get the entity information corresponding to the primary tag of the specified row_id
@@ -373,24 +547,23 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
   }
 
   std::vector<k_uint32> scan_cols;
-  vector<AttributeInfo> metrics_attribute_info = entity_bt_->getSchemaInfoWithoutHidden();
+  uint32_t table_version = entity_bt_manager_->GetCurrentTableVersion();
+  vector<AttributeInfo> metrics_attribute_info = entity_bt_manager_->GetSchemaInfoWithoutHidden(table_version);
   k_uint32 num_col = metrics_attribute_info.size();
-  auto actual_cols = entity_bt_->getColsIdxForHidden();
+  auto actual_cols = entity_bt_manager_->GetColsIdx(table_version);
   std::vector<k_uint32> ts_scan_cols;
   for (int i = 0; i < num_col; i++) {
     scan_cols.push_back(i);
     ts_scan_cols.emplace_back(actual_cols[i]);
   }
 
-  KTimestamp start_ts = INT64_MIN;
-  KTimestamp end_ts = INT64_MAX;
-  KwTsSpan ts_span = {start_ts, end_ts };
   // scan_agg_types should be updated when a new aggregate function is supported
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   // use iterator to read data from source entity group
   KStatus s = entity_group_->GetIterator(ctx, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                         {ts_span}, scan_cols, ts_scan_cols, scan_agg_types, &iter, entity_group_);
+                                         {ts_span}, scan_cols, ts_scan_cols, scan_agg_types,  table_version, &iter,
+                                         entity_group_, snapshot_info_.reorder, snapshot_info_.reorder);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("GetIterator failed during build snapshot, subgroup_id[%u], entity_id[%u], snapshot_id[%lu]",
               entity_id_list[0].subGroupId, entity_id_list[0].entityId, snapshot_info_.id);
@@ -492,7 +665,7 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
       }
       // construct payload
       TSSlice payload_data;
-      if (!pl_builder.Build(&payload_data)) {
+      if (!pl_builder.Build(&payload_data, table_version)) {
         LOG_ERROR("Payload build failed when build snapshot, snapshot id[%lu].", snapshot_info_.id);
         return KStatus::FAIL;
       }

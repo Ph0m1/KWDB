@@ -63,13 +63,15 @@ bool ChangeSumType(DATATYPE type, void* base, void** new_base) {
 
 TsIterator::TsIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                        vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
-                       std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols)
+                       std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
+                       uint32_t table_version)
                        : entity_group_id_(entity_group_id),
                          subgroup_id_(subgroup_id),
                          entity_ids_(entity_ids),
                          ts_spans_(ts_spans),
                          kw_scan_cols_(kw_scan_cols),
                          ts_scan_cols_(ts_scan_cols),
+                         table_version_(table_version),
                          entity_group_(entity_group) {
   entity_group_->RdDropLock();
 }
@@ -98,7 +100,7 @@ KStatus TsIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed)
     reverse(p_bts_.begin(), p_bts_.end());
   }
   if (!p_bts_.empty()) {
-    attrs_ = (*p_bts_.begin())->hierarchyInfo();
+    attrs_ = (*p_bts_.begin())->getSchemaInfo(table_version_);
   }
   if (cur_entity_idx_ < entity_ids_.size()) {
     cur_entity_id_ = entity_ids_[cur_entity_idx_];
@@ -182,6 +184,11 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
                 cur_block_item_->block_id, cur_pt->GetPath().c_str());
       return FAIL;
     }
+    if (segment_tbl->schemaVersion() > table_version_) {
+      cur_blockdata_offset_ = 1;
+      nextBlockItem(cur_entity_id_);
+      continue;
+    }
     if (nullptr == segment_iter_ || segment_iter_->segment_id() != segment_tbl->segment_id()) {
       if (segment_iter_ != nullptr) {
         delete segment_iter_;
@@ -219,10 +226,14 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     // If the data has been queried through the sequential reading optimization process, assemble Batch and return it;
     // Otherwise, traverse the data within the current BlockItem one by one,
     // and return the maximum number of consecutive data that meets the condition.
+    KStatus s;
     if (has_data) {
-      segment_iter_->GetBatch(cur_block_item_, first_row, res, *count);
+      s = segment_iter_->GetBatch(cur_block_item_, first_row, res, *count);
     } else {
-      segment_iter_->Next(cur_block_item_, &cur_blockdata_offset_, res, count);
+      s = segment_iter_->Next(cur_block_item_, &cur_blockdata_offset_, res, count);
+    }
+    if (s != KStatus::SUCCESS) {
+      return s;
     }
     // If the data query within the current BlockItem is completed, switch to the next block.
     if (cur_blockdata_offset_ > cur_block_item_->publish_row_count) {
@@ -240,7 +251,8 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
 }
 
 // Used to update the value of the first/first_row member variable during the traversal process
-void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id) {
+void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id,
+                                    const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   TsTimePartition* cur_pt = p_bts_[cur_first_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
@@ -249,10 +261,15 @@ void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id) {
   }
 
   for (auto& it : first_pairs_) {
+    auto bitmap = bitmaps.find(it.first);
+    if (bitmap == bitmaps.end()) {
+      continue;
+    }
     timestamp64 first_ts = it.second.second.first;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and
     // is non-empty, update it.
-    if ((first_ts == INVALID_TS || first_ts > ts) && !segment_tbl->isNullValue(row_id, it.first)) {
+    if ((first_ts == INVALID_TS || first_ts > ts) &&
+         !bitmap->second->IsNull(row_id.offset_row - 1)) {
       it.second = {cur_first_idx_, {ts, row_id}};
     }
   }
@@ -264,7 +281,8 @@ void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id) {
 }
 
 // Used to update the value of the last/last_row member variable during the traversal process
-void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id) {
+void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id,
+                                   const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   TsTimePartition* cur_pt = p_bts_[cur_last_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
@@ -273,10 +291,15 @@ void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id) {
   }
 
   for (auto& it : last_pairs_) {
+    auto bitmap = bitmaps.find(it.first);
+    if (bitmap == bitmaps.end()) {
+      continue;
+    }
     timestamp64 last_ts = it.second.second.first;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts == INVALID_TS || last_ts < ts) && !segment_tbl->isNullValue(row_id, it.first)) {
+    if ((last_ts == INVALID_TS || last_ts < ts) &&
+        !bitmap->second->IsNull(row_id.offset_row - 1)) {
       it.second = {cur_last_idx_, {ts, row_id}};
     }
   }
@@ -288,7 +311,9 @@ void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id) {
 }
 
 // Used to update the value of the last/last_row member variable during the traversal process
-void TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id) {
+void
+TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
+                                   const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
@@ -297,18 +322,28 @@ void TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id) {
   }
 
   for (auto& it : first_pairs_) {
+    auto bitmap = bitmaps.find(it.first);
+    if (bitmap == bitmaps.end()) {
+      continue;
+    }
     timestamp64 first_ts = it.second.second.first;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and is
     // non-empty, update it.
-    if ((first_ts == INVALID_TS || first_ts > ts) && !segment_tbl->isNullValue(row_id, it.first)) {
+    if ((first_ts == INVALID_TS || first_ts > ts) &&
+        !bitmap->second->IsNull(row_id.offset_row - 1)) {
       it.second = {cur_p_bts_idx_, {ts, row_id}};
     }
   }
   for (auto& it : last_pairs_) {
+    auto bitmap = bitmaps.find(it.first);
+    if (bitmap == bitmaps.end()) {
+      continue;
+    }
     timestamp64 last_ts = it.second.second.first;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts == INVALID_TS || last_ts < ts) && !segment_tbl->isNullValue(row_id, it.first)) {
+    if ((last_ts == INVALID_TS || last_ts < ts) &&
+        !bitmap->second->IsNull(row_id.offset_row - 1)) {
       it.second = {cur_p_bts_idx_, {ts, row_id}};
     }
   }
@@ -357,6 +392,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
     timestamp64 min_entity_ts = entity_item->min_ts;
     while (!block_item_queue_.empty()) {
       BlockItem* block_item = block_item_queue_.front();
+      cur_block_item_ = block_item;
       block_item_queue_.pop_front();
       if (!block_item || !block_item->publish_row_count) {
         continue;
@@ -379,6 +415,11 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
         continue;
       }
       bool has_found = false;
+      // save bitmap for all blocks, the first map key is col index
+      std::map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
+      if (getBlockBitmap(segment_tbl, block_item, bitmaps) != KStatus::SUCCESS) {
+        return KStatus::FAIL;
+      }
       // Traverse all data of this BlockItem
       uint32_t cur_row_offset = 1;
       while (cur_row_offset <= block_item->publish_row_count) {
@@ -395,7 +436,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
           continue;
         }
         // Update variables that record the query results of first/first_row
-        updateFirstCols(cur_ts, real_row);
+        updateFirstCols(cur_ts, real_row, bitmaps);
         // If all queried columns and their corresponding query types already have results,
         // and the timestamp of the updated data is equal to the minimum timestamp of the entity, then the query can end.
         if (hasFoundFirstAggData() && cur_ts == min_entity_ts) {
@@ -416,25 +457,25 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
   // The data traversal is completed, and the variable of the first/first_row query result updated by the
   // updateFirstCols function is encapsulated as Batch and added to res to be returned to the execution layer.
   for (k_uint32 i = 0; i < scan_agg_types_.size(); ++i) {
-    k_int32 ts_col = -1;
+    k_int32 col_idx = -1;
     if (i < ts_scan_cols_.size()) {
-      ts_col = ts_scan_cols_[i];
+      col_idx = ts_scan_cols_[i];
     }
-    if (ts_col < 0) {
+    if (col_idx < 0) {
       continue;
     }
     switch (scan_agg_types_[i]) {
       case FIRST: {
         Batch* b;
-        k_int32 pt_idx = first_pairs_[ts_col].first;
+        k_int32 pt_idx = first_pairs_[col_idx].first;
         // Read the first_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[ts_col].second.second;
-          timestamp64 first_ts = first_pairs_[ts_col].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+          MetricRowID real_row = first_pairs_[col_idx].second.second;
+          timestamp64 first_ts = first_pairs_[col_idx].second.first;
+          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
             return FAIL;
@@ -445,11 +486,11 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
       }
       case FIRSTTS: {
         Batch* b;
-        k_int32 pt_idx = first_pairs_[ts_col].first;
+        k_int32 pt_idx = first_pairs_[col_idx].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[ts_col].second.second;
+          MetricRowID real_row = first_pairs_[col_idx].second.second;
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -478,15 +519,24 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
                       real_row.block_id, cur_pt->GetPath().c_str());
             return KStatus::FAIL;;
           }
-          if (segment_tbl->isNullValue(real_row, ts_col)) {
+          void* bitmap = nullptr;
+          bool need_free_bitmap = false;
+          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
+                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
+            return KStatus::FAIL;
+          }
+          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
             std::shared_ptr<void> first_row_data(nullptr);
             b = new AggBatch(first_row_data, 1, nullptr);
           } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
             if (err_code < 0) {
               LOG_ERROR("getActualColBatch failed.");
               return FAIL;
             }
+          }
+          if (need_free_bitmap) {
+            free(bitmap);
           }
         }
         res->push_back(i, b);
@@ -556,6 +606,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
     timestamp64 max_entity_ts = entity_item->max_ts;
     while (!block_item_queue_.empty()) {
       BlockItem* block_item = block_item_queue_.back();
+      cur_block_item_ = block_item;
       block_item_queue_.pop_back();
       if (!block_item || !block_item->publish_row_count) {
         continue;
@@ -579,6 +630,11 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
         continue;
       }
       bool has_found = false;
+      // save bitmap for all blocks, the first map key is col index
+      std::map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
+      if (getBlockBitmap(segment_tbl, block_item, bitmaps) != KStatus::SUCCESS) {
+        return KStatus::FAIL;
+      }
       // Traverse all data of this BlockItem
       uint32_t cur_row_offset = block_item->publish_row_count;
       while (cur_row_offset > 0) {
@@ -595,7 +651,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
           continue;
         }
         // Update variables that record the query results of last/last_row
-        updateLastCols(cur_ts, real_row);
+        updateLastCols(cur_ts, real_row, bitmaps);
         // If all queried columns and their corresponding query types already have query results,
         // and the timestamp of the updated data is equal to the maximum timestamp of the entity, then the query can end.
         if (hasFoundLastAggData() && cur_ts == max_entity_ts) {
@@ -615,25 +671,25 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
   // The data traversal is completed, and the variables of the last/last_row query result updated by the
   // updateLastCols function are encapsulated as Batch and added to res to be returned to the execution layer.
   for (k_uint32 i = 0; i < scan_agg_types_.size(); ++i) {
-    k_int32 ts_col = -1;
+    k_int32 col_idx = -1;
     if (i < ts_scan_cols_.size()) {
-      ts_col = ts_scan_cols_[i];
+      col_idx = ts_scan_cols_[i];
     }
-    if (ts_col < 0) {
+    if (col_idx < 0) {
       continue;
     }
     switch (scan_agg_types_[i]) {
       case LAST: {
         Batch* b;
-        k_int32 pt_idx = last_pairs_[ts_col].first;
+        k_int32 pt_idx = last_pairs_[col_idx].first;
         //  Read the last_pairs_ result recorded during the traversal process.
         //  If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[ts_col].second.second;
-          timestamp64 last_ts = last_pairs_[ts_col].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+          MetricRowID real_row = last_pairs_[col_idx].second.second;
+          timestamp64 last_ts = last_pairs_[col_idx].second.first;
+          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
             return FAIL;
@@ -644,11 +700,11 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
       }
       case LASTTS: {
         Batch* b;
-        k_int32 pt_idx = last_pairs_[ts_col].first;
+        k_int32 pt_idx = last_pairs_[col_idx].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[ts_col].second.second;
+          MetricRowID real_row = last_pairs_[col_idx].second.second;
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -677,15 +733,24 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
                       real_row.block_id, cur_pt->GetPath().c_str());
             return FAIL;
           }
-          if (segment_tbl->isNullValue(real_row, ts_col)) {
+          void* bitmap = nullptr;
+          bool need_free_bitmap = false;
+          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
+                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
+            return KStatus::FAIL;
+          }
+          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
             std::shared_ptr<void> last_row_data(nullptr);
             b = new AggBatch(last_row_data, 1, nullptr);
           } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
             if (err_code < 0) {
               LOG_ERROR("getActualColBatch failed.");
               return FAIL;
             }
+          }
+          if (need_free_bitmap) {
+            free(bitmap);
           }
         }
         res->push_back(i, b);
@@ -734,12 +799,38 @@ KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timest
   return SUCCESS;
 }
 
+KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
+                                      std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+  for (auto& col_idx : ts_scan_cols_) {
+    auto it = bitmaps.find(col_idx);
+    if (it != bitmaps.end()) {
+      continue;
+    }
+    if (!segment_tbl->isColExist(col_idx)) {
+      bitmaps[col_idx] = std::make_shared<BlockBitmap>(block_item->block_id, col_idx, nullptr, false);
+      continue;
+    }
+    AttributeInfo actual_col = segment_tbl->GetColInfo(col_idx);
+    void* bitmap = segment_tbl->columnNullBitmapAddr(block_item->block_id, col_idx);
+    bool need_free_bitmap = false;
+    if (!isSameType(actual_col, attrs_[col_idx])) {
+      auto s = getActualColBitmap(segment_tbl, block_item->block_id, 1, col_idx, block_item->publish_row_count,
+                                  &bitmap, need_free_bitmap);
+      if (s != KStatus::SUCCESS) {
+        return KStatus::FAIL;
+      }
+    }
+    bitmaps[col_idx] = std::make_shared<BlockBitmap>(block_item->block_id, col_idx, bitmap, need_free_bitmap);
+  }
+  return KStatus::SUCCESS;
+}
+
 KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().agg_blocks);
   *count = 0;
   while (true) {
     if (!cur_block_item_) {
-      if ( nextBlockItem(cur_entity_id_) < 0 ) {
+      if (nextBlockItem(cur_entity_id_) < 0) {
         break;
       }
       continue;
@@ -761,6 +852,17 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     if (segment_tbl == nullptr) {
       LOG_ERROR("Can not find segment use block [%d], in path [%s]",
                 cur_block->block_id, cur_pt->GetPath().c_str());
+      return KStatus::FAIL;
+    }
+    if (segment_tbl->schemaVersion() > table_version_) {
+      cur_blockdata_offset_ = 1;
+      nextBlockItem(cur_entity_id_);
+      continue;
+    }
+
+    // save bitmap for all blocks, the first map key is col index
+    std::map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
+    if (getBlockBitmap(segment_tbl, cur_block, bitmaps) != KStatus::SUCCESS) {
       return KStatus::FAIL;
     }
     bool has_data = false;
@@ -815,7 +917,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
         first_row = cur_blockdata_offset_;
       }
       // Continuously updating member variables that record first/last/first_row/last_row results during data traversal.
-      updateFirstLastCols(cur_ts, real_row);
+      updateFirstLastCols(cur_ts, real_row, bitmaps);
       ++(*count);
       ++cur_blockdata_offset_;
     }
@@ -831,128 +933,110 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     //    and use the AggCalculator/VarColAggCalculator class to calculate the aggregation result.
     //    There is also a special case where the column being queried has undergone column type conversion,
     //    and the obtained continuous data needs to be first converted to the column type of the query
-    //    through getActualColMem.
+    //    through getActualColMemAndBitmap.
     if (has_data) {
       // Add all queried column data to the res result.
       for (k_uint32 i = 0; i < kw_scan_cols_.size(); ++i) {
-        k_int32 ts_col = -1;
+        k_int32 col_idx = -1;
         if (i < ts_scan_cols_.size()) {
-          ts_col = ts_scan_cols_[i];
+          col_idx = ts_scan_cols_[i];
         }
-        if (ts_col < 0 ||
-            !segment_tbl->hasValue(first_real_row, *count, ts_col) ||
-            !colTypeHasAggResult((DATATYPE)attrs_[ts_col].type, scan_agg_types_[i])) {
+        if (col_idx < 0 ||
+            !segment_tbl->hasValue(first_real_row, *count, col_idx) ||
+            !colTypeHasAggResult((DATATYPE)attrs_[col_idx].type, scan_agg_types_[i])) {
           continue;
         }
-        AttributeInfo col_info = segment_tbl->GetColInfo(ts_col);
+        AttributeInfo col_info = segment_tbl->GetColInfo(col_idx);
         Batch* b;
         if (*count < cur_block->publish_row_count || !cur_block->is_agg_res_available ||
-            col_info.type != attrs_[ts_col].type || col_info.size != attrs_[ts_col].size) {
-          switch (scan_agg_types_[i]) {
-            case Sumfunctype::MAX: {
-              void* mem = segment_tbl->columnAddr(first_real_row, ts_col);
-              void* bitmap = segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col);
-              if (col_info.type != attrs_[ts_col].type || col_info.size != attrs_[ts_col].size) {
-                std::shared_ptr<void> new_mem;
-                std::vector<std::shared_ptr<void>> new_var_mem;
-                int error_code = getActualColMem(segment_tbl, first_row, ts_col, *count, &new_mem, new_var_mem);
-                if (error_code < 0) {
-                  return KStatus::FAIL;
-                }
-                if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
-                  AggCalculator agg_cal(new_mem.get(), bitmap, first_row,
-                                        DATATYPE(attrs_[ts_col].type), attrs_[ts_col].size, *count);
-                  b = CreateAggBatch(agg_cal.GetMax(nullptr, true), nullptr);
-                } else {
-                  std::shared_ptr<void> max_base = nullptr;
-                  for (auto var_mem : new_var_mem) {
-                    VarColAggCalculator agg_cal(var_mem, 1);
-                    max_base = agg_cal.GetMax(max_base);
-                  }
-                  b = CreateAggBatch(max_base, nullptr);
-                }
-              } else {
-                if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
-                  AggCalculator agg_cal(mem, bitmap, first_row,
-                                        DATATYPE(attrs_[ts_col].type), attrs_[ts_col].size, *count);
-                  b = CreateAggBatch(agg_cal.GetMax(), nullptr);
-                } else {
-                  // Skip the null first and last rows because varColumnAddr does not support obtaining data
-                  // from empty first and last rows
-                  MetricRowID start_row, end_row;
-                  for (start_row = first_real_row; start_row < first_real_row + *count - 1; ++start_row) {
-                    if (!segment_tbl->isNullValue(start_row, ts_col)) {
-                      break;
-                    }
-                  }
-                  for (end_row = first_real_row + *count - 1; end_row > first_real_row ; --end_row) {
-                    if (!segment_tbl->isNullValue(end_row, ts_col)) {
-                      break;
-                    }
-                  }
-                  std::shared_ptr<void> var_mem =
-                      segment_tbl->varColumnAddr(start_row, end_row, ts_col);
-                  VarColAggCalculator agg_cal(mem, var_mem, bitmap, first_row, attrs_[ts_col].size, *count);
-                  b = CreateAggBatch(agg_cal.GetMax(), nullptr);
-                }
-              }
-              break;
+            !isSameType(col_info, attrs_[col_idx])) {
+          void* mem = segment_tbl->columnAddr(first_real_row, col_idx);
+          void* bitmap = segment_tbl->columnNullBitmapAddr(first_real_row.block_id, col_idx);
+          void* sum;
+          bool need_free_bitmap = false;
+          std::shared_ptr<void> new_mem;
+          std::vector<std::shared_ptr<void>> new_var_mem;
+          if (!isSameType(col_info, attrs_[col_idx])) {
+            auto s = getActualColMemAndBitmap(segment_tbl, cur_block->block_id, first_row, col_idx, *count,
+                                              &new_mem, new_var_mem, &bitmap, need_free_bitmap);
+            if (s != KStatus::SUCCESS) {
+              return s;
             }
+            if (isAllNull(reinterpret_cast<char*>(bitmap), first_row, *count)) {
+              continue;
+            }
+          }
+          switch (scan_agg_types_[i]) {
+            case Sumfunctype::MAX:
             case Sumfunctype::MIN: {
-              void* mem = segment_tbl->columnAddr(first_real_row, ts_col);
-              void* bitmap = segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col);
-              if (col_info.type != attrs_[ts_col].type || col_info.size != attrs_[ts_col].size) {
-                std::shared_ptr<void> new_mem;
-                std::vector<std::shared_ptr<void>> new_var_mem;
-                int error_code = getActualColMem(segment_tbl, first_row, ts_col, *count, &new_mem, new_var_mem);
-                if (error_code < 0) {
-                  return KStatus::FAIL;
-                }
-                if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
+              if (!isSameType(col_info, attrs_[col_idx])) {
+                if (!isVarLenType(attrs_[col_idx].type)) {
                   AggCalculator agg_cal(new_mem.get(), bitmap, first_row,
-                                        DATATYPE(attrs_[ts_col].type), attrs_[ts_col].size, *count);
-                  b = CreateAggBatch(agg_cal.GetMin(nullptr, true), nullptr);
+                                        DATATYPE(attrs_[col_idx].type), attrs_[col_idx].size, *count);
+                  if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                    b = CreateAggBatch(agg_cal.GetMax(nullptr, true), nullptr);
+                  } else {
+                    b = CreateAggBatch(agg_cal.GetMin(nullptr, true), nullptr);
+                  }
+                  b->is_new = true;
                 } else {
-                  std::shared_ptr<void> min_base = nullptr;
+                  std::shared_ptr<void> agg_base = nullptr;
                   for (auto var_mem : new_var_mem) {
                     VarColAggCalculator agg_cal(var_mem, 1);
-                    min_base = agg_cal.GetMin(min_base);
+                    if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                      agg_base = agg_cal.GetMax(agg_base);
+                    } else {
+                      agg_base = agg_cal.GetMin(agg_base);
+                    }
                   }
-                  b = CreateAggBatch(min_base, nullptr);
+                  b = CreateAggBatch(agg_base, nullptr);
                 }
               } else {
-                if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
+                if (!isVarLenType(attrs_[col_idx].type)) {
                   AggCalculator agg_cal(mem, bitmap, first_row,
-                                        DATATYPE(attrs_[ts_col].type), attrs_[ts_col].size, *count);
-                  b = CreateAggBatch(agg_cal.GetMin(), nullptr);
+                                        DATATYPE(attrs_[col_idx].type), attrs_[col_idx].size, *count);
+                  if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                    b = CreateAggBatch(agg_cal.GetMax(), nullptr);
+                  } else {
+                    b = CreateAggBatch(agg_cal.GetMin(), nullptr);
+                  }
                 } else {
                   // Skip the null first and last rows because varColumnAddr does not support obtaining data
                   // from empty first and last rows
                   MetricRowID start_row, end_row;
                   for (start_row = first_real_row; start_row < first_real_row + *count - 1; ++start_row) {
-                    if (!segment_tbl->isNullValue(start_row, ts_col)) {
+                    if (!segment_tbl->isNullValue(start_row, col_idx)) {
                       break;
                     }
                   }
                   for (end_row = first_real_row + *count - 1; end_row > first_real_row ; --end_row) {
-                    if (!segment_tbl->isNullValue(end_row, ts_col)) {
+                    if (!segment_tbl->isNullValue(end_row, col_idx)) {
                       break;
                     }
                   }
                   std::shared_ptr<void> var_mem =
-                      segment_tbl->varColumnAddr(start_row, end_row, ts_col);
-                  VarColAggCalculator agg_cal(mem, var_mem, bitmap, first_row, attrs_[ts_col].size, *count);
-                  b = CreateAggBatch(agg_cal.GetMin(), nullptr);
+                      segment_tbl->varColumnAddr(start_row, end_row, col_idx);
+                  VarColAggCalculator agg_cal(mem, var_mem, bitmap, first_row, attrs_[col_idx].size, *count);
+                  if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                    b = CreateAggBatch(agg_cal.GetMax(), nullptr);
+                  } else {
+                    b = CreateAggBatch(agg_cal.GetMin(), nullptr);
+                  }
                 }
               }
               break;
             }
             case Sumfunctype::SUM: {
-              AggCalculator agg_cal(segment_tbl->columnAddr(first_real_row, ts_col),
-                                    segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col), first_row,
-                                    DATATYPE(col_info.type), col_info.size, *count);
-              void* sum;
-              bool is_overflow = agg_cal.GetSum(&sum);
+              bool is_overflow = false;
+              if (!isSameType(col_info, attrs_[col_idx])) {
+                AggCalculator agg_cal(new_mem.get(), bitmap, first_row,
+                                      DATATYPE(attrs_[col_idx].type), attrs_[col_idx].size, *count);
+                is_overflow = agg_cal.GetSum(&sum);
+              } else {
+                bitmap = segment_tbl->columnNullBitmapAddr(first_real_row.block_id, col_idx);
+                AggCalculator agg_cal(mem, bitmap, first_row, DATATYPE(col_info.type), col_info.size, *count);
+                is_overflow = agg_cal.GetSum(&sum);
+              }
               b = CreateAggBatch(sum, nullptr);
               b->is_new = true;
               b->is_overflow = is_overflow;
@@ -961,7 +1045,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             case Sumfunctype::COUNT: {
               uint16_t notnull_count = 0;
               for (uint32_t j = 0; j < *count; ++j) {
-                if (!segment_tbl->isNullValue(first_real_row + j, ts_col)) {
+                if (!IsObjectColNull(static_cast<char*>(bitmap), first_real_row.offset_row - 1 + j)) {
                   ++notnull_count;
                 }
               }
@@ -973,11 +1057,14 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             default:
               break;
           }
+          if (need_free_bitmap) {
+            free(bitmap);
+          }
         } else {
           if (scan_agg_types_[i] == SUM && cur_block->is_overflow) {
             // If a type overflow is identified, the SUM result needs to be recalculated and cannot be read directly.
-            AggCalculator agg_cal(segment_tbl->columnAddr(first_real_row, ts_col),
-                                  segment_tbl->columnNullBitmapAddr(first_real_row.block_id, ts_col), first_row,
+            AggCalculator agg_cal(segment_tbl->columnAddr(first_real_row, col_idx),
+                                  segment_tbl->columnNullBitmapAddr(first_real_row.block_id, col_idx), first_row,
                                   DATATYPE(col_info.type), col_info.size, *count);
             void* sum;
             bool is_overflow = agg_cal.GetSum(&sum);
@@ -987,16 +1074,16 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
           } else if (scan_agg_types_[i] == SUM) {
             // Convert the obtained SUM result to the type agreed upon with the execution layer.
             void* new_sum_base;
-            void* sum_base = segment_tbl->columnAggAddr(first_real_row.block_id, ts_col, scan_agg_types_[i]);
-            bool is_new = ChangeSumType(DATATYPE(attrs_[ts_col].type), sum_base, &new_sum_base);
+            void* sum_base = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
+            bool is_new = ChangeSumType(DATATYPE(attrs_[col_idx].type), sum_base, &new_sum_base);
             b = CreateAggBatch(new_sum_base, nullptr);
             b->is_new = is_new;
           } else {
-            if ((attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) || scan_agg_types_[i] == COUNT) {
-              b = CreateAggBatch(segment_tbl->columnAggAddr(first_real_row.block_id, ts_col,
+            if (!isVarLenType(attrs_[col_idx].type) || scan_agg_types_[i] == COUNT) {
+              b = CreateAggBatch(segment_tbl->columnAggAddr(first_real_row.block_id, col_idx,
                                                             scan_agg_types_[i]), segment_tbl);
             } else {
-              std::shared_ptr<void> var_mem = segment_tbl->varColumnAggAddr(first_real_row, ts_col, scan_agg_types_[i]);
+              std::shared_ptr<void> var_mem = segment_tbl->varColumnAggAddr(first_real_row, col_idx, scan_agg_types_[i]);
               b = CreateAggBatch(var_mem, segment_tbl);
             }
           }
@@ -1017,103 +1104,116 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
   return SUCCESS;
 }
 
-int TsAggIterator::getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t ts_col, Batch** b) {
+int TsAggIterator::getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t col_idx, Batch** b) {
   std::shared_ptr<MMapSegmentTable> segment_tbl = p_bt->getSegmentTable(real_row.block_id);
   if (segment_tbl == nullptr) {
     LOG_ERROR("Can not find segment use block [%d], in path [%s]", real_row.block_id, p_bt->GetPath().c_str());
     return KStatus::FAIL;
   }
 
-  int32_t actual_col_type = segment_tbl->GetActualColType(ts_col);
+  int32_t actual_col_type = segment_tbl->GetColType(col_idx);
   bool is_var_type = actual_col_type == VARSTRING || actual_col_type == VARBINARY;
   // Encapsulation Batch Result:
   // 1. If a column type conversion occurs, it is necessary to convert the data in the real_row
   //    and write the original data into the newly applied space
   // 2. If no column type conversion occurs, directly read the original data stored in the file
-  if (actual_col_type != attrs_[ts_col].type) {
+  if (actual_col_type != attrs_[col_idx].type) {
     void* old_mem = nullptr;
     std::shared_ptr<void> old_var_mem = nullptr;
     if (!is_var_type) {
-      old_mem = segment_tbl->columnAddr(real_row, ts_col);
+      old_mem = segment_tbl->columnAddr(real_row, col_idx);
     } else {
-      old_var_mem = segment_tbl->varColumnAddr(real_row, ts_col);
+      old_var_mem = segment_tbl->varColumnAddr(real_row, col_idx);
     }
     // table altered. column type changes.
     std::shared_ptr<void> new_mem;
     int err_code = p_bt->ConvertDataTypeToMem(static_cast<DATATYPE>(actual_col_type),
-                                              static_cast<DATATYPE>(attrs_[ts_col].type),
-                                              attrs_[ts_col].size, old_mem, old_var_mem, &new_mem);
+                                              static_cast<DATATYPE>(attrs_[col_idx].type),
+                                              attrs_[col_idx].size, old_mem, old_var_mem, &new_mem);
     if (err_code < 0) {
-      LOG_ERROR("failed ConvertDataType from %u to %u", actual_col_type, attrs_[ts_col].type);
+      LOG_ERROR("failed ConvertDataType from %u to %u", actual_col_type, attrs_[col_idx].type);
       return FAIL;
     }
     *b = new AggBatch(new_mem, 1, segment_tbl);
   } else {
     if (!is_var_type) {
-      *b = new AggBatch(segment_tbl->columnAddr(real_row, ts_col), 1, segment_tbl);
+      *b = new AggBatch(segment_tbl->columnAddr(real_row, col_idx), 1, segment_tbl);
     } else {
-      *b = new AggBatch(segment_tbl->varColumnAddr(real_row, ts_col), 1, segment_tbl);
+      *b = new AggBatch(segment_tbl->varColumnAddr(real_row, col_idx), 1, segment_tbl);
     }
   }
   return 0;
 }
 
 // Convert the obtained continuous data into a query type and write it into the new application space.
-int TsAggIterator::getActualColMem(std::shared_ptr<MMapSegmentTable> segment_tbl, size_t start_row,
-                                   uint32_t ts_col, k_uint32 count, std::shared_ptr<void>* mem,
-                                   std::vector<std::shared_ptr<void>>& var_mem) {
-  ErrorInfo err_info;
+KStatus
+TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+                                        uint32_t col_idx, k_uint32 count, std::shared_ptr<void>* mem,
+                                        std::vector<std::shared_ptr<void>>& var_mem, void** bitmap, bool& need_free_bitmap) {
   auto schema_info = segment_tbl->getSchemaInfo();
-  void* bitmap = segment_tbl->getBlockHeader(cur_block_item_->block_id, ts_col);
   // There are two situations to handle:
   // 1. convert to fixed length types,  which can be further divided into:
   //    (1) other types to fixed length types
   //    (2) conversion between the same fixed length type but different lengths
   // 2. convert to variable length types
-  if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
-    if (schema_info[ts_col].type != attrs_[ts_col].type) {
+  if (!isVarLenType(attrs_[col_idx].type)) {
+    if (schema_info[col_idx].type != attrs_[col_idx].type) {
       // Conversion from other types to fixed length types.
-      char* value = static_cast<char*>(malloc(attrs_[ts_col].size * count));
-      memset(value, 0, attrs_[ts_col].size * count);
-      KStatus s = ConvertToFixedLen(segment_tbl, value, cur_block_item_,
-                                    (DATATYPE)(schema_info[ts_col].type), (DATATYPE)(attrs_[ts_col].type),
-                                    attrs_[ts_col].size, start_row, count, ts_col, bitmap);
+      char* value = static_cast<char*>(malloc(attrs_[col_idx].size * count));
+      memset(value, 0, attrs_[col_idx].size * count);
+      KStatus s = ConvertToFixedLen(segment_tbl, value, block_id,
+                                    (DATATYPE)(schema_info[col_idx].type), (DATATYPE)(attrs_[col_idx].type),
+                                    attrs_[col_idx].size, start_row, count, col_idx, bitmap, need_free_bitmap);
       if (s != KStatus::SUCCESS) {
         free(value);
-        return -1;
+        return KStatus::FAIL;
       }
       std::shared_ptr<void> ptr(value, free);
       *mem = ptr;
-    } else if (schema_info[ts_col].size != attrs_[ts_col].size) {
+    } else if (schema_info[col_idx].size != attrs_[col_idx].size) {
       // Conversion between same fixed length type, but different lengths.
-      char* value = static_cast<char*>(malloc(attrs_[ts_col].size * count));
-      memset(value, 0, attrs_[ts_col].size * count);
+      char* value = static_cast<char*>(malloc(attrs_[col_idx].size * count));
+      memset(value, 0, attrs_[col_idx].size * count);
       for (k_uint32 idx = start_row - 1; idx < count; ++idx) {
-        memcpy(value + idx * attrs_[ts_col].size,
-               segment_tbl->columnAddrByBlk(cur_block_item_->block_id, idx, ts_col), schema_info[ts_col].size);
+        memcpy(value + idx * attrs_[col_idx].size,
+               segment_tbl->columnAddrByBlk(block_id, idx, col_idx), schema_info[col_idx].size);
       }
       std::shared_ptr<void> ptr(value, free);
       *mem = ptr;
     }
   } else {
-    auto b = new VarColumnBatch(count, bitmap, start_row, segment_tbl);
     for (k_uint32 j = 0; j < count; ++j) {
-      std::shared_ptr<void> data = nullptr;
-      bool is_null;
-      if (b->isNull(j, &is_null) != KStatus::SUCCESS) {
-        delete b;
-        b = nullptr;
-        return -1;
-      }
-      if (is_null) {
+      if (IsObjectColNull(reinterpret_cast<char*>(*bitmap), start_row + j - 1)) {
         continue;
       }
+      std::shared_ptr<void> data = nullptr;
       // Convert other types to variable length data types.
-      data = ConvertVarLen(segment_tbl, cur_block_item_, static_cast<DATATYPE>(schema_info[ts_col].type),
-                           static_cast<DATATYPE>(attrs_[ts_col].type), start_row + j - 1, ts_col);
+      data = ConvertToVarLen(segment_tbl, block_id, static_cast<DATATYPE>(schema_info[col_idx].type),
+                             static_cast<DATATYPE>(attrs_[col_idx].type), start_row + j - 1, col_idx);
       var_mem.push_back(data);
     }
-    delete b;
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsAggIterator::getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+                                      uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap) {
+  *bitmap = segment_tbl->columnNullBitmapAddr(block_id, col_idx);
+  auto schema_info = segment_tbl->getSchemaInfo();
+  if (!isVarLenType(attrs_[col_idx].type)) {
+    if (schema_info[col_idx].type != attrs_[col_idx].type) {
+      // Conversion from other types to fixed length types.
+      char* value = static_cast<char*>(malloc(attrs_[col_idx].size * count));
+      memset(value, 0, attrs_[col_idx].size * count);
+      KStatus s = ConvertToFixedLen(segment_tbl, value, block_id,
+                                    (DATATYPE)(schema_info[col_idx].type), (DATATYPE)(attrs_[col_idx].type),
+                                    attrs_[col_idx].size, start_row, count, col_idx, bitmap, need_free_bitmap);
+      if (s != KStatus::SUCCESS) {
+        free(value);
+        return s;
+      }
+      free(value);
+    }
   }
   return KStatus::SUCCESS;
 }
@@ -1173,78 +1273,53 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
   // By calling the AggCalculator/VarColAggCalculator function,
   // integrate the intermediate results to obtain the final aggregated query result of an entity.
   for (k_uint32 i = 0; i < kw_scan_cols_.size(); ++i) {
-    k_int32 ts_col = -1;
+    k_int32 col_idx = -1;
     if (i < ts_scan_cols_.size()) {
-      ts_col = ts_scan_cols_[i];
+      col_idx = ts_scan_cols_[i];
     }
-    if (ts_col < 0) {
+    if (col_idx < 0) {
       LOG_ERROR("TsAggIterator::Next : no column : %d", kw_scan_cols_[i]);
       continue;
     }
     switch (scan_agg_types_[i]) {
-      case Sumfunctype::MAX: {
-        KWDB_DURATION(StStatistics::Get().agg_max);
-        if (result.data[i].empty()) {
-          Batch* b = CreateAggBatch(nullptr, nullptr);
-          res->push_back(i, b);
-        } else {
-          if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
-            bool need_to_new = false;
-            void* max_base = nullptr;
-            for (auto it : result.data[i]) {
-              if (it->is_new) need_to_new = true;
-              AggCalculator agg_cal(it->mem, DATATYPE(attrs_[ts_col].type), attrs_[ts_col].size, 1);
-              max_base = agg_cal.GetMax(max_base);
-            }
-            if (need_to_new) {
-              void* new_max_base = malloc(attrs_[ts_col].size);
-              memcpy(new_max_base, max_base, attrs_[ts_col].size);
-              max_base = new_max_base;
-            }
-            Batch* b = new AggBatch(max_base, 1, nullptr);
-            b->is_new = need_to_new;
-            res->push_back(i, b);
-          } else {
-            std::shared_ptr<void> max_base = nullptr;
-            for (auto it : result.data[i]) {
-              VarColAggCalculator agg_cal((reinterpret_cast<const AggBatch*>(it))->var_mem_, 1);
-              max_base = agg_cal.GetMax(max_base);
-            }
-            Batch* b = new AggBatch(max_base, 1, nullptr);
-            res->push_back(i, b);
-          }
-        }
-        break;
-      }
+      case Sumfunctype::MAX:
       case Sumfunctype::MIN: {
         KWDB_DURATION(StStatistics::Get().agg_min);
         if (result.data[i].empty()) {
           Batch* b = CreateAggBatch(nullptr, nullptr);
           res->push_back(i, b);
         } else {
-          if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
+          if (!isVarLenType(attrs_[col_idx].type)) {
             bool need_to_new = false;
-            void* min_base = nullptr;
+            void* agg_base = nullptr;
             for (auto it : result.data[i]) {
               if (it->is_new) need_to_new = true;
-              AggCalculator agg_cal(it->mem, DATATYPE(attrs_[ts_col].type), attrs_[ts_col].size, 1);
-              min_base = agg_cal.GetMin(min_base);
+              AggCalculator agg_cal(it->mem, DATATYPE(attrs_[col_idx].type), attrs_[col_idx].size, 1);
+              if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                agg_base = agg_cal.GetMax(agg_base);
+              } else if (scan_agg_types_[i] == Sumfunctype::MIN) {
+                agg_base = agg_cal.GetMin(agg_base);
+              }
             }
             if (need_to_new) {
-              void* new_min_base = malloc(attrs_[ts_col].size);
-              memcpy(new_min_base, min_base, attrs_[ts_col].size);
-              min_base = new_min_base;
+              void* new_agg_base = malloc(attrs_[col_idx].size);
+              memcpy(new_agg_base, agg_base, attrs_[col_idx].size);
+              agg_base = new_agg_base;
             }
-            Batch* b = new AggBatch(min_base, 1, nullptr);
+            Batch* b = new AggBatch(agg_base, 1, nullptr);
             b->is_new = need_to_new;
             res->push_back(i, b);
           } else {
-            std::shared_ptr<void> min_base = nullptr;
+            std::shared_ptr<void> agg_base = nullptr;
             for (auto it : result.data[i]) {
               VarColAggCalculator agg_cal(reinterpret_cast<const AggBatch*>(it)->var_mem_, 1);
-              min_base = agg_cal.GetMin(min_base);
+              if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                agg_base = agg_cal.GetMax(agg_base);
+              } else if (scan_agg_types_[i] == Sumfunctype::MIN) {
+                agg_base = agg_cal.GetMin(agg_base);
+              }
             }
-            Batch* b = new AggBatch(min_base, 1, nullptr);
+            Batch* b = new AggBatch(agg_base, 1, nullptr);
             res->push_back(i, b);
           }
         }
@@ -1255,8 +1330,8 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
         void *sum_base = nullptr;
         bool is_overflow = false;
         for (auto it : result.data[i]) {
-          AggCalculator agg_cal(it->mem, getSumType(DATATYPE(attrs_[ts_col].type)),
-                                getSumSize(DATATYPE(attrs_[ts_col].type)), 1, it->is_overflow);
+          AggCalculator agg_cal(it->mem, getSumType(DATATYPE(attrs_[col_idx].type)),
+                                getSumSize(DATATYPE(attrs_[col_idx].type)), 1, it->is_overflow);
           if (agg_cal.GetSum(&sum_base, sum_base, is_overflow)) {
             is_overflow = true;
           }
@@ -1283,15 +1358,15 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::FIRST: {
         KWDB_DURATION(StStatistics::Get().agg_first);
         Batch* b;
-        k_int32 pt_idx = first_pairs_[ts_col].first;
+        k_int32 pt_idx = first_pairs_[col_idx].first;
         // Read the first_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[ts_col].second.second;
-          timestamp64 first_ts = first_pairs_[ts_col].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+          MetricRowID real_row = first_pairs_[col_idx].second.second;
+          timestamp64 first_ts = first_pairs_[col_idx].second.first;
+          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
             return FAIL;
@@ -1303,15 +1378,15 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::LAST: {
         KWDB_DURATION(StStatistics::Get().agg_last);
         Batch* b;
-        k_int32 pt_idx = last_pairs_[ts_col].first;
+        k_int32 pt_idx = last_pairs_[col_idx].first;
         // Read the last_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[ts_col].second.second;
-          timestamp64 last_ts = last_pairs_[ts_col].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+          MetricRowID real_row = last_pairs_[col_idx].second.second;
+          timestamp64 last_ts = last_pairs_[col_idx].second.first;
+          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
             return KStatus::FAIL;
@@ -1337,15 +1412,24 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
                       real_row.block_id, cur_pt->GetPath().c_str());
             return KStatus::FAIL;
           }
-          if (segment_tbl->isNullValue(real_row, ts_col)) {
+          void* bitmap = nullptr;
+          bool need_free_bitmap = false;
+          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
+                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
+            return KStatus::FAIL;
+          }
+          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
             std::shared_ptr<void> first_row_data(nullptr);
             b = new AggBatch(first_row_data, 1, nullptr);
           } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
             if (err_code < 0) {
               LOG_ERROR("getActualColBatch failed.");
               return FAIL;
             }
+          }
+          if (need_free_bitmap) {
+            free(bitmap);
           }
         }
         res->push_back(i, b);
@@ -1370,15 +1454,24 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
                       real_row.block_id, cur_pt->GetPath().c_str());
             return KStatus::FAIL;
           }
-          if (segment_tbl->isNullValue(real_row, ts_col)) {
+          void* bitmap = nullptr;
+          bool need_free_bitmap = false;
+          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
+                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
+            return KStatus::FAIL;
+          }
+          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
             std::shared_ptr<void> last_row_data(nullptr);
             b = new AggBatch(last_row_data, 1, nullptr);
           } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, ts_col, &b);
+            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
             if (err_code < 0) {
               LOG_ERROR("getActualColBatch failed.");
               return FAIL;
             }
+          }
+          if (need_free_bitmap) {
+            free(bitmap);
           }
         }
         res->push_back(i, b);
@@ -1387,11 +1480,11 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::FIRSTTS: {
         KWDB_DURATION(StStatistics::Get().agg_firstts);
         Batch* b;
-        k_int32 pt_idx = first_pairs_[ts_col].first;
+        k_int32 pt_idx = first_pairs_[col_idx].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[ts_col].second.second;
+          MetricRowID real_row = first_pairs_[col_idx].second.second;
 
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
@@ -1407,11 +1500,11 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::LASTTS: {
         KWDB_DURATION(StStatistics::Get().agg_lastts);
         Batch* b;
-        k_int32 pt_idx = last_pairs_[ts_col].first;
+        k_int32 pt_idx = last_pairs_[col_idx].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[ts_col].second.second;
+          MetricRowID real_row = last_pairs_[col_idx].second.second;
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -1498,6 +1591,176 @@ KStatus TsTableIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
   } while (is_finished);
 
   return KStatus::SUCCESS;
+}
+
+void TsSortedRowDataIterator::fetchBlockSpans(k_uint32 entity_id) {
+  p_bts_[cur_p_bts_idx_]->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, compaction_);
+}
+
+int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {
+  cur_block_span_ = BlockSpan{};
+  while (true) {
+    if (block_spans_.empty()) {
+      cur_p_bts_idx_++;
+      if (segment_iter_ != nullptr) {
+        delete segment_iter_;
+        segment_iter_ = nullptr;
+      }
+      if (cur_p_bts_idx_ >= p_bts_.size()) {
+        return -1;
+      }
+      fetchBlockSpans(entity_id);
+      continue;
+    }
+    cur_block_span_ = block_spans_.front();
+    block_spans_.pop_front();
+
+    if (!cur_block_span_.block_item) {
+      LOG_WARN("BlockItem[] error: No space has been allocated");
+      continue;
+    }
+    return 0;
+  }
+}
+
+KStatus TsSortedRowDataIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) {
+  p_bts_ = std::move(p_bts);
+  is_reversed_ = is_reversed;
+  if (!p_bts_.empty()) {
+    if (is_reversed_) {
+      reverse(p_bts_.begin(), p_bts_.end());
+    }
+    attrs_ = (*p_bts_.begin())->getSchemaInfo(table_version_);
+  }
+  if (cur_entity_idx_ < entity_ids_.size()) {
+    cur_entity_id_ = entity_ids_[cur_entity_idx_];
+  }
+  if (cur_p_bts_idx_ < p_bts_.size() && cur_entity_id_ != 0) {
+    p_bts_[cur_p_bts_idx_]->GetAllBlockSpans(cur_entity_id_, ts_spans_, block_spans_, compaction_);
+  }
+  return SUCCESS;
+}
+
+KStatus TsSortedRowDataIterator::GetBatch(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
+                                          size_t block_start_idx, ResultSet* res, k_uint32 count) {
+  // Put data from all columns to the res result
+  auto schema_info = segment_tbl->getSchemaInfo();
+  ErrorInfo err_info;
+  for (k_uint32 i = 0; i < kw_scan_cols_.size(); ++i) {
+    k_int32 ts_col = -1;
+    if (i < ts_scan_cols_.size()) {
+      ts_col = ts_scan_cols_[i];
+    }
+    Batch* b;
+    if (ts_col >= 0 && segment_tbl->isColExist(ts_col)) {
+      void* bitmap_addr = segment_tbl->getBlockHeader(cur_block_item->block_id, ts_col);
+      if (attrs_[ts_col].type != VARSTRING && attrs_[ts_col].type != VARBINARY) {
+        if (schema_info[ts_col].type != attrs_[ts_col].type) {
+          // convert other types to fixed-length type
+          char* value = static_cast<char*>(malloc(attrs_[ts_col].size * count));
+          memset(value, 0, attrs_[ts_col].size * count);
+          bool need_free_bitmap = false;
+          KStatus s = ConvertToFixedLen(segment_tbl, value, cur_block_item->block_id,
+                                        static_cast<DATATYPE>(schema_info[ts_col].type),
+                                        static_cast<DATATYPE>(attrs_[ts_col].type),
+                                        attrs_[ts_col].size, block_start_idx, count, ts_col, &bitmap_addr, need_free_bitmap);
+          if (s != KStatus::SUCCESS) {
+            free(value);
+            return s;
+          }
+          b = new Batch(static_cast<void *>(value), count, bitmap_addr, block_start_idx, segment_tbl);
+          b->is_new = true;
+          b->need_free_bitmap = need_free_bitmap;
+        } else {
+          if (schema_info[ts_col].size != attrs_[ts_col].size) {
+            // convert same fixed-length type to different length
+            char* value = static_cast<char*>(malloc(attrs_[ts_col].size * count));
+            memset(value, 0, attrs_[ts_col].size * count);
+            for (int idx = 0; idx < count; idx++) {
+              memcpy(value + idx * attrs_[ts_col].size,
+                     segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx + idx - 1, ts_col),
+                     schema_info[ts_col].size);
+            }
+            b = new Batch(static_cast<void *>(value), count, bitmap_addr, block_start_idx, segment_tbl);
+            b->is_new = true;
+          } else {
+            b = new Batch(segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx - 1, ts_col),
+                          count, bitmap_addr, block_start_idx, segment_tbl);
+          }
+        }
+      } else {
+        b = new VarColumnBatch(count, bitmap_addr, block_start_idx, segment_tbl);
+        for (k_uint32 j = 0; j < count; ++j) {
+          std::shared_ptr<void> data = nullptr;
+          bool is_null;
+          if (b->isNull(j, &is_null) != KStatus::SUCCESS) {
+            delete b;
+            b = nullptr;
+            return KStatus::FAIL;
+          }
+          if (is_null) {
+            data = nullptr;
+          } else {
+            if (schema_info[ts_col].type != attrs_[ts_col].type) {
+              // convert other types to variable length
+              data = ConvertToVarLen(segment_tbl, cur_block_item->block_id,
+                                     static_cast<DATATYPE>(schema_info[ts_col].type),
+                                     static_cast<DATATYPE>(attrs_[ts_col].type), block_start_idx + j - 1, ts_col);
+            } else {
+              data = segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, block_start_idx + j - 1, ts_col);
+            }
+          }
+          b->push_back(data);
+        }
+      }
+    } else {
+      void* bitmap = nullptr;  // column not exist in segment table. so return nullptr.
+      b = new Batch(bitmap, count, bitmap, block_start_idx, segment_tbl);
+    }
+    res->push_back(i, b);
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts) {
+  KWDB_DURATION(StStatistics::Get().it_next);
+  *count = 0;
+  while (true) {
+    if (!cur_block_span_.block_item) {
+      if ( nextBlockSpan(cur_entity_id_) < 0 ) {
+        if (++cur_entity_idx_ >= entity_ids_.size()) {
+          *is_finished = true;
+          break;
+        }
+        cur_entity_id_ = entity_ids_[cur_entity_idx_];
+        cur_p_bts_idx_ = -1;
+      }
+      continue;
+    }
+    if (!cur_block_span_.row_num) {
+      continue;
+    }
+
+    *count = cur_block_span_.row_num;
+    uint32_t first_row = cur_block_span_.start_row + 1;
+    BlockItem* block_item = cur_block_span_.block_item;
+    MetricRowID first_real_row = block_item->getRowID(first_row);
+
+    TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
+    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
+    if (segment_tbl == nullptr) {
+      LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
+      return FAIL;
+    }
+
+    nextBlockSpan(cur_entity_id_);
+    GetBatch(segment_tbl, block_item, first_row, res, *count);
+    res->entity_index = {entity_group_id_, cur_entity_id_, subgroup_id_};
+    KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
+    return SUCCESS;
+  }
+  KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
+  return SUCCESS;
 }
 
 }  // namespace kwdbts

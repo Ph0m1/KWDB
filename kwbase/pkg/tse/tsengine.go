@@ -452,9 +452,11 @@ func (r *TsEngine) DropTsTable(tableID uint64) error {
 }
 
 // AddTSColumn adds column for ts table.
-func (r *TsEngine) AddTSColumn(tableID uint64, transactionID []byte, colMeta []byte) error {
+func (r *TsEngine) AddTSColumn(
+	tableID uint64, currentTSVersion, newTSVersion uint32, transactionID []byte, colMeta []byte,
+) error {
 	status := C.TSAddColumn(
-		r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta))
+		r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta), C.uint32_t(currentTSVersion), C.uint32_t(newTSVersion))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "could not AddTsColumn")
 	}
@@ -462,9 +464,11 @@ func (r *TsEngine) AddTSColumn(tableID uint64, transactionID []byte, colMeta []b
 }
 
 // DropTSColumn drop column for ts table.
-func (r *TsEngine) DropTSColumn(tableID uint64, transactionID []byte, colMeta []byte) error {
+func (r *TsEngine) DropTSColumn(
+	tableID uint64, currentTSVersion, newTSVersion uint32, transactionID []byte, colMeta []byte,
+) error {
 	status := C.TSDropColumn(
-		r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta))
+		r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta), C.uint32_t(currentTSVersion), C.uint32_t(newTSVersion))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "could not DropTsColumn")
 	}
@@ -482,9 +486,21 @@ func (r *TsEngine) AlterPartitionInterval(tableID uint64, partitionInterval uint
 
 // AlterTSColumnType alter column/tag type of ts table.
 func (r *TsEngine) AlterTSColumnType(
-	tableID uint64, transactionID []byte, colMeta []byte, originColMeta []byte,
+	tableID uint64,
+	currentTSVersion, newTSVersion uint32,
+	transactionID []byte,
+	colMeta []byte,
+	originColMeta []byte,
 ) error {
-	status := C.TSAlterColumnType(r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta), goToTSSlice(originColMeta))
+	status := C.TSAlterColumnType(
+		r.tdb,
+		C.TSTableID(tableID),
+		(*C.char)(unsafe.Pointer(&transactionID[0])),
+		goToTSSlice(colMeta),
+		goToTSSlice(originColMeta),
+		C.uint32_t(currentTSVersion),
+		C.uint32_t(newTSVersion),
+	)
 	if err := statusToError(status); err != nil {
 		return err
 	}

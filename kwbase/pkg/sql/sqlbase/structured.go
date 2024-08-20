@@ -1642,6 +1642,27 @@ func (desc *MutableTableDescriptor) MaybeIncrementVersion(
 	return nil
 }
 
+// MaybeIncrementTSVersion increments the ts version of a descriptor if necessary.
+// If needIncTsVersion = true, increase TsVersion and NextTsVersion.
+// If needIncTsVersion = false, just increase NextTsVersion.
+func (desc *MutableTableDescriptor) MaybeIncrementTSVersion(
+	ctx context.Context, needIncTsVersion bool,
+) {
+	desc.TsTable.NextTsVersion++
+	if !needIncTsVersion {
+		return
+	}
+	// Already incremented, no-op.
+	if desc.TsTable.TsVersion == desc.ClusterVersion.TsTable.GetNextTsVersion() {
+		return
+	}
+	desc.TsTable.TsVersion = desc.ClusterVersion.TsTable.GetNextTsVersion()
+
+	log.Infof(ctx, "publish: descID=%d (%s) tsVersion=%d mtime=%s",
+		desc.ID, desc.Name, desc.TsTable.TsVersion, desc.ModificationTime.GoTime())
+	return
+}
+
 // Validate validates that the table descriptor is well formed. Checks include
 // both single table and cross table invariants.
 func (desc *TableDescriptor) Validate(ctx context.Context, txn *kv.Txn) error {
@@ -1890,6 +1911,10 @@ func (desc *TableDescriptor) ValidateTable() error {
 
 	for _, m := range desc.Mutations {
 		unSetEnums := m.State == DescriptorMutation_UNKNOWN || m.Direction == DescriptorMutation_NONE
+		if unSetEnums && desc.IsTSTable() {
+			// just skip for alter type of ts table
+			continue
+		}
 		switch desc := m.Descriptor_.(type) {
 		case *DescriptorMutation_Column:
 			col := desc.Column
@@ -3240,6 +3265,16 @@ func (desc *MutableTableDescriptor) MakeMutationComplete(m DescriptorMutation) e
 		// Constraints to be dropped are dropped before column/index backfills.
 		case *DescriptorMutation_Column:
 			desc.RemoveColumnFromFamily(t.Column.ID)
+			if desc.IsTSTable() {
+				for i := range desc.Columns {
+					if desc.Columns[i].ID == t.Column.ID {
+						// Use [:i:i] to prevent reuse of existing slice, or outstanding refs
+						// to ColumnDescriptors may unexpectedly change.
+						desc.Columns = append(desc.Columns[:i:i], desc.Columns[i+1:]...)
+						break
+					}
+				}
+			}
 		}
 	}
 	return nil

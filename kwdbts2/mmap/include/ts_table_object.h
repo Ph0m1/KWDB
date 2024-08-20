@@ -46,11 +46,11 @@ struct TSTableFileMetadata {
   int magic;                ///< Magic number for a big object.
   int struct_version;       ///< object structure version number
   int struct_type;          ///< structure type
-  int schema_version;       ///< data version number
+  uint32_t schema_version;       ///< data version number
   uint64_t life_time ;          /// unit: second, over time data will be deleted.
   uint64_t partition_interval;  /// unit: second
   int cols_num;                    ///< number of cols.
-  int reserved_1;
+  uint32_t schema_version_of_latest_data;  // table version of the last data
   ///< shift size of name service.
   time_t create_time;       ///< TSTable object (vtree) create time.
   off_t meta_data_length;   ///< length of meta data section.
@@ -90,7 +90,7 @@ struct TSTableFileMetadata {
   char user_defined[123]; ///< reserved for user-defined meta data information.
 };
 
-class MMapEntityIdx;
+class MMapEntityBlockMeta;
 
 class TsTableObject {
  protected:
@@ -104,7 +104,7 @@ class TsTableObject {
   vector<AttributeInfo> cols_info_with_hidden_;
 
   vector<AttributeInfo> cols_info_without_hidden_;
-  vector<uint32_t> cols_idx_for_hidden_;  // The index corresponding cols_info_without_hidden_ to cols_info_with_hidden_
+  vector<uint32_t> cols_idx_;  // The column index that isn't dropped corresponding to cols_info_with_hidden_
 
   inline size_t& _reservedSize() const { return meta_data_->num_leaf_node; }
 
@@ -211,6 +211,8 @@ class TsTableObject {
   TSTableFileMetadata* metaData() { return meta_data_; }
 
   void setDropped() { meta_data_->is_dropped = true; }
+
+  void setNotDropped() { meta_data_->is_dropped = false; }
 
   bool isDropped() { return meta_data_->is_dropped; }
 

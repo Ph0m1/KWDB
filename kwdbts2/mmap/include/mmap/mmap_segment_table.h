@@ -14,12 +14,12 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <linux/magic.h>
-#include <payload.h>
-#include <ts_entity_idx_manager.h>
+#include "payload.h"
+#include "entity_block_meta_manager.h"
 #include "date_time_util.h"
 #include "ts_table_object.h"
 #include "utils/compress_utils.h"
-#include "mmap_entity_idx.h"
+#include "mmap_entity_block_meta.h"
 #include "ts_common.h"
 
 using namespace std;
@@ -37,11 +37,11 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   uint64_t reserved_rows_ = 0;
   // block header size
   vector<uint32_t> col_block_header_size_;
-  // datablock size of every column.
+  // data block size of every column.
   vector<size_t> col_block_size_;
   // varchar or varbinary values store in stringfile, which can remap size.
   MMapStringFile* m_str_file_{nullptr};
-  TsEntityIdxManager* entity_idx_{nullptr};
+  EntityBlockMetaManager* meta_manager_{nullptr};
   // is this segment compressed.
   bool is_compressed = false;
 
@@ -50,14 +50,14 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   int open_(int char_code, const string& file_path, const std::string& db_path, const string& tbl_sub_path,
             int flags, ErrorInfo& err_info);
 
-  int init(TsEntityIdxManager* entity_idx, const vector<AttributeInfo>& schema, int encoding, ErrorInfo& err_info);
+  int init(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema, int encoding, ErrorInfo& err_info);
 
   int initColumn(int flags, ErrorInfo& err_info);
 
   int setAttributeInfo(vector<AttributeInfo>& info);
 
   virtual void push_back_payload(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
-                                 size_t payload_column, size_t start_row, size_t num);
+                                 size_t payload_column_idx, size_t start_row, size_t num);
 
   int magic() { return *reinterpret_cast<const int *>("MMET"); }
 
@@ -67,13 +67,13 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
    * @param payload Record the data to be written.
    * @param row_id Specify the position of data in the table.
    * @param segment_column Indicate which column the data should be written to.
-   * @param payload_column The column corresponding to the payload.
+   * @param payload_column_idx The column corresponding to the payload.
    * @param payload_start_row The starting row number of the payload.
    * @param payload_num The number of data rows to be written.
    * @return Return the operation error code, 0 indicates success, and a negative value indicates failure.
  */
   int push_back_var_payload(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
-                            size_t payload_column, size_t payload_start_row, size_t payload_num);
+                                     size_t payload_column_idx, size_t payload_start_row, size_t payload_num);
 
   virtual void push_back_null_bitmap(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
                                      size_t payload_column, size_t payload_start_row, size_t payload_num);
@@ -140,15 +140,17 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
    * and its offset is recorded in the data block.
    *
    * @param start_row        Start row ID.
-   * @param payload_col      Column index where the data is written.
+   * @param segment_col_idx  Column index where the segment data is written.
+   * @param payload_col_idx  Column index where the data is written.
    * @param payload          Data to be written.
    * @param start_in_payload Payload position where writing begins.
    * @param span             Range of data blocks where writing occurs.
    * @param dedup_info       Deduplication information.
    * @return Return error code, 0 indicates success.
    */
-  int pushBackToColumn(MetricRowID start_row, size_t payload_col, kwdbts::Payload* payload,
-                       size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info);
+  int pushBackToColumn(MetricRowID start_row, size_t segment_col_idx, size_t payload_col_idx,
+                   kwdbts::Payload* payload, size_t start_in_payload, const BlockSpan& span,
+                   kwdbts::DedupInfo& dedup_info);
 
   /**
    * @brief .data file format
@@ -220,7 +222,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
         return nullptr;
     }
     // agg result address: block addr + null bitmap size + agg_type offset
-    size_t offset = entity_idx_->getBlockBitmapSize() + agg_offset;
+    size_t offset = meta_manager_->getBlockBitmapSize() + agg_offset;
     return reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
   }
 
@@ -233,7 +235,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   };
 
   inline void calculateAggAddr(BLOCK_ID data_block_id, size_t c, AggDataAddresses& addresses) {
-    size_t offset = entity_idx_->getBlockBitmapSize();
+    size_t offset = meta_manager_->getBlockBitmapSize();
     addresses.count = reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
     addresses.max = reinterpret_cast<void*>((intptr_t) addresses.count + BLOCK_AGG_COUNT_SIZE);
     addresses.min = reinterpret_cast<void*>((intptr_t) addresses.max + cols_info_with_hidden_[c].size);
@@ -276,11 +278,11 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return row_id.offset_row == 1;
   }
 
-  virtual int create(TsEntityIdxManager* entity_idx, const vector<AttributeInfo>& schema,
-                     int encoding, ErrorInfo& err_info);
+  virtual int create(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema,
+                     const uint32_t& table_version, int encoding, ErrorInfo& err_info);
 
-  virtual int open(TsEntityIdxManager* entity_idx, BLOCK_ID segment_id, const string& file_path, const std::string& db_path,
-                   const string& tbl_sub_path, int flags, bool lazy_open, ErrorInfo& err_info);
+  virtual int open(EntityBlockMetaManager* meta_manager, BLOCK_ID segment_id, const string& file_path,
+                   const std::string& db_path, const string& tbl_sub_path, int flags, bool lazy_open, ErrorInfo& err_info);
 
   virtual int reopen(bool lazy_open, ErrorInfo& err_info);
 
@@ -320,6 +322,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   virtual timestamp64& maxTimestamp() { return meta_data_->max_ts; }
 
   virtual uint64_t recordSize() const { return meta_data_->record_size; }
+
+  uint32_t schemaVersion() const { return meta_data_->schema_version; }
 
   // num of column in this segment
   virtual int numColumn() const { return meta_data_->cols_num; };
@@ -411,15 +415,11 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   }
 
   inline AttributeInfo GetColInfo(size_t c) const {
-    return cols_info_with_hidden_[cols_idx_for_hidden_[c]];
+    return cols_info_with_hidden_[c];
   }
 
-  inline uint32_t GetActualColType(size_t c) const {
-    return cols_info_with_hidden_[cols_idx_for_hidden_[c]].type;
-  }
-
-  inline uint32_t GetActualColIdx(size_t col) const {
-    return cols_idx_for_hidden_[col];
+  inline uint32_t GetColType(size_t c) const {
+    return cols_info_with_hidden_[c].type;
   }
 
   // check if current segment can writing data
@@ -465,14 +465,14 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     }
     assert(start_row.offset_row > 0);
     // 0 ~ config_block_rows_ - 1
-    assert((start_row.offset_row - 1 + count) < entity_idx_->getBlockMaxRows());
+    assert((start_row.offset_row - 1 + count) < meta_manager_->getBlockMaxRows());
     char* bitmap = static_cast<char*>(columnNullBitmapAddr(start_row.block_id, c));
-    return !isAllDeleted(bitmap, start_row.offset_row, count);
+    return !isAllNull(bitmap, start_row.offset_row, count);
   }
 
 };
 
-int convertVarToNum(const std::string& str, DATATYPE new_type, char* data, int32_t old_len,
-                    ErrorInfo& err_info);
+int convertStrToFixed(const std::string& str, DATATYPE new_type, char* data, int32_t old_len,
+                      ErrorInfo& err_info);
 
 std::shared_ptr<void> convertFixedToVar(DATATYPE old_type, DATATYPE new_type, char* data, ErrorInfo& err_info);

@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 #include "libkwdbts2.h"
-#include "mmap/mmap_metrics_table.h"
+#include "mmap/mmap_root_table_manager.h"
 #include "st_subgroup.h"
 #include "lt_rw_latch.h"
 
@@ -28,8 +28,8 @@ namespace kwdbts {
  */
 class SubEntityGroupManager : public TSObject {
  public:
-  explicit SubEntityGroupManager(MMapMetricsTable*& root_table)
-      : TSObject(), root_table_(root_table) {
+  explicit SubEntityGroupManager(MMapRootTableManager*& root_table_manager)
+      : TSObject(), root_table_manager_(root_table_manager) {
     subgroup_mgr_mutex_ = new SubEntityGroupManagerLatch(LATCH_ID_SUBENTITY_GROUP_MANAGER_MUTEX);
     subgroup_mgr_rwlock_ = new SubEntityGroupManagerRWLatch(RWLATCH_ID_SUBENTITY_GROUP_MANAGER_RWLOCK);
   }
@@ -77,14 +77,6 @@ class SubEntityGroupManager : public TSObject {
    * @return KStatus
    */
   TsSubEntityGroup* GetSubGroup(SubGroupID subgroup_id, ErrorInfo& err_info, bool create_not_exist = false);
-
-  /**
-   * @brief Alter SubGroup column
-   * @param[in] attr_info Attribute information
-   * @param[out] err_info error information
-   * @return
-   */
-  int AlterSubGroupColumn(AttributeInfo& attr_info, ErrorInfo& err_info);
 
   /**
    * @brief Query the PartitionTable of the specified partition time in the specified SubGroup directory.
@@ -168,16 +160,14 @@ class SubEntityGroupManager : public TSObject {
 
   void sync(int flags) override;
 
-  static void CopyMetaData(MMapMetricsTable* dst_bt, MMapMetricsTable* src_bt);
-
   void SetSubgroupAvailable();
 
  private:
   std::string db_path_;
   std::string tbl_sub_path_;
   uint64_t table_id_;
-  // Referenced from the root table under the directory of the time series table
-  MMapMetricsTable*& root_table_;
+  // Referenced from the root table manager under the directory of the time series table
+  MMapRootTableManager*& root_table_manager_;
 
   SubGroupID max_subgroup_id_ = 1;
   // Record the maximum addable device subgroup id

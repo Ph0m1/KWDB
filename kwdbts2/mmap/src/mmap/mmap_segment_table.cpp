@@ -26,6 +26,107 @@
 #include "perf_stat.h"
 #include "sys_utils.h"
 
+KStatus push_back_payload_with_conv(kwdbts::Payload* payload, char* value, const AttributeInfo& payload_attr,
+                                    DATATYPE new_type, int32_t new_len, size_t start_row, uint32_t count, int32_t col_idx) {
+  ErrorInfo err_info;
+  for (int idx = 0; idx < count; ++idx) {
+    DATATYPE old_type = static_cast<DATATYPE>(payload_attr.type);
+    int32_t old_len = payload_attr.size;
+    void* old_mem = nullptr;
+    // Check whether merge data exists
+    auto it = payload->tmp_col_values_4_dedup_merge_.find(col_idx);
+    if (unlikely(it != payload->tmp_col_values_4_dedup_merge_.end())) {
+      auto data_it = it->second.find(start_row + idx);
+      if (data_it != it->second.end()) {
+        old_type = static_cast<DATATYPE>(data_it->second.attr.type);
+        old_len = data_it->second.attr.size;
+        old_mem = data_it->second.value.get();
+      }
+    }
+    // If merge data does not exist, it is obtained from the payload
+    if (!old_mem) {
+      if (isVarLenType(old_type)) {
+        old_mem = payload->GetVarColumnAddr(start_row + idx, col_idx);
+      } else {
+        old_mem = payload->GetColumnAddr(start_row + idx, col_idx);
+      }
+    }
+    // Insert data
+    if (old_type != new_type) {
+      // Different data types
+      if (!isVarLenType(old_type)) {
+        // Convert fixed-length data to fixed-length data
+        if (new_type == DATATYPE::CHAR || new_type == DATATYPE::BINARY) {
+          err_info.errcode = convertFixedToStr(old_type, (char*) old_mem, value + idx * new_len, err_info);
+        } else {
+          err_info.errcode = convertFixedToNum(old_type, new_type, (char*) old_mem, value + idx * new_len, err_info);
+        }
+        if (err_info.errcode < 0) {
+          return KStatus::FAIL;
+        }
+      } else if (isVarLenType(old_type)) {
+        // Variable length data is converted to fixed length data
+        if (payload->IsNull(col_idx, start_row + idx)) {
+          continue;
+        }
+        void* old_var_mem = old_mem;
+        int32_t old_var_len = payload->GetVarColumnLen(start_row + idx, col_idx);
+        convertStrToFixed((char*) old_var_mem + MMapStringFile::kStringLenLen,
+                          new_type, value + idx * new_len, old_var_len, err_info);
+      }
+    } else {
+      // Data of the same type is written
+      size_t copy_size = std::min(old_len, new_len);
+      memcpy((char*)value + idx * new_len, old_mem, copy_size);
+    }
+  }
+  return KStatus::SUCCESS;
+}
+
+std::shared_ptr<void> ConvertToVarLenBeforePush(kwdbts::Payload* payload, DATATYPE old_type, DATATYPE new_type,
+                                                size_t start_row, uint32_t col_idx, bool has_merge_data,
+                                                std::shared_ptr<void> merge_data) {
+  ErrorInfo err_info;
+  std::shared_ptr<void> data = nullptr;
+  if (!isVarLenType(old_type)) {
+    void* old_mem;
+    if (likely(!has_merge_data)) {
+      old_mem = payload->GetColumnAddr(start_row, col_idx);
+    } else {
+      old_mem = merge_data.get();
+    }
+    data = convertFixedToVar(old_type, new_type, (char*) old_mem, err_info);
+  } else {
+    TSSlice old_value;
+    if (unlikely(has_merge_data)) {
+      char* var_addr_with_len = reinterpret_cast<char*>(merge_data.get());
+      uint16_t var_c_len = KUint16(var_addr_with_len);
+      old_value = {var_addr_with_len + sizeof(uint16_t), var_c_len};
+    } else {
+      old_value = {payload->GetVarColumnAddr(start_row, col_idx) + MMapStringFile::kStringLenLen,
+                   payload->GetVarColumnLen(start_row, col_idx)};
+    }
+    if (old_type == VARSTRING) {
+      auto old_len = uint16_t(old_value.len) - 1;
+      char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringFile::kStringLenLen));
+      memset(var_data, 0, old_len + MMapStringFile::kStringLenLen);
+      KUint16(var_data) = old_len;
+      memcpy(var_data + MMapStringFile::kStringLenLen, (char*) old_value.data, old_len);
+      std::shared_ptr<void> ptr(var_data, free);
+      data = ptr;
+    } else {
+      auto old_len = uint16_t(old_value.len);
+      char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringFile::kStringLenLen + 1));
+      memset(var_data, 0, old_len + MMapStringFile::kStringLenLen + 1);
+      KUint16(var_data) = old_len + 1;
+      memcpy(var_data + MMapStringFile::kStringLenLen, (char*) old_value.data, old_len);
+      std::shared_ptr<void> ptr(var_data, free);
+      data = ptr;
+    }
+  }
+  return data;
+}
+
 MMapSegmentTable::MMapSegmentTable() : rw_latch_(RWLATCH_ID_MMAP_SEGMENT_TABLE_RWLOCK) {
   reserved_rows_ = 1024;
 }
@@ -43,13 +144,14 @@ MMapSegmentTable::~MMapSegmentTable() {
 
 impl_latch_virtual_func(MMapSegmentTable, &rw_latch_)
 
-int MMapSegmentTable::create(TsEntityIdxManager* entity_idx, const vector<AttributeInfo>& schema,
-                             int encoding, ErrorInfo& err_info) {
-  if (init(entity_idx, schema, encoding, err_info) < 0)
+int MMapSegmentTable::create(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema,
+                             const uint32_t& table_version, int encoding, ErrorInfo& err_info) {
+  if (init(meta_manager, schema, encoding, err_info) < 0)
     return err_info.errcode;
 
   meta_data_->magic = magic();
   meta_data_->struct_type |= (ST_COLUMN_TABLE);
+  meta_data_->schema_version = table_version;
   meta_data_->has_data = true;
   if (initColumn(bt_file_.flags(), err_info) < 0)
     return err_info.errcode;
@@ -104,15 +206,15 @@ int MMapSegmentTable::initColumn(int flags, ErrorInfo& err_info) {
       return err_info.errcode;
     }
     // calculte block header size and block size
-    col_block_header_size_[i] = entity_idx_->getBlockBitmapSize() + BLOCK_AGG_COUNT_SIZE
+    col_block_header_size_[i] = meta_manager_->getBlockBitmapSize() + BLOCK_AGG_COUNT_SIZE
                                 + cols_info_with_hidden_[i].size * BLOCK_AGG_NUM;
     col_block_header_size_[i] = (col_block_header_size_[i] + 63) / 64 * 64;
 
-    col_block_size_[i] = col_block_header_size_[i] + cols_info_with_hidden_[i].size * entity_idx_->getBlockMaxRows();
+    col_block_size_[i] = col_block_header_size_[i] + cols_info_with_hidden_[i].size * meta_manager_->getBlockMaxRows();
     col_block_size_[i] = (col_block_size_[i] + 63) / 64 * 64;
 
     // vartype column will use string file to store real values.
-    if ((cols_info_with_hidden_[i].type == VARSTRING || cols_info_with_hidden_[i].type == VARBINARY) && !m_str_file_) {
+    if (isVarLenType(cols_info_with_hidden_[i].type) && !m_str_file_) {
       m_str_file_ = new MMapStringFile(LATCH_ID_METRICS_STRING_FILE_MUTEX, RWLATCH_ID_METRICS_STRING_FILE_RWLOCK);
       std::string col_str_file_name = name_ + ".s";
       int err_code = m_str_file_->open(col_str_file_name, db_path_ + tbl_sub_path_ + col_str_file_name, flags);
@@ -153,7 +255,7 @@ int MMapSegmentTable::open_(int char_code, const string& file_path, const std::s
   return err_info.errcode;
 }
 
-int MMapSegmentTable::open(TsEntityIdxManager* entity_idx, BLOCK_ID segment_id, const string& file_path,
+int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segment_id, const string& file_path,
                            const std::string& db_path, const string& tbl_sub_path,
                            int flags, bool lazy_open, ErrorInfo& err_info) {
   mutexLock();
@@ -163,7 +265,7 @@ int MMapSegmentTable::open(TsEntityIdxManager* entity_idx, BLOCK_ID segment_id, 
   if (getObjectStatus() == OBJ_READY) {
     return 0;
   }
-  entity_idx_ = entity_idx;
+  meta_manager_ = meta_manager;
   segment_id_ = segment_id;
 
   db_path_ = db_path;
@@ -203,7 +305,7 @@ int MMapSegmentTable::open(TsEntityIdxManager* entity_idx, BLOCK_ID segment_id, 
   if (meta_data_ != nullptr && _reservedSize() == 0) {
     LOG_DEBUG("reservedSize of table[ %s ] is 0.", file_path.c_str());
     setObjectReady();
-    err_info.errcode = reserve(entity_idx_->getReservedRows());
+    err_info.errcode = reserve(meta_manager_->getReservedRows());
     if (err_info.errcode < 0) {
       err_info.setError(err_info.errcode, tbl_sub_path + file_path);
     }
@@ -213,9 +315,9 @@ int MMapSegmentTable::open(TsEntityIdxManager* entity_idx, BLOCK_ID segment_id, 
   return err_info.errcode;
 }
 
-int MMapSegmentTable::init(TsEntityIdxManager* entity_idx, const vector<AttributeInfo>& schema, int encoding,
+int MMapSegmentTable::init(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema, int encoding,
                            ErrorInfo& err_info) {
-  entity_idx_ = entity_idx;
+  meta_manager_ = meta_manager;
   err_info.errcode = initMetaData();
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
@@ -244,11 +346,11 @@ int MMapSegmentTable::init(TsEntityIdxManager* entity_idx, const vector<Attribut
   meta_data_->struct_type = (ST_VTREE | ST_NS_EXT);
 
   cols_info_without_hidden_.clear();
-  cols_idx_for_hidden_.clear();
+  cols_idx_.clear();
   for (int i = 0; i < cols_info_with_hidden_.size(); ++i) {
     if (!cols_info_with_hidden_[i].isFlag(AINFO_DROPPED)) {
       cols_info_without_hidden_.emplace_back(cols_info_with_hidden_[i]);
-      cols_idx_for_hidden_.emplace_back(i);
+      cols_idx_.emplace_back(i);
     }
   }
 
@@ -261,7 +363,7 @@ int MMapSegmentTable::reopen(bool lazy_open, ErrorInfo &err_info) {
     return err_info.errcode;
   }
 
-  return open(entity_idx_, segment_id_, bt_file_.filePath(), db_path_, tbl_sub_path_,
+  return open(meta_manager_, segment_id_, bt_file_.filePath(), db_path_, tbl_sub_path_,
               MMAP_OPEN_NORECURSIVE, lazy_open, err_info);
 }
 
@@ -372,7 +474,7 @@ int MMapSegmentTable::reserveBase(size_t n) {
     if (cols_info_with_hidden_[i].isFlag(AINFO_DROPPED)) {
       continue;
     }
-    err_code = col_files_[i]->mremap(entity_idx_->getBlockMaxNum() * col_block_size_[i]);
+    err_code = col_files_[i]->mremap(meta_manager_->getBlockMaxNum() * col_block_size_[i]);
     if (err_code < 0) {
       break;
     }
@@ -410,23 +512,21 @@ int MMapSegmentTable::truncate() {
   return error_code;
 }
 
-int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t payload_col, kwdbts::Payload* payload,
-                                       size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info) {
-
-
+int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col_idx, size_t payload_col_idx,
+                                   kwdbts::Payload* payload, size_t start_in_payload, const BlockSpan& span,
+                                   kwdbts::DedupInfo& dedup_info) {
   int error_code = 0;
-  size_t segment_col = cols_idx_for_hidden_[payload_col];
+  size_t segment_col = cols_idx_[segment_col_idx];
   MetricRowID block_first_row = span.block_item->getRowID(1);
-  if (cols_info_without_hidden_[payload_col].type != DATATYPE::VARSTRING &&
-      cols_info_without_hidden_[payload_col].type != DATATYPE::VARBINARY) {
-    push_back_payload(payload, start_row, segment_col, payload_col, start_in_payload, span.row_num);
+  if (!isVarLenType(cols_info_without_hidden_[segment_col_idx].type)) {
+    push_back_payload(payload, start_row, segment_col, payload_col_idx, start_in_payload, span.row_num);
   } else {
     // Variable length is written line by line and can be directly written into the .s file.
     // Before writing, it will check whether the current .s file needs to be resized.
     // The merge mode will determine whether to write the merged data based on the offset of the payload.
     // String file stores the actual value of the string, and stores the offset of the string file
     // in the data column file.
-    error_code = push_back_var_payload(payload, start_row, segment_col, payload_col, start_in_payload, span.row_num);
+    error_code = push_back_var_payload(payload, start_row, segment_col, payload_col_idx, start_in_payload, span.row_num);
     if (error_code < 0) return error_code;
   }
 
@@ -435,14 +535,13 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t payload_col
   AggDataAddresses addresses{};
   calculateAggAddr(start_row.block_id, segment_col, addresses);
   bool is_block_first_row = isBlockFirstRow(start_row) || *reinterpret_cast<uint16_t*>(addresses.count) == 0;
-  push_back_null_bitmap(payload, start_row, segment_col, payload_col, start_in_payload, span.row_num);
-  void* src = payload->GetColumnAddr(start_in_payload, payload_col);
+  push_back_null_bitmap(payload, start_row, segment_col, payload_col_idx, start_in_payload, span.row_num);
+  void* src = payload->GetColumnAddr(start_in_payload, payload_col_idx);
   if (hasValue(start_row, span.row_num, segment_col)) {
-    if (cols_info_without_hidden_[payload_col].type != DATATYPE::VARSTRING &&
-        cols_info_without_hidden_[payload_col].type != DATATYPE::VARBINARY) {
+    if (!isVarLenType(cols_info_without_hidden_[segment_col_idx].type)) {
       AggCalculator aggCal(src, columnNullBitmapAddr(start_row.block_id, segment_col),
-                           start_row.offset_row, DATATYPE(cols_info_without_hidden_[payload_col].type),
-                           cols_info_without_hidden_[payload_col].size, span.row_num);
+                           start_row.offset_row, DATATYPE(cols_info_without_hidden_[segment_col_idx].type),
+                           cols_info_without_hidden_[segment_col_idx].size, span.row_num);
       if (aggCal.CalAllAgg(addresses.min, addresses.max, addresses.sum, addresses.count, is_block_first_row)) {
         span.block_item->is_overflow = true;
       }
@@ -469,14 +568,14 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t payload_col
       std::shared_ptr<void> var_mem = varColumnAddr(begin_r, end_r - 1, segment_col);
       VarColAggCalculator aggCal(mem, var_mem, columnNullBitmapAddr(start_row.block_id, segment_col),
                                  begin_r.offset_row,
-                                 cols_info_without_hidden_[payload_col].size, end_r.offset_row - begin_r.offset_row);
+                                 cols_info_without_hidden_[segment_col_idx].size, end_r.offset_row - begin_r.offset_row);
       aggCal.CalAllAgg(addresses.min, addresses.max, min_base, max_base, addresses.count, is_block_first_row);
     }
   }
 
   // Update the maximum and minimum timestamp information of the current segment,
   // which will be used for subsequent compression and other operations
-  if (payload_col == 0) {
+  if (payload_col_idx == 0) {
     if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {
       maxTimestamp() = KTimestamp(addresses.max);
     }
@@ -492,67 +591,103 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t payload_col
 int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwdbts::Payload* payload,
                                 size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info) {
   int error_code = 0;
-  if (cols_info_without_hidden_.size() != cols_idx_for_hidden_.size()) {
+  if (cols_info_without_hidden_.size() != cols_idx_.size()) {
     LOG_ERROR("Schema mismatch: The number of columns does not match!");
     return -1;
   }
   // During writing, a determination is made as to whether the current payload contains out-of-order data.
   // If present, entity_item is marked as being out of order.
   // During subsequent queries, a judgment will be made. If the result set is unordered, a secondary HASH aggregation based on AGG SCAN is required.
-  int payload_col = 1;
+  EntityItem* entity_item = meta_manager_->getEntityItem(entity_id);
+  if (payload->IsDisordered(start_in_payload, span.row_num) ||
+      payload->GetTimestamp(start_in_payload) < entity_item->max_ts) {
+    entity_item->is_disordered = true;
+  }
+  int payload_col_idx = 1;
   for (size_t i = 1; i < cols_info_without_hidden_.size(); ++i) {
-    if (payload_col >= payload->GetColNum()) {
-      // The payload data column is fewer than the segment column, allowing for writing (in online scenarios of adding and deleting columns) and logging
-      LOG_WARN("payload no column %d" , payload_col);
+    // The data of the new column is set to empty
+    if (payload_col_idx >= payload->GetActualCols().size()) {
+      MetricRowID row_id = start_row;
+      for (int idx = 0 ; idx < span.row_num; ++idx) {
+        setNullBitmap(row_id, cols_idx_[i]);
+        row_id.offset_row++;
+      }
+      continue;
+    }
+    // Skip data writes for deleted columns
+    if (cols_idx_[i] > payload->GetActualCols()[payload_col_idx]) {
+      payload_col_idx++;
       continue;
     }
     // Memcpy by column. If the column is of variable length, write it row by row. After completion, update the bitmap and aggregation results.
-    error_code = pushBackToColumn(start_row, i, payload, start_in_payload, span, dedup_info);
+    error_code = pushBackToColumn(start_row, i, payload_col_idx, payload, start_in_payload, span, dedup_info);
     if (error_code < 0) {
       return error_code;
     }
-    payload_col++;
+    payload_col_idx++;
   }
   // set timestamp at last. timestamp not 0 used for checking data inserted fully.
-  error_code = pushBackToColumn(start_row, 0, payload, start_in_payload, span, dedup_info);
+  error_code = pushBackToColumn(start_row, 0, 0, payload, start_in_payload, span, dedup_info);
   actual_writed_count_.fetch_add(span.row_num);
 
   return error_code;
 }
 
 void MMapSegmentTable::push_back_payload(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
-                                       size_t payload_column, size_t start_row, size_t num) {
-  memcpy(columnAddr(row_id, segment_column), payload->GetColumnAddr(start_row, payload_column),
-         num * cols_info_with_hidden_[segment_column].size);
+                                       size_t payload_column_idx, size_t start_row, size_t num) {
+  AttributeInfo payload_column_info = payload->GetSchemaInfo()[payload_column_idx];
+  if (likely(!payload->HasMergeData(payload_column_idx) && isSameType(payload_column_info, cols_info_with_hidden_[segment_column]))) {
+    memcpy(columnAddr(row_id, segment_column), payload->GetColumnAddr(start_row, payload_column_idx),
+           num * cols_info_with_hidden_[segment_column].size);
+  } else {
+    push_back_payload_with_conv(payload, (char*) columnAddr(row_id, segment_column), payload_column_info,
+                                (DATATYPE) cols_info_with_hidden_[segment_column].type, cols_info_with_hidden_[segment_column].size, start_row,
+                                num, payload_column_idx);
+  }
   return;
 }
 
 int MMapSegmentTable::push_back_var_payload(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
-                                            size_t payload_column, size_t payload_start_row, size_t payload_num) {
+                                     size_t payload_column_idx, size_t payload_start_row, size_t payload_num) {
   mutexLock();
   int err_code = 0;
   size_t loc = 0;
   uint16_t var_c_len = 0;
+  bool need_convert = false;
+  std::shared_ptr<void> data = nullptr;
   char* var_addr_with_len = nullptr;
   for (int i = 0 ; i < payload_num ; i++) {
-    if (!payload->IsNull(payload_column, payload_start_row)) {
-      uint64_t var_offset = KUint64(payload->GetColumnAddr(payload_start_row, payload_column));
-      if (var_offset >= UINT64_MAX / 2) {  // reuse string in stringfile.
-        // In the merge mode, it is necessary to write the variable-length data after merging into the stringfile
-        uint64_t var_addr_idx = var_offset - UINT64_MAX / 2;
-        if (var_addr_idx >= payload->tmp_var_col_values_4_dedup_merge_.size()) {
-          LOG_ERROR("cannot parse location %lu.", var_offset);
-          return -1;
+    if (!payload->IsNull(payload_column_idx, payload_start_row)) {
+      AttributeInfo payload_column_info = payload->GetSchemaInfo()[payload_column_idx];
+      bool has_merge_value = false;
+      MergeValueInfo merge_value;
+      if (unlikely(payload->HasMergeData(payload_column_idx))) {
+        auto it = payload->tmp_col_values_4_dedup_merge_.find(payload_column_idx);
+        auto data_it = it->second.find(payload_start_row);
+        if (data_it != it->second.end()) {
+          has_merge_value = true;
+          payload_column_info = data_it->second.attr;
+          merge_value = data_it->second;
         }
-        std::shared_ptr<void> var_addr = payload->tmp_var_col_values_4_dedup_merge_.at(var_addr_idx);
-        var_addr_with_len = reinterpret_cast<char*>(var_addr.get());
-        var_c_len = KUint16(var_addr_with_len);
-        if (cols_info_with_hidden_[segment_column].type == DATATYPE::VARSTRING) {
-          var_c_len -= 1;
+      }
+      if (payload_column_info.type == cols_info_with_hidden_[segment_column].type) {
+        need_convert = false;
+        if (has_merge_value) {  // reuse string in stringfile.
+          var_addr_with_len = reinterpret_cast<char*>(merge_value.value.get());
+          var_c_len = KUint16(var_addr_with_len);
+          if (cols_info_with_hidden_[segment_column].type == DATATYPE::VARSTRING) {
+            var_c_len -= 1;
+          }
+        } else {
+          var_c_len = payload->GetVarColumnLen(payload_start_row, payload_column_idx);
+          var_addr_with_len = payload->GetVarColumnAddr(payload_start_row, payload_column_idx);
         }
       } else {
-        var_c_len = payload->GetVarColumnLen(payload_start_row, payload_column);
-        var_addr_with_len = payload->GetVarColumnAddr(payload_start_row, payload_column);
+        need_convert = true;
+        data = ConvertToVarLenBeforePush(payload, (DATATYPE) payload_column_info.type,
+                                         (DATATYPE) cols_info_with_hidden_[segment_column].type,
+                                         payload_start_row, payload_column_idx, has_merge_value, merge_value.value);
+        var_c_len = KUint16(data.get());
       }
       // insert var string to string_file. and get string file location.
       {
@@ -568,12 +703,23 @@ int MMapSegmentTable::push_back_var_payload(kwdbts::Payload* payload, MetricRowI
         }
         // When writing data, variable-length data is first written to the string_file file to obtain the offset,
         // and then written to the data block in the data column using memcpy.
-        if (cols_info_with_hidden_[segment_column].type == DATATYPE::VARSTRING) {
-          loc = m_str_file_->push_back(
-              (void*) (var_addr_with_len + MMapStringFile::kStringLenLen), var_c_len);
+
+        if (!need_convert) {
+          if (cols_info_with_hidden_[segment_column].type == DATATYPE::VARSTRING) {
+            loc = m_str_file_->push_back(
+                (void*) (var_addr_with_len + MMapStringFile::kStringLenLen), var_c_len);
+          } else {
+            loc = m_str_file_->push_back_binary(
+                (void*) (var_addr_with_len + MMapStringFile::kStringLenLen), var_c_len);
+          }
         } else {
-          loc = m_str_file_->push_back_binary(
-              (void*) (var_addr_with_len + MMapStringFile::kStringLenLen), var_c_len);
+          if (cols_info_with_hidden_[segment_column].type == DATATYPE::VARSTRING) {
+            loc = m_str_file_->push_back(
+                (void*) ((char*)data.get() + MMapStringFile::kStringLenLen), var_c_len);
+          } else {
+            loc = m_str_file_->push_back_binary(
+                (void*) ((char*)data.get() + MMapStringFile::kStringLenLen), var_c_len);
+          }
         }
 
         if (loc == 0 || err_code < 0) {
@@ -676,40 +822,34 @@ const vector<AttributeInfo>& MMapSegmentTable::getSchemaInfo() const {
   return cols_info_with_hidden_;
 }
 
-int convertVarToNum(const std::string& str, DATATYPE new_type, char* data, int32_t old_len,
-                    ErrorInfo& err_info) {
+int convertStrToFixed(const std::string& str, DATATYPE new_type, char* data, int32_t old_len, ErrorInfo& err_info) {
   std::size_t pos{};
-  int res = 0;
+  int res32 = 0;
+  long long res64{};
+  float res_f;
+  double res_d;
   try {
     switch (new_type) {
-      case DATATYPE::INT16 : {
-        res = std::stoi(str, &pos);
-        KInt16(data) = res;
+      case DATATYPE::INT16 :
+        res32 = std::stoi(str, &pos);
         break;
-      }
       case DATATYPE::INT32 : {
-        auto res32 = std::stoi(str, &pos);
-        KInt32(data) = res32;
+        res32 = std::stoi(str, &pos);
         break;
       }
-      case DATATYPE::INT64 : {
-        auto res64 = std::stoll(str, &pos);
-        KInt64(data) = res64;
+      case DATATYPE::INT64 :
+        res64 = std::stoll(str, &pos);
         break;
-      }
-      case DATATYPE::FLOAT : {
-        auto res_f = std::stof(str, &pos);
-        KFloat32(data) = res_f;
+      case DATATYPE::FLOAT :
+        res_f = std::stof(str, &pos);
         break;
-      }
-      case DATATYPE::DOUBLE : {
-        auto res_d = std::stod(str, &pos);
-        KDouble64(data) = res_d;
+      case DATATYPE::DOUBLE :
+        res_d = std::stod(str, &pos);
         break;
-      }
       case DATATYPE::CHAR :
       case DATATYPE::BINARY : {
         memcpy(data, str.data(), old_len);
+        return 0;
       }
       default:
         break;
@@ -725,9 +865,29 @@ int convertVarToNum(const std::string& str, DATATYPE new_type, char* data, int32
     return err_info.setError(KWEPERM, "Data truncated '" + str + "'");
   }
   if (new_type == DATATYPE::INT16) {
-    if (res > INT16_MAX || res < INT16_MIN) {
+    if (res32 > INT16_MAX || res32 < INT16_MIN) {
       return err_info.setError(KWEPERM, "Out of range value '" + str + "'");
     }
+  }
+  switch (new_type) {
+    case DATATYPE::INT16 :
+      KInt16(data) = res32;
+      break;
+    case DATATYPE::INT32 :
+      KInt32(data) = res32;
+      break;
+    case DATATYPE::INT64 : {
+      KInt64(data) = res64;
+      break;
+    }
+    case DATATYPE::FLOAT :
+      KFloat32(data) = res_f;
+      break;
+    case DATATYPE::DOUBLE :
+      KDouble64(data) = res_d;
+      break;
+    default:
+      break;
   }
   return err_info.errcode;
 }

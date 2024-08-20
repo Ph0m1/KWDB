@@ -20,8 +20,8 @@
 #include "big_table.h"
 #include "mmap/mmap_object.h"
 #include "mmap/mmap_segment_table.h"
-#include "mmap/mmap_metrics_table.h"
-#include "mmap/mmap_entity_idx.h"
+#include "mmap/mmap_root_table_manager.h"
+#include "mmap/mmap_entity_block_meta.h"
 #include "cm_func.h"
 #include "payload.h"
 #include "ts_common.h"
@@ -29,7 +29,7 @@
 #include "lt_rw_latch.h"
 #include "lt_cond.h"
 #include "TSLockfreeOrderList.h"
-#include "ts_entity_idx_manager.h"
+#include "entity_block_meta_manager.h"
 
 extern int64_t g_compress_interval;
 
@@ -57,10 +57,9 @@ class TsTimePartition : public TSObject {
   string file_path_;
 
   // root table with schema info in table root directory
-  MMapMetricsTable*& root_table_;
-  // one subgroup can store max entity num. if has stored in meta file use stored, else use configure.
-  uint16_t config_subgroup_entities_;
-  mutable TsEntityIdxManager entity_idx_manager_;
+  MMapRootTableManager*& root_table_manager_;
+
+  mutable EntityBlockMetaManager meta_manager_;
   // partition list, key: min block id, value: MMapSegmentTable object
   TSLockfreeOrderList<BLOCK_ID, std::shared_ptr<MMapSegmentTable>> data_segments_;
   // current allocating space segment object.
@@ -77,9 +76,9 @@ class TsTimePartition : public TSObject {
   int loadSegments(ErrorInfo& err_info);
 
  public:
-  explicit TsTimePartition(MMapMetricsTable*& root_table, uint16_t config_subgroup_entities) :
-        TSObject(), root_table_(root_table) {
-    entity_idx_manager_.config_subgroup_entities = config_subgroup_entities;
+  explicit TsTimePartition(MMapRootTableManager*& root_table_manager, uint16_t config_subgroup_entities) :
+    TSObject(), root_table_manager_(root_table_manager) {
+    meta_manager_.config_subgroup_entities = config_subgroup_entities;
     rw_latch_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
     segments_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
     compress_mtx_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_COMPRESS_MUTEX);
@@ -114,14 +113,14 @@ class TsTimePartition : public TSObject {
   int open(const string& url, const std::string& db_path, const string& tbl_sub_path,
            int flags, ErrorInfo& err_info) override;
 
-  int openInitEntityMeta(const int flags, ErrorInfo& err_info);
+  int openBlockMeta(const int flags, ErrorInfo& err_info);
 
-  const vector<AttributeInfo>& getSchemaInfo() const {
-    return root_table_->getSchemaInfoWithHidden();
+  const vector<AttributeInfo>& getSchemaInfo(uint32_t table_version = 0) const {
+    return root_table_manager_->GetSchemaInfoWithHidden(table_version);
   }
 
-  const vector<AttributeInfo>& hierarchyInfo() const {
-    return root_table_->getSchemaInfoWithHidden();
+  const vector<uint32_t>& getActualCols() const {
+    return root_table_manager_->GetColsIdx();
   }
 
   const string& tbl_sub_path() const { return tbl_sub_path_; }
@@ -130,9 +129,9 @@ class TsTimePartition : public TSObject {
 
   string URL() const override { return file_path_; }
 
-  timestamp64& minTimestamp() { return entity_idx_manager_.minTimestamp(); }
+  timestamp64& minTimestamp() { return meta_manager_.minTimestamp(); }
 
-  timestamp64& maxTimestamp() { return entity_idx_manager_.maxTimestamp(); }
+  timestamp64& maxTimestamp() { return meta_manager_.maxTimestamp(); }
 
   virtual int reserve(size_t size) { return KWEPERM; }
 
@@ -156,7 +155,7 @@ class TsTimePartition : public TSObject {
       // segment has different status, if not ready means we need load segment files.
       if (value->getObjectStatus() != OBJ_READY && !lazy_open) {
         ErrorInfo err_info;
-        if (value->open(const_cast<TsEntityIdxManager*>(&entity_idx_manager_), key, name_ + ".bt",
+        if (value->open(const_cast<EntityBlockMetaManager*>(&meta_manager_), key, name_ + ".bt",
                         db_path_, tbl_sub_path_ + std::to_string(key) + "/", MMAP_OPEN_NORECURSIVE,
                         false, err_info) < 0) {
           LOG_ERROR("getSegmentTable segment[%d] open failed", key);
@@ -180,7 +179,7 @@ class TsTimePartition : public TSObject {
         return true;
       }
     }
-    return block_item->alloc_row_count >= entity_idx_manager_.getBlockMaxRows() || block_item->read_only;
+    return block_item->alloc_row_count >= meta_manager_.getBlockMaxRows() || block_item->read_only;
   }
 
   inline void releaseSegments() {
@@ -198,22 +197,22 @@ class TsTimePartition : public TSObject {
    *
    * @return A pointer to the newly created MMapSegmentTable on success, or nullptr if an error occurs.
    */
-  MMapSegmentTable* createSegmentTable(BLOCK_ID segment_id, ErrorInfo& err_info);
+  MMapSegmentTable* createSegmentTable(BLOCK_ID segment_id, uint32_t table_version, ErrorInfo& err_info);
 
-  inline size_t getBlockMaxRows() const { return entity_idx_manager_.getBlockMaxRows(); }
+  inline size_t getBlockMaxRows() const { return meta_manager_.getBlockMaxRows(); }
 
-  inline size_t getBlockMaxNum() const { return entity_idx_manager_.getBlockMaxNum(); }
+  inline size_t getBlockMaxNum() const { return meta_manager_.getBlockMaxNum(); }
 
   inline EntityItem* getEntityItem(uint entity_id) {
-    return entity_idx_manager_.getEntityItem(entity_id);
+    return meta_manager_.getEntityItem(entity_id);
   }
 
   inline void deleteEntityItem(uint entity_id) {
-    entity_idx_manager_.deleteEntity(entity_id);
+    meta_manager_.deleteEntity(entity_id);
   }
 
   inline BlockItem* getBlockItem(uint item_id) {
-    return entity_idx_manager_.GetBlockItem(item_id);
+    return meta_manager_.GetBlockItem(item_id);
   }
 
 /**
@@ -366,6 +365,9 @@ class TsTimePartition : public TSObject {
 
   int GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse = false);
 
+  int GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>& ts_spans, std::deque<BlockSpan>& block_spans,
+                       bool compaction = false);
+
   BlockItem* GetBlockItem(BLOCK_ID item_id);
 
   /**
@@ -393,9 +395,10 @@ class TsTimePartition : public TSObject {
    * @param batch_num The number of batches that need to be allocated.
    * @param spans Pointer to the BlockSpan vector that stores the allocation result.
    *              The successfully allocated spans will be added to this vector.
+   * @param payload_table_version Table version of payload
    * @return Return the error code, 0 indicates success, and a value less than 0 indicates an error.
    */
-  int AllocateAllDataSpace(uint entity_id, size_t batch_num, std::vector<BlockSpan>* spans);
+  int AllocateAllDataSpace(uint entity_id, size_t batch_num, std::vector<BlockSpan>* spans,  uint32_t payload_table_version);
 
   /**
    * @brief GetAndAllocateAllDataSpace reuse or allocates all data space required for an operation.
@@ -423,31 +426,18 @@ class TsTimePartition : public TSObject {
    * If there is no active segment, then a new segment will be created.
    *
    * @param entity_id entity ID, Used to identify entities that need to be allocated BlockItems.
+   * @param payload_table_version Table version of payload
    * @param blk_item Address of the pointer that points to the allocated BlockItem.
    * @return Success returns 0, failure returns error code.
    */
-  int allocateBlockItem(uint entity_id, BlockItem** blk_item);
+  int allocateBlockItem(uint entity_id, BlockItem** blk_item, uint32_t payload_table_version);
 
   void publish_payload_space(const std::vector<BlockSpan>& alloc_spans, const std::vector<MetricRowID>& delete_rows,
                              uint32_t entity_id, bool success);
 
-  /**
-   * @brief Alter partition table
-   * @param[in] attr_info Attribute information
-   * @param[out] err_info error information
-   * @return
-   */
-  int AlterTable(AttributeInfo& attr_info, ErrorInfo& err_info);
-
   int PrepareDup(kwdbts::DedupRule dedup_rule, uint32_t entity_id, const std::vector<KwTsSpan>& ts_spans);
 
-  // convert column value from old_type to new_type, happened after sql: altering table column type.
-  int ConvertDataType(DATATYPE old_type, DATATYPE new_type, kwdbts::Payload* payload, size_t payload_start_row,
-                      size_t column, std::shared_ptr<MMapSegmentTable>& segment_table, MetricRowID dup_real_r,
-                      uint32_t actual_c);
-
-  int ConvertDataTypeToMem(DATATYPE old_type, DATATYPE new_type, char* mem, std::shared_ptr<void>* var_mem,
-                           std::shared_ptr<MMapSegmentTable>& segment_table, MetricRowID dup_real_r, uint32_t actual_c);
+  int CopyFixedData(DATATYPE old_type, char* old_mem, std::shared_ptr<void>* new_mem);
 
   int ConvertDataTypeToMem(DATATYPE old_type, DATATYPE new_type, int32_t new_type_size,
                            void* old_mem, std::shared_ptr<void> old_var_mem, std::shared_ptr<void>* new_mem);
@@ -484,15 +474,12 @@ class TsTimePartition : public TSObject {
    * rows, it selects the latest non-null value from the duplicate rows for merging. During this process, it checks
    * if there is a change in the data type of the merged data, and if there is, it converts the data type accordingly.
    *
-   * @param schema_info schema info
-   * @param actual_cols The actually selected column
    * @param payload The result of the merge will be written here.
    * @param merge_row The target line number to be merged
    * @param dedup_info Deduplication information, including the line numbers for deduplication, etc
    * @return Returning 0 indicates success, non 0 indicates failure
    */
-  int mergeToPayload(const vector<AttributeInfo>& schema_info, const vector<uint32_t>& actual_cols,
-                     kwdbts::Payload* payload, size_t merge_row, kwdbts::DedupInfo& dedup_info);
+  int mergeToPayload(kwdbts::Payload* payload, size_t merge_row, kwdbts::DedupInfo& dedup_info);
 
   /**
    * waitBlockItemDataFilled is used to wait for the completion of writing all data for a specified
@@ -538,23 +525,12 @@ class TsTimePartition : public TSObject {
   int GetDedupRowsInBlk(uint entity_id, BlockItem* block_item, int read_count,
                         kwdbts::DedupInfo& dedup_info, bool has_lsn);
 
-  /**
-   * @brief Check whether the column types of the entity ids can be altered.
-   * @param entities[in] entity ids
-   * @param col_index[in] column index
-   * @param new_type[in]  the new type that the column will be altered to.
-   * @param is_valid[out]  result of check
-   * @param err_info[out] error information
-   * @return
-   */
-  int CheckAlterValid(const std::vector<uint32_t>& entities, int col_index, DATATYPE new_type,
-                      bool& is_valid, ErrorInfo& err_info);
-
-  static int checkTypeAlter(const std::string& str, DATATYPE new_type, ErrorInfo& err_info);
+  static int tryAlterType(const std::string& str, DATATYPE new_type, ErrorInfo& err_info);
 
   int ProcessDuplicateData(kwdbts::Payload* payload, size_t start_in_payload, size_t count,
                            const BlockSpan span, kwdbts::DedupInfo& dedup_info,
                            DedupResult* dedup_result, ErrorInfo& err_info);
+
 
   // When delete a table, check whether there is no other refcount other than the cache
   // and the table instance that called to delete
@@ -562,6 +538,23 @@ class TsTimePartition : public TSObject {
 
   // set deleted flag, iterator will not query this partition later
   bool& DeleteFlag() {
-    return entity_idx_manager_.getEntityHeader()->deleted;
+    return meta_manager_.getEntityHeader()->deleted;
   };
+
+  // Modify segment status according to max_blocks taken from entity_ids and get all the segment_id,
+  // so that it can be dropped after reorganization
+  int CompactingStatus(std::map<uint32_t, BLOCK_ID> &obsolete_max_block, std::vector<BLOCK_ID> &obsolete_segment_ids);
+
+  int DropSegmentDir(std::vector<BLOCK_ID> segment_ids);
+
+  int UpdateCompactMeta(std::map<uint32_t, BLOCK_ID> &obsolete_max_block,
+                        std::map<uint32_t, std::deque<BlockItem*>> &compacted_block_items) {
+    return meta_manager_.updateCompactMeta(obsolete_max_block, compacted_block_items);
+  };
+
+  bool NeedCompaction(uint32_t entity_id);
+
+  std::vector<uint32_t> GetEntities() { return meta_manager_.getEntities(); }
+
+  uint64_t PartitionInterval() { return maxTimestamp() - minTimestamp() + 1; }
 };

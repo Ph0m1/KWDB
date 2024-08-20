@@ -18,12 +18,15 @@
 #include <unordered_map>
 #include <memory>
 #include "kwdb_type.h"
-#include "mmap/mmap_entity_idx.h"
+#include "mmap/mmap_entity_block_meta.h"
 #include "TSLockfreeOrderList.h"
 #include "ts_common.h"
 #include "libkwdbts2.h"
 #include "st_wal_types.h"
 #include "ts_table_object.h"
+
+
+class MMapRootTableManager;
 
 namespace kwdbts {
 
@@ -35,6 +38,10 @@ enum class DedupRule {
   MERGE = 4,     // duplicate by column
 };
 
+struct MergeValueInfo {
+  AttributeInfo attr;  // segment attribute info
+  std::shared_ptr<void> value;  // segment merge value
+};
 
 /**
  * @brief payload support function to read payload memory incoming from go
@@ -80,28 +87,10 @@ class Payload {
 
   // TODO(jiadx): schema primary\tag\schema
   // data row first column is timestamp type
-  Payload(const std::vector<AttributeInfo>& schema, TSSlice data) : schema_(schema), slice_(data) {
-    start_row_ = 0;
-    count_ = *reinterpret_cast<int32_t*> (slice_.data + row_num_offset_);
-    flag_ = *reinterpret_cast<uint8_t*> (slice_.data + row_type_offset_);
-    primary_len_ = KInt16(slice_.data + header_size_);
-    primary_offset_ = header_size_ + 2;
-    tag_len_ = KInt32(slice_.data + primary_offset_ + primary_len_);
-    tag_offset_ = primary_offset_ + primary_len_ + 4;
-    if (flag_ != Payload::TAG_ONLY) {
-      data_len_ = KInt32(slice_.data + tag_offset_ + tag_len_);
-      data_offset_ = tag_offset_ + tag_len_ + 4;
-    }
-    bitmap_len_ = (count_ + 7) / 8;
+  Payload(MMapRootTableManager* root_bt_manager, TSSlice data);
 
-    col_offsets_ = new int32_t[schema_.size()];
-    // calculate column offset
-    int32_t col_len = data_offset_;
-    for (int i = 0; i < schema_.size(); i++) {
-      col_offsets_[i] = col_len;
-      col_len += (bitmap_len_ + schema_[i].size * count_);
-    }
-  }
+  Payload(const std::vector<AttributeInfo>& schema, const std::vector<uint32_t>& actual_cols, TSSlice data);
+
   ~Payload() {
     if (rec_helper_) delete rec_helper_;
     delete []col_offsets_;
@@ -240,27 +229,6 @@ class Payload {
     return true;
   }
 
-  void SetMergeValue(int col, MetricRowID row_id, const std::shared_ptr<void>& data) {
-    if (col < var_merge_values_.size()) {
-      var_merge_values_[col].insert({row_id, data});
-    } else {
-      std::map<MetricRowID, std::shared_ptr<void>> var_m;
-      var_merge_values_.emplace_back(var_m);
-      var_merge_values_[col].insert({row_id, data});
-    }
-  }
-
-  std::shared_ptr<void> GetMergeValue(int col, MetricRowID row_id) {
-    if (col >= var_merge_values_.size()) {
-      return nullptr;
-    }
-    auto iter = var_merge_values_[col].find(row_id);
-    if (iter != var_merge_values_[col].end()) {
-      return iter->second;
-    }
-    return nullptr;
-  }
-
   // Get the timestamp of the ith row
   KTimestamp GetTimestamp(int row) {
     return KTimestamp(GetColumnAddr(row, 0));
@@ -292,7 +260,20 @@ class Payload {
     return reinterpret_cast<char*> (slice_.data + primary_offset_);
   }
 
+  inline const std::vector<AttributeInfo>& GetSchemaInfo() {
+    return schema_;
+  }
+
+  inline const std::vector<uint32_t>& GetActualCols() {
+    return actual_cols_;
+  }
+
   inline uint8_t GetFlag() { return flag_; }
+
+  inline bool HasMergeData(size_t col_idx) {
+    return dedup_rule_ == DedupRule::MERGE && tmp_col_values_4_dedup_merge_.find(col_idx) !=
+                          tmp_col_values_4_dedup_merge_.end();
+  }
 
   ostream& PrintMetric(std::ostream& os) {
     if (!rec_helper_) {
@@ -317,7 +298,8 @@ class Payload {
   }
 
  private:
-  const vector<AttributeInfo>& schema_;
+  vector<AttributeInfo> schema_;
+  vector<uint32_t> actual_cols_;
   TSSlice slice_;
   int32_t primary_offset_;
   int16_t primary_len_;
@@ -339,7 +321,8 @@ class Payload {
  public:
   DedupRule dedup_rule_ = DedupRule::OVERRIDE;
   // while data deduplicate rule is merge, need change payload column value.
-  std::vector<std::shared_ptr<void>> tmp_var_col_values_4_dedup_merge_;
+  // <payload_column_idx, <payload_row_id, MergeValueInfo>>
+  std::unordered_map<size_t, std::unordered_map<size_t, MergeValueInfo>> tmp_col_values_4_dedup_merge_;
 };
 
 struct DedupInfo {

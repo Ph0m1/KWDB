@@ -14,6 +14,7 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#include <map>
 #include "libkwdbts2.h"
 #include "kwdb_type.h"
 #include "mmap/mmap_tag_column_table.h"
@@ -32,7 +33,7 @@ struct SnapshotInfo {
   uint64_t end_hash;
   // parameters are used for SubEntityGroup reconstruction
   uint32_t subgroup_id;  // reconstructed subgroup_id
-  int64_t partition_ts;  // partition timestamp
+  KwTsSpan partition_ts;  // partition timestamp
 };
 
 class TsEntityGroup;
@@ -48,9 +49,10 @@ class TsTableSnapshot {
    * @param[in] snapshot_info SnapshotInfo
    */
   TsTableSnapshot(const string& db_path, const KTableKey& table_id, const string& tbl_sub_path,
-                  std::shared_ptr<TsEntityGroup> entity_group, MMapMetricsTable* entity_bt, SnapshotInfo& snapshot_info)
+                  std::shared_ptr<TsEntityGroup> entity_group, MMapRootTableManager* entity_bt_manager,
+                  SnapshotInfo& snapshot_info)
       : snapshot_info_(snapshot_info), db_path_(db_path), table_id_(table_id), tbl_sub_path_(tbl_sub_path),
-        entity_bt_(entity_bt), entity_group_(entity_group) {}
+        entity_bt_manager_(entity_bt_manager), entity_group_(entity_group) {}
 
   ~TsTableSnapshot();
 
@@ -122,6 +124,35 @@ class TsTableSnapshot {
   KStatus Apply();
 
   /**
+    * @brief Before compaction, sort out the subgroup each entity belong to, and change the segment's status.
+    * @param[out] obsolete_max_block: map[subgroup_id][partition_ts][entity_id]block_id,
+    *      record latest block_id of each entity when compaction starts
+    * @param[out] obsolete_segment_ids: map[subgroup_id][partition_ts]{segment_id...},
+    *      record segment_ids under partition when compaction starts, these segment will be deleted.
+    * @param[out] subgroup_row: map[subgroup_id]{tag_row...}, compacting tags and their subgroup, for BuildCompactData
+    * @param[out] subgroup_ts_span: map[subgroup_id]{KwTsSpan...},
+    *      record compacting partitions of each subgroup, all convert to KwTsSpan, for BuildCompactData
+   */
+  KStatus PrepareCompactData(kwdbContext_p ctx,
+                             std::map<SubGroupID, std::map<timestamp64, std::map<uint32_t, BLOCK_ID>>> &obsolete_max_block,
+                             std::map<SubGroupID, std::map<timestamp64, std::vector<BLOCK_ID>>> &obsolete_segment_ids,
+                             std::map<SubGroupID, std::vector<uint32_t>> &subgroup_row,
+                             std::map<SubGroupID, std::vector<KwTsSpan>> &subgroup_ts_span);
+
+  KStatus BuildCompactData(kwdbContext_p ctx, std::vector<uint32_t> &tag_rows, std::vector<KwTsSpan> &partition_ts);
+
+  /**
+   * @brief Apply the compation result to EntityGroup. The ongoing subgroup cannot read/write.
+   * @param[in] subgroup_id: the subgroup applying the compaction result
+   * @param[in] obsolete_max_block: map[partition_ts][entity_id]block_id,
+   *      record the latest block_id of the entityies when compaction starts, for meta linking.
+   * @param[in] obsolete_segment_ids: map[partition_ts]{segment_id...},
+   *      record segment_ids under partition when compaction starts, these segment will be deleted.
+  */
+  KStatus ApplyCompactData(kwdbContext_p ctx, SubGroupID subgroup_id,
+                           std::map<timestamp64, std::map<uint32_t, BLOCK_ID>> &obsolete_max_block,
+                           std::map<timestamp64, std::vector<BLOCK_ID>> &obsolete_segment_ids);
+  /**
    * @brief Drop all snapshot data includes compressed file
    * @return
    */
@@ -164,15 +195,16 @@ class TsTableSnapshot {
    * @brief Generate the payload data for the snapshot to be migrated by PayloadBuilder
    * First, create iterator to read data in batches from source entity group, the read data batch is then assembled
    * into a payload through the builder and the snapshot group calls PutData to write the data.
-   * @param row_id The data to be migrated corresponds to the row number of the primary tag in the tag table
+   * @param[in] row_id The data to be migrated corresponds to the row number of the primary tag in the tag table
+   * @param[in] ts_span timestamp range of this time to generate paload
    * @return KStatus
    */
-  KStatus genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t row_id);
+  KStatus genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t row_id, KwTsSpan ts_span);
 
   string db_path_;
   KTableKey table_id_;
   string tbl_sub_path_;
-  MMapMetricsTable* entity_bt_;
+  MMapRootTableManager* entity_bt_manager_;
   SnapshotInfo snapshot_info_;
   // TsEntityGroup instance of a snapshot
   TsEntityGroup* snapshot_group_;

@@ -29,11 +29,6 @@ SET
 SET CLUSTER SETTING
 > alter table test_alter.t1 add column c int;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a  |  c   | b
 ----------------------------+-----+------+----
@@ -45,11 +40,6 @@ ALTER TABLE
 (5 rows)
 > alter table test_alter.t1 drop column c;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a  | b
 ----------------------------+-----+----
@@ -61,11 +51,6 @@ ALTER TABLE
 (5 rows)
 > alter table test_alter.t1 add column c int;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a  |  c   | b
 ----------------------------+-----+------+----
@@ -99,11 +84,6 @@ INSERT 1
 (8 rows)
 > alter table test_alter.t1 add column d float;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a  |  c   |  d   | b
 ----------------------------+-----+------+------+----
@@ -118,11 +98,6 @@ ALTER TABLE
 (8 rows)
 > alter table test_alter.t1 drop column d;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a  |  c   | b
 ----------------------------+-----+------+----
@@ -137,11 +112,6 @@ ALTER TABLE
 (8 rows)
 > alter table test_alter.t1 add column d float;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a  |  c   |  d   | b
 ----------------------------+-----+------+------+----
@@ -180,11 +150,6 @@ INSERT 1
 (12 rows)
 > alter table test_alter.t1 add column e char(20);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a   |  c   |  d   |  e   | b
 ----------------------------+------+------+------+------+----
@@ -203,11 +168,6 @@ ALTER TABLE
 (12 rows)
 > alter table test_alter.t1 drop column e;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a   |  c   |  d   | b
 ----------------------------+------+------+------+----
@@ -226,11 +186,6 @@ ALTER TABLE
 (12 rows)
 > alter table test_alter.t1 add column e char(20);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a   |  c   |  d   |  e   | b
 ----------------------------+------+------+------+------+----
@@ -274,11 +229,6 @@ INSERT 1
 (15 rows)
 > alter table test_alter.t1 add column f varchar(100);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a   |  c   |  d   |     e     |  f   | b
 ----------------------------+------+------+------+-----------+------+----
@@ -300,11 +250,6 @@ ALTER TABLE
 (15 rows)
 > alter table test_alter.t1 drop column f;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a   |  c   |  d   |     e     | b
 ----------------------------+------+------+------+-----------+----
@@ -345,11 +290,6 @@ ALTER TABLE
 (15 rows)
 > alter table test_alter.t1 add column f varchar(100);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t1 order by ts, b;
              ts             |  a   |  c   |  d   |     e     |  f   | b
 ----------------------------+------+------+------+-----------+------+----
@@ -529,6 +469,11 @@ ALTER TABLE
 > alter table test_alter.t3 add tag attr17_a1 smallint;
 ERROR: duplicate tag name: "attr17_a1"
 SQLSTATE: 42701
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
 > create table test_alter.t4(
                             k_timestamp timestamptz not null,
                             e1 int8,
@@ -693,11 +638,6 @@ ALTER TABLE
 CREATE TABLE
 > alter table test_alter.t7 add if not exists c1 int8;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > show tag values from test_alter.t7;
   code1 | code2 | code3 | flag | val1 | val2 | location | color | age | sex | year | type
 --------+-------+-------+------+------+------+----------+-------+-----+-----+------+-------
@@ -715,18 +655,8 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t8 add c1 int8 null;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t8 drop c1;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t8 add c1 int8 null;
 ALTER TABLE
 > CREATE TABLE test_alter.newtable_2 (
@@ -1064,11 +994,6 @@ ALTER TABLE
 ALTER TABLE
 > ALTER TABLE test_alter.t10 DROP COLUMN e8;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > select * from test_alter.t10 where code1 = 6;
           k_timestamp          |  e2  |  e9  | e10  | e11  | e12  | e13  | e14  | e15  | e16  | code1 | code2 | code3 | flag | val1 | val2 | location | color | age  | sex  | year | type
 -------------------------------+------+------+------+------+------+------+------+------+------+-------+-------+-------+------+------+------+----------+-------+------+------+------+-------
@@ -1084,11 +1009,6 @@ SET CLUSTER SETTING
 ALTER TABLE
 > alter table test_alter.t11 drop column d;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > insert into test_alter.t11 values(1672531201000, NULL, 101, 1);
 INSERT 1
 > select * from test_alter.t11;

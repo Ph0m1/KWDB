@@ -1036,6 +1036,9 @@ message TSTable {
   // Multiple schema change mutations can be grouped together on a
   // particular version increment.
   optional uint32 ts_version = 17 [(gogoproto.nullable) = false, (gogoproto.casttype) = "DescriptorVersion"];
+  // next_ts_version is used to ensure that tsVersion are not reused.
+  optional uint32 next_ts_version = 18 [(gogoproto.nullable) = false,
+        (gogoproto.customname) = "NextTsVersion", (gogoproto.casttype) = "DescriptorVersion"];
 }
 
 // SchemaDescriptor represents a physical schema and is stored in a structured

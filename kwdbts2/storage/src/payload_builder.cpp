@@ -138,7 +138,7 @@ bool PayloadBuilder::SetColumnNull(int row_num, int col_idx) {
   return true;
 }
 
-bool PayloadBuilder::Build(TSSlice *payload) {
+bool PayloadBuilder::Build(TSSlice *payload, uint32_t table_version) {
   if (count_ <= 0 || tag_schema_.empty() || data_schema_.empty() || primary_tags_.empty()) {
     return false;
   }
@@ -172,6 +172,7 @@ bool PayloadBuilder::Build(TSSlice *payload) {
   char* value_idx = value;
   // header part
   KInt32(value_idx + Payload::row_num_offset_) = count_;
+  KUint32(value_idx + Payload::ts_version_offset_) = table_version;
   value_idx += header_len;
   // set primary tag
   KInt16(value_idx) = primary_tag_len;

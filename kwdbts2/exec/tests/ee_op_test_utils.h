@@ -214,6 +214,7 @@ class BaseSchema {
                                            k_uint32 ms_interval = 10, int test_value = 0,
                                            bool fix_entityid = true) {
     vector<AttributeInfo> schema;
+    vector<uint32_t> actual_cols;
     vector<AttributeInfo> tag_schema;
     k_int32 tag_value_len = 0;
     payload_length = 0;
@@ -242,6 +243,7 @@ class BaseSchema {
         if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
           payload_length += (test_str.size() + 2);
         }
+        actual_cols.push_back(schema.size());
         schema.push_back(std::move(col_var));
       }
     }
@@ -268,7 +270,7 @@ class BaseSchema {
     // set data_len_len
     KInt32(value.get() + header_len + primary_len_len + primary_tag_len + tag_len_len +
            tag_value_len) = data_len;
-    Payload p(schema, {value.get(), data_length});
+    Payload p(schema, actual_cols, {value.get(), data_length});
     int16_t len = 0;
     genPayloadTagData(p, tag_schema, start_ts, fix_entityid);
     uint64_t var_exist_len = 0;
@@ -326,6 +328,7 @@ class BaseSchema {
                                             k_uint32 ms_interval = 10,
                                             int test_value = 0, bool fix_entityid = true) {
     vector<AttributeInfo> schema;
+    vector<uint32_t> actual_cols;
     vector<AttributeInfo> tag_schema;
     k_int32 tag_value_len = 0;
     for (int i = 0; i < meta.k_column_size(); i++) {
@@ -342,6 +345,7 @@ class BaseSchema {
         tag_value_len += col_var.size;
         tag_schema.push_back(std::move(col_var));
       } else {
+        actual_cols.push_back(schema.size());
         schema.push_back(std::move(col_var));
       }
     }
@@ -368,7 +372,7 @@ class BaseSchema {
     // set data_len_len
     KInt32(value.get() + header_len + primary_len_len + primary_tag_len + tag_len_len +
            tag_value_len) = data_len;
-    Payload p(schema, {value.get(), data_length});
+    Payload p(schema, actual_cols, {value.get(), data_length});
 
     genPayloadTagData(p, tag_schema, start_ts, fix_entityid);
 
@@ -540,6 +544,7 @@ class TSBSSchema {
                                            k_uint32 ms_interval = 10, int test_value = 0,
                                            bool fix_entityid = true) {
     vector<AttributeInfo> schema;
+    vector<uint32_t> actual_cols;
     vector<AttributeInfo> tag_schema;
     k_int32 tag_value_len = 0;
     payload_length = 0;
@@ -560,6 +565,7 @@ class TSBSSchema {
         if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
           payload_length += (test_str.size() + 2);
         }
+        actual_cols.push_back(schema.size());
         schema.push_back(std::move(col_var));
       }
     }
@@ -578,13 +584,14 @@ class TSBSSchema {
     auto value = make_unique<char[]>(data_length);
     memset(value.get(), 0, data_length);
     KInt32(value.get() + Payload::row_num_offset_) = count;
+    KUint32(value.get() + Payload::ts_version_offset_) = 1;
     // set primary_len_len
     KInt16(value.get() + HEADER_SIZE) = primary_tag_len;
     // set tag_len_len
     KInt32(value.get() + header_len + primary_len_len + primary_tag_len) = tag_value_len;
     // set data_len_len
     KInt32(value.get() + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
-    Payload p(schema, {value.get(), data_length});
+    Payload p(schema, actual_cols, {value.get(), data_length});
     int16_t len = 0;
     genPayloadTagData(p, tag_schema, start_ts, fix_entityid);
     uint64_t var_exist_len = 0;

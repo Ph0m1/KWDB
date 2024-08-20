@@ -16,9 +16,12 @@
 #include <vector>
 #include <utility>
 #include "lru_cache.h"
-#include "mmap/mmap_metrics_table.h"
+#include "mmap/mmap_root_table_manager.h"
 #include "ts_time_partition.h"
 #include "libkwdbts2.h"
+#include "mmap/mmap_tag_column_table.h"
+#include "map"
+#include "deque"
 
 namespace kwdbts {
 typedef uint32_t SubGroupID;
@@ -28,7 +31,7 @@ class TsSubEntityGroup : public TSObject {
  public:
   static const int cache_capacity_ = 10;
 
-  explicit TsSubEntityGroup(MMapMetricsTable*& root_tbl);
+  explicit TsSubEntityGroup(MMapRootTableManager*& root_tbl_manager);
 
   virtual ~TsSubEntityGroup();
 
@@ -40,10 +43,10 @@ class TsSubEntityGroup : public TSObject {
    * @brief	Open and initialize SubEntityGroup. Mainly for initializing meta files
    *        If flags=CREATE, an already existing error will be returned when the meta file exists.
    *
-   * @param 	tbl_name 
+   * @param 	tbl_name
    * @param 	schema		root table schema
    * @param 	subgroup_id		subgroup id
-   * @param 	db_path		 
+   * @param 	db_path
    * @param 	tbl_sub_path		subgroup sub path
    * @param 	flags option to open a file; O_CREAT to create new file.
    * @return	0 succeed, otherwise < 0.
@@ -82,7 +85,7 @@ class TsSubEntityGroup : public TSObject {
   int UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t* count, ErrorInfo& err_info);
 
   /**
-* @brief Modify the number of entities that SubEntityGroup can store. 
+* @brief Modify the number of entities that SubEntityGroup can store.
 *         When creating a new time partition MetricsTable, use the modified values without affecting the existing partition.
 * @param[in] entity_num   entity num
 *
@@ -119,7 +122,7 @@ class TsSubEntityGroup : public TSObject {
  * @param[in] create_if_not_exist  True: If the group table does not exist, call the internal createPartitionTable to create it.
  * @param[in] lru_push_back  False: Insert lru_cache put into the header; True: Insert to the end.
  *
- * @return 
+ * @return
  */
   TsTimePartition* GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
                                      bool create_if_not_exist = false,
@@ -127,9 +130,9 @@ class TsSubEntityGroup : public TSObject {
 
   /**
  * @brief  Filter partition table instances based on ts span
- * @param[in] ts_span  
+ * @param[in] ts_span
  *
- * @return 
+ * @return
  */
   vector<TsTimePartition*> GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info);
 
@@ -178,7 +181,6 @@ class TsSubEntityGroup : public TSObject {
  *
  * @return error code
  */
-  int AlterTable(AttributeInfo& attr_info, ErrorInfo& err_info);
 
   virtual void sync(int flags);
 
@@ -194,17 +196,36 @@ class TsSubEntityGroup : public TSObject {
 
   int ReOpenInit(ErrorInfo& err_info);
 
+  std::vector <timestamp64> GetPartitionTsInSpan(KwTsSpan ts_span);
+  int ClearPartitionCache();
+  int ErasePartitionCache(timestamp64 pt_ts);
+
+  /**
+   * @brief Apply the reorganization result to the subgroup, and the ongoing subgroup cannot be read or written
+   * @param[in] obsolete_max_block: map[partition_ts][entity_id]block_id, record the latest block_id of the entity
+   *            at the time of reorganization initiation, which is used to concatenate metas
+   * @param[in] obsolete_segment_ids: map[partition_ts]{segment_id...}, record the segment_id under the partition when the
+   *            reorganization starts, and these segments will be deleted
+   * @param[in] compacted_block_items: map[partition_ts][entity_id]{BlockItem...}, the reorganized BlockItems in snapshot
+   *            will replace blockItems in the source meta
+   * @param[in] compact_dir: Snapshot path for moving reorganized files
+  */
+  int ApplyCompactData(std::map<timestamp64, std::map<uint32_t, BLOCK_ID>> &obsolete_max_block,
+                       std::map<timestamp64, std::vector<BLOCK_ID>> &obsolete_segment_ids,
+                       std::map<timestamp64, std::map<uint32_t, std::deque<BlockItem*>>> &compacted_block_items,
+                       string compact_dir);
+
  private:
   std::string db_path_;
   std::string tbl_sub_path_;
   // The absolute path to the subgroup directory
   std::string real_path_;
-  // Referenced from the root table of SubEntityGroupManager
-  MMapMetricsTable*& root_tbl_;
+  // Referenced from the root table manager of SubEntityGroupManager
+  MMapRootTableManager*& root_tbl_manager_;
   std::string table_name_;
   SubGroupID subgroup_id_;
-  // The block index of subgroup is mainly used to manage the allocation of EntityIDs
-  MMapEntityIdx* entity_block_idx_{nullptr};
+  // The entity block meta of subgroup is mainly used to manage the allocation of EntityIDs
+  MMapEntityBlockMeta* entity_block_meta_{nullptr};
   // The set of all partition times: key=minimum partition time, value=maximum partition time
   map<timestamp64, timestamp64> partitions_ts_;
   // deleted but skipped partitions
@@ -229,14 +250,14 @@ class TsSubEntityGroup : public TSObject {
   /**
  * @brief Internal method to obtain MMapPartitionTable, unlocked
  *
- * @return 
+ * @return
  */
   TsTimePartition* getPartitionTable(timestamp64 p_time, timestamp64 max_ts, ErrorInfo& err_info,
                                      bool create_if_not_exist = false, bool lru_push_back = false);
   /**
   * @brief Internal method for creating MMapPartitionTable
   *
-  * @return 
+  * @return
   */
   TsTimePartition* createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
                                         ErrorInfo& err_info);
@@ -259,7 +280,7 @@ class TsSubEntityGroup : public TSObject {
 
   //
   void deleteEntityItem(uint entity_id) {
-    entity_block_idx_->deleteEntity(entity_id);
+    entity_block_meta_->deleteEntity(entity_id);
   }
 
   // Internal method to obtain all partition information: Lock, copy partitions.ts_, and return

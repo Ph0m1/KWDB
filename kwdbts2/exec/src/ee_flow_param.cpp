@@ -1025,6 +1025,8 @@ Field *PostResolve::ResolveFuncOperator(kwdbContext_p ctx, KString &func_name,
              func_name == "right" || func_name == "upper" ||
              func_name == "lower") {
     field = KNEW FieldFuncString(func_name, args);
+  } else if (func_name == "cast_check_ts") {
+    field = KNEW FieldFuncCastCheckTs(args.front(), right);
   } else {  // MathFields
     if (args.size() == 1) {
       for (k_int32 i = 0; i < mathFuncBuiltinsNum1; i++) {

@@ -104,6 +104,7 @@ class TestTsBLockItemMaxNoCore : public TestBigTableInstance {
     char* value_idx = value;
     // header 
     KInt32(value_idx + Payload::row_num_offset_) = count;
+    KUint32(value_idx + Payload::ts_version_offset_) = 1;
     value_idx += header_len;
     // set primary tag
     KInt16(value_idx) = primary_tag_len;
@@ -234,7 +235,7 @@ TEST_F(TestTsBLockItemMaxNoCore, mulitiInsert) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              ts_spans, scan_cols, scan_cols, scan_agg_types, &iter1, entity_group_leader_), KStatus::SUCCESS);
+                                              ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
   int iter_count = GetIterRows(iter1, scan_cols.size());
   EXPECT_TRUE(iter_count % batch_count == 0);
   delete iter1;

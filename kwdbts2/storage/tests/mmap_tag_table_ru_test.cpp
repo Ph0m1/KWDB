@@ -86,6 +86,7 @@ class TestTagRuTable : public TestBigTableInstance {
         info.version = 1;
         info.col_flag = (schema[i].m_tag_type == PRIMARY_TAG) ? COL_PRIMARY_TAG : COL_GENERAL_TAG;
         schema_.push_back(std::move(info));
+        actual_cols_.push_back(actual_cols_.size());
       }
 
       init0();
@@ -97,6 +98,10 @@ class TestTagRuTable : public TestBigTableInstance {
 
     vector<AttributeInfo> GetSchema() {
       return schema_;
+    }
+
+    vector<uint32_t> GetActualCols() {
+      return actual_cols_;
     }
 
     void SetFlag(int flag) {
@@ -301,6 +306,7 @@ class TestTagRuTable : public TestBigTableInstance {
     static const size_t flag_pos_ = 38;
 
     vector<AttributeInfo> schema_;
+    vector<uint32_t> actual_cols_;
     int flag_;
     char *buf_start_ptr_;
     char *buf_end_ptr_;
@@ -388,7 +394,7 @@ TEST_F(TestTagRuTable, insertForUndo) {
   size_t buf_len = 0;
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd(pb.GetSchema(), slice);
+  kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
   uint32_t entity_id = 110;
   uint32_t group_id = 119;
@@ -464,7 +470,7 @@ TEST_F(TestTagRuTable, deleteForUndo) {
   size_t buf_len = 0;
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd(pb.GetSchema(), slice);
+  kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
   uint32_t entityid = 110;
   uint32_t groupid = 119;
@@ -547,7 +553,7 @@ TEST_F(TestTagRuTable, alterAddRU) {
   size_t buf_len = 0;
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd(pb.GetSchema(), slice);
+  kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
   uint32_t entityid = 110;
   uint32_t groupid = 119;
@@ -626,7 +632,7 @@ TEST_F(TestTagRuTable, alterDropRU) {
   size_t buf_len = 0;
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd(pb.GetSchema(), slice);
+  kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
   uint32_t entityid = 110;
   uint32_t groupid = 119;
@@ -681,7 +687,7 @@ TEST_F(TestTagRuTable, alterDropRU) {
   buf_len = 0;
   buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice1{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd1(pb.GetSchema(), slice1);
+  kwdbts::Payload tmp_pd1(pb.GetSchema(), pb.GetActualCols(), slice1);
 
   entityid = 111;
   groupid = 120;
@@ -740,7 +746,7 @@ TEST_F(TestTagRuTable, alterAlterRU) {
   size_t buf_len = 0;
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd(pb.GetSchema(), slice);
+  kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
   uint32_t entityid = 110;
   uint32_t groupid = 119;
@@ -895,7 +901,7 @@ TEST_F(TestTagRuTable, genTagPack) {
   size_t buf_len = 0;
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
-  kwdbts::Payload tmp_pd(pb.GetSchema(), slice);
+  kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
   uint32_t entity_id = 110;
   uint32_t group_id = 119;

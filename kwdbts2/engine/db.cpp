@@ -11,6 +11,7 @@
 
 #include <libkwdbts2.h>
 #include <regex>
+#include <thread>
 #include "include/engine.h"
 #include "cm_exception.h"
 #include "cm_backtrace.h"
@@ -23,6 +24,12 @@ std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
 int64_t g_compress_interval = 3600;
 std::shared_mutex g_settings_mutex;
+
+int64_t g_input_autovacuum_interval = 0;  // interval of compaction, 0: stop.
+std::thread g_db_threads;
+// inform SettingChangedSensor from TriggerSettingCallback that the setting is changed
+std::condition_variable g_setting_changed_cv;
+std::atomic<bool> g_setting_changed(false);
 
 void InitMountCnt(const string& db_path) {
   string cmd = "cat /proc/mounts | grep " + db_path + " | wc -l";
@@ -115,6 +122,9 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
     return ToTsStatus("OpenTSEngine Internal Error!");
   }
   *engine = ts_engine;
+  g_db_threads = std::thread([ts_engine](){
+    ts_engine->SettingChangedSensor();
+  });
   return kTsSuccess;
 }
 
@@ -521,6 +531,44 @@ TSStatus TSxRollback(TSEngine* engine, TSTableID table_id, char* transaction_id)
   return kTsSuccess;
 }
 
+int64_t ParseInterval(const std::string& value) {
+  // ts.autovaccum.interval should be format like '1Y2M3W4D5h6m7s' or numeric like '36'
+  int64_t current_value = 0;
+  int64_t rtn = 0;
+  char t_unit[] = {'Y', 'M', 'W', 'D', 'h', 'm', 's'};  // 1Y2M3W4D5h6m7s
+  uint64_t to_sec[] = {31556926, 2592000, 604800, 86400, 3600, 60, 1};
+  int i = 0;
+  bool has_num = false;
+  for (char c : value) {
+    if (i == sizeof(t_unit)) {  // if there are other numbers after 's'
+      return -1;
+    }
+    if (std::isdigit(c)) {
+      has_num = true;
+      current_value = current_value * 10 + (c - '0');
+    } else {  // find non-numeric
+      bool valid = false;
+      for ( ; has_num && i < sizeof(t_unit); i++) {  // check if it is valid
+        if (c == t_unit[i]) {
+          rtn += current_value * to_sec[i];
+          current_value = 0;
+          i++;
+          valid = true;
+          has_num = false;
+          break;
+        }
+      }
+      if (!valid) {  // invalid
+        return -1;
+      }
+    }
+  }
+  if (i == 0) {  // numeric
+    rtn = current_value;
+  }
+  return rtn;
+}
+
 void TriggerSettingCallback(const std::string& key, const std::string& value) {
   if (TRACE_CONFIG_NAME == key) {
     TRACER.SetTraceConfigStr(value);
@@ -548,6 +596,17 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT = atoi(value.c_str());
   } else if ("ts.compress_interval" == key) {
     g_compress_interval = atoi(value.c_str());
+  } else if ("ts.autovacuum.interval" == key) {
+    // If ts.autovacuum.interval was set before shutting down,
+    // a set cluster command will be received immediately after rebooting to restore the setting.
+    int64_t new_interval = ParseInterval(value);
+    if (new_interval < 0) {
+      LOG_ERROR("Invalid time format");
+    } else {
+      g_input_autovacuum_interval = new_interval;
+      g_setting_changed.store(true);
+      g_setting_changed_cv.notify_one();  // inform SettingChangedSensor that the setting is changed.
+    }
   } else {
     LOG_INFO("Cluster setting %s has no callback function.", key.c_str());
   }
@@ -714,6 +773,10 @@ TSStatus TSClose(TSEngine* engine) {
     return ToTsStatus("InitServerKWDBContext Error!");
   }
   LOG_INFO("TSClose")
+  engine->CloseSettingChangedSensor();
+  if (g_db_threads.joinable()) {
+    g_db_threads.join();
+  }
   engine->CreateCheckpoint(ctx);
   delete engine;
   return TSStatus{nullptr, 0};
@@ -728,7 +791,8 @@ void TSRegisterExceptionHandler() {
   kwdbts::RegisterBacktraceSignalHandler();
 }
 
-TSStatus TSAddColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column) {
+TSStatus TSAddColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column,
+                     uint32_t cur_version, uint32_t new_version) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -737,15 +801,19 @@ TSStatus TSAddColumn(TSEngine* engine, TSTableID table_id, char* transaction_id,
   }
 
   string err_msg;
-  s = engine->AddColumn(ctx_p, table_id, transaction_id, column, err_msg);
+  s = engine->AddColumn(ctx_p, table_id, transaction_id, column, cur_version, new_version, err_msg);
   if (s != KStatus::SUCCESS) {
+    if (err_msg.empty()) {
+      err_msg = "unknown error";
+    }
     return ToTsStatus(err_msg);
   }
 
   return kTsSuccess;
 }
 
-TSStatus TSDropColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column) {
+TSStatus TSDropColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column,
+                      uint32_t cur_version, uint32_t new_version) {
     kwdbContext_t context;
     kwdbContext_p ctx_p = &context;
     KStatus s = InitServerKWDBContext(ctx_p);
@@ -753,16 +821,20 @@ TSStatus TSDropColumn(TSEngine* engine, TSTableID table_id, char* transaction_id
         return ToTsStatus("InitServerKWDBContext Error");
     }
     string err_msg;
-    s = engine->DropColumn(ctx_p, table_id, transaction_id, column, err_msg);
+    s = engine->DropColumn(ctx_p, table_id, transaction_id, column, cur_version, new_version, err_msg);
     if (s != KStatus::SUCCESS) {
-        return ToTsStatus(err_msg);
+      if (err_msg.empty()) {
+        err_msg = "unknown error";
+      }
+      return ToTsStatus(err_msg);
     }
 
     return kTsSuccess;
 }
 
 TSStatus TSAlterColumnType(TSEngine* engine, TSTableID table_id, char* transaction_id,
-                           TSSlice new_column, TSSlice origin_column) {
+                           TSSlice new_column, TSSlice origin_column,
+                           uint32_t cur_version, uint32_t new_version) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -771,8 +843,12 @@ TSStatus TSAlterColumnType(TSEngine* engine, TSTableID table_id, char* transacti
   }
 
   string err_msg;
-  s = engine->AlterColumnType(ctx_p, table_id, transaction_id, new_column, origin_column, err_msg);
+  s = engine->AlterColumnType(ctx_p, table_id, transaction_id, new_column, origin_column,
+                              cur_version, new_version, err_msg);
   if (s != KStatus::SUCCESS) {
+    if (err_msg.empty()) {
+      err_msg = "unknown error";
+    }
     return ToTsStatus(err_msg);
   }
 

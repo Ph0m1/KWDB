@@ -4,24 +4,20 @@ DROP DATABASE
 CREATE TS DATABASE
 > create table test_alter.t2(ts timestamp not null, a smallint, b smallint, c smallint) tags(attr int not null) primary tags(attr);
 CREATE TABLE
-> insert into test_alter.t2 values(1672531211005, 111, 112, 113, 1);
+> insert into test_alter.t2 values(1672531211005, 666, 11, 113, 1);
 INSERT 1
-> insert into test_alter.t2 values(1672531211006, 222, 223, 224, 1);
+> insert into test_alter.t2 values(1672531211006, 555, 22, 224, 1);
+INSERT 1
+> insert into test_alter.t2 values(1672531211007, 333, 33, NULL, 1);
+INSERT 1
+> insert into test_alter.t2 values(1672531211008, 444, 44, NULL, 1);
+INSERT 1
+> insert into test_alter.t2 values(1672531211009, 111, 55, NULL, 1);
 INSERT 1
 > alter table test_alter.t2 alter column a type int;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t2 alter column b type bigint;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t2 alter column c type varchar(120);
 ALTER TABLE
 > select pg_sleep(1);
@@ -32,7 +28,12 @@ ALTER TABLE
 > select first(a),first(b),first(c),last(a),last(b),last(c) from test_alter.t2;
   first | first | first | last | last | last
 --------+-------+-------+------+------+-------
-    111 |   112 | 113   |  222 |  223 | 224
+    666 |    11 | 113   |  111 |   55 | 224
+(1 row)
+> select count(c),max(c),min(c),first(c),last(c),first_row(c),last_row(c) from test_alter.t2;
+  count | max | min | first | last | first_row | last_row
+--------+-----+-----+-------+------+-----------+-----------
+      2 | 224 | 113 | 113   | 224  | 113       | NULL
 (1 row)
 > create table test_alter.t3(ts timestamp not null, a int, b int, c bigint) tags(attr int not null) primary tags(attr);
 CREATE TABLE
@@ -42,18 +43,8 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t3 alter column a type bigint;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t3 alter column b type varchar(120);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t3 alter column c type varchar(50);
 ALTER TABLE
 > select pg_sleep(1);
@@ -74,18 +65,8 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t4 alter column a type double;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t4 alter column b type varchar(120);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t4 alter column c type varchar(120);
 ALTER TABLE
 > select pg_sleep(1);
@@ -106,18 +87,8 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t5 alter column a type nchar(32);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t5 alter column b type varchar(64);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t5 alter column c type nvarchar(128);
 ALTER TABLE
 > select pg_sleep(1);
@@ -138,53 +109,18 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t7 alter column a type smallint;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column b type int;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column c type bigint;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column d type float;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column e type double;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column  f type char(128);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column  g type nchar(128);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t7 alter column  h type nvarchar(128);
 ALTER TABLE
 > select pg_sleep(1);
@@ -206,19 +142,9 @@ SQLSTATE: 42P01
 > alter table test_alter.t8 alter column a type char(128);
 ERROR: relation "test_alter.t8" does not exist
 SQLSTATE: 42P01
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t8 alter column b type nchar(128);
 ERROR: relation "test_alter.t8" does not exist
 SQLSTATE: 42P01
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t8 alter column c type varchar(128);
 ERROR: relation "test_alter.t8" does not exist
 SQLSTATE: 42P01
@@ -238,11 +164,6 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t9 alter column a type char(128);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t9 alter column b type nchar(128);
 ALTER TABLE
 > select pg_sleep(1);
@@ -263,25 +184,10 @@ INSERT 1
 INSERT 1
 > alter table test_alter.t10 alter column a type double;
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t10 alter column b type varchar(120);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t10 alter column c type varchar(120);
 ALTER TABLE
-> select pg_sleep(1);
-  pg_sleep
-------------
-    true
-(1 row)
 > alter table test_alter.t10 alter column d type int;
 ALTER TABLE
 > select pg_sleep(1);
@@ -293,6 +199,47 @@ ALTER TABLE
         first        | first  |    first    |  first  |        last        |  last  |    last     |  last
 ---------------------+--------+-------------+---------+--------------------+--------+-------------+----------
   13.140000343322754 | 165536 | 1test@TEST3 | 1335545 | 23.139999389648438 | 265536 | 2test@TEST3 | 2335545
+(1 row)
+> create table test_alter.t11(ts timestamp not null, a varchar(50)) tags(ptag int not null, attr1 varchar(100)) primary tags(ptag);
+CREATE TABLE
+> insert into test_alter.t11 values(1000000001, '1a', 1, 'aa');
+INSERT 1
+> insert into test_alter.t11 values(1000000002, '2b', 1, 'aa');
+INSERT 1
+> insert into test_alter.t11 values(1000000003, '4', 2, 'bb');
+INSERT 1
+> insert into test_alter.t11 values(1000000004, '3', 2, 'bb');
+INSERT 1
+> insert into test_alter.t11 values(1000000005, '6', 3, 'cc');
+INSERT 1
+> insert into test_alter.t11 values(1000000006, '9999999999999', 3, 'cc');
+INSERT 1
+> select count(a),max(a),min(a),first(a),last(a),first_row(a),last_row(a) from test_alter.t11;
+  count |      max      | min | first |     last      | first_row |   last_row
+--------+---------------+-----+-------+---------------+-----------+----------------
+      6 | 9999999999999 | 1a  | 1a    | 9999999999999 | 1a        | 9999999999999
+(1 row)
+> alter table test_alter.t11 alter column a type int;
+ALTER TABLE
+> select pg_sleep(1);
+  pg_sleep
+------------
+    true
+(1 row)
+> select first_row(a) from test_alter.t11;
+  first_row
+-------------
+  NULL
+(1 row)
+> select last_row(a) from test_alter.t11;
+  last_row
+------------
+  NULL
+(1 row)
+> select count(a),max(a),min(a),sum(a),first(a),last(a),first_row(a),last_row(a) from test_alter.t11;
+  count | max | min | sum | first | last | first_row | last_row
+--------+-----+-----+-----+-------+------+-----------+-----------
+      3 |   6 |   3 |  13 |     4 |    6 | NULL      | NULL
 (1 row)
 > drop database test_alter cascade;
 DROP DATABASE

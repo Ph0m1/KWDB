@@ -33,7 +33,7 @@ class TestWALManager : public TestBigTableInstance {
   uint64_t table_id_ = 10001;
   roachpb::CreateTsTable meta_;
   WALMgr* wal_;
-  MMapMetricsTable* mbt_;
+  MMapRootTableManager* mbt_;
 
 
   TestWALManager() {
@@ -54,7 +54,7 @@ class TestWALManager : public TestBigTableInstance {
 
     ErrorInfo err_info;
     string tbl_sub_path = std::to_string(table_id_) + "/";
-    mbt_ = TsTable::OpenMMapEntityBigTable(opts_.db_path, tbl_sub_path, table_id_, err_info);
+    mbt_ = TsTable::OpenMMapRootTableManager(opts_.db_path, tbl_sub_path, table_id_, err_info);
     EXPECT_EQ(err_info.errcode, 0);
 
     wal_ = new WALMgr(kDbPath + "/", table_id_, kTestRange.range_group_id, &opts_);
@@ -100,7 +100,7 @@ class TestWALManager : public TestBigTableInstance {
     size_t p_len = 0;
     char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
     TSSlice payload{data_value, p_len};
-    auto pd1 = Payload(mbt_->getSchemaInfoWithHidden(), payload);
+    auto pd1 = Payload(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), payload);
     auto p_tag = pd1.GetPrimaryTag();
 
     KStatus s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
@@ -163,14 +163,14 @@ TEST_F(TestWALManager, TestWALInit) {
   ErrorInfo err_info;
   string tbl_sub_path = std::to_string(table_id_) + "/";
   opts_.db_path += "/";
-  auto bt = TsTable::OpenMMapEntityBigTable(opts_.db_path, tbl_sub_path, table_id_, err_info);
+  auto bt = TsTable::OpenMMapRootTableManager(opts_.db_path, tbl_sub_path, table_id_, err_info);
   EXPECT_EQ(err_info.errcode, 0);
 
   KTimestamp start_ts = GetStartTs();
   size_t p_len = 0;
   char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  Payload pd1(bt->getSchemaInfoWithHidden(), payload);
+  Payload pd1(bt->GetSchemaInfoWithHidden(), bt->GetColsIdx(), payload);
 
 
   KStatus s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
@@ -195,7 +195,7 @@ TEST_F(TestWALManager, TestWALInsert) {
   size_t p_len = 0;
   char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(mbt_->getSchemaInfoWithHidden(), payload);
+  auto pd1 = Payload(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), payload);
   auto p_tag = pd1.GetPrimaryTag();
 
   KStatus s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
@@ -231,7 +231,7 @@ TEST_F(TestWALManager, TestWALInsert) {
   EXPECT_EQ(redo2->time_partition_, 0);
   EXPECT_EQ(redo2->offset_, 0);
   EXPECT_EQ(redo2->length_, payload.len);
-  Payload pd2(mbt_->getSchemaInfoWithHidden(), {redo2->data_, redo2->length_});
+  Payload pd2(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), {redo2->data_, redo2->length_});
   TSSlice sl = pd2.GetColumnValue(0, 0);
   KTimestamp ts_chk = 0;
   memcpy(&ts_chk, sl.data, sizeof(KTimestamp));
@@ -351,7 +351,7 @@ TEST_F(TestWALManager, TestWALMTRRollback) {
   ErrorInfo err_info;
   string tbl_sub_path = std::to_string(table_id_) + "/";
   opts_.db_path += "/";
-  auto bt = TsTable::OpenMMapEntityBigTable(opts_.db_path, tbl_sub_path, table_id_, err_info);
+  auto bt = TsTable::OpenMMapRootTableManager(opts_.db_path, tbl_sub_path, table_id_, err_info);
   EXPECT_EQ(err_info.errcode, 0);
 
   KTimestamp start_ts = std::chrono::duration_cast<std::chrono::milliseconds>
@@ -359,7 +359,7 @@ TEST_F(TestWALManager, TestWALMTRRollback) {
   size_t p_len = 0;
   char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(bt->getSchemaInfoWithHidden(), payload);
+  auto pd1 = Payload(bt->GetSchemaInfoWithHidden(), bt->GetColsIdx(), payload);
 
   TS_LSN entry_lsn;
 
@@ -512,7 +512,7 @@ TEST_F(TestWALManager, TestWALSyncInsert) {
     size_t p_len = 0;
     char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
     TSSlice payload{data_value, p_len};
-    auto pd1 = Payload(mbt_->getSchemaInfoWithHidden(), payload);
+    auto pd1 = Payload(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), payload);
     auto p_tag = pd1.GetPrimaryTag();
 
     KStatus s = wal2->WriteInsertWAL(ctx_, x_id, 0, 0, payload);

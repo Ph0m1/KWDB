@@ -16,6 +16,8 @@
 
 bool isBinaryType(int type) { return (type == BINARY || type == VARBINARY); }
 
+bool isVarLenType(int type) { return ((type == VARSTRING) ||  (type == VARBINARY)); }
+
 AttributeInfo::AttributeInfo() {
   id = 0;
   type = INVALID;
@@ -33,6 +35,11 @@ bool AttributeInfo::operator==(AttributeInfo& rhs) const {
     return false;
   return true;
 }
+
+bool isSameType(const AttributeInfo& a, const AttributeInfo& b) {
+  return (a.type == b.type && a.size == b.size);
+}
+
 
 std::string getDataTypeName(int32_t data_type) {
   switch (data_type)

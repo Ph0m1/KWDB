@@ -94,6 +94,7 @@ func makeTestObjectTable(tName string, tableID uint64, columns []TestCol) sqlbas
 		BitmapOffset: 0,
 		TableName:    tableName.String(),
 		Sde:          false,
+		TsVersion:    1,
 	}
 
 	return sqlbase.CreateTsTable{

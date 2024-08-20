@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 #include <utility>
-
+#include <random>
 #include "data_type.h"
 #include "utils/big_table_utils.h"
 #include "sys_utils.h"
@@ -83,6 +83,15 @@ bool RemoveDirectory(const char* path) {
   return true;
 }
 
+uint64_t GetRandomNumber(uint64_t max) {
+  static std::random_device rd;   // Declare static random device
+  static std::mt19937 eng(rd());  // Declare static random number engine
+  // Define the range
+  std::uniform_int_distribution<> distr(0, max);
+  // Generate and return the random number
+  return distr(eng);
+}
+
 class BtUtil {
  public:
 
@@ -118,6 +127,7 @@ std::vector<ZTableColumnMeta> g_all_col_types({
   {roachpb::DataType::NCHAR, 17, 17, roachpb::VariableLengthType::ColStorageTypeTuple},
   {roachpb::DataType::NVARCHAR, 8, 21, roachpb::VariableLengthType::ColStorageTypeTuple},  // 11
   {roachpb::DataType::VARBINARY, 8, 23, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMPTZ, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
   // {roachpb::DataType::SDECHAR, 4, 4, roachpb::VariableLengthType::ColStorageTypeTuple},
   // {roachpb::DataType::SDEVARCHAR, 4, 4, roachpb::VariableLengthType::ColStorageTypeTuple},
 });
@@ -152,6 +162,7 @@ void ConstructRoachpbTable(roachpb::CreateTsTable* meta, const KString& prefix_t
   table->set_ts_table_id(table_id);
   table->set_table_name(prefix_table_name + std::to_string(table_id));
   table->set_partition_interval(partition_interval);
+  table->set_ts_version(1);
   meta->set_allocated_ts_table(table);
 
   std::vector<ZTableColumnMeta> col_meta;
@@ -328,9 +339,10 @@ void GenPayloadTagData(Payload& payload, std::vector<AttributeInfo>& tag_schema,
 
 char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_length, KTimestamp start_ts,
                          roachpb::CreateTsTable* meta,
-                         k_uint32 ms_interval = 10, int test_value = 0, bool fix_entityid = true) {
+                         k_uint32 ms_interval = 10, int test_value = 0, bool fix_entity_id = true, bool random_ts = false) {
   vector<AttributeInfo> schema;
   vector<AttributeInfo> tag_schema;
+  vector<uint32_t> actual_cols;
   string test_str = "abcdefghijklmnopqrstuvwxyz";
   k_int32 tag_value_len = 0;
   payload_length = 0;
@@ -347,11 +359,12 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_le
         tag_value_len += (32 + 2);
       }
       tag_schema.emplace_back(std::move(col_var));
-    } else {
+    } else if (!col.dropped()) {
       payload_length += col_var.size;
       if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
         payload_length += (test_str.size() + 2);
       }
+      actual_cols.push_back(schema.size());
       schema.push_back(std::move(col_var));
     }
   }
@@ -370,15 +383,20 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_le
   char* value = new char[data_length];
   memset(value, 0, data_length);
   KInt32(value + Payload::row_num_offset_) = count;
+  if (meta->ts_table().ts_version() == 0) {
+    KUint32(value + Payload::ts_version_offset_) = 1;
+  } else {
+    KUint32(value + Payload::ts_version_offset_) = meta->ts_table().ts_version();
+  }
   // set primary_len_len
   KInt16(value + g_header_size) = primary_tag_len;
   // set tag_len_len
   KInt32(value + header_len + primary_len_len + primary_tag_len) = tag_value_len;
   // set data_len_len
   KInt32(value + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
-  Payload p(schema, {value, data_length});
+  Payload p(schema, actual_cols, {value, data_length});
   int16_t len = 0;
-  GenPayloadTagData(p, tag_schema, start_ts, fix_entityid, test_value);
+  GenPayloadTagData(p, tag_schema, start_ts, fix_entity_id, test_value);
   uint64_t var_exist_len = 0;
   for (int i = 0; i < schema.size(); i++) {
     switch (schema[i].type) {
@@ -390,9 +408,15 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_le
         break;
       case DATATYPE::TIMESTAMP64_LSN:
         for (int j = 0; j < count; j++) {
-          KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
-          KTimestamp(p.GetColumnAddr(j, i) + 8) = 1;
-          start_ts += ms_interval;
+          if (random_ts) {
+            uint64_t r = GetRandomNumber(ms_interval);
+            KTimestamp(p.GetColumnAddr(j, i)) = (start_ts + r);
+            KTimestamp(p.GetColumnAddr(j, i) + 8) = (start_ts + r);
+          } else {
+            KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
+            KTimestamp(p.GetColumnAddr(j, i) + 8) = 1;
+            start_ts += ms_interval;
+          }
         }
         break;
       case DATATYPE::INT16:
@@ -403,6 +427,21 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_le
       case DATATYPE::INT32:
         for (int j = 0; j < count; j++) {
           KInt32(p.GetColumnAddr(j, i)) = 2222;
+        }
+        break;
+      case DATATYPE::INT64:
+        for (int j = 0; j < count; j++) {
+          KInt64(p.GetColumnAddr(j, i)) = 333333;
+        }
+        break;
+      case DATATYPE::FLOAT:
+        for (int j = 0; j < count; j++) {
+          KFloat32(p.GetColumnAddr(j, i)) = 44.44;
+        }
+        break;
+      case DATATYPE::DOUBLE:
+        for (int j = 0; j < count; j++) {
+          KDouble64(p.GetColumnAddr(j, i)) = 55.555;
         }
         break;
       case DATATYPE::CHAR:
@@ -445,6 +484,7 @@ char* GenSomePayloadDataWithBigValue(kwdbContext_p ctx, k_uint32 count, k_uint32
                                      bool fix_entity_id = true) {
   vector<AttributeInfo> schema;
   vector<AttributeInfo> tag_schema;
+  vector<uint32_t> actual_cols;
   string test_str = "abcdefghijklmnopqrstuvwxyz";
   k_int32 tag_value_len = 0;
   payload_length = 0;
@@ -466,6 +506,7 @@ char* GenSomePayloadDataWithBigValue(kwdbContext_p ctx, k_uint32 count, k_uint32
       if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
         payload_length += (test_str.size() + 2);
       }
+      actual_cols.push_back(schema.size());
       schema.push_back(std::move(col_var));
     }
   }
@@ -484,13 +525,14 @@ char* GenSomePayloadDataWithBigValue(kwdbContext_p ctx, k_uint32 count, k_uint32
   char* value = new char[data_length];
   memset(value, 0, data_length);
   KInt32(value + Payload::row_num_offset_) = count;
+  KUint32(value + Payload::ts_version_offset_) = 1;
   // set primary_len_len
   KInt16(value + g_header_size) = primary_tag_len;
   // set tag_len_len
   KInt32(value + header_len + primary_len_len + primary_tag_len) = tag_value_len;
   // set data_len_len
   KInt32(value + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
-  Payload p(schema, {value, data_length});
+  Payload p(schema, actual_cols, {value, data_length});
   int16_t len = 0;
   GenPayloadTagData(p, tag_schema, start_ts, fix_entity_id, test_value);
   uint64_t var_exist_len = 0;
@@ -661,6 +703,7 @@ char* GenPayloadDataWithNull(kwdbContext_p ctx, k_uint32 count, k_uint32& payloa
                              k_uint32 ms_interval = 10, int test_value = 0, bool fix_entityid = true) {
   vector<AttributeInfo> schema;
   vector<AttributeInfo> tag_schema;
+  vector<uint32_t> actual_cols;
   string test_str = "abcdefghijklmnopqrstuvwxyz";
   k_int32 tag_value_len = 0;
   payload_length = 0;
@@ -682,6 +725,7 @@ char* GenPayloadDataWithNull(kwdbContext_p ctx, k_uint32 count, k_uint32& payloa
       if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
         payload_length += (test_str.size() + 2);
       }
+      actual_cols.push_back(schema.size());
       schema.push_back(std::move(col_var));
     }
   }
@@ -700,13 +744,14 @@ char* GenPayloadDataWithNull(kwdbContext_p ctx, k_uint32 count, k_uint32& payloa
   char* value = new char[data_length];
   memset(value, 0, data_length);
   KInt32(value + Payload::row_num_offset_) = count;
+  KUint32(value + Payload::ts_version_offset_) = 1;
   // set primary_len_len
   KInt16(value + g_header_size) = primary_tag_len;
   // set tag_len_len
   KInt32(value + header_len + primary_len_len + primary_tag_len) = tag_value_len;
   // set data_len_len
   KInt32(value + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
-  Payload p(schema, {value, data_length});
+  Payload p(schema, actual_cols, {value, data_length});
   int16_t len = 0;
   GenPayloadTagData(p, tag_schema, start_ts, fix_entityid);
   uint64_t var_exist_len = 0;

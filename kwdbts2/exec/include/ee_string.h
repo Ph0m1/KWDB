@@ -136,5 +136,17 @@ struct String {
     }
     return ret;
   }
+
+  k_int32 compare(const char *ptr, size_t length) const {
+    k_int32 min_len = length_ < length ? length_ : length;
+    k_int32 ret = strncmp(ptr_, ptr, min_len);
+    if (ret == 0 && length_ != length) {
+      if (length_ < length) {
+        return -1;
+      }
+      return 1;
+    }
+    return ret;
+  }
 };
 }  // namespace kwdbts

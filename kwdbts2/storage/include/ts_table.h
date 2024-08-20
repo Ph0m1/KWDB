@@ -26,7 +26,7 @@
 #include "iterator.h"
 #include "tag_iterator.h"
 #include "payload.h"
-#include "mmap/mmap_metrics_table.h"
+#include "mmap/mmap_root_table_manager.h"
 #include "mmap/mmap_tag_column_table.h"
 #include "st_group_manager.h"
 #include "st_wal_internal_log_structure.h"
@@ -56,7 +56,7 @@ class TsTable {
    * @return bool
    */
   virtual bool IsExist() {
-    return this->entity_bt_ != nullptr;
+    return this->entity_bt_manager_ != nullptr;
   }
 
   /**
@@ -82,13 +82,15 @@ class TsTable {
     return table_id_;
   }
 
+  virtual uint32_t GetCurrentTableVersion();
+
   /**
    * @brief create ts table
    * @param[in] metric_schema schema
    *
    * @return KStatus
    */
-  virtual KStatus Create(kwdbContext_p ctx, vector<AttributeInfo>& metric_schema,
+  virtual KStatus Create(kwdbContext_p ctx, vector<AttributeInfo>& metric_schema, uint32_t ts_version = 1,
                          uint64_t partition_interval = kwdbts::EngineOptions::iot_interval);
 
   /**
@@ -329,12 +331,13 @@ class TsTable {
     * @param[in] ts_span
     * @param[in] scan_cols  column to read
     * @param[in] scan_agg_types Read column agg type array for filtering block statistics information
+    * @param[in] table_version The maximum table version that needs to be queried
     * @param[out] TsIterator*
     */
   virtual KStatus GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
-                              std::vector<Sumfunctype> scan_agg_types, TsTableIterator** iter,
-                              bool reverse = false, k_uint32 table_version = 0);
+                              std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
+                              TsTableIterator** iter, bool reverse = false, bool sorted = false);
 
   /**
    * @brief get entityId List
@@ -366,36 +369,24 @@ class TsTable {
    */
   virtual KStatus GetMetaIterator(kwdbContext_p ctx, MetaIterator** iter, k_uint32 table_version);
 
-  /**
-   * @brief Add column in ts table.
-   * @param[in] column column information will be added.
-   * @param[out] msg error message
-   * @return KStatus
-   */
-  virtual KStatus AddColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column, string& msg);
+  virtual KStatus AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KWDBKTSColumn* column,
+                             uint32_t cur_version, uint32_t new_version, string& msg);
 
-  /**
-   * @brief Drop column in ts table.
-   * @param[in] column column information will be dropped.
-   * @param[out] msg error message
-   * @return KStatus
-   */
-  virtual KStatus DropColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column, string& msg);
+  virtual KStatus AlterTableTag(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
+                                uint32_t cur_version, uint32_t new_version, string& msg);
 
-  /**
-   * @brief Alter column type in ts table.
-   * @param[in] column column information will be altered.
-   * @param[out] msg error message
-   * @return KStatus
-   */
-  virtual KStatus AlterColumnType(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column, string& errmsg);
+  virtual KStatus AlterTableCol(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
+                                uint32_t cur_version, uint32_t new_version, string& msg);
 
-  /**
-   * @brief Undo alter column type in ts table.
-   * @param[in] log LogEntry
-   * @return KStatus
-   */
   virtual KStatus UndoAlterTable(kwdbContext_p ctx, LogEntry* log);
+
+  virtual KStatus undoAlterTable(kwdbContext_p ctx, AlterType alter_type,
+                                 roachpb::KWDBKTSColumn* column, uint32_t cur_version, uint32_t new_version);
+
+  virtual KStatus undoAlterTableTag(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
+                                    uint32_t cur_version, uint32_t new_version);
+
+  virtual KStatus undoAlterTableCol(kwdbContext_p ctx, uint32_t cur_version, uint32_t new_version);
 
   virtual KStatus AlterPartitionInterval(kwdbContext_p ctx, uint64_t partition_interval);
 
@@ -404,6 +395,10 @@ class TsTable {
   void SetDropped();
 
   bool IsDropped();
+
+  uint64_t partitionInterval() {
+    return entity_bt_manager_->GetPartitionInterval();
+  }
 
   /**
     * @brief clean ts table
@@ -418,7 +413,7 @@ class TsTable {
   string tbl_sub_path_;
 
 //  MMapTagColumnTable* tag_bt_;
-  MMapMetricsTable* entity_bt_;
+  MMapRootTableManager* entity_bt_manager_;
 
   std::unordered_map<uint64_t, std::shared_ptr<TsEntityGroup>> entity_groups_{};
 
@@ -433,9 +428,12 @@ class TsTable {
                                     const RangeGroup& hash_range,
                                     const string& range_tbl_sub_path,
                                     std::shared_ptr<TsEntityGroup>* entity_group) {
-    auto t_range = std::make_shared<TsEntityGroup>(ctx, entity_bt_, db_path_, table_id_, hash_range, range_tbl_sub_path);
+    auto t_range = std::make_shared<TsEntityGroup>(ctx, entity_bt_manager_, db_path_, table_id_,
+                                                   hash_range, range_tbl_sub_path);
     *entity_group = std::move(t_range);
   }
+
+  void UpdateTagTsVersion(uint32_t new_version);
 
  public:
   // Save the correspondence between snapshot ID and snapshot table under this table
@@ -444,89 +442,18 @@ class TsTable {
 
   static uint32_t GetConsistentHashId(char* data, size_t length);
 
-  static MMapMetricsTable* CreateMMapEntityBigTable(string& db_path, string& tbl_sub_path, KTableKey table_id,
-                                                    vector<AttributeInfo> schema, uint64_t partition_interval,
-                                                    ErrorInfo& err_info);
+  static MMapRootTableManager* CreateMMapRootTableManager(string& db_path, string& tbl_sub_path, KTableKey table_id,
+                                                          vector<AttributeInfo>& schema, uint32_t table_version,
+                                                          uint64_t partition_interval, ErrorInfo& err_info);
 
-  static MMapMetricsTable* OpenMMapEntityBigTable(string& db_path, string& tbl_sub_path, KTableKey table_id,
-                                                  ErrorInfo& err_info);
+  static MMapRootTableManager* OpenMMapRootTableManager(string& db_path, string& tbl_sub_path, KTableKey table_id,
+                                                        ErrorInfo& err_info);
 
  protected:
   using TsTableEntityGrpsRwLatch = KRWLatch;
   TsTableEntityGrpsRwLatch* entity_groups_mtx_;
 
  private:
-  /**
-   * @brief Add column in table's root meta
-   * @param[in] attr_info column information will be added.
-   * @param[out] err_info error information
-   * @return KStatus
-   */
-  KStatus addMetricsTableColumn(kwdbContext_p ctx, AttributeInfo& attr_info, ErrorInfo& err_info);
-
-  /**
-   * @brief Drop column in table's root meta
-   * @param[in] attr_info column information will be dropped.
-   * @param[out] err_info  error information
-   * @return KStatus
-   */
-  KStatus dropMetricsTableColumn(kwdbContext_p ctx, AttributeInfo& attr_info, ErrorInfo& err_info);
-
-  /**
-   * @brief Alter column in table's root meta
-   * @param[in] col_index column index
-   * @param[in] new_attr column information will be altered.
-   * @return KStatus
-   */
-  KStatus alterMetricsTableColumn(kwdbContext_p ctx, int col_index, const AttributeInfo& new_attr);
-
-  /**
-   * @brief Check whether we can change the column type in a database table
-   * @param[in] col_index column index
-   * @param[in] origin_type column's original type
-   * @param[in] new_type new type that column will be altered to
-   * @param[out] is_valid result of checking
-   * @param[out] err_info error information
-   * @return KStatus
-   */
-  KStatus checkAlterValid(kwdbContext_p ctx, int col_index, DATATYPE origin_type,
-                                  DATATYPE new_type, bool& is_valid, ErrorInfo& err_info);
-
-  /**
-   * @brief Rollback add column operation
-   * @param[in] column column information
-   * @return KStatus
-   */
-  KStatus undoAddColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column);
-
-  /**
-   * @brief Rollback add column operation
-   * @param[int] col_id  The column ID of the add column operation to be rolled back
-   * @return KStatus
-   */
-  KStatus undoAddMetricsTableColumn(kwdbContext_p ctx, uint32_t  col_id);
-
-  /**
-   * @brief Rollback drop column operation
-   * @param[in] column column information
-   * @return KStatus
-   */
-  KStatus undoDropColumn(kwdbContext_p ctx, roachpb::KWDBKTSColumn* column);
-
-  /**
-   * @brief Rollback delete column operation
-   * @param[int] col_id The column ID of the delete column operation to be rolled back
-   * @return KStatus
-   */
-  KStatus undoDropMetricsTableColumn(kwdbContext_p ctx, uint32_t  col_id);
-
-  /**
-   * @brief Rollback alter column operation
-   * @param[in] origin_column original column information
-   * @return KStatus
-   */
-  KStatus undoAlterColumnType(kwdbContext_p ctx, roachpb::KWDBKTSColumn* origin_column);
-
   using TsTableSnapshotLatch = KLatch;
   TsTableSnapshotLatch* snapshot_manage_mtx_;
 
@@ -556,7 +483,7 @@ class TsEntityGroup {
  public:
   TsEntityGroup() = delete;
 
-  explicit TsEntityGroup(kwdbContext_p ctx, MMapMetricsTable*& root_table, const string& db_path,
+  explicit TsEntityGroup(kwdbContext_p ctx, MMapRootTableManager*& root_table_manager, const string& db_path,
                          const KTableKey& table_id, const RangeGroup& range, const string& tbl_sub_path);
 
   virtual ~TsEntityGroup();
@@ -640,7 +567,7 @@ class TsEntityGroup {
    * @brief Mark the deletion of temporal data within the specified time range for range entities.
    * @param[in] table_id   ID
    * @param[in] hash_span entity
-   * @param[in] ts_spans
+   * @param[in] ts_spans time range to delete
    * @param[out] count  delete row num
    * @param[in] mtr_id Mini-transaction id for TS table.
    *
@@ -654,7 +581,7 @@ class TsEntityGroup {
    * @brief Mark the deletion of temporal data within a specified time range for a certain entity.
    * @param[in] table_id   ID
    * @param[in] primary_tag entity
-   * @param[in] ts_spans
+   * @param[in] ts_spans time range to delete
    * @param[out] count  delete row num
    * @param[in] mtr_id Mini-transaction id for TS table.
    *
@@ -725,13 +652,14 @@ class TsEntityGroup {
    * @param[in] ts_span
    * @param[in] scan_cols column index
    * @param[in] scan_agg_types Read column agg type array for filtering block statistics information
+   * @param[in] table_version The maximum table version that needs to be queried
    * @param[out] TsIterator*
    */
   virtual KStatus GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, vector<uint32_t> entity_ids,
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
-                              std::vector<k_uint32> ts_scan_cols,
-                              std::vector<Sumfunctype> scan_agg_types, TsIterator** iter,
-                              std::shared_ptr<TsEntityGroup> entity_group, bool reverse = false);
+                              std::vector<k_uint32> ts_scan_cols, std::vector<Sumfunctype> scan_agg_types,
+                              uint32_t table_version, TsIterator** iter, std::shared_ptr<TsEntityGroup> entity_group,
+                              bool reverse = false, bool sorted = false, bool compaction = false);
 
   /**
    * @brief Create an iterator TsIterator for Tag tables
@@ -778,23 +706,20 @@ class TsEntityGroup {
     */
   KStatus TSxClean(kwdbContext_p ctx);
 
-  virtual KStatus AlterTable(kwdbContext_p ctx, AlterType alter_type, AttributeInfo& attr_info);
+  virtual KStatus AlterTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema,
+                               ErrorInfo& err_info, uint32_t new_table_version = 1);
 
-  virtual KStatus AlterTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema, ErrorInfo& err_info);
+  virtual KStatus AddTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema,
+                             ErrorInfo& err_info, uint32_t new_table_version = 1);
 
-  virtual KStatus AddTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema, ErrorInfo& err_info);
+  virtual KStatus DropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema,
+                              ErrorInfo& err_info, uint32_t new_table_version = 1);
 
-  virtual KStatus DropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, ErrorInfo& err_info);
+  virtual KStatus UndoAddTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, uint32_t new_table_version = 1);
 
-  virtual KStatus UndoAddTagInfo(kwdbContext_p ctx, TagInfo& tag_schema);
+  virtual KStatus UndoDropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, uint32_t new_table_version = 1);
 
-  virtual KStatus UndoDropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema);
-
-  virtual KStatus UndoAlterTagInfo(kwdbContext_p ctx, TagInfo& origin_tag_schema);
-
-  virtual KStatus RedoAddTagInfo(kwdbContext_p ctx, TagInfo& tag_schema);
-
-  virtual KStatus RedoDropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema);
+  virtual KStatus UndoAlterTagInfo(kwdbContext_p ctx, TagInfo& origin_tag_schema, uint32_t new_table_version = 1);
 
   /**
    * @brief Convert roachpb::KWDBKTSColumn to attribute info.
@@ -822,18 +747,6 @@ class TsEntityGroup {
    */
   static KStatus GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roachpb::KWDBKTSColumn& col);
 
-  /**
-   * @brief Check whether we can change the column type in a database table
-   * @param entities[in] entity groups
-   * @param col_index[in] column index
-   * @param new_type[in] column will change to this new type
-   * @param is_valid[out] result of check
-   * @param err_info[out] error information
-   * @return
-   */
-  KStatus CheckAlterValid(kwdbContext_p ctx, const std::map<uint32_t, std::vector<uint32_t>>& entities,
-                          int col_index, DATATYPE new_type, bool& is_valid, ErrorInfo& err_info);
-
   virtual void SetAllSubgroupAvailable() {
     ebt_manager_->SetSubgroupAvailable();
   }
@@ -855,7 +768,7 @@ class TsEntityGroup {
     optimistic_read_lsn_.store(optimistic_read_lsn);
   }
 
-  MMapMetricsTable*& root_bt_;
+  MMapRootTableManager*& root_bt_manager_;
 
   void RdDropLock() {
     RW_LATCH_S_LOCK(drop_mutex_);
@@ -863,6 +776,12 @@ class TsEntityGroup {
 
   void DropUnlock() {
     RW_LATCH_UNLOCK(drop_mutex_);
+  }
+
+  void UpdateTagVersion(uint32_t table_version) {
+    tag_bt_->mutexLock();
+    tag_bt_->SetTableVersion(table_version);
+    tag_bt_->mutexUnlock();
   }
 
  protected:

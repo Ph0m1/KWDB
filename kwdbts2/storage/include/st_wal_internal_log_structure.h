@@ -743,12 +743,16 @@ class DDLAlterEntry : public DDLEntry {
 
   char* encode() override {
     TSSlice column_meta{data_, length_};
-    return construct(type_, x_id_, object_id_, alter_type_, column_meta);
+    return construct(type_, x_id_, object_id_, alter_type_, cur_version_, new_version_, column_meta);
   }
 
   size_t getLen() override;
 
-  [[nodiscard]] WALAlterType getAlterType() const;
+  [[nodiscard]] AlterType getAlterType() const;
+
+  [[nodiscard]] uint32_t getCurVersion() const;
+
+  [[nodiscard]] uint32_t getNewVersion() const;
 
   [[nodiscard]] uint64_t getLength() const;
 
@@ -757,17 +761,21 @@ class DDLAlterEntry : public DDLEntry {
   [[nodiscard]] TSSlice getColumnMeta() const;
 
  private:
-  WALAlterType alter_type_{1};
+  AlterType alter_type_{1};
+  uint32_t cur_version_;
+  uint32_t new_version_;
   uint64_t length_{0};
   char* data_{nullptr};
 
  public:
-  static const size_t head_length = sizeof(x_id_) + sizeof(object_id_) + sizeof(alter_type_) + sizeof(length_);
+  static const size_t head_length = sizeof(x_id_) + sizeof(object_id_) + sizeof(alter_type_)
+      + sizeof(cur_version_) + sizeof(new_version_) + sizeof(length_);
 
   static const size_t fixed_length = sizeof(type_) + sizeof(x_id_)
-      + sizeof(object_id_) + sizeof(alter_type_) + sizeof(length_);
+      + sizeof(object_id_) + sizeof(alter_type_) + sizeof(cur_version_) + sizeof(new_version_) + sizeof(length_);
 
-  static char* construct(WALLogType type, uint64_t x_id, uint64_t object_id, WALAlterType alter_type, TSSlice& column_meta) {
+  static char* construct(WALLogType type, uint64_t x_id, uint64_t object_id, AlterType alter_type,
+                         uint32_t cur_version, uint32_t new_version, TSSlice& column_meta) {
     char* log_ptr = KNEW char[fixed_length + column_meta.len];
     int offset = 0;
 
@@ -779,6 +787,10 @@ class DDLAlterEntry : public DDLEntry {
     offset += sizeof(object_id_);
     memcpy(log_ptr + offset, &alter_type, sizeof(alter_type_));
     offset += sizeof(alter_type_);
+    memcpy(log_ptr + offset, &cur_version, sizeof(cur_version_));
+    offset += sizeof(cur_version_);
+    memcpy(log_ptr + offset, &new_version, sizeof(new_version_));
+    offset += sizeof(new_version_);
     memcpy(log_ptr + offset, &column_meta.len, sizeof(length_));
     offset += sizeof(length_);
     memcpy(log_ptr + offset, column_meta.data, column_meta.len);

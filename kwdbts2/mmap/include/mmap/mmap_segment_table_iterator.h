@@ -24,20 +24,20 @@ inline int convertNumToNum(char* src, char* dst)
   return 0;
 }
 
-// convert column value from fixed-len type to other fixed-len type.
-int convertFixedToFixed(DATATYPE old_type, DATATYPE new_type, char* src, char* dst, ErrorInfo& err_info);
+// convert column value from fixed-len type to numeric types
+int convertFixedToNum(DATATYPE old_type, DATATYPE new_type, char* src, char* dst, ErrorInfo& err_info);
 
 // convert column value from fixed-len type to string type
 int convertFixedToStr(DATATYPE old_type, char* old_data, char* new_data, ErrorInfo& err_info);
 
-// convert column value from types to fixed len type.
-KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* value, BlockItem* cur_block_item,
+// convert column value from other types to fixed length type.
+KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* value, BLOCK_ID block_id,
                           DATATYPE old_type, DATATYPE new_type, int32_t new_len,
-                          size_t start_row, k_uint32 count, k_int32 ts_col, void* bitmap);
+                          size_t start_row, k_uint32 count, k_int32 col_idx, void** bitmap, bool& need_free_bitmap);
 
 // convert column value from types to vartype.
-std::shared_ptr<void> ConvertVarLen(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
-                                    DATATYPE old_type, DATATYPE new_type, size_t row_idx, k_int32 ts_col);
+std::shared_ptr<void> ConvertToVarLen(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id,
+                                      DATATYPE old_type, DATATYPE new_type, size_t row_idx, k_int32 col_idx);
 
 /**
  * @brief iterator used for scan all data in segment.

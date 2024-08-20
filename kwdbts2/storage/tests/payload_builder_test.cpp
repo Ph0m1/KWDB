@@ -23,6 +23,7 @@ const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 class TestTsPayloadBuilder : public TestBigTableInstance {
  public:
   std::vector<TagColumn*> tag_schema_;
+  std::vector<uint32_t> actual_cols;
   std::vector<AttributeInfo> data_schema_;
   TsTable *table_{nullptr};
   KTableKey table_id_ = 10086;
@@ -92,6 +93,9 @@ class TestTsPayloadBuilder : public TestBigTableInstance {
     s = table_->GetTagSchema(ctx_, range_groups[0], &tag_schema_);
     EXPECT_EQ(s, KStatus::SUCCESS);
     s = table_->GetDataSchema(ctx_, &data_schema_);
+    for (auto col : data_schema_) {
+      actual_cols.push_back(actual_cols.size());
+    }
     EXPECT_EQ(s, KStatus::SUCCESS);
   }
 
@@ -192,7 +196,7 @@ class TestTsPayloadBuilder : public TestBigTableInstance {
       }
     }
     TSSlice payload_slice;
-    bool s = pay_build.Build(&payload_slice);
+    bool s = pay_build.Build(&payload_slice, 1);
     EXPECT_EQ(s, true);
     return payload_slice;
   }
@@ -213,7 +217,7 @@ TEST_F(TestTsPayloadBuilder, create) {
   int count = 100;
   KTimestamp primary_tag = 10010;
   TSSlice payload_slice = GenPayload(primary_tag, count);
-  Payload payload(data_schema_, payload_slice);
+  Payload payload(data_schema_, actual_cols, payload_slice);
   for (size_t i = 0; i < count; i++) {
     for (size_t j = 0; j < data_schema_.size(); j++) {
       ASSERT_EQ(KTimestamp(payload.GetColumnAddr(i, j)), primary_tag + i + j);
@@ -233,7 +237,7 @@ TEST_F(TestTsPayloadBuilder, create_1) {
   int count = 10;
   KTimestamp primary_tag = 10086;
   TSSlice payload_slice = GenPayload(primary_tag, count);
-  Payload payload(data_schema_, payload_slice);
+  Payload payload(data_schema_, actual_cols, payload_slice);
   // checkout data in payload is ok.
   for (size_t i = 0; i < count; i++) {
     for (size_t j = 0; j < data_schema_.size(); j++) {

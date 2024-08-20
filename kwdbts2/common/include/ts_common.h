@@ -62,6 +62,11 @@ struct DelRowSpans {
   std::vector<DelRowSpan> spans;
 };
 
+enum SortOrder {
+  ASC = 0,
+  DESC,
+};
+
 struct Batch {
   Batch() = delete;
 
@@ -80,6 +85,7 @@ struct Batch {
   // Record whether mem_ is the memory space requested on the heap
   bool is_new = false;
   bool is_overflow = false;
+  bool need_free_bitmap = false;
   void* mem = nullptr;
   void* bitmap = nullptr;
   k_uint32 count = 0;
@@ -91,10 +97,15 @@ struct Batch {
       free(mem);
       mem = nullptr;
     }
+    if (need_free_bitmap) {
+      free(bitmap);
+      bitmap = nullptr;
+    }
   }
 
   // row_idx  start from 0
   virtual void* getVarColData(k_uint32 row_idx) const { return 0; }
+
   virtual uint16_t getVarColDataLen(k_uint32 row_idx) const { return 0; }
 
   virtual void push_back(std::shared_ptr<void> data) { return; }
@@ -105,7 +116,7 @@ struct Batch {
       *is_null = true;
       return KStatus::SUCCESS;
     }
-    if (!bitmap || row_idx >= count) {
+    if (row_idx >= count) {
       return KStatus::FAIL;
     }
     int byte = (offset + row_idx - 1) >> 3;
@@ -113,20 +124,33 @@ struct Batch {
     *is_null = static_cast<char*>(bitmap)[byte] & bit;
     return KStatus::SUCCESS;
   }
+
+  virtual KStatus setNull(uint32_t row_idx) {
+    if (!bitmap || row_idx >= count) {
+      return KStatus::FAIL;
+    }
+    size_t byte = (offset + row_idx - 1) >> 3;
+    size_t bit = (offset + row_idx - 1) & 7;
+    static_cast<char*>(bitmap)[byte] |= (1 << bit);
+    return KStatus::SUCCESS;
+  }
 };
 
 struct TagBatch : public Batch {
   uint64_t start_offset;
   void* var_data;
+
   TagBatch(void* m, k_uint32 c, void* b) : Batch(m, c, b, nullptr) {
     start_offset = 0;
     var_data = nullptr;
   }
+
   TagBatch(void* m, k_uint32 c, void* b, uint64_t offset, void* var)
       : Batch(m, c, b, nullptr) {
     start_offset = offset;
     var_data = var;
   }
+
   virtual ~TagBatch() {
     if (var_data) {
       free(var_data);
@@ -141,6 +165,7 @@ struct TagBatch : public Batch {
       bitmap = nullptr;
     }
   }
+
   void* getVarColData(uint32_t row_idx) const {
     // getoffset
     if (!var_data) return nullptr;
@@ -163,6 +188,7 @@ struct TagBatch : public Batch {
 
 struct AggBatch : public Batch {
   AggBatch(void* m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t) : Batch(m, c, t) {}
+
   AggBatch(std::shared_ptr<void> m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t) : Batch(m.get(), c, t), var_mem_(m) {}
 
   // row_idx  start from 0
@@ -304,6 +330,15 @@ inline bool isTimestampWithinSpans(const std::vector<KwTsSpan>& spans,
                                    timestamp64 start, timestamp64 end) {
   for (auto& span : spans) {
     if (start >= span.begin && end <= span.end) {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline bool CheckIfTsInSpan(timestamp64 ts, std::vector<KwTsSpan>& ts_spans) {
+  for (auto& ts_span : ts_spans) {
+    if (ts >= ts_span.begin && ts <= ts_span.end) {
       return true;
     }
   }

@@ -44,7 +44,7 @@ enum WALTableType : uint8_t {
   TAG = 1
 };
 
-enum WALAlterType : uint8_t {
+enum AlterType : uint8_t {
   ADD_COLUMN = 1,
   DROP_COLUMN = 2,
   ALTER_COLUMN_TYPE = 3,

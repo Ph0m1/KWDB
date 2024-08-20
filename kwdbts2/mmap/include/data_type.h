@@ -188,6 +188,7 @@ typedef uint64_t    TS_LSN;
 
 bool isBinaryType(int type);    // BINARY or VARBINARY
 
+bool isVarLenType(int type);
 
 #define AINFO_INTERNAL              0x00000001  // internal column
 #define AINFO_HAS_DEFAULT           0x00000002  // has default value set
@@ -209,11 +210,6 @@ enum ColumnFlag {
     COL_PRIMARY_TAG,
 };
 
-enum class AlterType {
-  ADD_COLUMN,
-  DROP_COLUMN,
-  MODIFY_COLUMN
-};
 
 #define TsColumnTailSize      40 // (sizeof(AttributeInfo) - 2 * sizeof(string) - sizeof(uint32_t))
 #define COLUMNATTR_LEN      64  // MAX_COLUMNATTR_LEN + 2
@@ -246,6 +242,7 @@ struct AttributeInfo {
   bool operator==(AttributeInfo& rhs) const;
 };
 
+bool isSameType(const AttributeInfo& a, const AttributeInfo& b);
 
 inline void * offsetAddr(const void *addr, size_t offset)
 { return (void *)((unsigned char *)addr + offset); }
