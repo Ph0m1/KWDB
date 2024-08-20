@@ -225,6 +225,7 @@ struct AttributeInfo {
   int32_t max_len;        ///< max length for string; Geohash precision;
   uint32_t version;       /// table column version
   ColumnFlag col_flag;
+  char reserved[4] = {0};
 
   AttributeInfo();
 
