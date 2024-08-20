@@ -69,7 +69,6 @@ struct VecTsFetcherVector {
     // add data of analyse to chunk
     kwdbts::KStatus AddAnalyse(kwdbContext_p ctx, int32_t processor_id, int64_t duration, int64_t read_row_num,
                                int64_t bytes_read, int64_t max_allocated_mem, int64_t max_allocated_disk) {
-      EnterFunc();
       auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
       if (fetchers != nullptr && fetchers->collected) {
         TsFetcher fetcher;
@@ -91,12 +90,11 @@ struct VecTsFetcherVector {
         }
         fetchers_vec_.push_back(fetcher);
       }
-      Return(KStatus::SUCCESS);
+      return KStatus::SUCCESS;
     }
 
     // get data of analyse from chunk
     kwdbts::KStatus GetAnalyse(kwdbContext_p ctx) {
-      EnterFunc();
       auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
       if (fetchers != nullptr && fetchers->collected) {
         for (int i = 0; i < fetchers->size; ++i) {
@@ -112,7 +110,7 @@ struct VecTsFetcherVector {
           }
         }
       }
-      Return(KStatus::SUCCESS);
+      return KStatus::SUCCESS;
     }
 };
 }  //  namespace kwdbts

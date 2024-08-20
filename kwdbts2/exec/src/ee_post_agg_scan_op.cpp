@@ -12,7 +12,6 @@
 #include "ee_post_agg_scan_op.h"
 #include <variant>
 
-#include "ee_kwthd.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_common.h"
 
@@ -27,9 +26,9 @@ PostAggScanOperator::PostAggScanOperator(BaseOperator* input,
 PostAggScanOperator::PostAggScanOperator(const PostAggScanOperator& other, BaseOperator* input, int32_t processor_id)
     : HashAggregateOperator(other, input, processor_id) {}
 
-EEIteratorErrCode PostAggScanOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
-  auto code = HashAggregateOperator::PreInit(ctx);
+  auto code = HashAggregateOperator::Init(ctx);
 
   // construct the output column information for agg output.
   agg_output_col_info.reserve(output_fields_.size());

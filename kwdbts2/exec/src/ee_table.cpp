@@ -13,8 +13,7 @@
 #include "ee_table.h"
 
 #include "ee_field.h"
-#include "ee_handler.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "er_api.h"
 #include "lg_api.h"
 
@@ -199,12 +198,12 @@ bool TABLE::is_nullable(int col, roachpb::KWDBKTSColumn::ColumnType ctype) {
 }
 
 void *TABLE::GetData2(int col, k_uint64 offset, roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {
-  RowContainer* data_handle = current_thd->GetDataChunk();
+  IChunk* data_handle = current_thd->GetDataChunk();
   return data_handle->GetData(col);
 }
 
 bool TABLE::is_nullable2(int col, roachpb::KWDBKTSColumn::ColumnType ctype) {
-  RowContainer* data_handle = current_thd->GetDataChunk();
+  IChunk* data_handle = current_thd->GetDataChunk();
   return data_handle->IsNull(col);
 }
 

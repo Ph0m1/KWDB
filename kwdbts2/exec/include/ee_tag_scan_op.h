@@ -30,15 +30,18 @@ namespace kwdbts {
  *
  * @author  liguoliang
  */
+
+class StorageHandler;
+
 class TagScanOperator : public BaseOperator {
  public:
   TagScanOperator(TSTagReaderSpec* spec, TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   ~TagScanOperator() override;
 
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
-
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
 
   EEIteratorErrCode Next(kwdbContext_p ctx) override;
 
@@ -69,14 +72,14 @@ class TagScanOperator : public BaseOperator {
   ReaderPostResolve param_;
   Field* filter_{nullptr};
   TagRowBatchPtr tagdata_handle_{nullptr};
-  Handler* handler_{nullptr};
+  StorageHandler* handler_{nullptr};
 
  private:
   mutable std::mutex tag_lock_;
-  bool is_pre_init_{false};
   bool is_init_{false};
-  EEIteratorErrCode pre_init_code_;
+  bool started_{false};
   EEIteratorErrCode init_code_;
+  EEIteratorErrCode start_code_;
   bool tag_index_once_{true};
   bool is_first_entity_{true};
 };

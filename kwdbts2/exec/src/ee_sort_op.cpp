@@ -13,7 +13,7 @@
 
 #include "ee_sort_op.h"
 #include "cm_func.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "ee_pb_plan.pb.h"
 #include "lg_api.h"
 // #include "rocksdb/db.h"
@@ -69,13 +69,13 @@ KStatus SortOperator::ResolveSortCols(kwdbContext_p ctx) {
   Return(KStatus::SUCCESS);
 }
 
-EEIteratorErrCode SortOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode SortOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
   do {
     // input preinit
-    code = input_->PreInit(ctx);
+    code = input_->Init(ctx);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -114,12 +114,12 @@ EEIteratorErrCode SortOperator::PreInit(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode SortOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   cur_offset_ = offset_;
 
-  code = input_->Init(ctx);
+  code = input_->Start(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }

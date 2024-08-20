@@ -16,7 +16,8 @@
 #include "cm_func.h"
 #include "ee_cancel_checker.h"
 #include "ee_common.h"
-#include "ee_kwthd.h"
+#include "ee_storage_handler.h"
+#include "ee_kwthd_context.h"
 #include "ee_pb_plan.pb.h"
 #include "lg_api.h"
 
@@ -33,12 +34,12 @@ SortScanOperator::SortScanOperator(const SortScanOperator& other,
 
 SortScanOperator::~SortScanOperator() {}
 
-EEIteratorErrCode SortScanOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
   do {
-    code = TableScanOperator::PreInit(ctx);
+    code = TableScanOperator::Init(ctx);
     if (code != EEIteratorErrCode::EE_OK) {
       LOG_ERROR("TableScanOperator::PreInit() failed\n");
       break;
@@ -63,16 +64,16 @@ EEIteratorErrCode SortScanOperator::PreInit(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  code = TableScanOperator::Init(ctx);
+  code = TableScanOperator::Start(ctx);
   if (code != EEIteratorErrCode::EE_OK) {
     return code;
   }
 
-  KWThd* thd = current_thd;
-  Handler* handler = thd->GetHandler();
+  KWThdContext* thd = current_thd;
+  StorageHandler* handler = handler_;
 
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);

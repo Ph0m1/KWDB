@@ -34,7 +34,7 @@ class BaseAggregator : public BaseOperator {
   /*
     Inherited from BseIterator's virtual function
   */
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;  // init spec param
+  EEIteratorErrCode Init(kwdbContext_p ctx) override;  // init spec param
   EEIteratorErrCode Reset(kwdbContext_p ctx) override;    // Reset
   KStatus Close(kwdbContext_p ctx) override;  // close and free ctx
 
@@ -117,7 +117,7 @@ class HashAggregateOperator : public BaseAggregator {
   /*
     Inherited from Barcelato's virtual function
   */
-  EEIteratorErrCode Init(kwdbContext_p ctx) override;
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
   BaseOperator* Clone() override;
 
@@ -151,7 +151,7 @@ class OrderedAggregateOperator : public BaseAggregator {
   /*
     Inherited from Barcelato's virtual function
   */
-  EEIteratorErrCode Init(kwdbContext_p ctx) override;
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
   BaseOperator* Clone() override;
 

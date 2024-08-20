@@ -36,9 +36,9 @@ class SortOperator : public BaseOperator {
   /**
    * Inherited from BaseIterator
   */
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
-
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
 
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
 
@@ -98,6 +98,10 @@ class SortOperator : public BaseOperator {
       container_ = nullptr;
       return ret;
     }
+    if (limit_ > 0) {
+      container_->SetMaxOutputRows(limit_ + offset_);
+    }
+
     // copy buffer to container
     ret = container_->Append(buffer);
     return ret;

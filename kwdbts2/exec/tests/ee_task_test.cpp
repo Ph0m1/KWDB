@@ -28,16 +28,4 @@ TEST(ExecTaskTest, StateTest) {
   EXPECT_EQ(task.GetState(), kwdbts::EXEC_TASK_STATE_RUNNING);
 }
 
-// Test the type settings and fetch of Exektask
-TEST(ExecTaskTest, TypeTest) {
-  kwdbts::ExecTask task;
-
-  EXPECT_EQ(task.GetTaskType(), kwdbts::EXEC_TASK_TYPE_NORMAL);
-
-  task.SetTaskType(kwdbts::EXEC_TASK_TYPE_TOPIC);
-  EXPECT_EQ(task.GetTaskType(), kwdbts::EXEC_TASK_TYPE_TOPIC);
-
-  task.SetTaskType(kwdbts::EXEC_TASK_TYPE_PRE);
-  EXPECT_EQ(task.GetTaskType(), kwdbts::EXEC_TASK_TYPE_PRE);
-}
 }  // namespace kwdbts

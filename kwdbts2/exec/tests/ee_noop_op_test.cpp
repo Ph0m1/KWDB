@@ -14,7 +14,7 @@
 #include "ee_exec_pool.h"
 #include "ee_iterator_create_test.h"
 #include "ee_test_util.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "gtest/gtest.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 
@@ -35,14 +35,13 @@ class TestNoopOperator : public TestBigTableInstance {
     TestBigTableInstance::SetUp();
     // meta_.SetUp(ctx_);
     engine_.SetUp(ctx_, kDbPath, table_id_);
-    KWDBDynamicThreadPool::GetThreadPool().Init(15, ctx_);
     ASSERT_EQ(ExecPool::GetInstance().Init(ctx_), SUCCESS);
-    thd_ = new KWThd();
+    thd_ = new KWThdContext();
     current_thd = thd_;
     ASSERT_TRUE(current_thd != nullptr);
-    pipeGroup_ = KNEW PipeGroup();
-    pipeGroup_->SetDegree(1);
-    current_thd->SetPipeGroup(pipeGroup_);
+    parallelGroup_ = KNEW ParallelGroup();
+    parallelGroup_->SetDegree(1);
+    current_thd->SetParallelGroup(parallelGroup_);
     noop_.SetUp(ctx_, table_id_);
   }
 
@@ -54,22 +53,21 @@ class TestNoopOperator : public TestBigTableInstance {
     CloseTestTsEngine(ctx_);
     SafeDelete(thd_);
     ExecPool::GetInstance().Stop();
-    KWDBDynamicThreadPool::GetThreadPool().Stop();
-    delete pipeGroup_;
+    delete parallelGroup_;
   }
 
   //   CreateMeta meta_;
   CreateEngine engine_;
   CreateNoop noop_;
   KDatabaseId table_id_{10};
-  KWThd *thd_{nullptr};
-  PipeGroup* pipeGroup_{nullptr};
+  KWThdContext *thd_{nullptr};
+  ParallelGroup* parallelGroup_{nullptr};
 };
 
 TEST_F(TestNoopOperator, NoopIterTest) {
   BaseOperator *noop_iter = noop_.iter_;
-  EXPECT_EQ(noop_iter->PreInit(ctx_), EE_OK);
   EXPECT_EQ(noop_iter->Init(ctx_), EE_OK);
+  EXPECT_EQ(noop_iter->Start(ctx_), EE_OK);
   EXPECT_EQ(noop_iter->Next(ctx_), EE_END_OF_RECORD);
   EXPECT_EQ(noop_iter->Close(ctx_), SUCCESS);
   noop_iter->GetRowBatch(ctx_);

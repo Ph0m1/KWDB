@@ -21,8 +21,8 @@
 #include "ee_row_batch.h"
 #include "ee_flow_param.h"
 #include "ee_global.h"
-#include "ee_handler.h"
-#include "ee_kwthd.h"
+#include "ee_storage_handler.h"
+#include "ee_kwthd_context.h"
 #include "ee_tag_scan_op.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_table.h"
@@ -75,16 +75,15 @@ TableScanOperator::TableScanOperator(const TableScanOperator& other, BaseOperato
 }
 
 TableScanOperator::~TableScanOperator() = default;
-
-EEIteratorErrCode TableScanOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
 
   EEIteratorErrCode ret = EEIteratorErrCode::EE_ERROR;
   do {
     if (input_) {
-      ret = input_->PreInit(ctx);
+      ret = input_->Init(ctx);
       if (ret != EEIteratorErrCode::EE_OK) {
-        LOG_ERROR("Tag Scan PreInit() failed\n");
+        LOG_ERROR("Tag Scan Init() failed\n");
         break;
       }
     }
@@ -127,26 +126,23 @@ EEIteratorErrCode TableScanOperator::PreInit(kwdbContext_p ctx) {
   Return(ret);
 }
 
-EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode TableScanOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KStatus ret = KStatus::FAIL;
 
-  do {
-    cur_offset_ = offset_;
+  cur_offset_ = offset_;
 
-    code = InitHandler(ctx);
-    if (EEIteratorErrCode::EE_OK != code) {
-      break;
+  code = InitHandler(ctx);
+  if (EEIteratorErrCode::EE_OK != code) {
+    Return(code);
+  }
+  if (input_) {
+    code = input_->Start(ctx);
+    if (code != EEIteratorErrCode::EE_OK) {
+      LOG_ERROR("Tag Scan Init() failed\n");
+      Return(code);
     }
-    if (input_) {
-      code = input_->Init(ctx);
-      if (code != EEIteratorErrCode::EE_OK) {
-        LOG_ERROR("Tag Scan Init() failed\n");
-        break;
-      }
-    }
-  } while (0);
+  }
 
   Return(code);
 }
@@ -154,8 +150,7 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
 EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThd *thd = current_thd;
-  Handler *handler = thd->GetHandler();
+  KWThdContext *thd = current_thd;
 
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
@@ -172,7 +167,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
     }
     // read data
     while (true) {
-      code = handler->TsNext(ctx);
+      code = handler_->TsNext(ctx);
       if (EEIteratorErrCode::EE_OK != code) {
         break;
       }
@@ -221,8 +216,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
 EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThd *thd = current_thd;
-  Handler *handler = thd->GetHandler();
+  KWThdContext *thd = current_thd;
 
   auto start = std::chrono::high_resolution_clock::now();
   if (CheckCancel(ctx) != SUCCESS) {
@@ -240,7 +234,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
     }
     // read data
     while (true) {
-      code = handler->TsNext(ctx);
+      code = handler_->TsNext(ctx);
       if (EEIteratorErrCode::EE_OK != code) {
         break;
       }
@@ -311,7 +305,6 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<int64_t, std::nano> duration = end - start;
     if (nullptr != chunk) {
-      KWThd *thd = current_thd;
       ScanRowBatchPtr data_handle = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
       int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_, duration.count(),
@@ -324,6 +317,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
 
 EEIteratorErrCode TableScanOperator::Reset(kwdbContext_p ctx) {
   EnterFunc();
+  SafeDeletePointer(handler_);
   Return(EEIteratorErrCode::EE_OK);
 }
 
@@ -339,24 +333,23 @@ KStatus TableScanOperator::Close(kwdbContext_p ctx) {
 
 EEIteratorErrCode TableScanOperator::InitHandler(kwdbContext_p ctx) {
   EnterFunc();
-  EEIteratorErrCode ret = EEIteratorErrCode::EE_ERROR;
-  KWThd *thd = current_thd;
-  Handler *handler = thd->InitHandler(ctx, table_);
-  if (!handler) {
-    Return(ret);
+  EEIteratorErrCode ret = EEIteratorErrCode::EE_OK;
+  handler_ = KNEW StorageHandler(table_);
+  if (!handler_) {
+    Return(EEIteratorErrCode::EE_ERROR);
   }
-  handler->SetTagScan(static_cast<TagScanOperator *>(input_));
-  ret = handler->Init(ctx, &ts_kwspans_);
+  handler_->Init(ctx);
+  handler_->SetTagScan(static_cast<TagScanOperator *>(input_));
+  handler_->SetSpans(&ts_kwspans_);
 
   Return(ret);
 }
 
 EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch) {
   EnterFunc();
-  KWThd *thd = current_thd;
+  KWThdContext *thd = current_thd;
   *row_batch = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
   if (nullptr != *row_batch) {
-    //  *data_handle = std::make_shared<ScanRowBatch>((*data_handle).get());
     (*row_batch)->Reset();
   } else {
     *row_batch = std::make_shared<ScanRowBatch>(table_);
@@ -373,7 +366,7 @@ EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRow
 
 RowBatchPtr TableScanOperator::GetRowBatch(kwdbContext_p ctx) {
   EnterFunc();
-  KWThd *thd = current_thd;
+  KWThdContext *thd = current_thd;
   Return(thd->GetRowBatch());
 }
 

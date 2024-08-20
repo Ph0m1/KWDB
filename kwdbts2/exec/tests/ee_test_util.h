@@ -111,7 +111,6 @@ bool RemoveDirectory(const char* path) {
 
 class BtUtil {
  public:
-
   static int CreateDB(const std::string& db, size_t life_cycle,
                       ErrorInfo& err_info) {
     string db_path = normalizePath(db);

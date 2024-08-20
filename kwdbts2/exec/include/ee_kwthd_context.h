@@ -14,35 +14,33 @@
 #include <utility>
 
 #include "ee_row_batch.h"
-#include "ee_pipegroup.h"
+#include "ee_parallel_group.h"
 #include "kwdb_type.h"
 
 namespace kwdbts {
-class KWThd {
+class KWThdContext {
  private:
   RowBatchPtr row_batch_{nullptr};
-  PipeGroup* pipe_group_{nullptr};
+  ParallelGroup* parallel_group_{nullptr};
   k_uint64 thd_id_{0};
-  Handler  *handler_{nullptr};
-  RowContainer* data_chunk_;
+  IChunk* data_chunk_{nullptr};
 
  public:
-  KWThd() { thd_id_ = pthread_self(); }
-  ~KWThd() { Reset(); }
+  KWThdContext() { thd_id_ = pthread_self(); }
+  ~KWThdContext() { Reset(); }
 
   void SetRowBatch(RowBatchPtr ptr) {
     row_batch_ = ptr;
   }
 
-  void SetPipeGroup(PipeGroup* ptr) {
-    pipe_group_ = ptr;
+  void SetParallelGroup(ParallelGroup* ptr) {
+    parallel_group_ = ptr;
   }
 
   void Reset() {
     if (row_batch_) {
       row_batch_.reset();
     }
-    SafeDeletePointer(handler_);
   }
   RowBatchPtr& GetRowBatch() { return row_batch_; }
 
@@ -52,32 +50,21 @@ class KWThd {
    * @return the original pointer for row_batch_ structure.
    */
   RowBatch* GetRowBatchOriginalPtr() { return row_batch_.get(); }
-  PipeGroup* GetPipeGroup() { return pipe_group_; }
+  ParallelGroup* GetParallelGroup() { return parallel_group_; }
   k_uint32 GetDegree() {
-    if (pipe_group_) {
-      return pipe_group_->GetDegree();
+    if (parallel_group_) {
+      return parallel_group_->GetDegree();
     }
     return 1;
   }
   k_uint64 GetThdID() { return thd_id_; }
-
-  Handler* InitHandler(kwdbContext_p ctx, TABLE *table) {
-    handler_ = KNEW Handler(table);
-    if (!handler_) {
-      return nullptr;
-    }
-    handler_->PreInit(ctx);
-    return handler_;
-  }
-
-  Handler *GetHandler() { return handler_; }
-  void SetDataChunk(RowContainer *ptr) { data_chunk_ = ptr; }
-  RowContainer* GetDataChunk() { return data_chunk_; }
+  void SetDataChunk(IChunk *ptr) { data_chunk_ = ptr; }
+  IChunk* GetDataChunk() { return data_chunk_; }
 
  public:
-  static thread_local KWThd *thd_;
+  static thread_local KWThdContext *thd_;
 };
 
-#define current_thd KWThd::thd_
+#define current_thd KWThdContext::thd_
 
 };  // namespace kwdbts

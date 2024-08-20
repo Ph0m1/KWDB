@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #if defined(__GNUC__) && (__GNUC__ < 8)
   #include <experimental/filesystem>
@@ -29,37 +30,30 @@
 #endif
 
 namespace kwdbts {
+
 k_int32 CpuInfo::num_cores_ = 1;
 k_bool CpuInfo::initialized_ = false;
 
-std::string& trim(std::string& s) {
-  if (s.empty()) {
-    return s;
-  }
-  s.erase(0, s.find_first_not_of(" "));
-  s.erase(s.find_last_not_of(" ") + 1);
-  return s;
-}
-
 void CpuInfo::Init() {
   if (initialized_) return;
-  std::string line;
-  std::string name;
-  // std::string value;
-
-  // float max_mhz = 0;
+  num_cores_ = std::thread::hardware_concurrency();
   int num_cores = 0;
 
-  // Read from /proc/cpuinfo
-  std::ifstream cpuinfo("/proc/cpuinfo");
-  while (cpuinfo) {
-    getline(cpuinfo, line);
-    size_t colon = line.find(':');
-    if (colon != std::string::npos) {
-      name = line.substr(0, colon - 1);
-      trim(name);
-      if (name.compare("processor") == 0) {
-        ++num_cores;
+  // Read from /sys/fs/cgroup/cpu/cpu.cfs_quota_us
+  std::ifstream quota_info("/sys/fs/cgroup/cpu/cpu.cfs_quota_us");
+  if (quota_info.is_open()) {
+    std::string quota_str;
+    quota_info >> quota_str;
+    quota_info.close();
+    k_int32 quota = std::stoi(quota_str);
+    if (quota != -1) {
+      std::ifstream period_info("/sys/fs/cgroup/cpu/cpu.cfs_period_us");
+      if (period_info.is_open()) {
+        std::string period_info_str;
+        period_info >> period_info_str;
+        period_info.close();
+        k_int32 period = std::stoi(period_info_str);
+        num_cores = quota / period;
       }
     }
   }

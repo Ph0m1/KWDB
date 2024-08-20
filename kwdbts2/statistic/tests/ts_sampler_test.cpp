@@ -130,7 +130,7 @@
 //     std::shared_ptr<TsSampler> sampler = std::make_shared<TsSampler>(table_.get(), input_.get(), 0);
 //     EXPECT_EQ(input_->GetRenderSize(), 0);
 //     ASSERT_TRUE(sampler->setup(samplerSpec_.get()) == SUCCESS);
-//     if (sampler->PreInit(ctx_) == EE_OK) {
+//     if (sampler->Init(ctx_) == EE_OK) {
 //       EXPECT_EQ(input_->GetRenderSize(), output_size_);
 //       EXPECT_EQ(sampler->Close(ctx_), SUCCESS);
 //     }
@@ -139,14 +139,14 @@
 // TEST_F(TestSampler, SamplerNext) {
 //     std::shared_ptr<TsSampler> sampler = std::make_shared<TsSampler>(table_.get(), input_.get(), 0);
 //     ASSERT_TRUE(sampler->setup(samplerSpec_.get()) == SUCCESS);
-//     ASSERT_TRUE(sampler->PreInit(ctx_) == EE_OK);
+//     ASSERT_TRUE(sampler->Init(ctx_) == EE_OK);
 // //    ASSERT_TRUE(sampler->Next(ctx_) == EE_ERROR);
 // }
 
 // TEST_F(TestSampler, SamplerMainLoop) {
 //     std::shared_ptr<TsSampler> sampler = std::make_shared<TsSampler>(table_.get(), input_.get(), 0);
 //     ASSERT_TRUE(sampler->setup(samplerSpec_.get()) == SUCCESS);
-//     ASSERT_TRUE(sampler->PreInit(ctx_) == EE_OK);
+//     ASSERT_TRUE(sampler->Init(ctx_) == EE_OK);
 //     EXPECT_EQ(sampler->GetSketches<NormalCol>().size(), output_size_ - 1);
 // //    ASSERT_TRUE(sampler->mainLoop<NormalCol>(ctx_) == EE_ERROR);
 //     EXPECT_EQ(sampler->GetSketches<Tag>().size(), 0);

@@ -10,14 +10,13 @@
 // See the Mulan PSL v2 for more details.
 // Created by liguoliang on 2022/07/18.
 
-#include "ee_handler.h"
+#include "ee_storage_handler.h"
 
 #include "cm_func.h"
 #include "ee_field.h"
 #include "ee_global.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "ee_scan_row_batch.h"
-#include "ee_synchronizer_op.h"
 #include "ee_table.h"
 #include "ee_tag_scan_op.h"
 #include "engine.h"
@@ -26,41 +25,30 @@
 #include "tag_iterator.h"
 #include "ts_table.h"
 
-static constexpr k_int64 MAX_TIME_SPENT_NS = 100'000'000L;  // ns
-
 namespace kwdbts {
 
-Handler::~Handler() {
+StorageHandler::~StorageHandler() {
   table_ = nullptr;
   Close();
 }
 
-EEIteratorErrCode Handler::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode StorageHandler::Init(kwdbContext_p ctx) {
   EnterFunc();
   KStatus ret = KStatus::FAIL;
   TSEngine *ts_engine = static_cast<TSEngine *>(ctx->ts_engine);
   if (ts_engine)
     ret = ts_engine->GetTsTable(ctx, table_->object_id_, ts_table_);
-  cpu_slice_cost_time_ = 0;
   Return(ret == KStatus::SUCCESS ? EEIteratorErrCode::EE_OK
                                  : EEIteratorErrCode::EE_ERROR);
 }
 
-EEIteratorErrCode Handler::Init(kwdbContext_p ctx,
-                                     std::vector<KwTsSpan> *ts_spans) {
-  EnterFunc();
+void StorageHandler::SetSpans(std::vector<KwTsSpan> *ts_spans) {
   ts_spans_ = ts_spans;
-  Return(EEIteratorErrCode::EE_OK);
 }
 
-EEIteratorErrCode Handler::TsNext(kwdbContext_p ctx) {
+EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
-  PipeGroup* pipe_group = current_thd->GetPipeGroup();
-
-  if (pipe_group && pipe_group->GetParallel()) {
-    cpu_slice_count_.start();
-  }
 
   while (true) {
     if (nullptr == ts_iterator) {
@@ -85,17 +73,6 @@ EEIteratorErrCode Handler::TsNext(kwdbContext_p ctx) {
     }
 
     if (0 == data_handle->count_) {
-      // ns
-      // if (pipe_group && pipe_group->GetParallel()) {
-      if (0) {
-        cpu_slice_cost_time_ = cpu_slice_count_.stop();
-        if (cpu_slice_cost_time_ >= MAX_TIME_SPENT_NS) {
-          code = EE_TIMESLICE_OUT;
-          pipe_group->GetParent()->RunForPg(
-              ctx);  // if cpu time out, renew pipegroup
-          break;
-        }
-      }
       ret = data_handle->tag_rowbatch_->NextLine(&(current_tag_index_));
       if (KStatus::FAIL == ret) {
         code = NewTsIterator(ctx);
@@ -129,10 +106,10 @@ EEIteratorErrCode Handler::TsNext(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode Handler::TagNext(kwdbContext_p ctx, Field *tag_filter) {
+EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThd *thd = current_thd;
+  KWThdContext *thd = current_thd;
   RowBatchPtr ptr = thd->GetRowBatch();
   thd->SetRowBatch(tag_datahandle_);
   while (true) {
@@ -163,7 +140,7 @@ EEIteratorErrCode Handler::TagNext(kwdbContext_p ctx, Field *tag_filter) {
   Return(code);
 }
 
-KStatus Handler::Close() {
+KStatus StorageHandler::Close() {
   KStatus ret = KStatus::SUCCESS;
   SafeDeletePointer(ts_iterator);
 
@@ -174,26 +151,23 @@ KStatus Handler::Close() {
 
   return ret;
 }
-EEIteratorErrCode Handler::GetNextTagData(kwdbContext_p ctx) {
+EEIteratorErrCode StorageHandler::GetNextTagData(kwdbContext_p ctx) {
   EnterFunc();
   KStatus ret = FAIL;
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
   ScanRowBatchPtr data_handle =
       std::dynamic_pointer_cast<ScanRowBatch>(current_thd->GetRowBatch());
 
-  do {
-    ret = data_handle->tag_rowbatch_->GetTagData(&(data_handle->tagdata_),
+  ret = data_handle->tag_rowbatch_->GetTagData(&(data_handle->tagdata_),
                                                  &(data_handle->tag_bitmap_),
                                                  current_tag_index_);
-    if (KStatus::FAIL == ret) {
-      code = EE_END_OF_RECORD;
-      break;
-    }
-  } while (0);
+  if (KStatus::FAIL == ret) {
+    code = EE_END_OF_RECORD;
+  }
   Return(code)
 }
 
-EEIteratorErrCode Handler::NewTsIterator(kwdbContext_p ctx) {
+EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
   EnterFunc();
   KStatus ret = FAIL;
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
@@ -225,7 +199,7 @@ EEIteratorErrCode Handler::NewTsIterator(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode Handler::NewTagIterator(kwdbContext_p ctx) {
+EEIteratorErrCode StorageHandler::NewTagIterator(kwdbContext_p ctx) {
   EnterFunc();
   KStatus ret = FAIL;
 
@@ -243,12 +217,12 @@ EEIteratorErrCode Handler::NewTagIterator(kwdbContext_p ctx) {
                               : EEIteratorErrCode::EE_OK);
 }
 
-EEIteratorErrCode Handler::GetEntityIdList(kwdbContext_p ctx,
+EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
                                            TSTagReaderSpec *spec,
                                            Field *tag_filter) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThd *thd = current_thd;
+  KWThdContext *thd = current_thd;
   RowBatchPtr old_ptr = thd->GetRowBatch();
   thd->SetRowBatch(tag_datahandle_);
 
@@ -293,7 +267,7 @@ EEIteratorErrCode Handler::GetEntityIdList(kwdbContext_p ctx,
   Return(code);
 }
 
-KStatus Handler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc_size,
+KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc_size,
                                      kwdbts::k_int32 sz,
                                      std::vector<void *> *primary_tags) {
   char *ptr = nullptr;
@@ -400,7 +374,7 @@ KStatus Handler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc_size,
   return SUCCESS;
 }
 
-void Handler::tagFilter(kwdbContext_p ctx, Field *tag_filter) {
+void StorageHandler::tagFilter(kwdbContext_p ctx, Field *tag_filter) {
   EnterFunc();
 
   for (k_uint32 i = 0; i < tag_datahandle_->count_; ++i) {
@@ -418,7 +392,7 @@ void Handler::tagFilter(kwdbContext_p ctx, Field *tag_filter) {
   ReturnVoid();
 }
 
-bool Handler::isDisorderedMetrics() {
+bool StorageHandler::isDisorderedMetrics() {
   if (ts_iterator == nullptr) {
     return false;
   } else {

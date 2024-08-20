@@ -13,7 +13,6 @@
 
 #include "ee_field_common.h"
 #include "ee_global.h"
-#include "ee_pipegroup.h"
 #include "ee_table.h"
 
 namespace kwdbts {

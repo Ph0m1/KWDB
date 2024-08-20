@@ -51,9 +51,9 @@ class BaseOperator {
   BaseOperator(BaseOperator&&) = delete;
   BaseOperator& operator=(BaseOperator&&) = delete;
 
-  virtual EEIteratorErrCode PreInit(kwdbContext_p ctx) = 0;
-
   virtual EEIteratorErrCode Init(kwdbContext_p ctx) = 0;
+
+  virtual EEIteratorErrCode Start(kwdbContext_p ctx) = 0;
   // get next batch data
   virtual EEIteratorErrCode Next(kwdbContext_p ctx) {
     return EEIteratorErrCode::EE_END_OF_RECORD;

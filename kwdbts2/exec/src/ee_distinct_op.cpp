@@ -13,7 +13,7 @@
 #include "cm_func.h"
 #include "lg_api.h"
 #include "ee_common.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 
 namespace kwdbts {
 
@@ -47,12 +47,12 @@ DistinctOperator::~DistinctOperator() {
   }
 }
 
-EEIteratorErrCode DistinctOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode DistinctOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   do {
     // init subquery iterator
-    code = input_->PreInit(ctx);
+    code = input_->Init(ctx);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -82,11 +82,11 @@ EEIteratorErrCode DistinctOperator::PreInit(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode DistinctOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode DistinctOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
-  code = input_->Init(ctx);
+  code = input_->Start(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }

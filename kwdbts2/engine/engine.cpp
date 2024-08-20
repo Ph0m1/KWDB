@@ -81,6 +81,7 @@ TSEngineImpl::~TSEngineImpl() {
   DestoryExecutor();
   delete tables_cache_;
   delete tables_lock_;
+  KWDBDynamicThreadPool::GetThreadPool().Stop();
   LOG_DESTORY();
 }
 

@@ -34,7 +34,7 @@ class TABLE;
 
 class KWDBPostProcessSpec;
 
-class Handler;
+class StorageHandler;
 
 /**
  * @brief   scan operator
@@ -49,9 +49,9 @@ class TableScanOperator : public BaseOperator {
 
   ~TableScanOperator() override;
 
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
-
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
 
   EEIteratorErrCode Next(kwdbContext_p ctx) override;
 
@@ -83,7 +83,7 @@ class TableScanOperator : public BaseOperator {
   k_uint32 offset_{0};
   ReaderPostResolve param_;
   Field* filter_{nullptr};
-
+  StorageHandler *handler_{nullptr};
   BaseOperator* input_{nullptr};  // input iterator
 
  protected:

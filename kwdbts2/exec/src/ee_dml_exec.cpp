@@ -12,7 +12,7 @@
 #include "ee_dml_exec.h"
 
 #include "cm_fault_injection.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_processors.h"
 #include "lg_api.h"
@@ -29,7 +29,7 @@ DmlExec::~DmlExec() {
 }
 
 KStatus DmlExec::Init() {
-  thd_ = new KWThd();
+  thd_ = new KWThdContext();
   current_thd = thd_;
   return SUCCESS;
 }

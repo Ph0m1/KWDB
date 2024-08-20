@@ -32,7 +32,6 @@
 #include "ee_tag_scan_op.h"
 #include "kwdb_type.h"
 #include "ts_common.h"
-#include "ee_count_timer.h"
 
 namespace kwdbts {
 
@@ -55,11 +54,11 @@ class Field;
  * differentiation, etc., * so a large expansion space is reserved
  */
 class TagScanIterator;
-class Handler {
+class StorageHandler {
  public:
-  explicit Handler(TABLE *table) : table_(table) {}
+  explicit StorageHandler(TABLE *table) : table_(table) {}
 
-  virtual ~Handler();
+  virtual ~StorageHandler();
 
   void SetTagRowBatch(TagRowBatchPtr tag_datahandle) {
     tag_datahandle_ = tag_datahandle;
@@ -72,10 +71,9 @@ class Handler {
    *
    * @param             ctx
    * @return            EEIteratorErrCode
-   * @note              This function needs to be called before the HaRndInit
    *                    function
    */
-  virtual EEIteratorErrCode PreInit(kwdbContext_p ctx);
+  virtual EEIteratorErrCode Init(kwdbContext_p ctx);
 
   /**
    * @brief
@@ -83,10 +81,8 @@ class Handler {
    * @param ctx
    * @param min_ts
    * @param max_ts
-   * @return EEIteratorErrCode
    */
-  virtual EEIteratorErrCode Init(kwdbContext_p ctx,
-                                      std::vector<KwTsSpan> *ts_spans);
+  virtual void SetSpans(std::vector<KwTsSpan> *ts_spans);
 
   /**
    * @brief           read data
@@ -149,8 +145,6 @@ class Handler {
   //  TagIterator *tag_iterator{nullptr};
   BaseEntityIterator *tag_iterator{nullptr};
   TagRowBatchPtr tag_datahandle_;
-  k_uint64 cpu_slice_cost_time_;
-  CountTimer cpu_slice_count_;
   TSTableReadMode read_mode_{
       TSTableReadMode::tableTableMeta};
   TagScanOperator* tag_scan_{nullptr};

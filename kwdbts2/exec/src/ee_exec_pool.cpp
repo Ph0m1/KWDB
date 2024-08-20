@@ -10,12 +10,9 @@
 // See the Mulan PSL v2 for more details.
 #include "ee_exec_pool.h"
 
-#include "ee_kwthd.h"
 #include "ee_task.h"
-#include "ee_timer_event.h"
 #include "er_api.h"
 #include "lg_api.h"
-#include "th_kwdb_dynamic_thread_pool.h"
 #include "kwdb_type.h"
 #include "cm_fault_injection.h"
 #include "ee_cpuinfo.h"
@@ -24,31 +21,33 @@ namespace kwdbts {
 
 #define EE_MIN_TOPIC_WINDOW_OFFSET 500
 #define EE_START_THREAD_TIMEOUT 10000
+#define DEFAULT_MAX_THREADS_NUM 10
 
 ExecPool::ExecPool(k_uint32 tq_num, k_uint32 tp_size) {
   tq_num_ = tq_num;
-  tp_size_ = tp_size;
+  min_threads_ = tp_size;
+  max_threads_ = DEFAULT_MAX_THREADS_NUM;
   is_tp_stop_ = true;
-  thread_ids_ = nullptr;
+}
+
+void ExecPool::CreateThread() {
+  std::thread thr([this]() {
+    this->Routine(this);
+  });
+  thr.detach();
 }
 
 KStatus ExecPool::Init(kwdbContext_p ctx) {
   EnterFunc();
+  if (is_init_) {
+    Return(SUCCESS);
+  }
+  is_init_ = true;
   if (EE_ENABLE_PARALLEL > 0) {
     CpuInfo::Init();
-    k_int32 cpu_cores = CpuInfo::Get_Num_Cores();
-    if (cpu_cores > 0) {
-      //  tp_size_ = cpu_cores;
-    }
+    max_threads_ = CpuInfo::Get_Num_Cores();
   }
-
-  thread_ids_ = static_cast<KThreadID *>(malloc(sizeof(KThreadID) * tp_size_));
-  if (!thread_ids_) {
-    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-    Return(KStatus::FAIL);
-  }
-  memset(thread_ids_, 0, sizeof(KThreadID) * tp_size_);
-  /*
+  is_tp_stop_ = false;
   timer_event_pool_ = KNEW TimerEventPool(EE_TIMER_EVENT_POOL_SIZE);
   if (timer_event_pool_ == nullptr) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -58,37 +57,14 @@ KStatus ExecPool::Init(kwdbContext_p ctx) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
   }
-  */
-  is_tp_stop_ = false;
-  for (int i = 0; i < tp_size_; i++) {
-    KWDBOperatorInfo kwdb_operator_info;
-    // add attribute for KWDBOperatorInfo
-    kwdb_operator_info.SetOperatorName("Executor");
-    kwdb_operator_info.SetOperatorOwner("Executor");
-    time_t now;
-    kwdb_operator_info.SetOperatorStartTime((k_uint64)time(&now));
-    // succeed :thread ID, failed:0
-    KThreadID tid = KWDBDynamicThreadPool::GetThreadPool().ApplyThread(
-        std::bind(&ExecPool::Routine, this, std::placeholders::_1), this,
-        &kwdb_operator_info);
-    INJECT_DATA_FAULT(FAULT_EE_EXECUTOR_APPLY_THREAD_MSG_FAIL, tid, 0, nullptr);
-    if (tid < 1) {
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Init execution thread pool");
-      Return(KStatus::FAIL);
+  for (k_int32 i = 0; i < min_threads_; i++) {
+    {
+      std::unique_lock unique_lock(lock_);
+      threads_starting_++;
     }
-    thread_ids_[i] = tid;
+    CreateThread();
   }
-  wait_thread_num_ = tp_size_;
-  k_uint32 wait_time = 0;
-  while (start_tp_size_ < tp_size_) {
-    if (wait_time > EE_START_THREAD_TIMEOUT) {
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "execution thread start timeout");
-      Return(FAIL);
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    wait_time = wait_time + 10;
-  }
-  // timer_event_pool_->Start();
+  timer_event_pool_->Start();
   Return(KStatus::SUCCESS);
 }
 
@@ -96,21 +72,13 @@ void ExecPool::Stop() {
   is_tp_stop_ = true;
   wait_cond_.notify_all();
   not_fill_cv_.notify_all();
-  // if (timer_event_pool_) {
-  //   timer_event_pool_->Stop();
-  //   delete timer_event_pool_;
-  //   timer_event_pool_ = nullptr;
-  // }
-  if (thread_ids_) {
-    for (k_uint32 i = 0; i < tp_size_; ++i) {
-      if (thread_ids_[i] > 0) {
-        KWDBDynamicThreadPool::GetThreadPool().JoinThread(thread_ids_[i], 0);
-      }
-    }
-    free(thread_ids_);
-    thread_ids_ = nullptr;
+  if (timer_event_pool_) {
+    timer_event_pool_->Stop();
+    SafeDeletePointer(timer_event_pool_);
   }
-
+  std::unique_lock l(lock_);
+  no_threads_cond_.wait(
+      l, [&]() { return threads_num_ + threads_starting_ <= 0; });
   task_queue_.clear();
 }
 
@@ -123,47 +91,56 @@ ExecPool::~ExecPool() {
  * execute tasks in the task queue
  */
 void ExecPool::Routine(void *arg) {
-  auto ctx = ContextManager::GetThreadContext();
-  start_tp_size_.fetch_add(1);
+  kwdbContext_t context;
+  kwdbContext_p ctx = &context;
+  InitServerKWDBContext(ctx);
   std::unique_lock l(lock_);
+  threads_num_++;
+  threads_starting_--;
+  bool permanent = threads_num_ <= min_threads_;
+  bool wait_once = false;
   while (true) {
-    if (KWDBDynamicThreadPool::GetThreadPool().IsCancel() || is_tp_stop_) {
+    if (is_tp_stop_) {
       break;
     }
     // task_queue_ null
     if (task_queue_.empty()) {
+      if (!permanent && wait_once) {
+        break;
+      }
       wait_cond_.wait_for(l, std::chrono::seconds(2));
+      wait_once = true;
       continue;
     }
-
+    wait_once = false;
     // get task
     ExecTaskPtr task_ptr = task_queue_.front();
     task_queue_.pop_front();
     not_fill_cv_.notify_one();
     if (task_ptr) {
-      wait_thread_num_--;
+      ++active_threads_;
       l.unlock();
-      // try {
+      try {
         task_ptr->SetState(ExecTaskState::EXEC_TASK_STATE_RUNNING);
         // execute task
         task_ptr->Run(ctx);
         task_ptr->SetState(ExecTaskState::EXEC_TASK_STATE_IDLE);
-      // } catch (...) {
-      //   constexpr char ERROR_MESSAGE[128] =
-      //       "some unknown exception was thrown in execution of the thread pool!";
-      //   PUSH_ERR_1(IN_EXEC_ERR, ERROR_MESSAGE);
-      //   LOG_ERROR(ERROR_MESSAGE);
-      // }
+      } catch (...) {
+        constexpr char ERROR_MESSAGE[128] =
+              "some unknown exception was thrown in execution of the thread pool!";
+        LOG_ERROR(ERROR_MESSAGE);
+      }
       l.lock();
-      wait_thread_num_++;
+      --active_threads_;
     }
+  }
+  threads_num_--;
+  if (threads_num_ + threads_starting_ == 0) {
+    no_threads_cond_.notify_all();
   }
 }
 
 KStatus ExecPool::PushTask(ExecTaskPtr task_ptr) {
-  if (ExecTaskState::EXEC_TASK_STATE_IDLE != task_ptr->GetState()) {
-    return KStatus::FAIL;
-  }
   std::unique_lock unique_lock(lock_);
   not_fill_cv_.wait(unique_lock, [this]() -> bool {
     return ((task_queue_.size() < tq_num_) || is_tp_stop_);
@@ -171,21 +148,35 @@ KStatus ExecPool::PushTask(ExecTaskPtr task_ptr) {
   if (is_tp_stop_) {
     return KStatus::FAIL;
   }
+  k_int32 idle = threads_num_ + threads_starting_ - active_threads_;
+  k_int32 need_threads = task_queue_.size() + 1 - idle;
+  bool need = false;
+  if (need_threads > 0 &&
+      threads_num_ + threads_starting_ < max_threads_) {
+    need = true;
+    threads_starting_++;
+  }
   // insert task queue
   task_queue_.push_back(task_ptr);
   task_ptr->SetState(ExecTaskState::EXEC_TASK_STATE_WAITING);
   // notify
   wait_cond_.notify_one();
+  unique_lock.unlock();
+  if (need) {
+    CreateThread();
+  }
   return KStatus::SUCCESS;
 }
-
-k_bool ExecPool::IsFull() { return task_queue_.size() >= tq_num_; }
 
 void ExecPool::PushTimeEvent(TimerEventPtr event_ptr) {
   return timer_event_pool_->PushTimeEvent(event_ptr);
 }
+
+k_bool ExecPool::IsFull() { return task_queue_.size() >= tq_num_; }
+
 k_uint32 ExecPool::GetWaitThreadNum() const {
-  return wait_thread_num_;
+  k_int32 idle = threads_num_ + threads_starting_ - active_threads_;
+  return idle > 8 ? 8 : idle;
 }
 
 }  // namespace kwdbts

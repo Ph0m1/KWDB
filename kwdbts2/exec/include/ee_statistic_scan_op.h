@@ -19,7 +19,7 @@
 #include "kwdb_consts.h"
 #include "kwdb_type.h"
 namespace kwdbts {
-class Handler;
+class StorageHandler;
 class TABLE;
 class TSPostProcessSpec;
 class TSStatisticReaderSpec;
@@ -30,8 +30,8 @@ class TableStatisticScanOperator : public BaseOperator {
                              TSPostProcessSpec *post, TABLE *table, BaseOperator *input, int32_t processor_id);
   TableStatisticScanOperator(const TableStatisticScanOperator&, BaseOperator* input, int32_t processor_id);
   virtual ~TableStatisticScanOperator();
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
   KStatus Close(kwdbContext_p ctx) override;
   EEIteratorErrCode Reset(kwdbContext_p ctx) override;
@@ -40,7 +40,7 @@ class TableStatisticScanOperator : public BaseOperator {
 
  protected:
   EEIteratorErrCode InitHandler(kwdbContext_p ctx);
-  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx);
+  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch);
 
  protected:
   TSPostProcessSpec *post_{nullptr};
@@ -53,7 +53,6 @@ class TableStatisticScanOperator : public BaseOperator {
   BaseOperator *input_{nullptr};  // input iterator
 
  protected:
-  Handler *handle_{nullptr};
-  std::shared_ptr<ScanRowBatch> data_handle_{nullptr};
+  StorageHandler *handler_{nullptr};
 };
 }  // namespace kwdbts

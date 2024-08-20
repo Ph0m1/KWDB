@@ -9,9 +9,9 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 
 namespace kwdbts {
-thread_local KWThd* KWThd::thd_ = nullptr;
+thread_local KWThdContext* KWThdContext::thd_ = nullptr;
 
 }  // namespace kwdbts

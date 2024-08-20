@@ -13,7 +13,6 @@
 #include <chrono>
 #include "ee_aggregate_op.h"
 #include "cm_func.h"
-#include "ee_kwthd.h"
 #include "ee_pb_plan.pb.h"
 #include "lg_api.h"
 #include "ee_common.h"
@@ -416,13 +415,13 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
   Return(status);
 }
 
-EEIteratorErrCode BaseAggregator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode BaseAggregator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
   do {
     // init subquery iterator
-    code = input_->PreInit(ctx);
+    code = input_->Init(ctx);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -601,14 +600,14 @@ HashAggregateOperator::~HashAggregateOperator() {
   }
 }
 
-EEIteratorErrCode HashAggregateOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode HashAggregateOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
   // set current offset
   cur_offset_ = offset_;
 
-  code = input_->Init(ctx);
+  code = input_->Start(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }
@@ -874,10 +873,10 @@ OrderedAggregateOperator::~OrderedAggregateOperator() {
   SafeDeleteArray(bucket_);
 }
 
-EEIteratorErrCode OrderedAggregateOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode OrderedAggregateOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  code = input_->Init(ctx);
+  code = input_->Start(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }

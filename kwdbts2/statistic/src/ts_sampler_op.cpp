@@ -255,7 +255,7 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
     total_sample_rows_ += primary_tag_sketches_.size();
     if (!normalCol_sketches_.empty() || !tag_sketches_.empty()) {
       tagScanOp->Reset(ctx);
-      code = tagScanOp->Init(ctx);
+      code = tagScanOp->Start(ctx);
       if (EEIteratorErrCode::EE_OK != code) {
         Return(code)
       }
@@ -354,12 +354,12 @@ void TsSamplerOperator::AddData(const vector<optional<DataVariant>>& row_data, D
   }
 }
 
-EEIteratorErrCode TsSamplerOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode TsSamplerOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode ret = EEIteratorErrCode::EE_ERROR;
   do {
     // Pre-initialize lower-level operators
-    ret = input_->PreInit(ctx);
+    ret = input_->Init(ctx);
     if (EEIteratorErrCode::EE_OK != ret) {
       break;
     }
@@ -393,12 +393,12 @@ EEIteratorErrCode TsSamplerOperator::PreInit(kwdbContext_p ctx) {
 }
 
 
-EEIteratorErrCode TsSamplerOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode TsSamplerOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode ret = EEIteratorErrCode::EE_ERROR;
   KStatus code;
   do {
-    ret = input_->Init(ctx);
+    ret = input_->Start(ctx);
     if (EEIteratorErrCode::EE_OK != ret) {
       break;
     }

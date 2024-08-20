@@ -21,7 +21,7 @@
 #include "row_sampling.h"
 #include "ts_hyperloglog.h"
 #include "ee_data_chunk.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 
 enum SketchMethods {
     // Computes the count-distinct statistical algorithm for columns
@@ -64,9 +64,9 @@ class TsSamplerOperator : public BaseOperator {
 
   ~TsSamplerOperator() override = default;
 
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
-
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
 
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
 

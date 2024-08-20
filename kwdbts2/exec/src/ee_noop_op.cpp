@@ -12,7 +12,7 @@
 #include "ee_noop_op.h"
 
 #include "ee_field.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "lg_api.h"
 
 namespace kwdbts {
@@ -44,12 +44,12 @@ Field* NoopOperator::GetRender(int i) {
   return nullptr;
 }
 
-EEIteratorErrCode NoopOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode NoopOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   do {
     // init subquery iterator
-    code = input_->PreInit(ctx);
+    code = input_->Init(ctx);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -83,9 +83,9 @@ EEIteratorErrCode NoopOperator::PreInit(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode NoopOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode NoopOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
-  EEIteratorErrCode code = input_->Init(ctx);
+  EEIteratorErrCode code = input_->Start(ctx);
 
   Return(code);
 }
@@ -103,7 +103,7 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
     Return(code);
   }
 
-  KWThd *kwthd = current_thd;
+  KWThdContext *kwthd = current_thd;
 
   DataChunk *input_chunk = data_batch.get();
   current_thd->SetDataChunk(input_chunk);

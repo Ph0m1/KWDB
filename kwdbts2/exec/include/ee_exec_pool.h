@@ -10,11 +10,11 @@
 // See the Mulan PSL v2 for more details.
 #pragma once
 
+#include <condition_variable>
 #include <deque>
 #include <memory>
-#include <string>
-#include <condition_variable>
 #include <mutex>
+#include <string>
 
 #include "cm_assert.h"
 #include "ee_global.h"
@@ -45,11 +45,6 @@ class ExecPool {
    * @brief tq_num_ queue length limit
    */
   k_uint32 tq_num_;
-
-  /**
-   * @brief Number of threads executed
-   */
-  k_uint32 tp_size_;
   /**
    * @brief Concurrency lock, which controls the concurrency of thread pool
    * tasks
@@ -67,23 +62,39 @@ class ExecPool {
    */
   std::condition_variable wait_cond_;
   /*
+   * @brief Conditional variables, Waiters wake up when
+   * threads_num_ and threads_starting_ are both 0. 
+   */
+  std::condition_variable no_threads_cond_;
+  /*
    * @brief Stop Thread Pool
    */
   bool is_tp_stop_;
-
-  /**
-   * @brief The ID of the thread 
-   * 
+  /*
+   * @brief The flag of initialization, prevent duplicate initialization
    */
-  KThreadID *thread_ids_;
-
-  /**
-   * @brief Number of idle threads
+  bool is_init_{false};
+  /*
+   * @brief Number of threads
    *
    */
-  k_uint32 wait_thread_num_;
-
-  std::atomic<k_uint32> start_tp_size_{0};
+  k_uint32 threads_num_{0};
+  /*
+   * @brief Number of threads which are starting.
+   */
+  k_uint32 threads_starting_{0};
+  /*
+   * @brief Min Number of threads.
+   */
+  k_uint32 min_threads_{0};
+  /*
+   * @brief Max Number of threads.
+   */
+  k_uint32 max_threads_{0};
+  /*
+   * @brief Number of active threads.
+   */
+  k_uint32 active_threads_{0};
 
  public:
   /**
@@ -108,19 +119,17 @@ class ExecPool {
    * @param task_ptr
    */
   KStatus PushTask(ExecTaskPtr task_ptr);
-
   /**
   * @brief add timed tasks
   *
   * @param event_ptr
   */
   void PushTimeEvent(TimerEventPtr event_ptr);
-
   /**
    * @brief Threads are scheduled to execute tasks
    */
   void Routine(void *);
-
+  inline void CreateThread();
   /**
    * @brief gets the number of idle threads
    */
@@ -133,6 +142,8 @@ class ExecPool {
     return instance;
   }
   k_bool IsFull();
+
+ public:
   std::string db_path_;
 };  // ExecPool
 };  // namespace kwdbts

@@ -12,8 +12,8 @@
 
 #include "ee_statistic_scan_op.h"
 
-#include "ee_handler.h"
-#include "ee_kwthd.h"
+#include "ee_storage_handler.h"
+#include "ee_kwthd_context.h"
 #include "ee_tag_scan_op.h"
 #include "lg_api.h"
 #include "ee_scan_op.h"
@@ -69,67 +69,63 @@ TableStatisticScanOperator::~TableStatisticScanOperator() {
 EEIteratorErrCode TableStatisticScanOperator::InitHandler(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode ret = EEIteratorErrCode::EE_OK;
-  handle_ = new Handler(table_);
-  handle_->PreInit(ctx);
-  handle_->SetTagScan(static_cast<TagScanOperator *>(input_));
-
-  if (EEIteratorErrCode::EE_OK == ret) {
-    ret = handle_->Init(ctx, &ts_kwspans_);
+  handler_ = KNEW StorageHandler(table_);
+  if (!handler_) {
+    Return(EEIteratorErrCode::EE_ERROR);
   }
-
+  handler_->Init(ctx);
+  handler_->SetTagScan(static_cast<TagScanOperator *>(input_));
+  handler_->SetSpans(&ts_kwspans_);
   Return(ret);
 }
 
-EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode TableStatisticScanOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KStatus ret = KStatus::FAIL;
 
-  do {
-    code = InitHandler(ctx);
-    if (EEIteratorErrCode::EE_OK != code) {
-      break;
+  code = InitHandler(ctx);
+  if (EEIteratorErrCode::EE_OK != code) {
+    Return(code);
+  }
+  if (input_) {
+    code = input_->Start(ctx);
+    if (code != EEIteratorErrCode::EE_OK) {
+      LOG_ERROR("Tag Scan Init() failed\n");
+      Return(code);
     }
-    if (input_) {
-      code = input_->Init(ctx);
-      if (code != EEIteratorErrCode::EE_OK) {
-        LOG_ERROR("Tag Scan Init() failed\n");
-        break;
-      }
-    }
-  } while (0);
+  }
 
   Return(code);
 }
 
-EEIteratorErrCode TableStatisticScanOperator::InitScanRowBatch(
-    kwdbContext_p ctx) {
+EEIteratorErrCode TableStatisticScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch) {
   EnterFunc();
-  if (nullptr != data_handle_) {
-    data_handle_ = std::make_shared<ScanRowBatch>(data_handle_.get());
+  KWThdContext *thd = current_thd;
+  *row_batch = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
+  if (nullptr != *row_batch) {
+    (*row_batch)->Reset();
   } else {
-    data_handle_ = std::make_shared<ScanRowBatch>(table_);
+    *row_batch = std::make_shared<ScanRowBatch>(table_);
+    thd->SetRowBatch(*row_batch);
   }
 
-  if (nullptr == data_handle_) {
-    LOG_ERROR("make scan statistic data handle failed");
+  if (nullptr == (*row_batch)) {
+    LOG_ERROR("make scan data handle failed");
     Return(EEIteratorErrCode::EE_ERROR);
   }
-
-  current_thd->SetRowBatch(data_handle_);
 
   Return(EEIteratorErrCode::EE_OK);
 }
 
-EEIteratorErrCode TableStatisticScanOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode ret = EEIteratorErrCode::EE_ERROR;
 
   do {
     if (input_) {
-      ret = input_->PreInit(ctx);
+      ret = input_->Init(ctx);
       if (ret != EEIteratorErrCode::EE_OK) {
-        LOG_ERROR("Tag Scan PreInit() failed\n");
+        LOG_ERROR("Tag Scan Init() failed\n");
         break;
       }
     }
@@ -176,11 +172,7 @@ KStatus TableStatisticScanOperator::Close(kwdbContext_p ctx) {
 
 EEIteratorErrCode TableStatisticScanOperator::Reset(kwdbContext_p ctx) {
   EnterFunc();
-  SafeDeletePointer(handle_);
-  if (nullptr != data_handle_) {
-    data_handle_.reset();
-    data_handle_ = nullptr;
-  }
+  SafeDeletePointer(handler_);
   Return(EEIteratorErrCode::EE_OK);
 }
 
@@ -191,18 +183,19 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
   }
 
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  code = InitScanRowBatch(ctx);
+  ScanRowBatchPtr data_handle;
+  code = InitScanRowBatch(ctx, &data_handle);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }
-  code = handle_->TsNext(ctx);
+  code = handler_->TsNext(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }
 
   // reset line
-  data_handle_->ResetLine();
-  if (data_handle_->Count() == 0) {
+  data_handle->ResetLine();
+  if (data_handle->Count() == 0) {
     Return(code);
   }
 
@@ -217,7 +210,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
                             field->get_storage_type(),
                             field->get_return_type());
     }
-    chunk = std::make_unique<DataChunk>(col_info, data_handle_->Count());
+    chunk = std::make_unique<DataChunk>(col_info, data_handle->Count());
     if (chunk->Initialize() < 0) {
       chunk = nullptr;
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -226,7 +219,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
   }
 
   // dispose render
-  KStatus status = chunk->AddRowBatchData(ctx, data_handle_.get(), renders_);
+  KStatus status = chunk->AddRowBatchData(ctx, data_handle.get(), renders_);
   if (status != KStatus::SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
@@ -237,7 +230,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
     if (nullptr != chunk) {
       int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_,
-                        duration.count(), int64_t(data_handle_->count_), bytes_read, 0, 0);
+                        duration.count(), int64_t(data_handle->count_), bytes_read, 0, 0);
     }
   }
 

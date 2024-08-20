@@ -8,8 +8,7 @@
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
-#ifndef KWDBTS2_EXEC_INCLUDE_EE_TIMER_EVENT_H_
-#define KWDBTS2_EXEC_INCLUDE_EE_TIMER_EVENT_H_
+#pragma once
 
 #include <atomic>
 #include <condition_variable>
@@ -43,7 +42,7 @@ enum TimerEventType {
   TE_CRON         // cron plan
 };
 
-typedef k_uint64 k_time_point;
+typedef k_int64 k_time_point;
 
 /**
  * @brief Timed events
@@ -128,19 +127,19 @@ class TimerEvent {
    * @param[in] pool_exit Whether to stop
    * @return KStatus
    */
-  KStatus OnExpire(const k_bool& pool_exit);
+  inline KStatus OnExpire(const k_bool& pool_exit);
 
   const k_time_point& GetTimePoint() const { return time_point_; }
 
   const k_uint32& GetDuration() const { return duration_; }
 
   inline TimerEventType GetType() const { return type_; }
-
+  inline void SetType(const TimerEventType &type) {  type_ = type; }
   /**
    * @brief update time
    * If there is no point in time available, an error is returned
    */
-  KStatus UpdateTimePoint();
+  inline KStatus UpdateTimePoint();
 
   /**
    * @brief now+sec
@@ -179,7 +178,7 @@ class TimerEvent {
    * after that
    * @return false
    */
-  k_bool Stop();
+  k_bool StopEvent();
 
   /**
    * @brief Whether to stop
@@ -192,7 +191,7 @@ class TimerEvent {
 
   void SetTimePoint(const k_time_point& time_point);
 
-  void SetComputingTime(k_time_point computing_time) { computing_time_ = computing_time; }
+  inline void SetComputingTime(k_time_point computing_time) { computing_time_ = computing_time; }
   k_time_point GetComputingTime() { return computing_time_; }
 
  private:
@@ -200,18 +199,18 @@ class TimerEvent {
    * @brief Timed time
    *
    */
-  k_time_point time_point_;
+  k_time_point time_point_{0};
   k_time_point computing_time_{0};
   /**
    * @brief type：interval
    *
    */
-  TimerEventType type_;
+  TimerEventType type_{TimerEventType::TE_TIME_POINT};
   /**
    * @brief end time,You can set an end time for interval tasks
    *
    */
-  k_time_point end_time_;
+  k_time_point end_time_{0};
   /**
    * @brief interval time 
    *
@@ -221,7 +220,7 @@ class TimerEvent {
    * @brief Whether to stop
    *
    */
-  std::atomic<k_bool> stop_;
+  std::atomic<k_bool> stop_{KFALSE};
 
  public:
   TimerEventPtr next;
@@ -320,9 +319,9 @@ class TimerEventPool {
    * @brief max
    *
    */
-  k_uint32 max_time_event_count_;
+  k_uint32 max_time_event_count_{0};
 
-  std::atomic<k_uint32> current_size_ = 0;
+  std::atomic<k_uint32> current_size_{0};
   /**
    * @brief condition var，You need to wait when the queue reaches its upper
    * limit
@@ -338,13 +337,11 @@ class TimerEventPool {
    * @brief stop
    *
    */
-  bool stop_;
+  bool stop_{false};
   /**
-   * @brief tid
+   * @brief thread
    *
    */
-  KThreadID backend_;
+  std::thread thr_;
 };
 };  // namespace kwdbts
-
-#endif  // KWDBTS2_EXEC_INCLUDE_EE_TIMER_EVENT_H_

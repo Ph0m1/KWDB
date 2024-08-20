@@ -14,20 +14,10 @@
 #include <memory>
 #include <string>
 
-#include "cm_assert.h"
+#include "cm_kwdb_context.h"
 #include "ee_timer_event.h"
 
 namespace kwdbts {
-
-/**
- * @brief Task Type
- *
- */
-enum ExecTaskType {
-  EXEC_TASK_TYPE_NORMAL = 0,  // general query
-  EXEC_TASK_TYPE_TOPIC,       // Stream computing
-  EXEC_TASK_TYPE_PRE          // precomputing
-};
 
 enum ExecTaskState {
   EXEC_TASK_STATE_IDLE,
@@ -38,44 +28,29 @@ enum ExecTaskState {
 /**
  * @brief ExecTask task
  */
-class ExecTask {
+class ExecTask : public TimerEvent, public std::enable_shared_from_this<ExecTask> {
  public:
-  ~ExecTask() {}
+  virtual ~ExecTask() {}
 
   ExecTask(const ExecTask &) = delete;
   ExecTask& operator=(const ExecTask &) = delete;
   ExecTask(ExecTask &&) = delete;
   ExecTask& operator=(ExecTask &&) = delete;
-
+  std::shared_ptr<ExecTask> GetPtr() { return shared_from_this(); }
   /**
    * @brief op interface
    */
   virtual void Run(kwdbContext_p ctx) {}
-
   /**
    * @brief Construct a new ExecTask object
    *
    */
-  ExecTask() : task_type_(EXEC_TASK_TYPE_NORMAL), state_(EXEC_TASK_STATE_IDLE) {}
-  /**
-   * @brief Set the TaskType
-   *
-   * @param task_type
-   */
-  void SetTaskType(ExecTaskType task_type) { task_type_ = task_type; }
-
-  /**
-   * @brief Get the TaskType
-   *
-   * @return ExecTaskType
-   */
-  ExecTaskType GetTaskType() { return task_type_; }
+  ExecTask() : state_(EXEC_TASK_STATE_IDLE) {}
 
   void SetState(ExecTaskState state) { state_ = state; }
   ExecTaskState GetState() { return state_; }
 
  private:
-  ExecTaskType task_type_;
   ExecTaskState state_;
 };
 

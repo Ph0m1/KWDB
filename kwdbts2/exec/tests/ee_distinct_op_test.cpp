@@ -12,7 +12,7 @@
 #include "ee_exec_pool.h"
 #include "ee_iterator_create_test.h"
 #include "ee_test_util.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "gtest/gtest.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 
@@ -50,14 +50,14 @@ class TestDistinctIterator : public TestBigTableInstance {
     TestBigTableInstance::SetUp();
     // meta_.SetUp(ctx_);
     engine_.SetUp(ctx_, kDbPath, tableid_);
-    thd_ = new KWThd();
+    thd_ = new KWThdContext();
     current_thd = thd_;
     KWDBDynamicThreadPool::GetThreadPool().Init(15, ctx_);
     ASSERT_EQ(ExecPool::GetInstance().Init(ctx_), SUCCESS);
     ASSERT_TRUE(current_thd != nullptr);
-    pipeGroup_ = KNEW PipeGroup();
-    pipeGroup_->SetDegree(1);
-    current_thd->SetPipeGroup(pipeGroup_);
+    parallelGroup_ = KNEW ParallelGroup();
+    parallelGroup_->SetDegree(1);
+    current_thd->SetParallelGroup(parallelGroup_);
     agg_.SetUp(ctx_, tableid_);
   }
 
@@ -69,24 +69,24 @@ class TestDistinctIterator : public TestBigTableInstance {
     ExecPool::GetInstance().Stop();
     SafeDelete(thd_);
     KWDBDynamicThreadPool::GetThreadPool().Stop();
-    delete pipeGroup_;
+    delete parallelGroup_;
   }
 
   //   CreateMeta meta_;
   CreateEngine engine_;
   CreateDistinct agg_;
   KDatabaseId tableid_{10};
-  KWThd *thd_{nullptr};
-  PipeGroup* pipeGroup_{nullptr};
+  KWThdContext *thd_{nullptr};
+  ParallelGroup* parallelGroup_{nullptr};
 };
 
 TEST_F(TestDistinctIterator, AggTest) {
   KStatus ret = KStatus::FAIL;
 
   BaseOperator *agg = agg_.iter_;
-  ASSERT_EQ(agg->PreInit(ctx_), EE_OK);
-
   ASSERT_EQ(agg->Init(ctx_), EE_OK);
+
+  ASSERT_EQ(agg->Start(ctx_), EE_OK);
 
   DataChunkPtr chunk = nullptr;
   ASSERT_EQ(agg->Next(ctx_, chunk), EE_END_OF_RECORD);

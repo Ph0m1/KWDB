@@ -81,7 +81,7 @@ class AggTableScanOperator : public TableScanOperator {
     agg_num_ = 0;
   };
   // resolve spec
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
+  EEIteratorErrCode Init(kwdbContext_p ctx) override;
   // call Next for get data
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
   // clone the operator for parallel

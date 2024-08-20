@@ -49,14 +49,14 @@ class NoopOperator : public BaseOperator {
 
   Field *GetRender(int i) override;
 
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
+  EEIteratorErrCode Init(kwdbContext_p ctx) override;
 
   /**
    * @brief
    *            init
    * @return int     0 - success, other - failed
    */
-  EEIteratorErrCode Init(kwdbContext_p ctx) override;
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
 
   /**
    * @brief

@@ -31,7 +31,6 @@ TEST_F(TestTimerEvent, TestTimerEventPool) {
   kwdbts::kwdbContext_t g_pool_context;
   kwdbts::kwdbContext_p thread_pool_ctx_ = &g_pool_context;
   InitServerKWDBContext(thread_pool_ctx_);
-  kwdbts::KWDBDynamicThreadPool::GetThreadPool().Init(1, thread_pool_ctx_);
   kwdbts::TimerEventPool pool(102400);
   pool.Init();
   // start dispose thread
@@ -48,14 +47,13 @@ TEST_F(TestTimerEvent, TestTimerEventPool) {
   pool.PushTimeEvent(te_ptr);
   pool.PushTimeEvent(te_ptr2);
   std::this_thread::sleep_for(std::chrono::seconds(3));
-  bool succ = te_ptr2->Stop();
+  bool succ = te_ptr2->StopEvent();
   EXPECT_TRUE(succ);
   if (succ == true) {
     std::cout << "time event stop succ!" << std::endl;
   }
   std::this_thread::sleep_for(std::chrono::seconds(2));
   pool.Stop();
-  kwdbts::KWDBDynamicThreadPool::GetThreadPool().Stop();
 }
 
 }  // namespace kwdbts

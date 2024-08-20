@@ -54,9 +54,9 @@ class SortScanOperator : public TableScanOperator {
 
   ~SortScanOperator() override;
 
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
-
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
 
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
 

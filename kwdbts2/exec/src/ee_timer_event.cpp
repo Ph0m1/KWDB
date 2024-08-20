@@ -12,11 +12,9 @@
 
 #include <unistd.h>
 
-#include "th_kwdb_dynamic_thread_pool.h"
-
 namespace kwdbts {
 
-k_bool TimerEvent::Stop() {
+k_bool TimerEvent::StopEvent() {
   k_bool expect = KFALSE;
   // atomic operation
   return stop_.compare_exchange_strong(expect, KTRUE);
@@ -162,11 +160,9 @@ void TimerEventPool::PushTimeEvent(const TimerEventPtr& te) {
 }
 
 void TimerEventPool::Run() {
-  auto ctx = ContextManager::GetThreadContext();
-
   try {
     while (true) {
-      if (KWDBDynamicThreadPool::GetThreadPool().IsCancel() || stop_) {
+      if (stop_) {
         break;
       }
       k_bool stop = KFALSE;
@@ -200,24 +196,15 @@ void TimerEventPool::Stop() {
   stop_ = KTRUE;
   // wake run
   at_least_one_cv_.notify_all();
-  // stop
-  if (backend_ > 0) {
-    KWDBDynamicThreadPool::GetThreadPool().JoinThread(backend_, 0);
-  }
+  thr_.join();
   CleanAllEvent();
 }
 
 TimerEventPool::~TimerEventPool() { Stop(); }
 void TimerEventPool::Start() {
-  KWDBOperatorInfo kwdb_operator_info;
-  // add attribute
-  kwdb_operator_info.SetOperatorName("Executor_time_event");
-  kwdb_operator_info.SetOperatorOwner("Executor");
-  time_t now;
-  kwdb_operator_info.SetOperatorStartTime((k_uint64)time(&now));
-  // if succeed,return threadid or, return 0.
-  backend_ = KWDBDynamicThreadPool::GetThreadPool().ApplyThread(
-      std::bind(&TimerEventPool::Run, this), this, &kwdb_operator_info);
+  thr_ = std::thread([this]() {
+    this->Run();
+  });
 }
 
 KStatus TimerEventPool::GetReady(k_bool* stop,

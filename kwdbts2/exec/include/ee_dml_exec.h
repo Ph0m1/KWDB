@@ -18,7 +18,7 @@ namespace kwdbts {
 class Messagemq;
 class Processors;
 class TSFlowSpec;
-class KWThd;
+class KWThdContext;
 class DmlExec {
   enum TsScanRetState { TS_RT_NORMAL, TS_RT_LASTRECORD, TS_RT_EOF, TS_RT_ERROR };
   struct TsScan {
@@ -68,7 +68,7 @@ class DmlExec {
   TsScan *tsscan_head_;
   TsScan *tsscan_end_;
   bool   first_next_{true};
-  KWThd  *thd_{nullptr};
+  KWThdContext  *thd_{nullptr};
 };
 };  // namespace kwdbts
 

@@ -11,6 +11,8 @@
 
 #include "ee_row_container.h"
 
+#include <parallel/algorithm>
+
 #include <queue>
 #include <chrono>
 #include <cmath>
@@ -154,6 +156,12 @@ bool OrderColumnCompare::operator()(k_uint32 a, k_uint32 b) {
 
 //////////////// MemRowContainer //////////////////////
 
+MemRowContainer::~MemRowContainer() {
+  col_info_.clear();
+  col_offset_.clear();
+  SafeDeleteArray(data_);
+}
+
 KStatus MemRowContainer::Init() {
   if (Initialize() < 0) {
     return KStatus::FAIL;
@@ -183,6 +191,10 @@ KStatus MemRowContainer::Append(DataChunkPtr& chunk) {
   return SUCCESS;
 }
 
+void MemRowContainer::CopyRow(k_uint32 row, void* src) {
+  std::memcpy(data_ + row * row_size_, src, row_size_);
+}
+
 void MemRowContainer::Sort() {
   // selection_ init
   selection_.resize(count_);
@@ -196,7 +208,17 @@ void MemRowContainer::Sort() {
 
   // sort
   OrderColumnCompare cmp(this, order_info_);
-  std::stable_sort(it_begin, it_end, cmp);
+  const bool prefilter_nth_element = max_output_rows_ < count_ / 2;
+  if (prefilter_nth_element) {
+    std::nth_element(it_begin, it_begin + max_output_rows_ - 1, it_end, cmp);
+    it_end = it_begin + max_output_rows_;
+  }
+
+  if (count_ <= 100) {
+    std::sort(it_begin, it_end, cmp);
+  } else {
+    std::stable_sort(it_begin, it_end, cmp);
+  }
 }
 
 k_int32 MemRowContainer::NextLine() {
@@ -215,12 +237,79 @@ k_uint32 MemRowContainer::Count() {
   return selection_.size();
 }
 
+bool MemRowContainer::IsNull(k_uint32 row, k_uint32 col) {
+  char* bitmap = reinterpret_cast<char*>(data_ + (row + 1) * row_size_ - bitmap_size_);
+  if (bitmap == nullptr) {
+    return true;
+  }
+
+  return (bitmap[col / 8] & ((1 << 7) >> (col % 8))) != 0;
+}
+
+DatumPtr MemRowContainer::GetData(k_uint32 row, k_uint32 col) {
+  return data_ + row * row_size_ + col_offset_[col];
+}
+
 DatumPtr MemRowContainer::GetData(k_uint32 col) {
-  return DataChunk::GetData(selection_[current_sel_idx_], col);
+  return data_ + selection_[current_sel_idx_] * row_size_ + col_offset_[col];
 }
 
 bool MemRowContainer::IsNull(k_uint32 col) {
-  return DataChunk::IsNull(selection_[current_sel_idx_], col);
+  char* bitmap = reinterpret_cast<char*>(data_ + (selection_[current_sel_idx_] + 1) * row_size_ - bitmap_size_);
+  if (bitmap == nullptr) {
+    return true;
+  }
+
+  return (bitmap[col / 8] & ((1 << 7) >> (col % 8))) != 0;
+}
+
+int MemRowContainer::Initialize() {
+  // null bitmap
+  col_num_ = col_info_.size();
+  bitmap_size_ = (col_num_ + 7) / 8;
+  // calculate row width and length
+  k_uint32 data_size = 0;
+  for (int i = 0; i < col_num_; ++i) {
+    col_offset_.push_back(data_size);
+
+    /**
+     * Row size adjustment for string type column and decimal type column. Add
+     * 2 byte for string length and 1 byte indicator for decimal type. Ideally
+     * storage length of the field (FieldDecimal, FieldVarChar, FieldVarBlob,
+     * etc.) should take extra bytes into account, and it needs to make
+     * necessary changes on all derived Field classes. Now we temporarily make
+     * row size adjustment in several places.
+     */
+    if (IsStringType(col_info_[i].storage_type)) {
+      data_size += STRING_WIDE;
+    } else if (col_info_[i].storage_type == roachpb::DataType::DECIMAL) {
+      data_size += BOOL_WIDE;
+    }
+    data_size += col_info_[i].storage_len;
+  }
+  // In order to be consistent with the bigtable format, an additional byte of
+  // delete is required
+  data_size += 1;
+  row_size_ = data_size + bitmap_size_;
+  if (capacity_ == 0) {
+    if (DataChunk::SIZE_LIMIT >= row_size_) {
+      capacity_ = DataChunk::SIZE_LIMIT / row_size_;
+    } else {
+      // use 1 as the minimum capacity.
+      capacity_ = 1;
+    }
+  }
+  // alloc
+  if (capacity_ * row_size_ > 0) {
+    data_ = KNEW char[capacity_ * row_size_];
+    // allocation failure
+    if (data_ == nullptr) {
+      LOG_ERROR("Allocate buffer in DataChunk failed.");
+      return -1;
+    }
+    std::memset(data_, 0, capacity_ * row_size_);
+  }
+  return 0;
 }
 
 ////////////// DiskRowContainer //////////////////////
@@ -239,29 +328,29 @@ k_uint32 DiskRowContainer::Count() {
   return selection_.size();
 }
 DatumRowPtr DiskRowContainer::GetRow(k_uint32 row) {
-  return static_cast<DatumPtr>(temp_table_->getColumnAddr(row, 0));
+  return static_cast<DatumPtr>(materialized_file_->getColumnAddr(row, 0));
 }
 void DiskRowContainer::Reset() {
-  if (temp_table_) {
+  if (materialized_file_) {
     ErrorInfo err_info;
-    DropTempTable(temp_table_, err_info);
-    temp_table_ = nullptr;
+    DropTempTable(materialized_file_, err_info);
+    materialized_file_ = nullptr;
   }
 }
 DatumPtr DiskRowContainer::GetData(k_uint32 row, k_uint32 col) {
-  return static_cast<DatumPtr>(temp_table_->getColumnAddr(row, col));
+  return static_cast<DatumPtr>(materialized_file_->getColumnAddr(row, col));
 }
 
 bool DiskRowContainer::IsNull(k_uint32 row, k_uint32 col) {
-  return temp_table_->isNull(row, col);
+  return materialized_file_->isNull(row, col);
 }
 
 DatumPtr DiskRowContainer::GetData(k_uint32 col) {
-  return static_cast<DatumPtr>(temp_table_->getColumnAddr(selection_[current_sel_idx_], col));
+  return static_cast<DatumPtr>(materialized_file_->getColumnAddr(selection_[current_sel_idx_], col));
 }
 
 bool DiskRowContainer::IsNull(k_uint32 col) {
-  return temp_table_->isNull(selection_[current_sel_idx_], col);
+  return materialized_file_->isNull(selection_[current_sel_idx_], col);
 }
 
 KStatus DiskRowContainer::GenAttributeInfo(const ColumnInfo &col_info,
@@ -345,7 +434,7 @@ KStatus DiskRowContainer::Init() {
                    err_info.errmsg.c_str());
     return FAIL;
   }
-  temp_table_ = tmp_bt;
+  materialized_file_ = tmp_bt;
   return SUCCESS;
 }
 
@@ -365,18 +454,18 @@ KStatus DiskRowContainer::Append(std::queue<DataChunkPtr>& buffer) {
 
 KStatus DiskRowContainer::Append(DataChunkPtr& chunk) {
   k_uint32 lines = chunk->Count();
-  k_uint32 d_org_siz = temp_table_->size();
+  k_uint32 d_org_siz = materialized_file_->size();
   k_uint32 d_sz = d_org_siz + lines;     // expected dest size
   ErrorInfo err_info;
-  err_info.errcode = temp_table_->reserveBase(d_sz + 1);
+  err_info.errcode = materialized_file_->reserveBase(d_sz + 1);
   if (err_info.errcode < 0) {
     LOG_ERROR("append temp table error : %d, %s", err_info.errcode, err_info.errmsg.c_str());
     return FAIL;
   }
   size_t batch_buf_length = chunk->RowSize() * chunk->Count();
-  memcpy(static_cast<char *>(temp_table_->getColumnAddr(d_org_siz, 0)), chunk->GetData(), batch_buf_length);
-  temp_table_->resize(d_sz);
-  count_ = temp_table_->size();
+  memcpy(static_cast<char *>(materialized_file_->getColumnAddr(d_org_siz, 0)), chunk->GetData(), batch_buf_length);
+  materialized_file_->resize(d_sz);
+  count_ = materialized_file_->size();
   return SUCCESS;
 }
 
@@ -393,6 +482,16 @@ void DiskRowContainer::Sort() {
 
   // sort
   OrderColumnCompare cmp(this, order_info_);
-  std::stable_sort(it_begin, it_end, cmp);
+  const bool prefilter_nth_element = max_output_rows_ < count_ / 2;
+  if (prefilter_nth_element) {
+    std::nth_element(it_begin, it_begin + max_output_rows_ - 1, it_end, cmp);
+    it_end = it_begin + max_output_rows_;
+  }
+
+  if (count_ <= 100) {
+    std::sort(it_begin, it_end, cmp);
+  } else {
+    std::stable_sort(it_begin, it_end, cmp);
+  }
 }
 }  // namespace kwdbts

@@ -15,21 +15,21 @@
 #include <vector>
 
 #include "ee_base_op.h"
-#include "ee_cpuinfo.h"
 #include "ee_exec_pool.h"
-#include "ee_handler.h"
-#include "ee_kwthd.h"
-#include "ee_pipegroup.h"
+#include "ee_parallel_group.h"
 #include "tag_iterator.h"
 
 namespace kwdbts {
 
 #define EE_MAX_DOP 1
 
-KStatus CMergeOperator::PushData(DataChunkPtr &chunk) {
+KStatus SynchronizerOperator::PushData(DataChunkPtr &chunk, bool wait) {
   std::unique_lock unique_lock(lock_);
   // storage to task queue
   try {
+    if (!wait && data_queue_.size() >= max_queue_size_) {
+      return KStatus::FAIL;
+    }
     not_fill_cv_.wait(unique_lock, [this]() -> bool {
       return ((data_queue_.size() < max_queue_size_) || is_tp_stop_);
     });
@@ -43,7 +43,7 @@ KStatus CMergeOperator::PushData(DataChunkPtr &chunk) {
   return KStatus::SUCCESS;
 }
 
-void CMergeOperator::PopData(kwdbContext_p ctx, DataChunkPtr &chunk) {
+void SynchronizerOperator::PopData(kwdbContext_p ctx, DataChunkPtr &chunk) {
   std::unique_lock l(lock_);
   while (true) {
     if (is_tp_stop_) {
@@ -51,7 +51,7 @@ void CMergeOperator::PopData(kwdbContext_p ctx, DataChunkPtr &chunk) {
     }
     // data_queue_ is empty，wait
     if (data_queue_.empty()) {
-      if (pipe_done_num_ == pipe_num_) {
+      if (group_done_num_ == group_num_) {
         break;
       }
       wait_cond_.wait_for(l, std::chrono::seconds(2));
@@ -65,13 +65,13 @@ void CMergeOperator::PopData(kwdbContext_p ctx, DataChunkPtr &chunk) {
   }
 }
 
-void CMergeOperator::FinishPipeGroup(EEIteratorErrCode code, const EEPgErrorInfo &pg_info) {
+void SynchronizerOperator::FinishParallelGroup(EEIteratorErrCode code, const EEPgErrorInfo &pg_info) {
   std::unique_lock l(lock_);
-  pipe_done_num_++;
+  group_done_num_++;
   if (code != EEIteratorErrCode::EE_OK &&
       code != EEIteratorErrCode::EE_END_OF_RECORD &&
       code != EEIteratorErrCode::EE_TIMESLICE_OUT) {
-    pipegroup_code_ = code;
+    group_code_ = code;
   }
   if (pg_info.code > 0) {
     pg_info_ = pg_info;
@@ -80,76 +80,49 @@ void CMergeOperator::FinishPipeGroup(EEIteratorErrCode code, const EEPgErrorInfo
   wait_cond_.notify_one();
 }
 
-KStatus CMergeOperator::InitPipeGroup(kwdbContext_p ctx) {
-  EnterFunc();
-  // Create multiple pipeGroup for concurrency
-  RunForParallelPg(ctx);
-  Return(SUCCESS);
-}
-
-
-void CMergeOperator::RunForParallelPg(kwdbContext_p ctx) {
-  // Creating the number of pipegroups based on parallelism
+void SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
+  // Creating the number of parallelgroups based on parallelism
   max_queue_size_ = degree_ * 2 + 2;
-  pipe_groups_.resize(degree_);
+  parallel_groups_.resize(degree_);
   for (k_uint32 i = 0; i < degree_; ++i) {
-    PipeGroupPtr pipeGroup = std::make_shared<PipeGroup>();
+    ParallelGroupPtr parallelGroup = std::make_shared<ParallelGroup>();
     if (i == 0) {
-      pipeGroup->SetIterator(input_);
+      parallelGroup->SetIterator(input_);
     } else {
       BaseOperator *clone_iter = input_->Clone();
-      clone_iter->PreInit(ctx);
-      pipeGroup->SetIterator(clone_iter);
+      clone_iter->Init(ctx);
+      parallelGroup->SetIterator(clone_iter);
       clone_iter_list_.push_back(clone_iter);
     }
 
-    pipeGroup->SetTable(table_);
-    pipeGroup->Init(ctx);
-    pipeGroup->SetParent(this);
-    pipeGroup->SetParallel(EE_ENABLE_PARALLEL);
-    pipeGroup->SetDegree(degree_);
-    pipe_num_++;
-    pipe_groups_[i] = pipeGroup;
-    ExecPool::GetInstance().PushTask(pipeGroup);
+    parallelGroup->SetTable(table_);
+    parallelGroup->Init(ctx);
+    parallelGroup->SetParent(this);
+    parallelGroup->SetParallel(EE_ENABLE_PARALLEL);
+    parallelGroup->SetDegree(degree_);
+    group_num_++;
+    parallel_groups_[i] = parallelGroup;
+    ExecPool::GetInstance().PushTask(parallelGroup);
   }
 }
 
-void CMergeOperator::RunForPg(kwdbContext_p ctx, k_bool run) {
-  PipeGroupPtr pipeGroup = std::make_shared<PipeGroup>();
-  pipeGroup->SetIterator(input_);
-  pipeGroup->SetTable(table_);
-  pipeGroup->Init(ctx);
-  pipeGroup->SetParent(this);
-  if (run) {
-    pipeGroup->SetParallel(false);
-    pipe_num_++;
-    pipe_groups_.push_back(pipeGroup);
-    pipeGroup->Run(ctx);
-  } else {
-    pipeGroup->SetParallel(true);
-    {
-      std::unique_lock l(lock_);
-      pipe_num_++;
-      pipe_groups_.push_back(pipeGroup);
-    }
-    ExecPool::GetInstance().PushTask(pipeGroup);
-  }
-}
-
-EEIteratorErrCode CMergeOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode SynchronizerOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  do {
-    code = input_->PreInit(ctx);
-    if (EEIteratorErrCode::EE_OK != code) {
-      break;
-    }
-  } while (0);
+  code = input_->Init(ctx);
+  if (EEIteratorErrCode::EE_OK != code) {
+    Return(code);
+  }
+  // maintain consistency between output and input columns
+  for (auto &input_field : input_fields_) {
+    Field *field = input_field->field_to_copy();
+    output_fields_.push_back(field);
+  }
 
   Return(code);
 }
 
-void CMergeOperator::CalculateDegree() {
+void SynchronizerOperator::CalculateDegree() {
   k_uint32 dop = degree_;
   // TagScan does not support parallelism, forcing parallelism to be set to 1
   char *class_name =
@@ -158,47 +131,42 @@ void CMergeOperator::CalculateDegree() {
     dop = 1;
   }
   free(class_name);
+  /*
   if (ExecPool::GetInstance().GetWaitThreadNum() < dop) {
     dop = ExecPool::GetInstance().GetWaitThreadNum();
   }
+  */
   if (dop < 1) dop = 1;
   degree_ = dop;
-  if (degree_ > ONE_FETCH_COUNT) {
-    degree_ = ONE_FETCH_COUNT;
-  }
   if (degree_ > 1) {
     is_parallel_ = true;
   }
 }
 
-EEIteratorErrCode CMergeOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode SynchronizerOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
   CalculateDegree();
   if (is_parallel_) {
-    KStatus ret = InitPipeGroup(ctx);
-    if (ret != SUCCESS) {
-      code = EEIteratorErrCode::EE_ERROR;
-      Return(code)
-    }
+    InitParallelGroup(ctx);
   } else {
-    code = input_->Init(ctx);
+    code = input_->Start(ctx);
   }
   Return(code);
 }
-KStatus CMergeOperator::Close(kwdbContext_p ctx) {
+KStatus SynchronizerOperator::Close(kwdbContext_p ctx) {
   EnterFunc();
   is_tp_stop_ = true;
-  if (pipe_done_num_ < pipe_num_) {
-    for (auto &pipe_group : pipe_groups_) {
-      pipe_group->Stop();
+  if (group_done_num_ < group_num_) {
+    for (auto &parallel_group : parallel_groups_) {
+      parallel_group->Stop();
     }
     data_queue_.clear();
     not_fill_cv_.notify_all();
     std::unique_lock l(lock_);
     while (true) {
       // wait
-      if (pipe_done_num_ == pipe_num_) {
+      if (group_done_num_ == group_num_) {
         break;
       }
       wait_cond_.wait_for(l, std::chrono::seconds(2));
@@ -207,37 +175,6 @@ KStatus CMergeOperator::Close(kwdbContext_p ctx) {
   }
   KStatus ret = input_->Close(ctx);
   Return(ret);
-}
-
-SynchronizerOperator::SynchronizerOperator(BaseOperator *input,
-                                           TSSynchronizerSpec *spec,
-                                           TSPostProcessSpec *post,
-                                           TABLE *table, int32_t processor_id)
-    : CMergeOperator(input, post, table, processor_id) {
-  if (spec->has_degree()) {
-    degree_ = spec->degree();
-  }
-}
-
-SynchronizerOperator::SynchronizerOperator(BaseOperator *input, TABLE *table, int32_t processor_id)
-    : CMergeOperator(input, nullptr, table, processor_id) {
-  degree_ = 1;
-}
-
-EEIteratorErrCode SynchronizerOperator::PreInit(kwdbContext_p ctx) {
-  EnterFunc();
-  EEIteratorErrCode code = CMergeOperator::PreInit(ctx);
-  // maintain consistency between output and input columns
-  for (auto & input_field : input_fields_) {
-    Field *field = input_field->field_to_copy();
-    output_fields_.push_back(field);
-  }
-  Return(code);
-}
-EEIteratorErrCode SynchronizerOperator::Init(kwdbContext_p ctx) {
-  EnterFunc();
-  EEIteratorErrCode code = CMergeOperator::Init(ctx);
-  Return(code);
 }
 
 EEIteratorErrCode SynchronizerOperator::Next(kwdbContext_p ctx, DataChunkPtr &chunk) {
@@ -251,8 +188,8 @@ EEIteratorErrCode SynchronizerOperator::Next(kwdbContext_p ctx, DataChunkPtr &ch
     }
     if (!chunk) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
-      if (pipegroup_code_ != EEIteratorErrCode::EE_OK) {
-        code = pipegroup_code_;
+      if (group_code_ != EEIteratorErrCode::EE_OK) {
+        code = group_code_;
       }
     }
   } else {

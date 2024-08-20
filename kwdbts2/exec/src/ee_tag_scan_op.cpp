@@ -20,11 +20,11 @@
 #include "ee_row_batch.h"
 #include "ee_flow_param.h"
 #include "ee_global.h"
-#include "ee_handler.h"
+#include "ee_storage_handler.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_table.h"
 #include "lg_api.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 
 namespace kwdbts {
 
@@ -44,11 +44,11 @@ TagScanOperator::TagScanOperator(TSTagReaderSpec* spec, TSPostProcessSpec* post,
 
 TagScanOperator::~TagScanOperator() = default;
 
-EEIteratorErrCode TagScanOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode TagScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   std::unique_lock l(tag_lock_);
-  if (is_pre_init_) {
-    Return(pre_init_code_);
+  if (is_init_) {
+    Return(init_code_);
   }
   EEIteratorErrCode ret = EEIteratorErrCode::EE_ERROR;
   do {
@@ -80,24 +80,24 @@ EEIteratorErrCode TagScanOperator::PreInit(kwdbContext_p ctx) {
       }
     }
   } while (0);
-  is_pre_init_ = true;
-  pre_init_code_ = ret;
+  is_init_ = true;
+  init_code_ = ret;
   Return(ret);
 }
 
-EEIteratorErrCode TagScanOperator::Init(kwdbContext_p ctx) {
+EEIteratorErrCode TagScanOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
   std::unique_lock l(tag_lock_);
   // Involving parallelism, ensuring that it is only called once
-  if (is_init_) {
-    Return(init_code_);
+  if (started_) {
+    Return(start_code_);
   }
-  is_init_ = true;
-  init_code_ = EEIteratorErrCode::EE_ERROR;
-  handler_ = new Handler(table_);
-  init_code_ = handler_->PreInit(ctx);
-  if (init_code_ == EEIteratorErrCode::EE_ERROR) {
-    Return(init_code_);
+  started_ = true;
+  start_code_ = EEIteratorErrCode::EE_ERROR;
+  handler_ = new StorageHandler(table_);
+  start_code_ = handler_->Init(ctx);
+  if (start_code_ == EEIteratorErrCode::EE_ERROR) {
+    Return(start_code_);
   }
 
   k_uint32 access_mode = table_->GetAccessMode();
@@ -110,9 +110,9 @@ EEIteratorErrCode TagScanOperator::Init(kwdbContext_p ctx) {
     case TSTableReadMode::metaTable:
     case TSTableReadMode::onlyTag: {
       handler_->SetReadMode((TSTableReadMode) access_mode);
-      init_code_ = handler_->NewTagIterator(ctx);
-      if (init_code_ != EE_OK) {
-        Return(init_code_);
+      start_code_ = handler_->NewTagIterator(ctx);
+      if (start_code_ != EE_OK) {
+        Return(start_code_);
       }
       break;
     }
@@ -121,7 +121,7 @@ EEIteratorErrCode TagScanOperator::Init(kwdbContext_p ctx) {
       break;
     }
   }
-  Return(init_code_);
+  Return(start_code_);
 }
 
 EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx) {
@@ -238,7 +238,7 @@ EEIteratorErrCode TagScanOperator::Reset(kwdbContext_p ctx) {
   data_ = nullptr;
   count_ = 0;
   tag_index_once_ = false;
-  is_init_ = false;
+  started_ = false;
   tag_index_once_ = true;
 
   Return(EEIteratorErrCode::EE_OK)

@@ -18,7 +18,6 @@
 #include "ee_iterator_data_test.h"
 #include "ee_metadata_data_test.h"
 #include "ee_exec_pool.h"
-#include "th_kwdb_dynamic_thread_pool.h"
 
 string kDbPath = "./test_db";
 
@@ -49,7 +48,6 @@ class TestDmlExec : public TestBigTableInstance {
 
  protected:
   virtual void SetUp() {
-    KWDBDynamicThreadPool::GetThreadPool().Init(15, ctx_);
     ASSERT_EQ(ExecPool::GetInstance().Init(ctx_), SUCCESS);
     // create source data
     CreateTestTsEngine(ctx_, kDbPath, 10);
@@ -57,11 +55,9 @@ class TestDmlExec : public TestBigTableInstance {
   }
   virtual void TearDown() {
     CloseTestTsEngine(ctx_);
-    KWDBDynamicThreadPool::GetThreadPool().Stop();
     system(("rm -rf " + kDbPath + "/*").c_str());
     SafeDelete(flow_);
     ExecPool::GetInstance().Stop();
-    KWDBDynamicThreadPool::GetThreadPool().Stop();
   }
   KTableId objectid_{301};
   TSFlowSpec *flow_{nullptr};
@@ -104,7 +100,7 @@ TEST_F(TestDmlExec, TestDmlExecInit) {
   info->handle = respInfo.handle;
   info->tp = EnMqType::MQ_TYPE_DML_CLOSE;
   DmlExec::ExecQuery(ctx_, info, info2);
-  
+
   free(message);
 }
 }  // namespace kwdbts

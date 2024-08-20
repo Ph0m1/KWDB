@@ -17,7 +17,7 @@
 #include "ee_exec_pool.h"
 #include "ee_executor.h"
 #include "ee_iterator_data_test.h"
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "ee_metadata_data_test.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 namespace fs = std::filesystem;
@@ -61,9 +61,8 @@ class TestProcessors : public TestBigTableInstance {
 };
 
 TEST_F(TestProcessors, TestPubsubResult) {
-  KWThd *thd = new KWThd();
+  KWThdContext *thd = new KWThdContext();
   current_thd = thd;
-  KWDBDynamicThreadPool::GetThreadPool().Init(15, ctx_);
   ASSERT_EQ(ExecPool::GetInstance().Init(ctx_), SUCCESS);
   ExecPool::GetInstance().db_path_ = kDbPath + "/temp_db_/";
   if (access(ExecPool::GetInstance().db_path_.c_str(), 0)) {
@@ -99,7 +98,6 @@ TEST_F(TestProcessors, TestPubsubResult) {
   ExecPool::GetInstance().Stop();
   thd->Reset();
   SafeDeletePointer(thd);
-  kwdbts::KWDBDynamicThreadPool::GetThreadPool().Stop();
 }
 
 // Processors::InitProcessorsOptimization

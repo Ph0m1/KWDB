@@ -18,8 +18,8 @@
 #include "ee_row_batch.h"
 #include "ee_flow_param.h"
 #include "ee_global.h"
-#include "ee_handler.h"
-#include "ee_kwthd.h"
+#include "ee_storage_handler.h"
+#include "ee_kwthd_context.h"
 #include "ee_aggregate_flow_spec.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_scan_row_batch.h"
@@ -27,11 +27,11 @@
 
 namespace kwdbts {
 
-EEIteratorErrCode AggTableScanOperator::PreInit(kwdbContext_p ctx) {
+EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode ret;
   do {
-    ret = TableScanOperator::PreInit(ctx);
+    ret = TableScanOperator::Init(ctx);
     if (ret != EEIteratorErrCode::EE_OK) {
       LOG_ERROR("RenderSize() failed\n");
       break;
@@ -100,8 +100,8 @@ EEIteratorErrCode AggTableScanOperator::PreInit(kwdbContext_p ctx) {
 EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThd* thd = current_thd;
-  Handler* handler = thd->GetHandler();
+  KWThdContext* thd = current_thd;
+  StorageHandler* handler = handler_;
 
   do {
     if (limit_ && examined_rows_ >= limit_) {

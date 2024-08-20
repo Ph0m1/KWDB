@@ -89,7 +89,7 @@ KStatus Processors::Init(kwdbContext_p ctx, const TSFlowSpec* fspec) {
     Return(FAIL);
   }
 
-  EEIteratorErrCode code = root_iterator_->PreInit(ctx);
+  EEIteratorErrCode code = root_iterator_->Init(ctx);
   INJECT_DATA_FAULT(FAULT_EE_DML_SETUP_PREINIT_MSG_FAIL, code,
                     EEIteratorErrCode::EE_ERROR, nullptr);
   if (code != EEIteratorErrCode::EE_OK) {
@@ -122,7 +122,7 @@ KStatus Processors::InitIterator(kwdbContext_p ctx) {
   AssertNotNull(root_iterator_);
   EEPgErrorInfo::ResetPgErrorInfo();
   // Init operators
-  EEIteratorErrCode code = root_iterator_->Init(ctx);
+  EEIteratorErrCode code = root_iterator_->Start(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
     root_iterator_->Close(ctx);
     Return(KStatus::FAIL);

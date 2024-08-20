@@ -31,15 +31,9 @@ class TestExecutor : public ::testing::Test {
  protected:
   static void SetUpTestCase() {
     InitServerKWDBContext(ctx);
-    // InitMetadataCacheManager(ctx);
-    // Assign conn_id for the error module
-    // KConnId conn_id = allocateConnectionID(INNER_CONN_EE);
-    // ctx->connection_id = conn_id;
   }
 
   static void TearDownTestCase() {
-    // ASSERT_TRUE(kwdbts::KWDBDynamicThreadPool::GetThreadPool().Stop());
-    // CloseMetadataCacheManager(ctx);
     DestroyKWDBContext(ctx);
   }
 

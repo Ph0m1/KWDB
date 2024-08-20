@@ -53,82 +53,33 @@ struct ColumnInfo {
         return_type(return_type) {}
 };
 
-/**
- * @brief RowContainer
- * @details Sort container interface，derived classes include
- * MemRowContainer and DiskRowContainer
- */
-class RowContainer {
+class IChunk {
  public:
-  virtual ~RowContainer() {}
-
-  /**
-   * @brief Initialize row container. Now DiskRowContainer override it.
-   */
-  virtual KStatus Init() { return SUCCESS; }
-
-  /**
-   * @brief Sort all rows in the container
-   */
-  virtual void Sort() {}
-
-  /**
-   * @brief Read data in datachunk and append all rows into row container
-   * @param[in] chunk datachunk unique_ptr
-   */
-  virtual KStatus Append(DataChunkPtr& chunk) { return SUCCESS; }
-
-  /**
-   * @brief Read all data from a datachunk queue and append into row container
-   * @param[in] chunk_queue queue of datachunk unique_ptr
-   */
-  virtual KStatus Append(std::queue<DataChunkPtr>& buffer) { return SUCCESS; }
-
   /**
    * @brief Check whether it is null at (row, col)
    * @param[in] row
    * @param[in] col
    */
-  virtual bool IsNull(k_uint32 row, k_uint32 col) { return true; }
+  virtual bool IsNull(k_uint32 row, k_uint32 col) = 0;
 
   /**
    * @brief Check whether it is null at (current_line, col)
    * @param[in] col
    */
-  virtual bool IsNull(k_uint32 col) { return true; }
+  virtual bool IsNull(k_uint32 col) = 0;
 
   /**
    * @brief Get data pointer at (row, col)
    * @param[in] row
    * @param[in] col
    */
-  virtual DatumPtr GetData(k_uint32 row, k_uint32 col) { return nullptr; }
+  virtual DatumPtr GetData(k_uint32 row, k_uint32 col) = 0;
 
   /**
    * @brief Get data pointer at (current_line, col)
    * @param[in] col
    */
-  virtual DatumPtr GetData(k_uint32 col) { return nullptr; }
-
-  /**
-   * @brief Get data pointer at (row, 0)
-   * @param[in] row
-   */
-  virtual DatumPtr GetRow(k_uint32 row) { return nullptr; }
-
-  /* Column info getter */
-  virtual std::vector<ColumnInfo>& GetColumnInfo() = 0;
-
-  /**
-   * @brief Move to next line
-   * @return Return row index of next line when it's valid, otherwise return -1.
-   */
-  virtual k_int32 NextLine() { return -1; }
-
-  /**
-   * @brief return count
-   */
-  virtual k_uint32 Count() { return -1; }
+  virtual DatumPtr GetData(k_uint32 col) = 0;
 };
 
 /**
@@ -171,7 +122,7 @@ class RowContainer {
  * on Datachunk to provide sorting capability. But the class hierarchy is
  * changed after DiskRowContainer implementation.
  */
-class DataChunk : public RowContainer {
+class DataChunk : public IChunk {
  public:
   /* Constructor & Deconstructor */
   explicit DataChunk(vector<ColumnInfo>& column_info, k_uint32 capacity = 0);
@@ -200,11 +151,11 @@ class DataChunk : public RowContainer {
   /* override methods */
   DatumPtr GetData(k_uint32 row, k_uint32 col) override;
   DatumPtr GetData(k_uint32 col) override;
-  DatumRowPtr GetRow(k_uint32 row) override;
-  k_int32 NextLine() override;
+  DatumRowPtr GetRow(k_uint32 row);
+  k_int32 NextLine();
   bool IsNull(k_uint32 row, k_uint32 col) override;
   bool IsNull(k_uint32 col) override;
-  KStatus Append(std::queue<DataChunkPtr>& buffer) override;
+  KStatus Append(std::queue<DataChunkPtr>& buffer);
 
   ////////////////   Basic Methods   ///////////////////
 

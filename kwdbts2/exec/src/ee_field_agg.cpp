@@ -9,7 +9,6 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
-#include "ee_kwthd.h"
 #include "ee_field_agg.h"
 #include "ee_aggregate_op.h"
 #include "ee_aggregate_func.h"
@@ -17,34 +16,34 @@
 namespace kwdbts {
 
 k_bool FieldAggNum::is_nullable() {
-    HashAggregateOperator *hash_agg_op = dynamic_cast<HashAggregateOperator*>(op_);
-    if (hash_agg_op != nullptr) {
-        char* bitmap = hash_agg_op->iter_->second + hash_agg_op->agg_null_offset_;
-        return AggregateFunc::IsNull(bitmap, num_);
-    } else {
-        OrderedAggregateOperator *ordered_agg_op = dynamic_cast<OrderedAggregateOperator*>(op_);
-        if (ordered_agg_op != nullptr) {
-            char* bitmap = ordered_agg_op->bucket_ + ordered_agg_op->agg_null_offset_;
-            return AggregateFunc::IsNull(bitmap, num_);
-        }
+  HashAggregateOperator *hash_agg_op = dynamic_cast<HashAggregateOperator *>(op_);
+  if (hash_agg_op != nullptr) {
+    char *bitmap = hash_agg_op->iter_->second + hash_agg_op->agg_null_offset_;
+    return AggregateFunc::IsNull(bitmap, num_);
+  } else {
+    OrderedAggregateOperator *ordered_agg_op = dynamic_cast<OrderedAggregateOperator *>(op_);
+    if (ordered_agg_op != nullptr) {
+      char *bitmap = ordered_agg_op->bucket_ + ordered_agg_op->agg_null_offset_;
+      return AggregateFunc::IsNull(bitmap, num_);
     }
-    return false;
+  }
+  return false;
 }
 
 char *FieldAggNum::get_ptr() {
-    HashAggregateOperator *hash_agg_op = dynamic_cast<HashAggregateOperator*>(op_);
-    if (hash_agg_op != nullptr) {
-        // data + offset
-        DatumRowPtr data = hash_agg_op->iter_->second;
-        return data + hash_agg_op->funcs_[num_]->GetOffset();
-    } else {
-        OrderedAggregateOperator *ordered_agg_op = dynamic_cast<OrderedAggregateOperator*>(op_);
-        if (ordered_agg_op != nullptr) {
-            return ordered_agg_op->bucket_ + ordered_agg_op->funcs_[num_]->GetOffset();
-        }
+  HashAggregateOperator *hash_agg_op = dynamic_cast<HashAggregateOperator *>(op_);
+  if (hash_agg_op != nullptr) {
+    // data + offset
+    DatumRowPtr data = hash_agg_op->iter_->second;
+    return data + hash_agg_op->funcs_[num_]->GetOffset();
+  } else {
+    OrderedAggregateOperator *ordered_agg_op = dynamic_cast<OrderedAggregateOperator *>(op_);
+    if (ordered_agg_op != nullptr) {
+      return ordered_agg_op->bucket_ + ordered_agg_op->funcs_[num_]->GetOffset();
     }
+  }
 
-    return nullptr;
+  return nullptr;
 }
 
 ////////////// FieldAggBool ////////////

@@ -13,7 +13,7 @@
 
 #include <gtest/gtest.h>
 #include <string>
-#include "ee_kwthd.h"
+#include "ee_kwthd_context.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "engine.h"
 #include "ee_exec_pool.h"
@@ -49,14 +49,12 @@ class OperatorTestBase : public ::testing::Test {
 
  protected:
   void SetUp() override {
-    KWDBDynamicThreadPool::GetThreadPool().Init(15, ctx_);
     ExecPool::GetInstance().Init(ctx_);
   }
 
   void TearDown() override {
     ExecPool::GetInstance().Stop();
     CloseTestTsEngine(ctx_);
-    KWDBDynamicThreadPool::GetThreadPool().Stop();
   }
 
   kwdbContext_t test_context;

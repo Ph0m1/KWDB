@@ -8,8 +8,7 @@
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
-#include "ee_kwthd.h"
-
+#include "ee_kwthd_context.h"
 #include "gtest/gtest.h"
 namespace kwdbts {
 
@@ -21,7 +20,7 @@ class TestKwthd : public testing::Test {
 };
 
 TEST_F(TestKwthd, TestKwthdInit) {
-  KWThd *thd = new KWThd();
+  KWThdContext *thd = new KWThdContext();
   current_thd = thd;
   thd->Reset();
   SafeDeletePointer(thd);

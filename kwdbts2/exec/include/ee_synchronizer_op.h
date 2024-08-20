@@ -20,9 +20,8 @@
 #include "ee_aggregate_flow_spec.h"
 #include "ee_base_op.h"
 #include "ee_flow_param.h"
-#include "ee_handler.h"
 #include "ee_pb_plan.pb.h"
-#include "ee_pipegroup.h"
+#include "ee_parallel_group.h"
 #include "ee_row_batch.h"
 #include "ee_tag_row_batch.h"
 #include "kwdb_consts.h"
@@ -36,38 +35,49 @@ class AggregateRowBatch;
 class TSPostProcessSpec;
 class TagScanIterator;
 
-class CMergeOperator : public BaseOperator {
+class SynchronizerOperator : public BaseOperator {
  public:
-  CMergeOperator(BaseOperator *input, TSPostProcessSpec *post, TABLE *table, int32_t processor_id)
-      : BaseOperator(table, processor_id), input_{input}, post_{post},
-        input_fields_{input->OutputFields()} {}
-  virtual ~CMergeOperator() {
+  SynchronizerOperator(BaseOperator *input, TSSynchronizerSpec *spec,
+                       TSPostProcessSpec *post, TABLE *table,
+                       int32_t processor_id)
+      : BaseOperator(table, processor_id),
+        input_{input},
+        post_{post},
+        input_fields_{input->OutputFields()} {
+    if (spec->has_degree()) {
+      degree_ = spec->degree();
+    }
+  }
+  virtual ~SynchronizerOperator() {
     for (auto it : clone_iter_list_) {
       SafeDeletePointer(it)
     }
     clone_iter_list_.clear();
-    pipe_groups_.clear();
+    parallel_groups_.clear();
   }
 
-  KStatus PushData(DataChunkPtr &chunk);
+  KStatus PushData(DataChunkPtr &chunk, bool wait = false);
   void PopData(kwdbContext_p ctx, DataChunkPtr &chunk);
-  void FinishPipeGroup(EEIteratorErrCode code, const EEPgErrorInfo &pgInfo);
+  void FinishParallelGroup(EEIteratorErrCode code, const EEPgErrorInfo &pgInfo);
   void CalculateDegree();
-  KStatus InitPipeGroup(kwdbContext_p ctx);
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+  EEIteratorErrCode Start(kwdbContext_p ctx) override;
   KStatus Close(kwdbContext_p ctx) override;
 
-  void RunForParallelPg(kwdbContext_p ctx);
-  void RunForPg(kwdbContext_p ctx, k_bool run = false);
+  void InitParallelGroup(kwdbContext_p ctx);
+  Field **GetRender() { return input_->GetRender(); }
+  Field *GetRender(int i) { return input_->GetRender(i); }
+  k_uint32 GetRenderSize() { return input_->GetRenderSize(); }
+  std::vector<Field*>& OutputFields() { return input_->OutputFields(); }
+  EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr &chunk);
 
  protected:
   BaseOperator *input_{nullptr};  // input iterator
   bool is_tp_stop_{false};
-  k_uint32 pipe_num_{0};
-  k_uint32 pipe_done_num_{0};
+  k_uint32 group_num_{0};
+  k_uint32 group_done_num_{0};
   TSPostProcessSpec *post_{nullptr};
-  EEIteratorErrCode pipegroup_code_{EEIteratorErrCode::EE_OK};
+  EEIteratorErrCode group_code_{EEIteratorErrCode::EE_OK};
   std::list<BaseOperator *> clone_iter_list_;
 
   // input field (FieldNum)
@@ -97,26 +107,8 @@ class CMergeOperator : public BaseOperator {
    * @brief concurrent locks
    */
   mutable std::mutex pg_lock_;
-  std::vector<PipeGroupPtr> pipe_groups_;
+  std::vector<ParallelGroupPtr> parallel_groups_;
   k_uint32 max_queue_size_{0};
-};
-
-class SynchronizerOperator : public CMergeOperator {
- public:
-  SynchronizerOperator(BaseOperator *input, TSSynchronizerSpec *spec,
-                        TSPostProcessSpec *post, TABLE *table, int32_t processor_id);
-  SynchronizerOperator(BaseOperator *input, TABLE *table, int32_t processor_id);
-  ~SynchronizerOperator() {}
-  Field **GetRender() { return input_->GetRender(); }
-  Field *GetRender(int i) { return input_->GetRender(i); }
-  k_uint32 GetRenderSize() { return input_->GetRenderSize(); }
-  EEIteratorErrCode PreInit(kwdbContext_p ctx) override;
-  EEIteratorErrCode Init(kwdbContext_p ctx) override;
-  EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr &chunk) override;
-  std::vector<Field*>& OutputFields() { return input_->OutputFields(); }
-
- private:
-  RowBatchPtr data_handle_{nullptr};
 };
 
 };  // namespace kwdbts

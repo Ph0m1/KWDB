@@ -82,7 +82,7 @@ class TestOpBase {
 //    iter_ =
 //        NewIterator<CMergeAggIterator>(childIter_->iter_, &spec_, &post_, table_);
 //    // iter_->Init(ctx);
-//    // iter_->PreInit(ctx);
+//    // iter_->Init(ctx);
 //  }
 //
 // private:
