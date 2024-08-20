@@ -210,10 +210,14 @@ var castSupportType = []oid.Oid{oid.T_timestamp, oid.T_timestamptz, oid.T_int2, 
 	oid.T_float4, oid.T_float8, oid.T_bool, oid.T_bpchar, oid.T_bytea, types.T_nchar, oid.T_varchar, types.T_nvarchar, oid.T_varbytea}
 
 // CheckExprCanExecInTSEngine checks whether expr and it's children exprs can be pushed down
-func CheckExprCanExecInTSEngine(src opt.Expr, pos int8, f CheckFunc) (bool, uint32) {
+// tupleCanExecInTSEngine is true when the tuple use in InExpr or NotInExpr, tuple expr only can exec in ts engine in this case,
+// such as col in (1,2,3) or col in (col1,col2); other case such as COUNT(DISTINCT (channel, companyid)) can not exec in ts engine.
+func CheckExprCanExecInTSEngine(
+	src opt.Expr, pos int8, f CheckFunc, tupleCanExecInTSEngine bool,
+) (bool, uint32) {
 	// const and column can exec in ts engine
 	if opt.IsConstValueOp(src) || src.Op() == opt.VariableOp ||
-		(src.Op() == opt.TupleOp && src.ChildCount() > 0 && src.Child(0).ChildCount() > 0) {
+		(src.Op() == opt.TupleOp && src.ChildCount() > 0 && src.Child(0).ChildCount() > 0 && tupleCanExecInTSEngine) {
 		return true, 0
 	}
 
@@ -223,7 +227,7 @@ func CheckExprCanExecInTSEngine(src opt.Expr, pos int8, f CheckFunc) (bool, uint
 	// add the check for (not) in operator, that white list can add common, otherwise can only check (not )in any
 	if src.Op() == opt.InOp || src.Op() == opt.NotInOp {
 		for i := 0; i < src.ChildCount(); i++ {
-			can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f)
+			can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, true)
 			if !can { // can not push down
 				return false, 0
 			}
@@ -249,7 +253,7 @@ func CheckExprCanExecInTSEngine(src opt.Expr, pos int8, f CheckFunc) (bool, uint
 	switch source := src.(type) {
 	case *ScalarListExpr:
 		for i := 0; i < len(*source); i++ {
-			can, _ := CheckExprCanExecInTSEngine((*source)[i], pos, f)
+			can, _ := CheckExprCanExecInTSEngine((*source)[i], pos, f, false)
 			if !can { // can not push down
 				return false, 0
 			}
@@ -281,7 +285,7 @@ func CheckExprCanExecInTSEngine(src opt.Expr, pos int8, f CheckFunc) (bool, uint
 
 	// check whether child exprs can exec in ts engine
 	for i := 0; i < src.ChildCount(); i++ {
-		if can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f); !can { // can not push down
+		if can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, false); !can { // can not push down
 			return false, hashCode
 		}
 	}
@@ -311,7 +315,7 @@ func CheckFilterExprCanExecInTSEngine(src opt.Expr, pos ExprPos, f CheckFunc) bo
 	}
 
 	// check white list that can support by ts engine
-	if can, _ := CheckExprCanExecInTSEngine(src, int8(pos), f); !can {
+	if can, _ := CheckExprCanExecInTSEngine(src, int8(pos), f, false); !can {
 		return false
 	}
 
@@ -398,7 +402,7 @@ func (m *Memo) SplitTagExpr(src opt.Expr, colMap TagColMap) (leave opt.Expr, tag
 		return source, nil
 	default:
 		// check white list that can push down
-		if push, _ := CheckExprCanExecInTSEngine(src, ExprPosSelect, m.GetWhiteList().CheckWhiteListParam); !push {
+		if push, _ := CheckExprCanExecInTSEngine(src, ExprPosSelect, m.GetWhiteList().CheckWhiteListParam, false); !push {
 			return source, nil
 		}
 

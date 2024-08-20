@@ -1384,7 +1384,7 @@ func (m *Memo) checkProject(source *ProjectExpr) (bool, bool, bool, error) {
 		if childExecInTS {
 			// check if element of ProjectionExpr can execute in ts engine.
 			if execInTSEngine, hashcode := CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), ExprPosProjList,
-				m.CheckHelper.whiteList.CheckWhiteListParam); execInTSEngine {
+				m.CheckHelper.whiteList.CheckWhiteListParam, false); execInTSEngine {
 				m.AddColumn(proj.Col, "", GetExprType(proj.Element), ExprPosProjList, hashcode, false)
 			} else {
 				selfExecInTS = false
