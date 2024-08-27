@@ -1199,6 +1199,9 @@ TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segmen
 KStatus TsAggIterator::getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
                                       uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap) {
   *bitmap = segment_tbl->columnNullBitmapAddr(block_id, col_idx);
+  if (nullptr == *bitmap) {
+    return KStatus::SUCCESS;
+  }
   auto schema_info = segment_tbl->getSchemaInfo();
   if (!isVarLenType(attrs_[col_idx].type)) {
     if (schema_info[col_idx].type != attrs_[col_idx].type) {

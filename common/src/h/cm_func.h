@@ -176,6 +176,9 @@ void SetObjectColNull(char* bitmap, k_uint32 col_index);
  */
 // inline k_bool IsObjectColNull(const char* bitmap, k_uint32 col_index);
 inline k_bool IsObjectColNull(const char* bitmap, k_uint32 col_index) {
+  if (!bitmap) {
+    return KTRUE;
+  }
   const k_uint32 bit = col_index & 0x00000007;
   const k_uint32 idx = col_index >> 3;
 
