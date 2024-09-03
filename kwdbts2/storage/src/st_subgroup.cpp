@@ -509,10 +509,10 @@ int TsSubEntityGroup::RemoveExpiredPartition(int64_t end_ts, ErrorInfo& err_info
   }
   err_info.clear();
   // delete all partitions in p_times.
-  for (auto p_time = deleted_partitions_.begin(); p_time != deleted_partitions_.end();) {
-    string pt_tbl_sub_path = partitionTblSubPath(p_time->first);
+  for (auto iter = deleted_partitions_.begin(); iter != deleted_partitions_.end();) {
+    string pt_tbl_sub_path = partitionTblSubPath(iter->first);
     LOG_INFO("RemoveExpiredPartitionTable[%s] start", pt_tbl_sub_path.c_str());
-    int ret = RemovePartitionTable(p_time->first, err_info, true);
+    int ret = RemovePartitionTable(iter->first, err_info, true);
     if (ret < 0) {
       if (ret != KWERSRCBUSY) {
         LOG_ERROR("RemoveExpiredPartitionTable[%s] failed", pt_tbl_sub_path.c_str());
@@ -522,9 +522,10 @@ int TsSubEntityGroup::RemoveExpiredPartition(int64_t end_ts, ErrorInfo& err_info
       // Clear err_info, avoid error reporting due to KWERSRCBUSY returned.
       err_info.clear();
       LOG_WARN("RemoveExpiredPartitionTable[%s] skipped", pt_tbl_sub_path.c_str());
+      iter++;
       continue;
     }
-    deleted_partitions_.erase(p_time++);
+    deleted_partitions_.erase(iter++);
     LOG_INFO("RemoveExpiredPartitionTable[%s] succeeded", pt_tbl_sub_path.c_str());
   }
   return err_info.errcode;
