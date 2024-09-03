@@ -1313,6 +1313,14 @@ func (ag *aggregatorBase) encode(
 	return appendTo, nil
 }
 
+func isLastOrFirst(specFunc execinfrapb.AggregatorSpec_Func) bool {
+	if specFunc == execinfrapb.AggregatorSpec_FIRST || specFunc == execinfrapb.AggregatorSpec_LAST ||
+		specFunc == execinfrapb.AggregatorSpec_FIRST_ROW || specFunc == execinfrapb.AggregatorSpec_LAST_ROW {
+		return true
+	}
+	return false
+}
+
 func (ag *aggregatorBase) createAggregateFuncs() (aggregateFuncs, error) {
 	if err := ag.bucketsAcc.Grow(ag.PbCtx(), sizeOfAggregateFuncs+sizeOfAggregateFunc*int64(len(ag.funcs))); err != nil {
 		return nil, err
@@ -1331,6 +1339,12 @@ func (ag *aggregatorBase) createAggregateFuncs() (aggregateFuncs, error) {
 			if imputationbucket, ok := bucket[i].(*builtins.ImputationAggregate); ok {
 				imputationbucket.Aggfunc = bucket[i+1]
 				bucket = append(bucket[:i+1], bucket[i+2:]...)
+				if isLastOrFirst(ag.aggregations[i+1].Func) {
+					//The time column should be added to the last or first function.
+					if len(ag.aggregations[i+1].ColIdx) > 0 {
+						ag.aggregations[i].ColIdx = append(ag.aggregations[i].ColIdx, ag.aggregations[i+1].ColIdx[1])
+					}
+				}
 				ag.aggregations = append(ag.aggregations[:i+1], ag.aggregations[i+2:]...)
 				ag.outputTypes = append(ag.outputTypes[:i+1], ag.outputTypes[i+2:]...)
 				ag.interpolated = true

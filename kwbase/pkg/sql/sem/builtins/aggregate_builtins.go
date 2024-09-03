@@ -2944,7 +2944,10 @@ func (a *ImputationAggregate) Add(
 	default:
 		return errors.New("Second argument type must be int, float or string")
 	}
-	return a.Aggfunc.Add(ctx, datum1)
+	if len(datum2) > 1 {
+		datum2 = datum2[1:]
+	}
+	return a.Aggfunc.Add(ctx, datum1, datum2...)
 }
 
 // Result is for interpolate agg
