@@ -12,8 +12,8 @@ function uninstall() {
 		if [ "$manager" == "dpkg" ];then
 			eval $kw_cmd_prefix $manager -r kaiwudb-server >/dev/null 2>&1
 			eval $kw_cmd_prefix $manager -r kaiwudb-libcommon >/dev/null 2>&1
-			eval $kw_cmd_prefix $manager -r kwdb-libcommon >/dev/null 2>&1
 			eval $kw_cmd_prefix $manager -r kwdb-server >/dev/null 2>&1
+			eval $kw_cmd_prefix $manager -r kwdb-libcommon >/dev/null 2>&1
 		elif [ "$manager" == "rpm" ];then
 			eval $kw_cmd_prefix $manager -e kaiwudb-server >/dev/null 2>&1
 			eval $kw_cmd_prefix $manager -e kaiwudb-libcommon >/dev/null 2>&1
