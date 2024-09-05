@@ -1645,8 +1645,8 @@ func (ex *connExecutor) execCmd(ctx context.Context) error {
 		ev, payload = ex.execDescribe(ctx, tcmd, descRes)
 	case BindStmt:
 		res = ex.clientComm.CreateBindResult(pos)
-		ps, _ := ex.extraTxnState.prepStmtsNamespace.prepStmts[tcmd.PreparedStatementName]
-		if ps.Statement.Insertdirectstmt.InsertFast {
+		ps, ok := ex.extraTxnState.prepStmtsNamespace.prepStmts[tcmd.PreparedStatementName]
+		if ok && ps.Statement.Insertdirectstmt.InsertFast {
 			ev, payload = ex.execPreparedirectBind(ctx, tcmd)
 		} else {
 			ev, payload = ex.execBind(ctx, tcmd)

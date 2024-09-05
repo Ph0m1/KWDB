@@ -308,12 +308,10 @@ func (ex *connExecutor) execBind(
 	}
 
 	numQArgs := uint16(len(ps.InferredTypes))
-	var qargs tree.QueryArguments
-	if ps.PrepareInsertDirect.ColsDesc == nil {
-		// Decode the arguments, except for internal queries for which we just verify
-		// that the arguments match what's expected.
-		qargs = make(tree.QueryArguments, numQArgs)
-	}
+	// Decode the arguments, except for internal queries for which we just verify
+	// that the arguments match what's expected.
+	qargs := make(tree.QueryArguments, numQArgs)
+
 	if bindCmd.internalArgs != nil {
 		if len(bindCmd.internalArgs) != int(numQArgs) {
 			return retErr(
@@ -361,21 +359,19 @@ func (ex *connExecutor) execBind(
 		}
 
 		ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
-		if ps.PrepareInsertDirect.ColsDesc == nil {
-			for i, arg := range bindCmd.Args {
-				k := tree.PlaceholderIdx(i)
-				t := ps.InferredTypes[i]
-				if arg == nil {
-					// nil indicates a NULL argument value.
-					qargs[k] = tree.DNull
-				} else {
-					d, err := pgwirebase.DecodeOidDatum(ptCtx, t, qArgFormatCodes[i], arg)
-					if err != nil {
-						return retErr(pgerror.Wrapf(err, pgcode.ProtocolViolation,
-							"error in argument for %s", k))
-					}
-					qargs[k] = d
+		for i, arg := range bindCmd.Args {
+			k := tree.PlaceholderIdx(i)
+			t := ps.InferredTypes[i]
+			if arg == nil {
+				// nil indicates a NULL argument value.
+				qargs[k] = tree.DNull
+			} else {
+				d, err := pgwirebase.DecodeOidDatum(ptCtx, t, qArgFormatCodes[i], arg)
+				if err != nil {
+					return retErr(pgerror.Wrapf(err, pgcode.ProtocolViolation,
+						"error in argument for %s", k))
 				}
+				qargs[k] = d
 			}
 		}
 	}
