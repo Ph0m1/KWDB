@@ -195,9 +195,10 @@ func TestLint(t *testing.T) {
 	t.Run("TestCopyrightHeaders", func(t *testing.T) {
 		t.Parallel()
 
-		bslHeader := regexp.MustCompile(`Licensed under the Apache License, Version 2\.0`)
+		bslHeader := regexp.MustCompile(`Apache License, Version 2\.0`)
 
 		kwbaseHeader := regexp.MustCompile(`This software \(KWDB\) is licensed under Mulan PSL v2`)
+		enterpriseHeader := regexp.MustCompile(`confidential and proprietary information of Shanghai Yunxi Technology Co, Ltd`)
 		// These extensions identify source files that should have copyright headers.
 		extensions := []string{
 			"*.go", "*.cc", "*.h", "*.js", "*.ts", "*.tsx", "*.s", "*.S", "*.styl", "*.proto", "*.rl",
@@ -241,10 +242,8 @@ func TestLint(t *testing.T) {
 			}
 			data = data[0:n]
 
-			if expHeader.Find(data) == nil {
-				if kwbaseHeader.Find(data) == nil {
-					t.Errorf("did not find expected license header (ccl=%v) in %s", isCCL, filename)
-				}
+			if expHeader.Find(data) == nil && kwbaseHeader.Find(data) == nil && enterpriseHeader.Find(data) == nil {
+				t.Errorf("did not find expected license header (ccl=%v) in %s", isCCL, filename)
 			}
 		}); err != nil {
 			t.Fatal(err)
