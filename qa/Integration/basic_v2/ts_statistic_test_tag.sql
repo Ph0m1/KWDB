@@ -68,6 +68,13 @@ insert into test1.t6 values('2023-07-29 03:37:59.688', 21, 200,31,2);
 select min(a) from test1.t6;
 select sum(tag1),sum(tag2),sum(a) ,sum(c) from test1.t6;
 
+CREATE TABLE test1.t7(k_timestamp TIMESTAMP not null, a int not null, b double, c int2, d int8) TAGS (tag1 int not null,tag2 int) PRIMARY TAGS (tag1);
+insert into test1.t7 values('2024-07-25 06:42:01.922', 1,  1,1,-3,1,2);
+insert into test1.t7 values('2024-07-25 06:45:50.57', 21,  21,32767,3,31,2);
+select count(*),first(a) from test1.t7  where k_timestamp > '2024-7-25 06:43:00' and k_timestamp < '2024-7-25 06:45:00';
+select count(*),last(a) from test1.t7  where k_timestamp > '2024-7-25 06:43:00' and k_timestamp < '2024-7-25 06:45:00';
+select count(*),last(k_timestamp) from test1.t7  where k_timestamp > '2024-7-25 06:43:00' and k_timestamp < '2024-7-25 06:45:00';
+
 use defaultdb;
 drop database test1 CASCADE;
 
