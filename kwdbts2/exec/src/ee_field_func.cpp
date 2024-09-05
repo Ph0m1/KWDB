@@ -1688,6 +1688,4 @@ Field *FieldFuncCoalesce::field_to_copy() {
   return field;
 }
 
-k_bool FieldFuncCoalesce::is_nullable() { return false; }
-
 }  // namespace kwdbts
