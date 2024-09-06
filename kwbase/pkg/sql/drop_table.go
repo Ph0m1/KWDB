@@ -476,7 +476,8 @@ func (p *planner) initiateDropTable(
 			return err
 		}
 
-		if tableDesc.IsTSTable() {
+		// drop ts table which is not a system table.
+		if tableDesc.IsTSTable() && tableDesc.ID > keys.MaxReservedDescID {
 			if tableDesc.TableType == tree.TemplateTable {
 				allChild, err := sqlbase.GetAllInstanceByTmplTableID(ctx, p.txn, tableDesc.ID, true, p.ExecCfg().InternalExecutor)
 				if err != nil {

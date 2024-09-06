@@ -16,7 +16,7 @@ ERROR: relation "tsdb.t111" does not exist
 SQLSTATE: 42P01
 > create schedule s1 for sql 'insert into tsdb.t2 select * from tsdb.t1' recurring '@hourly' with schedule options first_run=now;
 CREATE SCHEDULE
-> select pg_sleep(10);
+> select pg_sleep(15);
   pg_sleep
 ------------
     true
