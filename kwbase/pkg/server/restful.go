@@ -51,10 +51,14 @@ var transTypeToLength = map[string]int64{
 	"INT2":        2,
 	"INT4":        4,
 	"INT8":        8,
+	"_INT8":       8,
 	"FLOAT4":      4,
 	"FLOAT8":      8,
 	"TIMESTAMP":   8,
-	"TIMESTAMPTZ": 8}
+	"TIMESTAMPTZ": 8,
+	"INTERVAL":    8,
+	"_TEXT":       9223372036854775807,
+	"NAME":        9223372036854775807}
 
 const (
 	//insert_type_str = "INSERT INTO"
@@ -636,7 +640,7 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 							if mistakeTypeCount == 1 {
 								desc = ""
 							}
-							desc += "the type's description and length of column " + colName + " can not be displayed completely for current version"
+							desc += "the type's description " + colType + " and length of column " + colName + " can not be displayed completely for current version"
 							code = -1
 						}
 					}
