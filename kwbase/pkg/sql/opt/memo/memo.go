@@ -1538,10 +1538,11 @@ func (m *Memo) checkGroupBy(
 
 				// first: check if child of agg can execute in ts engine.
 				// second: check if agg itself can execute in ts engine.
-				if (!m.checkChildExecInTS(srcExpr, hashCode) ||
-					!m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList)) &&
-					!hasSynchronizer {
-					m.setSynchronizerForChild(input, &hasSynchronizer)
+				if !m.checkChildExecInTS(srcExpr, hashCode) ||
+					!m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList) {
+					if !hasSynchronizer {
+						m.setSynchronizerForChild(input, &hasSynchronizer)
+					}
 					return false, false, false, hasSynchronizer, false, nil
 				}
 				m.AddColumn((*aggs)[i].Col, "", ExprTypeAggOp, ExprPosGroupBy, hashCode, false)

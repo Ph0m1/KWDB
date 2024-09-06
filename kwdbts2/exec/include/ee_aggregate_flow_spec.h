@@ -435,7 +435,7 @@ EEIteratorErrCode AggregatorSpecParam<T>::MallocArray(kwdbContext_p ctx) {
     LOG_ERROR("aggs_ malloc failed\n");
     Return(EEIteratorErrCode::EE_ERROR);
   }
-
+  memset(aggs_, 0, aggs_size_ * sizeof(Field *));
   Return(EEIteratorErrCode::EE_OK);
 }
 

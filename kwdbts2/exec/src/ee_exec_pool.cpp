@@ -79,6 +79,7 @@ void ExecPool::Stop() {
   std::unique_lock l(lock_);
   no_threads_cond_.wait(
       l, [&]() { return threads_num_ + threads_starting_ <= 0; });
+  sleep(1);
   task_queue_.clear();
 }
 
