@@ -716,6 +716,7 @@ class FieldFuncCoalesce : public FieldFunc {
   k_int64 ValInt() override;
   k_double64 ValReal() override;
   String ValStr() override;
+  k_bool is_nullable() override;
   Field *field_to_copy() override;
 };
 

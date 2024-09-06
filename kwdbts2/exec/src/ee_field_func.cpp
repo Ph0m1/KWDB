@@ -1688,4 +1688,11 @@ Field *FieldFuncCoalesce::field_to_copy() {
   return field;
 }
 
+k_bool FieldFuncCoalesce::is_nullable() {
+  if (args_[0]->is_nullable() && args_[1]->is_nullable()) {
+    return true;
+  }
+  return false;
+}
+
 }  // namespace kwdbts
