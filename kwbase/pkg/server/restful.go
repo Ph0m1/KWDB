@@ -306,10 +306,6 @@ func (s *restfulServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.ifByLogin {
-		username, password = "", ""
-	}
-
 	// Call the verifySession/verifyPassword function from authentication.go
 	valid, expired, err := s.server.authentication.verifyPassword(ctx, username, password)
 	if err != nil {
