@@ -27,9 +27,11 @@ KStatus SynchronizerOperator::PushData(DataChunkPtr &chunk, bool wait) {
   std::unique_lock unique_lock(lock_);
   // storage to task queue
   try {
+  /*
     if (!wait && data_queue_.size() >= max_queue_size_) {
       return KStatus::FAIL;
     }
+  */
     not_fill_cv_.wait(unique_lock, [this]() -> bool {
       return ((data_queue_.size() < max_queue_size_) || is_tp_stop_);
     });
@@ -133,11 +135,11 @@ void SynchronizerOperator::CalculateDegree() {
     dop = 1;
   }
   free(class_name);
-  /*
+
   if (ExecPool::GetInstance().GetWaitThreadNum() < dop) {
     dop = ExecPool::GetInstance().GetWaitThreadNum();
   }
-  */
+
   if (dop < 1) dop = 1;
   degree_ = dop;
   if (degree_ > 1) {
