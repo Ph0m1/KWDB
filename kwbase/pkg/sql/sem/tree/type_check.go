@@ -1989,6 +1989,18 @@ func typeCheckComparisonOp(
 	leftFamily := leftReturn.Family()
 	rightFamily := rightReturn.Family()
 
+	// check type of child of tuple, ex: (col1,col2) = (col3,col4)  => (bool, string) = (int, int)
+	// need report error when the operator not support.
+	if leftFamily == types.TupleFamily && rightFamily == types.TupleFamily {
+		l := leftReturn.TupleContents()
+		r := rightReturn.TupleContents()
+		for i := range l {
+			if _, ok := ops.LookupImpl(&l[i], &r[i]); !ok {
+				return nil, nil, nil, false, pgerror.Newf(
+					pgcode.UndefinedFunction, "unsupported comparison operator: <%s> %s <%s>", l[i].Name(), op, r[i].Name())
+			}
+		}
+	}
 	// Return early if at least one overload is possible, NULL is an argument,
 	// and none of the overloads accept NULL.
 	nullComparison := false
