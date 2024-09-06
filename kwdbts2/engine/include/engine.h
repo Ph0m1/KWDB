@@ -769,7 +769,8 @@ class AggCalculator {
 
   bool GetSum(void** sum_res, void* base = nullptr, bool is_overflow = false);
 
-  bool CalAllAgg(void* min_base, void* max_base, void* sum_base, void* count_base, bool block_first_line);
+  bool CalAllAgg(void* min_base, void* max_base, void* sum_base, void* count_base,
+                 bool block_first_line, const BlockSpan& span);
 
   void UndoAgg(void* min_base, void* max_base, void* sum_base, void* count_base);
 
@@ -777,6 +778,8 @@ class AggCalculator {
   bool cmp(void* l, void* r);
 
   bool isnull(size_t row);
+
+  bool isDeleted(char* delete_flags, size_t row);
 
   void* changeBaseType(void* base);
 
@@ -813,11 +816,12 @@ class VarColAggCalculator {
   std::shared_ptr<void> GetMin(std::shared_ptr<void> base = nullptr);
 
   void CalAllAgg(void* min_base, void* max_base, std::shared_ptr<void> var_min_base,
-                 std::shared_ptr<void> var_max_base, void* count_base, bool block_first_line);
+                 std::shared_ptr<void> var_max_base, void* count_base, bool block_first_line, const BlockSpan& span);
 
  private:
   bool cmp(void* l, void* r);
   bool isnull(size_t row);
+  bool isDeleted(char* delete_flags, size_t row);
 
  private:
   void* mem_;

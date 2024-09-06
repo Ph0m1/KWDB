@@ -407,6 +407,11 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     entity_item->row_written -= deleted_rows;
     for (size_t i = 0; i < alloc_spans->size(); i++) {
       (*alloc_spans)[i].block_item->publish_row_count += (*alloc_spans)[i].row_num;
+      if ((*alloc_spans)[i].block_item->publish_row_count >= getBlockMaxRows()) {
+        std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[i].block_item->block_id);
+        const BlockSpan& span = (*alloc_spans)[i];
+        tbl->updateAggregateResult(span);
+      }
     }
     MUTEX_UNLOCK(partition_table_latch_);
   }};
@@ -882,6 +887,11 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     entity_item->row_written -= deleted_rows;
     for (size_t i = 0; i < alloc_spans->size(); i++) {
       (*alloc_spans)[i].block_item->publish_row_count += (*alloc_spans)[i].row_num;
+      if ((*alloc_spans)[i].block_item->publish_row_count >= getBlockMaxRows()) {
+        std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[i].block_item->block_id);
+        const BlockSpan& span = (*alloc_spans)[i];
+        tbl->updateAggregateResult(span);
+      }
     }
     MUTEX_UNLOCK(partition_table_latch_);
   }};
@@ -1145,7 +1155,7 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
     }
 
     block_item->is_overflow = false;
-    block_item->is_agg_res_available = true;
+    block_item->is_agg_res_available = false;
 
     // Updates the metadata of the active segment.
     active_segment_->metaData()->block_num_of_segment++;

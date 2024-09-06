@@ -278,6 +278,24 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return row_id.offset_row == 1;
   }
 
+  /**
+   * @brief update the result of Aggregate except ts column.
+   * @param span  Range of data blocks where writing occurs.
+   */
+  void updateAggregateResult(const BlockSpan& span);
+
+  /**
+   * @brief update the Aggregate result of the specified colum.
+   * @param span             Range of data blocks where writing occurs.
+   * @param start_row        Start row ID.
+   * @param segment_col_idx  Column index where the segment data is written.
+   * @param addresses        Store agg result address of certain block and certain column
+   * @param row_num          The number of rows.
+   */
+  void columnAggCalculate(const BlockSpan& span, MetricRowID start_row, size_t segment_col_idx,
+                          AggDataAddresses& addresses, size_t row_num, bool max_rows);
+
+
   virtual int create(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema,
                      const uint32_t& table_version, int encoding, ErrorInfo& err_info);
 

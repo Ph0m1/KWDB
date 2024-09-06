@@ -517,7 +517,6 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
                                    kwdbts::DedupInfo& dedup_info) {
   int error_code = 0;
   size_t segment_col = cols_idx_[segment_col_idx];
-  MetricRowID block_first_row = span.block_item->getRowID(1);
   if (!isVarLenType(cols_info_without_hidden_[segment_col_idx].type)) {
     push_back_payload(payload, start_row, segment_col, payload_col_idx, start_in_payload, span.row_num);
   } else {
@@ -530,19 +529,62 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
     if (error_code < 0) return error_code;
   }
 
+  if (!payload->NoNullMetric(payload_col_idx)) {
+    RW_LATCH_X_LOCK(&rw_latch_);
+    push_back_null_bitmap(payload, start_row, segment_col, payload_col_idx, start_in_payload, span.row_num);
+    RW_LATCH_UNLOCK(&rw_latch_);
+  }
+  // Only update aggregate result of ts column.
+  if (payload_col_idx != 0) {
+    return error_code;
+  }
+
   // Aggregate result update, the structure includes 4 addresses, namely min, max, sum, count,
   // calculateAggAddr will write the obtained aggregation address to the AggDataAddresses struct.
   AggDataAddresses addresses{};
-  calculateAggAddr(start_row.block_id, segment_col, addresses);
-  bool is_block_first_row = isBlockFirstRow(start_row) || *reinterpret_cast<uint16_t*>(addresses.count) == 0;
-  push_back_null_bitmap(payload, start_row, segment_col, payload_col_idx, start_in_payload, span.row_num);
-  void* src = payload->GetColumnAddr(start_in_payload, payload_col_idx);
-  if (hasValue(start_row, span.row_num, segment_col)) {
+  columnAggCalculate(span, start_row, segment_col_idx, addresses, span.row_num, false);
+
+  // Update the maximum and minimum timestamp information of the current segment,
+  // which will be used for subsequent compression and other operations
+  if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {
+    maxTimestamp() = KTimestamp(addresses.max);
+  }
+  if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
+    minTimestamp() = KTimestamp(addresses.min);
+  }
+
+  return error_code;
+}
+
+void MMapSegmentTable::updateAggregateResult(const BlockSpan& span)  {
+  MetricRowID start_row = MetricRowID{span.block_item->block_id, 1};
+  size_t segment_col_idx = span.block_item->getDeletedCount() > 0 ? 0 : 1;
+  for (; segment_col_idx < cols_info_without_hidden_.size(); ++segment_col_idx) {
+    AggDataAddresses addresses{};
+    columnAggCalculate(span, start_row, segment_col_idx, addresses, span.block_item->publish_row_count, true);
+  }
+  span.block_item->is_agg_res_available = true;
+}
+
+void MMapSegmentTable::columnAggCalculate(const BlockSpan& span, MetricRowID start_row, size_t segment_col_idx,
+                                          AggDataAddresses& addresses, size_t row_num, bool max_rows) {
+  size_t segment_col = cols_idx_[segment_col_idx];
+  calculateAggAddr(span.block_item->block_id, segment_col, addresses);
+  if (hasValue(start_row, row_num, segment_col)) {
+    bool is_block_first_row = true;
+    if (segment_col_idx == 0) {
+      if (max_rows) {
+        *reinterpret_cast<uint16_t*>(addresses.count) = 0;
+      } else {
+        is_block_first_row = isBlockFirstRow(start_row) || *reinterpret_cast<uint16_t*>(addresses.count) == 0;
+      }
+    }
     if (!isVarLenType(cols_info_without_hidden_[segment_col_idx].type)) {
+      void* src = columnAddr(start_row, segment_col);
       AggCalculator aggCal(src, columnNullBitmapAddr(start_row.block_id, segment_col),
                            start_row.offset_row, DATATYPE(cols_info_without_hidden_[segment_col_idx].type),
-                           cols_info_without_hidden_[segment_col_idx].size, span.row_num);
-      if (aggCal.CalAllAgg(addresses.min, addresses.max, addresses.sum, addresses.count, is_block_first_row)) {
+                           cols_info_without_hidden_[segment_col_idx].size, row_num);
+      if (aggCal.CalAllAgg(addresses.min, addresses.max, addresses.sum, addresses.count, is_block_first_row, span)) {
         span.block_item->is_overflow = true;
       }
     } else {
@@ -551,7 +593,7 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
       std::shared_ptr<void> max_base =
           is_block_first_row ? nullptr : varColumnAggAddr(start_row, segment_col, Sumfunctype::MAX);
       MetricRowID begin_r = start_row;
-      MetricRowID end_r = start_row + span.row_num;
+      MetricRowID end_r = start_row + row_num;
       for (MetricRowID r = begin_r; r < end_r; ++r) {
         if (!isNullValue(r, segment_col)) {
           break;
@@ -569,24 +611,10 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
       VarColAggCalculator aggCal(mem, var_mem, columnNullBitmapAddr(start_row.block_id, segment_col),
                                  begin_r.offset_row,
                                  cols_info_without_hidden_[segment_col_idx].size, end_r.offset_row - begin_r.offset_row);
-      aggCal.CalAllAgg(addresses.min, addresses.max, min_base, max_base, addresses.count, is_block_first_row);
+      aggCal.CalAllAgg(addresses.min, addresses.max, min_base, max_base, addresses.count, is_block_first_row, span);
     }
   }
-
-  // Update the maximum and minimum timestamp information of the current segment,
-  // which will be used for subsequent compression and other operations
-  if (payload_col_idx == 0) {
-    if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {
-      maxTimestamp() = KTimestamp(addresses.max);
-    }
-    if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
-      minTimestamp() = KTimestamp(addresses.min);
-    }
-  }
-
-  return error_code;
 }
-
 
 int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwdbts::Payload* payload,
                                 size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info) {
@@ -739,9 +767,6 @@ int MMapSegmentTable::push_back_var_payload(kwdbts::Payload* payload, MetricRowI
 
 void MMapSegmentTable::push_back_null_bitmap(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
                                              size_t payload_column, size_t payload_start_row, size_t payload_num) {
-  if (payload->NoNullMetric(payload_column)) {
-    return;
-  }
   for (int i = 0 ; i < payload_num ; i++) {
     // If the payload is empty, set the bitmap
     if (payload->IsNull(payload_column, payload_start_row)) {

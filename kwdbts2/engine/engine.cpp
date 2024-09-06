@@ -1433,6 +1433,15 @@ bool AggCalculator::isnull(size_t row) {
   return static_cast<char*>(bitmap_)[byte] & bit;
 }
 
+bool AggCalculator::isDeleted(char* delete_flags, size_t row) {
+  if (!delete_flags) {
+    return false;
+  }
+  size_t byte = (row - 1) >> 3;
+  size_t bit = 1 << ((row - 1) & 7);
+  return static_cast<char*>(delete_flags)[byte] & bit;
+}
+
 void* AggCalculator::GetMax(void* base, bool need_to_new) {
   void* max = nullptr;
   for (int i = 0; i < count_; ++i) {
@@ -1631,7 +1640,8 @@ bool AggCalculator::GetSum(void** sum_res, void* base, bool is_overflow) {
   return (new_sum_base != nullptr) || is_overflow_;
 }
 
-bool AggCalculator::CalAllAgg(void* min_base, void* max_base, void* sum_base, void* count_base, bool block_first_line) {
+bool AggCalculator::CalAllAgg(void* min_base, void* max_base, void* sum_base, void* count_base,
+                              bool block_first_line, const BlockSpan& span) {
   void* min = block_first_line ? nullptr : min_base;
   void* max = block_first_line ? nullptr : max_base;
 
@@ -1640,7 +1650,11 @@ bool AggCalculator::CalAllAgg(void* min_base, void* max_base, void* sum_base, vo
   }
 
   bool is_overflow = false;
+  bool hasDeleted = span.block_item->getDeletedCount() > 0;
   for (int i = 0; i < count_; ++i) {
+    if (hasDeleted && isDeleted(span.block_item->rows_delete_flags, first_row_ + i)) {
+      continue;
+    }
     if (isnull(first_row_ + i)) {
       continue;
     }
@@ -1722,6 +1736,15 @@ bool VarColAggCalculator::isnull(size_t row) {
   return static_cast<char*>(bitmap_)[byte] & bit;
 }
 
+bool VarColAggCalculator::isDeleted(char* delete_flags, size_t row) {
+  if (!delete_flags) {
+    return false;
+  }
+  size_t byte = (row - 1) >> 3;
+  size_t bit = 1 << ((row - 1) & 7);
+  return static_cast<char*>(delete_flags)[byte] & bit;
+}
+
 std::shared_ptr<void> VarColAggCalculator::GetMax(std::shared_ptr<void> base) {
   void* max = nullptr;
   for (int i = 0; i < count_; ++i) {
@@ -1774,14 +1797,16 @@ std::shared_ptr<void> VarColAggCalculator::GetMin(std::shared_ptr<void> base) {
 }
 
 void VarColAggCalculator::CalAllAgg(void* min_base, void* max_base, std::shared_ptr<void> var_min_base,
-                                    std::shared_ptr<void> var_max_base, void* count_base, bool block_first_line) {
+                                    std::shared_ptr<void> var_max_base, void* count_base,
+                                    bool block_first_line, const BlockSpan& span) {
   void* min = block_first_line ? nullptr : min_base;
   void* max = block_first_line ? nullptr : max_base;
   void* var_min = block_first_line ? nullptr : var_min_base.get();
   void* var_max = block_first_line ? nullptr : var_max_base.get();
 
+  bool hasDeleted = span.block_item->getDeletedCount() > 0;
   for (int i = 0; i < count_; ++i) {
-    if (isnull(first_row_ + i)) {
+    if (hasDeleted && isDeleted(span.block_item->rows_delete_flags, first_row_ + i)) {
       continue;
     }
     if (count_base) {
