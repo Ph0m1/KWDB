@@ -240,7 +240,7 @@ TSStatus TSClose(TSEngine* engine);
 
 void TSFree(void* ptr);
 
-void TSRegisterExceptionHandler();
+void TSRegisterExceptionHandler(char *dir);
 
 TSStatus TSAddColumn(TSEngine* engine, TSTableID table_id, char* transaction_id, TSSlice column,
                      uint32_t cur_version, uint32_t new_version);

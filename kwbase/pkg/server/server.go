@@ -1525,7 +1525,9 @@ func (s *Server) dumpAllBackTrace(ctx context.Context) {
 // should represent the general startup operation.
 func (s *Server) Start(ctx context.Context) error {
 	if !s.cfg.ForbidCatchCoreDump {
-		C.TSRegisterExceptionHandler()
+		dir := C.CString(s.cfg.LogConfig.Dir)
+		defer C.free(unsafe.Pointer(dir))
+		C.TSRegisterExceptionHandler(dir)
 	}
 
 	ctx = s.AnnotateCtx(ctx)

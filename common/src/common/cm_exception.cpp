@@ -148,7 +148,7 @@ void ExceptionHandler(const int sig, siginfo_t* const info, void*) {
   }
 }
 
-int32_t RegisterExceptionHandler(PostExceptionCb cb) {
+int32_t RegisterExceptionHandler(char *dir, PostExceptionCb cb) {
   const char* kwdb_data_root;
   if ( (kwdb_data_root = std::getenv("KWDB_DATA_ROOT")) &&
     ((std::strlen(kwdb_data_root) + 1 + std::strlen(kErrlogName)) < FULL_FILE_NAME_MAX_LEN) ) {
@@ -160,7 +160,7 @@ int32_t RegisterExceptionHandler(PostExceptionCb cb) {
   } else {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
-    snprintf(kErrlogPath, FULL_FILE_NAME_MAX_LEN, "./%s",
+    snprintf(kErrlogPath, FULL_FILE_NAME_MAX_LEN, "%s/%s", dir,
              kErrlogName);
 #pragma GCC diagnostic pop
   }

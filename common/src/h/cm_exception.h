@@ -19,7 +19,7 @@ namespace kwdbts {
 
 typedef std::function<void (int sig, std::ostream& os)> PostExceptionCb;
 
-int32_t RegisterExceptionHandler(PostExceptionCb cb = nullptr);
+int32_t RegisterExceptionHandler(char *dir, PostExceptionCb cb = nullptr);
 
 }  // namespace kwdbts
 

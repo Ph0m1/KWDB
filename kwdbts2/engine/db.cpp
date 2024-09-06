@@ -786,8 +786,8 @@ void TSFree(void* ptr) {
   free(ptr);
 }
 
-void TSRegisterExceptionHandler() {
-  kwdbts::RegisterExceptionHandler();
+void TSRegisterExceptionHandler(char *dir) {
+  kwdbts::RegisterExceptionHandler(dir);
   kwdbts::RegisterBacktraceSignalHandler();
 }
 
