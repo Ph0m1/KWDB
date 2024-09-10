@@ -27,15 +27,6 @@ fi
 
 log_init $g_deploy_path $g_cur_usr
 
-function get_config_dir() {
-  config_dir="/etc/kaiwudb"
-  if [ -d /etc/kwdb ];then
-    config_dir="/etc/kwdb"
-  fi
-}
-
-get_config_dir
-
 if ! $(install_check);then
   log_err "KaiwuDB does not exist. Please install KaiwuDB first."
   exit 1

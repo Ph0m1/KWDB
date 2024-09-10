@@ -1,12 +1,5 @@
 #! /bin/bash
 
-function rename_directory() {
-  if [ -d /etc/kwdb ];then
-    eval $kw_cmd_prefix mv /etc/kwdb /etc/kaiwudb
-    config_dir="/etc/kaiwudb"
-  fi
-}
-
 function upgrade_verify_files() {
   local packages_array=(server libcommon)
   local files=$(ls $g_deploy_path/packages)
@@ -34,10 +27,6 @@ function upgrade_verify_files() {
       exit 1
     fi
   fi
-  # if [ ! -f "$g_deploy_path/license/custLicense.crt.sign" ];then
-  #   log_err "License file does not exist."
-  #   exit 1
-  # fi
 }
 
 function rollback() {
@@ -70,50 +59,99 @@ function version_le() {
 	test "$(echo "$@" | tr " " "\n" | sort -V | head -n 1)" == "$1"; 
 }
 
-# check version whether satisfies
-function version_compare() {
-  if [ "$1" == "bare" ];then
-    if [ -f /usr/local/kwdb/bin/kwbase ];then
-      cd /usr/local/kwdb/bin
-    else
-      cd /usr/local/kaiwudb/bin
-    fi
-    old_version=`export LD_LIBRARY_PATH=/usr/local/gcc/lib64 && kwbase version | awk -F": " '{if($1~/^KaiwuDB Version$/){gsub(/V/,"",$2);gsub(" ","",$2);print $2}}' 2>&1`
-    if [ $? -ne 0 ];then
-      log_err "Get local KaiwuDB version failed:$old_version"
-      exit 1
-    fi
-    cd $g_deploy_path/packages
-    local pac_server=`ls $g_deploy_path/packages | grep "server"`
-    if [ "$g_package_tool" == "dpkg" ];then
-      local new_version=`$g_package_tool --info ./$pac_server | awk -F": " '{if($1~/Version/){print $2}}' | awk -F"-" '{print $1}'`
-      dpkg --compare-versions $new_version gt $old_version
-      if [ $? -ne 0 ]; then
-        log_err "UPGRADE ERROR:The requested upgrade version is older than the current installed version.(current:$old_version new_version:$new_version)"
+function ext_compare() {
+  local old_prefixn=$1
+  local old_suffixn=$2
+  local new_prefixn=$3
+  local new_suffixn=$4
+  local old_prefix=$(echo $1 | grep -oP '^[a-z]+(?=[0-9]*)')
+  local old_suffix=$(echo $2 | grep -oP '[a-z]+(?=[0-9]*$)')
+  local new_prefix=$(echo $3 | grep -oP '^[a-z]+(?=[0-9]*)')
+  local new_suffix=$(echo $4 | grep -oP '[a-z]+(?=[0-9]*$)')
+  # has same prefix,eg:
+  # hotfix2 -> hotfix1 (failed)
+  # hotfix1beta1 -> hotfix1alpha1 (failed)
+  # hotfix1alpha2 -> hotfix1alpha1 (failed)
+  if [ "$old_prefix" == "$new_prefix" ] && version_le $new_prefixn $old_prefixn;then
+    if [ "$new_prefixn" == "$old_prefixn" ];then
+      if [ "$old_prefix" != "$old_suffix" ] && [ "$new_prefix" != "$new_suffix" ];then
+        if [[ "$old_suffix" =~ ^beta && "$new_suffix" =~ ^alpha ]];then
+          log_err "UPGRADE ERROR:The upgrade conditions are not met.($old_prefixn$old_suffixn --> $new_prefixn$new_suffixn)"
+          exit 1
+        elif [ "$old_suffix" == "$new_suffix" ] && version_le $new_suffixn $old_suffixn;then
+          log_err "UPGRADE ERROR:The upgrade conditions are not met.($old_prefixn$old_suffixn --> $new_prefixn$new_suffixn)"
+          exit 1
+        fi
+      elif [ "$old_prefix" == "$old_suffix" ] && [ "$new_prefix" != "$new_suffix" ];then
+        log_err "UPGRADE ERROR:The upgrade conditions are not met.($old_prefixn --> $new_prefixn)"
+        exit 1
+      elif [ "$old_prefix" == "$old_suffix" ] && [ "$new_prefix" == "$new_suffix" ];then
+        log_err "UPGRADE ERROR:The upgrade conditions are not met.($old_prefixn --> $new_prefixn)"
         exit 1
       fi
     else
-      local new_version=`$g_package_tool -qpi ./$pac_server | awk -F": " '{if($1~/Version/){print $2}}' | awk -F"-" '{print $1}'`
-      local ret=`rpm --eval "%{lua:print(rpm.vercmp('$new_version', '$old_version'))}"`
-      if [ $ret -lt 1 ]; then
-        log_err "UPGRADE ERROR:The requested upgrade version is older than the current installed version.(current:$old_version new_version:$new_version)"
-        exit 1
-      fi
-    fi
-  else
-    local image_name=$(install_dir)
-    old_version=`docker image ls "--format={{.Tag}}" $image_name | awk -F"-" '{print $1}'`
-    cd $g_deploy_path/packages
-    image_name=`docker load < KaiwuDB.tar 2>/dev/null | awk -F": " '{print $2}'`
-    local new_version=`docker image ls "--format={{.Tag}}" $image_name | awk -F"-" '{print $1}'`
-    if version_le $new_version $old_version; then
-      if [ "$new_version" != "$old_version" ];then
-        docker rmi $image_name 2>&1 >/dev/null
-      fi
-      log_err "UPGRADE ERROR:The requested upgrade version is older than the current installed version.(current:$old_version new_version:$new_version)"
+      log_warn "WARNING:This version upgrade is not supported, and if you continue to upgrade, you can use the "--bypass-version-check" option to re-execute the upgrade command to skip the version comparison check."
       exit 1
     fi
+  elif [ "$old_prefix" == "$new_prefix" ] && [[ "$old_prefix" =~ hotfix || "$old_prefix" =~ enhance ]];then
+    log_warn "WARNING:This version upgrade is not supported, and if you continue to upgrade, you can use the "--bypass-version-check" option to re-execute the upgrade command to skip the version comparison check."
+    exit 1
   fi
+}
+
+function version_compare() {
+  local old_basic_version=
+  local old_extend_version=
+  local current_basic_version=
+  local current_extend_version=
+  # version file is exist
+  if [ -f /etc/kaiwudb/info/.version ];then
+    old_basic_version=$(sed -n '1p' /etc/kaiwudb/info/.version)
+    old_extend_version=$(sed -n '2p' /etc/kaiwudb/info/.version)
+  else
+    # if version file is not exist, considered the version to be lower
+    return 0
+  fi
+  current_basic_version=$(sed -n '1p' $g_deploy_path/packages/.version)
+  current_extend_version=$(sed -n '2p' $g_deploy_path/packages/.version)
+  # if version os equals current
+  if [ "$current_basic_version" == "$old_basic_version" ];then
+    if [ -z "$old_extend_version" ] && \
+       [[ "$current_extend_version" =~ ^alpha || "$current_extend_version" =~ ^beta ]];then
+      log_err "UPGRADE ERROR:Official version can not upgrade to $current_extend_version."
+      exit 1
+    fi
+    if [[ "$old_extend_version" =~ ^beta && "$current_extend_version" =~ ^alpha ]];then
+      log_err "UPGRADE ERROR:The upgrade conditions are not met.($old_extend_version --> $current_extend_version)"
+      exit 1
+    fi
+    if [[ "$old_extend_version" =~ ^hotfix || "$old_extend_version" =~ ^enhance || "$old_extend_version" =~ ^patch ]] && \
+       [[ "$current_extend_version" =~ ^alpha || "$current_extend_version" =~ ^beta ]];then
+      log_err "UPGRADE ERROR:The upgrade conditions are not met.($old_extend_version --> $current_extend_version)"
+      exit 1
+    fi
+
+    if [[ "$old_extend_version" =~ ^hotfix && "$current_extend_version" =~ ^enhance ]] \
+       || [[ "$old_extend_version" =~ ^enhance && "$current_extend_version" =~ ^hotfix ]] \
+       || [[ "$old_extend_version" =~ ^enhance && "$current_extend_version" =~ ^patch ]] \
+       || [[ "$old_extend_version" =~ ^patch && "$current_extend_version" =~ ^enhance ]] \
+       || [[ "$old_extend_version" =~ ^patch && "$current_extend_version" =~ ^hotfix ]] \
+       || [[ "$old_extend_version" =~ ^hotfix && "$current_extend_version" =~ ^patch ]];then
+      log_warn "WARNING:This version upgrade is not supported, and if you continue to upgrade, you can use the "--bypass-version-check" option to re-execute the upgrade command to skip the version comparison check."
+      exit 0
+    fi
+    ext_compare $(echo "$old_extend_version" | grep -oP '^[a-z]+([0-9]*)') \
+                $(echo "$old_extend_version" | grep -oP '[a-z]+([0-9]?$)') \
+                $(echo "$current_extend_version" | grep -oP '^[a-z]+([0-9]*)') \
+                $(echo "$current_extend_version" | grep -oP '[a-z]+([0-9]?$)')
+    return 0
+  fi
+  # if new basic version is less or equal current
+  if version_le $current_basic_version $old_basic_version;then
+    log_err "UPGRADE ERROR:The requested upgrade version is older than the current installed version.(current:$old_basic_version new_version:$current_basic_version)"
+    exit 1
+  fi
+  return 0
 }
 
 function upgrade() {
@@ -218,6 +256,7 @@ function upgrade() {
     sudo sed -i "s/\/etc\/kwdb/\/etc\/kaiwudb/" /etc/kaiwudb/script/docker-compose.yml
     sudo sed -i "s/\/etc\/kwdb/\/etc\/kaiwudb/" /etc/systemd/system/kaiwudb.service
   fi
+  sudo cp -f $g_deploy_path/packages/.version /etc/kaiwudb/info
   return 0
 }
 
@@ -312,12 +351,6 @@ function remote_upgrade() {
   ssh -p $2 $3@$1 "
 function version_le() {
 	test \"\$(echo \"\$@\" | tr \" \" \"\n\" | sort -V | head -n 1)\" == \"\$1\"; 
-}
-
-function rename_directory() {
-  if [ -d /etc/kwdb ];then
-    eval $g_node_prefix mv /etc/kwdb /etc/kaiwudb
-  fi
 }
 
 function rollback() {
@@ -415,8 +448,6 @@ function upgrade() {
     sudo sed -i \"s/\/etc\/kwdb/\/etc\/kaiwudb/\" /etc/systemd/system/kaiwudb.service
   fi
 }
-
-rename_directory
 
 if [ \"$ins_type\" == \"bare\" ];then
   if [ -f /usr/local/kwdb/bin/kwbase ];then
@@ -518,6 +549,7 @@ if [ \"\$kw_node_id\" != \"\" ];then
   fi
 fi
 upgrade
+sudo cp -f ~/kaiwudb_files/.version /etc/kaiwudb/
 if [ \"$ins_type\" == \"bare\" ];then
   # add option --upgrade-complete to start command
   sudo sed -i \"s/KAIWUDB_START_ARG=\\\"/&--upgrade-complete /\" /etc/kaiwudb/script/kaiwudb_env

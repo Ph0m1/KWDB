@@ -316,6 +316,7 @@ function install() {
     eval $kw_cmd_prefix chmod +x /etc/kaiwudb/script/docker-compose.yml
     log_info_without_console "load docker image and create compose file success"
   fi
+  sudo cp -f $g_deploy_path/packages/.version /etc/kaiwudb/info
   return 0
 }
 

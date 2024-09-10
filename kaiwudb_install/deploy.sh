@@ -217,6 +217,10 @@ function upgrade_usage() {
         g_upgrade_opt=all
         return
       ;;
+      --bypass-version-check)
+        g_ign_cmp=yes
+        return
+      ;;
       -h|--help)
         ;;
     esac
@@ -226,9 +230,10 @@ function upgrade_usage() {
   deploy.sh upgrade [Options]
 
 Options:
-  -l, --local          local node upgrade
-  -a, --all            whole cluster upgrade
-  -h, --help           help message
+  -l, --local             local node upgrade
+  -a, --all               whole cluster upgrade
+  --bypass-version-check  ignore version compare check
+  -h, --help              help message
 "
   exit 0
 }
@@ -239,7 +244,7 @@ function cmd_check() {
   g_kw_cmd=""
   local global_flag=false
   local short_cmd="hsial"
-  local long_cmd="help,single,init,status,cpu:,addr:,single-replica,multi-replica,local,all"
+  local long_cmd="help,single,init,status,cpu:,addr:,single-replica,multi-replica,local,all,bypass-version-check"
   local options=$(getopt -a -o $short_cmd -l $long_cmd -n "deploy.sh" -- "$@" 2>/dev/null)
   if [ $? -ne 0 ];then
     global_usage
@@ -414,14 +419,7 @@ fi
 # init log
 log_init $g_deploy_path $g_cur_usr
 
-function get_config_dir() {
-  config_dir="/etc/kaiwudb"
-  if [ -d /etc/kwdb ];then
-    config_dir="/etc/kwdb"
-  fi
-}
-
-get_config_dir
+config_dir="/etc/kaiwudb"
 
 if [ "$g_kw_cmd" == "install" ];then
   # pipe
@@ -789,7 +787,6 @@ if [ "$g_kw_cmd" == "upgrade" ];then
   rm -rf $g_deploy_path/kw_pipe >/dev/null 2>&1
   process_bar $$ &
   process_pid=$!
-  rename_directory
   # whether install KaiwuDB
   if ! $(install_check);then
     log_err "KaiwuDB does not exist. Please install KaiwuDB first."
@@ -801,7 +798,9 @@ if [ "$g_kw_cmd" == "upgrade" ];then
   echo "install#type:20" >&10
   upgrade_verify_files $ins_type
   echo "check#packages:30" >&10
-  version_compare $ins_type
+  if [ "$g_ign_cmp" != "yes" ];then
+    version_compare $ins_type
+  fi
   echo "version#compare:40" >&10
 
   # Get KaiwuDB running type
