@@ -144,7 +144,8 @@ struct EntityItem {
   bool is_deleted;                  // entity delete flag.
   bool is_disordered = false;
   BLOCK_ID max_compacting_block;
-  char user_defined[28];  // reserved for user-defined information.
+  bool need_compact = true;
+  char user_defined[27];  // reserved for user-defined information.
 
   ostream& to_string(ostream& os) {
     os << " entity_id:" << entity_id

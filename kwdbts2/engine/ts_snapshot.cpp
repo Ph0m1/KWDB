@@ -265,7 +265,7 @@ KStatus TsTableSnapshot::PrepareCompactData(kwdbContext_p ctx,
       // when interval is altered, skip this partition
       if (p_bt->PartitionInterval() != entity_bt_manager_->GetPartitionInterval()) {
         EntityItem *entity = p_bt->getEntityItem(entity_id);
-        entity->is_disordered = false;
+        entity->need_compact = false;
         ebt_manager->ReleasePartitionTable(p_bt);
         continue;
       }

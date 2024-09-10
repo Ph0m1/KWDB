@@ -799,3 +799,56 @@ TEST_F(TestPartitionBigTable, aggUpdate) {
   delete mt_table;
   delete root_bt_manager;
 }
+
+TEST_F(TestPartitionBigTable, disorderPut) {
+  TS_LSN lsn = 100;
+  ErrorInfo err_info;
+  string table_name = "t1";
+  TableType table_type = TableType::ENTITY_TABLE;
+  MMapMetricsTable* root_bt = BtUtil::CreateLsnTable(db_name_, db_path_, table_name, table_type, err_info);
+  ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
+  string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
+  ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  vector<string> key{};
+
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
+  uint32_t entity_id = 1;
+  uint32_t row_num = 1;
+  timestamp64 ts_now = time(nullptr) * 1000 + 1000000;
+  DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
+
+  uint32_t payload_len = 0;
+  std::vector<BlockSpan> cur_alloc_spans;
+  std::vector<MetricRowID> to_del_rows;
+  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now + 10000, false);
+  kwdbts::Payload pd(root_bt_manager, {data, payload_len});
+  pd.SetLsn(lsn);
+  pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
+  for (int i = 0; i < 2; i++) {
+    mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &dedup_result);
+    if (err_info.errcode >= 0) {
+      mt_table->publish_payload_space(cur_alloc_spans, to_del_rows, entity_id, true);
+    }
+  }
+  ASSERT_EQ(mt_table->size(entity_id), row_num * 2);
+  auto entity_item = mt_table->getEntityItem(entity_id);
+  ASSERT_FALSE(entity_item->is_disordered);
+  // insert disorder data
+  char* disorder_data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now, false);
+  kwdbts::Payload pd_disorder(root_bt_manager, {disorder_data, payload_len});
+  pd_disorder.SetLsn(lsn);
+  pd_disorder.dedup_rule_ = kwdbts::DedupRule::KEEP;
+  mt_table->push_back_payload(ctx_, entity_id, &pd_disorder, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info,&dedup_result);
+  if (err_info.errcode >= 0) {
+    mt_table->publish_payload_space(cur_alloc_spans, to_del_rows, entity_id, true);
+  }
+  ASSERT_TRUE(entity_item->is_disordered);
+
+  delete[] data;
+  delete[] disorder_data;
+  delete mt_table;
+  delete root_bt_manager;
+}

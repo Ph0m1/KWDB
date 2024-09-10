@@ -445,11 +445,11 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
       return err_code;
     }
     EntityItem* entity_item = getEntityItem(entity_id);
-    if (!entity_item->is_disordered) {
+    if (!entity_item->need_compact) {
       // to trigger compaction
       // TODO(qlp): Since the rules for determining the timing of reorganization triggering haven't yet been determined,
-      //  the entity currently will set the is_disordered to true as long as there is data written
-      entity_item->is_disordered = true;
+      //  the entity currently will set the need_compact to true as long as there is data written
+      entity_item->need_compact = true;
     }
     err_code = ProcessDuplicateData(payload, start_in_payload, count, span, dedup_info, dedup_result, err_info);
     if (err_code < 0) {
@@ -1895,7 +1895,7 @@ bool TsTimePartition::NeedCompaction(uint32_t entity_id) {
   // Make sure that this entity has data in this Partition and set disordered,
   // if the entity has been set deleted, the entity->is_disordered should be true,
   // in order to be reorganized to release space.
-  if (entity && entity->cur_block_id > 0 && entity->is_disordered) {
+  if (entity && entity->cur_block_id > 0 && entity->need_compact) {
     return true;
   }
   return false;

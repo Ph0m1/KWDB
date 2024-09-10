@@ -274,8 +274,8 @@ int EntityBlockMetaManager::updateCompactMeta(std::map<uint32_t, BLOCK_ID>& obso
 
     EntityItem* entity_item = getEntityItem(entity_id);
     if (obsolete_max_block_id == 0) {  // Represents this entity that has been found to be deleted in CompactingStatus.
-      if (entity_item->is_disordered) {
-        entity_item->is_disordered = false;  // Avoid calling for PrepareCompactData next time.
+      if (entity_item->need_compact) {
+        entity_item->need_compact = false;  // Avoid calling for PrepareCompactData next time.
       }
       continue;
     }
@@ -343,7 +343,11 @@ int EntityBlockMetaManager::updateCompactMeta(std::map<uint32_t, BLOCK_ID>& obso
 
     entity_item->block_count = entity_item->block_count - it.second + new_list_count;
     if (entity_item->is_disordered) {
+      // The reorganization has completed the sorting of entity
       entity_item->is_disordered = false;
+    }
+    if (entity_item->need_compact) {
+      entity_item->need_compact = false;
     }
   }
   return 0;
