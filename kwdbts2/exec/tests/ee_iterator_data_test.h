@@ -19,8 +19,8 @@ void CreateTagReaderSpec(TSTagReaderSpec **spec, k_uint64 table_id) {
   *spec = KNEW TSTagReaderSpec();
   (*spec)->set_tableversion(1);
   TSCol *col0 = (*spec)->add_colmetas();
-  col0->set_storage_type(roachpb::DataType::INT);
-  col0->set_storage_len(4);
+  col0->set_storage_type(roachpb::DataType::BIGINT);
+  col0->set_storage_len(8);
   TSCol *col1 = (*spec)->add_colmetas();
   col1->set_storage_type(roachpb::DataType::INT);
   col1->set_storage_len(4);

@@ -20,6 +20,10 @@
 #include "kwdb_type.h"
 #include "ee_data_chunk.h"
 
+#ifndef UINT64_C
+#define UINT64_C(c) c ## ULL
+#endif
+
 namespace kwdbts {
 
 /*
@@ -28,10 +32,18 @@ via ADL.
 
 This is an extension to TR1
 */
+// template<class T>
+// inline void hash_combine(std::size_t& seed, const T& v) {
+//   std::hash<T> hasher;
+//   seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+// }
+
+
+// FIXME: fix me if a better combined hash function is found
 template<class T>
-inline void hash_combine(std::size_t& seed, const T& v) {
+inline void hash_combine(std::size_t& h, const T& v) {
   std::hash<T> hasher;
-  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  h = (hasher(v) * UINT64_C(0xbf58476d1ce4e5b9)) ^ h;
 }
 
 /*
@@ -63,12 +75,25 @@ class CombinedGroupKey {
     group_key_size_++;
   }
 
+  void AddGroupKey(DatumPtr ptr, roachpb::DataType type);
+
   bool is_null(k_uint32 i) const { return group_key_values_[i].index() == 0; }
 
   // overload ==
   bool operator==(const CombinedGroupKey& other) const;
 
   std::string to_string();
+
+  /**
+   * @brief whether the row of data chunk belongs to a new group
+   * @param[in] chunk
+   * @param[in] row
+   * @param[in] group_cols index of group columns
+   * @param[in] col_types data type of all columns
+   */
+  bool IsNewGroup(const DataChunkPtr& chunk, k_uint32 row,
+                  const std::vector<k_uint32>& group_cols,
+                  const std::vector<roachpb::DataType>& col_types);
 
   // the real data，Otherwise, the data pointed to by the pointer may be
   // released
@@ -90,19 +115,19 @@ struct GroupKeyHasher {
       switch (gkc.group_key_types_[i]) {
         case roachpb::DataType::BOOL: {
           if (const k_bool* pval = get_if<k_bool>(&gkc.group_key_values_[i])) {
-            hash_combine(h, static_cast<bool>((*pval)));
+            hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::SMALLINT: {
           if (const k_int16* pval = get_if<k_int16>(&gkc.group_key_values_[i])) {
-            hash_combine(h, static_cast<int>((*pval)));
+            hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::INT: {
           if (const k_int32* pval = get_if<k_int32>(&gkc.group_key_values_[i])) {
-            hash_combine(h, static_cast<int>((*pval)));
+            hash_combine(h, *pval);
           }
           break;
         }
@@ -111,19 +136,19 @@ struct GroupKeyHasher {
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT: {
           if (const k_int64* pval = get_if<k_int64>(&gkc.group_key_values_[i])) {
-            hash_combine(h, static_cast<k_int64>((*pval)));
+            hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::FLOAT: {
           if (const k_float32* pval = get_if<k_float32>(&gkc.group_key_values_[i])) {
-            hash_combine(h, static_cast<float>((*pval)));
+            hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::DOUBLE: {
           if (const k_double64* pval = get_if<k_double64>(&gkc.group_key_values_[i])) {
-            hash_combine(h, static_cast<double>((*pval)));
+            hash_combine(h, *pval);
           }
           break;
         }

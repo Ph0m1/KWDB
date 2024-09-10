@@ -19,68 +19,65 @@ namespace kwdbts {
 DataChunk::DataChunk(vector<ColumnInfo>& col_info, k_uint32 capacity) :
     col_info_(col_info), capacity_(capacity) {}
 
+DataChunk::DataChunk(vector<ColumnInfo>& col_info, const char* buf,
+                     k_uint32 count, k_uint32 capacity)
+    : data_(const_cast<char*>(buf)), col_info_(col_info), capacity_(capacity),
+      count_(count) {
+  is_data_owner_ = false;
+}
+
 DataChunk::~DataChunk() {
   col_info_.clear();
   col_offset_.clear();
-  SafeDeleteArray(data_);
+  bitmap_offset_.clear();
+  if (is_data_owner_) {
+    SafeDeleteArray(data_);
+  }
 }
 
 int DataChunk::Initialize() {
   // null bitmap
   col_num_ = col_info_.size();
-  bitmap_size_ = (col_num_ + 7) / 8;
   // calculate row width and length
-  k_uint32 data_size = 0;
-  for (int i = 0; i < col_num_; ++i) {
-    col_offset_.push_back(data_size);
+  row_size_ = ComputeRowSize(col_info_);
 
-    /**
-     * Row size adjustment for string type column and decimal type column. Add
-     * 2 byte for string length and 1 byte indicator for decimal type. Ideally
-     * storage length of the field (FieldDecimal, FieldVarChar, FieldVarBlob,
-     * etc.) should take extra bytes into account, and it needs to make
-     * necessary changes on all derived Field classes. Now we temporarily make
-     * row size adjustment in several places.
-     */
-    if (IsStringType(col_info_[i].storage_type)) {
-      data_size += STRING_WIDE;
-    } else if (col_info_[i].storage_type == roachpb::DataType::DECIMAL) {
-      data_size += BOOL_WIDE;
-    }
-    data_size += col_info_[i].storage_len;
-  }
-  // In order to be consistent with the bigtable format, an additional byte of
-  // delete is required
-  data_size += 1;
-  row_size_ = data_size + bitmap_size_;
   if (capacity_ == 0) {
-    if (DataChunk::SIZE_LIMIT >= row_size_) {
-      capacity_ = DataChunk::SIZE_LIMIT / row_size_;
-    } else {
-      // use 1 as the minimum capacity.
-      capacity_ = 1;
+    // (capacity_ + 7)/8 * col_num_ + capacity_ * row_size_ <= DataChunk::SIZE_LIMIT
+    capacity_ = EstimateCapacity(col_info_);
+  }
+
+  if (is_data_owner_) {
+    if (capacity_ * row_size_ > 0) {
+      k_uint64 data_len = (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
+      data_ = KNEW char[data_len];
+      // allocation failure
+      if (data_ == nullptr) {
+        LOG_ERROR("Allocate buffer in DataChunk failed.");
+        return -1;
+      }
+      std::memset(data_, 0, data_len);
     }
   }
-  // alloc
-  if (capacity_ * row_size_ > 0) {
-    data_ = KNEW char[capacity_ * row_size_];
-    // allocation failure
-    if (data_ == nullptr) {
-      LOG_ERROR("Allocate buffer in DataChunk failed.");
-      return -1;
-    }
-    std::memset(data_, 0, capacity_ * row_size_);
+
+  bitmap_size_ = (capacity_ + 7) / 8;
+
+  k_uint32 bitmap_offset = 0;
+  for (auto& info : col_info_) {
+    bitmap_offset_.push_back(bitmap_offset);
+    col_offset_.push_back(bitmap_offset + bitmap_size_);
+    bitmap_offset += info.fixed_storage_len * capacity_ + bitmap_size_;
   }
   return 0;
 }
 
 KStatus DataChunk::InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len) {
-  // record the length of all strings
+  k_uint32 col_offset = row * col_info_[col].fixed_storage_len + col_offset_[col];
+
   if (IsStringType(col_info_[col].storage_type)) {
-    std::memcpy(data_ + row * row_size_ + col_offset_[col], &len, STRING_WIDE);
-    std::memcpy(data_ + row * row_size_ + col_offset_[col] + STRING_WIDE, value, len);
+    std::memcpy(data_ + col_offset, &len, STRING_WIDE);
+    std::memcpy(data_ + col_offset + STRING_WIDE, value, len);
   } else {
-    std::memcpy(data_ + row * row_size_ + col_offset_[col], value, len);
+    std::memcpy(data_ + col_offset, value, len);
   }
   SetNotNull(row, col);
   return SUCCESS;
@@ -90,20 +87,31 @@ KStatus DataChunk::InsertDecimal(k_uint32 row, k_uint32 col, DatumPtr value, k_b
   if (col_info_[col].storage_type != roachpb::DataType::DECIMAL) {
     return FAIL;
   }
+  k_uint32 col_offset = row * col_info_[col].fixed_storage_len + col_offset_[col];
 
-  std::memcpy(data_ + row * row_size_ + col_offset_[col], &is_double, sizeof(k_bool));
-  std::memcpy(data_ + row * row_size_ + col_offset_[col] + sizeof(k_bool), value, sizeof(k_double64));
+  std::memcpy(data_ + col_offset, &is_double, BOOL_WIDE);
+  std::memcpy(data_ + col_offset + BOOL_WIDE, value, sizeof(k_double64));
+  SetNotNull(row, col);
   return SUCCESS;
 }
 
-KStatus DataChunk::InsertData(kwdbContext_p ctx, DatumPtr value, Field** renders) {
+KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, Field** renders) {
   EnterFunc();
 
   if (nullptr == renders) {
     if (value == nullptr) {
       Return(KStatus::FAIL);
     }
-    memcpy(data_ + count_ * row_size_, value, row_size_);
+
+    for (uint32_t col_idx = 0; col_idx < col_num_; col_idx++) {
+      if (value->IsNull(col_idx)) {
+        SetNull(count_, col_idx);
+      } else {
+        SetNotNull(count_, col_idx);
+        std::memcpy(data_ + count_ * col_info_[col_idx].fixed_storage_len + col_offset_[col_idx],
+                    value->GetData(col_idx), col_info_[col_idx].fixed_storage_len);
+      }
+    }
     AddCount();
     Return(KStatus::SUCCESS);
   }
@@ -186,71 +194,57 @@ KStatus DataChunk::InsertData(kwdbContext_p ctx, DatumPtr value, Field** renders
 }
 
 DatumPtr DataChunk::GetData(k_uint32 row, k_uint32 col) {
-  return data_ + row * row_size_ + col_offset_[col];
+  return data_ + row * col_info_[col].fixed_storage_len + col_offset_[col];
 }
 
 DatumPtr DataChunk::GetData(k_uint32 row, k_uint32 col, k_uint16& len) {
-  DatumPtr ptr = data_ + row * row_size_ + col_offset_[col];
-  std::memcpy(&len, ptr, sizeof(k_uint16));
-  return data_ + row * row_size_ + col_offset_[col] + sizeof(k_uint16);
+  k_uint32 col_offset = row * col_info_[col].fixed_storage_len + col_offset_[col];
+  std::memcpy(&len, data_ + col_offset, sizeof(k_uint16));
+  return data_ + col_offset + sizeof(k_uint16);
 }
 
 DatumPtr DataChunk::GetData(k_uint32 col) {
-  return data_ + current_line_ * row_size_ + col_offset_[col];
-}
-
-DatumRowPtr DataChunk::GetRow(k_uint32 row) {
-  return data_ + row * row_size_;
-}
-
-void DataChunk::CopyRow(k_uint32 row, void* src) {
-  std::memcpy(data_ + row * row_size_, src, row_size_);
+  return data_ + current_line_ * col_info_[col].fixed_storage_len + col_offset_[col];
 }
 
 bool DataChunk::IsNull(k_uint32 row, k_uint32 col) {
-  char* bitmap = reinterpret_cast<char*>(data_ + (row + 1) * row_size_ - bitmap_size_);
+  char* bitmap = reinterpret_cast<char*>(data_ + bitmap_offset_[col]);
   if (bitmap == nullptr) {
     return true;
   }
 
-  return (bitmap[col / 8] & ((1 << 7) >> (col % 8))) != 0;
+  return (bitmap[row / 8] & ((1 << 7) >> (row % 8))) != 0;
 }
 
 bool DataChunk::IsNull(k_uint32 col) {
-  char* bitmap = reinterpret_cast<char*>(
-      data_ + (current_line_ + 1) * row_size_ - bitmap_size_);
-  if (bitmap == nullptr) {
-    return true;
-  }
-  // return ((bitmap[col >> 3]) & (1 << (col & 7))) != 0;
-  return (bitmap[col / 8] & ((1 << 7) >> (col % 8))) != 0;
+  return IsNull(current_line_, col);
 }
 
 // 1 null，0 not null
 void DataChunk::SetNull(k_uint32 row, k_uint32 col) {
-  char* bitmap = reinterpret_cast<char*>(data_ + (row + 1) * row_size_ - bitmap_size_);
+  char* bitmap = reinterpret_cast<char*>(data_ + bitmap_offset_[col]);
   if (bitmap == nullptr) {
     return;
   }
 
-  bitmap[col / 8] |= (1 << 7) >> (col % 8);
+  bitmap[row / 8] |= (1 << 7) >> (row % 8);
 }
 
 void DataChunk::SetNotNull(k_uint32 row, k_uint32 col) {
-  char* bitmap = reinterpret_cast<char*>(data_ + (row + 1) * row_size_ - bitmap_size_);
+  char* bitmap = reinterpret_cast<char*>(data_ + bitmap_offset_[col]);
   if (bitmap == nullptr) {
     return;
   }
 
-  k_uint32 index = col >> 3;     // col / 8
+  k_uint32 index = row >> 3;     // row / 8
   unsigned int pos = 1 << 7;    // binary 1000 0000
-  unsigned int mask = pos >> (col & 7);     // pos >> (col % 8)
+  unsigned int mask = pos >> (row & 7);     // pos >> (row % 8)
   bitmap[index] &= ~mask;
 }
 
 void DataChunk::SetAllNull() {
-  for (int row = 0; row < capacity_; row++) {
-    char* bitmap = reinterpret_cast<char*>(data_ + (row + 1) * row_size_ - bitmap_size_);
+  for (int col_idx = 0; col_idx < col_num_; col_idx++) {
+    char* bitmap = reinterpret_cast<char*>(data_ + bitmap_offset_[col_idx]);
     if (bitmap == nullptr) {
       return;
     }
@@ -258,16 +252,50 @@ void DataChunk::SetAllNull() {
   }
 }
 
+KStatus DataChunk::Append(DataChunk* chunk) {
+  for (uint32_t col_idx = 0; col_idx < col_num_; col_idx++) {
+    size_t col_data_length = col_info_[col_idx].fixed_storage_len * chunk->Count();
+    std::memcpy(data_ + count_ * col_info_[col_idx].fixed_storage_len + col_offset_[col_idx],
+                chunk->GetData(0, col_idx), col_data_length);
+
+    for (k_uint32 row = 0; row < chunk->Count(); row++) {
+      if (chunk->IsNull(row, col_idx)) {
+        SetNull(count_ + row, col_idx);
+      }
+    }
+  }
+  count_ += chunk->Count();
+  return SUCCESS;
+}
+
 KStatus DataChunk::Append(std::queue<DataChunkPtr>& buffer) {
+  KStatus ret = SUCCESS;
   while (!buffer.empty()) {
     auto& buf = buffer.front();
-    size_t batch_buf_length = buf->RowSize() * buf->Count();
-
-    size_t offset = count_ * RowSize();
-    memcpy(data_ + offset, buf->GetData(), batch_buf_length);
-    count_ += buf->Count();
+    ret = Append(buf.get());
+    if (ret != SUCCESS) {
+      return ret;
+    }
     buffer.pop();
   }
+  return SUCCESS;
+}
+
+KStatus DataChunk::Append(DataChunk* chunk, k_uint32 begin_row, k_uint32 end_row) {
+  k_uint32 row_num = end_row - begin_row;
+  for (uint32_t col_idx = 0; col_idx < col_num_; col_idx++) {
+    size_t col_data_length = col_info_[col_idx].fixed_storage_len * row_num;
+    std::memcpy(data_ + count_ * col_info_[col_idx].fixed_storage_len + col_offset_[col_idx],
+                chunk->GetData(begin_row, col_idx), col_data_length);
+
+    for (k_uint32 row = begin_row; row < end_row; row++) {
+      if (chunk->IsNull(row, col_idx)) {
+        SetNull(count_ + row - begin_row, col_idx);
+      }
+    }
+  }
+
+  count_ += row_num;
   return SUCCESS;
 }
 
@@ -476,7 +504,7 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
       k_int64 msec;
       std::memcpy(&msec, raw, sizeof(k_int64));
       k_int64 seconds = msec / 1000;
-      time_t rawtime = (time_t)seconds;
+      time_t rawtime = (time_t) seconds;
       tm timeinfo;
       localtime_r(&rawtime, &timeinfo);
 
@@ -834,55 +862,184 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
   Return(SUCCESS);
 }
 
-KStatus DataChunk::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_batch, Field** renders) {
-  EnterFunc();
-  if (row_batch == nullptr) {
-    Return(KStatus::FAIL);
-  }
-
-  for (int row = 0; row < row_batch->Count(); ++row) {
-    for (k_uint32 col = 0; col < col_num_; ++col) {
-      Field* field = renders[col];
-
-      // dispose null
-      if (field->isNullable() && field->is_nullable()) {
-        SetNull(row, col);
-        continue;
-      }
-
-      k_uint32 len = field->get_storage_length();
-      switch (field->get_storage_type()) {
-        case roachpb::DataType::BOOL: {
-          bool val = field->ValInt() > 0 ? 1 : 0;
-          InsertData(row, col, reinterpret_cast<char*>(&val), len);
-          break;
+void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 col, Field* field) {
+  k_uint32 len = field->get_storage_length();
+  switch (field->get_storage_type()) {
+    case roachpb::DataType::BOOL: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
         }
+
+        bool val = field->ValInt() > 0 ? 1 : 0;
+        InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::TIMESTAMP:
+    case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::DATE:
+    case roachpb::DataType::BIGINT: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+
+        k_int64 val = field->ValInt();
+        InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::INT: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+        k_int32 val = field->ValInt();
+        InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::SMALLINT: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+        k_int16 val = field->ValInt();
+        InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::FLOAT: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+        k_float32 val = field->ValReal();
+        InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::DOUBLE: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+        k_double64 val = field->ValReal();
+        InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::CHAR:
+    case roachpb::DataType::NCHAR:
+    case roachpb::DataType::NVARCHAR:
+    case roachpb::DataType::VARCHAR:
+    case roachpb::DataType::BINARY:
+    case roachpb::DataType::VARBINARY: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+
+        kwdbts::String val = field->ValStr();
+        if (val.isNull()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+        char* mem = const_cast<char*>(val.c_str());
+        InsertData(count_ + row, col, mem, val.length());
+        row_batch->NextLine();
+      }
+      break;
+    }
+    case roachpb::DataType::DECIMAL: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+          continue;
+        }
+        k_bool overflow = field->is_over_flow();
+        if (field->get_sql_type() == roachpb::DataType::DOUBLE ||
+            field->get_sql_type() == roachpb::DataType::FLOAT || overflow) {
+          k_double64 val = field->ValReal();
+          InsertDecimal(count_ + row, col, reinterpret_cast<char*>(&val), true);
+        } else {
+          k_int64 val = field->ValInt();
+          InsertDecimal(count_ + row, col, reinterpret_cast<char*>(&val), false);
+        }
+        row_batch->NextLine();
+      }
+      break;
+    }
+    default: {
+      for (int row = 0; row < row_batch->Count(); ++row) {
+        if (field->isNullable() && field->is_nullable()) {
+          SetNull(count_ + row, col);
+          row_batch->NextLine();
+        }
+      }
+      break;
+    }
+  }
+}
+
+KStatus DataChunk::AddRecordByColumn(kwdbContext_p ctx, RowBatch* row_batch, Field** renders) {
+  EnterFunc()
+  for (k_uint32 col = 0; col < col_num_; ++col) {
+    Field* field = renders[col];
+    row_batch->ResetLine();
+    if (field->get_field_type() == Field::Type::FIELD_ITEM) {
+      switch (field->get_storage_type()) {
+        case roachpb::DataType::BOOL:
         case roachpb::DataType::TIMESTAMP:
         case roachpb::DataType::TIMESTAMPTZ:
         case roachpb::DataType::DATE:
-        case roachpb::DataType::BIGINT: {
-          k_int64 val = field->ValInt();
-          InsertData(row, col, reinterpret_cast<char*>(&val), len);
-          break;
-        }
-        case roachpb::DataType::INT: {
-          k_int32 val = field->ValInt();
-          InsertData(row, col, reinterpret_cast<char*>(&val), len);
-          break;
-        }
-        case roachpb::DataType::SMALLINT: {
-          k_int16 val = field->ValInt();
-          InsertData(row, col, reinterpret_cast<char*>(&val), len);
-          break;
-        }
-        case roachpb::DataType::FLOAT: {
-          k_float32 val = field->ValReal();
-          InsertData(row, col, reinterpret_cast<char*>(&val), len);
-          break;
-        }
+        case roachpb::DataType::BIGINT:
+        case roachpb::DataType::INT:
+        case roachpb::DataType::SMALLINT:
+        case roachpb::DataType::FLOAT:
         case roachpb::DataType::DOUBLE: {
-          k_double64 val = field->ValReal();
-          InsertData(row, col, reinterpret_cast<char*>(&val), len);
+          k_uint32 len = field->get_storage_length();
+          if (0 == field->get_num()) {
+            for (int row = 0; row < row_batch->Count(); ++row) {
+              k_int64 val = field->ValInt();
+              InsertData(count_ + row, col, reinterpret_cast<char*>(&val), len);
+              row_batch->NextLine();
+            }
+          } else {
+            k_uint32 col_offset = count_ * col_info_[col].fixed_storage_len + col_offset_[col];
+            row_batch->CopyColumnData(field->getColIdxInRs(), data_ + col_offset, len, field->get_column_type(),
+                                      field->get_storage_type());
+
+            for (int row = 0; row < row_batch->Count(); ++row) {
+              if (field->isNullable() && field->is_nullable()) {
+                SetNull(count_ + row, col);
+              }
+              row_batch->NextLine();
+            }
+          }
           break;
         }
         case roachpb::DataType::CHAR:
@@ -891,37 +1048,56 @@ KStatus DataChunk::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_batch, Field
         case roachpb::DataType::VARCHAR:
         case roachpb::DataType::BINARY:
         case roachpb::DataType::VARBINARY: {
-          kwdbts::String val = field->ValStr();
-          if (val.isNull()) {
-            SetNull(row, col);
-            break;
+          for (int row = 0; row < row_batch->Count(); ++row) {
+            if (field->isNullable() && field->is_nullable()) {
+              SetNull(count_ + row, col);
+              row_batch->NextLine();
+              continue;
+            }
+
+            kwdbts::String val = field->ValStr();
+            if (val.isNull()) {
+              SetNull(count_ + row, col);
+              row_batch->NextLine();
+              continue;
+            }
+            char* mem = const_cast<char*>(val.c_str());
+            InsertData(count_ + row, col, mem, val.length());
+            row_batch->NextLine();
           }
-          char* mem = const_cast<char*>(val.c_str());
-          InsertData(row, col, mem, val.length());
           break;
         }
         case roachpb::DataType::DECIMAL: {
-          k_bool overflow = field->is_over_flow();
-          if (field->get_sql_type() == roachpb::DataType::DOUBLE ||
-              field->get_sql_type() == roachpb::DataType::FLOAT || overflow) {
-            k_double64 val = field->ValReal();
-            InsertDecimal(row, col, reinterpret_cast<char*>(&val), true);
-          } else {
-            k_int64 val = field->ValInt();
-            InsertDecimal(row, col, reinterpret_cast<char*>(&val), false);
-          }
-          break;
+          Return(KStatus::FAIL)
         }
         default: {
           break;
         }
       }
+    } else {
+      AddRecordByRow(ctx, row_batch, col, field);
     }
-    AddCount();
-    row_batch->NextLine();
   }
+  Return(KStatus::SUCCESS)
+}
 
-  Return(KStatus::SUCCESS);
+KStatus DataChunk::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_batch, Field** renders, bool batch_copy) {
+  EnterFunc()
+  KStatus status = KStatus::SUCCESS;
+  if (row_batch == nullptr) {
+    Return(KStatus::FAIL)
+  }
+  if (batch_copy) {
+    status = AddRecordByColumn(ctx, row_batch, renders);
+  } else {
+    for (k_uint32 col = 0; col < col_num_; ++col) {
+      row_batch->ResetLine();
+      Field* field = renders[col];
+      AddRecordByRow(ctx, row_batch, col, field);
+    }
+  }
+  count_ += row_batch->Count();
+  Return(status)
 }
 
 /**
@@ -948,4 +1124,49 @@ k_int32 DataChunk::NextLine() {
 k_uint32 DataChunk::Count() {
   return count_;
 }
+
+k_uint32 DataChunk::EstimateCapacity(vector<ColumnInfo>& column_info) {
+  auto col_num = (k_int32) column_info.size();
+  auto row_size = (k_int32) ComputeRowSize(column_info);
+
+  // (capacity_ + 7)/8 * col_num_ + capacity_ * row_size_ <= DataChunk::SIZE_LIMIT
+  k_int32 capacity = (DataChunk::SIZE_LIMIT * 8 - 7 * col_num) / (col_num + 8 * row_size);
+
+  if (capacity <= 0) {
+    capacity = MIN_CAPACITY;
+  }
+  return capacity;
+}
+
+k_uint32 DataChunk::ComputeRowSize(vector<ColumnInfo>& column_info) {
+  k_uint32 col_num = column_info.size();
+
+  k_uint32 row_size = 0;
+  for (int i = 0; i < col_num; ++i) {
+    /**
+     * Row size adjustment for string type column and decimal type column. Add
+     * 2 byte for string length and 1 byte indicator for decimal type. Ideally
+     * storage length of the field (FieldDecimal, FieldVarChar, FieldVarBlob,
+     * etc.) should take extra bytes into account, and it needs to make
+     * necessary changes on all derived Field classes. Now we temporarily make
+     * row size adjustment in several places.
+     */
+    if (IsStringType(column_info[i].storage_type)) {
+      row_size += STRING_WIDE;
+      column_info[i].fixed_storage_len = column_info[i].storage_len + STRING_WIDE;
+    } else if (column_info[i].storage_type == roachpb::DataType::DECIMAL) {
+      row_size += BOOL_WIDE;
+      column_info[i].fixed_storage_len = column_info[i].storage_len + BOOL_WIDE;
+    } else {
+      column_info[i].fixed_storage_len = column_info[i].storage_len;
+    }
+    row_size += column_info[i].storage_len;
+  }
+  // In order to be consistent with the bigtable format, an additional byte of
+  // delete is required
+  row_size += 1;
+
+  return row_size;
+}
+
 }   // namespace kwdbts

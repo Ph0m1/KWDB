@@ -12,7 +12,8 @@
 #include "ee_scan_row_batch.h"
 
 namespace kwdbts {
-void* ScanRowBatch::GetData(k_uint32 col, k_uint32 offset, roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {
+void* ScanRowBatch::GetData(k_uint32 col, k_uint32 offset, roachpb::KWDBKTSColumn::ColumnType ctype,
+                            roachpb::DataType dt) {
   if (roachpb::KWDBKTSColumn::TYPE_PTAG == ctype || roachpb::KWDBKTSColumn::TYPE_TAG == ctype) {
     return static_cast<char*>(tagdata_[col].tag_data);
   } else {
@@ -31,12 +32,12 @@ k_uint16 ScanRowBatch::GetDataLen(k_uint32 col, k_uint32 offset, roachpb::KWDBKT
     return tagdata_[col].size;
   } else {
     return res_.data[col][current_batch_no_]->getVarColDataLen(
-            current_batch_line_);
+        current_batch_line_);
   }
 }
 
 k_bool ScanRowBatch::IsOverflow(k_uint32 col,
-                         roachpb::KWDBKTSColumn::ColumnType ctype) {
+                                roachpb::KWDBKTSColumn::ColumnType ctype) {
   if (roachpb::KWDBKTSColumn::TYPE_PTAG == ctype ||
       roachpb::KWDBKTSColumn::TYPE_TAG == ctype) {
     return false;
@@ -65,10 +66,11 @@ k_uint32 ScanRowBatch::Count() {
     return count_;
   }
 }
+
 /**
  *  nextline
  */
-k_uint32 ScanRowBatch::NextLine() {
+k_int32 ScanRowBatch::NextLine() {
   if (is_filter_) {
     if (current_line_ + 1 >= effect_count_) {
       return -1;
@@ -93,6 +95,7 @@ k_uint32 ScanRowBatch::NextLine() {
     return current_line_;
   }
 }
+
 /**
  *  ResetLine
  */
@@ -124,4 +127,28 @@ bool ScanRowBatch::IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype
     return is_null;
   }
 }
+
+void ScanRowBatch::CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
+                                  roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {
+  if (roachpb::KWDBKTSColumn::TYPE_PTAG == ctype || roachpb::KWDBKTSColumn::TYPE_TAG == ctype) {
+    auto src = static_cast<char*>(tagdata_[col_idx].tag_data);
+    if (src == nullptr) {
+      return;
+    }
+    for (int row = 0; row < count_; row++) {
+      memcpy(dest + row * data_len, src, data_len);
+    }
+  } else {
+    k_uint32 offset = 0;
+    for (auto& batch : res_.data[col_idx]) {
+      k_uint32 total_len = batch->count * data_len;
+      if (batch->mem == nullptr) {
+        offset += total_len;
+        continue;
+      }
+      memcpy(dest + offset, batch->mem, total_len);
+    }
+  }
+}
+
 }  // namespace kwdbts

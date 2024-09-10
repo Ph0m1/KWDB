@@ -125,7 +125,13 @@ values ('2023-05-31 10:00:10', 58, null, 24, 61, 22, 63, 6, 44, null, 38, 'host_
        ('2023-05-31 10:00:10', 21, 77, 90, 83, 41, -84, 26, 60, 43, null, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
        ('2023-05-31 10:00:10', 90, 0, 81, 28, 25, -44, 8, 89, 11, 76, 'host_2', 'aaa', -888888, 6666, '', '', '', '', '', '');
 
-
+SELECT hostname, max(usage_user) as max_cur, min(usage_user) as min_cur, avg(usage_user) as avg_cur
+FROM test.cpu
+where 1 = 1
+  and hostname = 'host_4'
+  and k_timestamp > '2023-01-01 00:00:00'::timestamp and k_timestamp < '2024-01-01 00:00:00':: timestamp
+group by hostname
+order by hostname asc;
 
 SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,

@@ -82,7 +82,7 @@ class TagRowBatch : public RowBatch {
   /**
    *  Move the cursor to the next line, default 0
    */
-  k_uint32 NextLine();
+  k_int32 NextLine();
   /**
    *  Move the input cursor to the next line
    */

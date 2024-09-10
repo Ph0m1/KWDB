@@ -72,6 +72,9 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
     return code;
   }
 
+  // set current offset
+  cur_offset_ = offset_;
+
   KWThdContext* thd = current_thd;
   StorageHandler* handler = handler_;
 

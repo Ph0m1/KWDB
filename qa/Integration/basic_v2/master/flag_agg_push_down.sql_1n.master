@@ -41,6 +41,7 @@ CREATE TABLE
                               | distributed      | true
                               | vectorized       | false
   render                      |                  |
+   │                          | engine type      | time series
    │                          | k_timestamp_b    | k_timestamp_b
    │                          | hostname         | any_not_null
    │                          | max              | max
@@ -64,7 +65,7 @@ CREATE TABLE
                               | ts-table         | cpu
                               | access mode      | tagIndex
                               | ptag filter[0]   | hostname = 'host_4'
-(26 rows)
+(27 rows)
 > explain SELECT
                hostname,
                max(usage_user)
@@ -77,6 +78,7 @@ CREATE TABLE
                     | distributed      | true
                     | vectorized       | false
   render            |                  |
+   │                | engine type      | time series
    │                | hostname         | any_not_null
    │                | max              | max
    └── group        |                  |
@@ -88,7 +90,7 @@ CREATE TABLE
                     | ts-table         | cpu
                     | access mode      | tagIndex
                     | ptag filter[0]   | hostname = 'host_4'
-(14 rows)
+(15 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
                hostname,usage_nice,
                max(usage_user)
@@ -101,6 +103,7 @@ CREATE TABLE
                               | distributed      | true
                               | vectorized       | false
   render                      |                  |
+   │                          | engine type      | time series
    │                          | k_timestamp_b    | k_timestamp_b
    │                          | hostname         | any_not_null
    │                          | usage_nice       | usage_nice
@@ -126,7 +129,7 @@ CREATE TABLE
                               | ts-table         | cpu
                               | access mode      | tagIndex
                               | ptag filter[0]   | hostname = 'host_4'
-(28 rows)
+(29 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
                hostname,
                max(usage_user)
@@ -173,6 +176,7 @@ ORDER BY hostname, k_timestamp_b;
                               | distributed      | true
                               | vectorized       | false
   render                      |                  |
+   │                          | engine type      | time series
    │                          | k_timestamp_b    | k_timestamp_b
    │                          | hostname         | any_not_null
    │                          | max              | max
@@ -198,7 +202,7 @@ ORDER BY hostname, k_timestamp_b;
                               | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                               | filter           | usage_nice > 2000
                               | ptag filter[0]   | hostname = 'host_4'
-(28 rows)
+(29 rows)
 > explain select first_row(usage_user),first_row(usage_user),first_row(usage_user),first_row(usage_user)
 from benchmark_ut.cpu
 group by usage_idle having usage_idle > 20;
@@ -207,6 +211,7 @@ group by usage_idle having usage_idle > 20;
                          | distributed      | true
                          | vectorized       | false
   render                 |                  |
+   │                     | engine type      | time series
    │                     | first_row        | first_row
    │                     | first_row        | first_row
    │                     | first_row        | first_row
@@ -224,6 +229,6 @@ group by usage_idle having usage_idle > 20;
                          | ts-table         | cpu
                          | access mode      | metaTable
                          | filter           | usage_idle > 20
-(20 rows)
+(21 rows)
 > drop database benchmark_ut cascade;
 DROP DATABASE

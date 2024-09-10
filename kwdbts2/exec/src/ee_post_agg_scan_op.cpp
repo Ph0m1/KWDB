@@ -14,6 +14,7 @@
 
 #include "ee_pb_plan.pb.h"
 #include "ee_common.h"
+#include "ee_disk_data_container.h"
 
 namespace kwdbts {
 
@@ -28,7 +29,7 @@ PostAggScanOperator::PostAggScanOperator(const PostAggScanOperator& other, BaseO
 
 EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
-  auto code = HashAggregateOperator::Init(ctx);
+  BaseAggregator::Init(ctx);
 
   // construct the output column information for agg output.
   agg_output_col_info.reserve(output_fields_.size());
@@ -37,13 +38,41 @@ EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
                                      field->get_return_type());
   }
 
-  data_types_.clear();
-  data_types_.reserve(output_fields_.size());
+  col_types_.clear();
+  col_lens_.clear();
+  col_types_.reserve(output_fields_.size());
+  col_lens_.reserve(output_fields_.size());
   for (auto field : output_fields_) {
-    data_types_.push_back(field->get_storage_type());
+    col_types_.push_back(field->get_storage_type());
+    col_lens_.push_back(field->get_storage_length());
   }
 
-  Return(code);
+  std::vector<roachpb::DataType> group_types;
+  std::vector<k_uint32> group_lens;
+  for (auto& col : group_cols_) {
+    group_lens.push_back(output_fields_[col]->get_storage_length());
+    group_types.push_back(output_fields_[col]->get_storage_type());
+  }
+  ht_ = KNEW LinearProbingHashTable(group_types, group_lens, agg_row_size_);
+  if (ht_ == nullptr || ht_->Resize() < 0) {
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  Return(EEIteratorErrCode::EE_OK);
+}
+
+// create, init and populate temp file using received data.
+KStatus PostAggScanOperator::initDiskSink() {
+  KStatus ret = SUCCESS;
+  disk_sink_ = std::make_unique<DiskDataContainer>(agg_output_col_info);
+  ret = disk_sink_->Init();
+  if (ret != KStatus::SUCCESS) {
+    return ret;
+  }
+
+  disk_sink_->Append(processed_chunks_);
+
+  return KStatus::SUCCESS;
 }
 
 KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
@@ -70,9 +99,19 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
       continue;
     }
     // the chunk->isScanAgg() is always true.
-    pass_agg_ &= chunk->isPassAgg();
+    pass_agg_ &= !chunk->isDisorder();
     agg_result_counter_ += chunk->Count();
-    processed_chunks_.push(std::move(chunk));
+    if ((!pass_agg_) &&
+        ((agg_result_counter_ * chunk->RowSize()) >= POST_AGG_SCAN_MAX_MEM_BUFFER_SIZE)) {
+      if (disk_sink_ == nullptr) {
+        if (initDiskSink() != KStatus::SUCCESS) {
+          Return(KStatus::FAIL);
+        }
+      }
+      disk_sink_->Append(chunk.get());
+    } else {
+      processed_chunks_.push(std::move(chunk));
+    }
   }
 
 
@@ -83,39 +122,45 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
    * scalar group
    * select max(c1) from t1 => handler_->NewTagIterator
    */
-  if (processed_chunks_.empty()) {
-    if (buckets_.empty() && group_cols_.empty() &&
+  if (processed_chunks_.empty() && disk_sink_ == nullptr) {
+    if (ht_->Empty() && group_cols_.empty() &&
         group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
       // return null
-      CombinedGroupKey group_keys;
-      group_keys.Reserve(1);
-      group_keys.AddGroupKey(std::monostate(), roachpb::DataType::UNKNOWN);
+      k_uint64 loc = ht_->CreateNullGroups();
+      auto agg_ptr = ht_->GetAggResult(loc);
 
-      auto ptr = KNEW char[agg_row_size_];
-      std::memset(ptr, 0, agg_row_size_);
-      InitFirstLastTimeStamp(ptr);
+      if (!ht_->IsUsed(loc)) {
+        ht_->SetUsed(loc);
+        InitFirstLastTimeStamp(agg_ptr);
+      }
 
       // COUNT_ROW or COUNT，return 0
       for (int i = 0; i < aggregations_.size(); i++) {
         if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT_ROWS ||
-          aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT) {
+            aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT) {
           // set not null
-          AggregateFunc::SetNotNull(ptr + agg_null_offset_, i);
+          AggregateFunc::SetNotNull(agg_ptr + agg_null_offset_, i);
         }
       }
-
-      buckets_[group_keys] = ptr;
     }
   } else {
     // combine all the result into one chunk and do HASH Agg.
     if (!pass_agg_) {
-      DataChunkPtr chunk = constructAggResults(agg_result_counter_);
-      if (chunk == nullptr) {
-        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-        Return(KStatus::FAIL);
+      if (disk_sink_ == nullptr) {
+        DataChunkPtr chunk = constructAggResults(agg_result_counter_);
+        if (chunk == nullptr) {
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+          Return(KStatus::FAIL);
+        }
+
+        KStatus ret = chunk->Append(processed_chunks_);
+        if (ret != SUCCESS) {
+          return ret;
+        }
+        accumulateBatch(ctx, chunk.get());
+      } else {
+        accumulateBatch(ctx, disk_sink_.get());
       }
-      chunk->Append(processed_chunks_);
-      accumulateBatch(ctx, chunk);
     }
   }
   Return(KStatus::SUCCESS);
@@ -192,8 +237,8 @@ KStatus PostAggScanOperator::getAggResults(kwdbContext_p ctx, DataChunkPtr& resu
 
     // assembling rows
     k_uint32 index = 0;
-    while (total_read_row_ < buckets_.size()) {
-      DatumRowPtr data = iter_->second;
+    while (total_read_row_ < ht_->Size()) {
+      DatumRowPtr data = *iter_;
       for (int col = 0; col < output_fields_.size(); col++) {
         // dispose null
         char* bitmap = data + agg_row_size_ - (output_fields_.size() + 7) / 8;
@@ -217,7 +262,7 @@ KStatus PostAggScanOperator::getAggResults(kwdbContext_p ctx, DataChunkPtr& resu
       }
       results->AddCount();
       ++index;
-      iter_++;
+      ++iter_;
       ++examined_rows_;
       ++total_read_row_;
 
@@ -226,7 +271,7 @@ KStatus PostAggScanOperator::getAggResults(kwdbContext_p ctx, DataChunkPtr& resu
       }
     }
 
-    if (examined_rows_ == buckets_.size()) {
+    if (examined_rows_ == ht_->Size()) {
       is_done_ = true;
     }
   }
@@ -305,7 +350,7 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
       case Sumfunctype::MIN: {
         switch (output_fields_[argIdx]->get_storage_type()) {
           case roachpb::DataType::BOOL:
-            agg_func = make_unique< MinAggregate<k_bool>>(i, argIdx, len);
+            agg_func = make_unique<MinAggregate<k_bool>>(i, argIdx, len);
             break;
           case roachpb::DataType::SMALLINT:
             agg_func = make_unique<MinAggregate<k_int16>>
@@ -352,7 +397,7 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
 
         switch (output_fields_[argIdx]->get_storage_type()) {
           case roachpb::DataType::BOOL:
-            agg_func = make_unique< AnyNotNullAggregate<k_bool>>(i, argIdx, len);
+            agg_func = make_unique<AnyNotNullAggregate<k_bool>>(i, argIdx, len);
             break;
           case roachpb::DataType::SMALLINT:
             agg_func = make_unique<AnyNotNullAggregate<k_int16>>
@@ -422,7 +467,7 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
                 (i, argIdx, len + BOOL_WIDE);
             break;
           default:
-            LOG_ERROR("unsupported data type for sum aggregation\n");
+          LOG_ERROR("unsupported data type for sum aggregation\n");
             status = KStatus::FAIL;
             break;
         }
@@ -443,9 +488,9 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
         len = output_fields_[i]->get_storage_length() + sizeof(KTimestamp);
 
         if (IsStringType(output_fields_[i]->get_storage_type())) {
-          agg_func = make_unique<LastAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else {
-          agg_func = make_unique<LastAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -466,9 +511,9 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
         len = output_fields_[i]->get_storage_length() + sizeof(KTimestamp);
 
         if (IsStringType(output_fields_[i]->get_storage_type())) {
-          agg_func = make_unique<LastRowAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<LastRowAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else {
-          agg_func = make_unique<LastRowAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<LastRowAggregate<false>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -490,9 +535,9 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
         len = output_fields_[i]->get_storage_length() + sizeof(KTimestamp);
 
         if (IsStringType(output_fields_[i]->get_storage_type())) {
-          agg_func = make_unique<FirstAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<FirstAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else {
-          agg_func = make_unique<FirstAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<FirstAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -513,9 +558,9 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
         len = output_fields_[i]->get_storage_length() + sizeof(KTimestamp);
 
         if (IsStringType(output_fields_[i]->get_storage_type())) {
-          agg_func = make_unique<FirstRowAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<FirstRowAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else {
-          agg_func = make_unique<FirstRowAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<FirstRowAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -569,7 +614,7 @@ void PostAggScanOperator::CalculateAggOffsets() {
     }
 
     if (IsFirstLastAggFunc(aggregations_[i].func())) {
-        offset += sizeof(KTimestamp);
+      offset += sizeof(KTimestamp);
     }
     offset += output_fields_[i]->get_storage_length();
   }

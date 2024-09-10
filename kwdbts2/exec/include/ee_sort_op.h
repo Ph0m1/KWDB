@@ -20,7 +20,8 @@
 #include "ee_data_chunk.h"
 #include "ee_sort_flow_spec.h"
 #include "kwdb_type.h"
-#include "ee_row_container.h"
+#include "ee_memory_data_container.h"
+#include "ee_disk_data_container.h"
 #include "ee_pb_plan.pb.h"
 
 namespace kwdbts {
@@ -66,8 +67,7 @@ class SortOperator : public BaseOperator {
   std::vector<ColumnOrderInfo> order_info_;
 
   // sort container
-  RowContainerPtr container_;
-  // RowContainer *container_;
+  DataContainerPtr container_;
 
   // input (FieldNum)
   std::vector<Field*>& input_fields_;
@@ -76,6 +76,8 @@ class SortOperator : public BaseOperator {
   bool is_mem_container{true};   // sort type
 
  private:
+  static const k_uint64 SORT_MAX_MEM_BUFFER_SIZE = BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE;
+
   KStatus initContainer(k_uint32 size, std::queue<DataChunkPtr> &buffer) {
     // create container
     std::vector<ColumnInfo> col_info;
@@ -91,7 +93,7 @@ class SortOperator : public BaseOperator {
           std::make_unique<MemRowContainer>(order_info_, col_info, size);
     } else {
       container_ =
-          std::make_unique<DiskRowContainer>(order_info_, col_info, size);
+          std::make_unique<DiskDataContainer>(order_info_, col_info);
     }
     ret = container_->Init();
     if (ret != SUCCESS) {
@@ -103,7 +105,15 @@ class SortOperator : public BaseOperator {
     }
 
     // copy buffer to container
-    ret = container_->Append(buffer);
+    while (!buffer.empty()) {
+      auto& buf = buffer.front();
+      ret = container_->Append(buf.get());
+      if (ret != SUCCESS) {
+        return ret;
+      }
+      buffer.pop();
+    }
+
     return ret;
   }
 };

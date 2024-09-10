@@ -233,11 +233,11 @@ class FieldFuncTimeBucket : public FieldFuncOp {
   Field *field_to_copy() override;
   k_bool field_is_nullable() override;
 
-  k_uint64 getIntervalSeconds() {
+  k_int64 getIntervalSeconds() {
     std::string timestring = {args_[1]->ValStr().getptr(),
                               args_[1]->ValStr().length_};
     std::string intervalStr = timestring.substr(0, timestring.size() - 1);
-    k_uint64 interval_seconds_ = stoll(intervalStr);
+    k_int64 interval_seconds_ = stoll(intervalStr);
     interval_seconds_ *= 1000;
     nullable_ = false;
     return interval_seconds_;

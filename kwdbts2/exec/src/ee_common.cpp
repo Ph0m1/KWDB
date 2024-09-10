@@ -14,12 +14,6 @@
 
 namespace kwdbts {
 
-bool IsStringType(roachpb::DataType storage_type) {
-    return storage_type == roachpb::DataType::CHAR || storage_type == roachpb::DataType::VARCHAR ||
-           storage_type == roachpb::DataType::NCHAR || storage_type == roachpb::DataType::NVARCHAR ||
-           storage_type == roachpb::DataType::BINARY || storage_type == roachpb::DataType::VARBINARY;
-}
-
 bool IsFirstLastAggFunc(kwdbts::TSAggregatorSpec_Func func) {
   return func == TSAggregatorSpec_Func::TSAggregatorSpec_Func_LAST ||
          func == TSAggregatorSpec_Func::TSAggregatorSpec_Func_LAST_ROW ||

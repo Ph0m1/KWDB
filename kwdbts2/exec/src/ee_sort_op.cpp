@@ -165,12 +165,12 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
     KStatus ret = SUCCESS;
     if (is_mem_container) {
       buffer.push(std::move(chunk));
-      if (buffer_size > MAX_SORT_MEM_SIZE) {
+      if (buffer_size > SORT_MAX_MEM_BUFFER_SIZE) {
         is_mem_container = false;
         ret = initContainer(total_count, buffer);
       }
     } else {
-      ret = container_->Append(chunk);
+      ret = container_->Append(chunk.get());
     }
     if (ret != SUCCESS) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Append data failed.");
@@ -250,7 +250,7 @@ EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
       --cur_offset_;
       continue;
     }
-    chunk->InsertData(ctx, container_->GetRow(row), num_ != 0 ? renders_ : nullptr);
+    chunk->InsertData(ctx, container_.get(), num_ != 0 ? renders_ : nullptr);
 
     // rowcount ++
     ++examined_rows_;

@@ -20,7 +20,7 @@
 namespace kwdbts {
 
 BaseAggregator::BaseAggregator(BaseOperator* input, TSAggregatorSpec* spec, TSPostProcessSpec* post,
-                                TABLE* table, int32_t processor_id)
+                               TABLE* table, int32_t processor_id)
     : BaseOperator(table, processor_id),
       spec_{spec},
       post_{post},
@@ -148,7 +148,7 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
             agg_func = make_unique<MinAggregate<k_decimal>>(i, argIdx, len + BOOL_WIDE);
             break;
           default:
-            LOG_ERROR("unsupported data type for min aggregation\n");
+          LOG_ERROR("unsupported data type for min aggregation\n");
             status = KStatus::FAIL;
             break;
         }
@@ -156,7 +156,6 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
       }
       case Sumfunctype::ANY_NOT_NULL: {
         k_uint32 argIdx = agg.col_idx(0);
-
         k_uint32 len = input_fields_[argIdx]->get_storage_length();
 
         switch (input_fields_[argIdx]->get_storage_type()) {
@@ -264,14 +263,14 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(1);
 
-        k_uint32 len = input_fields_[argIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[argIdx]->get_storage_length());
 
         if (IsStringType(param_.aggs_[i]->get_storage_type())) {
-          agg_func = make_unique<LastAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else if (param_.aggs_[i]->get_storage_type() == roachpb::DataType::DECIMAL) {
-          agg_func = make_unique<LastAggregate>(i, argIdx, tsIdx, len + BOOL_WIDE);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, len + BOOL_WIDE);
         } else {
-          agg_func = make_unique<LastAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -282,7 +281,7 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
           tsIdx = agg.col_idx(1);
         }
 
-        k_uint32 len = input_fields_[tsIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[tsIdx]->get_storage_length());
         agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, len);
         break;
       }
@@ -290,14 +289,14 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(1);
 
-        k_uint32 len = input_fields_[argIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[argIdx]->get_storage_length());
 
         if (IsStringType(param_.aggs_[i]->get_storage_type())) {
-          agg_func = make_unique<LastRowAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<LastRowAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else if (param_.aggs_[i]->get_storage_type() == roachpb::DataType::DECIMAL) {
-          agg_func = make_unique<LastRowAggregate>(i, argIdx, tsIdx, len + BOOL_WIDE);
+          agg_func = make_unique<LastRowAggregate<>>(i, argIdx, tsIdx, len + BOOL_WIDE);
         } else {
-          agg_func = make_unique<LastRowAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<LastRowAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -308,7 +307,7 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
           tsIdx = agg.col_idx(1);
         }
 
-        k_uint32 len = input_fields_[tsIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[tsIdx]->get_storage_length());
         agg_func = make_unique<LastRowTSAggregate>(i, argIdx, tsIdx, len);
         break;
       }
@@ -316,14 +315,14 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(1);
 
-        k_uint32 len = input_fields_[argIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[argIdx]->get_storage_length());
 
         if (IsStringType(param_.aggs_[i]->get_storage_type())) {
-          agg_func = make_unique<FirstAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<FirstAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else if (param_.aggs_[i]->get_storage_type() == roachpb::DataType::DECIMAL) {
-          agg_func = make_unique<FirstAggregate>(i, argIdx, tsIdx, len + BOOL_WIDE);
+          agg_func = make_unique<FirstAggregate<>>(i, argIdx, tsIdx, len + BOOL_WIDE);
         } else {
-          agg_func = make_unique<FirstAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<FirstAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -334,7 +333,7 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
           tsIdx = agg.col_idx(1);
         }
 
-        k_uint32 len = input_fields_[tsIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[tsIdx]->get_storage_length());
         agg_func = make_unique<FirstTSAggregate>(i, argIdx, tsIdx, len);
         break;
       }
@@ -342,13 +341,13 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(1);
 
-        k_uint32 len = input_fields_[argIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[argIdx]->get_storage_length());
         if (IsStringType(param_.aggs_[i]->get_storage_type())) {
-          agg_func = make_unique<FirstRowAggregate>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<FirstRowAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
         } else if (param_.aggs_[i]->get_storage_type() == roachpb::DataType::DECIMAL) {
-          agg_func = make_unique<FirstRowAggregate>(i, argIdx, tsIdx, len + BOOL_WIDE);
+          agg_func = make_unique<FirstRowAggregate<>>(i, argIdx, tsIdx, len + BOOL_WIDE);
         } else {
-          agg_func = make_unique<FirstRowAggregate>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<FirstRowAggregate<>>(i, argIdx, tsIdx, len);
         }
         break;
       }
@@ -359,7 +358,7 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
           tsIdx = agg.col_idx(1);
         }
 
-        k_uint32 len = input_fields_[tsIdx]->get_storage_length() + sizeof(KTimestamp);
+        k_uint32 len = fixLength(input_fields_[tsIdx]->get_storage_length());
 
         agg_func = make_unique<FirstRowTSAggregate>(i, argIdx, tsIdx, len);
         break;
@@ -389,9 +388,9 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
           case roachpb::DataType::DOUBLE:
             agg_func = make_unique<AVGRowAggregate<k_double64>>(i, argIdx, len);
             break;
-          // case roachpb::DataType::DECIMAL:
-          //   agg_func = make_unique<AVGRowAggregate<k_decimal>>(i, argIdx, len);
-          //   break;
+            // case roachpb::DataType::DECIMAL:
+            //   agg_func = make_unique<AVGRowAggregate<k_decimal>>(i, argIdx, len);
+            //   break;
           default:
           LOG_ERROR("unsupported data type for sum aggregation\n");
             status = KStatus::FAIL;
@@ -482,7 +481,20 @@ EEIteratorErrCode BaseAggregator::Init(kwdbContext_p ctx) {
     agg_row_size_ += (param_.aggs_size_ + 7) / 8;
 
     for (auto field : input_fields_) {
-      data_types_.push_back(field->get_storage_type());
+      col_types_.push_back(field->get_storage_type());
+      col_lens_.push_back(field->get_storage_length());
+    }
+
+    // init column info used by data chunk.
+    output_col_info_.reserve(output_fields_.size());
+    for (auto field : output_fields_) {
+      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    }
+
+    constructDataChunk();
+    if (current_data_chunk_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR)
     }
   } while (0);
 
@@ -532,7 +544,7 @@ void BaseAggregator::InitFirstLastTimeStamp(DatumRowPtr ptr) {
       KTimestamp max_ts = INT64_MAX;
       std::memcpy(ptr + offset + len - sizeof(KTimestamp), &max_ts, sizeof(KTimestamp));
     } else if (func_type == TSAggregatorSpec_Func::TSAggregatorSpec_Func_LAST_ROW ||
-        func_type == TSAggregatorSpec_Func::TSAggregatorSpec_Func_LASTROWTS) {
+               func_type == TSAggregatorSpec_Func::TSAggregatorSpec_Func_LASTROWTS) {
       KTimestamp min_ts = INT64_MIN;
       std::memcpy(ptr + offset + len - sizeof(KTimestamp), &min_ts, sizeof(KTimestamp));
     }
@@ -554,7 +566,7 @@ EEIteratorErrCode BaseAggregator::Reset(kwdbContext_p ctx) {
 }
 
 KStatus BaseAggregator::accumulateRowIntoBucket(kwdbContext_p ctx, DatumRowPtr bucket, k_uint32 agg_null_offset,
-                                                DataChunkPtr& chunk, k_uint32 line) {
+                                                IChunk* chunk, k_uint32 line) {
   EnterFunc();
   for (int i = 0; i < funcs_.size(); i++) {
     // distinct
@@ -563,7 +575,11 @@ KStatus BaseAggregator::accumulateRowIntoBucket(kwdbContext_p ctx, DatumRowPtr b
     // Distinct Agg
     if (agg.distinct()) {
       // group cols + agg cols
-      if (!funcs_[i]->isDistinct(chunk, line, data_types_, group_cols_)) {
+      k_bool is_distinct;
+      if (funcs_[i]->isDistinct(chunk, line, col_types_, col_lens_, group_cols_, &is_distinct) < 0) {
+        Return(KStatus::FAIL);
+      }
+      if (is_distinct == false) {
         continue;
       }
     }
@@ -585,8 +601,8 @@ HashAggregateOperator::HashAggregateOperator(BaseOperator* input,
     : BaseAggregator(input, spec, post, table, processor_id) {}
 
 HashAggregateOperator::HashAggregateOperator(const HashAggregateOperator& other,
-                                              BaseOperator* input,
-                                              int32_t processor_id)
+                                             BaseOperator* input,
+                                             int32_t processor_id)
     : BaseAggregator(other, input, processor_id) {}
 
 HashAggregateOperator::~HashAggregateOperator() {
@@ -595,10 +611,27 @@ HashAggregateOperator::~HashAggregateOperator() {
     delete input_;
   }
 
-  for (auto& bucket : buckets_) {
-    SafeDeleteArray(bucket.second);
-  }
+  SafeDeletePointer(ht_);
 }
+
+EEIteratorErrCode HashAggregateOperator::Init(kwdbContext_p ctx) {
+  EnterFunc();
+  BaseAggregator::Init(ctx);
+
+  std::vector<roachpb::DataType> group_types;
+  std::vector<k_uint32> group_lens;
+  for (auto& col : group_cols_) {
+    group_lens.push_back(input_fields_[col]->get_storage_length());
+    group_types.push_back(input_fields_[col]->get_storage_type());
+  }
+  ht_ = KNEW LinearProbingHashTable(group_types, group_lens, agg_row_size_);
+  if (ht_ == nullptr || ht_->Resize() < 0) {
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  Return(EEIteratorErrCode::EE_OK);
+}
+
 
 EEIteratorErrCode HashAggregateOperator::Start(kwdbContext_p ctx) {
   EnterFunc();
@@ -618,7 +651,7 @@ EEIteratorErrCode HashAggregateOperator::Start(kwdbContext_p ctx) {
     code = EEIteratorErrCode::EE_ERROR;
   }
 
-  iter_ = buckets_.begin();
+  iter_ = ht_->begin();
   Return(code);
 }
 
@@ -651,32 +684,30 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
 }
 
 KStatus HashAggregateOperator::accumulateBatch(kwdbContext_p ctx,
-                                               DataChunkPtr& chunk) {
-  EnterFunc();
-
-  std::vector<DatumRowPtr> dest_ptrs;
-  dest_ptrs.reserve(chunk->Count());
-
+                                               IChunk* chunk) {
+  EnterFunc()
   for (k_uint32 line = 0; line < chunk->Count(); ++line) {
-    CombinedGroupKey group_keys;
-    AggregateFunc::ConstructGroupKeys(chunk, group_cols_, data_types_, line,
-                                      group_keys);
-
-    if (buckets_.find(group_keys) == buckets_.end()) {
-      // create new bucket
-      auto ptr = KNEW char[agg_row_size_];
-      std::memset(ptr, 0, agg_row_size_);
-      InitFirstLastTimeStamp(ptr);
-      buckets_[group_keys] = ptr;
+    k_uint64 loc;
+    if (ht_->FindOrCreateGroups(chunk, line, group_cols_, &loc) < 0) {
+      Return(KStatus::FAIL);
     }
+    auto agg_ptr = ht_->GetAggResult(loc);
 
-    dest_ptrs[line] = buckets_[group_keys];
+    if (!ht_->IsUsed(loc)) {
+      ht_->SetUsed(loc);
+      // copy group keys from data chunk to hash table
+      ht_->CopyGroups(chunk, line, group_cols_, loc);
+
+      InitFirstLastTimeStamp(agg_ptr);
+    }
   }
 
   for (int i = 0; i < funcs_.size(); i++) {
     // call agg func
-    DistinctOpt opt{aggregations_[i].distinct(), data_types_, group_cols_};
-    funcs_[i]->AddOrUpdate(chunk, dest_ptrs, agg_null_offset_, opt);
+    DistinctOpt opt{aggregations_[i].distinct(), col_types_, col_lens_, group_cols_};
+    if (funcs_[i]->AddOrUpdate(chunk, ht_, agg_null_offset_, opt) < 0) {
+      Return(KStatus::FAIL);
+    }
   }
   Return(KStatus::SUCCESS);
 }
@@ -684,19 +715,19 @@ KStatus HashAggregateOperator::accumulateBatch(kwdbContext_p ctx,
 KStatus HashAggregateOperator::accumulateRow(kwdbContext_p ctx, DataChunkPtr& chunk, k_uint32 line) {
   EnterFunc();
 
-  // groupby col
-  CombinedGroupKey group_keys;
-  AggregateFunc::ConstructGroupKeys(chunk, group_cols_, data_types_, line, group_keys);
-
-  if (buckets_.find(group_keys) == buckets_.end()) {
-    // create new bucket
-    auto ptr = KNEW char[agg_row_size_];
-    std::memset(ptr, 0, agg_row_size_);
-    InitFirstLastTimeStamp(ptr);
-    buckets_[group_keys] = ptr;
+  k_uint64 loc;
+  if (ht_->FindOrCreateGroups(chunk.get(), line, group_cols_, &loc) < 0) {
+    Return(KStatus::FAIL);
   }
+  auto agg_ptr = ht_->GetAggResult(loc);
+  if (!ht_->IsUsed(loc)) {
+    ht_->SetUsed(loc);
+    // copy group keys from data chunk to hash table
+    ht_->CopyGroups(chunk.get(), line, group_cols_, loc);
 
-  accumulateRowIntoBucket(ctx, buckets_[group_keys], agg_null_offset_, chunk, line);
+    InitFirstLastTimeStamp(agg_ptr);
+  }
+  accumulateRowIntoBucket(ctx, agg_ptr, agg_null_offset_, chunk.get(), line);
 
   Return(KStatus::SUCCESS);
 }
@@ -726,7 +757,7 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
       continue;
     }
 
-    auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
+    auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
     if (fetchers != nullptr && fetchers->collected) {
       goLock(fetchers->goMutux);
       chunk->GetFvec().GetAnalyse(ctx);
@@ -736,11 +767,7 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
     }
 
     auto start = std::chrono::high_resolution_clock::now();
-    // loop through each row
-    for (k_uint32 line = 0; line < chunk->Count(); ++line) {
-      accumulateRow(ctx, chunk, line);
-    }
-    // accumulateBatch(ctx, chunk);
+    accumulateBatch(ctx, chunk.get());
     auto end = std::chrono::high_resolution_clock::now();
 
     if (fetchers != nullptr && fetchers->collected) {
@@ -749,18 +776,18 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
     }
   }
   analyseFetcher(ctx, this->processor_id_, duration, read_row_num, 0,
-                 sizeof(aggregations_)+sizeof(kwdbts::TSAggregatorSpec_Aggregation) * aggregations_.size(), 1, 0);
+                 sizeof(aggregations_) + sizeof(kwdbts::TSAggregatorSpec_Aggregation) * aggregations_.size(), 1, 0);
 
   // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was
   // aggregated.
-  if (buckets_.empty() && group_cols_.empty()) {
+  if (ht_->Empty() && group_cols_.empty()) {
     // retrun NULL
-    CombinedGroupKey group_keys;
-    group_keys.Reserve(1);
-    group_keys.AddGroupKey(std::monostate(), roachpb::DataType::UNKNOWN);
-
-    auto ptr = KNEW char[agg_row_size_];
-    std::memset(ptr, 0, agg_row_size_);
+    k_uint64 loc = ht_->CreateNullGroups();
+    auto agg_ptr = ht_->GetAggResult(loc);
+    if (!ht_->IsUsed(loc)) {
+      ht_->SetUsed(loc);
+      InitFirstLastTimeStamp(agg_ptr);
+    }
 
     // return 0
     for (int i = 0; i < aggregations_.size(); i++) {
@@ -768,11 +795,9 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
           aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT ||
           aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_SUM_INT) {
         // set no null, default 0
-        AggregateFunc::SetNotNull(ptr + agg_null_offset_, i);
+        AggregateFunc::SetNotNull(agg_ptr + agg_null_offset_, i);
       }
     }
-
-    buckets_[group_keys] = ptr;
   }
 
   Return(KStatus::SUCCESS);
@@ -787,12 +812,12 @@ KStatus HashAggregateOperator::getAggResults(kwdbContext_p ctx,
   // row indicates indicates the row position inserted into the current
   // DataChunk
   k_uint32 row = 0;
-  while (total_read_row_ < buckets_.size()) {
+  while (total_read_row_ < ht_->Size()) {
     // filter
     if (nullptr != having_filter_) {
       k_int64 ret = having_filter_->ValInt();
       if (0 == ret) {
-        iter_++;
+        ++iter_;
         ++total_read_row_;
         continue;
       }
@@ -807,14 +832,14 @@ KStatus HashAggregateOperator::getAggResults(kwdbContext_p ctx,
     // offset
     if (cur_offset_ > 0) {
       --cur_offset_;
-      iter_++;
+      ++iter_;
       ++total_read_row_;
       continue;
     }
 
     FieldsToChunk(GetRender(), GetRenderSize(), row, results);
 
-    iter_++;
+    ++iter_;
     ++examined_rows_;
     ++total_read_row_;
     results->AddCount();
@@ -826,7 +851,7 @@ KStatus HashAggregateOperator::getAggResults(kwdbContext_p ctx,
       break;
     }
   }
-  auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
+  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
   if (fetchers != nullptr && fetchers->collected) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<int64_t, std::nano> duration = end - start;
@@ -834,7 +859,7 @@ KStatus HashAggregateOperator::getAggResults(kwdbContext_p ctx,
                    0, 0, examined_rows_);
   }
 
-  if (total_read_row_ == buckets_.size()) {
+  if (total_read_row_ == ht_->Size()) {
     is_done_ = true;
   }
   Return(KStatus::SUCCESS);
@@ -857,64 +882,257 @@ OrderedAggregateOperator::OrderedAggregateOperator(BaseOperator* input,
                                                    TSPostProcessSpec* post,
                                                    TABLE* table,
                                                    int32_t processor_id)
-    : BaseAggregator(input, spec, post, table, processor_id) {}
+    : BaseAggregator(input, spec, post, table, processor_id) {
+  append_additional_timestamp_ = false;
+}
 
 OrderedAggregateOperator::OrderedAggregateOperator(const OrderedAggregateOperator& other,
-                                                    BaseOperator* input,
-                                                    int32_t processor_id)
-    : BaseAggregator(other, input, processor_id) {}
+                                                   BaseOperator* input,
+                                                   int32_t processor_id)
+    : BaseAggregator(other, input, processor_id) {
+  append_additional_timestamp_ = false;
+}
 
 OrderedAggregateOperator::~OrderedAggregateOperator() {
   //  delete input
   if (is_clone_) {
     delete input_;
   }
-
-  SafeDeleteArray(bucket_);
 }
 
-EEIteratorErrCode OrderedAggregateOperator::Start(kwdbContext_p ctx) {
+EEIteratorErrCode OrderedAggregateOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
-  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  code = input_->Start(ctx);
-  if (EEIteratorErrCode::EE_OK != code) {
-    Return(code);
+  BaseAggregator::Init(ctx);
+
+  // construct the output column information for agg functions.
+  for (int i = 0; i < param_.aggs_size_; i++) {
+    agg_output_col_info_.emplace_back(param_.aggs_[i]->get_storage_length(),
+                                      param_.aggs_[i]->get_storage_type(),
+                                      param_.aggs_[i]->get_return_type());
   }
 
-  bucket_ = KNEW char[agg_row_size_];
-  std::memset(bucket_, 0, agg_row_size_);
-  InitFirstLastTimeStamp(bucket_);
-
-  Return(code);
-}
-
-EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
-  EnterFunc();
-  if (is_done_) {
-    Return(EEIteratorErrCode::EE_END_OF_RECORD);
-  }
-
-  if (nullptr == chunk) {
-    // init data chunk
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      col_info.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
-    }
-    chunk = std::make_unique<DataChunk>(col_info);
-    if (chunk->Initialize() < 0) {
-      chunk = nullptr;
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-      Return(EEIteratorErrCode::EE_ERROR);
-    }
-  }
-
-  KStatus ret = accumulateRows(ctx, chunk);
-  if (ret != KStatus::SUCCESS) {
+  constructAggResults();
+  if (agg_data_chunk_ == nullptr) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);
   }
 
   Return(EEIteratorErrCode::EE_OK);
+}
+
+EEIteratorErrCode OrderedAggregateOperator::Start(kwdbContext_p ctx) {
+  EnterFunc();
+  EEIteratorErrCode code = input_->Start(ctx);
+  // set current offset
+  cur_offset_ = offset_;
+  Return(code);
+}
+
+EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
+  EnterFunc()
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  int64_t duration = 0;
+  int64_t read_row_num = 0;
+
+  do {
+    DataChunkPtr input_chunk;
+    // read a batch of data from sub operator
+    code = input_->Next(ctx, input_chunk);
+    if (code != EEIteratorErrCode::EE_OK) {
+      if (code == EEIteratorErrCode::EE_END_OF_RECORD ||
+          code == EEIteratorErrCode::EE_TIMESLICE_OUT) {
+        is_done_ = true;
+
+        if (agg_data_chunk_ != nullptr) {
+          temporary_data_chunk_ = std::move(agg_data_chunk_);
+          temporary_data_chunk_->ResetLine();
+          temporary_data_chunk_->NextLine();
+          if (current_data_chunk_ == nullptr) {
+            constructDataChunk();
+            if (current_data_chunk_ == nullptr) {
+              EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+              Return(EEIteratorErrCode::EE_ERROR);
+            }
+          }
+          for (int idx = 0; idx < temporary_data_chunk_->Count(); idx++) {
+            if (current_data_chunk_->isFull()) {
+              output_queue_.push(std::move(current_data_chunk_));
+              // initialize a new agg result buffer.
+              constructDataChunk();
+              if (current_data_chunk_ == nullptr) {
+                EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+                Return(EEIteratorErrCode::EE_ERROR);
+              }
+            }
+            getAggResult(ctx, current_data_chunk_);
+            temporary_data_chunk_->NextLine();
+          }
+          temporary_data_chunk_.reset();
+        }
+        if (current_data_chunk_ != nullptr && current_data_chunk_->Count() == 0) {
+          handleEmptyResults(ctx);
+        }
+
+        if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
+          output_queue_.push(std::move(current_data_chunk_));
+        }
+
+        code = EEIteratorErrCode::EE_OK;
+        break;
+      }
+      LOG_ERROR("Failed to fetch data from child operator, return code = %d.\n", code);
+      Return(EEIteratorErrCode::EE_ERROR);
+    }
+
+    // no data,continue
+    if (input_chunk->Count() == 0) {
+      input_chunk = nullptr;
+      continue;
+    }
+
+    if (!is_done_) {
+      auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
+      if (fetchers != nullptr && fetchers->collected) {
+        goLock(fetchers->goMutux);
+        input_chunk->GetFvec().GetAnalyse(ctx);
+        goUnLock(fetchers->goMutux);
+        // analyse collection
+        read_row_num += input_chunk->Count();
+      }
+
+      auto start = std::chrono::high_resolution_clock::now();
+
+      input_chunk->ResetLine();
+      input_chunk->NextLine();
+      if (input_chunk->Count() > 0) {
+        KStatus status = ProcessData(ctx, input_chunk);
+
+        if (status != KStatus::SUCCESS) {
+          Return(EEIteratorErrCode::EE_ERROR)
+        }
+      }
+
+      auto end = std::chrono::high_resolution_clock::now();
+
+      if (fetchers != nullptr && fetchers->collected) {
+        std::chrono::duration<int64_t, std::nano> t = end - start;
+        duration += t.count();
+      }
+    } else {
+      if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
+        output_queue_.push(std::move(current_data_chunk_));
+      }
+    }
+  } while (!is_done_ && output_queue_.empty());
+
+  if (!output_queue_.empty()) {
+    chunk = std::move(output_queue_.front());
+
+    analyseFetcher(ctx, this->processor_id_, duration, read_row_num, 0, 0, 1, chunk->Count());
+
+    output_queue_.pop();
+    if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
+      Return(EEIteratorErrCode::EE_OK)
+    } else {
+      Return(code)
+    }
+  } else {
+    if (is_done_) {
+      Return(EEIteratorErrCode::EE_END_OF_RECORD)
+    } else {
+      Return(code)
+    }
+  }
+}
+
+KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& chunk) {
+  EnterFunc()
+  if (chunk == nullptr) {
+    Return(KStatus::FAIL)
+  }
+  std::queue<DataChunkPtr> agg_output_queue;
+  auto count_of_current_chunk = (k_int32) agg_data_chunk_->Count();
+
+  k_int32 target_row = count_of_current_chunk - 1;
+  k_uint32 row_batch_count = chunk->Count();
+
+  std::vector<DataChunk*> chunks;
+  chunks.push_back(agg_data_chunk_.get());
+
+  group_by_metadata_.reset(row_batch_count);
+  if (!group_cols_.empty()) {
+    for (k_uint32 row = 0; row < row_batch_count; ++row) {
+      bool is_new_group = last_group_key_.IsNewGroup(chunk, row, group_cols_, col_types_);
+
+      // new group or end of rowbatch
+      if (is_new_group) {
+        has_agg_result = true;
+        group_by_metadata_.setNewGroup(row);
+
+        if (agg_data_chunk_->isFull()) {
+          agg_output_queue.push(std::move(agg_data_chunk_));
+          // initialize a new agg result buffer.
+          constructAggResults();
+          if (agg_data_chunk_ == nullptr) {
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+            Return(KStatus::FAIL);
+          }
+          target_row = -1;
+          chunks.push_back(agg_data_chunk_.get());
+        }
+
+        ++target_row;
+        agg_data_chunk_->AddCount();
+
+        CombinedGroupKey group_keys;
+        AggregateFunc::ConstructGroupKeys(chunk.get(), group_cols_, col_types_, row, group_keys);
+
+        // update new group key
+        last_group_key_ = group_keys;
+      }
+
+      chunk->NextLine();
+    }
+  } else {
+    // if the group by column(s) is empty, it needs at least one row to hold the response.
+    if (agg_data_chunk_->Count() <= 0) {
+      agg_data_chunk_->AddCount();
+    }
+  }
+
+  k_int32 start_line_in_begin_chunk = group_cols_.empty() ? 0 : count_of_current_chunk - 1;
+  // need reset to the first line of row_batch before processing agg columns.
+  for (int i = 0; i < funcs_.size(); i++) {
+    chunk->ResetLine();
+    chunk->NextLine();
+    DistinctOpt opt{aggregations_[i].distinct(), col_types_, col_lens_, group_cols_};
+    if (funcs_[i]->addOrUpdate(chunks, start_line_in_begin_chunk, chunk.get(), group_by_metadata_, opt) < 0) {
+      Return(KStatus::FAIL);
+    }
+  }
+
+  while (!agg_output_queue.empty()) {
+    temporary_data_chunk_ = std::move(agg_output_queue.front());
+    agg_output_queue.pop();
+
+    temporary_data_chunk_->ResetLine();
+    temporary_data_chunk_->NextLine();
+    for (int idx = 0; idx < temporary_data_chunk_->Count(); idx++) {
+      if (current_data_chunk_->isFull()) {
+        output_queue_.push(std::move(current_data_chunk_));
+        // initialize a new agg result buffer.
+        constructDataChunk();
+        if (current_data_chunk_ == nullptr) {
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+          Return(KStatus::FAIL);
+        }
+      }
+      getAggResult(ctx, current_data_chunk_);
+      temporary_data_chunk_->NextLine();
+    }
+  }
+  temporary_data_chunk_.reset();
+  Return(KStatus::SUCCESS)
 }
 
 KStatus OrderedAggregateOperator::getAggResult(kwdbContext_p ctx, DataChunkPtr& chunk) {
@@ -948,125 +1166,7 @@ KStatus OrderedAggregateOperator::getAggResult(kwdbContext_p ctx, DataChunkPtr& 
     keep = 0;
   }
 
-  std::memset(bucket_, 0, agg_row_size_);
-  has_agg_result = false;
-
   return KStatus::SUCCESS;
-}
-
-KStatus OrderedAggregateOperator::accumulateRows(kwdbContext_p ctx, DataChunkPtr& chunk) {
-  EnterFunc();
-  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  int64_t duration = 0;
-  int64_t read_row_num = 0;
-
-  for (;;) {
-    if (chunk_ == nullptr) {
-      // batch_ is null，read a batch of data from sub operator
-      code = input_->Next(ctx, chunk_);
-      if (code != EEIteratorErrCode::EE_OK) {
-        if (code == EEIteratorErrCode::EE_END_OF_RECORD ||
-            code == EEIteratorErrCode::EE_TIMESLICE_OUT) {
-          is_done_ = true;
-          code = EEIteratorErrCode::EE_OK;
-          break;
-        }
-        LOG_ERROR("Failed to fetch data from child operator, return code = %d.\n", code);
-        Return(KStatus::FAIL);
-      }
-
-      // no data,continue
-      if (chunk_->Count() == 0) {
-        chunk_ = nullptr;
-        continue;
-      }
-    }
-
-    auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
-    if (fetchers != nullptr && fetchers->collected) {
-      goLock(fetchers->goMutux);
-      chunk_->GetFvec().GetAnalyse(ctx);
-      goUnLock(fetchers->goMutux);
-      // analyse collection
-      read_row_num += chunk_->Count();
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    // dispose data
-    while (processed_rows < chunk_->Count()) {
-      // groupby col
-      CombinedGroupKey group_keys;
-      AggregateFunc::ConstructGroupKeys(chunk_, group_cols_, data_types_, processed_rows, group_keys);
-
-      if (!(group_keys == last_group_key_)) {
-        // bucket_ write to chunk
-        if (has_agg_result) {
-          if (getAggResult(ctx, chunk) != KStatus::SUCCESS) {
-            Return(KStatus::FAIL);
-          }
-          // chunk is full
-          if (chunk->Count() == chunk->Capacity()) {
-            Return(KStatus::SUCCESS);
-          }
-        }
-
-        // set new group key
-        last_group_key_ = group_keys;
-      }
-
-      accumulateRowIntoBucket(ctx, bucket_, agg_null_offset_, chunk_, processed_rows);
-      has_agg_result = true;
-      ++processed_rows;
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-
-    if (fetchers != nullptr && fetchers->collected) {
-      std::chrono::duration<int64_t, std::nano> t = end - start;
-      duration += t.count();
-    }
-
-    // batch_ read finish，read next batch of data
-    chunk_ = nullptr;
-    processed_rows = 0;
-  }
-
-  // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was aggregated.
-  auto all_start = std::chrono::high_resolution_clock::now();
-  if (!has_agg_result && group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
-    // return NULL
-    CombinedGroupKey group_keys;
-    group_keys.Reserve(1);
-    group_keys.AddGroupKey(std::monostate(), roachpb::DataType::UNKNOWN);
-
-    // return 0, if agg type is COUNT_ROW or COUNT
-    for (int i = 0; i < aggregations_.size(); i++) {
-      if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT_ROWS ||
-          aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT ||
-          aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_SUM_INT) {
-        // set not null ,default 0
-        AggregateFunc::SetNotNull(bucket_ + agg_null_offset_, i);
-      }
-    }
-    has_agg_result = true;
-  }
-
-  // dispos the result of last agg
-  if (has_agg_result) {
-    if (getAggResult(ctx, chunk) != KStatus::SUCCESS) {
-      Return(KStatus::FAIL);
-    }
-    // chunk is full
-    if (chunk->Count() == chunk->Capacity()) {
-      Return(KStatus::SUCCESS);
-    }
-  }
-  auto all_end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<int64_t, std::nano> all_t = all_end - all_start;
-  duration += all_t.count();
-  analyseFetcher(ctx, this->processor_id_, duration, read_row_num, 0, 0, 1, chunk->Count());
-
-  Return(KStatus::SUCCESS);
 }
 
 BaseOperator* OrderedAggregateOperator::Clone() {

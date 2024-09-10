@@ -13,24 +13,43 @@
 
 namespace kwdbts {
 
-k_bool AggregateFunc::isDistinct(DataChunkPtr& chunk, k_uint32 line, std::vector<roachpb::DataType>& data_types,
-                                 std::vector<k_uint32>& group_cols) {
+int AggregateFunc::isDistinct(IChunk* chunk, k_uint32 line,
+                                 std::vector<roachpb::DataType>& col_types,
+                                 std::vector<k_uint32>& col_lens,
+                                 std::vector<k_uint32>& group_cols,
+                                 k_bool *is_distinct) {
   // group col + agg col
   std::vector<k_uint32> all_cols(group_cols);
   all_cols.insert(all_cols.end(), arg_idx_.begin(), arg_idx_.end());
 
-  // CominbedGroupKey
-  CombinedGroupKey field_keys;
-  AggregateFunc::ConstructGroupKeys(chunk, all_cols, data_types, line, field_keys);
-
-  // find the same key
-  if (seen.find(field_keys) != seen.end()) {
-    return false;
+  if (seen_ == nullptr) {
+    std::vector<roachpb::DataType> distinct_types;
+    std::vector<k_uint32> distinct_lens;
+    for (auto& col : all_cols) {
+      distinct_types.push_back(col_types[col]);
+      distinct_lens.push_back(col_lens[col]);
+    }
+    seen_ = KNEW LinearProbingHashTable(distinct_types, distinct_lens, 0);
+    if (seen_->Resize() < 0) {
+      return -1;
+    }
   }
 
-  seen.emplace(field_keys);
+  k_uint64 loc;
+  if (seen_->FindOrCreateGroups(chunk, line, all_cols, &loc) < 0) {
+    return -1;
+  }
 
-  return true;
+  if (seen_->IsUsed(loc)) {
+    *is_distinct = false;
+    return 0;
+  }
+
+  seen_->SetUsed(loc);
+  seen_->CopyGroups(chunk, line, all_cols, loc);
+
+  *is_distinct = true;
+  return 0;
 }
 
 }   // namespace kwdbts

@@ -8,11 +8,13 @@
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
+
 #pragma once
 
 #include <memory>
 #include <vector>
 
+#include "ee_data_container.h"
 #include "ee_table.h"
 #include "kwdb_type.h"
 #include "ts_common.h"
@@ -43,7 +45,7 @@ struct TagRawData {
   k_bool is_null{false};
 };
 
-class RowBatch {
+class RowBatch{
  public:
   enum Stage {
     STAGE_UNKNOW = -1,
@@ -79,7 +81,7 @@ class RowBatch {
   /**
    *  Move the cursor to the next line, default 0
    */
-  virtual k_uint32 NextLine() = 0;
+  virtual k_int32 NextLine() = 0;
   /**
    *  Set the cursor to the first line
    */
@@ -96,6 +98,8 @@ class RowBatch {
 
   virtual void AddSelection() {}
   virtual void EndSelection() {}
+  virtual void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
+                              roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {}
 };
 
 };  // namespace kwdbts

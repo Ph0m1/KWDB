@@ -42,6 +42,7 @@ group by t.point_sn  order by count(*) desc  limit 1;
                               | distributed      | true
                               | vectorized       | false
   render                      |                  |
+   │                          | engine type      | time series
    │                          | point_sn         | point_sn
    └── limit                  |                  |
         │                     | engine type      | time series
@@ -63,6 +64,6 @@ group by t.point_sn  order by count(*) desc  limit 1;
                               | spans:fromTime   | 2024-05-01 00:00:00.001 +0000 UTC
                               | spans:toTime     | 2024-05-31 23:59:59.999 +0000 UTC
                               | tag filter[0]    | work_area_sn = 'GZZYQ'
-(24 rows)
+(25 rows)
 > drop database test cascade;
 DROP DATABASE

@@ -49,9 +49,9 @@ else()
             CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.3)
             message(WARNING "GNU C/C++ compiler version should greater and equal than 7.3")
         endif()
-        if(CMAKE_C_COMPILER_VERSION VERSION_GREATER 13 OR 
-            CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
-            message(WARNING "GNU C/C++ compiler version should less and equal than 13")
+        if(CMAKE_C_COMPILER_VERSION VERSION_GREATER 13.2 OR
+            CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.2)
+            message(WARNING "GNU C/C++ compiler version should less and equal than 13.2")
         endif()
     endif()
 endif()

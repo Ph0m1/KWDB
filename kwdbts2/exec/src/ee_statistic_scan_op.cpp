@@ -30,7 +30,7 @@ TableStatisticScanOperator::TableStatisticScanOperator(
       param_(spec, post, table),
       input_(input) {
   for (int i = 0; i < spec->tsspans_size(); i++) {
-    TsSpan *span = spec->mutable_tsspans(i);
+    TsSpan* span = spec->mutable_tsspans(i);
     KwTsSpan ts_span;
     if (span->has_fromtimestamp()) {
       ts_span.begin = span->fromtimestamp();
@@ -155,6 +155,17 @@ EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
       LOG_ERROR("ResolveOutputFields() failed\n");
       break;
     }
+    // init column info used by data chunk.
+    output_col_info_.reserve(output_fields_.size());
+    for (auto field : output_fields_) {
+      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    }
+
+    constructDataChunk();
+    if (current_data_chunk_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR)
+    }
   } while (0);
 
   Return(ret);
@@ -181,60 +192,93 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
-
-  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  ScanRowBatchPtr data_handle;
-  code = InitScanRowBatch(ctx, &data_handle);
-  if (EEIteratorErrCode::EE_OK != code) {
-    Return(code);
-  }
-  code = handler_->TsNext(ctx);
-  if (EEIteratorErrCode::EE_OK != code) {
-    Return(code);
-  }
-
-  // reset line
-  data_handle->ResetLine();
-  if (data_handle->Count() == 0) {
-    Return(code);
-  }
-
   auto start = std::chrono::high_resolution_clock::now();
-  // init DataChunk
-  if (nullptr == chunk) {
-    // init column info
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      col_info.emplace_back(field->get_storage_length(),
-                            field->get_storage_type(),
-                            field->get_return_type());
-    }
-    chunk = std::make_unique<DataChunk>(col_info, data_handle->Count());
-    if (chunk->Initialize() < 0) {
-      chunk = nullptr;
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-      Return(EEIteratorErrCode::EE_ERROR);
-    }
-  }
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
-  // dispose render
-  KStatus status = chunk->AddRowBatchData(ctx, data_handle.get(), renders_);
-  if (status != KStatus::SUCCESS) {
-    Return(EEIteratorErrCode::EE_ERROR);
-  }
-  auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
+  k_int64 counter = 0;
+  do {
+    ScanRowBatchPtr data_handle;
+    code = InitScanRowBatch(ctx, &data_handle);
+    if (EEIteratorErrCode::EE_OK != code) {
+      Return(code);
+    }
+
+    while (!is_done_) {
+      code = handler_->TsNext(ctx);
+      if (EEIteratorErrCode::EE_OK != code) {
+        is_done_ = true;
+        code = EEIteratorErrCode::EE_END_OF_RECORD;
+        if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
+          output_queue_.push(std::move(current_data_chunk_));
+        }
+        break;
+      }
+      if (data_handle->count_ < 1) {
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    // reset line
+    data_handle->ResetLine();
+    counter+=data_handle->Count();
+
+    if (!is_done_) {
+      if (data_handle->Count() > 0) {
+        if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < data_handle->Count()) {
+          if (current_data_chunk_->Count() > 0) {
+            output_queue_.push(std::move(current_data_chunk_));
+          }
+          k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_);
+          if (capacity >= data_handle->Count()) {
+            constructDataChunk();
+          } else {
+            constructDataChunk(data_handle->Count());
+          }
+          if (current_data_chunk_ == nullptr) {
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+            Return(EEIteratorErrCode::EE_ERROR)
+          }
+        }
+        KStatus status = current_data_chunk_->AddRowBatchData(ctx, data_handle.get(), renders_);
+        if (status != KStatus::SUCCESS) {
+          Return(EEIteratorErrCode::EE_ERROR);
+        }
+      }
+    } else {
+      if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
+        output_queue_.push(std::move(current_data_chunk_));
+      }
+    }
+  } while (!is_done_ && output_queue_.empty());
+
+  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
   if (fetchers != nullptr && fetchers->collected) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<int64_t, std::nano> duration = end - start;
     if (nullptr != chunk) {
       int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_,
-                        duration.count(), int64_t(data_handle->count_), bytes_read, 0, 0);
+                                  duration.count(), counter, bytes_read, 0, 0);
     }
   }
 
-  Return(code);
+  if (!output_queue_.empty()) {
+    chunk = std::move(output_queue_.front());
+    output_queue_.pop();
+    if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
+      Return(EEIteratorErrCode::EE_OK)
+    } else {
+      Return(code)
+    }
+  } else {
+    if (is_done_) {
+      Return(EEIteratorErrCode::EE_END_OF_RECORD);
+    } else {
+      Return(code)
+    }
+  }
 }
 
 BaseOperator* TableStatisticScanOperator::Clone() {

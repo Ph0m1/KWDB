@@ -126,6 +126,17 @@ values ('2023-05-31 10:00:10', 58, null, 24, 61, 22, 63, 6, 44, null, 38, 'host_
        ('2023-05-31 10:00:10', 21, 77, 90, 83, 41, -84, 26, 60, 43, null, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
        ('2023-05-31 10:00:10', 90, 0, 81, 28, 25, -44, 8, 89, 11, 76, 'host_2', 'aaa', -888888, 6666, '', '', '', '', '', '');
 INSERT 10
+> SELECT hostname, max(usage_user) as max_cur, min(usage_user) as min_cur, avg(usage_user) as avg_cur
+FROM test.cpu
+where 1 = 1
+  and hostname = 'host_4'
+  and k_timestamp > '2023-01-01 00:00:00'::timestamp and k_timestamp < '2024-01-01 00:00:00':: timestamp
+group by hostname
+order by hostname asc;
+  hostname | max_cur | min_cur | avg_cur
+-----------+---------+---------+----------
+  host_4   |      84 |       2 |    48.5
+(1 row)
 > SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        lastts(usage_guest),
@@ -1659,6 +1670,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | any_not_null
    │                               | lastts           | lastts
@@ -1715,13 +1727,14 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]    | hostname = 'host_0'
-(59 rows)
+(60 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, first_row(usage_idle), lastts(usage_nice), lastts(usage_irq), lastts(usage_guest_nice), max(usage_idle), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND hostname = 'host_1' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |               description
 -----------------------------------+------------------+------------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | any_not_null
    │                               | first_row        | first_row
@@ -1778,13 +1791,14 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]    | hostname = 'host_1'
-(59 rows)
+(60 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, sum(usage_guest), count(usage_idle), avg(usage_system), max(usage_steal), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND hostname = 'host_0' AND region = 'aaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |            description
 -----------------------------------+------------------+------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | any_not_null
    │                               | sum              | sum
@@ -1837,13 +1851,14 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]    | hostname = 'host_0'
                                    | tag filter[1]    | region = 'aaa'
-(55 rows)
+(56 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, last_row(usage_iowait), avg(usage_irq), max(usage_system), firstts(usage_irq), lastts(usage_softirq), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND hostname = 'host_0' AND region = 'aaaaaaaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |             description
 -----------------------------------+------------------+--------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | any_not_null
    │                               | last_row         | last_row
@@ -1899,13 +1914,14 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]    | hostname = 'host_0'
                                    | tag filter[1]    | region = 'aaaaaaaa'
-(58 rows)
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,first_row(usage_irq),lastts(usage_iowait),sum(usage_iowait),hostname,first_row(usage_system),lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND region = 'aaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |                description
 -----------------------------------+------------------+--------------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | first_row        | first_row
    │                               | lastts           | lastts
@@ -1956,13 +1972,14 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]    | region = 'aaa'
-(53 rows)
+(54 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, first (usage_nice), min (usage_system), min (usage_softirq), last_row(usage_guest_nice), hostname, lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND region = 'aaaaaaaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |                description
 -----------------------------------+------------------+--------------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | first            | first
    │                               | min              | min
@@ -2014,7 +2031,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]    | region = 'aaaaaaaa'
-(54 rows)
+(55 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, avg(usage_steal), avg(usage_guest_nice), last_row(usage_guest), min(usage_idle), hostname, lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts LIMIT 10;
                 tree               |      field       |                    description
 -----------------------------------+------------------+----------------------------------------------------
@@ -2159,6 +2176,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | any_not_null
    │                               | min              | min
@@ -2214,7 +2232,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | tag filter[0]    | hostname = 'host_0'
                                    | tag filter[1]    | region = 'aaa'
                                    | tag filter[2]    | datacenter = 888888
-(58 rows)
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        first_row(usage_iowait),
@@ -2298,6 +2316,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | sum              | sum
@@ -2342,7 +2361,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(47 rows)
+(48 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        min(usage_nice),
@@ -2360,6 +2379,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | min              | min
@@ -2415,7 +2435,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(58 rows)
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        count(usage_iowait), last (usage_guest_nice), sum (usage_softirq), first_row(usage_user),
@@ -2496,6 +2516,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | firstts          | firstts
@@ -2543,7 +2564,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(50 rows)
+(51 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        first_row(usage_guest),
@@ -2560,6 +2581,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | first_row        | first_row
@@ -2607,7 +2629,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(50 rows)
+(51 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname, first (usage_steal), count (usage_system), firstts(usage_steal), lastts(usage_steal), first_row(usage_steal),
     lastts(usage_user) as last_ts
@@ -2622,6 +2644,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | first            | first
@@ -2675,7 +2698,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(56 rows)
+(57 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname, first (usage_guest_nice), last (usage_guest), first (usage_iowait), firstts(usage_guest),
     lastts(usage_user) as last_ts
@@ -2690,6 +2713,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | first            | first
@@ -2741,7 +2765,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(54 rows)
+(55 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        lastts(usage_user),
@@ -2758,6 +2782,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | lastts           | lastts
@@ -2806,7 +2831,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(51 rows)
+(52 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        firstts(usage_idle),
@@ -2825,6 +2850,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | firstts          | firstts
@@ -2880,7 +2906,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(58 rows)
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        max(usage_nice), first (usage_system), avg (usage_idle), last (usage_irq), first (usage_irq),
@@ -2896,6 +2922,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | max              | max
@@ -2951,7 +2978,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(58 rows)
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        max(usage_guest_nice),
@@ -2970,6 +2997,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | max              | max
@@ -3025,7 +3053,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(58 rows)
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        min(usage_guest_nice),
@@ -3035,6 +3063,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | min              | min
@@ -3079,13 +3108,14 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(47 rows)
+(48 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, last (usage_steal), count (usage_user), avg (usage_iowait), count (usage_guest), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |                    description
 -----------------------------------+------------------+----------------------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | last             | last
@@ -3137,13 +3167,14 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(54 rows)
+(55 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, count(usage_guest_nice), firstts(usage_softirq), last (usage_nice), sum (usage_user), max (usage_iowait), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |                    description
 -----------------------------------+------------------+----------------------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
    │                               | count            | count
@@ -3199,13 +3230,14 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(58 rows)
+(59 rows)
 > explain SELECT count(usage_irq),time_bucket(k_timestamp, '2s') as k_timestamp_b,hostname,avg(usage_softirq),first_row(usage_softirq),first_row(usage_nice), last (usage_iowait), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |      field       |                    description
 -----------------------------------+------------------+----------------------------------------------------
                                    | distributed      | true
                                    | vectorized       | false
   render                           |                  |
+   │                               | engine type      | time series
    │                               | count            | count
    │                               | k_timestamp_b    | k_timestamp_b
    │                               | hostname         | hostname
@@ -3261,7 +3293,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | access mode      | tableTableMeta
                                    | spans:fromTime   | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
-(58 rows)
+(59 rows)
 > drop database test cascade;
 DROP DATABASE
 > create ts database test;

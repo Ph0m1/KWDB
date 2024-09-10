@@ -75,6 +75,7 @@ TableScanOperator::TableScanOperator(const TableScanOperator& other, BaseOperato
 }
 
 TableScanOperator::~TableScanOperator() = default;
+
 EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
 
@@ -118,6 +119,28 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
       LOG_ERROR("ResolveOutputFields() failed\n");
       break;
     }
+
+    // init column info used by data chunk.
+    output_col_info_.reserve(output_fields_.size());
+    for (auto field : output_fields_) {
+      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    }
+
+    constructDataChunk();
+    if (current_data_chunk_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR)
+    }
+
+    batch_copy_ = nullptr == filter_ && 0 == offset_ && 0 == limit_;
+
+    for (int i = 0; i < num_; i++) {
+      auto field = renders_[i];
+      if (field->get_field_type() != Field::Type::FIELD_ITEM) {
+        batch_copy_ = false;
+      }
+    }
+
     if (!is_clone_) {
       ret = param_.ResolveScanCols(ctx);
     }
@@ -150,7 +173,7 @@ EEIteratorErrCode TableScanOperator::Start(kwdbContext_p ctx) {
 EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThdContext *thd = current_thd;
+  KWThdContext* thd = current_thd;
 
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
@@ -216,15 +239,20 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
 EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThdContext *thd = current_thd;
+  KWThdContext* thd = current_thd;
 
   auto start = std::chrono::high_resolution_clock::now();
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
   do {
-    if (is_done_) {
-      Return(EEIteratorErrCode::EE_END_OF_RECORD);
+    if (limit_ && examined_rows_ >= limit_) {
+      code = EEIteratorErrCode::EE_END_OF_RECORD;
+      is_done_ = true;
+      if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
+        output_queue_.push(std::move(current_data_chunk_));
+      }
+      break;
     }
 
     ScanRowBatchPtr data_handle;
@@ -233,9 +261,18 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
       break;
     }
     // read data
-    while (true) {
+    while (!is_done_) {
       code = handler_->TsNext(ctx);
       if (EEIteratorErrCode::EE_OK != code) {
+        is_done_ = true;
+        break;
+      }
+
+      if (data_handle->count_ < 1) continue;
+
+      if (nullptr == filter_ && 0 == cur_offset_ && 0 == limit_) {
+        total_read_row_ += data_handle->count_;
+        examined_rows_ += data_handle->count_;
         break;
       }
 
@@ -258,7 +295,6 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
         }
 
         if (limit_ && examined_rows_ >= limit_) {
-          is_done_ = true;
           break;
         }
 
@@ -273,34 +309,36 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
       }
     }
 
-    // reset line
-    data_handle->ResetLine();
-    if (data_handle->Count() > 0) {
-      // init DataChunk
-      if (nullptr == chunk) {
-        // init column
-        std::vector<ColumnInfo> col_info;
-        col_info.reserve(output_fields_.size());
-        for (auto field : output_fields_) {
-          col_info.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    if (!is_done_) {
+      if (data_handle->Count() > 0) {
+        if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < data_handle->Count()) {
+          // the current chunk have no enough space to save the whole data results in data_handle,
+          // push it into the output queue, create a new one and ensure it has enough space.
+          if (current_data_chunk_->Count() > 0) {
+            output_queue_.push(std::move(current_data_chunk_));
+          }
+          k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_);
+          if (capacity >= data_handle->Count()) {
+            constructDataChunk();
+          } else {
+            constructDataChunk(data_handle->Count());
+          }
+          if (current_data_chunk_ == nullptr) {
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+            Return(EEIteratorErrCode::EE_ERROR)
+          }
         }
-
-        chunk = std::make_unique<DataChunk>(col_info, data_handle->Count());
-        if (chunk->Initialize() < 0) {
-          chunk = nullptr;
-          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-          Return(EEIteratorErrCode::EE_ERROR);
-        }
+        current_data_chunk_->AddRowBatchData(ctx, data_handle.get(), renders_,
+                                             batch_copy_ && !data_handle->hasFilter());
       }
-
-      // dispose data
-      KStatus status = chunk->AddRowBatchData(ctx, data_handle.get(), renders_);
-      if (status != KStatus::SUCCESS) {
-        Return(EEIteratorErrCode::EE_ERROR);
+    } else {
+      if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
+        output_queue_.push(std::move(current_data_chunk_));
       }
     }
-  } while (0);
-  auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
+  } while (!is_done_ && output_queue_.empty());
+
+  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
   if (fetchers != nullptr && fetchers->collected) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<int64_t, std::nano> duration = end - start;
@@ -308,11 +346,25 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
       ScanRowBatchPtr data_handle = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
       int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_, duration.count(),
-                        int64_t(data_handle->count_), bytes_read, 0, 0);
+                                  int64_t(data_handle->count_), bytes_read, 0, 0);
     }
   }
 
-  Return(code);
+  if (!output_queue_.empty()) {
+    chunk = std::move(output_queue_.front());
+    output_queue_.pop();
+    if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
+      Return(EEIteratorErrCode::EE_OK)
+    } else {
+      Return(code)
+    }
+  } else {
+    if (is_done_) {
+      Return(EEIteratorErrCode::EE_END_OF_RECORD);
+    } else {
+      Return(code)
+    }
+  }
 }
 
 EEIteratorErrCode TableScanOperator::Reset(kwdbContext_p ctx) {
@@ -339,15 +391,15 @@ EEIteratorErrCode TableScanOperator::InitHandler(kwdbContext_p ctx) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
   handler_->Init(ctx);
-  handler_->SetTagScan(static_cast<TagScanOperator *>(input_));
+  handler_->SetTagScan(static_cast<TagScanOperator*>(input_));
   handler_->SetSpans(&ts_kwspans_);
 
   Return(ret);
 }
 
-EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch) {
+EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr* row_batch) {
   EnterFunc();
-  KWThdContext *thd = current_thd;
+  KWThdContext* thd = current_thd;
   *row_batch = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
   if (nullptr != *row_batch) {
     (*row_batch)->Reset();
@@ -366,7 +418,7 @@ EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRow
 
 RowBatchPtr TableScanOperator::GetRowBatch(kwdbContext_p ctx) {
   EnterFunc();
-  KWThdContext *thd = current_thd;
+  KWThdContext* thd = current_thd;
   Return(thd->GetRowBatch());
 }
 

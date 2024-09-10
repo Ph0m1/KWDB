@@ -21,14 +21,25 @@ namespace kwdbts {
 static const k_uint16 STRING_WIDE = sizeof(k_uint16);
 static const k_uint16 BOOL_WIDE = sizeof(k_bool);
 
-bool IsStringType(roachpb::DataType storage_type);
+static inline bool IsFixedStringType(roachpb::DataType storage_type) {
+  return storage_type == roachpb::DataType::CHAR || storage_type == roachpb::DataType::VARCHAR ||
+         storage_type == roachpb::DataType::NCHAR || storage_type == roachpb::DataType::BINARY;
+}
+
+static inline bool IsVarStringType(roachpb::DataType storage_type) {
+  return storage_type == roachpb::DataType::NVARCHAR || storage_type == roachpb::DataType::VARBINARY;
+}
+
+static inline bool IsStringType(roachpb::DataType storage_type) {
+  return IsFixedStringType(storage_type) || IsVarStringType(storage_type);
+}
 
 bool IsFirstLastAggFunc(kwdbts::TSAggregatorSpec_Func func);
 
 // create agg field by input field and agg type
-KStatus CreateAggField(k_int32 i, Field* input_field, BaseOperator *agg_op, FieldAggNum **func_field);
+KStatus CreateAggField(k_int32 i, Field* input_field, BaseOperator* agg_op, FieldAggNum** func_field);
 
 // convert field to chunk
-void FieldsToChunk(Field **fields, k_uint32 field_num, k_uint32 row, DataChunkPtr& chunk);
+void FieldsToChunk(Field** fields, k_uint32 field_num, k_uint32 row, DataChunkPtr& chunk);
 
 }       // namespace kwdbts

@@ -18,7 +18,7 @@
 #include "ee_data_chunk.h"
 #include "ee_global.h"
 #include "ee_pb_plan.pb.h"
-#include "ee_row_container.h"
+#include "ee_memory_data_container.h"
 #include "ee_scan_op.h"
 #include "ee_sort_flow_spec.h"
 #include "kwdb_type.h"

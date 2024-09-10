@@ -45,6 +45,7 @@ DistinctOperator::~DistinctOperator() {
   if (is_clone_) {
     delete input_;
   }
+  SafeDeletePointer(seen_);
 }
 
 EEIteratorErrCode DistinctOperator::Init(kwdbContext_p ctx) {
@@ -78,6 +79,19 @@ EEIteratorErrCode DistinctOperator::Init(kwdbContext_p ctx) {
       code = EEIteratorErrCode::EE_ERROR;
       break;
     }
+
+    // custom hash set
+    std::vector<roachpb::DataType> distinct_types;
+    std::vector<k_uint32> distinct_lens;
+    for (const auto& col : distinct_cols_) {
+      distinct_types.push_back(input_fields_[col]->get_storage_type());
+      distinct_lens.push_back(input_fields_[col]->get_storage_length());
+    }
+
+    seen_ = KNEW LinearProbingHashTable(distinct_types, distinct_lens, 0);
+    if (seen_ == nullptr || seen_->Resize() < 0) {
+      Return(EEIteratorErrCode::EE_ERROR);
+    }
   } while (0);
   Return(code);
 }
@@ -90,6 +104,9 @@ EEIteratorErrCode DistinctOperator::Start(kwdbContext_p ctx) {
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);
   }
+
+  // set current offset
+  cur_offset_ = offset_;
 
   Return(code);
 }
@@ -141,12 +158,13 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
         break;
       }
 
-      // distinct col
-      CombinedGroupKey distinct_keys;
-      encodeDistinctCols(data_chunk, row, distinct_keys);
+      k_uint64 loc;
+      if (seen_->FindOrCreateGroups(data_chunk.get(), row, distinct_cols_, &loc) < 0) {
+        Return(EEIteratorErrCode::EE_ERROR);
+      }
 
       // not find
-      if (seen.find(distinct_keys) == seen.end()) {
+      if (!seen_->IsUsed(loc)) {
         // limit
         if (limit_ && examined_rows_ >= limit_) {
           code = EEIteratorErrCode::EE_END_OF_RECORD;
@@ -169,20 +187,24 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
         ++i;
 
         // update distinct info
-        seen.insert(distinct_keys);
+        seen_->SetUsed(loc);
+        seen_->CopyGroups(data_chunk.get(), row, distinct_cols_, loc);
       }
     }
   } while (0);
-  auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
+  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
   if (fetchers != nullptr && fetchers->collected) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<int64_t, std::nano> duration = end - start;
     if (nullptr != chunk) {
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_,
-                        duration.count(), read_row_num, 0, 1, 0);
+                                  duration.count(), read_row_num, 0, 1, 0);
     }
   }
 
+  if (chunk != nullptr && chunk->Count() > 0) {
+    Return(EEIteratorErrCode::EE_OK)
+  }
   Return(code);
 }
 
@@ -224,75 +246,16 @@ KStatus DistinctOperator::ResolveDistinctCols(kwdbContext_p ctx) {
 void DistinctOperator::encodeDistinctCols(DataChunkPtr& chunk, k_uint32 line, CombinedGroupKey& distinct_keys) {
   distinct_keys.Reserve(distinct_cols_.size());
   for (const auto& col : distinct_cols_) {
-    DatumPtr ptr = chunk->GetData(line, col);
-    bool is_null = chunk->IsNull(line, col);
-
     roachpb::DataType col_type = input_fields_[col]->get_storage_type();
+
+    bool is_null = chunk->IsNull(line, col);
     if (is_null) {
-      distinct_keys.AddGroupKey(std::monostate(), col_type);
+      distinct_keys.AddGroupKey(nullptr, col_type);
       continue;
     }
-    switch (col_type) {
-      case roachpb::DataType::BOOL: {
-        k_bool val = *reinterpret_cast<k_bool*>(ptr);
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::SMALLINT: {
-        k_int16 val = *reinterpret_cast<k_int16*>(ptr);
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::INT: {
-        k_int32 val = *reinterpret_cast<k_int32*>(ptr);
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::TIMESTAMP:
-      case roachpb::DataType::TIMESTAMPTZ:
-      case roachpb::DataType::DATE:
-      case roachpb::DataType::BIGINT: {
-        k_int64 val = *reinterpret_cast<k_int64*>(ptr);
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::FLOAT: {
-        k_float32 val = *reinterpret_cast<k_float32*>(ptr);
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::DOUBLE: {
-        k_double64 val = *reinterpret_cast<k_double64*>(ptr);
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::CHAR:
-      case roachpb::DataType::VARCHAR:
-      case roachpb::DataType::NCHAR:
-      case roachpb::DataType::NVARCHAR:
-      case roachpb::DataType::BINARY:
-      case roachpb::DataType::VARBINARY: {
-        k_uint16 len;
-        std::memcpy(&len, ptr, sizeof(k_uint16));
-        std::string val = std::string{ptr + sizeof(k_uint16), len};
 
-        distinct_keys.AddGroupKey(val, col_type);
-        break;
-      }
-      case roachpb::DataType::DECIMAL: {
-        k_bool is_double = *reinterpret_cast<k_bool*>(ptr);
-        if (is_double) {
-          k_double64 val = *reinterpret_cast<k_double64*>(ptr + sizeof(k_bool));
-          distinct_keys.AddGroupKey(val, roachpb::DataType::DOUBLE);
-        } else {
-          k_int64 val = *reinterpret_cast<k_int64*>(ptr + sizeof(k_bool));
-          distinct_keys.AddGroupKey(val, roachpb::DataType::BIGINT);
-        }
-        break;
-      }
-      default:
-        break;
-    }
+    DatumPtr ptr = chunk->GetData(line, col);
+    distinct_keys.AddGroupKey(ptr, col_type);
   }
 }
 

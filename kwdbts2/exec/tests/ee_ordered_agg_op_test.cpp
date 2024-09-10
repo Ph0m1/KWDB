@@ -87,13 +87,10 @@ TEST_F(TestAggIterator, AggTest) {
   ASSERT_EQ(agg->Start(ctx_), EE_OK);
 
   DataChunkPtr chunk = nullptr;
-  k_int32 j = 2;
-  while (j--) {
-    if (1 == j) {
-      ASSERT_EQ(agg->Next(ctx_, chunk), EE_OK);
-    } else {
-      ASSERT_EQ(agg->Next(ctx_, chunk), EE_END_OF_RECORD);
-    }
+  EEIteratorErrCode code = agg->Next(ctx_, chunk);
+  while (code != EE_END_OF_RECORD) {
+    ASSERT_EQ(code, EE_OK);
+    code = agg->Next(ctx_, chunk);
   }
 
   ret = agg->Close(ctx_);

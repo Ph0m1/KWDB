@@ -123,7 +123,7 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
       continue;
     }
 
-    chunk->InsertData(ctx, input_chunk->GetRow(row), num_ != 0 ? renders_ : nullptr);
+    chunk->InsertData(ctx, input_chunk, num_ != 0 ? renders_ : nullptr);
     ++examined_rows_;
     if (limit_ > 0 && examined_rows_ >= limit_) {
       break;

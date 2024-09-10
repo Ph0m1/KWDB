@@ -17,6 +17,7 @@
 #include <queue>
 #include <vector>
 
+#include "ee_data_container.h"
 #include "cm_kwdb_context.h"
 #include "ee_encoding.h"
 #include "ee_field.h"
@@ -29,58 +30,6 @@
 #include "me_metadata.pb.h"
 
 namespace kwdbts {
-
-typedef char* DatumPtr;
-// A pointer to a row of data
-typedef char* DatumRowPtr;
-class RowContainer;
-class DataChunk;
-typedef std::unique_ptr<RowContainer> RowContainerPtr;
-typedef std::unique_ptr<DataChunk> DataChunkPtr;
-
-/**
- * Structure to store column type, length.
- */
-struct ColumnInfo {
-  k_uint32 storage_len;
-  roachpb::DataType storage_type;
-  KWDBTypeFamily return_type;
-
-  ColumnInfo(k_uint32 storage_len, roachpb::DataType storage_type,
-             KWDBTypeFamily return_type)
-      : storage_len(storage_len),
-        storage_type(storage_type),
-        return_type(return_type) {}
-};
-
-class IChunk {
- public:
-  /**
-   * @brief Check whether it is null at (row, col)
-   * @param[in] row
-   * @param[in] col
-   */
-  virtual bool IsNull(k_uint32 row, k_uint32 col) = 0;
-
-  /**
-   * @brief Check whether it is null at (current_line, col)
-   * @param[in] col
-   */
-  virtual bool IsNull(k_uint32 col) = 0;
-
-  /**
-   * @brief Get data pointer at (row, col)
-   * @param[in] row
-   * @param[in] col
-   */
-  virtual DatumPtr GetData(k_uint32 row, k_uint32 col) = 0;
-
-  /**
-   * @brief Get data pointer at (current_line, col)
-   * @param[in] col
-   */
-  virtual DatumPtr GetData(k_uint32 col) = 0;
-};
 
 /**
  * The data chunk class is the intermediate representation used by the execution
@@ -102,23 +51,15 @@ class IChunk {
  *             |     Storage     |
  *             +-----------------+
  *
- * Data in the chunk is organized in row format as following example. In
+ * Data in the chunk is organized in column format as following example. In
  * addition to holding the data, the DataChuck also owns columns' type/length
  * information and calculates the column offsets during initialization.
  *    - extra 2 bytes for strings column to keep string length
  *    - reserves maximum space for varchar/varbytes column. (Enhancement in the
  * future)
- *    - null bitmap at the end of each row, length = (column_num + 7) / 8
+ *    - null bitmap at the begin of each row, length = (column_num + 7) / 8
  *
- * +--------+--------+--------+--------+-------------+----------+-------------+
- * |        |   TS   | bigint | float  | varchar(10) | char(10) | null bitmap |
- * +========+========+========+========+=============+==========+=============+
- * | Length |   8    |   8    |   4    |     12      |   12     |      1      |
- * +--------+--------+--------+--------+-------------+----------+-------------+
- * | Offset |   0    |   8    |   16   |     20      |   32     |      44     |
- * +--------+--------+--------+--------+-------------+------------------------+
- *
- * Notes: Originally DataChunk class is the base class. RowContainer leverages
+ * Notes: Originally DataChunk class is the base class. DataContainer leverages
  * on Datachunk to provide sorting capability. But the class hierarchy is
  * changed after DiskRowContainer implementation.
  */
@@ -126,6 +67,10 @@ class DataChunk : public IChunk {
  public:
   /* Constructor & Deconstructor */
   explicit DataChunk(vector<ColumnInfo>& column_info, k_uint32 capacity = 0);
+
+  explicit DataChunk(vector<ColumnInfo>& column_info, const char* buf,
+                     k_uint32 count, k_uint32 capacity);
+
   virtual ~DataChunk();
 
   /**
@@ -135,27 +80,40 @@ class DataChunk : public IChunk {
 
   /* Getter && Setter */
   [[nodiscard]] inline k_uint32 ColumnNum() const { return col_num_; }
+
   [[nodiscard]] inline k_uint32 RowSize() const { return row_size_; }
+
   [[nodiscard]] inline char* GetData() const { return data_; }
-  inline std::vector<ColumnInfo>& GetColumnInfo() { return col_info_; }
+
+  std::vector<ColumnInfo>& GetColumnInfo() override { return col_info_; }
+
   [[nodiscard]] inline k_uint32 Capacity() const { return capacity_; }
 
-  [[nodiscard]] bool isPassAgg() const { return pass_agg_; }
-  void setPassAgg(bool passAgg) { pass_agg_ = passAgg; }
+  [[nodiscard]] bool isDisorder() const { return disorder_; }
 
-  [[nodiscard]] bool isScanAgg() const { return scan_agg_; }
-  void setScanAgg(bool scanAgg) { scan_agg_ = scanAgg; }
+  void setDisorder(bool disorder) { disorder_ = disorder; }
 
   VecTsFetcherVector& GetFvec() { return fvec_; }
 
   /* override methods */
   DatumPtr GetData(k_uint32 row, k_uint32 col) override;
+
   DatumPtr GetData(k_uint32 col) override;
-  DatumRowPtr GetRow(k_uint32 row);
-  k_int32 NextLine();
+
+  k_int32 NextLine() override;
+
+  k_uint32 Count() override;
+
   bool IsNull(k_uint32 row, k_uint32 col) override;
+
   bool IsNull(k_uint32 col) override;
-  KStatus Append(std::queue<DataChunkPtr>& buffer);
+
+  virtual KStatus Append(DataChunk* chunk);
+
+  virtual KStatus Append(std::queue<DataChunkPtr>& buffer);
+
+  // Append all columns whose row number are in [begin_row, end_row)
+  KStatus Append(DataChunk* chunk, k_uint32 begin_row, k_uint32 end_row);
 
   ////////////////   Basic Methods   ///////////////////
 
@@ -163,11 +121,6 @@ class DataChunk : public IChunk {
    * @brief Check if the datachunk is full
    */
   [[nodiscard]] inline bool isFull() const { return count_ == capacity_; }
-
-  /**
-   * @brief return count
-   */
-  virtual k_uint32 Count();
 
   /**
    * @brief increase the count
@@ -205,7 +158,7 @@ class DataChunk : public IChunk {
    * @param[in] col
    * @param[in/out] string length
    */
-  DatumPtr GetData(k_uint32 row, k_uint32 col, k_uint16& len);
+  DatumPtr GetData(k_uint32 row, k_uint32 col, k_uint16& len) override;
 
   ////////////////   Insert/Copy Data   ///////////////////
 
@@ -224,7 +177,7 @@ class DataChunk : public IChunk {
    * @param[in] value
    * @param[in] renders
    */
-  KStatus InsertData(kwdbContext_p ctx, DatumPtr value, Field** renders);
+  KStatus InsertData(kwdbContext_p ctx, IChunk* value, Field** renders);
 
   /**
    * @brief Insert data into location at (row, col). Expected return
@@ -244,13 +197,6 @@ class DataChunk : public IChunk {
                         k_bool is_double);
 
   /**
-   * @brief Copy the row from another DataChunk (same column schema)
-   * @param[in] row
-   * @param[in] src
-   */
-  void CopyRow(k_uint32 row, void* src);
-
-  /**
    * @brief Copy data from another data chunk
    * @param[in] other
    * @param[in] begin
@@ -265,13 +211,27 @@ class DataChunk : public IChunk {
   }
 
   /**
+   * @brief Copy current line using row mode
+   * @param[in] ctx
+   * @param[in] renders
+   */
+  void AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 col, Field* field);
+
+  /**
+ * @brief Copy current line using column mode
+ * @param[in] ctx
+ * @param[in] renders
+ */
+  KStatus AddRecordByColumn(kwdbContext_p ctx, RowBatch* row_batch, Field** renders);
+
+  /**
    * @brief Copy all data from the RowBatch
    * @param[in] ctx
    * @param[in] row_batch
    * @param[in] renders
    */
   KStatus AddRowBatchData(kwdbContext_p ctx, RowBatch* row_batch,
-                          Field** renders);
+                          Field** renders, bool batch_copy = false);
 
   ////////////////   Encoding func  ///////////////////
 
@@ -308,11 +268,11 @@ class DataChunk : public IChunk {
    * @param[in] raw
    * @param[in] info
    */
-  template <typename T>
+  template<typename T>
   void EncodeDecimal(DatumPtr raw, const EE_StringInfo& info) {
     T val;
     std::memcpy(&val, raw, sizeof(T));
-    if constexpr(std::is_floating_point<T>::value) {
+    if constexpr (std::is_floating_point<T>::value) {
       // encode floating number
       k_int32 len = ValueEncoding::EncodeComputeLenFloat(0);
       KStatus ret = ee_enlargeStringInfo(info, len);
@@ -344,12 +304,12 @@ class DataChunk : public IChunk {
    * @param[in] raw
    * @param[in] info
    */
-  template <typename T>
+  template<typename T>
   KStatus PgEncodeDecimal(DatumPtr raw, const EE_StringInfo& info) {
     T val;
     std::memcpy(&val, raw, sizeof(T));
 
-    if constexpr(std::is_same_v<T, k_int64>) {
+    if constexpr (std::is_same_v<T, k_int64>) {
       k_int64 data = val;
       char val_char[32];
       snprintf(val_char, sizeof(val_char), "%ld", data);
@@ -383,11 +343,18 @@ class DataChunk : public IChunk {
 
   //  use to limit the return size in Next functions.
   static const int SIZE_LIMIT = 32768;
+  static const int MIN_CAPACITY = 1;
+
+  static k_uint32 EstimateCapacity(vector<ColumnInfo>& column_info);
+
+  static k_uint32 ComputeRowSize(vector<ColumnInfo>& column_info);
 
  protected:
+  bool is_data_owner_{true};
   char* data_{nullptr};  // Multiple rows of column data（not tag）
   std::vector<ColumnInfo> col_info_;  // column info
   std::vector<k_uint32> col_offset_;  // column offset
+  std::vector<k_uint32> bitmap_offset_;  // bitmap offset
 
   k_uint32 capacity_{0};     // data capacity
   k_uint32 count_{0};        // total number
@@ -401,8 +368,7 @@ class DataChunk : public IChunk {
   k_int32 current_line_{-1};  // current row
 
  private:
-  bool scan_agg_{false};
-  bool pass_agg_{false};
+  bool disorder_{false};
 };
 
 }  //  namespace kwdbts

@@ -12,23 +12,27 @@
 #pragma once
 
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
 #include "ee_aggregate_flow_spec.h"
 #include "ee_aggregate_func.h"
 #include "ee_base_op.h"
 #include "ee_combined_group_key.h"
+#include "ee_data_container.h"
 #include "ee_data_chunk.h"
 #include "ee_global.h"
 #include "ee_pb_plan.pb.h"
+#include "ee_hash_table.h"
 
 namespace kwdbts {
 // Base Agg OP
 class BaseAggregator : public BaseOperator {
  public:
-  BaseAggregator(BaseOperator* input, TSAggregatorSpec* spec, TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+  BaseAggregator(BaseOperator* input, TSAggregatorSpec* spec, TSPostProcessSpec* post, TABLE* table,
+                 int32_t processor_id);
+
   BaseAggregator(const BaseAggregator&, BaseOperator* input, int32_t processor_id);
+
   virtual ~BaseAggregator();
 
   /*
@@ -50,7 +54,16 @@ class BaseAggregator : public BaseOperator {
 
   // accumulaten for agg
   KStatus accumulateRowIntoBucket(kwdbContext_p ctx, DatumRowPtr bucket, k_uint32 agg_null_offset,
-                                  DataChunkPtr& chunk, k_uint32 line);
+                                  IChunk* chunk, k_uint32 line);
+
+  // The Hash Agg OP uses an internal bucket to persist the temporary output of
+  // agg function execution.
+  // For the last/lastts/last_row/last_rowts and first/firstts/first_row/first_rowts functions,
+  // it needs an additional int64 to save the selected value's timestamp.
+  // The Ordered Agg OP can hold the selected value's timestamp in the function's local.
+  [[nodiscard]] k_uint32 fixLength(k_uint32 len) const {
+    return append_additional_timestamp_ ? len + sizeof(KTimestamp) : len;
+  }
 
   TSAggregatorSpec* spec_;
   TSPostProcessSpec* post_;
@@ -63,8 +76,9 @@ class BaseAggregator : public BaseOperator {
 
   // This inputs column references (FieldNum)
   std::vector<Field*>& input_fields_;
-  // the list of The inputs column's type
-  std::vector<roachpb::DataType> data_types_;
+  // the list of The inputs column's type and storage length
+  std::vector<roachpb::DataType> col_types_;
+  std::vector<k_uint32> col_lens_;
 
   // group col
   std::vector<k_uint32> group_cols_;
@@ -90,6 +104,10 @@ class BaseAggregator : public BaseOperator {
   k_uint32 cur_offset_{0};
   k_uint32 examined_rows_{0};   // for limit examine
   k_uint32 total_read_row_{0};  // total read
+
+  // for hash agg, we need an additional timestamp column to save the temporary Timestamp column for
+  // last/last_row/first/first_row functions.
+  bool append_additional_timestamp_{true};
 };
 
 /**
@@ -98,8 +116,6 @@ class BaseAggregator : public BaseOperator {
  * @author
  */
 class HashAggregateOperator : public BaseAggregator {
-  using map_iterator = std::unordered_map<CombinedGroupKey, DatumRowPtr, GroupKeyHasher>::iterator;
-
  public:
   /**
    * @brief Construct a new Aggregate Operator object
@@ -111,29 +127,38 @@ class HashAggregateOperator : public BaseAggregator {
    */
   HashAggregateOperator(BaseOperator* input, TSAggregatorSpec* spec,
                         TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+
   HashAggregateOperator(const HashAggregateOperator&, BaseOperator* input, int32_t processor_id);
+
   ~HashAggregateOperator() override;
 
   /*
     Inherited from Barcelato's virtual function
   */
+  EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
   EEIteratorErrCode Start(kwdbContext_p ctx) override;
+
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
+
   BaseOperator* Clone() override;
 
   friend class FieldAggNum;
 
  protected:
   // accumulate one batch
-  KStatus accumulateBatch(kwdbContext_p ctx, DataChunkPtr& chunk);
+  KStatus accumulateBatch(kwdbContext_p ctx, IChunk* chunk);
+
   // accumulate one row
   KStatus accumulateRow(kwdbContext_p ctx, DataChunkPtr& chunk, k_uint32 line);
+
   // accumulate rows
   virtual KStatus accumulateRows(kwdbContext_p ctx);
+
   virtual KStatus getAggResults(kwdbContext_p ctx, DataChunkPtr& chunk);
 
-  std::unordered_map<CombinedGroupKey, DatumRowPtr, GroupKeyHasher> buckets_;
-  map_iterator iter_;
+  LinearProbingHashTable* ht_{nullptr};
+  LinearProbingHashTable::iterator iter_;
 };
 
 /**
@@ -144,29 +169,75 @@ class HashAggregateOperator : public BaseAggregator {
 class OrderedAggregateOperator : public BaseAggregator {
  public:
   OrderedAggregateOperator(BaseOperator* input, TSAggregatorSpec* spec,
-                            TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+                           TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+
   OrderedAggregateOperator(const OrderedAggregateOperator&, BaseOperator* input, int32_t processor_id);
+
   ~OrderedAggregateOperator() override;
 
   /*
     Inherited from Barcelato's virtual function
   */
+  EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
   EEIteratorErrCode Start(kwdbContext_p ctx) override;
+
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
+
   BaseOperator* Clone() override;
 
   friend class FieldAggNum;
 
  protected:
-  // void insertOneRow(kwdbContext_p ctx, DataChunkPtr& chunk, DatumPtr data, k_uint32 index);
   KStatus getAggResult(kwdbContext_p ctx, DataChunkPtr& chunk);
-  KStatus accumulateRows(kwdbContext_p ctx, DataChunkPtr& chunk);
 
-  DatumRowPtr bucket_{nullptr};
-  DataChunkPtr chunk_{nullptr};  // the next result of the sub operator
+  KStatus ProcessData(kwdbContext_p ctx, DataChunkPtr& chunk);
+
+  // construct agg info
+  inline void constructAggResults() {
+    // initialize the agg output buffer.
+    agg_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_);
+    if (agg_data_chunk_->Initialize() < 0) {
+      agg_data_chunk_ = nullptr;
+      return;
+    }
+    agg_data_chunk_->SetAllNull();
+  }
+
+  inline void handleEmptyResults(kwdbContext_p ctx) {
+    // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was aggregated.
+    if (!has_agg_result && group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
+      temporary_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_, 1);
+      if (temporary_data_chunk_->Initialize() < 0) {
+        temporary_data_chunk_ = nullptr;
+        return;
+      }
+      temporary_data_chunk_->AddCount();
+      temporary_data_chunk_->NextLine();
+      temporary_data_chunk_->SetAllNull();
+
+      // return 0, if agg type is COUNT_ROW or COUNT
+      for (int i = 0; i < aggregations_.size(); i++) {
+        if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT_ROWS ||
+            aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_COUNT ||
+            aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_SUM_INT) {
+          // set not null ,default 0
+          temporary_data_chunk_->SetNotNull(0, i);
+        }
+      }
+      getAggResult(ctx, current_data_chunk_);
+      temporary_data_chunk_.reset();
+      has_agg_result = true;
+    }
+  }
+
+  DataChunkPtr agg_data_chunk_;
+  std::vector<ColumnInfo> agg_output_col_info_;  // construct agg output col
+
+  // used to save if the current row is a new group based on the input groupby information.
+  GroupByMetadata group_by_metadata_;
   CombinedGroupKey last_group_key_;
   k_bool has_agg_result{false};
-  k_uint32 processed_rows{0};
 };
 
 }  // namespace kwdbts

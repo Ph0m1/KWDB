@@ -82,7 +82,7 @@ bool TagRowBatch::IsNull(k_uint32 tagIndex,
   return false;
 }
 
-k_uint32 TagRowBatch::NextLine() {
+k_int32 TagRowBatch::NextLine() {
   if (isFilter_) {
     if (current_line_ + 1 >= effect_count_) {
       current_line_++;

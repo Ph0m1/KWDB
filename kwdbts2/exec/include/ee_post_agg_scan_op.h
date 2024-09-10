@@ -17,6 +17,7 @@
 #include <queue>
 
 #include "ee_aggregate_op.h"
+#include "ee_data_container.h"
 
 namespace kwdbts {
 
@@ -36,16 +37,6 @@ class PostAggScanOperator : public HashAggregateOperator {
 
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
 
-//  EEIteratorErrCode Start(kwdbContext_p ctx) override;
-//
-//  EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
-//
-//  EEIteratorErrCode Reset(kwdbContext_p ctx) override;
-//
-//  KStatus Close(kwdbContext_p ctx) override;
-//
-//  RowBatchPtr GetRowBatch(kwdbContext_p ctx) override;
-
   BaseOperator* Clone() override;
 
   KStatus ResolveAggFuncs(kwdbContext_p ctx) override;
@@ -53,7 +44,6 @@ class PostAggScanOperator : public HashAggregateOperator {
   void CalculateAggOffsets() override;
 
  protected:
-//  KStatus accumulateBatch(kwdbContext_p ctx, DataChunkPtr& chunk);
   void ResolveGroupByCols(kwdbContext_p ctx) override;
 
   KStatus accumulateRows(kwdbContext_p ctx) override;
@@ -67,21 +57,21 @@ class PostAggScanOperator : public HashAggregateOperator {
     auto agg_results_ = std::make_unique<DataChunk>(agg_output_col_info, capacity);
     if (agg_results_->Initialize() < 0) {
       agg_results_ = nullptr;
-    } else {
-      agg_results_->setScanAgg(true);
-      agg_results_->setPassAgg(true);
-      agg_results_->SetAllNull();
     }
     return agg_results_;
   }
 
+  KStatus initDiskSink();
+
  protected:
+  static const k_uint64 POST_AGG_SCAN_MAX_MEM_BUFFER_SIZE = BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE;
   std::queue<DataChunkPtr> processed_chunks_;
   bool pass_agg_{true};
   k_uint64 agg_result_counter_{0};
 
   std::map<k_uint32, k_uint32> agg_source_target_col_map_;
   std::vector<ColumnInfo> agg_output_col_info;
+  DataContainerPtr disk_sink_;
 };
 
 }  // namespace kwdbts

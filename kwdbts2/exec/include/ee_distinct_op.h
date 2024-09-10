@@ -13,7 +13,6 @@
 
 #include <memory>
 #include <vector>
-#include <unordered_set>
 
 #include "ee_base_op.h"
 #include "ee_distinct_flow_spec.h"
@@ -21,6 +20,7 @@
 #include "ee_data_chunk.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_combined_group_key.h"
+#include "ee_hash_table.h"
 
 namespace kwdbts {
 
@@ -38,7 +38,8 @@ class DistinctOperator : public BaseOperator {
    * @param post
    * @param table
    */
-  DistinctOperator(BaseOperator* input, DistinctSpec* spec, TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+  DistinctOperator(BaseOperator* input, DistinctSpec* spec, TSPostProcessSpec* post, TABLE* table,
+                   int32_t processor_id);
 
   DistinctOperator(const DistinctOperator&, BaseOperator* input, int32_t processor_id);
 
@@ -72,7 +73,7 @@ class DistinctOperator : public BaseOperator {
 
   // distinct column
   std::vector<k_uint32> distinct_cols_;
-  unordered_set<CombinedGroupKey, GroupKeyHasher> seen;
+  LinearProbingHashTable* seen_{nullptr};
 
   // This layer inputs column references (FieldNum)
   std::vector<Field*>& input_fields_;

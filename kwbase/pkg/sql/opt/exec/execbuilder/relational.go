@@ -79,6 +79,9 @@ type execPlan struct {
 	// Note: conceptually, this could be a ColList; however, the map is more
 	// convenient when converting VariableOps to IndexedVars.
 	outputCols opt.ColMap
+
+	// exec engine type
+	execEngine tree.EngineType
 }
 
 // numOutputCols returns the number of columns emitted by the execPlan's Node.
@@ -364,6 +367,10 @@ func (b *Builder) buildRelational(e memo.RelExpr) (execPlan, error) {
 
 	if addSynchronizer && e.GetAddSynchronizer() {
 		ep = b.buildSynchronizer(ep)
+	}
+
+	if e.IsTSEngine() {
+		ep.execEngine = tree.EngineTypeTimeseries
 	}
 
 	if saveTableName != "" {
@@ -2288,7 +2295,8 @@ func (b *Builder) ensureColumns(
 	}
 	reqOrdering := exec.OutputOrdering(res.sqlOrdering(provided))
 	var err error
-	res.root, err = b.factory.ConstructSimpleProject(input.root, cols, colNames, reqOrdering, false)
+	res.root, err = b.factory.ConstructSimpleProject(input.root, cols, colNames, reqOrdering,
+		input.execEngine == tree.EngineTypeTimeseries)
 	return res, err
 }
 

@@ -175,6 +175,7 @@ INSERT 1
                               | distributed | true
                               | vectorized  | false
   render                      |             |
+   │                          | engine type | time series
    │                          | usage_user  | usage_user
    └── sort                   |             |
         │                     | engine type | time series
@@ -188,7 +189,7 @@ INSERT 1
                               | ts-table    | cpu
                               | access mode | metaTable
                               | filter      | usage_system > 2000
-(16 rows)
+(17 rows)
 > explain select usage_user from cpu where usage_system>2000 limit 1;
              tree             |    field    |     description
 ------------------------------+-------------+----------------------

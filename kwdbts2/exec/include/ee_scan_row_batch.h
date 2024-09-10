@@ -36,7 +36,7 @@ class ScanRowBatch : public RowBatch {
   Selection selection_;
   k_uint32 current_batch_line_{0};
   k_uint32 current_batch_no_{0};
-  k_uint32 current_line_{0};
+  k_int32 current_line_{0};
   k_uint32 effect_count_{0};
   k_uint32 tag_col_offset_{0};
   TABLE *table_{nullptr};
@@ -81,31 +81,36 @@ class ScanRowBatch : public RowBatch {
   /**
    * data count
    */
-  k_uint32 Count();
+  k_uint32 Count() override;
   /**
    *  Move the cursor to the next line, default 0
    */
-  k_uint32 NextLine();
+  k_int32 NextLine() override;
   /**
    *  Move the cursor to the first line
    */
-  void ResetLine();
+  void ResetLine() override;
 
-  bool IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype);
+  bool IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype) override;
 
   ResultSet *GetResultSet() { return &res_; }
   k_uint32 *GetCount() { return &count_; }
-  void AddSelection() {
+  void AddSelection() override {
     selection_.push_back({current_batch_no_, current_batch_line_});
     effect_count_++;
   }
   Selection *GetSelection() { return &selection_; }
   KStatus Sort(Field **renders, const std::vector<k_uint32> &cols,
-               const std::vector<k_int32> &order_type) {
+               const std::vector<k_int32> &order_type) override {
     return FAIL;
   }
-  void SetLimitOffset(k_uint32 limit, k_uint32 offset) {}
+  void SetLimitOffset(k_uint32 limit, k_uint32 offset) override {}
   void SetTagToColOffset(k_uint32 offset) { tag_col_offset_ = offset; }
+
+  [[nodiscard]] bool hasFilter() const { return is_filter_; }
+
+  void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
+                      roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) override;
 };
 
 };  // namespace kwdbts

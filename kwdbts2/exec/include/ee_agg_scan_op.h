@@ -22,15 +22,9 @@
 #include "kwdb_type.h"
 #include "ee_scan_op.h"
 #include "ee_aggregate_flow_spec.h"
-#include "ee_scan_aggregate_func.h"
+#include "ee_aggregate_func.h"
 
 namespace kwdbts {
-// group by col info
-struct GroupByColumnInfo {
-  k_uint32 col_index;
-  char* data_ptr;
-  k_uint32 len;
-};
 
 // AggTableScanOperator is used by agg op
 class AggTableScanOperator : public TableScanOperator {
@@ -75,32 +69,31 @@ class AggTableScanOperator : public TableScanOperator {
     }
 
     for (auto field : agg_output_fields_) {
-      SafeDeletePointer(field);
+      SafeDeletePointer(field)
     }
 
     agg_num_ = 0;
   };
+
   // resolve spec
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
+
   // call Next for get data
   EEIteratorErrCode Next(kwdbContext_p ctx, DataChunkPtr& chunk) override;
+
   // clone the operator for parallel
   BaseOperator* Clone() override;
 
   // add data to trunk struct
-  KStatus AddRowBatchData(kwdbContext_p ctx, RowBatch* row_batch,
-                          Field** renders);
+  KStatus AddRowBatchData(kwdbContext_p ctx, RowBatch* row_batch);
+
   // process group col
   k_bool ProcessGroupCols(k_int32& target_row, RowBatch* row_batch,
-                          k_uint32 row,
                           std::vector<GroupByColumnInfo>& group_by_cols,
-                          KTimestampTz& time_bucket,
-                          std::vector<std::vector<DataSource>>& source);
+                          KTimestampTz& time_bucket);
 
   // resolve agg func
   KStatus ResolveAggFuncs(kwdbContext_p ctx);
-
-  char* GetFieldDataPtr(Field* field, RowBatch* row_batch);
 
   [[nodiscard]] inline KTimestampTz construct(Field* filed) const {
     auto time_bucket_field = dynamic_cast<FieldFuncTimeBucket*>(filed);
@@ -111,9 +104,6 @@ class AggTableScanOperator : public TableScanOperator {
     return 0;
   }
 
-  [[nodiscard]] bool hasTimeBucket() const {
-    return interval_seconds_ != 0;
-  }
   // timebucket
   void extractTimeBucket(Field** readers, k_uint32 render_num) {
     for (k_int32 i = 0; i < render_num; ++i) {
@@ -127,23 +117,22 @@ class AggTableScanOperator : public TableScanOperator {
       }
     }
   }
+
   // construct agg info
   inline void constructAggResults() {
     // initialize the agg output buffer.
-    agg_results_ = std::make_unique<DataChunk>(agg_output_col_info);
-    if (agg_results_->Initialize() < 0) {
-      agg_results_ = nullptr;
+    current_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info);
+    if (current_data_chunk_->Initialize() < 0) {
+      current_data_chunk_ = nullptr;
       return;
     }
-    agg_results_->setScanAgg(true);
-    agg_results_->setPassAgg(true);
-    agg_results_->SetAllNull();
+    current_data_chunk_->SetAllNull();
   }
 
   template<typename T>
   void processGroupByColumn(char* source_ptr, char* target_ptr, uint32_t target_col,
                             bool is_dest_null, std::vector<GroupByColumnInfo>& group_by_cols, bool& is_new_group) {
-    if constexpr(std::is_same_v<T, std::string>) {
+    if constexpr (std::is_same_v<T, std::string>) {
       auto source_str = std::string_view{source_ptr};
       k_uint32 len = source_str.length();
       if (is_dest_null) {
@@ -163,7 +152,7 @@ class AggTableScanOperator : public TableScanOperator {
         T src_val = *reinterpret_cast<T*>(source_ptr);
         T dest_val = *reinterpret_cast<T*>(target_ptr);
 
-        if constexpr(std::is_same_v<T, std::float_t> || std::is_same_v<T, std::double_t>) {
+        if constexpr (std::is_same_v<T, std::float_t> || std::is_same_v<T, std::double_t>) {
           if (std::abs(src_val - dest_val) < std::numeric_limits<double>::epsilon()) {
             is_new_group = true;
           }
@@ -193,7 +182,7 @@ class AggTableScanOperator : public TableScanOperator {
   std::vector<k_uint32> agg_cols_;
   std::vector<k_uint32> normal_cols_;
   // storage agg funcs
-  std::vector<unique_ptr<ScanAggregateFunc>> funcs_;
+  std::vector<unique_ptr<AggregateFunc>> funcs_;
 
   // Aggregate spec
   std::vector<TSAggregatorSpec_Aggregation> aggregations_;
@@ -205,15 +194,10 @@ class AggTableScanOperator : public TableScanOperator {
   k_uint32 agg_num_{0};           // the count of agg projection column
 
   std::vector<Field*> agg_output_fields_;  // the output field of agg operator
-
   std::vector<ColumnInfo> agg_output_col_info;  // construct agg output col
-  DataChunkPtr agg_results_;  // agg result info
-  std::queue<DataChunkPtr> agg_output_queue;
 
-  bool is_done_{false};
-  std::vector<k_uint32> arg_idx_vec;
-
-  std::vector<std::vector<DataSource>> source;
+  // used to save if the current row is a new group based on the input groupby information.
+  GroupByMetadata group_by_metadata;
 };
 
 }  //  namespace kwdbts
