@@ -31,6 +31,8 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/lex"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -109,7 +111,7 @@ ORDER BY group_id, database_name, table_name, partition_id;
 	}
 
 	if idx.Table().GetTableType() == tree.RelationalTable {
-		return nil, sqlbase.TSUnsupportedError("show ts partitions")
+		return nil, pgerror.Newf(pgcode.FeatureNotSupported, "%s is not supported in relation table", "show ts partitions")
 	}
 
 	id := sqlbase.ID(idx.Table().ID())

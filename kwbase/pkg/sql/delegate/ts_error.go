@@ -13,6 +13,8 @@ package delegate
 
 import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 )
@@ -44,7 +46,7 @@ func CheckTsDBSupportShow(d *delegator, dbName tree.Name, n tree.Statement) erro
 		return err
 	}
 	if schema.GetDatabaseType() == tree.EngineTypeRelational {
-		return TSUnsupportedShowError(n)
+		return pgerror.Newf(pgcode.FeatureNotSupported, "%s is not supported in relation database", "show ts partitions")
 	}
 	return nil
 }
