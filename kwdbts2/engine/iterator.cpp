@@ -252,7 +252,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
 
 // Used to update the value of the first/first_row member variable during the traversal process
 void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id,
-                                    const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+                                    const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   TsTimePartition* cur_pt = p_bts_[cur_first_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
@@ -260,17 +260,16 @@ void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id,
     return;
   }
 
-  for (auto& it : first_pairs_) {
-    auto bitmap = bitmaps.find(it.first);
-    if (bitmap == bitmaps.end()) {
+  for (int i = 0; i < first_pairs_.size(); ++i) {
+    if (scan_agg_types_[i] != Sumfunctype::FIRST && scan_agg_types_[i] != Sumfunctype::FIRSTTS) {
       continue;
     }
-    timestamp64 first_ts = it.second.second.first;
+    timestamp64 first_ts = first_pairs_[i].second.first;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and
     // is non-empty, update it.
     if ((first_ts == INVALID_TS || first_ts > ts) &&
-         !bitmap->second->IsNull(row_id.offset_row - 1)) {
-      it.second = {cur_first_idx_, {ts, row_id}};
+         !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
+      first_pairs_[i] = {cur_first_idx_, {ts, row_id}};
     }
   }
   timestamp64 first_row_ts = first_row_pair_.second.first;
@@ -282,7 +281,7 @@ void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id,
 
 // Used to update the value of the last/last_row member variable during the traversal process
 void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id,
-                                   const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+                                   const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   TsTimePartition* cur_pt = p_bts_[cur_last_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
@@ -290,17 +289,16 @@ void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id,
     return;
   }
 
-  for (auto& it : last_pairs_) {
-    auto bitmap = bitmaps.find(it.first);
-    if (bitmap == bitmaps.end()) {
+  for (int i = 0; i < last_pairs_.size(); ++i) {
+    if (scan_agg_types_[i] != Sumfunctype::LAST && scan_agg_types_[i] != Sumfunctype::LASTTS) {
       continue;
     }
-    timestamp64 last_ts = it.second.second.first;
+    timestamp64 last_ts = last_pairs_[i].second.first;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
     if ((last_ts == INVALID_TS || last_ts < ts) &&
-        !bitmap->second->IsNull(row_id.offset_row - 1)) {
-      it.second = {cur_last_idx_, {ts, row_id}};
+        !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
+      last_pairs_[i] = {cur_last_idx_, {ts, row_id}};
     }
   }
   timestamp64 last_row_ts = last_row_pair_.second.first;
@@ -313,7 +311,7 @@ void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id,
 // Used to update the value of the last/last_row member variable during the traversal process
 void
 TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
-                                   const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+                                   const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
   std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
   if (segment_tbl == nullptr) {
@@ -321,30 +319,28 @@ TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
     return;
   }
 
-  for (auto& it : first_pairs_) {
-    auto bitmap = bitmaps.find(it.first);
-    if (bitmap == bitmaps.end()) {
+  for (int i = 0; i < first_pairs_.size(); ++i) {
+    if (scan_agg_types_[i] != Sumfunctype::FIRST && scan_agg_types_[i] != Sumfunctype::FIRSTTS) {
       continue;
     }
-    timestamp64 first_ts = it.second.second.first;
+    timestamp64 first_ts = first_pairs_[i].second.first;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and is
     // non-empty, update it.
     if ((first_ts == INVALID_TS || first_ts > ts) &&
-        !bitmap->second->IsNull(row_id.offset_row - 1)) {
-      it.second = {cur_p_bts_idx_, {ts, row_id}};
+        !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
+      first_pairs_[i] = {cur_p_bts_idx_, {ts, row_id}};
     }
   }
-  for (auto& it : last_pairs_) {
-    auto bitmap = bitmaps.find(it.first);
-    if (bitmap == bitmaps.end()) {
+  for (int i = 0; i < last_pairs_.size(); ++i) {
+    if (scan_agg_types_[i] != Sumfunctype::LAST && scan_agg_types_[i] != Sumfunctype::LASTTS) {
       continue;
     }
-    timestamp64 last_ts = it.second.second.first;
+    timestamp64 last_ts = last_pairs_[i].second.first;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
     if ((last_ts == INVALID_TS || last_ts < ts) &&
-        !bitmap->second->IsNull(row_id.offset_row - 1)) {
-      it.second = {cur_p_bts_idx_, {ts, row_id}};
+        !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
+      last_pairs_[i] = {cur_p_bts_idx_, {ts, row_id}};
     }
   }
   timestamp64 first_row_ts = first_row_pair_.second.first;
@@ -369,7 +365,7 @@ TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
 KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().agg_first);
   *count = 0;
-  if (hasFoundFirstAggData() || cur_first_idx_ >= p_bts_.size()) {
+  if ((has_found_first_data || hasFoundFirstAggData()) || cur_first_idx_ >= p_bts_.size()) {
     return KStatus::SUCCESS;
   }
   for ( ; cur_first_idx_ < p_bts_.size(); ++cur_first_idx_) {
@@ -416,7 +412,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
       }
       bool has_found = false;
       // save bitmap for all blocks, the first map key is col index
-      std::map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
+      std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
       if (getBlockBitmap(segment_tbl, block_item, bitmaps) != KStatus::SUCCESS) {
         return KStatus::FAIL;
       }
@@ -439,7 +435,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
         updateFirstCols(cur_ts, real_row, bitmaps);
         // If all queried columns and their corresponding query types already have results,
         // and the timestamp of the updated data is equal to the minimum timestamp of the entity, then the query can end.
-        if (hasFoundFirstAggData() && cur_ts == min_entity_ts) {
+        if ((has_found_first_data || hasFoundFirstAggData()) && cur_ts == min_entity_ts) {
           has_found = true;
           break;
         }
@@ -449,7 +445,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
         break;
       }
     }
-    if (hasFoundFirstAggData()) {
+    if (has_found_first_data || hasFoundFirstAggData()) {
       break;
     }
   }
@@ -467,14 +463,14 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
     switch (scan_agg_types_[i]) {
       case FIRST: {
         Batch* b;
-        k_int32 pt_idx = first_pairs_[col_idx].first;
+        k_int32 pt_idx = first_pairs_[i].first;
         // Read the first_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[col_idx].second.second;
-          timestamp64 first_ts = first_pairs_[col_idx].second.first;
+          MetricRowID real_row = first_pairs_[i].second.second;
+          timestamp64 first_ts = first_pairs_[i].second.first;
           int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
@@ -486,11 +482,11 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
       }
       case FIRSTTS: {
         Batch* b;
-        k_int32 pt_idx = first_pairs_[col_idx].first;
+        k_int32 pt_idx = first_pairs_[i].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[col_idx].second.second;
+          MetricRowID real_row = first_pairs_[i].second.second;
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -583,7 +579,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
 KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().agg_last);
   *count = 0;
-  if (hasFoundLastAggData() || cur_last_idx_ < 0) {
+  if ((has_found_last_data || hasFoundLastAggData()) || cur_last_idx_ < 0) {
     return KStatus::SUCCESS;
   }
   for ( ; cur_last_idx_ >= 0; --cur_last_idx_) {
@@ -631,7 +627,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
       }
       bool has_found = false;
       // save bitmap for all blocks, the first map key is col index
-      std::map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
+      std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
       if (getBlockBitmap(segment_tbl, block_item, bitmaps) != KStatus::SUCCESS) {
         return KStatus::FAIL;
       }
@@ -654,7 +650,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
         updateLastCols(cur_ts, real_row, bitmaps);
         // If all queried columns and their corresponding query types already have query results,
         // and the timestamp of the updated data is equal to the maximum timestamp of the entity, then the query can end.
-        if (hasFoundLastAggData() && cur_ts == max_entity_ts) {
+        if ((has_found_last_data || hasFoundLastAggData()) && cur_ts == max_entity_ts) {
           has_found = true;
           break;
         }
@@ -664,7 +660,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
         break;
       }
     }
-    if (hasFoundLastAggData()) {
+    if (has_found_last_data || hasFoundLastAggData()) {
       break;
     }
   }
@@ -681,14 +677,14 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
     switch (scan_agg_types_[i]) {
       case LAST: {
         Batch* b;
-        k_int32 pt_idx = last_pairs_[col_idx].first;
+        k_int32 pt_idx = last_pairs_[i].first;
         //  Read the last_pairs_ result recorded during the traversal process.
         //  If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[col_idx].second.second;
-          timestamp64 last_ts = last_pairs_[col_idx].second.first;
+          MetricRowID real_row = last_pairs_[i].second.second;
+          timestamp64 last_ts = last_pairs_[i].second.first;
           int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
@@ -700,11 +696,11 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
       }
       case LASTTS: {
         Batch* b;
-        k_int32 pt_idx = last_pairs_[col_idx].first;
+        k_int32 pt_idx = last_pairs_[i].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[col_idx].second.second;
+          MetricRowID real_row = last_pairs_[i].second.second;
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -800,7 +796,7 @@ KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timest
 }
 
 KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
-                                      std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+                                      std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   for (auto& col_idx : ts_scan_cols_) {
     auto it = bitmaps.find(col_idx);
     if (it != bitmaps.end()) {
@@ -861,7 +857,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     }
 
     // save bitmap for all blocks, the first map key is col index
-    std::map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
+    std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
     if (getBlockBitmap(segment_tbl, cur_block, bitmaps) != KStatus::SUCCESS) {
       return KStatus::FAIL;
     }
@@ -1361,14 +1357,14 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::FIRST: {
         KWDB_DURATION(StStatistics::Get().agg_first);
         Batch* b;
-        k_int32 pt_idx = first_pairs_[col_idx].first;
+        k_int32 pt_idx = first_pairs_[i].first;
         // Read the first_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[col_idx].second.second;
-          timestamp64 first_ts = first_pairs_[col_idx].second.first;
+          MetricRowID real_row = first_pairs_[i].second.second;
+          timestamp64 first_ts = first_pairs_[i].second.first;
           int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
@@ -1381,14 +1377,14 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::LAST: {
         KWDB_DURATION(StStatistics::Get().agg_last);
         Batch* b;
-        k_int32 pt_idx = last_pairs_[col_idx].first;
+        k_int32 pt_idx = last_pairs_[i].first;
         // Read the last_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (pt_idx < 0) {
           b = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[col_idx].second.second;
-          timestamp64 last_ts = last_pairs_[col_idx].second.first;
+          MetricRowID real_row = last_pairs_[i].second.second;
+          timestamp64 last_ts = last_pairs_[i].second.first;
           int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
@@ -1483,11 +1479,11 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::FIRSTTS: {
         KWDB_DURATION(StStatistics::Get().agg_firstts);
         Batch* b;
-        k_int32 pt_idx = first_pairs_[col_idx].first;
+        k_int32 pt_idx = first_pairs_[i].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = first_pairs_[col_idx].second.second;
+          MetricRowID real_row = first_pairs_[i].second.second;
 
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
@@ -1503,11 +1499,11 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
       case Sumfunctype::LASTTS: {
         KWDB_DURATION(StStatistics::Get().agg_lastts);
         Batch* b;
-        k_int32 pt_idx = last_pairs_[col_idx].first;
+        k_int32 pt_idx = last_pairs_[i].first;
         if (pt_idx < 0) {
           b = new AggBatch(nullptr, 0, nullptr);
         } else {
-          MetricRowID real_row = last_pairs_[col_idx].second.second;
+          MetricRowID real_row = last_pairs_[i].second.second;
           std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
           if (segment_tbl == nullptr) {
             LOG_ERROR("Can not find segment use block [%d], in path [%s]",

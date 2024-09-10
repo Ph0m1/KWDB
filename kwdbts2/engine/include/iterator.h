@@ -185,18 +185,20 @@ class TsAggIterator : public TsIterator {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
+    first_pairs_.assign(scan_agg_types_.size(), {});
+    last_pairs_.assign(scan_agg_types_.size(), {});
     for (size_t i = 0; i < ts_scan_cols_.size(); ++i) {
       // If the query aggregation type contains first/last correlation, the corresponding member variables need to be
       // initialized to record the results during the query process.
       if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
         no_first_last_type_ = false;
-        first_pairs_[ts_scan_cols_[i]] = {-1, {INVALID_TS, MetricRowID{}}};
+        first_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
       } else if (scan_agg_types_[i] == Sumfunctype::FIRST_ROW || scan_agg_types_[i] == Sumfunctype::FIRSTROWTS) {
         no_first_last_type_ = false;
         first_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
       } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
         no_first_last_type_ = false;
-        last_pairs_[ts_scan_cols_[i]] = {-1, {INVALID_TS, MetricRowID{}}};
+        last_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
       } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
         no_first_last_type_ = false;
         last_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
@@ -234,15 +236,19 @@ class TsAggIterator : public TsIterator {
       cur_last_idx_ = p_bts_.size() - 1;
     }
 
+    has_found_first_data = false;
+    has_found_last_data = false;
     first_pairs_.clear();
     last_pairs_.clear();
+    first_pairs_.assign(scan_agg_types_.size(), {});
+    last_pairs_.assign(scan_agg_types_.size(), {});
     for (size_t i = 0; i < ts_scan_cols_.size(); ++i) {
       if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
-        first_pairs_[ts_scan_cols_[i]] = {-1, {INVALID_TS, MetricRowID{}}};
+        first_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
       } else if (scan_agg_types_[i] == Sumfunctype::FIRST_ROW || scan_agg_types_[i] == Sumfunctype::FIRSTROWTS) {
         first_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
       } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
-        last_pairs_[ts_scan_cols_[i]] = {-1, {INVALID_TS, MetricRowID{}}};
+        last_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
       } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
         last_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
       }
@@ -292,7 +298,7 @@ class TsAggIterator : public TsIterator {
       switch (scan_agg_types_[i]) {
         case FIRST:
         case FIRSTTS:
-          if (first_pairs_[ts_scan_cols_[i]].first == -1) {
+          if (first_pairs_[i].first == -1) {
             return false;
           }
           break;
@@ -306,6 +312,7 @@ class TsAggIterator : public TsIterator {
           break;
       }
     }
+    has_found_first_data = true;
     return true;
   }
 
@@ -314,7 +321,7 @@ class TsAggIterator : public TsIterator {
       switch (scan_agg_types_[i]) {
         case LAST:
         case LASTTS:
-          if (last_pairs_[ts_scan_cols_[i]].first == -1) {
+          if (last_pairs_[i].first == -1) {
             return false;
           }
           break;
@@ -328,6 +335,7 @@ class TsAggIterator : public TsIterator {
           break;
       }
     }
+    has_found_last_data = true;
     return true;
   }
 
@@ -364,17 +372,17 @@ class TsAggIterator : public TsIterator {
   // 2. For last related queries, start traversing from the end of the partition table array, which is the largest
   // partition table.
   void updateFirstCols(timestamp64 ts, MetricRowID row_id,
-                       const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+                       const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
   void updateLastCols(timestamp64 ts, MetricRowID row_id,
-                      const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+                      const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
   void updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
-                           const std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+                           const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
   KStatus findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts);
   KStatus findLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
   KStatus findFirstLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
 
   KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
-                         std::map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+                         std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
 
   /**
    * @brief Used internally in the Next function, which returns the aggregated result of the most consecutive data in a BlockItem
@@ -432,10 +440,13 @@ class TsAggIterator : public TsIterator {
   bool only_first_last_type_ = false;
   bool no_first_last_type_ = true;
 
+  bool has_found_first_data = false;
+  bool has_found_last_data = false;
+
   // Used to record first/last related results during a traversal process.
   // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
-  std::unordered_map<k_uint32, std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> first_pairs_;
-  std::unordered_map<k_uint32, std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> last_pairs_;
+  std::vector<std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> first_pairs_;
+  std::vector<std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> last_pairs_;
   // std::pair<index of column, std::pair<timestamp64, row id>>
   std::pair<k_int32, std::pair<timestamp64, MetricRowID>> first_row_pair_;
   std::pair<k_int32, std::pair<timestamp64, MetricRowID>> last_row_pair_;
