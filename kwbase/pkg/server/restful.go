@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/md5"
 	gosql "database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -143,13 +144,13 @@ type queryResponse struct {
 
 // loginResponseFail returns login fail
 type showAllSuccess struct {
-	Code   int           `json:"code"`
-	Tokens []sessionInfo `json:"tokens"`
+	Code  int           `json:"code"`
+	Conns []sessionInfo `json:"conns"`
 }
 
 // sessionInfo shows seesion infos
 type sessionInfo struct {
-	SessionID      string
+	Connid         string
 	Username       string
 	Token          string
 	MaxLifeTime    int64
@@ -299,16 +300,14 @@ func (s *restfulServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.sendJSONResponse(ctx, w, -1, nil, desc)
 		return
 	}
-
-	// case 1: -H "Username" -H "Password"
-	username := r.Header.Get("Username")
-	password := r.Header.Get("Password")
-	// case 2: -u "Username:Password"
-	if username == "" || password == "" {
-		desc = "username or password can not be empty."
-		s.sendJSONResponse(ctx, w, -1, nil, desc)
+	var username, password string
+	// case 1: -H "Authorization:Basic d3k5OTk6MTIzNDU2Nzg5"
+	usr, pass, err := s.getUserWIthPass(r)
+	if err != nil {
+		s.sendJSONResponse(ctx, w, -1, nil, err.Error())
 		return
 	}
+	username, password = usr, pass
 
 	// Call the verifySession/verifyPassword function from authentication.go
 	valid, expired, err := s.server.authentication.verifyPassword(ctx, username, password)
@@ -831,12 +830,14 @@ func (s *restfulServer) handleSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		s.handleUserShow(w, r)
 	} else if r.Method == "DELETE" {
-		s.handleAdminDelete(w, r)
+		s.handleUserDelete(w, r)
 	}
 }
 
-// handleAdminDelete deletes conn by session id for your API endpoint
-func (s *restfulServer) handleAdminDelete(w http.ResponseWriter, r *http.Request) {
+// handleUserDelete deletes conn by session id for your API endpoint
+// If the current user is an admin, they can delete all connections
+// If the current user is a regular user, they can only delete their own connections
+func (s *restfulServer) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	code := 0
 	desc := "delete success"
@@ -846,32 +847,47 @@ func (s *restfulServer) handleAdminDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	isAdmin, _, _, _, err := s.verifyUser(ctx)
+	isAdmin, _, _, username, err := s.verifyUser(ctx)
 	if err != nil {
 		desc = err.Error()
 		s.sendJSONResponse(ctx, w, -1, nil, desc)
 		return
 	}
-
-	if !isAdmin {
-		desc = "do not have authority, please check."
-		s.sendJSONResponse(ctx, w, -1, nil, desc)
-		return
-	}
-
 	found := false
-	for key, value := range s.connCache {
-		if value.sessionid == uuid {
-			if err := value.db.Close(); err != nil {
-				log.Error(ctx, "restful api close db err: %v", err.Error())
+	if isAdmin {
+		// If it's an admin user, directly delete the session for that connid
+		for key, value := range s.connCache {
+			if value.sessionid == uuid {
+				if err := value.db.Close(); err != nil {
+					log.Error(ctx, "restful api close db err: %v", err.Error())
+				}
+				delete(s.connCache, key)
+				found = true
+				break
 			}
-			delete(s.connCache, key)
-			found = true
+		}
+	} else {
+		// If it's a regular user, they can only delete sessions that they themselves have created
+		for key, value := range s.connCache {
+			if value.sessionid == uuid {
+				if value.username == username {
+					if err := value.db.Close(); err != nil {
+						log.Error(ctx, "restful api close db err: %v", err.Error())
+					}
+					delete(s.connCache, key)
+					found = true
+					break
+				} else {
+					// If it's not created by themselves, an error will occur
+					desc = "do not have authority, please check."
+					s.sendJSONResponse(ctx, w, -1, nil, desc)
+					return
+				}
+			}
 		}
 	}
-
 	if !found {
-		desc = "no sessionid matching the given one was found."
+		desc = "no connid matching the given one was found."
 		s.sendJSONResponse(ctx, w, -1, nil, desc)
 		return
 	}
@@ -899,23 +915,23 @@ func (s *restfulServer) handleUserShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isAdmin && method == "password" {
+	if isAdmin {
+		for token, value := range s.connCache {
+			s.addSessionInfo(&tokens, *value, token)
+		}
+	} else if method == "password" {
 		for token, value := range s.connCache {
 			if value.username == username {
 				s.addSessionInfo(&tokens, *value, token)
 			}
 		}
-	} else if !isAdmin && method == "token" {
+	} else if method == "token" {
 		if value, ok := s.connCache[key]; ok {
 			s.addSessionInfo(&tokens, *value, key)
 		}
-	} else if isAdmin {
-		for token, value := range s.connCache {
-			s.addSessionInfo(&tokens, *value, token)
-		}
 	}
 
-	responseSuccess := showAllSuccess{Code: code, Tokens: tokens}
+	responseSuccess := showAllSuccess{Code: code, Conns: tokens}
 	s.sendJSONResponse(ctx, w, 0, responseSuccess, "")
 }
 
@@ -923,10 +939,13 @@ func (s *restfulServer) handleUserShow(w http.ResponseWriter, r *http.Request) {
 func (s *restfulServer) addSessionInfo(tokens *[]sessionInfo, value pgConnection, token string) {
 	lastLoginTime := transtUnixTime(value.lastLoginTime)
 	expirationTime := transtUnixTime(value.lastLoginTime + value.maxLifeTime)
+	truncated := token[:8]
+
+	showtoken := truncated + strings.Repeat("*", 1)
 	*tokens = append(*tokens, sessionInfo{
-		SessionID:      value.sessionid,
+		Connid:         value.sessionid,
 		Username:       value.username,
-		Token:          token,
+		Token:          showtoken,
 		MaxLifeTime:    value.maxLifeTime,
 		LastLoginTime:  lastLoginTime,
 		ExpirationTime: expirationTime,
@@ -1017,11 +1036,13 @@ func (s *restfulServer) pickConnCache(ctx context.Context) (*pgConnection, error
 }
 
 // verifyUser verifys if the user has logged in.
-func (s *restfulServer) verifyUser(ctx context.Context) (bool, string, string, string, error) {
-	key := ctx.Value(webCacheKey{}).(string)
-	username := ctx.Value(webSessionUserKey{}).(string)
+func (s *restfulServer) verifyUser(
+	ctx context.Context,
+) (isadmin bool, method string, key string, username string, err error) {
+	key = ctx.Value(webCacheKey{}).(string)
+	username = ctx.Value(webSessionUserKey{}).(string)
 	password := ctx.Value(webSessionPassKey{}).(string)
-	method := ctx.Value(webCacheMethodKey{}).(string)
+	method = ctx.Value(webCacheMethodKey{}).(string)
 	if method == "token" {
 		if pgconn, ok := s.connCache[key]; ok {
 			if pgconn.isAdmin {
@@ -1215,4 +1236,40 @@ func parseDesc(desc string) string {
 	desc = strings.ReplaceAll(desc, `""`, `"`)
 	desc = strings.TrimRight(desc, ",")
 	return desc
+}
+
+func (s *restfulServer) getUserWIthPass(
+	r *http.Request,
+) (userName string, passWd string, err error) {
+	tokenWithBaseAu := s.server.restful.authorization
+	tokenFromHeader := r.Header.Get("Authorization")
+
+	tokenStr := ""
+	if tokenWithBaseAu != "" {
+		tokenStr = tokenWithBaseAu
+	} else if tokenFromHeader != "" {
+		tokenStr = tokenFromHeader
+	}
+	// token : format[Basic base64codes]
+	token := ""
+	// get token.
+	if tokenStr == "" {
+		return "", "", fmt.Errorf("can not find Basic attribute, please check")
+	}
+
+	tokenSlice := strings.Split(tokenStr, " ")
+	if tokenSlice[0] != "Basic" || tokenSlice[1] == "" {
+		return "", "", fmt.Errorf("can not find Basic attribute, please check")
+	}
+	token = tokenSlice[1]
+
+	usernamePassword, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return "", "", fmt.Errorf("wrong username or password, please check")
+	}
+	slice := strings.Split(string(usernamePassword), ":")
+	if len(slice) != 2 {
+		return "", "", fmt.Errorf("wrong username or password, please check")
+	}
+	return slice[0], slice[1], nil
 }

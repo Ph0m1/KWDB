@@ -583,8 +583,6 @@ func (rm *restAuthMux) getIdentifier(
 	req *http.Request, dbName string,
 ) (userName string, passWd string, cacheKey string, methodKey string, err error) {
 	// way of make Key : format[username:token] temply for base64
-	username := ""
-	password := ""
 	token := ""
 	header := req.Header
 
@@ -614,12 +612,7 @@ func (rm *restAuthMux) getIdentifier(
 
 	// case2: need to make token
 	if token == "" {
-		username = header.Get("Username")
-		password = header.Get("Password")
-		if username == "" || password == "" {
-			return "", "", "", "", fmt.Errorf("wrong username or password, please check")
-		}
-		return username, password, "", "password", nil
+		return "", "", "", "", fmt.Errorf("wrong username or password, please check")
 	}
 
 	_, err = hex.DecodeString(token)
