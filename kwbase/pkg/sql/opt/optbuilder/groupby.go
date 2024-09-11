@@ -476,7 +476,9 @@ func (b *Builder) analyzeHaving(having *tree.Where, fromScope *scope) tree.Typed
 	if having == nil {
 		return nil
 	}
-
+	if b.factory.Memo().CheckFlag(opt.HasGapFill) {
+		panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with having is not supported"))
+	}
 	// We need to save and restore the previous value of the field in semaCtx
 	// in case we are recursively called within a subquery context.
 	defer b.semaCtx.Properties.Restore(b.semaCtx.Properties)

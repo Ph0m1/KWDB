@@ -81,4 +81,10 @@ const (
 
 	// OrderGroupBy is set when sort is before group by.
 	OrderGroupBy = 1 << 4
+
+	// HasGapFill is set when use time_bucket_gapfill function in SQL.
+	HasGapFill = 1 << 5
+
+	// HasSubquery is set when use subquery in SQL.
+	HasSubquery = 1 << 6
 )

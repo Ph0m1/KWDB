@@ -689,21 +689,52 @@ k_int64 FieldFuncTimeBucket::ValInt() {
   if (nullptr != ptr) {
     return FieldFuncOp::ValInt(ptr);
   } else {
-    try {
-      int64_t intervalSeconds;
-      std::string timestring = {args_[1]->ValStr().getptr(),
-                                args_[1]->ValStr().length_};
-      std::string intervalStr = timestring.substr(0, timestring.size() - 1);
-      intervalSeconds = stoll(intervalStr);
-      intervalSeconds *= 1000;
-
-      auto newTime = args_[0]->ValInt();
-      auto timebucket = newTime - newTime % intervalSeconds;
-      return timebucket;
-    } catch (const std::exception &e) {
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-                                    "second arg is error");
+    // not sure why not break in getIntervalSeconds when interval is unvalid.
+    if (interval_seconds_ == 0) {
+      if (error_info_ == "invalid input interval time for time_bucket or time_bucket_gapfill.") {
+        EEPgErrorInfo::SetPgErrorInfo(
+          ERRCODE_INVALID_PARAMETER_VALUE,
+          error_info_.c_str());
+      } else if (error_info_ == "second arg should be a positive interval.") {
+        EEPgErrorInfo::SetPgErrorInfo(
+          ERRCODE_INVALID_PARAMETER_VALUE,
+          error_info_.c_str());
+      } else {
+        EEPgErrorInfo::SetPgErrorInfo(
+          ERRCODE_INVALID_DATETIME_FORMAT,
+          error_info_.c_str());
+      }
       return 0;
+    }
+    // use 0000-01-01 00:00:00 as start, same as kwdbts2/exec/include/ee_agg_scan_op.h
+    if (!var_interval_) {
+      auto original_timestamp = args_[0]->ValInt();
+      KTimestampTz time_diff = time_zone_ * 3600000;
+      KTimestampTz bucket_start = (original_timestamp + 62135596800000 + time_diff)
+       / (k_int64)interval_seconds_ * (k_int64)interval_seconds_;
+      return bucket_start - 62135596800000 - time_diff;
+    } else {
+      auto original_timestamp = args_[0]->ValInt();
+      std::time_t tt = (std::time_t)original_timestamp/1000;
+      struct std::tm tm;
+      gmtime_r(&tt, &tm);
+      tm.tm_sec = 0;
+      tm.tm_min = 0;
+      tm.tm_hour = 0;
+      tm.tm_mday = 1;
+      if (year_bucket_) {
+        tm.tm_mon = 0;
+        tm.tm_year = (int32_t)( (tm.tm_year + 1899) / static_cast<int>(interval_seconds_)
+         * static_cast<int>(interval_seconds_) - 1899);
+        tm.tm_hour -= time_zone_;
+      } else {
+        int32_t mon = (tm.tm_year + 1899) * 12 + tm.tm_mon;
+        mon = (int32_t)(mon / static_cast<int>(interval_seconds_) * static_cast<int>(interval_seconds_));
+        tm.tm_year = (mon / 12) - 1899;
+        tm.tm_mon = mon % 12;
+        tm.tm_hour -= time_zone_;
+      }
+      return (KTimestampTz)(timegm(&tm)  * 1000);
     }
   }
 }
@@ -724,39 +755,100 @@ Field *FieldFuncTimeBucket::field_to_copy() {
   return field;
 }
 
-k_bool FieldFuncTimeBucket::field_is_nullable() {
-  double intervalSeconds;
+std::string FieldFuncTimeBucket::replaceKeywords(const std::string& timestring) {
+    static const std::vector<std::pair<std::string, char>> replacements = {
+        {"seconds", 's'}, {"second", 's'}, {"secs", 's'}, {"sec", 's'},
+        {"minutes", 'm'}, {"minute", 'm'}, {"mins", 'm'}, {"min", 'm'},
+        {"hours", 'h'}, {"hour", 'h'}, {"hrs", 'h'}, {"hr", 'h'},
+        {"days", 'd'}, {"day", 'd'},
+        {"weeks", 'w'}, {"week", 'w'},
+        {"months", 'n'}, {"month", 'n'}, {"mons", 'n'}, {"mon", 'n'},
+        {"years", 'y'}, {"year", 'y'}, {"yrs", 'y'}, {"yr", 'y'}
+    };
+
+    std::string result = timestring;
+    for (const auto& pair : replacements) {
+      if (timestring.find(pair.first) != std::string::npos) {
+        result = std::regex_replace(result, std::regex(pair.first), std::string(1, pair.second));
+        break;
+      }
+    }
+    return result;
+}
+
+k_uint64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info) {
   std::string timestring = {args_[1]->ValStr().getptr(),
                             args_[1]->ValStr().length_};
-  if (timestring.back() == 's') {
-    std::string intervalStr = timestring.substr(0, timestring.size() - 1);
-    try {
-      intervalSeconds = stod(intervalStr);
-      if (floor(intervalSeconds) != intervalSeconds) {
-        EEPgErrorInfo::SetPgErrorInfo(
-            ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-            "Second arg should be an integral seconds");
-        return false;
-      }
-    } catch (const std::exception &e) {
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-                                    "Second arg should be an integral seconds");
-      return false;
+  std::string raw_string = timestring;
+  // uppercase to lowcase
+  std::transform(timestring.begin(), timestring.end(),
+    timestring.begin(), [](unsigned char c){ return std::tolower(c); });
+
+  // Replace time unit keywords
+  timestring = replaceKeywords(timestring);
+
+  if (timestring.length() < 2) {
+    error_info = "invalid input interval time for time_bucket or time_bucket_gapfill.";
+    return 0;
+  }
+
+  char unit = timestring.back();
+  if (unit != 'y' && unit != 'n' && unit != 'w' && unit != 'd' && unit != 'h' && unit != 'm' && unit != 's') {
+    error_info = "interval: invalid input syntax: " + raw_string + ".";
+    return 0;
+  }
+
+  std::string intervalStr = timestring.substr(0, timestring.size() - 1);
+  try {
+    if (std::stol(intervalStr) <= 0) {
+    error_info = "second arg should be a positive interval.";
+    return 0;
     }
-  } else {
-    EEPgErrorInfo::SetPgErrorInfo(
-        ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-        "Second arg should be in seconds, format: '10s'");
-    return false;
+  } catch (...) {
+    error_info = "interval: invalid input syntax: " + raw_string + ".";
+    return 0;
   }
 
-  if (intervalSeconds <= 0) {
-    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-                                  "Second arg should be a positive seconds");
-    return false;
+
+  for (char c : intervalStr) {
+    if (c > '9' || c < '0') {
+      error_info = "invalid input interval time for time_bucket or time_bucket_gapfill.";
+      return 0;
+    }
   }
 
-  return false;
+  k_uint64 interval_seconds_ = stoll(intervalStr);
+
+  // Convert interval to milliseconds based on unit
+  switch (unit) {
+      case 'y':
+          year_bucket = true;
+          var_interval = true;
+          // Do not convert interval_seconds_ as it is a variable interval
+          break;
+      case 'n':
+          var_interval = true;
+          // Do not convert interval_seconds_ as it is a variable interval
+          break;
+      case 'm':
+          interval_seconds_ *= 60000;
+          break;
+      case 'h':
+          interval_seconds_ *= 3600000;
+          break;
+      case 'd':
+          interval_seconds_ *= 86400000;
+          break;
+      case 'w':
+          interval_seconds_ *= 604800000;
+          break;
+      default:
+          interval_seconds_ *= 1000;
+          break;
+  }
+
+  nullable_ = false;
+  return interval_seconds_;
 }
 
 FieldFuncCastCheckTs::FieldFuncCastCheckTs(Field *left, Field *right)

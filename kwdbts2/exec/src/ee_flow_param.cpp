@@ -963,7 +963,7 @@ Field *PostResolve::ResolveFuncOperator(kwdbContext_p ctx, KString &func_name,
   }
 
   if (func_name == "time_bucket") {
-    field = KNEW FieldFuncTimeBucket(args);
+    field = KNEW FieldFuncTimeBucket(args, ctx->timezone);
   } else if (func_name == "now") {
     field = KNEW FieldFuncNow();
   } else if (func_name == "current_date") {

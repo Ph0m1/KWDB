@@ -309,13 +309,14 @@ SQLSTATE: 42803
   2023-05-10 09:15:10+00:00 | 500 |    500000.5 | false | c    | n    | NULL           | 测试测试               | deg4096测试1(  | \x7465735fe6b58be8af9531 | \xbbccbbbb
 (8 rows)
 > select time_bucket(k_timestamp, '5.5s') as tb, e2 from test_select_timebucket.tb group by tb,e2 order by tb,e2;
-ERROR: Second arg should be an integral seconds
-SQLSTATE: 22003
+ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
+SQLSTATE: 22023
 > select time_bucket(k_timestamp, '-1s') as tb, e2 from test_select_timebucket.tb group by tb,e2 order by tb,e2;
-ERROR: Second arg should be a positive seconds
-SQLSTATE: 22003
+ERROR: second arg should be a positive interval.
+SQLSTATE: 22023
 > select time_bucket(k_timestamp, '-5s') as tb, e20 from test_select_timebucket.tb where e20 is not null group by tb,e20;
-ERROR: time_bucket(): second arg should be a positive seconds
+ERROR: time_bucket(): second arg should be a positive interval
+SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10s') as tb,t1 from test_select_timebucket.tb group by tb,t1 order by tb,t1;
              tb             |   t1
 ----------------------------+---------

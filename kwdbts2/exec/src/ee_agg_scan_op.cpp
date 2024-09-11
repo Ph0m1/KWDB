@@ -72,6 +72,12 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
       break;
     }
 
+    if (!variable_interval_) {
+      construct_ = &AggTableScanOperator::construct;
+    } else {
+      construct_ = &AggTableScanOperator::construct_variable;
+    }
+
     ResolveAggFuncs(ctx);
 
     // construct the output column information for agg functions.
@@ -282,7 +288,7 @@ k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         if (col == col_idx_) {
-          time_bucket = construct(field);
+          time_bucket = (this->*construct_)(field);
           source_ptr = reinterpret_cast<char*>(&time_bucket);
         }
         processGroupByColumn<k_int64>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);

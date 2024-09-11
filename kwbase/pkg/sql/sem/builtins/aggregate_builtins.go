@@ -29,6 +29,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -40,7 +42,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/duration"
 	"gitee.com/kwbasedb/kwbase/pkg/util/json"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
-	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/apd"
 	"github.com/cockroachdb/errors"
 )
@@ -375,6 +376,10 @@ var aggregates = map[string]builtinDefinition{
 	),
 
 	"time_bucket_gapfill_internal": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Timestamp, types.String}, types.Timestamp, newTimeBucketAggregate,
+			"TimeBucketGapfill"),
+		makeAggOverload([]*types.T{types.TimestampTZ, types.String}, types.TimestampTZ, newTimestamptzBucketAggregate,
+			"TimeBucketGapfill"),
 		makeAggOverload([]*types.T{types.Timestamp, types.Int}, types.Timestamp, newTimeBucketAggregate,
 			"TimeBucketGapfill"),
 		makeAggOverload([]*types.T{types.TimestampTZ, types.Int}, types.TimestampTZ, newTimestamptzBucketAggregate,
@@ -2773,7 +2778,7 @@ func (a *floatSqrDiffAggregate) Size() int64 {
 // TimeBucketAggregate is for timebucketagg
 type TimeBucketAggregate struct {
 	Time       time.Time
-	Timebucket int64
+	Timebucket tree.DInterval
 }
 
 func newTimeBucketAggregate(_ []*types.T, _ *tree.EvalContext, _ tree.Datums) tree.AggregateFunc {
@@ -2786,21 +2791,14 @@ func (a *TimeBucketAggregate) Add(
 ) error {
 	value, ok := datum1.(*tree.DTimestamp)
 	if !ok {
-		return errors.New("first arg is error")
+		return pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
 	}
-	timestamp := value.Time
-	key, ok := datum2[0].(*tree.DInt)
-	if !ok {
-		return errors.New("second arg is error")
+	dInterval, err := getTimeInterval(datum2[0])
+	if err != nil {
+		return err
 	}
-	timebucket := int64(*key)
-	if timebucket <= 0 {
-		return errors.New("second arg should be a positive integer")
-	}
-	newTime := timestamp.Unix() - timestamp.Unix()%timebucket
-	timeTmp := timeutil.Unix(newTime, 0)
-	a.Time = timeTmp
-	a.Timebucket = timebucket
+	a.Time = getNewTime(value.Time, dInterval, time.UTC)
+	a.Timebucket = dInterval
 	return nil
 }
 
@@ -2811,7 +2809,7 @@ func (a *TimeBucketAggregate) Result() (tree.Datum, error) {
 
 // Reset implements tree.AggregateFunc interface.
 func (a *TimeBucketAggregate) Reset(context.Context) {
-	a.Timebucket = 0
+	a.Timebucket = tree.DInterval{}
 }
 
 // Close is part of the tree.AggregateFunc interface.
@@ -2825,13 +2823,14 @@ func (a *TimeBucketAggregate) Size() int64 {
 // TimestamptzBucketAggregate is for timebucketagg
 type TimestamptzBucketAggregate struct {
 	Time       time.Time
-	Timebucket int64
+	Timebucket tree.DInterval
+	loc        *time.Location
 }
 
 func newTimestamptzBucketAggregate(
-	_ []*types.T, _ *tree.EvalContext, _ tree.Datums,
+	_ []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
 ) tree.AggregateFunc {
-	return &TimestamptzBucketAggregate{}
+	return &TimestamptzBucketAggregate{loc: evalCtx.GetLocation()}
 }
 
 // Add is for timebucket
@@ -2842,19 +2841,115 @@ func (a *TimestamptzBucketAggregate) Add(
 	if !ok {
 		return errors.New("first arg is error")
 	}
-	timestamp := value.Time
-	key, ok := datum2[0].(*tree.DInt)
-	if !ok {
-		return errors.New("second arg is error")
+	dInterval, err := getTimeInterval(datum2[0])
+	if err != nil {
+		return err
 	}
-	timebucket := int64(*key)
-	if timebucket <= 0 {
-		return errors.New("second arg should be a positive integer")
+	a.Time = getNewTime(value.Time, dInterval, a.loc)
+	a.Timebucket = dInterval
+	return nil
+}
+
+// getNewTime returns the result of rounding oldTime down to a multiple of dInterval.
+func getNewTime(oldTime time.Time, dInterval tree.DInterval, loc *time.Location) time.Time {
+	newTime := time.Date(1, 1, 1, 0, 0, 0, 0, loc)
+	if dInterval.Months != 0 {
+		timeMonth := (oldTime.Year()-1)*12 + (int(oldTime.Month() - 1))
+		newMonth := (int64(timeMonth) / dInterval.Months) * dInterval.Months
+		newTime = newTime.AddDate(0, int(newMonth), 0)
+		return newTime
 	}
-	newTime := timestamp.Unix() - timestamp.Unix()%timebucket
-	timeTmp := timeutil.Unix(newTime, 0)
-	a.Time = timeTmp
-	a.Timebucket = timebucket
+	var offSet int
+	if loc != nil && loc != time.UTC {
+		timeInLocation := oldTime.In(loc)
+		_, offSet = timeInLocation.Zone()
+		oldTime = oldTime.Add(time.Duration(offSet) * time.Second)
+	}
+	if dInterval.Days != 0 {
+		newTime = oldTime.Truncate(time.Duration(dInterval.Days) * time.Hour * 24)
+	}
+	if dInterval.Nanos() != 0 {
+		newTime = oldTime.Truncate(time.Duration(dInterval.Nanos()))
+	}
+	if loc != nil && loc != time.UTC {
+		newTime = newTime.Add(-time.Duration(offSet) * time.Second)
+	}
+	return newTime
+}
+
+// getTimeInterval converts input string or int value to interval.
+// input:input datum for time_bucket or time_bucket_gapfill.
+// output:DInterval converted by string or int.
+func getTimeInterval(datum tree.Datum) (tree.DInterval, error) {
+	var valueStr string
+	switch d := datum.(type) {
+	case *tree.DString:
+		valueStr = string(*d)
+	case *tree.DInt:
+		valueStr = strconv.Itoa(int(*d)) + "s"
+	default:
+		return tree.DInterval{}, pgerror.New(pgcode.InvalidParameterValue, "second arg is error")
+	}
+	// convert a string to a interval.
+	dInterval, err := tree.ParseDInterval(valueStr)
+	if err != nil {
+		return tree.DInterval{}, err
+	}
+	if dInterval.AsFloat64() <= 0 {
+		return tree.DInterval{}, pgerror.New(pgcode.InvalidParameterValue, "second arg should be a positive interval")
+	}
+	if err = checkTimeUnit(valueStr); err != nil {
+		return tree.DInterval{}, err
+	}
+	return *dInterval, nil
+}
+
+// checkTimeUnit check input interval of time_bucket or time_bucket_gapfill is a composite time.
+// only support positive integer and year(s)/yrs/yr/y, month(s)/mons/mon, week(s)/w,
+// day(s)/d, hour(s)/hrs/hr/h, minute(s)/mins/min/m, second(s)/secs/sec/s,
+// e.g., '2year', '3mon'.
+func checkTimeUnit(str string) error {
+	replaceMap := map[string]string{
+		"second": "s", "secs": "s", "sec": "s", "seconds": "s",
+		"minute": "m", "mins": "m", "min": "m", "minutes": "m",
+		"hour": "h", "hrs": "h", "hr": "h", "hours": "h",
+		"day": "d", "days": "d", "week": "w", "weeks": "w",
+		"month": "n", "months": "n", "mon": "n", "mons": "n",
+		"year": "y", "years": "y", "yrs": "y", "yr": "y",
+	}
+	replaceSlice := []string{
+		"minutes", "seconds",
+		"minute", "second", "months",
+		"hours", "weeks", "years", "month",
+		"secs", "mins", "hour", "days", "week", "mons", "year",
+		"sec", "min", "hrs", "day", "mon", "yrs",
+		"hr", "yr",
+	}
+	newStr := strings.ToLower(str)
+	for _, unitOld := range replaceSlice {
+		unitNew := replaceMap[unitOld]
+		newStr = strings.ReplaceAll(newStr, unitOld, unitNew)
+	}
+	// the input of time interval must contain num value and unit.
+	if len(newStr) < 2 {
+		return pgerror.New(pgcode.InvalidParameterValue, "invalid input interval time for time_bucket or time_bucket_gapfill")
+	}
+	unit := newStr[len(newStr)-1]
+	if unit != 'y' && unit != 'n' && unit != 'w' && unit != 'd' && unit != 'h' && unit != 'm' && unit != 's' {
+		return pgerror.New(pgcode.InvalidParameterValue, "wrong interval time unit for time_bucket or time_bucket_gapfill")
+	}
+	var numVal string
+	if len(newStr) == 2 {
+		numVal = string(newStr[0])
+	} else {
+		numVal = newStr[:len(newStr)-2]
+	}
+	// unsupported composite time.
+	for _, s := range numVal {
+		if s > '9' || s < '0' {
+			return pgerror.New(pgcode.InvalidParameterValue, "invalid input interval time for time_bucket or time_bucket_gapfill")
+		}
+	}
 	return nil
 }
 
@@ -2865,7 +2960,7 @@ func (a *TimestamptzBucketAggregate) Result() (tree.Datum, error) {
 
 // Reset implements tree.AggregateFunc interface.
 func (a *TimestamptzBucketAggregate) Reset(context.Context) {
-	a.Timebucket = 0
+	a.Timebucket = tree.DInterval{}
 }
 
 // Close is part of the tree.AggregateFunc interface.

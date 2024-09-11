@@ -212,6 +212,7 @@ void DmlExec::DisposeError(kwdbContext_p ctx, QueryInfo *return_info) {
         memcpy(return_info->value, EEPgErrorInfo::GetPgErrorInfo().msg, return_info->len);
       }
     }
+    EEPgErrorInfo::ResetPgErrorInfo();
   } else if (SUCCESS == ERR_STACK()->GetLastError(&error)) {
     return_info->code = error->GetCode();
   }

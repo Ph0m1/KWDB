@@ -285,7 +285,11 @@ func TestStdDevDecimalResultDeepCopy(t *testing.T) {
 func TestGapfillResultDeepCopy(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 	rng, _ := randutil.NewPseudoRand()
-	var datum tree.Datum = tree.NewDInt(tree.DInt(rng.Int63()))
+	randomInt := rng.Int31()
+	if randomInt == 0 {
+		randomInt = 1
+	}
+	var datum tree.Datum = tree.NewDInt(tree.DInt(randomInt))
 	testAggregateResultDeepCopyGapfill(t, newTimeBucketAggregate, makeTimestampTestDatum(10), datum)
 }
 
@@ -468,7 +472,11 @@ func runBenchmarkAggregateGapfill(
 	params := []*types.T{vals[0].ResolvedType()}
 	b.ResetTimer()
 	rng, _ := randutil.NewPseudoRand()
-	var datum tree.Datum = tree.NewDInt(tree.DInt(rng.Int63()))
+	randomInt := rng.Int31()
+	if randomInt == 0 {
+		randomInt = 1
+	}
+	var datum tree.Datum = tree.NewDInt(tree.DInt(randomInt))
 
 	for i := 0; i < b.N; i++ {
 		func() {

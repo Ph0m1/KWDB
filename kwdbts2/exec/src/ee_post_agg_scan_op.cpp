@@ -29,7 +29,11 @@ PostAggScanOperator::PostAggScanOperator(const PostAggScanOperator& other, BaseO
 
 EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
-  BaseAggregator::Init(ctx);
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  code = BaseAggregator::Init(ctx);
+  if (EEIteratorErrCode::EE_OK != code) {
+    Return(code);
+  }
 
   // construct the output column information for agg output.
   agg_output_col_info.reserve(output_fields_.size());

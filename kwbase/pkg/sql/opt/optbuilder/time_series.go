@@ -106,7 +106,9 @@ func checkoutInterpolate(groupBy tree.GroupBy, s *scope) bool {
 			panic(pgerror.New(pgcode.FeatureNotSupported, "group by accepts only one column when using time_bucket_gapfill"))
 		}
 	}
-
+	if s.builder.factory.Memo().CheckFlag(opt.HasGapFill) && s.builder.factory.Memo().CheckFlag(opt.HasSubquery) {
+		panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with subquery is not supported"))
+	}
 	return hasInterpolate
 }
 

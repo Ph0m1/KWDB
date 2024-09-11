@@ -740,31 +740,33 @@ func (ag *aggregatorBase) getAggResults(
 			case *(builtins.TimeBucketAggregate):
 				// We check the gap between currTime and last filled timestamp value and update the
 				// gapfilling status accordingly.
-				newTime := ag.gapfill.prevgaptime + t.Timebucket
+				newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
+				newTimeUnix := newTime.Unix()
 				currTime := t.Time.Unix()
-				if !(newTime < currTime) {
+				if !(newTimeUnix < currTime) {
 					ag.gapfill.startgapfilling = false
 					ag.gapfill.endgapfilling = true
 					break
 				}
 				// increment prevgaptime by t.Timebucket
-				ag.gapfill.prevgaptime = newTime
-				timeTmp := timeutil.Unix(newTime, 0)
+				ag.gapfill.prevgaptime = newTimeUnix
+				timeTmp := newTime
 				// record data in row
 				ag.outputTypes[i] = *types.Timestamp
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestamp{Time: timeTmp})
 			case *(builtins.TimestamptzBucketAggregate):
 				// We check the gap between currTime and last filled timestamp value and update the
 				// gapfilling status accordingly.
-				newTime := ag.gapfill.prevgaptime + t.Timebucket
+				newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
+				newTimeUnix := newTime.Unix()
 				currTime := t.Time.Unix()
-				if !(newTime < currTime) {
+				if !(newTimeUnix < currTime) {
 					ag.gapfill.startgapfilling = false
 					ag.gapfill.endgapfilling = true
 					break
 				}
-				ag.gapfill.prevgaptime = newTime
-				timeTmp := timeutil.Unix(newTime, 0)
+				ag.gapfill.prevgaptime = newTimeUnix
+				timeTmp := newTime
 				ag.outputTypes[i] = *types.TimestampTZ
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
 				// row[0] is a group by column
@@ -853,18 +855,24 @@ func (ag *aggregatorBase) getAggResults(
 		switch t := b.(type) {
 		case *(builtins.TimeBucketAggregate):
 			if ag.gapfill.prevtime.IsZero() {
-				ag.gapfill.prevtime = timeutil.Unix(t.Time.Unix()-t.Timebucket, 0)
+				ag.gapfill.prevtime = t.Time.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos()))
 			}
 			prevTime := ag.gapfill.prevtime
-			newTime := prevTime.Unix() + t.Timebucket
+
+			newTime := prevTime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
+			newTimeUnix := newTime.Unix()
 			currTime := t.Time.Unix()
 			ag.gapfill.prevtime = t.Time
-			ag.gapfill.prevgaptime = newTime - t.Timebucket
+			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).Unix()
 			// we check if gapfilling is needed by comparing currTime with Time in the last row
-			if newTime < currTime {
-				ag.gapfill.linearGap = (int)((currTime-newTime)/t.Timebucket + 1)
+			if newTimeUnix < currTime {
+				if t.Timebucket.Months != 0 {
+					ag.gapfill.linearGap = ((t.Time.Year()-newTime.Year())*12+int(t.Time.Month()-newTime.Month()))/int(t.Timebucket.Months) + 1
+				} else {
+					ag.gapfill.linearGap = int(t.Time.Sub(newTime)/(time.Duration(t.Timebucket.Days)*time.Hour*24+time.Duration(t.Timebucket.Nanos()))) + 1
+				}
 				ag.gapfill.linearPos = 1
-				timeTmp := timeutil.Unix(newTime, 0)
+				timeTmp := newTime
 				ag.gapfill.gapfillingbucket = bucket
 				ag.outputTypes[i] = *types.Timestamp
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestamp{Time: timeTmp})
@@ -872,18 +880,24 @@ func (ag *aggregatorBase) getAggResults(
 			}
 		case *(builtins.TimestamptzBucketAggregate):
 			if ag.gapfill.prevtime.IsZero() {
-				ag.gapfill.prevtime = timeutil.Unix(t.Time.Unix()-t.Timebucket, 0)
+				ag.gapfill.prevtime = t.Time.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos()))
 			}
 			prevTime := ag.gapfill.prevtime
-			newTime := prevTime.Unix() + t.Timebucket
+
+			newTime := prevTime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
+			newTimeUnix := newTime.Unix()
 			currTime := t.Time.Unix()
 			ag.gapfill.prevtime = t.Time
-			ag.gapfill.prevgaptime = newTime - t.Timebucket
+			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).Unix()
 			// we check if gapfilling is needed by comparing currTime with Time in the last row
-			if newTime < currTime {
-				ag.gapfill.linearGap = (int)((currTime-newTime)/t.Timebucket + 1)
+			if newTimeUnix < currTime {
+				if t.Timebucket.Months != 0 {
+					ag.gapfill.linearGap = ((t.Time.Year()-newTime.Year())*12+int(t.Time.Month()-newTime.Month()))/int(t.Timebucket.Months) + 1
+				} else {
+					ag.gapfill.linearGap = int(t.Time.Sub(newTime)/(time.Duration(t.Timebucket.Days)*time.Hour*24+time.Duration(t.Timebucket.Nanos()))) + 1
+				}
 				ag.gapfill.linearPos = 1
-				timeTmp := timeutil.Unix(newTime, 0)
+				timeTmp := newTime
 				ag.gapfill.gapfillingbucket = bucket
 				ag.outputTypes[i] = *types.TimestampTZ
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})

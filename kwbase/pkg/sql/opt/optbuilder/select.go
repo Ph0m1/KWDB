@@ -179,7 +179,10 @@ func (b *Builder) buildDataSource(
 		locking = locking.withoutTargets()
 
 		outScope = b.buildSelectStmt(source.Select, locking, nil /* desiredTypes */, inScope)
-
+		outScope.builder.factory.Memo().SetFlag(opt.HasSubquery)
+		if b.factory.Memo().CheckFlag(opt.HasGapFill) {
+			panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with subquery is not supported"))
+		}
 		// Treat the subquery result as an anonymous data source (i.e. column names
 		// are not qualified). Remove hidden columns, as they are not accessible
 		// outside the subquery.
@@ -969,6 +972,13 @@ func (b *Builder) buildSelectStmtWithoutParens(
 	}
 
 	if limit != nil {
+		if b.factory.Memo().CheckFlag(opt.HasGapFill) {
+			if limit.Count != nil {
+				panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with limit is not supported"))
+			} else {
+				panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with offset is not supported"))
+			}
+		}
 		b.buildLimit(limit, inScope, outScope)
 	}
 

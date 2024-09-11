@@ -4445,122 +4445,40 @@ may increase either contention or retry errors, or both.`,
 		tree.Overload{
 			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}, {"interval", types.String}},
 			ReturnType: tree.FixedReturnType(types.Timestamp),
-			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				value, ok := args[0].(*tree.DTimestamp)
-				if !ok {
-					return &tree.DTimestamp{}, errors.New("first arg is error")
-				}
-				timestamp := value.Time
-				var interval int64
-				valueStr, ok2 := args[1].(*tree.DString)
-				if !ok2 {
-					return &tree.DTimestamp{}, errors.New("second arg is error")
-				}
-
-				// Convert a string to a number.
-				if strings.Contains(string(*valueStr), "s") {
-					strs := strings.Split(string(*valueStr), "s")
-					res, err := strconv.Atoi(strs[0])
-					if err != nil {
-						return &tree.DTimestamp{}, errors.New("second arg should be a integral seconds")
-					}
-					interval = int64(res)
-				} else {
-					return &tree.DTimestamp{}, errors.New("second arg should in seconds, format: '10s'")
-				}
-
-				if interval <= 0 {
-					return &tree.DTimestamp{}, errors.New("second arg should be a positive seconds")
-				}
-				newTime := timestamp.Unix() - timestamp.Unix()%interval
-				timeTmp := timeutil.Unix(newTime, 0)
-				return tree.MakeDTimestamp(timeTmp, 0), nil
-			},
-			Info: "time_bucket groups timestamps by duration.",
+			Fn:         timeBucketOverload,
+			Info:       "time_bucket groups timestamps by interval.",
 		},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"timestamp", types.TimestampTZ}, {"interval", types.String}},
 			ReturnType: tree.FixedReturnType(types.TimestampTZ),
-			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				value, ok := args[0].(*tree.DTimestampTZ)
-				if !ok {
-					return &tree.DTimestampTZ{}, errors.New("first arg is error")
-				}
-				timestamp := value.Time
-				var interval int64
-				valueStr, ok2 := args[1].(*tree.DString)
-				if !ok2 {
-					return &tree.DTimestampTZ{}, errors.New("second arg is error")
-				}
-
-				// Convert a string to a number.
-				if strings.Contains(string(*valueStr), "s") {
-					strs := strings.Split(string(*valueStr), "s")
-					res, err := strconv.Atoi(strs[0])
-					if err != nil {
-						return &tree.DTimestampTZ{}, errors.New("second arg should be a integral seconds")
-					}
-					interval = int64(res)
-				} else {
-					return &tree.DTimestampTZ{}, errors.New("second arg should in seconds, format: '10s'")
-				}
-
-				if interval <= 0 {
-					return &tree.DTimestampTZ{}, errors.New("second arg should be a positive seconds")
-				}
-				newTime := timestamp.Unix() - timestamp.Unix()%interval
-				timeTmp := timeutil.Unix(newTime, 0)
-				return tree.MakeDTimestampTZ(timeTmp, 0), nil
-			},
-			Info: "time_bucket groups timestamps by duration.",
+			Fn:         timeBucketTZOverload,
+			Info:       "time_bucket groups timestamps by interval.",
 		},
 	),
 	"time_bucket_gapfill": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
 		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}, {"interval", types.String}},
+			ReturnType: tree.FixedReturnType(types.Timestamp),
+			Fn:         timeBucketOverload,
+			Info:       "time_bucket_gapfill groups timestamps by interval.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamptz", types.TimestampTZ}, {"interval", types.String}},
+			ReturnType: tree.FixedReturnType(types.TimestampTZ),
+			Fn:         timeBucketTZOverload,
+			Info:       "time_bucket_gapfill groups timestamps by interval.",
+		},
+		tree.Overload{
 			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}, {"interval", types.Int}},
 			ReturnType: tree.FixedReturnType(types.Timestamp),
-			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				value, ok := args[0].(*tree.DTimestamp)
-				if !ok {
-					return &tree.DTimestamp{}, errors.New("first arg is error")
-				}
-				timestamp := value.Time
-				var interval int64
-				valueInt, ok2 := args[1].(*tree.DInt)
-				if ok2 {
-					interval = int64(*valueInt)
-				}
-				if interval == 0 {
-					return &tree.DTimestamp{}, errors.New("second arg should be a positive integer")
-				}
-				newTime := timestamp.Unix() - timestamp.Unix()%interval
-				timeTmp := timeutil.Unix(newTime, 0)
-				return tree.MakeDTimestamp(timeTmp, 0), nil
-			},
-			Info: "time_bucket_gapfill groups timestamps by duration.",
+			Fn:         timeBucketOverload,
+			Info:       "time_bucket_gapfill groups timestamps by interval.",
 		},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"timestamptz", types.TimestampTZ}, {"interval", types.Int}},
 			ReturnType: tree.FixedReturnType(types.TimestampTZ),
-			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				value, ok := args[0].(*tree.DTimestampTZ)
-				if !ok {
-					return &tree.DTimestampTZ{}, errors.New("first arg is error")
-				}
-				timestamp := value.Time
-				var interval int64
-				valueInt, ok2 := args[1].(*tree.DInt)
-				if ok2 {
-					interval = int64(*valueInt)
-				}
-				if interval == 0 {
-					return &tree.DTimestamp{}, errors.New("second arg should be a positive integer")
-				}
-				newTime := timestamp.Unix() - timestamp.Unix()%interval
-				timeTmp := timeutil.Unix(newTime, 0)
-				return tree.MakeDTimestampTZ(timeTmp, 0), nil
-			},
-			Info: "time_bucket_gapfill groups timestamps by duration.",
+			Fn:         timeBucketTZOverload,
+			Info:       "time_bucket_gapfill groups timestamps by interval.",
 		},
 	),
 	"change_ts_distribute": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
@@ -4651,6 +4569,30 @@ may increase either contention or retry errors, or both.`,
 			Info: "time_bucket_gapfill groups timestamps by duration.",
 		},
 	),
+}
+
+func timeBucketOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+	value, ok := args[0].(*tree.DTimestamp)
+	if !ok {
+		return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
+	}
+	dInterval, err := getTimeInterval(args[1])
+	if err != nil {
+		return &tree.DTimestamp{}, err
+	}
+	return tree.MakeDTimestamp(getNewTime(value.Time, dInterval, time.UTC), 0), nil
+}
+
+func timeBucketTZOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+	value, ok := args[0].(*tree.DTimestampTZ)
+	if !ok {
+		return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
+	}
+	dInterval, err := getTimeInterval(args[1])
+	if err != nil {
+		return &tree.DTimestampTZ{}, err
+	}
+	return tree.MakeDTimestampTZ(getNewTime(value.Time, dInterval, evalCtx.GetLocation()), 0), nil
 }
 
 var lengthImpls = func(incBitOverload bool) builtinDefinition {

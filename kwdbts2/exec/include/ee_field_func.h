@@ -13,6 +13,8 @@
 
 #include <list>
 #include <string>
+#include <regex>
+#include <algorithm>
 
 #include "ee_field.h"
 #include "ee_field_const.h"
@@ -223,7 +225,10 @@ class FieldFuncRightShift : public FieldFuncOp {
 class FieldFuncTimeBucket : public FieldFuncOp {
  public:
   using FieldFuncOp::FieldFuncOp;
-
+  explicit FieldFuncTimeBucket(std::list<Field *> fields, k_int8 tz) : FieldFuncOp(fields) {
+    time_zone_ = tz;
+    interval_seconds_ = getIntervalSeconds(var_interval_, year_bucket_, error_info_);
+  }
   enum Functype functype() override { return TIME_BUCKET_FUNC; }
 
   k_int64 ValInt() override;
@@ -231,22 +236,21 @@ class FieldFuncTimeBucket : public FieldFuncOp {
   String ValStr() override;
 
   Field *field_to_copy() override;
-  k_bool field_is_nullable() override;
 
-  k_int64 getIntervalSeconds() {
-    std::string timestring = {args_[1]->ValStr().getptr(),
-                              args_[1]->ValStr().length_};
-    std::string intervalStr = timestring.substr(0, timestring.size() - 1);
-    k_int64 interval_seconds_ = stoll(intervalStr);
-    interval_seconds_ *= 1000;
-    nullable_ = false;
-    return interval_seconds_;
-  }
+  // Replace keywords in the timestring
+  std::string replaceKeywords(const std::string& timestring);
+
+  k_uint64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info_);
 
   KTimestampTz getOriginalTimestamp() {
     auto val_ptr = args_[0]->get_ptr();
     return *reinterpret_cast<KTimestampTz *>(val_ptr);
   }
+  k_int8 time_zone_{0};
+  k_uint64 interval_seconds_{0};
+  k_bool var_interval_{false};
+  k_bool year_bucket_{false};
+  std::string error_info_{""};
 };
 
 class FieldFuncCastCheckTs : public FieldFunc {

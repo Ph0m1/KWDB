@@ -533,7 +533,7 @@ func (opc *optPlanningCtx) buildExecMemo(
 		stats.AutomaticTsStatisticsClusterMode.Get(&p.EvalContext().Settings.SV))
 	f.GetPushHelperValue(opc.optimizer.Memo().GetPushHelperAddress())
 	if _, isCanned := opc.p.stmt.AST.(*tree.CannedOptPlan); !isCanned {
-		if _, err := opc.optimizer.Optimize(); err != nil && bld.PhysType == tree.Invalid {
+		if _, err := opc.optimizer.Optimize(); err != nil {
 			return nil, tree.Invalid, err
 		}
 	}

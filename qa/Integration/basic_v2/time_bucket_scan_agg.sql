@@ -1655,3 +1655,490 @@ select time_bucket(k_timestamp, '15s') as tb, last(e12),last(e15) from test_last
 select time_bucket(k_timestamp, '15s') as tb, last_row(e12),last_row(e15) from test_last.stb group by tb,name order by tb;
 
 drop database test_last cascade;
+
+-- time unit and date before 1970
+drop database if exists test cascade;
+create ts database test;
+
+create table test.cpu
+(
+    k_timestamp      timestamp not null,
+    usage_user       bigint not null,
+    usage_system     bigint,
+    usage_idle       int,
+    usage_nice       int,
+    usage_iowait     smallint,
+    usage_irq        smallint,
+    usage_softirq    float,
+    usage_steal      float,
+    usage_guest      real,
+    usage_guest_nice real
+) attributes (
+    hostname char(30) not null,
+    region varchar(8) not null,
+    datacenter int,
+    rack int not null,
+    os char(30),
+    arch char(30),
+    team char(30),
+    service char(30),
+    service_version char(30),
+    service_environment char(30)
+    )
+primary attributes (hostname, region, rack);
+
+INSERT INTO test.cpu
+values ('1800-05-31 10:00:00', 2147483647, -2147483648, -2147483648, -2147483648, -32768, -32768, 54.122111, 54.122111, 3.141593, 3.141593, 'host_0', 'aaaaaaaa', null, 6666, '', null, '', null, '', ''),
+       ('1800-05-31 10:00:00', -2147483648, -2147483648, -2147483648, -2147483648, -32768, -32768, 54.122111, 54.122111, 3.141593, 3.141593, 'host_0', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 84, 2147483647, -2147483648, 2147483647, 29, 20, -54.122111, -54.122111, 53, 74, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 29, 48, 5, 63, -17, 52, 60, null, 93, 1, 'host_2', 'a', -888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 8, 21, -89, 78, 30, 81, 33, 24, 24, 82, 'host_3', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 2, 26, 64, 6, 38, 20, -71, 19, 40, 54, 'host_4', 'aaa', -888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', -76, -40, -63, -7, -81, -20, -29, -55, null, -15, 'host_5', 'aaa', 888888, -6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 44, 70, 20, -67, 65, 11, 7, 92, 0, 31, 'host_6', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 92, 35, 99, 9, 31, -1, 2, 24, 96, 69, 'host_7', 'aaa', -888888, -6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 21, 77, 90, 83, 41, 84, 26, 60, 43, null, 'host_8', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-05-31 10:00:00', 90, 0, 81, 28, 25, -44, 8, -89, 11, 76, 'host_9', 'aaa', 888888, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('1800-06-01 11:00:01', 2147483647, -2147483648, 2147483647, -2147483648, 32767, -32768, -100.1, 54.122111, -3.141593, null, 'host_0', 'aaa', -2147483648, 6666, '', '', null, '', '', ''),
+       ('1800-06-01 11:00:01', 2147483647, 2147483647, 2147483647, 2147483647, 32767, 32767, 54.122111, -54.1221111, 3.141593, -3.141593, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 29, 48, 5, 63, 17, 52, 60, 49, 93, 1, 'host_3', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 8, 21, 89, 78, 30, 81, 33, 24, 24, 82, 'host_4', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 2, 26, 64, 6, 38, 20, 71, null, 40, 54, 'host_5', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 76, 40, 63, 7, 81, 20, 29, -55, 20, 15, 'host_6', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 44, 70, 20, 67, 65, 11, 7, 92, 0, 31, 'host_7', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 92, 35,-99, 9, 31, 1, 2, 24, 96, 69, 'host_8', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1800-06-01 11:00:01', 21, 77, 90, 83, 41, 84, 26, 60, null, 36, 'host_9', 'aaa', -888888, -6666, '', '', '', '', '', ''),
+       ('1800-06-31 11:00:01', 90, 0, -81, 28, 25, 44, 8, 89, 11, 76, 'host_2', 'a', -888888, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('1969-12-31 10:00:02', 58, -2, 24, 61, 22, 63, 6, 44, null, 38, 'host_2', 'aaa', null, -6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 84, 11, 53, 87, 29, 20, 54, 77, 53, 74, 'host_3', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 29, 48, -5, 63, -17, 52, 60, 49, 93, 1, 'host_4', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 8, 21, 89, -78, 30, 81, 33, 24, 24, 82, 'host_5', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 2, 26, -64, 6, -38, 20, 71, null, 40, 54, 'host_6', 'aaa', null, -6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 76, 40, 63, 7, 81, 20, 29, 55, 20, 15, 'host_7', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 44, 70, 20, 67, 65, 11, 7, 92, 0, 31, 'host_8', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 92, 35, 99, -9, 31, 1, -2, 24, 96, 69, 'host_9', 'aaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 21, 77, -90, 83, 41, 84, 26, 60, 43, null, 'host_0', 'aaaaaaaa', 2147483647, 6666, '', '', '', '', '', ''),
+       ('1969-12-31 10:00:02', 90, 0, 81, 28, 25, 44, 8, -89, 11, 76, 'host_1', 'aaa', 2147483647, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('1970-01-01 15:00:04', 2147483647, 2, 24, 61, 22, 63, 6, 44, null, 38, 'host_3', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 15:00:04', 84, 11, 53, 87, 29, 20, 54, 77, 53, 74, 'host_4', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 15:00:04', 29, 48, 5, -63, 17, -52, 60, 49, 93, 1, 'host_5', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 16:00:04', 8, 21, 89, 78, 30, -81, 33, 24, 24, 82, 'host_6', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 17:00:04', 2, 26, -64, 6, 38, -20, 71, null, 40, 54, 'host_7', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 15:00:04', 76, 40, 63, 7, 81, 20, 29, 55, 20, 15, 'host_8', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 16:00:04', 44, 70, 20, 67, 65, 11, 7, 92, 0, 31, 'host_9', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 15:00:04', 92, 35, 99, 9, 31, -1, 2, 24, 96, 69, 'host_0', 'aaaaaaaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 15:00:04', 21, 77, 90, 83, 41, 84, 26, 60, 43, null, 'host_1', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-01-01 15:00:04', 90, 0, 81, 28, 25, 44, 8, -89, 11, 76, 'host_2', 'aaa', -2147483648, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('1970-02-01 10:00:04', 2147483647, 2, 24, 61, 22, 63, 6, 44, null, 38, 'host_3', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 84, 11, 53, 87, 29, 20, 54, 77, 53, 74, 'host_4', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 29, 48, 5, -63, 17, -52, 60, 49, 93, 1, 'host_5', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 8, 21, 89, 78, 30, -81, 33, 24, 24, 82, 'host_6', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 2, 26, -64, 6, 38, -20, 71, null, 40, 54, 'host_7', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 76, 40, 63, 7, 81, 20, 29, 55, 20, 15, 'host_8', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 44, 70, 20, 67, 65, 11, 7, 92, 0, 31, 'host_9', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 92, 35, 99, 9, 31, -1, 2, 24, 96, 69, 'host_0', 'aaaaaaaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 21, 77, 90, 83, 41, 84, 26, 60, 43, null, 'host_1', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-01 10:00:04', 90, 0, 81, 28, 25, 44, 8, -89, 11, 76, 'host_2', 'aaa', -2147483648, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('1970-02-02 10:00:04', 2147483647, 2, 24, 61, 22, 63, 6, 44, null, 38, 'host_3', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 84, 11, 53, 87, 29, 20, 54, 77, 53, 74, 'host_4', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 29, 48, 5, -63, 17, -52, 60, 49, 93, 1, 'host_5', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 8, 21, 89, 78, 30, -81, 33, 24, 24, 82, 'host_6', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 2, 26, -64, 6, 38, -20, 71, null, 40, 54, 'host_7', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 76, 40, 63, 7, 81, 20, 29, 55, 20, 15, 'host_8', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 44, 70, 20, 67, 65, 11, 7, 92, 0, 31, 'host_9', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 92, 35, 99, 9, 31, -1, 2, 24, 96, 69, 'host_0', 'aaaaaaaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 21, 77, 90, 83, 41, 84, 26, 60, 43, null, 'host_1', 'aaa', -2147483648, 6666, '', '', '', '', '', ''),
+       ('1970-02-02 10:00:04', 90, 0, 81, 28, 25, 44, 8, -89, 11, 76, 'host_2', 'aaa', -2147483648, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('1970-05-31 22:00:03', 58, null, 24, 61, 22, 63, 6, 44, null, 38, 'host_3', 'aaa', 888888, -6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 84, 11, 53, 87, 29, 20, 54, 77, 53, 74, 'host_4', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 29, 48, 5, 63, 17, 52, 60, 49, 93, 1, 'host_5', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 8, 21, 89, 78, 30, 81, 33, 24, 24, 82, 'host_6', 'aaa', -888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 2, 26, 64, 6, 38, -20, 71, null, 40, 54, 'host_7', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 76, 40, 63, 7, 81, 20, 29, 55, 20, 15, 'host_8', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 44, 70, 20, 67, 65, 11, -7, 92, 0, 31, 'host_9', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 92, 35, 99, 9, 31, 1, 2, 24, 96, 69, 'host_0', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 21, 77, 90, 83, 41, 84, 26, 60, 43, null, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('1970-05-31 22:00:03', 90, 0, 81, 28, 25, 44, 8, 89, 11, 76, 'host_2', 'aaa', 888888, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_3', 'aaaaaaa', null, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_4', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_5', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_6', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_7', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_8', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_9', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_0', 'aaa', 0, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:08', 2147483647, null, null, null, null, null, null, null, null, null, 'host_2', 'aaa', null, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_3', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_4', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_5', 'aaa', null, -6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_6', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_7', 'aaa', -888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_8', 'aaa', 888888, -6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_9', 'aaa', null, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_0', 'aaa', -888888, -6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:00:09', 2147483647, null, null, null, null, null, null, null, null, null, 'host_2', 'aaa', null, 6666, '', '', '', '', '', '');
+
+INSERT INTO test.cpu
+values ('2023-05-31 10:30:10', 58, null, 24, 61, 22, 63, 6, 44, null, 38, 'host_3', 'aaa', 888888, -6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 84, 11, 53, 87, 29, 20, 54, 77, 53, 74, 'host_4', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 29, 48, 5, -63, 17, 52, 60, 49, 93, 1, 'host_5', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 8, 21, 89, -78, 30, 81, 33, 24, 24, 82, 'host_6', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 2, 26, 64, 6, 38, -20, 71, null, -40, 54, 'host_7', 'aaa', -888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 76, 40, -63, 7, 81, -20, 29, 55, 20, 15, 'host_8', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 44, 70, 20, 67, 65, 11, 7, -92, 0, 31, 'host_9', 'aaa', 888888, -6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 92, 35, 99, 9, -31, 1, 2, 24, 96, 69, 'host_0', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 21, 77, 90, 83, 41, -84, 26, 60, 43, null, 'host_1', 'aaa', 888888, 6666, '', '', '', '', '', ''),
+       ('2023-05-31 10:30:10', 90, 0, 81, 28, 25, -44, 8, 89, 11, 76, 'host_2', 'aaa', -888888, 6666, '', '', '', '', '', '');
+
+
+SELECT time_bucket(k_timestamp, '4YEAR') as k_timestamp_b,
+       hostname,
+       lastts(usage_guest),
+       sum(usage_steal),
+       firstts(usage_nice),
+       max(usage_user),
+       max(usage_irq),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE hostname = 'host_0'
+AND k_timestamp >= '1800-01-01 00:00:00'
+AND k_timestamp < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '2yrs') as k_timestamp_b,
+       hostname,
+       first_row(usage_idle),
+       lastts(usage_nice),
+       lastts(usage_irq),
+       lastts(usage_guest_nice),
+       max(usage_idle),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE hostname = 'host_1'
+AND k_timestamp >= '1900-01-01 00:00:00'
+AND k_timestamp < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '20yr') as k_timestamp_b,
+       hostname,
+       sum(usage_guest),
+       count(usage_idle),
+       avg(usage_system),
+       max(usage_steal),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE hostname = 'host_0'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '100y') as k_timestamp_b,
+       hostname,
+       last_row(usage_iowait),
+       avg(usage_irq),
+       max(usage_system),
+       firstts(usage_irq),
+       lastts(usage_softirq),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE hostname = 'host_0'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '2month') as k_timestamp_b,
+       first_row(usage_irq),
+       lastts(usage_iowait),
+       sum(usage_iowait),
+       hostname,
+       first_row(usage_system),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '5mon') as k_timestamp_b, first (usage_nice), min (usage_system), min (usage_softirq), last_row(usage_guest_nice), hostname,
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE region = 'aaaaaaaa'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '16mons') as k_timestamp_b,
+       avg(usage_steal),
+       avg(usage_guest_nice),
+       last_row(usage_guest),
+       min(usage_idle),
+       hostname,
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts
+LIMIT 10;
+
+SELECT time_bucket(k_timestamp, '15weeks') as k_timestamp_b,
+       hostname,
+       sum(usage_nice),
+       sum(usage_idle),
+       min(usage_irq),
+       sum(usage_system),
+       last_row(usage_user),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts
+OFFSET 2;
+
+SELECT time_bucket(k_timestamp, '5week') as k_timestamp_b,
+       hostname,
+       min(usage_iowait),
+       last_row(usage_irq),
+       count(usage_nice),
+       last_row(usage_idle),
+       last_row(usage_system),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '1w') as k_timestamp_b,
+       hostname,
+       first_row(usage_iowait),
+       last_row(usage_steal),
+       min(usage_user),
+       last_row(usage_nice),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '2day') as k_timestamp_b,
+       hostname,
+       sum(usage_guest_nice),
+       sum(usage_irq),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1700-01-01 00:00:00'
+  AND k_timestamp < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '10d') as k_timestamp_b,
+       hostname,
+       min(usage_nice),
+       firstts(usage_user),
+       min(usage_guest), first (usage_idle), first (usage_softirq),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1100-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '12hour') as k_timestamp_b,
+       hostname,
+    last (usage_system), avg (usage_guest), last (usage_idle), first (usage_user),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1500-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '3hrs') as k_timestamp_b,
+       hostname,
+       count(usage_iowait), last (usage_guest_nice), sum (usage_softirq), first_row(usage_user),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1800-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts
+
+    LIMIT 1
+OFFSET 1;
+
+SELECT time_bucket(k_timestamp, '2hr') as k_timestamp_b,
+       hostname,
+       firstts(usage_iowait), last (usage_user), min (usage_steal),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '7h') as k_timestamp_b,
+       hostname,
+       first_row(usage_guest),
+       firstts(usage_system),
+       lastts(usage_system),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1700-01-01 00:00:00'
+  AND k_timestamp < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '2minute') as k_timestamp_b,
+       hostname,
+    first (usage_steal), count (usage_system), firstts(usage_steal), lastts(usage_steal), first_row(usage_steal),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '15mins') as k_timestamp_b,
+       hostname,
+    first (usage_guest_nice), last (usage_guest), first (usage_iowait), firstts(usage_guest),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '60min') as k_timestamp_b,
+       hostname,
+       lastts(usage_user),
+       firstts(usage_guest_nice), last (usage_softirq), last_row(usage_softirq),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '12min') as k_timestamp_b,
+       hostname,
+       firstts(usage_idle),
+       first_row(usage_guest_nice),
+       avg(usage_user),
+       count(usage_softirq),
+       count(usage_steal),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '2second') as k_timestamp_b,
+       hostname,
+       max(usage_nice), first (usage_system), avg (usage_idle), last (usage_irq), first (usage_irq),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '20secs') as k_timestamp_b,
+       hostname,
+       max(usage_guest_nice),
+       lastts(usage_idle),
+       max(usage_guest),
+       avg(usage_nice), first (usage_guest),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT time_bucket(k_timestamp, '2ec') as k_timestamp_b,
+       hostname,
+       min(usage_guest_nice),
+       max(usage_softirq),
+       lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT count(usage_irq),
+       time_bucket(k_timestamp, '-10s') as k_timestamp_b,
+       hostname,
+       avg(usage_softirq),
+       first_row(usage_softirq),
+       first_row(usage_nice), last (usage_iowait),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT count(usage_irq),
+       time_bucket(k_timestamp, '1.5hour') as k_timestamp_b,
+       hostname,
+       avg(usage_softirq),
+       first_row(usage_softirq),
+       first_row(usage_nice), last (usage_iowait),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT count(usage_irq),
+       time_bucket(k_timestamp, '2xiaoshi') as k_timestamp_b,
+       hostname,
+       avg(usage_softirq),
+       first_row(usage_softirq),
+       first_row(usage_nice), last (usage_iowait),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+
+SELECT count(usage_irq),
+       time_bucket(k_timestamp, '10YEARS') as k_timestamp_b,
+       hostname,
+       avg(usage_softirq),
+       first_row(usage_softirq),
+       first_row(usage_nice), last (usage_iowait),
+    lastts(usage_user)            as last_ts
+FROM test.cpu
+WHERE k_timestamp >= '1600-01-01 00:00:00'
+  AND k_timestamp
+    < '2024-01-01 00:00:00'
+GROUP BY hostname, region, rack, k_timestamp_b
+ORDER BY hostname, region, rack, k_timestamp_b, last_ts;
+drop database test cascade;

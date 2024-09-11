@@ -616,8 +616,11 @@ HashAggregateOperator::~HashAggregateOperator() {
 
 EEIteratorErrCode HashAggregateOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
-  BaseAggregator::Init(ctx);
-
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  code = BaseAggregator::Init(ctx);
+  if (EEIteratorErrCode::EE_OK != code) {
+    Return(code);
+  }
   std::vector<roachpb::DataType> group_types;
   std::vector<k_uint32> group_lens;
   for (auto& col : group_cols_) {

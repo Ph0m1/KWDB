@@ -18,6 +18,7 @@
 #include <queue>
 #include <limits>
 #include <string>
+#include <ctime>
 
 #include "kwdb_type.h"
 #include "ee_scan_op.h"
@@ -92,27 +93,81 @@ class AggTableScanOperator : public TableScanOperator {
                           std::vector<GroupByColumnInfo>& group_by_cols,
                           KTimestampTz& time_bucket);
 
+  KTimestampTz (AggTableScanOperator::*construct_)(Field*) const;
+
   // resolve agg func
   KStatus ResolveAggFuncs(kwdbContext_p ctx);
 
-  [[nodiscard]] inline KTimestampTz construct(Field* filed) const {
+  // use 0000-01-01 00:00:00 as start
+  // -62135596800000 is the timestamp of 0000-01-01 00:00:00
+  [[nodiscard]] KTimestampTz construct(Field* filed) const {
     auto time_bucket_field = dynamic_cast<FieldFuncTimeBucket*>(filed);
     if (time_bucket_field != nullptr) {
       KTimestampTz original_timestamp = time_bucket_field->getOriginalTimestamp();
-      return original_timestamp - original_timestamp % interval_seconds_;
+      KTimestampTz time_diff = timezone_ * 3600000;
+      KTimestampTz bucket_start = (original_timestamp + 62135596800000 + time_diff)
+        / (k_int64)interval_seconds_ * (k_int64)interval_seconds_;
+      return bucket_start - 62135596800000 - time_diff;
     }
     return 0;
   }
 
+  // construct_variable calculate the start of time_bucket for year and month
+  // use 0000-01-01 00:00:00 as start
+  [[nodiscard]] KTimestampTz construct_variable(Field* filed) const {
+    auto time_bucket_field = dynamic_cast<FieldFuncTimeBucket*>(filed);
+    if (time_bucket_field != nullptr) {
+      KTimestampTz original_timestamp = time_bucket_field->getOriginalTimestamp();
+      std::time_t tt = (std::time_t)original_timestamp/1000;
+      struct std::tm tm;
+      gmtime_r(&tt, &tm);
+      tm.tm_sec = 0;
+      tm.tm_min = 0;
+      tm.tm_hour = 0;
+      tm.tm_mday = 1;
+      if (year_bucket_) {
+        tm.tm_mon = 0;
+        tm.tm_year = (int32_t)( (tm.tm_year + 1899) / static_cast<int>(interval_seconds_)
+         * static_cast<int>(interval_seconds_) - 1899);
+        tm.tm_hour -= timezone_;
+      } else {
+        int32_t mon = (tm.tm_year + 1899) * 12 + tm.tm_mon;
+        mon = (int32_t)(mon / static_cast<int>(interval_seconds_) * static_cast<int>(interval_seconds_));
+        tm.tm_year = (mon / 12) - 1899;
+        tm.tm_mon = mon % 12;
+        tm.tm_hour -= timezone_;
+      }
+      return (KTimestampTz)(timegm(&tm)  * 1000);
+    }
+    return 0;
+  }
+
+  [[nodiscard]] bool hasTimeBucket() const {
+    return interval_seconds_ != 0;
+  }
   // timebucket
   void extractTimeBucket(Field** readers, k_uint32 render_num) {
     for (k_int32 i = 0; i < render_num; ++i) {
       Field* field = readers[i];
       auto time_bucket_field = dynamic_cast<FieldFuncTimeBucket*>(field);
       if (time_bucket_field != nullptr) {
-        if (!time_bucket_field->field_is_nullable()) {
-          interval_seconds_ = time_bucket_field->getIntervalSeconds();
-          col_idx_ = time_bucket_field->get_num();
+        interval_seconds_ = time_bucket_field->getIntervalSeconds(variable_interval_, year_bucket_, error_info_);
+        timezone_ = time_bucket_field->time_zone_;
+        col_idx_ = time_bucket_field->get_num();
+      }
+      if (error_info_ != "") {
+        if (error_info_ == "invalid input interval time for time_bucket or time_bucket_gapfill.") {
+          EEPgErrorInfo::SetPgErrorInfo(
+            ERRCODE_INVALID_PARAMETER_VALUE,
+            error_info_.c_str());
+        } else if (error_info_ == "second arg should be a positive interval.") {
+          EEPgErrorInfo::SetPgErrorInfo(
+            ERRCODE_INVALID_PARAMETER_VALUE,
+            error_info_.c_str());
+        } else {
+          EEPgErrorInfo::SetPgErrorInfo(
+            ERRCODE_INVALID_DATETIME_FORMAT,
+            error_info_.c_str());
         }
       }
     }
@@ -169,6 +224,10 @@ class AggTableScanOperator : public TableScanOperator {
  private:
   k_uint32 col_idx_{0};
   k_int64 interval_seconds_{0};
+  std::string error_info_{""};
+  k_bool variable_interval_{false};
+  k_bool year_bucket_{false};
+  k_int8 timezone_{0};
 
   // the list of input column's type
   std::vector<roachpb::DataType> data_types_;

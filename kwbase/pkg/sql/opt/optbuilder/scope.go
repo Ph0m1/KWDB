@@ -986,6 +986,7 @@ func (s *scope) VisitPre(expr tree.Expr) (recurse bool, newExpr tree.Expr) {
 				} else {
 					n.Parts[0] = Gapfillinternal
 					s.hasGapfill = true
+					s.builder.factory.Memo().SetFlag(opt.HasGapFill)
 				}
 			}
 		}
