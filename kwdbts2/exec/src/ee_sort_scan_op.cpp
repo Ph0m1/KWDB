@@ -141,6 +141,7 @@ KStatus SortScanOperator::Close(kwdbContext_p ctx) {
 
 EEIteratorErrCode SortScanOperator::Reset(kwdbContext_p ctx) {
   EnterFunc();
+  TableScanOperator::Reset(ctx);
   Data* del = nullptr;
   while (!data_asc_.empty()) {
     del = data_asc_.top();
