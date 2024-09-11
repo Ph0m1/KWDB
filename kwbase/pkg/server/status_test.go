@@ -1313,8 +1313,8 @@ func TestRemoteDebugModeSetting(t *testing.T) {
 			{"allocator/range/1", &serverpb.AllocatorResponse{}},
 			{"logs/local", &serverpb.LogEntriesResponse{}},
 			{"logfiles/local/kwbase.log", &serverpb.LogEntriesResponse{}},
-			{"local_sessions", &serverpb.ListSessionsResponse{}},
-			{"sessions", &serverpb.ListSessionsResponse{}},
+			// {"local_sessions", &serverpb.ListSessionsResponse{}},
+			// {"sessions", &serverpb.ListSessionsResponse{}},
 		} {
 			err := getStatusJSONProto(ts, tc.path, tc.response)
 			if !testutils.IsError(err, "403 Forbidden") {

@@ -1573,9 +1573,9 @@ func (s *statusServer) ListLocalSessions(
 	ctx context.Context, req *serverpb.ListSessionsRequest,
 ) (*serverpb.ListSessionsResponse, error) {
 	ctx = propagateGatewayMetadata(ctx)
-	if !debug.GatewayRemoteAllowed(ctx, s.st) {
-		return nil, remoteDebuggingErr
-	}
+	// if !debug.GatewayRemoteAllowed(ctx, s.st) {
+	// 	return nil, remoteDebuggingErr
+	// }
 
 	sessionUser, isAdmin, err := s.admin.getUserAndRole(ctx)
 	if err != nil {
@@ -1701,9 +1701,9 @@ func (s *statusServer) iterateNodes(
 func (s *statusServer) ListSessions(
 	ctx context.Context, req *serverpb.ListSessionsRequest,
 ) (*serverpb.ListSessionsResponse, error) {
-	if !debug.GatewayRemoteAllowed(ctx, s.st) {
-		return nil, remoteDebuggingErr
-	}
+	// if !debug.GatewayRemoteAllowed(ctx, s.st) {
+	// 	return nil, remoteDebuggingErr
+	// }
 
 	ctx = propagateGatewayMetadata(ctx)
 	ctx = s.AnnotateCtx(ctx)

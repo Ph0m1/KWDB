@@ -505,11 +505,14 @@ func (h ConnectionHandler) SendDTI(
 	var tempStmt Statement
 	var flags planFlags
 	tempStmt.AST = stmts[0].AST
+	user := h.ex.sessionData.User
+	database := h.ex.sessionData.Database
 	h.ex.statsCollector.recordStatement(
 		&tempStmt, nil,
 		flags.IsSet(planFlagDistributed), flags.IsSet(planFlagImplicitTxn),
 		0, rownum, nil,
 		0, 0, endtime.Sub(starttime).Seconds(), 0, 0, 0, 0,
+		user, database,
 	)
 	h.ex.metrics.ExecutedStatementCounters.QueryCount.Inc()
 	h.ex.metrics.ExecutedStatementCounters.InsertCount.Inc()

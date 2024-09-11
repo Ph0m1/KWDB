@@ -158,12 +158,15 @@ func (ex *connExecutor) recordStatementSummary(
 		m.SQLExecLatency.RecordValue(runLatRaw.Nanoseconds())
 		m.SQLServiceLatency.RecordValue(svcLatRaw.Nanoseconds())
 	}
+	user := ex.sessionData.User
+	database := ex.sessionData.Database
 
 	ex.statsCollector.recordStatement(
 		stmt, planner.curPlan.instrumentation.savedPlanForStats,
 		flags.IsSet(planFlagDistributed), flags.IsSet(planFlagImplicitTxn),
 		automaticRetryCount, rowsAffected, err,
 		parseLat, planLat, runLat, svcLat, execOverhead, bytesRead, rowsRead,
+		user, database,
 	)
 
 	if log.V(2) {

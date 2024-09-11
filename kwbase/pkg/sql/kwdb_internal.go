@@ -706,7 +706,9 @@ CREATE TABLE kwdb_internal.node_statement_statistics (
   bytes_read          INT8 NOT NULL,
   rows_read           INT8 NOT NULL,
   implicit_txn        BOOL NOT NULL,
-  failed_count        INT8 NOT NULL
+  failed_count        INT8 NOT NULL,
+  user_name           STRING,
+  database            STRING
 )`,
 	populate: func(ctx context.Context, p *planner, _ *DatabaseDescriptor, addRow func(...tree.Datum) error) error {
 		if err := p.RequireAdminRole(ctx, "access application statistics"); err != nil {
@@ -786,6 +788,8 @@ CREATE TABLE kwdb_internal.node_statement_statistics (
 					tree.NewDInt(tree.DInt(s.data.RowsRead)),
 					tree.MakeDBool(tree.DBool(stmtKey.implicitTxn)),
 					tree.NewDInt(tree.DInt(s.data.FailedCount)),
+					tree.NewDString(stmtKey.user),
+					tree.NewDString(stmtKey.database),
 				)
 				s.Unlock()
 				if err != nil {

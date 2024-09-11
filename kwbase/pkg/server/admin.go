@@ -33,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,6 +69,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
 	"gitee.com/kwbasedb/kwbase/pkg/util/protoutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
+	"gitee.com/kwbasedb/kwbase/pkg/util/sysutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
 	"github.com/cockroachdb/apd"
 	"github.com/cockroachdb/errors"
@@ -747,6 +749,34 @@ func (s *adminServer) TableDetails(
 		}
 	}
 	resp.MmapSize = totalSize
+
+	// Get the size of TIME SERIES TABLE by system file
+	var tsTableSize int64
+	if tableType == "TIME SERIES TABLE" {
+		storePath := s.server.cfg.Stores.Specs[0].Path
+		var tablePath string = storePath + "/tsdb/" + strconv.Itoa(int(tableID))
+
+		rootDevNum, err := sysutil.GetDeviceNumber(tablePath)
+		if err != nil {
+			return nil, err
+		}
+		if errOuter := filepath.Walk(tablePath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			subDevNum, err := sysutil.GetDeviceNumber(path)
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && subDevNum == rootDevNum {
+				tsTableSize += info.Size()
+			}
+			return nil
+		}); errOuter != nil {
+			return nil, errOuter
+		}
+	}
+	resp.TstableSize = tsTableSize
 
 	return &resp, nil
 }
@@ -1619,6 +1649,54 @@ func (s *adminServer) Jobs(
 		}
 		if runningStatusOrNil != nil {
 			job.RunningStatus = *runningStatusOrNil
+		}
+	}
+
+	return &resp, nil
+}
+
+func (s *adminServer) Queries(
+	ctx context.Context, req *serverpb.QueriesRequest,
+) (*serverpb.QueriesResponse, error) {
+	ctx = s.server.AnnotateCtx(ctx)
+	userName, err := userFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	q := makeSQLQuery()
+	q.Append(`
+      SELECT node_id, user_name, start, query, phase, application_name
+		FROM kwdb_internal.cluster_queries
+		WHERE true
+	`)
+	q.Append(" AND application_name != $", "$ internal-admin-queries")
+	rows, cols, err := s.server.internalExecutor.QueryWithCols(
+		ctx, "admin-queries", nil, /* txn */
+		sqlbase.InternalExecutorSessionDataOverride{User: userName},
+		q.String(),
+		q.QueryArguments()...,
+	)
+	if nil != err {
+		return nil, err
+	}
+
+	scanner := makeResultScanner(cols)
+	resp := serverpb.QueriesResponse{
+		Queries: make([]serverpb.QueriesResponse_Query, len(rows)),
+	}
+	for i, row := range rows {
+		query := &resp.Queries[i]
+		if err := scanner.ScanAll(
+			row,
+			&query.NodeId,
+			&query.UserName,
+			&query.Start,
+			&query.Query,
+			&query.Phase,
+			&query.ApplicationName,
+		); nil != err {
+			return nil, s.serverError(err)
 		}
 	}
 

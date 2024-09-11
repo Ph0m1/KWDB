@@ -501,9 +501,20 @@ var charts = []sectionDescription{
 		Organization: [][]string{{Process, "Server", "Mmap"}},
 		Charts: []chartDescription{
 			{
-				Title: "Memory Map Size",
+				Title: "Memory Map Virtual Size",
 				Metrics: []string{
-					"sys.memory.map.totalbytes",
+					"sys.memory.map.virtualbytes",
+				},
+			},
+		},
+	},
+	{
+		Organization: [][]string{{Process, "Server", "Mmap"}},
+		Charts: []chartDescription{
+			{
+				Title: "Memory Map Physical Size",
+				Metrics: []string{
+					"sys.memory.map.physicalbytes",
 				},
 			},
 		},

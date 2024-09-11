@@ -192,6 +192,8 @@ message TableDetailsResponse {
   int64 mmap_size = 10;
   // mmap_count is the number of memory map regions, the unit is count.
   int64 mmap_count = 11;
+  // tstable_size is the total size of ts table, the unit is bytes.
+  int64 tstable_size = 12;
 }
 
 // TableStatsRequest is a request for detailed, computationally expensive
@@ -638,6 +640,22 @@ message JobsResponse {
   repeated Job jobs = 1 [(gogoproto.nullable) = false];
 }
 
+message QueriesRequest {
+}
+
+// QueriesResponse contains the running queries.
+message QueriesResponse {
+  message Query {
+    int64 node_id = 1;
+    string user_name = 2;
+    google.protobuf.Timestamp start = 3 [(gogoproto.stdtime) = true];
+    string query = 4;
+    string phase = 5;
+    string application_name = 6;
+  }
+  repeated Query queries = 1 [(gogoproto.nullable) = false];
+}
+
 // LocationsRequest requests system locality location information.
 message LocationsRequest {
 }
@@ -963,6 +981,13 @@ service Admin {
   rpc Jobs(JobsRequest) returns (JobsResponse) {
     option (google.api.http) = {
       get: "/_admin/v1/jobs"
+    };
+  }
+
+  // Queries returns all running queries.
+  rpc Queries(QueriesRequest) returns (QueriesResponse) {
+    option (google.api.http) = {
+      get: "/_admin/v1/queries"
     };
   }
 

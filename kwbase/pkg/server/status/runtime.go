@@ -166,9 +166,15 @@ var (
 		Measurement: "Kamlloc",
 		Unit:        metric.Unit_BYTES,
 	}
-	metaMemoryMapBytes = metric.Metadata{
-		Name:        "sys.memory.map.totalbytes",
-		Help:        "Total bytes of memory map allocated",
+	metaMemoryMapVirtualBytes = metric.Metadata{
+		Name:        "sys.memory.map.virtualbytes",
+		Help:        "Total virtual bytes of memory map",
+		Measurement: "Memory",
+		Unit:        metric.Unit_BYTES,
+	}
+	metaMemoryMapPhysicalBytes = metric.Metadata{
+		Name:        "sys.memory.map.physicalbytes",
+		Help:        "Total physical bytes of memory map allocated",
 		Measurement: "Memory",
 		Unit:        metric.Unit_BYTES,
 	}
@@ -307,7 +313,8 @@ type RuntimeStatSampler struct {
 	CgoAllocBytes     *metric.Gauge
 	CgoTotalBytes     *metric.Gauge
 	KmallocTotalBytes *metric.Gauge
-	MmapTotalBytes    *metric.Gauge
+	MmapVirtualBytes  *metric.Gauge
+	MmapPhysicalBytes *metric.Gauge
 	MmapTotalCount    *metric.Gauge
 	GcCount           *metric.Gauge
 	GcPauseNS         *metric.Gauge
@@ -387,7 +394,8 @@ func NewRuntimeStatSampler(ctx context.Context, clock *hlc.Clock) *RuntimeStatSa
 		CgoAllocBytes:          metric.NewGauge(metaCgoAllocBytes),
 		CgoTotalBytes:          metric.NewGauge(metaCgoTotalBytes),
 		KmallocTotalBytes:      metric.NewGauge(metaKmallocBytes),
-		MmapTotalBytes:         metric.NewGauge(metaMemoryMapBytes),
+		MmapVirtualBytes:       metric.NewGauge(metaMemoryMapVirtualBytes),
+		MmapPhysicalBytes:      metric.NewGauge(metaMemoryMapPhysicalBytes),
 		MmapTotalCount:         metric.NewGauge(metaMemoryMapCount),
 		GcCount:                metric.NewGauge(metaGCCount),
 		GcPauseNS:              metric.NewGauge(metaGCPauseNS),
@@ -445,8 +453,10 @@ type KmallocMemStats struct {
 
 // MmapStats reports what has been allocated by memory map
 type MmapStats struct {
-	// MmapTotalBytes is the total size of memory map, the unit is bytes.
-	MmapTotalBytes int64
+	// MmapVirtualBytes is the virtual size of memory map, the unit is bytes.
+	MmapVirtualBytes int64
+	// MmapPhysicalBytes is the physical size of memory map, the unit is bytes.
+	MmapPhysicalBytes int64
 	// MmapTotalCount is the number of memory map regions, the unit is count.
 	MmapTotalCount int64
 }
@@ -478,14 +488,16 @@ func GetKmallocStats(ctx context.Context) *KmallocMemStats {
 
 // GetMmapStatsBySysFile collects memory map size by system file.
 func GetMmapStatsBySysFile(ctx context.Context) *MmapStats {
-	var mmapBytes uint
+	var mmapVirtualBytes uint
+	var mmapPhysicalBytes uint
 	var mmapCount uint
 
 	pid := os.Getpid()
 	statusPath := "/proc/" + strconv.Itoa(pid) + "/status"
 	mapsPath := "/proc/" + strconv.Itoa(pid) + "/maps"
+	statmPath := "/proc/" + strconv.Itoa(pid) + "/statm"
 
-	// Get the total memory map size.
+	// Get the virtual memory map size.
 	statusFile, err := os.Open(statusPath)
 	if err != nil {
 		log.Errorf(ctx, "Error opening file %s: %s", statusPath, err)
@@ -505,7 +517,33 @@ func GetMmapStatsBySysFile(ctx context.Context) *MmapStats {
 					log.Errorf(ctx, "Error parsing VmSize from %s: %s", statusPath, err)
 				}
 				// VmSize is in kB, Convert from kB to bytes
-				mmapBytes = uint(size * 1024)
+				mmapVirtualBytes = uint(size * 1024)
+				break
+			}
+		}
+	}
+
+	// Get the physical memory map size.
+	statmFile, err := os.Open(statmPath)
+	if err != nil {
+		log.Errorf(ctx, "Error opening file %s: %s", statmPath, err)
+	} else {
+		defer statmFile.Close()
+		scanner := bufio.NewScanner(statmFile)
+		if scanner.Scan() {
+			line := scanner.Text()
+			pageSize := int64(os.Getpagesize())
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				sizeStr := fields[2]
+				size, err := strconv.ParseInt(sizeStr, 10, 64)
+				if err != nil {
+					log.Errorf(ctx, "Error parsing shared pages in %s: %s", statmPath, err)
+					size = 0
+				}
+				mmapPhysicalBytes = uint(size * pageSize)
+			} else {
+				log.Errorf(ctx, "Not enough fields in %s", statmPath)
 			}
 		}
 	}
@@ -523,8 +561,9 @@ func GetMmapStatsBySysFile(ctx context.Context) *MmapStats {
 	}
 
 	return &MmapStats{
-		MmapTotalBytes: int64(mmapBytes),
-		MmapTotalCount: int64(mmapCount),
+		MmapVirtualBytes:  int64(mmapVirtualBytes),
+		MmapPhysicalBytes: int64(mmapPhysicalBytes),
+		MmapTotalCount:    int64(mmapCount),
 	}
 }
 
@@ -630,7 +669,8 @@ func (rsr *RuntimeStatSampler) SampleEnvironment(
 
 	var kmallocTotal = GetKmallocStats(ctx).KmallocTotalBytes
 	mmapStats := GetMmapStatsBySysFile(ctx)
-	var mmapTotalBytes = mmapStats.MmapTotalBytes
+	var mmapVirtualBytes = mmapStats.MmapVirtualBytes
+	var mmapPhysicalBytes = mmapStats.MmapPhysicalBytes
 	var mmapTotalCount = mmapStats.MmapTotalCount
 
 	// Log summary of statistics to console.
@@ -662,7 +702,8 @@ func (rsr *RuntimeStatSampler) SampleEnvironment(
 	rsr.CgoAllocBytes.Update(cs.CGoAllocatedBytes)
 	rsr.CgoTotalBytes.Update(cs.CGoTotalBytes)
 	rsr.KmallocTotalBytes.Update(kmallocTotal)
-	rsr.MmapTotalBytes.Update(mmapTotalBytes)
+	rsr.MmapVirtualBytes.Update(mmapVirtualBytes)
+	rsr.MmapPhysicalBytes.Update(mmapPhysicalBytes)
 	rsr.MmapTotalCount.Update(mmapTotalCount)
 	rsr.GcCount.Update(gc.NumGC)
 	rsr.GcPauseNS.Update(int64(gc.PauseTotal))

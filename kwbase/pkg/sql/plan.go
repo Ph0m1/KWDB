@@ -554,6 +554,8 @@ func (pi *planInstrumentation) savePlanInfo(ctx context.Context, curPlan *planTo
 	}
 	if pi.appStats != nil && pi.appStats.shouldSaveLogicalPlanDescription(
 		curPlan.stmt,
+		curPlan.catalog.planner.SessionData().User,
+		curPlan.catalog.planner.SessionData().Database,
 		curPlan.flags.IsSet(planFlagDistributed),
 		curPlan.flags.IsSet(planFlagImplicitTxn),
 		curPlan.execErr,

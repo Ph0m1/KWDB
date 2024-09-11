@@ -2138,10 +2138,13 @@ func (s *sqlStatsCollector) recordStatement(
 	err error,
 	parseLat, planLat, runLat, svcLat, ovhLat float64,
 	bytesRead, rowsRead int64,
+	user string,
+	database string,
 ) {
 	s.appStats.recordStatement(
 		stmt, samplePlanDescription, distSQLUsed, implicitTxn, automaticRetryCount, numRows, err,
-		parseLat, planLat, runLat, svcLat, ovhLat, bytesRead, rowsRead)
+		parseLat, planLat, runLat, svcLat, ovhLat, bytesRead, rowsRead,
+		user, database)
 }
 
 // recordTransaction records stats for one transaction.

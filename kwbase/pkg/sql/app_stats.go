@@ -53,6 +53,8 @@ type stmtKey struct {
 	failed      bool
 	distSQLUsed bool
 	implicitTxn bool
+	user        string
+	database    string
 }
 
 // appStats holds per-application statistics.
@@ -118,7 +120,8 @@ var logicalPlanCollectionPeriod = settings.RegisterPublicNonNegativeDurationSett
 )
 
 func (s stmtKey) String() string {
-	return s.flags() + s.stmt
+	sep := "|"
+	return s.flags() + sep + s.user + sep + s.database + sep + s.stmt
 }
 
 func (s stmtKey) flags() string {
@@ -145,6 +148,8 @@ func (a *appStats) recordStatement(
 	err error,
 	parseLat, planLat, runLat, svcLat, ovhLat float64,
 	bytesRead, rowsRead int64,
+	user string,
+	database string,
 ) {
 	if !stmtStatsEnable.Get(&a.st.SV) {
 		return
@@ -155,7 +160,7 @@ func (a *appStats) recordStatement(
 	}
 
 	// Get the statistics object.
-	s := a.getStatsForStmt(stmt, distSQLUsed, implicitTxn, err, true /* createIfNonexistent */)
+	s := a.getStatsForStmt(stmt, user, database, distSQLUsed, implicitTxn, err, true /* createIfNonexistent */)
 
 	// Collect the per-statement statistics.
 	s.Lock()
@@ -187,7 +192,13 @@ func (a *appStats) recordStatement(
 
 // getStatsForStmt retrieves the per-stmt stat object.
 func (a *appStats) getStatsForStmt(
-	stmt *Statement, distSQLUsed bool, implicitTxn bool, err error, createIfNonexistent bool,
+	stmt *Statement,
+	user string,
+	database string,
+	distSQLUsed bool,
+	implicitTxn bool,
+	err error,
+	createIfNonexistent bool,
 ) *stmtStats {
 	// Extend the statement key with various characteristics, so
 	// that we use separate buckets for the different situations.
@@ -198,6 +209,8 @@ func (a *appStats) getStatsForStmt(
 	} else {
 		key.stmt = anonymizeStmt(stmt.AST)
 	}
+	key.user = user
+	key.database = database
 
 	return a.getStatsForStmtWithKey(key, createIfNonexistent)
 }
@@ -300,12 +313,12 @@ func (a *appStats) recordTransaction(txnTimeSec float64, ev txnEvent, implicit b
 // `logicalPlanCollectionPeriod` to assess how frequently to sample logical
 // plans.
 func (a *appStats) shouldSaveLogicalPlanDescription(
-	stmt *Statement, useDistSQL bool, implicitTxn bool, err error,
+	stmt *Statement, user string, database string, useDistSQL bool, implicitTxn bool, err error,
 ) bool {
 	if !sampleLogicalPlans.Get(&a.st.SV) {
 		return false
 	}
-	stats := a.getStatsForStmt(stmt, useDistSQL, implicitTxn, err, false /* createIfNonexistent */)
+	stats := a.getStatsForStmt(stmt, user, database, useDistSQL, implicitTxn, err, false /* createIfNonexistent */)
 	if stats == nil {
 		// Save logical plan the first time we see new statement fingerprint.
 		return true
@@ -509,6 +522,8 @@ func (s *sqlStats) getStmtStats(
 					ImplicitTxn: q.implicitTxn,
 					Failed:      q.failed,
 					App:         maybeHashedAppName,
+					User:        q.user,
+					Database:    q.database,
 				}
 				stats.Lock()
 				data := stats.data
