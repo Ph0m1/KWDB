@@ -58,6 +58,14 @@ var transTypeToLength = map[string]int64{
 	"TIMESTAMP":   8,
 	"TIMESTAMPTZ": 8,
 	"INTERVAL":    8,
+	"BIT":         8,
+	"VARBIT":      8,
+	"DATE":        8,
+	"TIME":        8,
+	"JSONB":       8,
+	"INET":        8,
+	"UUID":        8,
+	"GEOMETRY":    9223372036854775807,
 	"_TEXT":       9223372036854775807,
 	"NAME":        9223372036854775807}
 
