@@ -734,7 +734,7 @@ TEST_F(TestPartitionBigTable, redoPut) {
 }
 
 /*
- * @brief Test the ability of MMapEntityBigTable to write a large amount of data
+ * @brief Test the updateAggregateResult function
  */
 TEST_F(TestPartitionBigTable, aggUpdate) {
   ErrorInfo err_info;
@@ -849,6 +849,71 @@ TEST_F(TestPartitionBigTable, disorderPut) {
 
   delete[] data;
   delete[] disorder_data;
+  delete mt_table;
+  delete root_bt_manager;
+}
+
+/*
+ * @brief Test the updateAggregateResult function of null value
+ */
+TEST_F(TestPartitionBigTable, aggUpdateNull) {
+  CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 10;
+  ErrorInfo err_info;
+  string table_name = "t3";
+  TableType table_type = TableType::ENTITY_TABLE;
+  MMapMetricsTable* root_bt = BtUtil::CreateRootTableVarCol(db_name_, db_path_, table_name, table_type, err_info);
+  ASSERT_EQ(err_info.errmsg, "");
+  MMapRootTableManager* root_bt_manager = new MMapRootTableManager(db_path_, db_name_, 123456789);
+  root_bt_manager->PutTable(1, root_bt);
+  string pt_tbl_sub_path = std::to_string(time(nullptr)) + "/";
+  ::mkdir((db_path_ + pt_tbl_sub_path).c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  vector<string> key{};
+
+  TsTimePartition* mt_table = new TsTimePartition(root_bt_manager, CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
+  mt_table->open(root_bt->name() + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
+  EXPECT_EQ(err_info.errmsg, "");
+
+  int count = 10;
+  // Set the current entity id to 1, and write data for 10 block items in sequence
+  uint32_t entity_id = 1;
+  timestamp64 ts_now = time(nullptr) * 1000;
+  DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
+  initDataWithNull(ctx_, mt_table, entity_id, ts_now, count, &dedup_result, kwdbts::DedupRule::OVERRIDE);
+
+  EXPECT_EQ(mt_table->size(entity_id), count);
+  auto block_item = mt_table->getBlockItem(1);
+  ASSERT_EQ(block_item->publish_row_count, 10);
+  ASSERT_EQ(block_item->is_agg_res_available, false);
+  std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
+  ASSERT_NE(segment_tbl, nullptr);
+  ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(1, 0, kwdbts::Sumfunctype::COUNT)), 10);
+
+  initData2(ctx_, mt_table, entity_id, ts_now, count , &dedup_result, kwdbts::DedupRule::OVERRIDE);
+
+  bool is_deleted = false;
+  for (int i = 0; i < count; ++i) {
+    block_item->isDeleted(i + 1, &is_deleted);
+    ASSERT_TRUE(is_deleted);
+  }
+  EXPECT_EQ(mt_table->size(entity_id), count * 2);
+  ASSERT_EQ(block_item->publish_row_count, 10);
+  ASSERT_EQ(block_item->is_agg_res_available, false);
+
+  auto block_item2 = mt_table->getBlockItem(2);
+  ASSERT_EQ(block_item2->publish_row_count, 10);
+  ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(2, 0, kwdbts::Sumfunctype::COUNT)), 10);
+  ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(2, 1, kwdbts::Sumfunctype::COUNT)), 10);
+  ASSERT_EQ(KInt64(segment_tbl->columnAggAddr(2, 1, kwdbts::Sumfunctype::MIN)), 11);
+  ASSERT_EQ(KInt64(segment_tbl->columnAggAddr(2, 1, kwdbts::Sumfunctype::MAX)), 11);
+  ASSERT_EQ(KInt64(segment_tbl->columnAggAddr(2, 1, kwdbts::Sumfunctype::SUM)), 110);
+  ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(2, 2, kwdbts::Sumfunctype::COUNT)), 10);
+  MetricRowID row{2, 1};
+  string test_str = "abcdefghijklmnopqrstuvwxyz";
+  char aa[27];
+  auto var_data = segment_tbl->varColumnAggAddr(row, 2, kwdbts::Sumfunctype::MAX);
+  memcpy(aa, (char*)var_data.get() + sizeof(uint16_t), 27);
+  ASSERT_EQ(strcmp(aa, test_str.data()), 0);
+  ASSERT_EQ(block_item2->is_agg_res_available, true);
   delete mt_table;
   delete root_bt_manager;
 }

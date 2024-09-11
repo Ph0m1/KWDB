@@ -562,6 +562,9 @@ void MMapSegmentTable::updateAggregateResult(const BlockSpan& span)  {
   for (; segment_col_idx < cols_info_without_hidden_.size(); ++segment_col_idx) {
     AggDataAddresses addresses{};
     columnAggCalculate(span, start_row, segment_col_idx, addresses, span.block_item->publish_row_count, true);
+    if (*reinterpret_cast<uint16_t*>(addresses.count) == 0) {
+      return;
+    }
   }
   span.block_item->is_agg_res_available = true;
 }

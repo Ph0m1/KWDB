@@ -1707,11 +1707,11 @@ bool AggCalculator::CalAllAgg(void* min_base, void* max_base, void* sum_base, vo
     }
   }
 
-  if (min != min_base) {
+  if (min != nullptr && min != min_base) {
     memcpy(min_base, min, size_);
   }
 
-  if (max != max_base) {
+  if (max != nullptr && max != max_base) {
     memcpy(max_base, max, size_);
   }
   return is_overflow;
@@ -1809,6 +1809,9 @@ void VarColAggCalculator::CalAllAgg(void* min_base, void* max_base, std::shared_
     if (hasDeleted && isDeleted(span.block_item->rows_delete_flags, first_row_ + i)) {
       continue;
     }
+    if (isnull(first_row_ + i)) {
+      continue;
+    }
     if (count_base) {
       *reinterpret_cast<uint16_t*>(count_base) += 1;
     }
@@ -1825,11 +1828,11 @@ void VarColAggCalculator::CalAllAgg(void* min_base, void* max_base, std::shared_
     }
   }
 
-  if (min != min_base) {
+  if (min != nullptr && min != min_base) {
     memcpy(min_base, min, size_);
   }
 
-  if (max != max_base) {
+  if (max != nullptr && max != max_base) {
     memcpy(max_base, max, size_);
   }
 }
