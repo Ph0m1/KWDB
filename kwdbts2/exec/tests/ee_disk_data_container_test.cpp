@@ -48,7 +48,7 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
 
   // check insert
   chunk = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
-  ASSERT_EQ(chunk->Initialize(), 0);
+  ASSERT_EQ(chunk->Initialize(), true);
   k_int32 row = chunk->NextLine();
   ASSERT_EQ(row, -1);
 
@@ -105,7 +105,7 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
 
   DataChunkPtr chunk2;
   chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
-  ASSERT_EQ(chunk2->Initialize(), 0);
+  ASSERT_EQ(chunk2->Initialize(), true);
   chunk2->InsertData(ctx, chunk.get(), nullptr);
   ASSERT_EQ(chunk2->Count(), 1);
 

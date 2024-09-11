@@ -92,6 +92,7 @@ type TsEngineConfig struct {
 	Dir            string
 	ThreadPoolSize int
 	TaskQueueSize  int
+	BufferPoolSize int
 	Settings       *cluster.Settings
 	LogCfg         log.Config
 	ExtraOptions   []byte
@@ -246,6 +247,7 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 				extra_options:     goToTSSlice(r.cfg.ExtraOptions),
 				thread_pool_size:  C.uint16_t(uint16(r.cfg.ThreadPoolSize)),
 				task_queue_size:   C.uint16_t(uint16(r.cfg.TaskQueueSize)),
+				buffer_pool_size:  C.uint32_t(uint32(r.cfg.BufferPoolSize)),
 				lg_opts:           optLog,
 			},
 			nil,
@@ -271,6 +273,7 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 				extra_options:     goToTSSlice(r.cfg.ExtraOptions),
 				thread_pool_size:  C.uint16_t(uint16(r.cfg.ThreadPoolSize)),
 				task_queue_size:   C.uint16_t(uint16(r.cfg.TaskQueueSize)),
+				buffer_pool_size:  C.uint32_t(uint32(r.cfg.BufferPoolSize)),
 				lg_opts:           optLog,
 			},
 			&appliedRangeIndex[0],

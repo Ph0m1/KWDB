@@ -150,7 +150,9 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
       // If the result set is unordered, it is necessary to perform secondary
       // HASH aggregation on the basis of AGG SCAN.
       if (handler->isDisorderedMetrics()) {
-        current_data_chunk_->setDisorder(true);
+        if (nullptr != current_data_chunk_) {
+          current_data_chunk_->setDisorder(true);
+        }
       }
       // reset
       data_handle->ResetLine();
@@ -190,8 +192,13 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
   if (row_batch == nullptr) {
     Return(KStatus::FAIL)
   }
-  auto count_of_current_chunk = (k_int32) current_data_chunk_->Count();
 
+  k_int32 count_of_current_chunk = 0;
+  if (current_data_chunk_ != nullptr) {
+    count_of_current_chunk = (k_int32) current_data_chunk_->Count();
+  } else {
+    Return(KStatus::FAIL);
+  }
   k_int32 target_row = count_of_current_chunk - 1;
   k_uint32 row_batch_count = row_batch->Count();
 

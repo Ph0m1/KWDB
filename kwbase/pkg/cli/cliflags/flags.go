@@ -1201,6 +1201,11 @@ The default is to not exclude any node.`,
 		Description: `AE executor task queue size.`,
 	}
 
+	BufferPoolSize = FlagInfo{
+		Name:        "buffer-pool-size",
+		Description: `AE executor buffer pool size.`,
+	}
+
 	CgroupUser = FlagInfo{
 		Name:        "cgroup-user",
 		Description: `Control groups user.`,

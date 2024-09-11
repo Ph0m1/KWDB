@@ -20,6 +20,7 @@
 #include "ee_data_container.h"
 #include "cm_kwdb_context.h"
 #include "ee_encoding.h"
+#include "ee_executor.h"
 #include "ee_field.h"
 #include "ee_field_func.h"
 #include "ee_global.h"
@@ -72,11 +73,10 @@ class DataChunk : public IChunk {
                      k_uint32 count, k_uint32 capacity);
 
   virtual ~DataChunk();
-
   /**
-   * @return return -1 if memory allocation fails
+   * @return return false if memory allocation fails
    */
-  int Initialize();
+  k_bool Initialize();
 
   /* Getter && Setter */
   [[nodiscard]] inline k_uint32 ColumnNum() const { return col_num_; }
@@ -342,7 +342,7 @@ class DataChunk : public IChunk {
   }
 
   //  use to limit the return size in Next functions.
-  static const int SIZE_LIMIT = 32768;
+  static const int SIZE_LIMIT = ROW_BUFFER_SIZE;
   static const int MIN_CAPACITY = 1;
 
   static k_uint32 EstimateCapacity(vector<ColumnInfo>& column_info);

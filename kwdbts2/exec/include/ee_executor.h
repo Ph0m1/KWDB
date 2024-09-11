@@ -11,6 +11,7 @@
 #pragma once
 #include <string>
 #include "cm_assert.h"
+#include "ee_mempool.h"
 #include "kwdb_type.h"
 #include "settings.h"
 

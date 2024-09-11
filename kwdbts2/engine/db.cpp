@@ -85,6 +85,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
 
   opts.thread_pool_size = options.thread_pool_size;
   opts.task_queue_size = options.task_queue_size;
+  opts.buffer_pool_size = options.buffer_pool_size;
 
   setenv("KW_HOME", db_path.c_str(), 1);
 

@@ -468,6 +468,18 @@ func runStart(cmd *cobra.Command, args []string, disableReplication bool) error 
 	}
 	serverCfg.TaskQueueSize = startCtx.taskQueueSize
 
+	// buffer pool size
+	bufferPoolSize, err := strconv.Atoi(startCtx.bufferPoolSize)
+	if err != nil {
+		return err
+	}
+	// 16777216 512 GB
+	if bufferPoolSize > 16777216 || bufferPoolSize < 1 {
+		err = fmt.Errorf("buffer pool size %d is invalid", bufferPoolSize)
+		return err
+	}
+	serverCfg.BufferPoolSize = startCtx.bufferPoolSize
+
 	// cgroup user
 	serverCfg.CgroupUser = startCtx.cgroupUser
 

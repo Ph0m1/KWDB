@@ -671,15 +671,17 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
                             field->get_return_type());
     }
     chunk = std::make_unique<DataChunk>(col_info);
-    if (chunk->Initialize() < 0) {
-      chunk = nullptr;
+    if (chunk->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      chunk = nullptr;
       Return(EEIteratorErrCode::EE_ERROR);
     }
   }
 
   // write aggdata to result_set
-  getAggResults(ctx, chunk);
+  if (getAggResults(ctx, chunk) != KStatus::SUCCESS) {
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
   Return(EEIteratorErrCode::EE_OK);
 }
 
@@ -1051,7 +1053,12 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
     Return(KStatus::FAIL)
   }
   std::queue<DataChunkPtr> agg_output_queue;
-  auto count_of_current_chunk = (k_int32) agg_data_chunk_->Count();
+  k_int32 count_of_current_chunk = 0;
+  if (agg_data_chunk_ != nullptr) {
+    count_of_current_chunk = (k_int32)agg_data_chunk_->Count();
+  } else {
+    Return(KStatus::FAIL);
+  }
 
   k_int32 target_row = count_of_current_chunk - 1;
   k_uint32 row_batch_count = chunk->Count();

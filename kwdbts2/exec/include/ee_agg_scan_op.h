@@ -122,7 +122,7 @@ class AggTableScanOperator : public TableScanOperator {
   inline void constructAggResults() {
     // initialize the agg output buffer.
     current_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info);
-    if (current_data_chunk_->Initialize() < 0) {
+    if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
     }

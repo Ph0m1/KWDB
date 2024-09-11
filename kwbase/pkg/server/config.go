@@ -679,12 +679,18 @@ func (cfg *Config) CreateTsEngine(
 		return nil, err
 	}
 
+	bufferPoolSize, err := strconv.Atoi(cfg.BufferPoolSize)
+	if err != nil {
+		return nil, err
+	}
+
 	//TODO Use the rocksdb store directory +tsdb suffix
 	tsConfig := tse.TsEngineConfig{
 		Dir:            cfg.Stores.Specs[0].Path + "/tsdb",
 		Settings:       cfg.Settings,
 		ThreadPoolSize: threadPoolSize,
 		TaskQueueSize:  taskQueueSize,
+		BufferPoolSize: bufferPoolSize,
 		LogCfg:         cfg.LogConfig,
 	}
 	tsDB, err := tse.NewTsEngine(ctx, tsConfig, stopper, rangeIndex)

@@ -21,15 +21,15 @@ class TestMempool : public testing::Test {
 };
 
 TEST_F(TestMempool, TestCreateMempool) {
-  kwdbts::EE_PoolInfoDataPtr g_pstPoolTestInfo = kwdbts::EE_MemPoolInit(1, 16);
-  EXPECT_EQ((g_pstPoolTestInfo != nullptr), true);
-  kwdbts::k_char* pcTestMsg = kwdbts::EE_MemPoolMalloc(g_pstPoolTestInfo);
+  kwdbts::EE_PoolInfoDataPtr pstPoolTestInfo = kwdbts::EE_MemPoolInit(1, 16);
+  EXPECT_EQ((pstPoolTestInfo != nullptr), true);
+  kwdbts::k_char* pcTestMsg = kwdbts::EE_MemPoolMalloc(pstPoolTestInfo, ROW_BUFFER_SIZE);
   EXPECT_EQ((pcTestMsg != nullptr), true);
-  kwdbts::KStatus status = kwdbts::EE_MemPoolFree(g_pstPoolTestInfo, pcTestMsg);
+  kwdbts::KStatus status = kwdbts::EE_MemPoolFree(pstPoolTestInfo, pcTestMsg);
   EXPECT_EQ(status, kwdbts::SUCCESS);
-  status = kwdbts::EE_MemPoolCleanUp(g_pstPoolTestInfo);
+  status = kwdbts::EE_MemPoolCleanUp(pstPoolTestInfo);
   EXPECT_EQ(status, kwdbts::SUCCESS);
-  g_pstPoolTestInfo = nullptr;
+  pstPoolTestInfo = nullptr;
 }
 
 }  // namespace kwdbts

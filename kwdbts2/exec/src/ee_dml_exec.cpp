@@ -208,8 +208,9 @@ void DmlExec::DisposeError(kwdbContext_p ctx, QueryInfo *return_info) {
     return_info->len = strlen(EEPgErrorInfo::GetPgErrorInfo().msg);
     if (return_info->len > 0) {
       return_info->value = malloc(return_info->len);
-      memcpy(return_info->value, EEPgErrorInfo::GetPgErrorInfo().msg,
-             return_info->len);
+      if (return_info->value != nullptr) {
+        memcpy(return_info->value, EEPgErrorInfo::GetPgErrorInfo().msg, return_info->len);
+      }
     }
   } else if (SUCCESS == ERR_STACK()->GetLastError(&error)) {
     return_info->code = error->GetCode();

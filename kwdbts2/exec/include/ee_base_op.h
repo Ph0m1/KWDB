@@ -114,7 +114,7 @@ class BaseOperator {
  protected:
   inline void constructDataChunk() {
     current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_);
-    if (current_data_chunk_->Initialize() < 0) {
+    if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
     }
@@ -122,7 +122,7 @@ class BaseOperator {
 
   inline void constructDataChunk(k_uint32 capacity) {
     current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_, capacity);
-    if (current_data_chunk_->Initialize() < 0) {
+    if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
     }

@@ -81,7 +81,11 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
-  initContainer(ctx);
+  code = initContainer(ctx);
+  if (code != EEIteratorErrCode::EE_OK) {
+    return code;
+  }
+
   k_uint32 limit = limit_ + offset_;
   // read data
   while (true) {
@@ -175,7 +179,7 @@ EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx) {
   }
 
   data_chunk_ = std::make_unique<DataChunk>(col_info, limit_ + offset_);
-  if (data_chunk_->Initialize() < 0) {
+  if (data_chunk_->Initialize() != true) {
     data_chunk_ = nullptr;
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);

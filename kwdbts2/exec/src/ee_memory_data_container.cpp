@@ -17,7 +17,7 @@ namespace kwdbts {
 //////////////// MemRowContainer //////////////////////
 
 KStatus MemRowContainer::Init() {
-  if (data_chunk_.Initialize() < 0) {
+  if (data_chunk_.Initialize() != true) {
     return KStatus::FAIL;
   }
 

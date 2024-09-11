@@ -264,6 +264,7 @@ func makeTestConfigFromParams(params base.TestServerArgs) Config {
 	cfg.ModeFlag = params.ModeFlag
 	cfg.Config.ThreadPoolSize = params.ThreadPoolSize
 	cfg.Config.TaskQueueSize = params.TaskQueueSize
+	cfg.Config.BufferPoolSize = params.BufferPoolSize
 	cfg.ForbidCatchCoreDump = !params.CatchCoreDump
 	return cfg
 }

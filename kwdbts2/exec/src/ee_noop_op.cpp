@@ -67,7 +67,7 @@ EEIteratorErrCode NoopOperator::Init(kwdbContext_p ctx) {
       LOG_ERROR("Resolve having clause error\n");
       break;
     }
-     // resolve output fields
+    // resolve output fields
     code = param_.ResolveOutputFields(ctx, renders_, num_, output_fields_);
     if (0 == output_fields_.size()) {
       size_t sz = input_->OutputFields().size();
@@ -111,6 +111,9 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   k_uint32 count = input_chunk->Count();
 
   make_noop_data_chunk(ctx, &chunk, count);
+  if (chunk == nullptr) {
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
 
   for (k_uint32 i = 0; i < count; ++i) {
     k_uint32 row = input_chunk->NextLine();
@@ -198,9 +201,9 @@ void NoopOperator::make_noop_data_chunk(kwdbContext_p ctx, DataChunkPtr *chunk, 
     }
 
     *chunk = std::make_unique<DataChunk>(col_info, capacity);
-    if ((*chunk)->Initialize() < 0) {
-      *chunk = nullptr;
+    if ((*chunk)->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      (*chunk) = nullptr;
     }
   }
 

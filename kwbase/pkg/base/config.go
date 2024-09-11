@@ -113,6 +113,9 @@ const (
 	// default executor task queue size
 	DefaultTaskQueueSize = "1024"
 
+	// default executor buffer pool size
+	DefaultBufferPoolSize = "4096"
+
 	// default control groups user
 	DefaultCgroupUser = "kaiwudb"
 
@@ -261,6 +264,9 @@ type Config struct {
 
 	// TaskQueueSize is AE executor task queue size.
 	TaskQueueSize string
+
+	// TaskQueueSize is AE executor buffer pool size.
+	BufferPoolSize string
 
 	// control groups user
 	CgroupUser string

@@ -11,39 +11,48 @@
 
 #include "ee_mempool.h"
 
+#include "ee_global.h"
 #include "lg_api.h"
 
 namespace kwdbts {
+kwdbts::EE_PoolInfoDataPtr g_pstBufferPoolInfo;
 EE_PoolInfoDataPtr EE_MemPoolInit(k_uint32 numOfBlock, k_uint32 blockSize) {
   if (numOfBlock <= 0 || blockSize <= 0) {
-    LOG_ERROR("invalid parameter numOfBlockL %d, blockSize: %d\r\n", numOfBlock,
-              blockSize);
+    LOG_ERROR("invalid parameter numOfBlockL %d, blockSize: %d\n", numOfBlock, blockSize);
     return nullptr;
   }
 
   EE_PoolInfoDataPtr pstPoolMsg = nullptr;
   pstPoolMsg = KNEW(EE_PoolInfoData);
   if (pstPoolMsg == nullptr) {
-    LOG_ERROR("ee pool new failed .\r\n");
+    LOG_ERROR("ee pool new failed .\n");
     return nullptr;
   }
+  pstPoolMsg->iFreeList = KNEW k_uint32[numOfBlock];
+  if (pstPoolMsg->iFreeList == nullptr) {
+    LOG_ERROR("failed to malloc memory, malloc numOfBlock: %d\n", numOfBlock);
+    delete pstPoolMsg;
+    return nullptr;
+  }
+  pstPoolMsg->iDataIndex = 0;
 
   pstPoolMsg->data_ = nullptr;
   k_uint64 iSumSize = blockSize * numOfBlock;
-  pstPoolMsg->data_ = static_cast<k_char *>(malloc(iSumSize));
+  pstPoolMsg->data_ = KNEW char[iSumSize];
   if (pstPoolMsg->data_ == nullptr) {
-    LOG_ERROR("failed to malloc memory, malloc sum size: %ld\r\n", iSumSize);
+    LOG_ERROR("failed to malloc memory, malloc sum size: %ld\n", iSumSize);
+    SafeDeleteArray(pstPoolMsg->iFreeList);
     delete pstPoolMsg;
     return nullptr;
   }
 
   pstPoolMsg->iBlockSize = blockSize;
   pstPoolMsg->iNumOfSumBlock = numOfBlock;
-  pstPoolMsg->iFreeList.clear();
+  pstPoolMsg->iSumOffset = iSumSize;
 
-  memset(pstPoolMsg->data_, 0, iSumSize);
+  std::memset(pstPoolMsg->data_, 0, iSumSize);
   for (k_uint32 i = 0; i < numOfBlock; ++i) {
-    pstPoolMsg->iFreeList.push_back(i);
+    pstPoolMsg->iFreeList[i] = i;
   }
 
   pstPoolMsg->iNumOfFreeBlock = numOfBlock;
@@ -53,54 +62,76 @@ EE_PoolInfoDataPtr EE_MemPoolInit(k_uint32 numOfBlock, k_uint32 blockSize) {
   return pstPoolMsg;
 }
 
-k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg) {
+k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_size_t iMallocLen) {
+#ifdef WITH_TESTS
+  k_char *data = static_cast<k_char *>(malloc(iMallocLen));
+  if (data != nullptr) {
+    std::memset(data, 0, iMallocLen);
+  }
+  return data;
+#else
   k_char *data = nullptr;
+#endif
   EE_PoolInfoDataPtr pstTemPtr = pstPoolMsg;
   if (pstTemPtr == nullptr) {
     return nullptr;
   }
-  std::unique_lock unique_lock(pstTemPtr->lock_);
-  if (pstTemPtr->iNumOfFreeBlock > 0) {
-    k_uint32 iFreePos = pstTemPtr->iFreeList.front();
-    pstTemPtr->iFreeList.erase(pstTemPtr->iFreeList.begin());
+  if (iMallocLen > ROW_BUFFER_SIZE) {
+    data = KNEW char[iMallocLen];
+    if (data != nullptr) {
+      std::memset(data, 0, iMallocLen);
+    }
+    // LOG_INFO("malloc non-anticipatory address: %p, iMallocLen: %ld\n", data, iMallocLen);
+    return data;
+  }
 
-    k_uint64 iOffset = pstTemPtr->iBlockSize * iFreePos;
-    data = pstTemPtr->data_ + iOffset;
+  std::lock_guard<std::mutex> lock(pstTemPtr->lock_);
+  if (pstTemPtr->iNumOfFreeBlock > 0) {
+    data = pstTemPtr->data_ + pstTemPtr->iBlockSize * (pstTemPtr->iFreeList[pstTemPtr->iDataIndex]);
+    pstTemPtr->iDataIndex++;
+    pstTemPtr->iDataIndex = pstTemPtr->iDataIndex % pstPoolMsg->iNumOfSumBlock;
+    pstTemPtr->iNumOfFreeBlock--;
   } else {
-    LOG_ERROR("out of memory\r\n");
+    LOG_ERROR("buffer pool malloc failed, malloc out of memory iMallocLen: %ld\n", iMallocLen);
   }
 
   return data;
 }
 
-kwdbts::KStatus EE_MemPoolFree(kwdbts::EE_PoolInfoDataPtr pstPoolMsg,
-                               k_char *data) {
-  k_uint32 iOffset = 0;
+kwdbts::KStatus EE_MemPoolFree(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_char *data) {
+#ifdef WITH_TESTS
+  SafeFreePointer(data);
+  return kwdbts::SUCCESS;
+#endif
   EE_PoolInfoDataPtr pstTemPtr = pstPoolMsg;
   if (pstTemPtr == nullptr) {
     return kwdbts::FAIL;
   }
-
-  std::unique_lock unique_lock(pstTemPtr->lock_);
   if (data == nullptr) {
     return kwdbts::FAIL;
   }
-  // caclulate pool offset
-  iOffset = ((data - pstTemPtr->data_) % pstTemPtr->iBlockSize);
-  if (iOffset != 0) {
-    LOG_ERROR("invalid free address:%p\r\n", data);
-    return kwdbts::FAIL;
+  kwdbts::k_int64 iCheckOffset = data - pstTemPtr->data_;
+  if ((iCheckOffset < 0) || (iCheckOffset > pstPoolMsg->iSumOffset)) {
+    SafeDeleteArray(data);
+    return kwdbts::SUCCESS;
   }
 
-  iOffset = ((data - pstTemPtr->data_) / pstTemPtr->iBlockSize);
+  // caclulate pool offset
+  if ((iCheckOffset % pstTemPtr->iBlockSize) != 0) {
+    LOG_ERROR("invalid free address:%p\n", data);
+    return kwdbts::FAIL;
+  }
+  k_uint32 iOffset = 0;
+  iOffset = (iCheckOffset / pstTemPtr->iBlockSize);
   if (iOffset < 0 || iOffset >= pstTemPtr->iNumOfSumBlock) {
-    LOG_ERROR("iOffset: error, iOffset: %d invalid address:%p\r\n", iOffset,
-              data);
+    LOG_ERROR("iOffset: error, iOffset: %d invalid address:%p\n", iOffset, data);
     return kwdbts::FAIL;
   }
 
   memset(data, 0, pstTemPtr->iBlockSize);
-  pstTemPtr->iFreeList.push_back(iOffset);
+  std::lock_guard<std::mutex> lock(pstTemPtr->lock_);
+  pstTemPtr->iFreeList[(pstTemPtr->iDataIndex + pstTemPtr->iNumOfFreeBlock) % pstTemPtr->iNumOfSumBlock] = iOffset;
+  pstTemPtr->iNumOfFreeBlock++;
   return kwdbts::SUCCESS;
 }
 
@@ -110,15 +141,12 @@ kwdbts::KStatus EE_MemPoolCleanUp(kwdbts::EE_PoolInfoDataPtr pstPoolMsg) {
     return kwdbts::FAIL;
   }
   {
-    std::unique_lock unique_lock(pstTemPtr->lock_);
+    std::lock_guard<std::mutex> lock(pstTemPtr->lock_);
     if (pstPoolMsg->is_pool_init_ == false) {
       return kwdbts::FAIL;
     }
-    if (pstTemPtr->data_ != nullptr) {
-      free(pstTemPtr->data_);
-      pstTemPtr->data_ = nullptr;
-    }
-    pstTemPtr->iFreeList.clear();
+    SafeDeleteArray(pstTemPtr->data_);
+    SafeDeleteArray(pstTemPtr->iFreeList);
   }
   delete pstTemPtr;
   pstTemPtr = nullptr;

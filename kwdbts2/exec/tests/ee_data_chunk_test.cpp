@@ -20,12 +20,18 @@
 #include "me_metadata.pb.h"
 
 using namespace kwdbts;  // NOLINT
-
 class TestDataChunk : public ::testing::Test {  // inherit testing::Test
  protected:
-  static void SetUpTestCase() {}
+  static void SetUpTestCase() {
+    g_pstBufferPoolInfo = kwdbts::EE_MemPoolInit(1, 16);
+    EXPECT_EQ((g_pstBufferPoolInfo != nullptr), true);
+  }
 
-  static void TearDownTestCase() {}
+  static void TearDownTestCase() {
+    kwdbts::KStatus status = kwdbts::EE_MemPoolCleanUp(g_pstBufferPoolInfo);
+    EXPECT_EQ(status, kwdbts::SUCCESS);
+    g_pstBufferPoolInfo = nullptr;
+  }
   void SetUp() override {}
   void TearDown() override {}
 
@@ -88,7 +94,7 @@ TEST_F(TestDataChunk, TestChunk) {
 
   // check insert
   chunk = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
-  ASSERT_EQ(chunk->Initialize(), 0);
+  ASSERT_EQ(chunk->Initialize(), true);
   k_int32 row = chunk->NextLine();
   ASSERT_EQ(row, -1);
 
@@ -134,7 +140,7 @@ TEST_F(TestDataChunk, TestChunk) {
 
   DataChunkPtr chunk2;
   chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
-  ASSERT_EQ(chunk2->Initialize(), 0);
+  ASSERT_EQ(chunk2->Initialize(), true);
   chunk2->InsertData(ctx, chunk.get(), nullptr);
   // current_thd->SetDataChunk(chunk.get());
   // chunk2->InsertData(ctx, chunk.get(), renders);
@@ -148,12 +154,12 @@ TEST_F(TestDataChunk, TestChunk) {
   // check append
   DataChunkPtr chunk3, chunk4;
   chunk3 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
-  ASSERT_EQ(chunk3->Initialize(), 0);
+  ASSERT_EQ(chunk3->Initialize(), true);
   queue_data_chunk.push(std::move(chunk));
 
   chunk3->Append(queue_data_chunk);
   ASSERT_EQ(chunk3->Count(), 1);
-  ASSERT_EQ(chunk3->EstimateCapacity(col_info), 549);
+  ASSERT_EQ(chunk3->EstimateCapacity(col_info), 1099);
 
   check_ts = 0;
   auto ptr31 = chunk2->GetData(0, 0);
@@ -203,7 +209,7 @@ TEST_F(TestDataChunk, TestChunk) {
 
   // check copy
   chunk4 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
-  ASSERT_EQ(chunk4->Initialize(), 0);
+  ASSERT_EQ(chunk4->Initialize(), true);
   chunk4->CopyFrom(chunk2, 0, 0);
 
   // check row batch

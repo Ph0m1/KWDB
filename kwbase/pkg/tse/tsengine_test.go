@@ -47,6 +47,7 @@ func TestTSOpen(t *testing.T) {
 		Settings:       st,
 		ThreadPoolSize: 10,
 		TaskQueueSize:  10,
+		BufferPoolSize: 4096,
 	}
 	stopper := stop.NewStopper()
 	tsDB, err := NewTsEngine(context.Background(), cfg, stopper, nil)
@@ -114,6 +115,7 @@ func TestTSPut(t *testing.T) {
 		Settings:       st,
 		ThreadPoolSize: 10,
 		TaskQueueSize:  10,
+		BufferPoolSize: 4096,
 	}
 	stopper := stop.NewStopper()
 	tsDB, err := NewTsEngine(context.Background(), cfg, stopper, nil)

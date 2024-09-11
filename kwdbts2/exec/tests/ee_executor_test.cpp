@@ -50,6 +50,7 @@ TEST_F(TestExecutor, ExecutorInitAndDestroy) {
   options.db_path = "tsdb";
   options.thread_pool_size = 1;
   options.task_queue_size = 1;
+  options.buffer_pool_size = 1;
   EXPECT_EQ(kwdbts::InitExecutor(ctx, options), SUCCESS);
   std::cout << "Executor Init ok. " << std::endl;
   EXPECT_EQ(kwdbts::DestoryExecutor(), SUCCESS);

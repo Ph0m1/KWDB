@@ -105,6 +105,7 @@ typedef struct {
   TSSlice extra_options;
   uint16_t thread_pool_size;
   uint16_t task_queue_size;
+  uint32_t buffer_pool_size;
   TsLogOptions lg_opts;
 } TSOptions;
 

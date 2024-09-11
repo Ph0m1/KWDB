@@ -197,7 +197,7 @@ class OrderedAggregateOperator : public BaseAggregator {
   inline void constructAggResults() {
     // initialize the agg output buffer.
     agg_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_);
-    if (agg_data_chunk_->Initialize() < 0) {
+    if (agg_data_chunk_->Initialize() != true) {
       agg_data_chunk_ = nullptr;
       return;
     }
@@ -208,7 +208,7 @@ class OrderedAggregateOperator : public BaseAggregator {
     // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was aggregated.
     if (!has_agg_result && group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
       temporary_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_, 1);
-      if (temporary_data_chunk_->Initialize() < 0) {
+      if (temporary_data_chunk_->Initialize() != true) {
         temporary_data_chunk_ = nullptr;
         return;
       }

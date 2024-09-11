@@ -31,11 +31,11 @@ DataChunk::~DataChunk() {
   col_offset_.clear();
   bitmap_offset_.clear();
   if (is_data_owner_) {
-    SafeDeleteArray(data_);
+    kwdbts::EE_MemPoolFree(g_pstBufferPoolInfo, data_);
   }
 }
 
-int DataChunk::Initialize() {
+k_bool DataChunk::Initialize() {
   // null bitmap
   col_num_ = col_info_.size();
   // calculate row width and length
@@ -49,11 +49,16 @@ int DataChunk::Initialize() {
   if (is_data_owner_) {
     if (capacity_ * row_size_ > 0) {
       k_uint64 data_len = (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
-      data_ = KNEW char[data_len];
+      if (data_len <= DataChunk::SIZE_LIMIT) {
+        data_ = kwdbts::EE_MemPoolMalloc(g_pstBufferPoolInfo, ROW_BUFFER_SIZE);
+        data_len = ROW_BUFFER_SIZE;
+      } else {
+        data_ = kwdbts::EE_MemPoolMalloc(g_pstBufferPoolInfo, data_len);
+      }
       // allocation failure
       if (data_ == nullptr) {
         LOG_ERROR("Allocate buffer in DataChunk failed.");
-        return -1;
+        return false;
       }
       std::memset(data_, 0, data_len);
     }
@@ -67,7 +72,8 @@ int DataChunk::Initialize() {
     col_offset_.push_back(bitmap_offset + bitmap_size_);
     bitmap_offset += info.fixed_storage_len * capacity_ + bitmap_size_;
   }
-  return 0;
+
+  return true;
 }
 
 KStatus DataChunk::InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len) {
@@ -497,8 +503,8 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
       const int secondOfDay = 24 * 3600;
       DatumPtr raw = GetData(row, col);
       std::string date_str = std::string{static_cast<char*>(raw)};
-      struct tm stm{
-          0
+      struct tm stm {
+        0
       };
       int year, mon, day;
       k_int64 msec;
@@ -594,8 +600,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, val_str.data(), val_str.length()) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::StringFamily: {
         k_uint16 val_len;
         DatumPtr raw = GetData(row, col, val_len);
@@ -608,12 +613,10 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
           Return(FAIL);
         }
         // write string
-        if (ee_appendBinaryStringInfo(info, val.c_str(), val.length()) !=
-            SUCCESS) {
+        if (ee_appendBinaryStringInfo(info, val.c_str(), val.length()) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::BytesFamily: {
         k_uint16 len;
         DatumPtr raw = GetData(row, col, len);
@@ -633,8 +636,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, bytes_f.c_str(), bytes_f.size()) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::TimestampFamily:
       case KWDBTypeFamily::TimestampTZFamily: {
         char ts_format_buf[32] = {0};
@@ -683,8 +685,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, ts_format_buf, format_len) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::FloatFamily: {
         k_char buf[30] = {0};
         k_int32 n = 0;
@@ -694,7 +695,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (col_info_[col].storage_type == roachpb::DataType::FLOAT) {
           k_float32 val32;
           std::memcpy(&val32, raw, sizeof(k_float32));
-          d = (k_double64) val32;
+          d = (k_double64)val32;
           n = snprintf(buf, sizeof(buf), "%.6f", d);
         } else {
           std::memcpy(&d, raw, sizeof(k_double64));
@@ -715,8 +716,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, buf, n) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::DecimalFamily: {
         switch (col_info_[col].storage_type) {
           case roachpb::DataType::SMALLINT: {
@@ -772,8 +772,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
             break;
           }
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::IntervalFamily: {
         time_t ms;
         DatumPtr raw = GetData(row, col);
@@ -789,8 +788,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, buf, n) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::DateFamily: {
         DatumPtr raw = GetData(row, col);
         std::string str = std::string{static_cast<char*>(raw)};
@@ -802,8 +800,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, str.c_str(), str.length()) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       case KWDBTypeFamily::IntFamily: {
         DatumPtr raw = GetData(row, col);
         k_int64 val;
@@ -835,8 +832,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, val_char, strlen(val_char)) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
       default: {
         // write the length of column value
         k_int64 val;
@@ -851,8 +847,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         if (ee_appendBinaryStringInfo(info, val_char, strlen(val_char)) != SUCCESS) {
           Return(FAIL);
         }
-      }
-        break;
+      } break;
     }
   }
 

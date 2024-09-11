@@ -53,9 +53,9 @@ class PostAggScanOperator : public HashAggregateOperator {
 //  void CalculateInputOffsets();
 
   inline DataChunkPtr constructAggResults(k_uint32 capacity) {
-    // initialize the agg output buffer.
+    // Initialize the agg output buffer.
     auto agg_results_ = std::make_unique<DataChunk>(agg_output_col_info, capacity);
-    if (agg_results_->Initialize() < 0) {
+    if (agg_results_->Initialize() != true) {
       agg_results_ = nullptr;
     }
     return agg_results_;

@@ -464,9 +464,9 @@ KStatus TsSamplerOperator::GetSampleResult(kwdbContext_p ctx, DataChunkPtr& chun
     }
 
     chunk = std::make_unique<DataChunk>(col_info, total_sample_rows_);
-    if (chunk->Initialize() < 0) {
-      chunk = nullptr;
+    if (chunk->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      chunk = nullptr;
       Return(KStatus::FAIL);
     }
   }

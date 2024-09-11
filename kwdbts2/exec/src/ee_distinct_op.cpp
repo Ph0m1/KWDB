@@ -140,9 +140,9 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
       }
 
       chunk = std::make_unique<DataChunk>(col_info, data_chunk->Count());
-      if (chunk->Initialize() < 0) {
-        chunk = nullptr;
+      if (chunk->Initialize() != true) {
         EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+        chunk = nullptr;
         Return(EEIteratorErrCode::EE_ERROR);
       }
     }

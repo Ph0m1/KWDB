@@ -46,10 +46,18 @@ KStatus InitExecutor(kwdbContext_p ctx, const EngineOptions &options) {
   } else {
     DeleteDirectory(ExecPool::GetInstance().db_path_);
   }
+#ifndef WITH_TESTS
+  k_uint32 bufferpool_size = options.buffer_pool_size;
+  g_pstBufferPoolInfo = kwdbts::EE_MemPoolInit(bufferpool_size, ROW_BUFFER_SIZE);
+#endif
   Return(SUCCESS);
 }
 KStatus DestoryExecutor() {
   ExecPool::GetInstance().Stop();
+#ifndef WITH_TESTS
+  kwdbts::KStatus status = kwdbts::EE_MemPoolCleanUp(g_pstBufferPoolInfo);
+  g_pstBufferPoolInfo = nullptr;
+#endif
   return SUCCESS;
 }
 }  // namespace kwdbts

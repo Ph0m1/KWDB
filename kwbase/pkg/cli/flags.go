@@ -400,6 +400,9 @@ func init() {
 		// set thread queue size with --task-queue-size
 		StringFlag(f, &startCtx.taskQueueSize, cliflags.TaskQueueSize, startCtx.taskQueueSize)
 
+		// set buffer pool size with --buffer-pool-size
+		StringFlag(f, &startCtx.bufferPoolSize, cliflags.BufferPoolSize, startCtx.bufferPoolSize)
+
 		// set cgroup user with --cgroup-user
 		StringFlag(f, &startCtx.cgroupUser, cliflags.CgroupUser, startCtx.cgroupUser)
 

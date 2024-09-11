@@ -136,6 +136,7 @@ func initCLIDefaults() {
 	startCtx.inBackground = false
 	startCtx.threadPoolSize = base.DefaultThreadPoolSize
 	startCtx.taskQueueSize = base.DefaultTaskQueueSize
+	startCtx.bufferPoolSize = base.DefaultBufferPoolSize
 	startCtx.cgroupUser = base.DefaultCgroupUser
 	startCtx.restfulPort = base.DefaultRestfulPort
 	startCtx.restfulTimeOut = base.DefaultRestfulTimeOut
@@ -351,6 +352,9 @@ var startCtx struct {
 
 	// AE executor task queue size
 	taskQueueSize string
+
+	// AE executor buffer pool size
+	bufferPoolSize string
 
 	// Control groups user
 	cgroupUser string

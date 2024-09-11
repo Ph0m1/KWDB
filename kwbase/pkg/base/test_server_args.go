@@ -130,6 +130,9 @@ type TestServerArgs struct {
 	// TaskQueueSize is AE executor task queue size.
 	TaskQueueSize string
 
+	// BufferPoolSize is AE executor buffer pool size
+	BufferPoolSize string
+
 	// cache coredump for go test, for example TestFuncNull
 	CatchCoreDump bool
 }
@@ -138,6 +141,7 @@ type TestServerArgs struct {
 func (n *TestServerArgs) InitTest() {
 	n.ThreadPoolSize = DefaultThreadPoolSize
 	n.TaskQueueSize = DefaultTaskQueueSize
+	n.BufferPoolSize = DefaultBufferPoolSize
 }
 
 // TestClusterArgs contains the parameters one can set when creating a test

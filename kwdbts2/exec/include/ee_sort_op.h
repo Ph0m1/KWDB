@@ -118,4 +118,4 @@ class SortOperator : public BaseOperator {
   }
 };
 
-}   // namespace kwdbts
+}  // namespace kwdbts

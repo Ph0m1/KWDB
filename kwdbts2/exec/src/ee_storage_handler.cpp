@@ -273,6 +273,10 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc
   k_int32 ns = spec->mutable_primarytags(0)->tagvalues_size();
   for (k_int32 i = 0; i < ns; ++i) {
     void *buffer = malloc(malloc_size);
+    if (buffer == nullptr) {
+      return FAIL;
+    }
+
     memset(buffer, 0, malloc_size);
     ptr = static_cast<char *>(buffer);
     for (k_int32 j = 0; j < sz; ++j) {

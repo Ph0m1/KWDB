@@ -18,25 +18,26 @@
 
 namespace kwdbts {
 
-#define newpool_max_size (128)       // default number of memory pool
-#define row_buffer_size (32 * 1024)  // default buffer size = 32k
+#define NEWPOOL_MAX_SIZE (4096)  // default number of memory pool
+#define ROW_BUFFER_SIZE (65536)  // default buffer size = 64k
 
 typedef struct {
-  k_uint32 iNumOfFreeBlock;         // amount of free block in the pool
-  k_uint32 iNumOfSumBlock;          // amount of total block in the pool
-  k_uint32 iBlockSize;              // block size
-  std::vector<k_uint32> iFreeList;  // free block list
-  k_char *data_;                    // pointer to pool data
+  k_uint32 iNumOfFreeBlock;  // amount of free block in the pool
+  k_uint32 iNumOfSumBlock;   // amount of total block in the pool
+  k_uint32 iBlockSize;       // block size
+  k_uint32 iDataIndex;
+  k_uint64 iSumOffset;
+  k_uint32 *iFreeList;
+  k_char *data_;  // pointer to pool data
   bool is_pool_init_{false};
-  mutable std::mutex lock_;         // mutex to control buffer allocate and release
+  std::mutex lock_;  // mutex to control buffer allocate and release
 } EE_PoolInfoData;
 typedef EE_PoolInfoData *EE_PoolInfoDataPtr;
 
-kwdbts::EE_PoolInfoDataPtr EE_MemPoolInit(k_uint32 numOfBlock,
-                                          k_uint32 blockSize);
-k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg);
-kwdbts::KStatus EE_MemPoolFree(kwdbts::EE_PoolInfoDataPtr pstPoolMsg,
-                               k_char *data);
+kwdbts::EE_PoolInfoDataPtr EE_MemPoolInit(k_uint32 numOfBlock, k_uint32 blockSize);
+k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_size_t iMallocLen);
+kwdbts::KStatus EE_MemPoolFree(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_char *data);
 kwdbts::KStatus EE_MemPoolCleanUp(kwdbts::EE_PoolInfoDataPtr pstPoolMsg);
+extern kwdbts::EE_PoolInfoDataPtr g_pstBufferPoolInfo;
 
 };  // namespace kwdbts
