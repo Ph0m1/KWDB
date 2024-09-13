@@ -6339,6 +6339,15 @@ select
 SET
 > drop database tsmtest cascade;
 DROP DATABASE
+> select count(localtime()) from test_ts.ts_table;
+  count
+---------
+      2
+(1 row)
+> use defaultdb;
+SET
+> drop database test_ts cascade;
+DROP DATABASE
 > use defaultdb;
 SET
 > drop database test cascade;

@@ -1858,6 +1858,12 @@ select
 use defaultdb;
 drop database tsmtest cascade;
 
+-- ZDP-40021
+select count(localtime()) from test_ts.ts_table;
+
+use defaultdb;
+drop database test_ts cascade;
+
 
 use defaultdb;
 drop database test cascade;

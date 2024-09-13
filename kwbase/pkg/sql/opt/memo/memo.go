@@ -1267,6 +1267,11 @@ func (m *Memo) dealCanNotAddSynchronize(child *RelExpr) (bool, bool, error) {
 // param3: is the error.
 func (m *Memo) CheckTSScan(source *TSScanExpr) (bool, bool, error) {
 	hasNotTag := false
+	if source.Cols.Empty() {
+		if c := source.Table.ColumnID(0); c > 0 {
+			source.Cols.Add(c)
+		}
+	}
 	source.Cols.ForEach(func(colID opt.ColumnID) {
 		colMeta := m.metadata.ColumnMeta(colID)
 		if colMeta.IsNormalCol() {
