@@ -206,27 +206,32 @@ Options:
 }
 
 function upgrade_usage() {
+  local help_mes=false
   eval set -- "$@"
-  if [ $# -eq 3 ];then
+  while true ; do
     case "$1" in
       -l|--local)
         g_upgrade_opt=local
-        return
+        shift 1
         ;;
       -a|--all)
         g_upgrade_opt=all
-        return
+        shift 1
       ;;
       --bypass-version-check)
         g_ign_cmp=yes
-        return
+        shift 1
       ;;
       -h|--help)
+        help_mes=true
+        break
         ;;
+      --)
+        break
     esac
-  fi
-
-  echo "Usage:
+  done
+  if [ "$help_mes" = "true" ];then
+    echo "Usage:
   deploy.sh upgrade [Options]
 
 Options:
@@ -236,6 +241,7 @@ Options:
   -h, --help              help message
 "
   exit 0
+  fi
 }
 
 function cmd_check() {

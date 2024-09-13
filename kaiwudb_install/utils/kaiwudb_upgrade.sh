@@ -694,14 +694,14 @@ function get_cluster_nodes() {
       cd /usr/local/kaiwudb/bin
     fi
     # get cluster nodes addr array
-    addr_array=($(sudo -u $kw_user bash -c "export LD_LIBRARY_PATH=/usr/local/gcc/lib64 && ./kwbase node status --host=127.0.0.1:$kw_port $kw_secure" | awk -F" " -v ip=$advertise_ip 'NR!=1{split($3,arr,":");if(arr[1]!=ip && arr[1]!="NULL" && $0~/.*healthy/){print arr[1]}}'))
+    addr_array=($(sudo -u $kw_user bash -c "export LD_LIBRARY_PATH=/usr/local/gcc/lib64 && ./kwbase node status --host=127.0.0.1:$kw_port $kw_secure" | awk -F" " -v ip=$advertise_ip 'NR!=1{split($3,arr,":");if(arr[1]!=ip && arr[1]!="NULL" && $11=$12){print arr[1]}}'))
     if [ $? -ne 0 ];then
       log_err "Failed to get nodes."
       exit 1
     fi
   else
     # get cluster nodes addr array
-    addr_array=($(docker exec kaiwudb-container bash -c "./kwbase node status $kw_secure --host=127.0.0.1:26257" | awk -F " " -v ip=$advertise_ip 'NR!=1{split($3,arr,":");if(arr[1]!=ip && arr[1]!="NULL" && $0~/.*healthy/)print arr[1]}'))
+    addr_array=($(docker exec kaiwudb-container bash -c "./kwbase node status $kw_secure --host=127.0.0.1:26257" | awk -F " " -v ip=$advertise_ip 'NR!=1{split($3,arr,":");if(arr[1]!=ip && arr[1]!="NULL" && $11==$12)print arr[1]}'))
     if [ $? -ne 0 ];then
       log_err "Failed to get nodes."
       exit 1

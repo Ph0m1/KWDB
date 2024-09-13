@@ -193,6 +193,7 @@ services:
       - $g_kwdb_port:26257
     ulimits:
       memlock: -1
+      nofile: 1048576
     deploy:
       resources:
         limits:
@@ -228,6 +229,7 @@ services:
       - $g_kwdb_port:26257
     ulimits:
       memlock: -1
+      nofile: 1048576
     volumes:
       - /etc/kaiwudb/certs:/kaiwudb/certs
       - $g_data_root:/kaiwudb/deploy/kaiwudb-container
@@ -700,6 +702,7 @@ User=$g_user
 Group=$g_user
 Type=simple
 LimitMEMLOCK=infinity
+LimitNOFILE=1048576
 CPUQuota=\$cpu_usage%
 WorkingDirectory=/usr/local/kaiwudb/bin
 EnvironmentFile=/etc/kaiwudb/script/kaiwudb_env
@@ -726,6 +729,7 @@ User=$g_user
 Group=$g_user
 Type=simple
 LimitMEMLOCK=infinity
+LimitNOFILE=1048576
 WorkingDirectory=/usr/local/kaiwudb/bin
 EnvironmentFile=/etc/kaiwudb/script/kaiwudb_env
 Environment=LD_LIBRARY_PATH=/usr/local/gcc/lib64
@@ -762,6 +766,7 @@ services:
       - $g_kwdb_port:26257
     ulimits:
       memlock: -1
+      nofile: 1048576
     deploy:
       resources:
         limits:
@@ -797,6 +802,7 @@ services:
       - $g_kwdb_port:26257
     ulimits:
       memlock: -1
+      nofile: 1048576
     volumes:
       - /etc/kaiwudb/certs:/kaiwudb/certs
       - $g_data_root:/kaiwudb/deploy/kaiwudb-container
@@ -828,6 +834,7 @@ User=root
 Group=root
 Type=simple
 LimitMEMLOCK=infinity
+LimitNOFILE=1048576
 WorkingDirectory=/etc/kaiwudb/script
 ExecStartPre=/usr/sbin/sysctl -w vm.max_map_count=10000000
 ExecStart=\$docker_compose_path --compatibility up
@@ -920,6 +927,7 @@ User=$g_user
 Group=$g_user
 Type=simple
 LimitMEMLOCK=infinity
+LimitNOFILE=1048576
 CPUQuota=$cpu_usage%
 WorkingDirectory=/usr/local/kaiwudb/bin
 EnvironmentFile=/etc/kaiwudb/script/kaiwudb_env
@@ -946,6 +954,7 @@ User=$g_user
 Group=$g_user
 Type=simple
 LimitMEMLOCK=infinity
+LimitNOFILE=1048576
 WorkingDirectory=/usr/local/kaiwudb/bin
 EnvironmentFile=/etc/kaiwudb/script/kaiwudb_env
 Environment=LD_LIBRARY_PATH=/usr/local/gcc/lib64
@@ -972,6 +981,7 @@ User=root
 Group=root
 Type=simple
 LimitMEMLOCK=infinity
+LimitNOFILE=1048576
 WorkingDirectory=/etc/kaiwudb/script
 ExecStartPre=/usr/sbin/sysctl -w vm.max_map_count=10000000
 ExecStart=$g_docker_compose_path --compatibility up
