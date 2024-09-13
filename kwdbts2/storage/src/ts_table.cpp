@@ -2341,13 +2341,12 @@ KStatus TsTable::CompactData(kwdbContext_p ctx, uint64_t range_group_id, const K
     LOG_INFO("ApplyCompactData success! [Snapshot ID:%ld, Range group ID: %ld]",
              ts_snapshot_table->GetSnapshotId(), range_group_id);
     RW_LATCH_UNLOCK(entity_groups_mtx_);
-
-    s = ts_snapshot_table->DropAll();
-    if (s != KStatus::SUCCESS) {
-      LOG_INFO("snapshot DropAll ! [Snapshot ID:%ld, Range group ID: %ld]",
-               ts_snapshot_table->GetSnapshotId(), range_group_id);
-      Return(KStatus::FAIL)
-    }
+  }
+  s = ts_snapshot_table->DropAll();
+  if (s != KStatus::SUCCESS) {
+    LOG_INFO("snapshot DropAll ! [Snapshot ID:%ld, Range group ID: %ld]",
+             ts_snapshot_table->GetSnapshotId(), range_group_id);
+    Return(KStatus::FAIL)
   }
   Return(KStatus::SUCCESS)
 }
