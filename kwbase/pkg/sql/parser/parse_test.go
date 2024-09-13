@@ -2733,22 +2733,22 @@ REVOKE SELECT ON ROLE foo, bar FROM blix
                       ^
 HINT: try \h REVOKE`,
 		},
-		{
-			`BACKUP ROLE foo, bar TO 'baz'`,
-			`at or near "foo": syntax error
-DETAIL: source SQL:
-BACKUP ROLE foo, bar TO 'baz'
-            ^
-HINT: try \h BACKUP`,
-		},
-		{
-			`RESTORE ROLE foo, bar FROM 'baz'`,
-			`at or near "foo": syntax error
-DETAIL: source SQL:
-RESTORE ROLE foo, bar FROM 'baz'
-             ^
-HINT: try \h RESTORE`,
-		},
+		//		{
+		//			`BACKUP ROLE foo, bar TO 'baz'`,
+		//			`at or near "foo": syntax error
+		//DETAIL: source SQL:
+		//BACKUP ROLE foo, bar TO 'baz'
+		//            ^
+		//HINT: try \h BACKUP`,
+		//		},
+		//		{
+		//			`RESTORE ROLE foo, bar FROM 'baz'`,
+		//			`at or near "foo": syntax error
+		//DETAIL: source SQL:
+		//RESTORE ROLE foo, bar FROM 'baz'
+		//             ^
+		//HINT: try \h RESTORE`,
+		//		},
 		{
 			`SELECT avg(1) OVER (ROWS UNBOUNDED FOLLOWING) FROM t`,
 			`at or near "following": syntax error: frame start cannot be UNBOUNDED FOLLOWING

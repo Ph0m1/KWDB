@@ -1318,7 +1318,7 @@ alter_ddl_stmt:
 | alter_sequence_stmt  // EXTEND WITH HELP: ALTER SEQUENCE
 | alter_database_stmt  // EXTEND WITH HELP: ALTER DATABASE
 | alter_range_stmt     // EXTEND WITH HELP: ALTER RANGE
-| alter_partition_stmt // EXTEND WITH HELP: ALTER PARTITION
+| alter_partition_stmt
 | alter_schedule_stmt  // EXTEND WITH HELP: ALTER SCHEDULE
 
 // %Help: ALTER TABLE - change the definition of a table
@@ -1327,27 +1327,32 @@ alter_ddl_stmt:
 // ALTER TABLE [IF EXISTS] <tablename> <command> [, ...]
 //
 // Commands:
+//   [Here are all commands supported by time-series tables and relational tables.
+//    For details about supported commands, see the documentation]
+//
 //   ALTER TABLE ... ADD [COLUMN] [IF NOT EXISTS] <colname> <type> [<qualifiers...>]
+//   ALTER TABLE ... ADD ATTRIBUTE/TAG <tagname> <type> [NULL]
 //   ALTER TABLE ... ADD <constraint>
 //   ALTER TABLE ... DROP [COLUMN] [IF EXISTS] <colname> [RESTRICT | CASCADE]
+//   ALTER TABLE ... DROP ATTRIBUTE/TAG <tagname>
 //   ALTER TABLE ... DROP CONSTRAINT [IF EXISTS] <constraintname> [RESTRICT | CASCADE]
-//   ALTER TABLE ... ALTER [COLUMN] <colname> {SET DEFAULT <expr> | DROP DEFAULT}
+//   ALTER TABLE ... ALTER [COLUMN] <colname> SET DEFAULT <expr>
+//   ALTER TABLE ... ALTER [COLUMN] <colname> SET NOT NULL
+//   ALTER TABLE ... ALTER [COLUMN] <colname> DROP DEFAULT
 //   ALTER TABLE ... ALTER [COLUMN] <colname> DROP NOT NULL
 //   ALTER TABLE ... ALTER [COLUMN] <colname> DROP STORED
 //   ALTER TABLE ... ALTER [COLUMN] <colname> [SET DATA] TYPE <type> [COLLATE <collation>]
+//   ALTER TABLE ... ALTER ATTRIBUTE/TAG <tagname> [SET DATA] TYPE <type>
 //   ALTER TABLE ... ALTER PRIMARY KEY USING INDEX <name>
 //   ALTER TABLE ... RENAME TO <newname>
 //   ALTER TABLE ... RENAME [COLUMN] <colname> TO <newname>
+//   ALTER TABLE ... RENAME CONSTRAINT <constraintname> TO <newname>
+//   ALTER TABLE ... RENAME ATTRIBUTE/TAG <tagname> TO <newname>
 //   ALTER TABLE ... VALIDATE CONSTRAINT <constraintname>
-//   ALTER TABLE ... SPLIT AT <selectclause> [WITH EXPIRATION <expr>]
-//   ALTER TABLE ... UNSPLIT AT <selectclause>
-//   ALTER TABLE ... UNSPLIT ALL
-//   ALTER TABLE ... SCATTER [ FROM ( <exprs...> ) TO ( <exprs...> ) ]
-//   ALTER TABLE ... INJECT STATISTICS ...  (experimental)
-//   ALTER TABLE ... PARTITION BY RANGE ( <name...> ) ( <rangespec> )
-//   ALTER TABLE ... PARTITION BY LIST ( <name...> ) ( <listspec> )
-//   ALTER TABLE ... PARTITION BY NOTHING
 //   ALTER TABLE ... CONFIGURE ZONE <zoneconfig>
+//   ALTER TABLE ... SET RETENTIONS = <duration>
+//   ALTER TABLE ... SET ACTIVETIME = <duration>
+//   ALTER TABLE ... SET PARTITION INTERVAL = <duration>
 //
 // Column qualifiers:
 //   [CONSTRAINT <constraintname>] {NULL | NOT NULL | UNIQUE | PRIMARY KEY | CHECK (<expr>) | DEFAULT <expr>}
@@ -1361,7 +1366,7 @@ alter_ddl_stmt:
 //   USING <var> = COPY FROM PARENT [, ...]
 //   { TO | = } <expr>
 //
-// %SeeAlso: WEBDOCS/alter-table.html
+// %SeeAlso: SHOW CREATE, SHOW TABLES
 alter_table_stmt:
   alter_onetable_stmt
 | alter_relocate_stmt
@@ -1375,37 +1380,14 @@ alter_table_stmt:
 // prefix is spread over multiple non-terminals.
 | ALTER TABLE error     // SHOW HELP: ALTER TABLE
 
-// %Help: ALTER PARTITION - apply zone configurations to a partition
-// %Category: DDL
-// %Text:
-// ALTER PARTITION <name> <command>
-//
-// Commands:
-//   -- Alter a single partition which exists on any of a table's indexes.
-//   ALTER PARTITION <partition> OF TABLE <tablename> CONFIGURE ZONE <zoneconfig>
-//
-//   -- Alter a partition of a specific index.
-//   ALTER PARTITION <partition> OF INDEX <tablename>@<indexname> CONFIGURE ZONE <zoneconfig>
-//
-//   -- Alter all partitions with the same name across a table's indexes.
-//   ALTER PARTITION <partition> OF INDEX <tablename>@* CONFIGURE ZONE <zoneconfig>
-//
-// Zone configurations:
-//   DISCARD
-//   USING <var> = <expr> [, ...]
-//   USING <var> = COPY FROM PARENT [, ...]
-//   { TO | = } <expr>
-//
-// %SeeAlso: WEBDOCS/configure-zone.html
 alter_partition_stmt:
   alter_zone_partition_stmt
-| ALTER PARTITION error // SHOW HELP: ALTER PARTITION
 
 // %Help: ALTER VIEW - change the definition of a view
 // %Category: DDL
 // %Text:
 // ALTER VIEW [IF EXISTS] <name> RENAME TO <newname>
-// %SeeAlso: WEBDOCS/alter-view.html
+// %SeeAlso:
 alter_view_stmt:
   alter_rename_view_stmt
 // ALTER VIEW has its error help token here because the ALTER VIEW
@@ -1440,8 +1422,17 @@ alter_sequence_options_stmt:
 // %Help: ALTER DATABASE - change the definition of a database
 // %Category: DDL
 // %Text:
+// ALTER DATABASE <name> <command>
+//
+// Commands:
 // ALTER DATABASE <name> RENAME TO <newname>
-// %SeeAlso: WEBDOCS/alter-database.html
+// ALTER DATABASE <name> CONFIGURE ZONE DISCARD
+// ALTER DATABASE <name> CONFIGURE ZONE USING <var> = <expr> [, ...]
+// ALTER DATABASE <name> CONFIGURE ZONE USING <var> = COPY FROM PARENT
+// ALTER DATABASE <name> CONFIGURE ZONE USING <var> = {COPY FROM PARENT | <expr>} [, ...]
+// ALTER TS DATABASE <name> SET RETENTIONS '=' <duration>
+// ALTER TS DATABASE <name> SET PARTITION INTERVAL '=' <duration>
+// %SeeAlso:
 alter_database_stmt:
   alter_rename_database_stmt
 |  alter_zone_database_stmt
@@ -1476,10 +1467,6 @@ alter_range_stmt:
 //
 // Commands:
 //   ALTER INDEX ... RENAME TO <newname>
-//   ALTER INDEX ... SPLIT AT <selectclause> [WITH EXPIRATION <expr>]
-//   ALTER INDEX ... UNSPLIT AT <selectclause>
-//   ALTER INDEX ... UNSPLIT ALL
-//   ALTER INDEX ... SCATTER [ FROM ( <exprs...> ) TO ( <exprs...> ) ]
 //
 // Zone configurations:
 //   DISCARD
@@ -1487,7 +1474,7 @@ alter_range_stmt:
 //   USING <var> = COPY FROM PARENT [, ...]
 //   { TO | = } <expr>
 //
-// %SeeAlso: WEBDOCS/alter-index.html
+// %SeeAlso: SHOW TABLES
 alter_index_stmt:
   alter_oneindex_stmt
 | alter_relocate_index_stmt
@@ -2049,9 +2036,12 @@ opt_validate_behavior:
   }
 
 
-// %Help: ALTER AUDIT - change audit properties
+// %Help: ALTER AUDIT - change the definition of an audit
 // %Category: DDL
-// %Text: ALTER AUDIT <audit_name> [ ENABLE | DISANLE ]
+// %Text:
+// ALTER AUDIT [IF EXISTS] <audit_name> [ ENABLE | DISANLE ]
+// ALTER AUDIT [IF EXISTS] <audit_name> RENAME TO <audit_name>
+//
 // %SeeAlso: CREATE AUDIT, DROP AUDIT, SHOW AUDITS
 alter_audit_stmt:
   ALTER AUDIT audit_name audit_able
@@ -2082,26 +2072,6 @@ audit_able:
     $$.val = false
   }
 
-// %Help: BACKUP - back up data to external storage
-// %Category: TOOLS
-// %Text:
-// BACKUP <targets...> TO <location...>
-//        [ AS OF SYSTEM TIME <expr> ]
-//        [ INCREMENTAL FROM <location...> ]
-//        [ WITH <option> [= <value>] [, ...] ]
-//
-// Targets:
-//    TABLE <pattern> [, ...]
-//    DATABASE <databasename> [, ...]
-//
-// Location:
-//    "[scheme]://[host]/[path to backup]?[parameters]"
-//
-// Options:
-//    INTO_DB
-//    SKIP_MISSING_FOREIGN_KEYS
-//
-// %SeeAlso: RESTORE, WEBDOCS/backup.html
 backup_stmt:
   BACKUP TO partitioned_backup opt_as_of_clause opt_incremental opt_with_options
   {
@@ -2111,27 +2081,7 @@ backup_stmt:
   {
     $$.val = &tree.Backup{Targets: $2.targetList(), To: $4.partitionedBackup(), IncrementalFrom: $6.exprs(), AsOf: $5.asOfClause(), Options: $7.kvOptions()}
   }
-| BACKUP error // SHOW HELP: BACKUP
 
-// %Help: RESTORE - restore data from external storage
-// %Category: TOOLS
-// %Text:
-// RESTORE <targets...> FROM <location...>
-//         [ AS OF SYSTEM TIME <expr> ]
-//         [ WITH <option> [= <value>] [, ...] ]
-//
-// Targets:
-//    TABLE <pattern> [, ...]
-//    DATABASE <databasename> [, ...]
-//
-// Locations:
-//    "[scheme]://[host]/[path to backup]?[parameters]"
-//
-// Options:
-//    INTO_DB
-//    SKIP_MISSING_FOREIGN_KEYS
-//
-// %SeeAlso: BACKUP, WEBDOCS/restore.html
 restore_stmt:
   RESTORE FROM partitioned_backup_list opt_as_of_clause opt_with_options
   {
@@ -2141,7 +2091,6 @@ restore_stmt:
   {
     $$.val = &tree.Restore{Targets: $2.targetList(), From: $4.partitionedBackups(), AsOf: $5.asOfClause(), Options: $6.kvOptions()}
   }
-| RESTORE error // SHOW HELP: RESTORE
 
 partitioned_backup:
   string_or_placeholder
@@ -2170,36 +2119,33 @@ import_format:
   }
 
 // %Help: IMPORT - load data from file in a distributed manner
-// %Category: TOOLS
+// %Category: DML
 // %Text:
-// -- Import both schema and table data:
-// IMPORT [ TABLE <tablename> FROM ]
-//        <format> <datafile>
-//        [ WITH <option> [= <value>] [, ...] ]
+// -- Import schema from external file:
+// IMPORT TABLE CREATE USING <schemafile>
 //
-// -- Import using specific schema, use only table data from external file:
-// IMPORT TABLE <tablename>
-//        { ( <elements> ) | CREATE USING <schemafile> }
-//        <format>
-//        DATA ( <datafile> [, ...] )
-//        [ WITH <option> [= <value>] [, ...] ]
+// -- Import both schema and table data from external file:
+// IMPORT TABLE CREATE USING <schemafile> <format> DATA ( <datafile>... ) [ WITH <option> [= <value>] [, ...] ]
+//
+// -- Import the whole database, schema and table data are from external file:
+// IMPORT DATABASE <format> DATA ( <datafile>... ) [ WITH <option> [= <value>] [, ...] ]
+//
+// -- Import using specific table, use only table data from external file:
+// IMPORT INTO <table_name> [ ( <column_list> ) ] <format> DATA ( <datafile>... ) [WITH <option> [= <value>] [, ...]]
 //
 // Formats:
 //    CSV
-//    DELIMITED
-//    MYSQLDUMP
-//    PGCOPY
-//    PGDUMP
 //
 // Options:
-//    distributed = '...'
-//    sstsize = '...'
-//    temp = '...'
-//    delimiter = '...'      [CSV, PGCOPY-specific]
-//    nullif = '...'         [CSV, PGCOPY-specific]
-//    comment = '...'        [CSV-specific]
+//    delimiter           = '<char>'
+//    enclosed            = '<char>'
+//    thread_concurrency  = '<int>'
+//    escaped             = '<char>'
+//    nullif              = '<char>'
+//    batch_rows          = '<int>'
+//    auto_shrink
 //
-// %SeeAlso: CREATE TABLE
+// %SeeAlso: CREATE TABLE, SHOW TABLES
 import_stmt:
  IMPORT TABLE CREATE USING string_or_placeholder import_format DATA '(' string_or_placeholder_list ')' opt_with_options
   {
@@ -2231,15 +2177,24 @@ import_stmt:
 | IMPORT error // SHOW HELP: IMPORT
 
 // %Help: EXPORT - export data to file in a distributed manner
-// %Category: TOOLS
+// %Category: DML
 // %Text:
-// EXPORT INTO <format> <datafile> [WITH <option> [= value] [,...]] FROM <query>
+// EXPORT INTO <format> <datafile> FROM <query> [WITH <option> [= value] [,...]]
+// EXPORT INTO CSV <export_path> FROM TABLE <table_name> [WITH <option> [= value] [,...]]
+// EXPORT INTO <format> <datafile> FROM DATABASE <database_name> [WITH <option> [= value] [,...]]
 //
 // Formats:
 //    CSV
 //
 // Options:
-//    delimiter = '...'   [CSV-specific]
+//    delimiter  = '<char>'
+//    chunk_rows = '<int>'
+//    enclosed   = '<char>'
+//    escaped    = '<char>'
+//    nullas     = '<char>'
+//    column_name
+//    meta_only
+//    data_only
 //
 // %SeeAlso: SELECT
 export_stmt:
@@ -2353,7 +2308,7 @@ cancel_stmt:
 // %Text:
 // CANCEL JOBS <selectclause>
 // CANCEL JOB <jobid>
-// %SeeAlso: SHOW JOBS, PAUSE JOBS, RESUME JOBS
+// %SeeAlso: SHOW JOBS, PAUSE JOBS, RESUME JOBS, SHOW TABLES
 cancel_jobs_stmt:
   CANCEL JOB a_expr
   {
@@ -2376,7 +2331,7 @@ cancel_jobs_stmt:
 // %Text:
 // CANCEL QUERIES [IF EXISTS] <selectclause>
 // CANCEL QUERY [IF EXISTS] <expr>
-// %SeeAlso: SHOW QUERIES
+// %SeeAlso: SHOW QUERIES, SHOW TABLES
 cancel_queries_stmt:
   CANCEL QUERY a_expr
   {
@@ -2412,7 +2367,7 @@ cancel_queries_stmt:
 // %Text:
 // CANCEL SESSIONS [IF EXISTS] <selectclause>
 // CANCEL SESSION [IF EXISTS] <sessionid>
-// %SeeAlso: SHOW SESSIONS
+// %SeeAlso: SHOW SESSIONS, SHOW TABLES
 cancel_sessions_stmt:
   CANCEL SESSION a_expr
   {
@@ -2554,7 +2509,7 @@ drop_unsupported:
 
 create_ddl_stmt:
   create_changefeed_stmt
-| create_ts_database_stmt // EXTEND WITH HELP: CREATE TS_DATABASE
+| create_ts_database_stmt // EXTEND WITH HELP: CREATE TS DATABASE
 | create_database_stmt // EXTEND WITH HELP: CREATE DATABASE
 | create_index_stmt    // EXTEND WITH HELP: CREATE INDEX
 | create_schema_stmt   // EXTEND WITH HELP: CREATE SCHEMA
@@ -2571,9 +2526,9 @@ create_ddl_stmt:
 // %Help: CREATE STATISTICS - create a new table statistic
 // %Category: Misc
 // %Text:
-// CREATE STATISTICS <statisticname>
-//   [ON <colname> [, ...]]
-//   FROM <tablename> [AS OF SYSTEM TIME <expr>]
+// CREATE STATISTICS <statisticname> [ON <colname|colid> [, ...]]
+//   				FROM <tablename> [AS OF SYSTEM TIME <expr>]
+// %SeeAlso: SHOW TABLES
 create_stats_stmt:
   CREATE STATISTICS statistics_name opt_stats_columns FROM create_stats_target opt_create_stats_options
   {
@@ -2814,7 +2769,7 @@ create_schedule_for_sql_stmt:
 //               [ORDER BY <exprs...>]
 //               [LIMIT <expr>]
 //               [RETURNING <exprs...>]
-// %SeeAlso: WEBDOCS/delete.html
+// %SeeAlso: SHOW TABLES
 delete_stmt:
   opt_with_clause DELETE FROM table_expr_opt_alias_idx opt_using_clause opt_where_clause opt_sort_clause opt_limit_clause returning_clause
   {
@@ -2873,7 +2828,7 @@ drop_ddl_stmt:
 // %Help: DROP VIEW - remove a view
 // %Category: DDL
 // %Text: DROP VIEW [IF EXISTS] <tablename> [, ...] [CASCADE | RESTRICT]
-// %SeeAlso: WEBDOCS/drop-index.html
+// %SeeAlso: SHOW TABLES
 drop_view_stmt:
   DROP VIEW table_name_list opt_drop_behavior
   {
@@ -2903,7 +2858,7 @@ drop_sequence_stmt:
 // %Help: DROP TABLE - remove a table
 // %Category: DDL
 // %Text: DROP TABLE [IF EXISTS] <tablename> [, ...] [CASCADE | RESTRICT]
-// %SeeAlso: WEBDOCS/drop-table.html
+// %SeeAlso: SHOW TABLES
 drop_table_stmt:
   DROP TABLE table_name_list opt_drop_behavior
   {
@@ -2918,7 +2873,7 @@ drop_table_stmt:
 // %Help: DROP INDEX - remove an index
 // %Category: DDL
 // %Text: DROP INDEX [CONCURRENTLY] [IF EXISTS] <idxname> [, ...] [CASCADE | RESTRICT]
-// %SeeAlso: WEBDOCS/drop-index.html
+// %SeeAlso:
 drop_index_stmt:
   DROP INDEX opt_concurrently table_index_name_list opt_drop_behavior
   {
@@ -2943,7 +2898,7 @@ drop_index_stmt:
 // %Help: DROP DATABASE - remove a database
 // %Category: DDL
 // %Text: DROP DATABASE [IF EXISTS] <databasename> [CASCADE | RESTRICT]
-// %SeeAlso: WEBDOCS/drop-database.html
+// %SeeAlso:
 drop_database_stmt:
   DROP DATABASE database_name opt_drop_behavior
   {
@@ -2997,7 +2952,8 @@ schema_name_list:
 
 // %Help: DROP FUNCTION - remove a function
 // %Category: DDL
-// %Text: DROP FUNCTION <functionname>
+// %Text: DROP FUNCTION <function_name>
+// %SeeAlso: CREATE FUNCTION, SHOW FUNCTION, SHOW FUNCTIONS
 drop_function_stmt:
   DROP FUNCTION function_name_list
   {
@@ -3045,7 +3001,7 @@ table_name_list:
     $$.val = append($1.tableNames(), name)
   }
 
-// %Help: DROP AUDIT - remove a audit
+// %Help: DROP AUDIT - remove an audit
 // %Category: DDL
 // %Text: DROP AUDIT [IF EXISTS] <audit_name> [, ...]
 // %SeeAlso: CREATE AUDIT, ALTER AUDIT, SHOW AUDITS
@@ -3075,7 +3031,7 @@ drop_audit_stmt:
 // Plan options:
 //     TYPES, VERBOSE, OPT
 //
-// %SeeAlso: WEBDOCS/explain.html
+// %SeeAlso:
 explain_stmt:
   EXPLAIN preparable_stmt
   {
@@ -3134,7 +3090,7 @@ explain_stmt:
 
 preparable_stmt:
   alter_stmt        // help texts in sub-rule
-| backup_stmt       // EXTEND WITH HELP: BACKUP
+| backup_stmt
 | cancel_stmt       // help texts in sub-rule
 | create_stmt       // help texts in sub-rule
 | delete_stmt       // EXTEND WITH HELP: DELETE
@@ -3145,11 +3101,11 @@ preparable_stmt:
 | pause_stmt        // EXTEND WITH HELP: PAUSE JOBS
 | pause_schedule_stmt // EXTEND WITH HELP: PAUSE SCHEDULE
 | reset_stmt        // help texts in sub-rule
-| restore_stmt      // EXTEND WITH HELP: RESTORE
+| restore_stmt
 | resume_stmt       // EXTEND WITH HELP: RESUME JOBS
 | resume_schedule_stmt // EXTEND WITH HELP: RESUME SCHEDULE
 | export_stmt       // EXTEND WITH HELP: EXPORT
-| scrub_stmt        // help texts in sub-rule
+| scrub_stmt
 | select_stmt       // help texts in sub-rule
   {
     $$.val = $1.slct()
@@ -3292,7 +3248,7 @@ deallocate_stmt:
 //   SCHEMA <schemaname> [, <schemaname>]...
 //   [TABLE] [<databasename> .] { <tablename> | * } [, ...]
 //
-// %SeeAlso: REVOKE, WEBDOCS/grant.html
+// %SeeAlso: REVOKE, SHOW TABLES
 grant_stmt:
   GRANT privileges ON targets TO name_list
   {
@@ -3324,7 +3280,7 @@ grant_stmt:
 //   SCHEMA <schemaname> [, <schemaname>]...
 //   [TABLE] [<databasename> .] { <tablename> | * } [, ...]
 //
-// %SeeAlso: GRANT, WEBDOCS/revoke.html
+// %SeeAlso: GRANT, SHOW TABLES
 revoke_stmt:
   REVOKE privileges ON targets FROM name_list
   {
@@ -3381,7 +3337,7 @@ reset_stmt:
 // %Help: RESET - reset a session variable to its default value
 // %Category: Cfg
 // %Text: RESET [SESSION] <var>
-// %SeeAlso: RESET CLUSTER SETTING, WEBDOCS/set-vars.html
+// %SeeAlso: RESET CLUSTER SETTING
 reset_session_stmt:
   RESET session_var
   {
@@ -3410,7 +3366,7 @@ reset_csetting_stmt:
 // %Text: USE <dbname>
 //
 // "USE <dbname>" is an alias for "SET [SESSION] database = <dbname>".
-// %SeeAlso: SET SESSION, WEBDOCS/set-vars.html
+// %SeeAlso: SET SESSION
 use_stmt:
   USE var_value
   {
@@ -3431,54 +3387,16 @@ preparable_set_stmt:
 | set_csetting_stmt    // EXTEND WITH HELP: SET CLUSTER SETTING
 | use_stmt             // EXTEND WITH HELP: USE
 
-// %Help: SCRUB - run checks against databases or tables
-// %Category: Experimental
-// %Text:
-// EXPERIMENTAL SCRUB TABLE <table> ...
-// EXPERIMENTAL SCRUB DATABASE <database>
-//
-// The various checks that ca be run with SCRUB includes:
-//   - Physical table data (encoding)
-//   - Secondary index integrity
-//   - Constraint integrity (NOT NULL, CHECK, FOREIGN KEY, UNIQUE)
-// %SeeAlso: SCRUB TABLE, SCRUB DATABASE
 scrub_stmt:
   scrub_table_stmt
 | scrub_database_stmt
-| EXPERIMENTAL SCRUB error // SHOW HELP: SCRUB
 
-// %Help: SCRUB DATABASE - run scrub checks on a database
-// %Category: Experimental
-// %Text:
-// EXPERIMENTAL SCRUB DATABASE <database>
-//                             [AS OF SYSTEM TIME <expr>]
-//
-// All scrub checks will be run on the database. This includes:
-//   - Physical table data (encoding)
-//   - Secondary index integrity
-//   - Constraint integrity (NOT NULL, CHECK, FOREIGN KEY, UNIQUE)
-// %SeeAlso: SCRUB TABLE, SCRUB
 scrub_database_stmt:
   EXPERIMENTAL SCRUB DATABASE database_name opt_as_of_clause
   {
     $$.val = &tree.Scrub{Typ: tree.ScrubDatabase, Database: tree.Name($4), AsOf: $5.asOfClause()}
   }
-| EXPERIMENTAL SCRUB DATABASE error // SHOW HELP: SCRUB DATABASE
 
-// %Help: SCRUB TABLE - run scrub checks on a table
-// %Category: Experimental
-// %Text:
-// SCRUB TABLE <tablename>
-//             [AS OF SYSTEM TIME <expr>]
-//             [WITH OPTIONS <option> [, ...]]
-//
-// Options:
-//   EXPERIMENTAL SCRUB TABLE ... WITH OPTIONS INDEX ALL
-//   EXPERIMENTAL SCRUB TABLE ... WITH OPTIONS INDEX (<index>...)
-//   EXPERIMENTAL SCRUB TABLE ... WITH OPTIONS CONSTRAINT ALL
-//   EXPERIMENTAL SCRUB TABLE ... WITH OPTIONS CONSTRAINT (<constraint>...)
-//   EXPERIMENTAL SCRUB TABLE ... WITH OPTIONS PHYSICAL
-// %SeeAlso: SCRUB DATABASE, SRUB
 scrub_table_stmt:
   EXPERIMENTAL SCRUB TABLE table_name opt_as_of_clause opt_scrub_options_clause
   {
@@ -3489,7 +3407,6 @@ scrub_table_stmt:
       Options: $6.scrubOptions(),
     }
   }
-| EXPERIMENTAL SCRUB TABLE error // SHOW HELP: SCRUB TABLE
 
 opt_scrub_options_clause:
   WITH OPTIONS scrub_option_list
@@ -3536,8 +3453,7 @@ scrub_option:
 // %Help: SET CLUSTER SETTING - change a cluster setting
 // %Category: Cfg
 // %Text: SET CLUSTER SETTING <var> { TO | = } <value>
-// %SeeAlso: SHOW CLUSTER SETTING, RESET CLUSTER SETTING, SET SESSION,
-// WEBDOCS/cluster-settings.html
+// %SeeAlso: SHOW CLUSTER SETTING, RESET CLUSTER SETTING, SET SESSION
 set_csetting_stmt:
   SET CLUSTER SETTING var_name to_or_eq var_value
   {
@@ -3565,8 +3481,7 @@ set_exprs_internal:
 // SET [SESSION] CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL { SNAPSHOT | SERIALIZABLE }
 // SET [SESSION] TRACING { TO | = } { on | off | cluster | local | kv | results } [,...]
 //
-// %SeeAlso: SHOW SESSION, RESET, DISCARD, SHOW, SET CLUSTER SETTING, SET TRANSACTION,
-// WEBDOCS/set-vars.html
+// %SeeAlso: SHOW SESSION, RESET, DISCARD, SHOW, SET CLUSTER SETTING, SET TRANSACTION
 set_session_stmt:
   SET SESSION set_rest_more
   {
@@ -3588,11 +3503,10 @@ set_session_stmt:
 // SET [SESSION] TRANSACTION <txnparameters...>
 //
 // Transaction parameters:
-//    ISOLATION LEVEL { SNAPSHOT | SERIALIZABLE }
+//    ISOLATION LEVEL { SERIALIZABLE }
 //    PRIORITY { LOW | NORMAL | HIGH }
 //
-// %SeeAlso: SHOW TRANSACTION, SET SESSION,
-// WEBDOCS/set-transaction.html
+// %SeeAlso: SHOW TRANSACTION, SET SESSION
 set_transaction_stmt:
   SET TRANSACTION transaction_mode_list
   {
@@ -3788,13 +3702,13 @@ zone_value:
 // %Text:
 // SHOW APPLICATIONS, SHOW BACKUP, SHOW CLUSTER SETTING, SHOW COLUMNS,
 // SHOW CONSTRAINTS, SHOW CREATE, SHOW DATABASES, SHOW HISTOGRAM, SHOW INDEXES,
-// SHOW PARTITIONS, SHOW JOBS, SHOW QUERIES, SHOW RANGE, SHOW RANGES,
+// SHOW TS PARTITIONS, SHOW JOBS, SHOW QUERIES, SHOW RANGE, SHOW RANGES,
 // SHOW ROLES, SHOW SCHEMAS, SHOW SEQUENCES, SHOW SESSION, SHOW SESSIONS,
 // SHOW STATISTICS, SHOW SYNTAX, SHOW TABLES, SHOW TRACE SHOW TRANSACTION, SHOW USERS
 show_stmt:
   show_applications_stmt    // EXTEND WITH HELP: SHOW APPLICATIONS
 | show_attributes_stmt      // EXTEND WITH HELP: SHOW ATTRIBUTES
-| show_backup_stmt          // EXTEND WITH HELP: SHOW BACKUP
+| show_backup_stmt
 | show_columns_stmt         // EXTEND WITH HELP: SHOW COLUMNS
 | show_constraints_stmt     // EXTEND WITH HELP: SHOW CONSTRAINTS
 | show_create_stmt          // EXTEND WITH HELP: SHOW CREATE
@@ -3804,7 +3718,7 @@ show_stmt:
 | show_grants_stmt          // EXTEND WITH HELP: SHOW GRANTS
 | show_histogram_stmt       // EXTEND WITH HELP: SHOW HISTOGRAM
 | show_indexes_stmt         // EXTEND WITH HELP: SHOW INDEXES
-| show_partitions_stmt      // EXTEND WITH HELP: SHOW PARTITIONS
+| show_partitions_stmt
 | show_jobs_stmt            // EXTEND WITH HELP: SHOW JOBS
 | show_queries_stmt         // EXTEND WITH HELP: SHOW QUERIES
 | show_ranges_stmt          // EXTEND WITH HELP: SHOW RANGES
@@ -3856,7 +3770,7 @@ reindex_stmt:
 // %Help: SHOW SESSION - display session variables
 // %Category: Cfg
 // %Text: SHOW [SESSION] { <var> | ALL }
-// %SeeAlso: WEBDOCS/show-vars.html
+// %SeeAlso:
 show_session_stmt:
   SHOW session_var         { $$.val = &tree.ShowVar{Name: $2} }
 | SHOW SESSION session_var { $$.val = &tree.ShowVar{Name: $3} }
@@ -3934,10 +3848,11 @@ show_histogram_stmt:
   }
 | SHOW HISTOGRAM error // SHOW HELP: SHOW HISTOGRAM
 
-// %Help: SHOW ATTRIBUTES - list attributes
+// %Help: SHOW ATTRIBUTES - list the attributes of the timeseries table
 // %Category: DDL
 // %Text:
-// %SHOW ATTRIBUTES/TAGS FROM TS TABLE
+// SHOW ATTRIBUTES/TAGS FROM <table_name>
+//	SHOW TAG VALUES FROM <table_name>
 show_attributes_stmt:
   SHOW attributes_tags FROM table_name
 	{
@@ -3956,10 +3871,10 @@ show_attributes_stmt:
 | SHOW ATTRIBUTES error // SHOW HELP: SHOW ATTRIBUTES
 | SHOW ATTRIBUTE error // SHOW HELP: SHOW ATTRIBUTES
 
-// %Help: SHOW RETENTIONS - list retentions
+// %Help: SHOW RETENTIONS - list retentions of the timeseries table
 // %Category: DDL
 // %Text:
-// %SHOW RETENTIONS ON TABLE table_name
+// SHOW RETENTIONS ON TABLE <table_name>
 show_retention_stmt:
 	SHOW RETENTIONS ON TABLE table_name
 	{
@@ -3973,7 +3888,8 @@ show_retention_stmt:
 // %Help: SHOW FUNCTIONS - list functions
 // %Category: DDL
 // %Text:
-// %SHOW FUNCTIONS
+// SHOW FUNCTIONS
+// %SeeAlso: CREATE FUNCTION, DROP FUNCTION, SHOW FUNCTION
 show_functions_stmt:
   SHOW FUNCTIONS
 	{
@@ -3983,10 +3899,12 @@ show_functions_stmt:
 	}
 | SHOW FUNCTIONS error // SHOW HELP: SHOW FUNCTIONS
 
-// %Help: SHOW FUNCTION - show function details
+// %Help: SHOW FUNCTION - Show the details of the function
 // %Category: DDL
 // %Text:
-// %SHOW FUNCTION function_name
+// SHOW FUNCTION <function_name>
+//
+// %SeeAlso: CREATE FUNCTION, DROP FUNCTION, SHOW FUNCTIONS
 show_function_stmt:
   SHOW FUNCTION function_name
 	{
@@ -4000,7 +3918,8 @@ show_function_stmt:
 // %Help: SHOW SCHEDULES - list schedules
 // %Category: DDL
 // %Text:
-// %SHOW SCHEDULES
+// SHOW SCHEDULES
+// %SeeAlso: ALTER SCHEDULE, PAUSE SCHEDULE, RESUME SCHEDULE, SHOW SCHEDULE
 show_schedules_stmt:
   SHOW SCHEDULES
 	{
@@ -4013,7 +3932,8 @@ show_schedules_stmt:
 // %Help: SHOW SCHEDULE - show schedule details
 // %Category: DDL
 // %Text:
-// %SHOW SCHEDULE schedule_name
+// SHOW SCHEDULE <schedule_name>
+// %SeeAlso: ALTER SCHEDULE, PAUSE SCHEDULE, RESUME SCHEDULE, SHOW SCHEDULES, DROP SCHEDULE
 show_schedule_stmt:
   SHOW SCHEDULE schedule_name
 	{
@@ -4024,10 +3944,6 @@ show_schedule_stmt:
 	}
 | SHOW SCHEDULE error // SHOW HELP: SHOW SCHEDULE
 
-// %Help: SHOW BACKUP - list backup contents
-// %Category: TOOLS
-// %Text: SHOW BACKUP [SCHEMAS|FILES|RANGES] <location>
-// %SeeAlso: WEBDOCS/show-backup.html
 show_backup_stmt:
   SHOW BACKUP string_or_placeholder opt_with_options
   {
@@ -4064,14 +3980,13 @@ show_backup_stmt:
       Options: $5.kvOptions(),
     }
   }
-| SHOW BACKUP error // SHOW HELP: SHOW BACKUP
 
 // %Help: SHOW CLUSTER SETTING - display cluster settings
 // %Category: Cfg
 // %Text:
 // SHOW CLUSTER SETTING <var>
 // SHOW [ PUBLIC | ALL ] CLUSTER SETTINGS
-// %SeeAlso: WEBDOCS/cluster-settings.html
+// %SeeAlso:
 show_csettings_stmt:
   SHOW CLUSTER SETTING var_name
   {
@@ -4100,7 +4015,7 @@ show_csettings_stmt:
 // %Help: SHOW COLUMNS - list columns in relation
 // %Category: DDL
 // %Text: SHOW COLUMNS FROM <tablename>
-// %SeeAlso: WEBDOCS/show-columns.html
+// %SeeAlso: SHOW TABLES
 show_columns_stmt:
   SHOW COLUMNS FROM table_name with_comment
   {
@@ -4108,10 +4023,6 @@ show_columns_stmt:
   }
 | SHOW COLUMNS error // SHOW HELP: SHOW COLUMNS
 
-// %Help: SHOW PARTITIONS - list partition information
-// %Category: DDL
-// %Text: SHOW PARTITIONS FROM { TABLE <table> | INDEX <index> | DATABASE <database> }
-// %SeeAlso: WEBDOCS/show-partitions.html
 show_partitions_stmt:
   SHOW PARTITIONS FROM TABLE table_name
   {
@@ -4129,12 +4040,11 @@ show_partitions_stmt:
   {
     $$.val = &tree.ShowPartitions{IsTable: true, Table: $5.unresolvedObjectName()}
   }
-| SHOW PARTITIONS error // SHOW HELP: SHOW PARTITIONS
 
 // %Help: SHOW DATABASES - list databases
 // %Category: DDL
 // %Text: SHOW DATABASES
-// %SeeAlso: WEBDOCS/show-databases.html
+// %SeeAlso:
 show_databases_stmt:
   SHOW DATABASES with_comment
   {
@@ -4150,7 +4060,7 @@ show_databases_stmt:
 // Show role grants:
 //   SHOW GRANTS ON ROLE [<roles...>] [FOR <grantees...>]
 //
-// %SeeAlso: WEBDOCS/show-grants.html
+// %SeeAlso:
 show_grants_stmt:
   SHOW GRANTS opt_on_targets_roles for_grantee_clause
   {
@@ -4166,7 +4076,7 @@ show_grants_stmt:
 // %Help: SHOW INDEXES - list indexes
 // %Category: DDL
 // %Text: SHOW INDEXES FROM { <tablename> | DATABASE <database_name> } [WITH COMMENT]
-// %SeeAlso: WEBDOCS/show-index.html
+// %SeeAlso: SHOW TABLES
 show_indexes_stmt:
   SHOW INDEX FROM table_name with_comment
   {
@@ -4199,7 +4109,7 @@ show_indexes_stmt:
 // %Help: SHOW CONSTRAINTS - list constraints
 // %Category: DDL
 // %Text: SHOW CONSTRAINTS FROM <tablename>
-// %SeeAlso: WEBDOCS/show-constraints.html
+// %SeeAlso: SHOW TABLES
 show_constraints_stmt:
   SHOW CONSTRAINT FROM table_name
   {
@@ -4343,7 +4253,7 @@ show_applications_stmt:
 // %Help: SHOW TABLES - list tables
 // %Category: DDL
 // %Text: SHOW TABLES [FROM <databasename> [ . <schemaname> ] ] [WITH COMMENT]
-// %SeeAlso: WEBDOCS/show-tables.html
+// %SeeAlso:
 show_tables_stmt:
   SHOW TABLES FROM name '.' name with_comment
   {
@@ -4431,7 +4341,7 @@ show_savepoint_stmt:
 // %Help: SHOW TRANSACTION - display current transaction properties
 // %Category: Cfg
 // %Text: SHOW TRANSACTION {ISOLATION LEVEL | PRIORITY | STATUS}
-// %SeeAlso: WEBDOCS/show-transaction.html
+// %SeeAlso:
 show_transaction_stmt:
   SHOW TRANSACTION ISOLATION LEVEL
   {
@@ -4453,7 +4363,7 @@ show_transaction_stmt:
 // %Help: SHOW CREATE - display the CREATE statement for a table, sequence or view
 // %Category: DDL
 // %Text: SHOW CREATE [ TABLE | SEQUENCE | VIEW ] <tablename>
-// %SeeAlso: WEBDOCS/show-create-table.html
+// %SeeAlso: SHOW TABLES
 show_create_stmt:
   SHOW CREATE table_name
   {
@@ -4474,7 +4384,7 @@ create_kw:
 // %Help: SHOW USERS - list defined users
 // %Category: Priv
 // %Text: SHOW USERS
-// %SeeAlso: CREATE USER, DROP USER, WEBDOCS/show-users.html
+// %SeeAlso: CREATE USER, DROP USER
 show_users_stmt:
   SHOW USERS
   {
@@ -4546,6 +4456,7 @@ show_zone_stmt:
 // %Text:
 // SHOW RANGE FROM TABLE <tablename> FOR ROW (row, value, ...)
 // SHOW RANGE FROM INDEX [ <tablename> @ ] <indexname> FOR ROW (row, value, ...)
+// %SeeAlso: SHOW TABLES
 show_range_for_row_stmt:
   SHOW RANGE FROM TABLE table_name FOR ROW '(' expr_list ')'
   {
@@ -4569,6 +4480,7 @@ show_range_for_row_stmt:
 // %Text:
 // SHOW RANGES FROM TABLE <tablename>
 // SHOW RANGES FROM INDEX [ <tablename> @ ] <indexname>
+// %SeeAlso: SHOW TABLES
 show_ranges_stmt:
   SHOW RANGES FROM TABLE table_name
   {
@@ -4585,12 +4497,12 @@ show_ranges_stmt:
   }
 | SHOW RANGES error // SHOW HELP: SHOW RANGES
 
-// %Help: SHOW TS PARTITIONS - list ts partitions
+// %Help: SHOW TS PARTITIONS - list the partitions of the timeseries table
 // %Category: Misc
 // %Text:
 // SHOW TS PARTITIONS
-// SHOW TS PARTITIONS FROM TABLE <tablename>
-// SHOW TS PARTITIONS FROM DATABASE <databasename>
+// SHOW TS PARTITIONS FROM TABLE <table_name>
+// SHOW TS PARTITIONS FROM DATABASE <database_name>
 show_ts_partitions_stmt:
   SHOW TS PARTITIONS FROM TABLE table_name
   {
@@ -4834,7 +4746,7 @@ for_grantee_clause:
 // %Text:
 // PAUSE JOBS <selectclause>
 // PAUSE JOB <jobid>
-// %SeeAlso: SHOW JOBS, CANCEL JOBS, RESUME JOBS
+// %SeeAlso: SHOW JOBS, CANCEL JOBS, RESUME JOBS, SHOW TABLES
 pause_stmt:
   PAUSE JOB a_expr
   {
@@ -4854,8 +4766,8 @@ pause_stmt:
 // %Help: PAUSE SCHEDULE - pause specified scheduled job
 // %Category: Misc
 // %Text:
-// PAUSE SCHEDULE <schedule_name>
-// %SeeAlso: SHOW SCHEDULES, PAUSE SCHEDULE, RESUME SCHEDULE
+// PAUSE SCHEDULE [IF EXISTS] <schedule_name>
+// %SeeAlso: ALTER SCHEDULE, RESUME SCHEDULE, SHOW SCHEDULE, SHOW SCHEDULES, DROP SCHEDULE
 pause_schedule_stmt:
   PAUSE SCHEDULE schedule_name
   {
@@ -4876,7 +4788,7 @@ pause_schedule_stmt:
 // %Category: Misc
 // %Text:
 // RESUME SCHEDULE <schedule_name>
-// %SeeAlso: SHOW SCHEDULES, PAUSE SCHEDULE, RESUME SCHEDULE
+// %SeeAlso: ALTER SCHEDULE, PAUSE SCHEDULE, SHOW SCHEDULE, SHOW SCHEDULES, DROP SCHEDULE
 resume_schedule_stmt:
   RESUME SCHEDULE schedule_name
   {
@@ -4896,10 +4808,11 @@ resume_schedule_stmt:
 // %Help: DROP SCHEDULES - destroy specified schedule
 // %Category: Misc
 // %Text:
-// DROP SCHEDULES <selectclause>
-//  selectclause: select statement returning schedule names to drop.
+// DROP SCHEDULES [IF EXISTS] <schedule_name>
+// DROP SCHEDULES [IF EXISTS] <select_clause>
+//  select_clause: select statement returning schedule names to drop.
 //
-// DROP SCHEDULE <schedule_name>
+// %SeeAlso: ALTER SCHEDULE, PAUSE SCHEDULE, RESUME SCHEDULE, SHOW SCHEDULE, SHOW SCHEDULES
 drop_schedule_stmt:
   DROP SCHEDULE schedule_name
   {
@@ -4957,6 +4870,8 @@ create_schema_stmt:
 // %Text:
 // CREATE [[GLOBAL | LOCAL] {TEMPORARY | TEMP}] TABLE [IF NOT EXISTS] <tablename> ( <elements...> ) [<interleave>] [<on_commit>]
 // CREATE [[GLOBAL | LOCAL] {TEMPORARY | TEMP}] TABLE [IF NOT EXISTS] <tablename> [( <colnames...> )] AS <source> [<interleave>] [<on commit>]
+// CREATE TABLE <tablename> (<elements...>) ATTRIBUTES/TAGS (<elements...>) PRIMARY ATTRIBUTES/TAGS (<name_list>)
+//			[RETENTIONS <duration>] [ACTIVETIME <duration>] [DICT ENCODING] [PARTITION INTERVAL <duration>]
 //
 // Table elements:
 //    <name> <type> [<qualifiers...>]
@@ -4984,9 +4899,7 @@ create_schema_stmt:
 // On commit clause:
 //    ON COMMIT {PRESERVE ROWS | DROP | DELETE ROWS}
 //
-// %SeeAlso: SHOW TABLES, CREATE VIEW, SHOW CREATE,
-// WEBDOCS/create-table.html
-// WEBDOCS/create-table-as.html
+// %SeeAlso: CREATE VIEW, SHOW CREATE, SHOW TABLES
 create_table_stmt:
   CREATE opt_temp_create_table TABLE table_name '(' opt_table_elem_list ')' opt_interleave opt_partition_by opt_table_with opt_create_table_on_commit
   {
@@ -6054,10 +5967,11 @@ create_sequence_stmt:
   }
 | CREATE opt_temp SEQUENCE error // SHOW HELP: CREATE SEQUENCE
 
-// %Help: ALTER SCHEDULE - alter schedule
+// %Help: ALTER SCHEDULE - change the definition of a schedule
 // %Category: DDL
 // %Text:
-// ALTER SCHEDULE opt_description cron_expr opt_with_schedule_options
+// ALTER SCHEDULE [IF EXISTS] <schedule_name> RECURRING [NEVER | <cron_expr>] [WITH SCHEDULE OPTIONS opt_list]
+// %SeeAlso: PAUSE SCHEDULE, RESUME SCHEDULE, SHOW SCHEDULE, SHOW SCHEDULES, DROP SCHEDULE
 alter_schedule_stmt:
    ALTER SCHEDULE schedule_name cron_expr opt_with_schedule_options
    {
@@ -6127,7 +6041,12 @@ opt_with_schedule_options:
 // %Help: CREATE FUNCTION - create a new function
 // %Category: DDL
 // %Text:
-// CREATE FUNCTION <function_name> ( <arguments...> ) RETURNS <typename> LANGUAGE LUA BEGIN <string> END
+// CREATE FUNCTION <function_name> ( <arguments...> ) RETURNS <typename> LANGUAGE LUA BEGIN <func_body> END
+//
+// Function arguments:
+//  <var_name> <type>
+//
+// %SeeAlso: SHOW FUNCTION, DROP FUNCTION, SHOW FUNCTIONS
 create_function_stmt:
   CREATE FUNCTION function_name '(' arg_def_list ')' RETURNS typename LANGUAGE LUA BEGIN SCONST END
   {
@@ -6260,7 +6179,7 @@ sequence_option_elem:
 // %Help: TRUNCATE - empty one or more tables
 // %Category: DML
 // %Text: TRUNCATE [TABLE] <tablename> [, ...] [CASCADE | RESTRICT]
-// %SeeAlso: WEBDOCS/truncate.html
+// %SeeAlso: SHOW TABLES
 truncate_stmt:
   TRUNCATE opt_table relation_expr_list opt_drop_behavior
   {
@@ -6328,7 +6247,7 @@ role_or_group_or_user:
 // %Help: CREATE VIEW - create a new view
 // %Category: DDL
 // %Text: CREATE [TEMPORARY | TEMP] VIEW <viewname> [( <colnames...> )] AS <source>
-// %SeeAlso: CREATE TABLE, SHOW CREATE, WEBDOCS/create-view.html
+// %SeeAlso: CREATE TABLE, SHOW CREATE, SHOW TABLES
 create_view_stmt:
   CREATE opt_temp opt_view_recursive VIEW view_name opt_column_list AS select_stmt
   {
@@ -6427,28 +6346,23 @@ create_type_stmt:
 
 
 
-// %Help: CREATE AUDIT - create a AUDIT
+// %Help: CREATE AUDIT - create an audit
 // %Category: DDL
 // %Text:
-//  --Object Audit
-//  CREATE AUDIT <audit_name> ON <TargetType> target_name
-//               FOR [ Oprations, ...] TO [username]
-//				 [ WITH <option> [= <value>] [, ...] ]
-//               [ ACTION ...]
-//               [ LEVEL ]
-//  --Stmt Audit
-//  CREATE AUDIT <audit_name> ON <TargetType>
-//               FOR [ Oprations, ...] TO [username]
-//				 [ WITH <option> [= <value>] [, ...] ]
-//               [ ACTION ...]
-//               [ LEVEL ]
-//  --Stmt TargetType:
-//      DATABASE, SCHEMA, TABLE, INDEX, VIEW, SEQUENCE,
-//      PROCEDURE, FUNCTION, TRIGGER, CDC, JOB, USER,
-//      ROLE, PRIVILEGE, QUERY, TRANSACTION, SAVEPOINT,
-//      RANGE, STATISTICS, SESSION, SCHEDULE, AUDIT
-//  --Object TargetType:
-//      TABLE, VIEW, COLUMN, FUNCTION
+// CREATE AUDIT [IF NOT EXISTS] <audit_name> ON <target_clause> FOR <operations_clause> TO {ALL | <username>}
+//						[WITH <var_value>] [whenever_clause] [ACTION <var_value>] [LEVEL <var_value>]
+//
+// Target Clause:
+//   DATABASE, SCHEMA, TABLE, INDEX, VIEW, SEQUENCE,
+//   JOB, USER, ROLE, PRIVILEGE, QUERY, RANGE,
+//   STATISTICS, SESSION, SCHEDULE, AUDIT
+//
+// Operations Clause:
+//   ALL, CREATE, GRANT, SELECT, <name>
+//
+// Whenever Clause:
+//   WHENEVER ALL, WHENEVER SUCCESS, WHENEVER FAIL
+//
 // %SeeAlso: ALTER AUDIT, DROP AUDIT, SHOW AUDITS
 create_audit_stmt:
   CREATE AUDIT audit_name ON audit_target FOR operations TO operators condition_clause whenever_clause action_clause level_clause
@@ -6561,7 +6475,19 @@ audit_target:
 
 // %Help: SHOW AUDITS - list audit policies
 // %Category: DDL
-// %Text: SHOW AUDITS [ [ <audit_name> ON <TargetType> [target_name] FOR <oprations> [, ...] ] TO <username> [, ...] ]
+// %Text:
+// SHOW AUDITS [TO <username>...]
+// SHOW AUDITS ON <target_clause> [FOR <oprations...>] [TO <username>...]
+//
+// Target Clause:
+//   ATABASE, SCHEMA, TABLE, INDEX, VIEW, SEQUENCE,
+//   PROCEDURE, FUNCTION, TRIGGER, CDC, JOB, USER,
+//   ROLE, PRIVILEGE, QUERY, TRANSACTION, SAVEPOINT,
+//   RANGE, STATISTICS, SESSION, SCHEDULE, AUDIT
+//
+// Operations Clause:
+//   ALL, CREATE, GRANT, SELECT, <name>
+//
 // %SeeAlso: CREATE AUDIT, ALTER AUDIT, DROP AUDIT
 show_audits_stmt:
   SHOW AUDITS ON audit_target opt_audit_operation opt_audit_operators
@@ -6604,8 +6530,7 @@ opt_audit_operation:
 // Interleave clause:
 //    INTERLEAVE IN PARENT <tablename> ( <colnames...> ) [CASCADE | RESTRICT]
 //
-// %SeeAlso: CREATE TABLE, SHOW INDEXES, SHOW CREATE,
-// WEBDOCS/create-index.html
+// %SeeAlso: CREATE TABLE, SHOW INDEXES, SHOW CREATE, SHOW TABLES
 create_index_stmt:
   CREATE opt_unique INDEX opt_concurrently opt_index_name ON table_name opt_using_gin_btree '(' index_params ')' opt_hash_sharded opt_storing opt_interleave opt_partition_by opt_idx_where
   {
@@ -6856,10 +6781,11 @@ rebalance_stmt:
     name := $6.unresolvedObjectName().ToTableName()
     $$.val = &tree.RebalanceTsData{TableName: name}
   }
+
 // %Help: RELEASE - complete a sub-transaction
 // %Category: Txn
 // %Text: RELEASE [SAVEPOINT] <savepoint name>
-// %SeeAlso: SAVEPOINT, WEBDOCS/savepoint.html
+// %SeeAlso: SAVEPOINT
 release_stmt:
   RELEASE savepoint_name
   {
@@ -6872,7 +6798,7 @@ release_stmt:
 // %Text:
 // RESUME JOBS <selectclause>
 // RESUME JOB <jobid>
-// %SeeAlso: SHOW JOBS, CANCEL JOBS, PAUSE JOBS
+// %SeeAlso: SHOW JOBS, CANCEL JOBS, PAUSE JOBS, SHOW TABLES
 resume_stmt:
   RESUME JOB a_expr
   {
@@ -6892,7 +6818,7 @@ resume_stmt:
 // %Help: SAVEPOINT - start a sub-transaction
 // %Category: Txn
 // %Text: SAVEPOINT <savepoint name>
-// %SeeAlso: RELEASE, WEBDOCS/savepoint.html
+// %SeeAlso: RELEASE
 savepoint_stmt:
   SAVEPOINT name
   {
@@ -6914,10 +6840,10 @@ transaction_stmt:
 // START TRANSACTION [ <txnparameter> [[,] ...] ]
 //
 // Transaction parameters:
-//    ISOLATION LEVEL { SNAPSHOT | SERIALIZABLE }
+//    ISOLATION LEVEL { SERIALIZABLE }
 //    PRIORITY { LOW | NORMAL | HIGH }
 //
-// %SeeAlso: COMMIT, ROLLBACK, WEBDOCS/begin-transaction.html
+// %SeeAlso: COMMIT, ROLLBACK
 begin_stmt:
   BEGIN opt_transaction begin_transaction
   {
@@ -6935,7 +6861,7 @@ begin_stmt:
 // %Text:
 // COMMIT [TRANSACTION]
 // END [TRANSACTION]
-// %SeeAlso: BEGIN, ROLLBACK, WEBDOCS/commit-transaction.html
+// %SeeAlso: BEGIN, ROLLBACK
 commit_stmt:
   COMMIT opt_transaction
   {
@@ -6964,7 +6890,7 @@ opt_abort_mod:
 // %Text:
 // ROLLBACK [TRANSACTION]
 // ROLLBACK [TRANSACTION] TO [SAVEPOINT] <savepoint name>
-// %SeeAlso: BEGIN, COMMIT, SAVEPOINT, WEBDOCS/rollback-transaction.html
+// %SeeAlso: BEGIN, COMMIT, SAVEPOINT
 rollback_stmt:
   ROLLBACK opt_transaction
   {
@@ -7077,7 +7003,7 @@ transaction_name_stmt:
 // %Help: CREATE DATABASE - create a new database
 // %Category: DDL
 // %Text: CREATE DATABASE [IF NOT EXISTS] <name>
-// %SeeAlso: WEBDOCS/create-database.html
+// %SeeAlso:
 create_database_stmt:
   CREATE DATABASE database_name opt_with opt_template_clause opt_encoding_clause opt_lc_collate_clause opt_lc_ctype_clause
   {
@@ -7102,9 +7028,10 @@ create_database_stmt:
    }
 | CREATE DATABASE error // SHOW HELP: CREATE DATABASE
 
-// %Help: CREATE TS_DATABASE - create a new ts database
+// %Help: CREATE TS DATABASE - create a new timeseries database
 // %Category: DDL
-// %Text: CREATE TS_DATABASE <name>
+// %Text:
+// CREATE TS DATABASE <name> [RETENTIONS <duration>] [PARTITION INTERVAL <duration>]
 create_ts_database_stmt:
 	CREATE TS DATABASE database_name opt_retentions_elems opt_partition_interval
   	{
@@ -7118,7 +7045,7 @@ create_ts_database_stmt:
 				TSDatabase: tsDB,
       }
   	}
-| CREATE TS DATABASE error // SHOW HELP: CREATE DATABASE
+| CREATE TS DATABASE error // SHOW HELP: CREATE TS DATABASE
 
 opt_template_clause:
   TEMPLATE opt_equal non_reserved_word_or_sconst
@@ -7171,7 +7098,7 @@ opt_equal:
 //        <selectclause>
 //        [ON CONFLICT [( <colnames...> )] {DO UPDATE SET ... [WHERE <expr>] | DO NOTHING}]
 //        [RETURNING <exprs...>]
-// %SeeAlso: UPSERT, UPDATE, DELETE, WEBDOCS/insert.html
+// %SeeAlso: UPSERT, UPDATE, DELETE, SHOW TABLES
 insert_stmt:
   opt_with_clause INSERT INTO insert_target insert_rest returning_clause
   {
@@ -7196,7 +7123,7 @@ insert_stmt:
 // UPSERT INTO <tablename> [AS <name>] [( <colnames...> )]
 //        <selectclause>
 //        [RETURNING <exprs...>]
-// %SeeAlso: INSERT, UPDATE, DELETE, WEBDOCS/upsert.html
+// %SeeAlso: INSERT, UPDATE, DELETE, SHOW TABLES
 upsert_stmt:
   opt_with_clause UPSERT INTO insert_target insert_rest returning_clause
   {
@@ -7343,7 +7270,7 @@ returning_clause:
 //        [ORDER BY <exprs...>]
 //        [LIMIT <expr>]
 //        [RETURNING <exprs...>]
-// %SeeAlso: INSERT, UPSERT, DELETE, WEBDOCS/update.html
+// %SeeAlso: INSERT, UPSERT, DELETE, SHOW TABLES
 update_stmt:
   opt_with_clause UPDATE table_expr_opt_alias_idx
     SET set_clause_list opt_from_list opt_where_clause opt_sort_clause opt_limit_clause returning_clause
@@ -7578,6 +7505,7 @@ select_clause:
 //   TABLE <tablename>
 //   VALUES ( <exprs...> ) [ , ... ]
 //   SELECT ... [ { INTERSECT | UNION | EXCEPT } [ ALL | DISTINCT ] <selectclause> ]
+// %SeeAlso: SHOW TABLES
 simple_select:
   simple_select_clause // EXTEND WITH HELP: SELECT
 | values_clause        // EXTEND WITH HELP: VALUES
@@ -7598,7 +7526,7 @@ simple_select:
 //        [ ORDER BY <expr> [ ASC | DESC ] [, ...] ]
 //        [ LIMIT { <expr> | ALL } ]
 //        [ OFFSET <expr> [ ROW | ROWS ] ]
-// %SeeAlso: WEBDOCS/select-clause.html
+// %SeeAlso: SHOW TABLES
 simple_select_clause:
   SELECT select_hint_set opt_all_clause target_list
     from_clause opt_where_clause
@@ -7677,7 +7605,7 @@ set_operation:
 // %Help: TABLE - select an entire table
 // %Category: DML
 // %Text: TABLE <tablename>
-// %SeeAlso: SELECT, VALUES, WEBDOCS/table-expressions.html
+// %SeeAlso: SELECT, VALUES, SHOW TABLES
 table_clause:
   TABLE table_ref
   {
@@ -8302,7 +8230,7 @@ having_clause:
 // %Help: VALUES - select a given set of values
 // %Category: DML
 // %Text: VALUES ( <exprs...> ) [, ...]
-// %SeeAlso: SELECT, TABLE, WEBDOCS/table-expressions.html
+// %SeeAlso: SELECT, TABLE
 values_clause:
   VALUES '(' expr_list ')' %prec UMINUS
   {
@@ -8447,7 +8375,7 @@ opt_index_flags:
 // Join types:
 //   { INNER | { LEFT | RIGHT | FULL } [OUTER] } [ { HASH | MERGE | LOOKUP } ]
 //
-// %SeeAlso: WEBDOCS/table-expressions.html
+// %SeeAlso: SHOW TABLES
 table_ref:
   numeric_table_ref opt_index_flags opt_ordinality opt_alias_clause
   {

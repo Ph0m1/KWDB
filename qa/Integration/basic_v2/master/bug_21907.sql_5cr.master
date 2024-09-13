@@ -48,7 +48,7 @@ SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database NULL
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > drop database "NULL" cascade;
 DROP DATABASE
 > drop database "null" cascade;

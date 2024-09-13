@@ -184,6 +184,7 @@ var HelpMessages = func(h map[string]HelpMessageBody) map[string]HelpMessageBody
 		}
 		return newItem
 	}
+	_ = appendSeeAlso
 	// DOC TODO: KWDB has NOT an external doc website for now.
 	// we disable showing the original CockroachDB website before we have one.
 	webdoc := regexp.MustCompile(`WEBDOCS.*`)
@@ -205,17 +206,17 @@ var HelpMessages = func(h map[string]HelpMessageBody) map[string]HelpMessageBody
 		// If the description contains <source>, append the <source> help.
 		if strings.Contains(m.Text, "<source>") && k != "<SOURCE>" {
 			m.Text = strings.TrimSpace(m.Text) + "\n\n" + strings.TrimSpace(srcMsg.Text)
-			m.SeeAlso = appendSeeAlso(srcMsg.SeeAlso, m.SeeAlso)
+			//m.SeeAlso = appendSeeAlso(srcMsg.SeeAlso, m.SeeAlso)
 		}
 		// Ditto for <selectclause>.
 		if strings.Contains(m.Text, "<selectclause>") && k != "<SELECTCLAUSE>" {
 			m.Text = strings.TrimSpace(m.Text) + "\n\n" + strings.TrimSpace(selectMsg.Text)
-			m.SeeAlso = appendSeeAlso(selectMsg.SeeAlso, m.SeeAlso)
+			//m.SeeAlso = appendSeeAlso(selectMsg.SeeAlso, m.SeeAlso)
 		}
 		// If the description contains <tablename>, mention SHOW TABLES in "See Also".
-		if strings.Contains(m.Text, "<tablename>") {
-			m.SeeAlso = appendSeeAlso("SHOW TABLES", m.SeeAlso)
-		}
+		//if strings.Contains(m.Text, "<tablename>") {
+		//	m.SeeAlso = appendSeeAlso("SHOW TABLES", m.SeeAlso)
+		//}
 		m.SeeAlso = reformatSeeAlso(m.SeeAlso)
 		h[k] = m
 	}

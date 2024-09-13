@@ -19,56 +19,56 @@ SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 1
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database 1.0;
 ERROR: at or near "1.0": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 1.0
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database 1.23;
 ERROR: at or near "1.23": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 1.23
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database -1.23;
 ERROR: at or near "-": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database -1.23
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '-1.23';
 ERROR: at or near "-1.23": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '-1.23'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '-1';
 ERROR: at or near "-1": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '-1'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database 123123131388888888888888888888888888888888888888888888888888123132;
 ERROR: at or near "123123131388888888888888888888888888888888888888888888888888123132": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 123123131388888888888888888888888888888888888888888888888888123132
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '一二三';
 ERROR: at or near "一二三": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '一二三'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database a;
 CREATE TS DATABASE
 > create ts database 'a';
@@ -77,7 +77,7 @@ SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 'a'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database "a";
 ERROR: database "a" already exists
 SQLSTATE: 42P04
@@ -87,7 +87,7 @@ SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 's'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database "q";
 CREATE TS DATABASE
 > create ts database 1+1;
@@ -96,28 +96,28 @@ SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 1+1
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database 2021-1-1;
 ERROR: at or near "2021": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 2021-1-1
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database 2021-1-5 11:15:45;
 ERROR: at or near "2021": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 2021-1-5 11:15:45
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '2021-1-5 11:15:45';
 ERROR: at or near "2021-1-5 11:15:45": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '2021-1-5 11:15:45'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database now();
 ERROR: at or near "(": syntax error
 SQLSTATE: 42601
@@ -130,56 +130,56 @@ SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database 1670976000
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database !;
 ERROR: at or near "!": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database !
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database @;
 ERROR: at or near "@": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database @
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '#';
 ERROR: at or near "#": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '#'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database $;
 ERROR: at or near "$": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database $
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '"';
 ERROR: at or near """: syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '"'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '♠';
 ERROR: at or near "♠": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '♠'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > create ts database '--';
 ERROR: at or near "--": syntax error
 SQLSTATE: 42601
 DETAIL: source SQL:
 create ts database '--'
                    ^
-HINT: try \h CREATE DATABASE
+HINT: try \h CREATE TS DATABASE
 > show  databases;
   database_name | engine_type
 ----------------+--------------

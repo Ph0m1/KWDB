@@ -96,9 +96,9 @@ func TestContextualHelp(t *testing.T) {
 		{`ALTER RANGE foo CONFIGURE ??`, `ALTER RANGE`},
 		{`ALTER RANGE ??`, `ALTER RANGE`},
 
-		{`ALTER PARTITION ??`, `ALTER PARTITION`},
+		//{`ALTER PARTITION ??`, `ALTER PARTITION`},
 		{`ALTER SCHEDULE ??`, `ALTER SCHEDULE`},
-		{`ALTER PARTITION p OF INDEX tbl@idx ??`, `ALTER PARTITION`},
+		//{`ALTER PARTITION p OF INDEX tbl@idx ??`, `ALTER PARTITION`},
 
 		{`CANCEL ??`, `CANCEL`},
 		{`CANCEL JOB ??`, `CANCEL JOBS`},
@@ -159,7 +159,7 @@ func TestContextualHelp(t *testing.T) {
 		{`CREATE TABLE blah AS (SELECT 1) ??`, `CREATE TABLE`},
 		{`CREATE TABLE blah AS SELECT 1 ??`, `SELECT`},
 
-		{`CREATE TS DATABASE blih ??`, `CREATE TS_DATABASE`},
+		{`CREATE TS DATABASE blih ??`, `CREATE TS DATABASE`},
 
 		{`CREATE SCHEMA IF ??`, `CREATE SCHEMA`},
 		{`CREATE SCHEMA IF NOT ??`, `CREATE SCHEMA`},
@@ -304,7 +304,7 @@ func TestContextualHelp(t *testing.T) {
 		{`SHOW JOBS ??`, `SHOW JOBS`},
 		{`SHOW AUTOMATIC JOBS ??`, `SHOW JOBS`},
 
-		{`SHOW BACKUP 'foo' ??`, `SHOW BACKUP`},
+		//{`SHOW BACKUP 'foo' ??`, `SHOW BACKUP`},
 
 		{`SHOW CLUSTER SETTING all ??`, `SHOW CLUSTER SETTING`},
 		{`SHOW ALL CLUSTER ??`, `SHOW CLUSTER SETTING`},
@@ -342,7 +342,7 @@ func TestContextualHelp(t *testing.T) {
 		{`SHOW INDEXES FROM ??`, `SHOW INDEXES`},
 		{`SHOW INDEXES FROM blah ??`, `SHOW INDEXES`},
 
-		{`SHOW PARTITIONS FROM ??`, `SHOW PARTITIONS`},
+		//{`SHOW PARTITIONS FROM ??`, `SHOW PARTITIONS`},
 		{`SHOW AUDITS ??`, `SHOW AUDITS`},
 		{`SHOW ROLES ??`, `SHOW ROLES`},
 
@@ -432,16 +432,16 @@ func TestContextualHelp(t *testing.T) {
 		{`RELEASE blah ??`, `RELEASE`},
 		{`RELEASE SAVEPOINT blah ??`, `RELEASE`},
 
-		{`EXPERIMENTAL SCRUB ??`, `SCRUB`},
-		{`EXPERIMENTAL SCRUB TABLE ??`, `SCRUB TABLE`},
-		{`EXPERIMENTAL SCRUB DATABASE ??`, `SCRUB DATABASE`},
+		//{`EXPERIMENTAL SCRUB ??`, `SCRUB`},
+		//{`EXPERIMENTAL SCRUB TABLE ??`, `SCRUB TABLE`},
+		//{`EXPERIMENTAL SCRUB DATABASE ??`, `SCRUB DATABASE`},
 
-		{`BACKUP foo TO 'bar' ??`, `BACKUP`},
-		{`BACKUP DATABASE ??`, `BACKUP`},
-		{`BACKUP foo TO 'bar' AS OF ??`, `BACKUP`},
-
-		{`RESTORE foo FROM 'bar' ??`, `RESTORE`},
-		{`RESTORE DATABASE ??`, `RESTORE`},
+		//{`BACKUP foo TO 'bar' ??`, `BACKUP`},
+		//{`BACKUP DATABASE ??`, `BACKUP`},
+		//{`BACKUP foo TO 'bar' AS OF ??`, `BACKUP`},
+		//
+		//{`RESTORE foo FROM 'bar' ??`, `RESTORE`},
+		//{`RESTORE DATABASE ??`, `RESTORE`},
 
 		{`IMPORT TABLE CREATE USING 'foo.sql' CSV DATA ('foo') ??`, `IMPORT`},
 		{`IMPORT TABLE ??`, `IMPORT`},
