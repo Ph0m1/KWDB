@@ -1408,8 +1408,13 @@ func (p *PhysicalPlan) AddFilter(
 
 	// child is ts post
 	post := p.Processors[p.ResultRouters[0]].TSSpec.Post
-	// self can not exec in ts engine, need add relational noop spec
-	if len(post.Renders) > 0 || post.Offset != 0 || post.Limit != 0 {
+	childIsSort := p.Processors[p.ResultRouters[0]].TSSpec.Core.Sorter != nil
+	// some cases need add ts noop spec, reference relationship case
+	// case1: post of child plan have render
+	// case2: post of child plan have offset
+	// case3: post of child plan have limit
+	// case4: child plan is sort (AE sort no support filter)
+	if len(post.Renders) > 0 || post.Offset != 0 || post.Limit != 0 || childIsSort {
 		// The last stage contains render expressions or a limit. The filter refers
 		// to the output as described by the existing spec, so we need to add
 		// another "no-op" stage to which to attach the filter.
