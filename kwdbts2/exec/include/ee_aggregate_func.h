@@ -547,7 +547,13 @@ class MaxAggregate : public AggregateFunc {
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
       is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
-      max_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE};
+      if (is_dest_null) {
+        max_val = "";
+      } else {
+        k_uint16 len;
+        std::memcpy(&len, dest_ptr, STRING_WIDE);
+        max_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE, len};
+      }
     } else {
       max_val = "";
     }
@@ -761,7 +767,13 @@ class MaxAggregate : public AggregateFunc {
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
       is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
-      max_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE};
+      if (is_dest_null) {
+        max_val = "";
+      } else {
+        k_uint16 len;
+        std::memcpy(&len, dest_ptr, STRING_WIDE);
+        max_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE, len};
+      }
     } else {
       max_val = "";
     }
@@ -1031,7 +1043,13 @@ class MinAggregate : public AggregateFunc {
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
       is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
-      min_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE};
+      if (is_dest_null) {
+        min_val = "";
+      } else {
+        k_uint16 len;
+        std::memcpy(&len, dest_ptr, STRING_WIDE);
+        min_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE, len};
+      }
     } else {
       min_val = "";
     }
@@ -1246,7 +1264,13 @@ class MinAggregate : public AggregateFunc {
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
       is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
-      min_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE};
+      if (is_dest_null) {
+        min_val = "";
+      } else {
+        k_uint16 len;
+        std::memcpy(&len, dest_ptr, STRING_WIDE);
+        min_val = is_dest_null ? "" : std::string_view{dest_ptr + STRING_WIDE, len};
+      }
     } else {
       min_val = "";
     }
