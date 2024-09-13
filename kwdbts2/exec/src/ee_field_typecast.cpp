@@ -197,11 +197,12 @@ inline KStatus timestamptzToString(Field *field, char *output, k_uint32 length,
                                    k_int8 time_zone) {
   k_int64 timestamp = field->ValInt();
   time_t time = static_cast<time_t>(timestamp / 1000) + time_zone * 3600;
-
-  struct tm *local_time = std::gmtime(&time);
+  struct tm local_time;
+  memset(&local_time, 0, sizeof(local_time));
+  gmtime_r(&time, &local_time);
 
   char buffer[30];
-  std::strftime(buffer, 30, "%Y-%m-%d %H:%M:%S", local_time);
+  std::strftime(buffer, 30, "%Y-%m-%d %H:%M:%S", &local_time);
 
   int milli_second = timestamp % 1000;
   KString milli_second_str = ".";

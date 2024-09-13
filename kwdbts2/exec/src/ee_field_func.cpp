@@ -1237,9 +1237,11 @@ String FieldFuncTimeOfDay::ValStr() {
   timestamp += time_zone * 3600;
   const int kArraySize = this->storage_len_;
   String s(kArraySize);
-  tm *t = std::gmtime(&timestamp);
-  t->tm_gmtoff = time_zone * 3600;
-  std::strftime(s.ptr_, kArraySize, "%a %b %d %H:%M:%S.xxx %Y %z", t);
+  struct tm t;
+  memset(&t, 0, sizeof(t));
+  gmtime_r(&timestamp, &t);
+  t.tm_gmtoff = time_zone * 3600;
+  std::strftime(s.ptr_, kArraySize, "%a %b %d %H:%M:%S.xxx %Y %z", &t);
   std::string formattedTime(s.ptr_);
   auto pos = formattedTime.find("xxx");
   if (pos != std::string::npos) {
