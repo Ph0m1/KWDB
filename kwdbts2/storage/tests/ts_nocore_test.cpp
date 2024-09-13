@@ -234,8 +234,8 @@ TEST_F(TestTsBLockItemMaxNoCore, mulitiInsert) {
   std::vector<k_uint32> scan_cols = {0};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
-  ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+  ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId}, ts_spans,
+    scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   int iter_count = GetIterRows(iter1, scan_cols.size());
   EXPECT_TRUE(iter_count % batch_count == 0);
   delete iter1;

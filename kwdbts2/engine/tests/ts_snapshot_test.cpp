@@ -98,7 +98,7 @@ TEST_F(TestTsSnapshotTable, CreateSnapshot) {
   TsIterator* iter1;
   SubGroupID group_id = 1;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1,
-                                   &iter1, tbl_range),
+                                   &iter1, tbl_range, false, false, false),
             KStatus::SUCCESS);
   ResultSet res{(k_uint32) scan_cols.size()};
   k_uint32 count;
@@ -167,7 +167,7 @@ TEST_F(TestTsSnapshotTable, CreateSnapshot) {
   entity_id = 1;
   ASSERT_EQ(
       snapshot_gp->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter2,
-                               tbl_range),
+                               tbl_range, false, false, false),
                                KStatus::SUCCESS);
   ResultSet res2{(k_uint32) scan_cols.size()};
   is_finished = false;
@@ -203,7 +203,7 @@ TEST_F(TestTsSnapshotTable, CreateSnapshot) {
   
   ASSERT_EQ(
       tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols_data, scan_cols_data, scan_agg_types, 1,
-                             &iter3, tbl_range),
+                             &iter3, tbl_range, false, false, false),
                              KStatus::SUCCESS);
   ResultSet res3{(k_uint32) scan_cols_data.size()};
   is_finished = false;
@@ -287,7 +287,7 @@ TEST_F(TestTsSnapshotTable, CompactData) {
   SubGroupID group_id = 1;
 
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1,
-                                   &iter1, tbl_range),
+                                   &iter1, tbl_range, false, false, false),
             KStatus::SUCCESS);
   ResultSet res{(k_uint32) scan_cols.size()};
   k_uint32 res_row_count = 0;
@@ -316,7 +316,7 @@ TEST_F(TestTsSnapshotTable, CompactData) {
   group_id = 1;
   entity_id = 1;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1,
-                                   &iter3, tbl_range),
+                                   &iter3, tbl_range, false, false, false),
             KStatus::SUCCESS);
   ResultSet res3{(k_uint32) scan_cols.size()};
   res_row_count = 0;

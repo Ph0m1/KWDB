@@ -1525,7 +1525,7 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
       TsIterator* ts_iter;
       s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
                                     scan_cols, ts_scan_cols, scan_agg_types,
-                                    table_version, &ts_iter, entity_group, reverse);
+                                    table_version, &ts_iter, entity_group, reverse, sorted, false);
       if (s == FAIL) return s;
       ts_table_iterator->AddEntityIterator(ts_iter);
 
@@ -1544,7 +1544,7 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
     TsIterator* ts_iter;
     s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
                                   scan_cols, ts_scan_cols, scan_agg_types,
-                                  table_version, &ts_iter, entity_group, reverse);
+                                  table_version, &ts_iter, entity_group, reverse, sorted, false);
     if (s == FAIL) return s;
     ts_table_iterator->AddEntityIterator(ts_iter);
   }

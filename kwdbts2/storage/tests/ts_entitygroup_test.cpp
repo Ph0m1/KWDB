@@ -220,7 +220,7 @@ TEST_F(TestTsEntityGroup, create) {
   TsIterator* iter1;
   res.setColumnNum(scan_cols.size());
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
 
   k_uint32 ret_cnt;
   res.clear();
@@ -238,7 +238,7 @@ TEST_F(TestTsEntityGroup, create) {
   delete iter1;
 
   ASSERT_EQ(entity_group_follower_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                                {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_follower_), KStatus::SUCCESS);
+                                                {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_follower_, false, false, false), KStatus::SUCCESS);
 
   res.clear();
   total_rows = 0;
@@ -254,7 +254,7 @@ TEST_F(TestTsEntityGroup, create) {
   delete iter1;
 
   ASSERT_EQ(entity_group_other_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                             {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_other_), KStatus::SUCCESS);
+                                             {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_other_, false, false, false), KStatus::SUCCESS);
 
   res.clear();
   total_rows = 0;
@@ -303,7 +303,7 @@ TEST_F(TestTsEntityGroup, InsertSometimes) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count, scan_cols.size()));
   delete iter1;
 }
@@ -342,7 +342,7 @@ TEST_F(TestTsEntityGroup, InsertCrossPartitionSometimes) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false ,false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count, scan_cols.size()));
   delete iter1;
 }
@@ -394,7 +394,7 @@ TEST_F(TestTsEntityGroup, mulitiInsert) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count * kThreadNum, scan_cols.size()));
   delete iter1;
 }
@@ -447,7 +447,7 @@ TEST_F(TestTsEntityGroup, mulitiInsertCrossPartition) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+                                              {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count * kThreadNum, scan_cols.size()));
   delete iter1;
 }
@@ -526,13 +526,13 @@ TEST_F(TestTsEntityGroup, mulitiInsertMultiEntity) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
 
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count * kThreadNum, scan_cols.size()));
   delete iter1;
 
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[1].subGroupId, {entity_id_list[1].entityId},
-            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count * kThreadNum, scan_cols.size()));
   delete iter1;
 }
@@ -580,7 +580,7 @@ TEST_F(TestTsEntityGroup, InsertAndDel) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * batch_count, scan_cols.size()));
   delete iter1;
 
@@ -595,7 +595,7 @@ TEST_F(TestTsEntityGroup, InsertAndDel) {
   }
 
   ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
-            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_), KStatus::SUCCESS);
+            {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, false, false, false), KStatus::SUCCESS);
   EXPECT_EQ(0, CheckIterRows(iter1, batch_times * (batch_count - 10), scan_cols.size()));
   delete iter1;
 }

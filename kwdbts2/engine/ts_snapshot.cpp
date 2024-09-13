@@ -563,7 +563,7 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
   // use iterator to read data from source entity group
   KStatus s = entity_group_->GetIterator(ctx, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
                                          {ts_span}, scan_cols, ts_scan_cols, scan_agg_types,  table_version, &iter,
-                                         entity_group_, snapshot_info_.reorder, snapshot_info_.reorder);
+                                         entity_group_, false, snapshot_info_.reorder, snapshot_info_.reorder);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("GetIterator failed during build snapshot, subgroup_id[%u], entity_id[%u], snapshot_id[%lu]",
               entity_id_list[0].subGroupId, entity_id_list[0].entityId, snapshot_info_.id);

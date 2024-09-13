@@ -187,8 +187,8 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
     if (ts_iterator) {
       SafeDeletePointer(ts_iterator);
     }
-    ret = ts_table_->GetIterator(ctx, entities, *ts_spans_, table_->scan_cols_,
-                                 table_->scan_real_agg_types_, table_->table_version_, &ts_iterator, table_->is_reverse_);
+    ret = ts_table_->GetIterator(ctx, entities, *ts_spans_, table_->scan_cols_, table_->scan_real_agg_types_,
+                                table_->table_version_, &ts_iterator, table_->is_reverse_, false);
     if (KStatus::FAIL == ret) {
       code = EEIteratorErrCode::EE_ERROR;
       LOG_ERROR("TsTable::GetIterator() error\n");

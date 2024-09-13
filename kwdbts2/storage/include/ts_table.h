@@ -337,7 +337,7 @@ class TsTable {
   virtual KStatus GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                               std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
-                              TsTableIterator** iter, bool reverse = false, bool sorted = false);
+                              TsTableIterator** iter, bool reverse, bool sorted);
 
   /**
    * @brief get entityId List
@@ -659,7 +659,7 @@ class TsEntityGroup {
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                               std::vector<k_uint32> ts_scan_cols, std::vector<Sumfunctype> scan_agg_types,
                               uint32_t table_version, TsIterator** iter, std::shared_ptr<TsEntityGroup> entity_group,
-                              bool reverse = false, bool sorted = false, bool compaction = false);
+                              bool reverse, bool sorted, bool compaction);
 
   /**
    * @brief Create an iterator TsIterator for Tag tables
