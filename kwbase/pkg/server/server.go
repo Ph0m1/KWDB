@@ -200,6 +200,15 @@ var (
 		"ts.autovacuum.interval",
 		"data compaction interval (sec)",
 		0)
+
+	tsCompressionType = settings.RegisterPublicStringSetting(
+		"ts.compression.type",
+		"compression algorithm for time series data",
+		"gzip")
+	tsCompressionLevel = settings.RegisterPublicStringSetting(
+		"ts.compression.level",
+		"compression level for time series data",
+		"middle")
 )
 
 // TODO(peter): Until go1.11, ServeMux.ServeHTTP was not safe to call

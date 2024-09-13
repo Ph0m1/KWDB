@@ -48,6 +48,36 @@ SET CLUSTER SETTING ts.cached_partitions_per_subgroup.max_limit = 10000000000;
 SET CLUSTER SETTING ts.cached_partitions_per_subgroup.max_limit = '';
 SET CLUSTER SETTING ts.cached_partitions_per_subgroup.max_limit = \x12;
 
+SET CLUSTER SETTING ts.compression.type = 2;
+SET CLUSTER SETTING ts.compression.type = 2.33;
+SET CLUSTER SETTING ts.compression.type = '';
+SET CLUSTER SETTING ts.compression.type = \x12;
+SET CLUSTER SETTING ts.compression.type = 'LZ4';
+SET CLUSTER SETTING ts.compression.type = 'GZIP';
+SET CLUSTER SETTING ts.compression.type = 'LZO';
+SET CLUSTER SETTING ts.compression.type = 'XZ';
+SET CLUSTER SETTING ts.compression.type = 'ZSTD';
+SET CLUSTER SETTING ts.compression.type = 'LZMA';
+SET CLUSTER SETTING ts.compression.type = 'lz4';
+SET CLUSTER SETTING ts.compression.type = 'gzip';
+SET CLUSTER SETTING ts.compression.type = 'lzo';
+SET CLUSTER SETTING ts.compression.type = 'xz';
+SET CLUSTER SETTING ts.compression.type = 'zstd';
+SET CLUSTER SETTING ts.compression.type = 'lzma';
+
+SET CLUSTER SETTING ts.compression.level = 2;
+SET CLUSTER SETTING ts.compression.level = 2.33;
+SET CLUSTER SETTING ts.compression.level = '';
+SET CLUSTER SETTING ts.compression.level = \x12;
+SET CLUSTER SETTING ts.compression.level = 'LOW';
+SET CLUSTER SETTING ts.compression.level = 'MIDDLE';
+SET CLUSTER SETTING ts.compression.level = 'HIGH';
+SET CLUSTER SETTING ts.compression.level = 'low';
+SET CLUSTER SETTING ts.compression.level = 'middle';
+SET CLUSTER SETTING ts.compression.level = 'high';
+
+SET CLUSTER SETTING ts.compression.type = 'gzip';
+SET CLUSTER SETTING ts.compression.level = 'middle';
 
 SET CLUSTER SETTING ts.entities_per_subgroup.max_limit = 3;
 SET CLUSTER SETTING ts.blocks_per_segment.max_limit = 2;

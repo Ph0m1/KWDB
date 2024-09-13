@@ -110,7 +110,9 @@ func needSendToAE(key string) bool {
 		key == "ts.entities_per_subgroup.max_limit" ||
 		key == "ts.blocks_per_segment.max_limit" ||
 		key == "ts.rows_per_block.max_limit" ||
-		key == "ts.autovacuum.interval" {
+		key == "ts.autovacuum.interval" ||
+		key == "ts.compression.type" ||
+		key == "ts.compression.level" {
 		return true
 	}
 	return false

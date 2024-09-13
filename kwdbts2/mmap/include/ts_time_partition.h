@@ -25,13 +25,13 @@
 #include "cm_func.h"
 #include "payload.h"
 #include "ts_common.h"
+#include "utils/compress_utils.h"
 #include "lg_api.h"
 #include "lt_rw_latch.h"
 #include "lt_cond.h"
 #include "TSLockfreeOrderList.h"
 #include "entity_block_meta_manager.h"
 
-extern int64_t g_compress_interval;
 
 bool ReachMetaMaxBlock(BLOCK_ID cur_block_id);
 

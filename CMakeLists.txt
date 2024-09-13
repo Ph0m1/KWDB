@@ -209,6 +209,7 @@ file(GLOB_RECURSE UTIL_SCRIPTS
         common/util/script/query_kwbase_status.sh
         common/util/script/setup_cert_file.sh
         common/util/script/err_inject.sh
+        common/util/script/df.sh
         common/util/script/utils.sh
         )
 INSTALL(FILES ${UTIL_SCRIPTS}

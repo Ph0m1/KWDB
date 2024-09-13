@@ -11,6 +11,7 @@
 
 #include "engine.h"
 #include "test_util.h"
+#include "utils/compress_utils.h"
 
 using namespace kwdbts;  // NOLINT
 
@@ -19,6 +20,8 @@ std::string kDbPath = "./test_db";  // NOLINT The current directory is the stora
 const string TestBigTableInstance::kw_home_ = kDbPath;  // NOLINT database path
 const string TestBigTableInstance::db_name_ = "tsdb";  // NOLINT database name
 const uint64_t TestBigTableInstance::iot_interval_ = 3600;
+
+extern bool g_engine_initialized;
 
 RangeGroup kTestRange{101, 0};
 
@@ -39,6 +42,7 @@ class TestEngine : public TestBigTableInstance {
     system(("rm -rf " + kDbPath + "/*").c_str());
     // Clean up file directory
     KStatus s = TSEngineImpl::OpenTSEngine(ctx_, kDbPath, opts_, &ts_engine_);
+    g_engine_initialized = true;
     EXPECT_EQ(s, KStatus::SUCCESS);
   }
 
@@ -588,6 +592,7 @@ TEST_F(TestEngine, CompressTsTable) {
   // Compress the partition of 360000
   ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Due to not being fully written, it will not be truly compressed until the second schedule
+  g_compression.compression_type = kwdbts::CompressionType::LZ4;
   ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
   // Close the table and reopen it to verify the mount function
@@ -640,6 +645,8 @@ TEST_F(TestEngine, CompressTsTable) {
   }
 
   // Compress 360000 and 720000 partitions
+  g_compression.compression_type = kwdbts::CompressionType::ZSTD;
+  g_compression.compression_level = kwdbts::CompressionLevel::LOW;
   ASSERT_EQ(ts_table->Compress(ctx_, 3 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Data check
   entity_id = 2;
@@ -751,6 +758,8 @@ TEST_F(TestEngine, LazyMount) {
   }
 
   // Compress all partitions
+  g_compression.compression_type = kwdbts::CompressionType::GZIP;
+  g_compression.compression_level = kwdbts::CompressionLevel::LOW;
   ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
   // Due to not being fully written, it will not be truly compressed until the second schedule
   ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
@@ -775,6 +784,7 @@ TEST_F(TestEngine, LazyMount) {
   delete iter;
 
   // Compress all partitions and trigger lruchache elimination
+  g_compression.compression_type = kwdbts::CompressionType::LZO;
   ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
   // Verify the number of mounted partitions
@@ -1083,9 +1093,11 @@ TEST_F(TestEngine, ClusterSetting) {
   }
 
   // Compress the current partition
+  g_compression.compression_type = kwdbts::CompressionType::LZMA;
   ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1), KStatus::SUCCESS);
   // Due to the first segment being 90% full, it will be compressed
   // The second segment is not filled to 90% and will not be compressed
+  g_compression.compression_type = kwdbts::CompressionType::XZ;
   ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1), KStatus::SUCCESS);
 
   // Check query results

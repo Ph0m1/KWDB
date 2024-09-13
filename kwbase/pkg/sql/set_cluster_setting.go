@@ -225,6 +225,15 @@ func (n *setClusterSettingNode) startExec(params runParams) error {
 				if expectedEncodedValue[:1] == "-" {
 					return errors.New("invalid value, the value of ts.autovacuum.interval can't be set to a negative number")
 				}
+			case "ts.compression.type":
+				if encoded != "gzip" && encoded != "lz4" && encoded != "lzma" &&
+					encoded != "lzo" && encoded != "xz" && encoded != "zstd" {
+					return errors.New("ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd")
+				}
+			case "ts.compression.level":
+				if encoded != "low" && encoded != "middle" && encoded != "high" {
+					return errors.New("ts.compression.level is incorrectly configured, and can be configured as: low, middle, high")
+				}
 			}
 			if _, err = execCfg.InternalExecutor.ExecEx(
 				ctx, "update-setting", txn,

@@ -116,6 +116,76 @@ DETAIL: source SQL:
 SET CLUSTER SETTING ts.cached_partitions_per_subgroup.max_limit = \x12
                                                                   ^
 HINT: try \h SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 2;
+ERROR: argument of SET CLUSTER SETTING ts.compression.type must be type string, not type int
+SQLSTATE: 42804
+> SET CLUSTER SETTING ts.compression.type = 2.33;
+ERROR: argument of SET CLUSTER SETTING ts.compression.type must be type string, not type decimal
+SQLSTATE: 42804
+> SET CLUSTER SETTING ts.compression.type = '';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = \x12;
+ERROR: at or near "\": syntax error
+SQLSTATE: 42601
+DETAIL: source SQL:
+SET CLUSTER SETTING ts.compression.type = \x12
+                                          ^
+HINT: try \h SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'LZ4';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = 'GZIP';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = 'LZO';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = 'XZ';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = 'ZSTD';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = 'LZMA';
+ERROR: ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd
+> SET CLUSTER SETTING ts.compression.type = 'lz4';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'gzip';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'lzo';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'xz';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'zstd';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'lzma';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.level = 2;
+ERROR: argument of SET CLUSTER SETTING ts.compression.level must be type string, not type int
+SQLSTATE: 42804
+> SET CLUSTER SETTING ts.compression.level = 2.33;
+ERROR: argument of SET CLUSTER SETTING ts.compression.level must be type string, not type decimal
+SQLSTATE: 42804
+> SET CLUSTER SETTING ts.compression.level = '';
+ERROR: ts.compression.level is incorrectly configured, and can be configured as: low, middle, high
+> SET CLUSTER SETTING ts.compression.level = \x12;
+ERROR: at or near "\": syntax error
+SQLSTATE: 42601
+DETAIL: source SQL:
+SET CLUSTER SETTING ts.compression.level = \x12
+                                           ^
+HINT: try \h SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.level = 'LOW';
+ERROR: ts.compression.level is incorrectly configured, and can be configured as: low, middle, high
+> SET CLUSTER SETTING ts.compression.level = 'MIDDLE';
+ERROR: ts.compression.level is incorrectly configured, and can be configured as: low, middle, high
+> SET CLUSTER SETTING ts.compression.level = 'HIGH';
+ERROR: ts.compression.level is incorrectly configured, and can be configured as: low, middle, high
+> SET CLUSTER SETTING ts.compression.level = 'low';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.level = 'middle';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.level = 'high';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.type = 'gzip';
+SET CLUSTER SETTING
+> SET CLUSTER SETTING ts.compression.level = 'middle';
+SET CLUSTER SETTING
 > SET CLUSTER SETTING ts.entities_per_subgroup.max_limit = 3;
 SET CLUSTER SETTING
 > SET CLUSTER SETTING ts.blocks_per_segment.max_limit = 2;

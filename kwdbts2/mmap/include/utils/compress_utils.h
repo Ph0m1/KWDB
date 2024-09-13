@@ -13,6 +13,8 @@
 
 #include <string>
 #include <atomic>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include "ts_object_error.h"
 #include "data_type.h"
@@ -22,15 +24,91 @@ using namespace std;
 
 namespace kwdbts {
 
+enum CompressionType {
+  GZIP = 0,
+  LZ4 = 1,
+  LZMA = 2,
+  LZO = 3,
+  XZ = 4,
+  ZSTD = 5,
+};
+
+enum CompressionLevel {
+  LOW = 0,
+  MIDDLE = 1,
+  HIGH = 2,
+};
+
+struct Compression {
+  CompressionType compression_type;  // Compression algorithms
+  CompressionLevel compression_level;  // Degree of compression
+  bool has_compression_level_option;  // Whether the compression_level option is included
+  bool has_lz4_hc_option;  // Whether the xhc option is included
+};
+
+// mksquashfs options
+struct MkSquashfsOption {
+  std::unordered_map<CompressionType, Compression> compressions;
+  bool has_mem_option;
+  bool has_processors_option;
+};
+
+// mount supports compression algorithms
+struct MountOption {
+  std::unordered_set<CompressionType> mount_compression_types;
+};
+
+inline string CompressionTypeToLowerCase(const CompressionType& type) {
+  switch (type) {
+    case GZIP:
+      return "gzip";
+    case LZ4:
+      return "lz4";
+    case LZMA:
+      return "lzma";
+    case LZO:
+      return "lzo";
+    case XZ:
+      return "xz";
+    case ZSTD:
+      return "zstd";
+  }
+  return "";
+}
+
+inline string CompressionTypeToUpperCase(const CompressionType& type) {
+  switch (type) {
+    case GZIP:
+      return "GZIP";
+    case LZ4:
+      return "LZ4";
+    case LZMA:
+      return "LZMA";
+    case LZO:
+      return "LZO";
+    case XZ:
+      return "XZ";
+    case ZSTD:
+      return "ZSTD";
+  }
+  return "";
+}
+
 extern std::string sudo_cmd;
 
 extern int g_max_mount_cnt_;
 
 extern atomic<int> g_cur_mount_cnt_;
 
-bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info);
+extern int64_t g_compress_interval;
 
-void initSudo();
+extern Compression g_compression;
+
+extern MkSquashfsOption g_mk_squashfs_option;
+
+extern MountOption g_mount_option;
+
+bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info);
 
 bool mount(const string& sqfs_file_path, const string& dir_name, ErrorInfo& err_info);
 
@@ -39,5 +117,7 @@ bool umount(const string& sqfs_file_path, const string& dir_name, ErrorInfo& err
 bool isMounted(const string& dir_path);
 
 int executeShell(const std::string& cmd, std::string &result);
+
+void InitCompressInfo(const string& db_path);
 
 } // namespace kwdbts

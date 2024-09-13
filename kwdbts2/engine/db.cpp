@@ -19,29 +19,18 @@
 #include "cm_task.h"
 #include "perf_stat.h"
 #include "lru_cache_manager.h"
+#include "utils/compress_utils.h"
 
 std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
-int64_t g_compress_interval = 3600;
 std::shared_mutex g_settings_mutex;
+bool g_engine_initialized = false;
 
 int64_t g_input_autovacuum_interval = 0;  // interval of compaction, 0: stop.
 std::thread g_db_threads;
 // inform SettingChangedSensor from TriggerSettingCallback that the setting is changed
 std::condition_variable g_setting_changed_cv;
 std::atomic<bool> g_setting_changed(false);
-
-void InitMountCnt(const string& db_path) {
-  string cmd = "cat /proc/mounts | grep " + db_path + " | wc -l";
-  string mount_cnt_str;
-  int ret = executeShell(cmd, mount_cnt_str);
-  if (ret != -1) {
-    int mount_cnt = atoi(mount_cnt_str.c_str());
-    if (mount_cnt > 0) {
-      g_cur_mount_cnt_ = mount_cnt;
-    }
-  }
-}
 
 TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
                 AppliedRangeIndex* applied_indexes, size_t range_num) {
@@ -115,7 +104,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
     return ToTsStatus("unsquashfs is not installed, please install squashfs-tools");
   }
 
-  InitMountCnt(opts.db_path);
+  InitCompressInfo(opts.db_path);
 
   TSEngine* ts_engine;
   s = TSEngineImpl::OpenTSEngine(ctx, opts.db_path, opts, &ts_engine, applied_indexes, range_num);
@@ -126,6 +115,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
   g_db_threads = std::thread([ts_engine](){
     ts_engine->SettingChangedSensor();
   });
+  g_engine_initialized = true;
   return kTsSuccess;
 }
 
@@ -596,7 +586,7 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
   } else if ("ts.blocks_per_segment.max_limit" == key) {
     CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT = atoi(value.c_str());
   } else if ("ts.compress_interval" == key) {
-    g_compress_interval = atoi(value.c_str());
+    kwdbts::g_compress_interval = atoi(value.c_str());
   } else if ("ts.autovacuum.interval" == key) {
     // If ts.autovacuum.interval was set before shutting down,
     // a set cluster command will be received immediately after rebooting to restore the setting.
@@ -608,6 +598,46 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
       g_setting_changed.store(true);
       g_setting_changed_cv.notify_one();  // inform SettingChangedSensor that the setting is changed.
     }
+  } else if ("ts.compression.type" == key) {
+    CompressionType type = kwdbts::CompressionType::GZIP;
+    if ("gzip" == value) {
+      type = kwdbts::CompressionType::GZIP;
+    } else if ("lz4" == value) {
+      type = kwdbts::CompressionType::LZ4;
+    } else if ("lzma" == value) {
+      type = kwdbts::CompressionType::LZMA;
+    } else if ("lzo" == value) {
+      type = kwdbts::CompressionType::LZO;
+    } else if ("xz" == value) {
+      type = kwdbts::CompressionType::XZ;
+    } else if ("zstd" == value) {
+      type = kwdbts::CompressionType::ZSTD;
+    }
+    if (g_mk_squashfs_option.compressions.find(type) ==
+        g_mk_squashfs_option.compressions.end()) {
+      LOG_WARN("mksquashfs does not support the %s algorithm and uses gzip by default. "
+                "Please upgrade the mksquashfs version.", value.c_str())
+      type = kwdbts::CompressionType::GZIP;
+    } else if (g_mount_option.mount_compression_types.find(type) ==
+               g_mount_option.mount_compression_types.end()) {
+      LOG_WARN("mount does not support the %s algorithm and uses gzip by default. "
+                "Upgrade to a linux kernel version that supports this algorithm", value.c_str())
+      type = kwdbts::CompressionType::GZIP;
+    }
+    g_compression = g_mk_squashfs_option.compressions.find(type)->second;
+  } else if ("ts.compression.level" == key) {
+    kwdbts::CompressionLevel level = kwdbts::CompressionLevel::MIDDLE;
+    if ("low" == value) {
+      level = kwdbts::CompressionLevel::LOW;
+    } else if ("middle" == value) {
+      level = kwdbts::CompressionLevel::MIDDLE;
+    } else if ("high" == value) {
+      level = kwdbts::CompressionLevel::HIGH;
+    }
+    for (auto& compression : g_mk_squashfs_option.compressions) {
+      compression.second.compression_level = level;
+    }
+    g_compression.compression_level = level;
   } else {
     LOG_INFO("Cluster setting %s has no callback function.", key.c_str());
   }

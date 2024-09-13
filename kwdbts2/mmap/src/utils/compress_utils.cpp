@@ -14,9 +14,7 @@
 #include <sys/statfs.h>
 #include <linux/magic.h>
 #include "utils/compress_utils.h"
-#include "utils/big_table_utils.h"
 #include "sys_utils.h"
-#include "mmap/mmap_big_table.h"
 
 namespace kwdbts {
 
@@ -25,6 +23,114 @@ std::string sudo_cmd = " ";
 int g_max_mount_cnt_ = 1000;
 
 atomic<int> g_cur_mount_cnt_ = 0;
+
+int64_t g_compress_interval = 3600;
+
+Compression g_compression = {kwdbts::CompressionType::GZIP, kwdbts::CompressionLevel::MIDDLE, true, false};
+
+MkSquashfsOption g_mk_squashfs_option;
+
+MountOption g_mount_option;
+
+inline void initSudo() {
+  if (sudo_cmd == " ") {
+    if (getuid() == 0) {
+      sudo_cmd = "";
+    } else {
+      sudo_cmd = "sudo ";
+    }
+  }
+}
+
+void getErrorInfo(string cmd, string dir_path, string log_file_name) {
+  if (!cmd.empty()) {
+    cmd += " >> ./" + log_file_name + " 2>&1;";
+  }
+  cmd += " echo $? >> ./" + log_file_name + " 2>&1;"
+         + " df -h >> ./" + log_file_name + " 2>&1;"
+         + " ls -l " + dir_path + " >> ./" + log_file_name + " 2>&1";
+  System(cmd);
+}
+
+inline string compressCmd(const string& dir_path, const string& file_path) {
+  string cmd = "nice -n 5 mksquashfs " + dir_path + " " + file_path;
+  if (g_mk_squashfs_option.has_mem_option) {
+    cmd += " -mem 16M";
+  }
+  switch (g_compression.compression_type) {
+    case kwdbts::CompressionType::GZIP:
+      cmd += " -comp gzip";
+      if (g_compression.has_compression_level_option) {
+        switch (g_compression.compression_level) {
+          case kwdbts::CompressionLevel::LOW:
+            cmd += " -Xcompression-level 1";
+            break;
+          case kwdbts::CompressionLevel::MIDDLE:
+            cmd += " -Xcompression-level 6";
+            break;
+          case kwdbts::CompressionLevel::HIGH:
+            cmd += " -Xcompression-level 9";
+            break;
+        }
+      }
+      break;
+    case kwdbts::CompressionType::LZ4:
+      cmd += " -comp lz4";
+      if (g_compression.has_lz4_hc_option) {
+        switch (g_compression.compression_level) {
+          case kwdbts::CompressionLevel::HIGH:
+            cmd += " -Xhc";
+            break;
+          default:
+            break;
+        }
+      }
+      break;
+    case kwdbts::CompressionType::LZMA:
+      cmd += " -comp lzma";
+      break;
+    case kwdbts::CompressionType::LZO:
+      cmd += " -comp lzo";
+      if (g_compression.has_compression_level_option) {
+        switch (g_compression.compression_level) {
+          case kwdbts::CompressionLevel::LOW:
+            cmd += " -Xcompression-level 1";
+            break;
+          case kwdbts::CompressionLevel::MIDDLE:
+            cmd += " -Xcompression-level 7";
+            break;
+          case kwdbts::CompressionLevel::HIGH:
+            cmd += " -Xcompression-level 9";
+            break;
+        }
+      }
+      break;
+    case kwdbts::CompressionType::XZ:
+      cmd += " -comp xz";
+      break;
+    case kwdbts::CompressionType::ZSTD:
+      cmd += " -comp zstd";
+      if (g_compression.has_compression_level_option) {
+        switch (g_compression.compression_level) {
+          case kwdbts::CompressionLevel::LOW:
+            cmd += " -Xcompression-level 1";
+            break;
+          case kwdbts::CompressionLevel::MIDDLE:
+            cmd += " -Xcompression-level 15";
+            break;
+          case kwdbts::CompressionLevel::HIGH:
+            cmd += " -Xcompression-level 22";
+            break;
+        }
+      }
+      break;
+  }
+  if (g_mk_squashfs_option.has_processors_option) {
+    cmd += " -processors 1";
+  }
+  cmd += " > /dev/null 2>&1";
+  return cmd;
+}
 
 bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info) {
   string dir_path = db_path + tbl_sub_path + dir_name;
@@ -43,9 +149,9 @@ bool compress(const string& db_path, const string& tbl_sub_path, const string& d
     if (IsExists(file_path_tmp)) {
       Remove(file_path_tmp);
     }
-    string cmd = "nice -n 5 mksquashfs " + dir_path + ' ' + file_path_tmp
-          + " -mem 16M -Xcompression-level 6 -processors 1 > /dev/null 2>&1";
+    string cmd = compressCmd(dir_path, file_path_tmp);
     if (System(cmd)) {
+      LOG_DEBUG("Compress succeeded, shell: %s", cmd.c_str());
       cmd = "mv " + file_path_tmp + " " + file_path;
       if (!System(cmd)) {
         err_info.errcode = KWEOTHER;
@@ -54,6 +160,7 @@ bool compress(const string& db_path, const string& tbl_sub_path, const string& d
         return false;
       }
     } else {
+      LOG_DEBUG("Compress failed, shell: %s", cmd.c_str());
       err_info.errcode = KWEOTHER;
       err_info.errmsg = "mksquashfs failed";
       return false;
@@ -64,26 +171,6 @@ bool compress(const string& db_path, const string& tbl_sub_path, const string& d
     return false;
   }
   return true;
-}
-
-void initSudo() {
-  if (sudo_cmd == " ") {
-    if (getuid() == 0) {
-      sudo_cmd = "";
-    } else {
-      sudo_cmd = "sudo ";
-    }
-  }
-}
-
-void getErrorInfo(string cmd, string dir_path, string log_file_name) {
-  if (!cmd.empty()) {
-    cmd += " >> ./" + log_file_name + " 2>&1;";
-  }
-  cmd += " echo $? >> ./" + log_file_name + " 2>&1;"
-      + " df -h >> ./" + log_file_name + " 2>&1;"
-      + " ls -l " + dir_path + " >> ./" + log_file_name + " 2>&1";
-  System(cmd);
 }
 
 bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_info) {
@@ -113,7 +200,7 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
   }
   // mount sqfs file
   int retry = 5;
-  std::string cmd  = sudo_cmd + "mount -o noatime,nodiratime -t squashfs " + sqfs_file_path + " " + dir_path;
+  std::string cmd = sudo_cmd + "mount -o noatime,nodiratime -t squashfs " + sqfs_file_path + " " + dir_path;
   while(retry > 0 && !System(cmd)) {
     sleep(1);
     --retry;
@@ -194,6 +281,62 @@ int executeShell(const std::string& cmd, std::string &result) {
     ret = -1;
   }
   return ret;
+}
+
+void InitCompressInfo(const string& db_path) {
+  // mount cnt
+  string cmd = "cat /proc/mounts | grep " + db_path + " | wc -l";
+  string result;
+  int ret = executeShell(cmd, result);
+  if (ret != -1) {
+    int mount_cnt = atoi(result.c_str());
+    if (mount_cnt > 0) {
+      g_cur_mount_cnt_ = mount_cnt;
+    }
+  }
+  // Check whether the mksquashfs supports the `-mem` command
+  cmd = "strings `which mksquashfs` | grep 'mem <size>' | wc -l";
+  if (executeShell(cmd, result) != -1 && atoi(result.c_str()) > 0) {
+    g_mk_squashfs_option.has_mem_option = true;
+  }
+  // Check whether the mksquashfs supports the `-processors` command
+  cmd = "strings `which mksquashfs` | grep 'processors <number>' | wc -l";
+  if (executeShell(cmd, result) != -1 && atoi(result.c_str()) > 0) {
+    g_mk_squashfs_option.has_processors_option = true;
+  }
+  // Check mksquashfs support for compression algorithms
+  for (CompressionType type = CompressionType::GZIP; type <= CompressionType::ZSTD; type = (CompressionType)(type + 1)) {
+    cmd = "strings `which mksquashfs` | grep " + CompressionTypeToLowerCase(type) + " | wc -l";
+    if (executeShell(cmd, result) != -1 && atoi(result.c_str()) > 0) {
+      Compression compression{type, CompressionLevel::MIDDLE, false, false};
+      if (type == CompressionType::GZIP || type == CompressionType::ZSTD || type == CompressionType::LZO) {
+        cmd = "strings `which mksquashfs` | grep " + CompressionTypeToLowerCase(type) +
+              " | grep Xcompression-level | wc -l";
+        if (executeShell(cmd, result) != -1 && atoi(result.c_str()) > 0) {
+          compression.has_compression_level_option = true;
+        }
+      } else if (type == CompressionType::LZ4) {
+        cmd = "strings `which mksquashfs` | grep Xhc | wc -l";
+        if (executeShell(cmd, result) != -1 && atoi(result.c_str()) > 0) {
+          compression.has_lz4_hc_option = true;
+        }
+      }
+      g_mk_squashfs_option.compressions[type] = compression;
+    }
+  }
+  // Check mount's support for compression algorithms
+  for (CompressionType type = CompressionType::GZIP; type <= CompressionType::ZSTD; type = (CompressionType)(type + 1)) {
+    if (type == CompressionType::GZIP) {
+      cmd = "grep SQUASHFS_ZLIB=y /boot/config-$(uname -r) | wc -l";
+    } else {
+      cmd = "grep SQUASHFS_" + CompressionTypeToUpperCase(type) + "=y /boot/config-$(uname -r) | wc -l";
+    }
+    if (executeShell(cmd, result) != -1 && atoi(result.c_str()) > 0) {
+      g_mount_option.mount_compression_types.insert(type);
+    }
+  }
+
+  g_compression = g_mk_squashfs_option.compressions[GZIP];
 }
 
 } // namespace kwdbts

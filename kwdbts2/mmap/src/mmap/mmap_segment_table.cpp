@@ -26,6 +26,8 @@
 #include "perf_stat.h"
 #include "sys_utils.h"
 
+extern bool g_engine_initialized;
+
 KStatus push_back_payload_with_conv(kwdbts::Payload* payload, char* value, const AttributeInfo& payload_attr,
                                     DATATYPE new_type, int32_t new_len, size_t start_row, uint32_t count, int32_t col_idx) {
   ErrorInfo err_info;
@@ -386,8 +388,7 @@ int MMapSegmentTable::close(ErrorInfo& err_info) {
   }
 
   SegmentStatus s_status = ActiveSegment;
-  if (g_max_mount_cnt_ != 0 && g_cur_mount_cnt_ > g_max_mount_cnt_
-      && meta_data_ != nullptr) {
+  if (meta_data_ != nullptr) {
     s_status = getSegmentStatus();
   }
 
@@ -408,7 +409,7 @@ int MMapSegmentTable::close(ErrorInfo& err_info) {
     }
   }
 
-  if (g_max_mount_cnt_ != 0 && g_cur_mount_cnt_ > g_max_mount_cnt_
+  if (g_engine_initialized && g_max_mount_cnt_ != 0 && g_cur_mount_cnt_ > g_max_mount_cnt_
       && s_status >= ImmuWithRawSegment) {
     if (!umount(db_path_, tbl_sub_path_, err_info)) {
       LOG_WARN("at MMapSegmentTable::close %s", err_info.errmsg.c_str());
