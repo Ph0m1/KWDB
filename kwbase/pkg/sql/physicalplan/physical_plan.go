@@ -440,6 +440,7 @@ func (p *PhysicalPlan) AddNoopToTsProcessors(nodeID roachpb.NodeID, local bool, 
 		return
 	}
 
+	childExecInTSEngineOld := p.ChildIsExecInTSEngine()
 	// add noop-processor to processor of time series in other Node
 	for i, idx := range p.ResultRouters {
 		if p.Processors[idx].ExecInTSEngine && p.Processors[idx].Node != nodeID {
@@ -454,7 +455,7 @@ func (p *PhysicalPlan) AddNoopToTsProcessors(nodeID roachpb.NodeID, local bool, 
 	}
 
 	// add noop-processor in gateway node for multi node
-	if forceMerge || (p.ChildIsExecInTSEngine() && local && len(p.ResultRouters) > 0) {
+	if forceMerge || (childExecInTSEngineOld && local && len(p.ResultRouters) > 0) {
 		p.addNoopForGatewayNode(nodeID)
 	}
 }
