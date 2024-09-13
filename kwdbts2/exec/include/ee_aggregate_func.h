@@ -1261,7 +1261,7 @@ class MinAggregate : public AggregateFunc {
           current_data_chunk_->SetNotNull(target_row, col_idx_);
           k_uint16 len = min_val.length();
           std::memcpy(dest_ptr, &len, STRING_WIDE);
-          std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len);
+          std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len + 1);
         }
 
         // if the current chunk is full.
@@ -1302,7 +1302,7 @@ class MinAggregate : public AggregateFunc {
       current_data_chunk_->SetNotNull(target_row, col_idx_);
       k_uint16 len = min_val.length();
       std::memcpy(dest_ptr, &len, STRING_WIDE);
-      std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len);
+      std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len + 1);
     }
   }
 
