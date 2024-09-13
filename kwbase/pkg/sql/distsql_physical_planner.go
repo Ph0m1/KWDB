@@ -3220,6 +3220,7 @@ func getFinalColumnType(
 	aggregationsColumnTypes [][]types.T,
 ) ([]types.T, error) {
 	finalOutTypes := make([]types.T, len(aggregations))
+	foundInterpolate := false
 	for i, agg := range aggregations {
 		argTypes := make([]types.T, len(agg.ColIdx)+len(agg.Arguments))
 		for j, c := range agg.ColIdx {
@@ -3233,7 +3234,23 @@ func getFinalColumnType(
 		if err != nil {
 			return finalOutTypes, err
 		}
+		// interpolate next is his agg param.
+		// eg aggregations[2] is interpolate, so aggregations[3] is param agg, the param agg return type is
+		if foundInterpolate {
+			switch returnTyp.InternalType.Family {
+			case types.IntFamily, types.FloatFamily, types.DecimalFamily:
+				break
+			default:
+				return finalOutTypes, pgerror.New(pgcode.Warning,
+					"The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily")
+			}
+		}
 		finalOutTypes[i] = *returnTyp
+		if agg.Func == execinfrapb.AggregatorSpec_INTERPOLATE {
+			foundInterpolate = true
+		} else {
+			foundInterpolate = false
+		}
 	}
 	return finalOutTypes, nil
 }

@@ -456,10 +456,10 @@ INSERT 1
 ERROR: time_bucket_gapfill should be use with group by time_bucket_gapfill
 SQLSTATE: 0A000
 > select time_bucket_gapfill(k_timestamp,'300s'),interpolate(max(e2),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
-ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
 SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,'300s'),interpolate(max(e3),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
-ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
 SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,'300s'),interpolate(STRING_AGG(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
 ERROR: unknown signature: string_agg(FLOAT8)
@@ -491,10 +491,10 @@ INSERT 1
   2020-11-06 17:11:50+00:00 | NULL
 (7 rows)
 > select time_bucket_gapfill(k_timestamp,'10s') as a,interpolate(max(e10),60) from t1.tb  group by a order by a;
-ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
 SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,'10s') as a,interpolate(max(e12),60) from t1.tb  group by a order by a;
-ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
 SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,'10s') as a,interpolate(sum(e7),60) from t1.tb  group by a order by a;
 ERROR: unknown signature: sum(BOOL)
@@ -511,7 +511,7 @@ SQLSTATE: 42883
   2020-11-06 17:11:50+00:00 |           1
 (7 rows)
 > select time_bucket_gapfill(k_timestamp,'10s') as a,interpolate(min(e15),60) from t1.tb  group by a order by a;
-ERROR: The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily
+ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
 SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,'0s') as a,sum(e2) from t1.tb  group by a order by a;
 ERROR: time_bucket_gapfill(): second arg should be a positive interval

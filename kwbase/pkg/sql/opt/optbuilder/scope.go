@@ -1017,7 +1017,7 @@ func (s *scope) VisitPre(expr tree.Expr) (recurse bool, newExpr tree.Expr) {
 						case types.IntFamily, types.FloatFamily, types.DecimalFamily:
 							break
 						default:
-							panic(pgerror.New(pgcode.Warning, "The type of the first parameter of interpolate must be IntFamily, FloatFamily, DecimalFamily"))
+							panic(pgerror.New(pgcode.Warning, "The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily"))
 						}
 					}
 				}

@@ -747,7 +747,10 @@ func (b *Builder) buildAggregateFunction(
 				} else if c, ok := col.Exprs[0].(*scopeColumn); ok {
 					c.typ = agg.col.typ
 					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
-					f.Exprs[0] = c
+					f.Exprs[0] = col.Exprs[0]
+				} else { // other is not only scopeColumn
+					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
+					f.Exprs[0] = col.Exprs[0]
 				}
 			}
 		} else {
