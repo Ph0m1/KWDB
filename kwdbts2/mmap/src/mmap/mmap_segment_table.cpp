@@ -543,6 +543,7 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
   // Aggregate result update, the structure includes 4 addresses, namely min, max, sum, count,
   // calculateAggAddr will write the obtained aggregation address to the AggDataAddresses struct.
   AggDataAddresses addresses{};
+  RW_LATCH_X_LOCK(&rw_latch_);
   columnAggCalculate(span, start_row, segment_col_idx, addresses, span.row_num, false);
 
   // Update the maximum and minimum timestamp information of the current segment,
@@ -553,6 +554,7 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
   if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
     minTimestamp() = KTimestamp(addresses.min);
   }
+  RW_LATCH_UNLOCK(&rw_latch_);
 
   return error_code;
 }
@@ -596,25 +598,17 @@ void MMapSegmentTable::columnAggCalculate(const BlockSpan& span, MetricRowID sta
           is_block_first_row ? nullptr : varColumnAggAddr(start_row, segment_col, Sumfunctype::MIN);
       std::shared_ptr<void> max_base =
           is_block_first_row ? nullptr : varColumnAggAddr(start_row, segment_col, Sumfunctype::MAX);
-      MetricRowID begin_r = start_row;
-      MetricRowID end_r = start_row + row_num;
-      for (MetricRowID r = begin_r; r < end_r; ++r) {
-        if (!isNullValue(r, segment_col)) {
-          break;
+      void* mem = columnAddr(start_row, segment_col);
+      vector<shared_ptr<void>> var_mem;
+      for (k_uint32 j = 0; j < row_num; ++j) {
+        std::shared_ptr<void> data = nullptr;
+        if (!isNullValue(start_row + j, segment_col)) {
+          data = varColumnAddr(start_row + j, segment_col);
         }
-        ++begin_r;
+        var_mem.push_back(data);
       }
-      for (MetricRowID r = end_r - 1; r > begin_r ; --r) {
-        if (!isNullValue(r, segment_col)) {
-          break;
-        }
-        --end_r;
-      }
-      void* mem = columnAddr(begin_r, segment_col);
-      std::shared_ptr<void> var_mem = varColumnAddr(begin_r, end_r - 1, segment_col);
       VarColAggCalculator aggCal(mem, var_mem, columnNullBitmapAddr(start_row.block_id, segment_col),
-                                 begin_r.offset_row,
-                                 cols_info_without_hidden_[segment_col_idx].size, end_r.offset_row - begin_r.offset_row);
+                                 start_row.offset_row, cols_info_without_hidden_[segment_col_idx].size, row_num);
       aggCal.CalAllAgg(addresses.min, addresses.max, min_base, max_base, addresses.count, is_block_first_row, span);
     }
   }

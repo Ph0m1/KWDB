@@ -976,16 +976,12 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
                   }
                   b->is_new = true;
                 } else {
-                  std::shared_ptr<void> agg_base = nullptr;
-                  for (auto var_mem : new_var_mem) {
-                    VarColAggCalculator agg_cal(var_mem, 1);
-                    if (scan_agg_types_[i] == Sumfunctype::MAX) {
-                      agg_base = agg_cal.GetMax(agg_base);
-                    } else {
-                      agg_base = agg_cal.GetMin(agg_base);
-                    }
+                  VarColAggCalculator agg_cal(new_var_mem, new_var_mem.size());
+                  if (scan_agg_types_[i] == Sumfunctype::MAX) {
+                    b = CreateAggBatch(agg_cal.GetMax(), nullptr);
+                  } else {
+                    b = CreateAggBatch(agg_cal.GetMin(), nullptr);
                   }
-                  b = CreateAggBatch(agg_base, nullptr);
                 }
               } else {
                 if (!isVarLenType(attrs_[col_idx].type)) {
@@ -997,22 +993,15 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
                     b = CreateAggBatch(agg_cal.GetMin(), nullptr);
                   }
                 } else {
-                  // Skip the null first and last rows because varColumnAddr does not support obtaining data
-                  // from empty first and last rows
-                  MetricRowID start_row, end_row;
-                  for (start_row = first_real_row; start_row < first_real_row + *count - 1; ++start_row) {
-                    if (!segment_tbl->isNullValue(start_row, col_idx)) {
-                      break;
+                  vector<shared_ptr<void>> var_mem_data;
+                  for (k_uint32 j = 0; j < *count; ++j) {
+                    std::shared_ptr<void> data = nullptr;
+                    if (!segment_tbl->isNullValue(first_real_row + j, col_idx)) {
+                      data = segment_tbl->varColumnAddrByBlk(cur_block_item_->block_id, first_row + j - 1, col_idx);
                     }
+                    var_mem_data.push_back(data);
                   }
-                  for (end_row = first_real_row + *count - 1; end_row > first_real_row ; --end_row) {
-                    if (!segment_tbl->isNullValue(end_row, col_idx)) {
-                      break;
-                    }
-                  }
-                  std::shared_ptr<void> var_mem =
-                      segment_tbl->varColumnAddr(start_row, end_row, col_idx);
-                  VarColAggCalculator agg_cal(mem, var_mem, bitmap, first_row, attrs_[col_idx].size, *count);
+                  VarColAggCalculator agg_cal(var_mem_data, bitmap, first_row, attrs_[col_idx].size, *count);
                   if (scan_agg_types_[i] == Sumfunctype::MAX) {
                     b = CreateAggBatch(agg_cal.GetMax(), nullptr);
                   } else {
@@ -1311,7 +1300,7 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
           } else {
             std::shared_ptr<void> agg_base = nullptr;
             for (auto it : result.data[i]) {
-              VarColAggCalculator agg_cal(reinterpret_cast<const AggBatch*>(it)->var_mem_, 1);
+              VarColAggCalculator agg_cal({reinterpret_cast<const AggBatch*>(it)->var_mem_}, 1);
               if (scan_agg_types_[i] == Sumfunctype::MAX) {
                 agg_base = agg_cal.GetMax(agg_base);
               } else if (scan_agg_types_[i] == Sumfunctype::MIN) {

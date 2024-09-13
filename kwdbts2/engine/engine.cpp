@@ -1389,7 +1389,7 @@ KStatus TSEngineImpl::CompactData(kwdbContext_p ctx) {
   Return(KStatus::SUCCESS);
 }
 
-bool AggCalculator::cmp(void* l, void* r) {
+int AggCalculator::cmp(void* l, void* r) {
   switch (type_) {
     case DATATYPE::INT8:
     case DATATYPE::BYTE:
@@ -1397,25 +1397,37 @@ bool AggCalculator::cmp(void* l, void* r) {
     case DATATYPE::BOOL:
     case DATATYPE::BINARY: {
       k_int32 ret = memcmp(l, r, size_);
-      return ret > 0;
+      return ret;
     }
-    case DATATYPE::INT16:
-      return (*(static_cast<k_int16*>(l))) > (*(static_cast<k_int16*>(r)));
+    case DATATYPE::INT16: {
+      k_int32 ret = (*(static_cast<k_int16*>(l))) - (*(static_cast<k_int16*>(r)));
+      return ret;
+    }
     case DATATYPE::INT32:
-    case DATATYPE::TIMESTAMP:
-      return (*(static_cast<k_int32*>(l))) > (*(static_cast<k_int32*>(r)));
+    case DATATYPE::TIMESTAMP: {
+      k_int64 diff = (*(static_cast<k_int32*>(l))) - (*(static_cast<k_int32*>(r)));
+      return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
+    }
     case DATATYPE::INT64:
-    case DATATYPE::TIMESTAMP64:
-      return (*(static_cast<k_int64*>(l))) > (*(static_cast<k_int64*>(r)));
-    case DATATYPE::TIMESTAMP64_LSN:
-      return (*(static_cast<TimeStamp64LSN*>(l))).ts64 > (*(static_cast<TimeStamp64LSN*>(r))).ts64;
-    case DATATYPE::FLOAT:
-      return (*(static_cast<float*>(l))) > (*(static_cast<float*>(r)));
-    case DATATYPE::DOUBLE:
-      return (*(static_cast<double*>(l))) > (*(static_cast<double*>(r)));
+    case DATATYPE::TIMESTAMP64: {
+      double diff = (*(static_cast<k_int64*>(l))) - (*(static_cast<k_int64*>(r)));
+      return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
+    }
+    case DATATYPE::TIMESTAMP64_LSN: {
+      double diff = (*(static_cast<TimeStamp64LSN*>(l))).ts64 - (*(static_cast<TimeStamp64LSN*>(r))).ts64;
+      return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
+    }
+    case DATATYPE::FLOAT: {
+      double diff = (*(static_cast<float*>(l))) - (*(static_cast<float*>(r)));
+      return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
+    }
+    case DATATYPE::DOUBLE: {
+      double diff = (*(static_cast<double*>(l))) - (*(static_cast<double*>(r)));
+      return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
+    }
     case DATATYPE::STRING: {
       k_int32 ret = strncmp(static_cast<char*>(l), static_cast<char*>(r), size_);
-      return ret > 0;
+      return ret;
     }
       break;
     default:
@@ -1449,11 +1461,11 @@ void* AggCalculator::GetMax(void* base, bool need_to_new) {
       continue;
     }
     void* current = reinterpret_cast<void*>((intptr_t) (mem_) + i * size_);
-    if (!max || cmp(current, max)) {
+    if (!max || cmp(current, max) > 0) {
       max = current;
     }
   }
-  if (base && cmp(base, max)) {
+  if (base && cmp(base, max) > 0) {
     max = base;
   }
   if (need_to_new && max) {
@@ -1471,11 +1483,11 @@ void* AggCalculator::GetMin(void* base, bool need_to_new) {
       continue;
     }
     void* current = reinterpret_cast<void*>((intptr_t) (mem_) + i * size_);
-    if (!min || !cmp(current, min)) {
+    if (!min || cmp(current, min) < 0) {
       min = current;
     }
   }
-  if (base && !cmp(base, min)) {
+  if (base && cmp(base, min) < 0) {
     min = base;
   }
   if (need_to_new && min) {
@@ -1663,10 +1675,10 @@ bool AggCalculator::CalAllAgg(void* min_base, void* max_base, void* sum_base, vo
     }
 
     void* current = reinterpret_cast<void*>((intptr_t) (mem_) + i * size_);
-    if (!max || cmp(current, max)) {
+    if (!max || cmp(current, max) > 0) {
       max = current;
     }
-    if (!min || !cmp(current, min)) {
+    if (!min || cmp(current, min) < 0) {
       min = current;
     }
     if (isSumType(type_)) {
@@ -1717,14 +1729,14 @@ bool AggCalculator::CalAllAgg(void* min_base, void* max_base, void* sum_base, vo
   return is_overflow;
 }
 
-bool VarColAggCalculator::cmp(void* l, void* r) {
+int VarColAggCalculator::cmp(void* l, void* r) {
   uint16_t l_len = *(reinterpret_cast<uint16_t*>(l));
   uint16_t r_len = *(reinterpret_cast<uint16_t*>(r));
   uint16_t len = min(l_len, r_len);
   void* l_data = reinterpret_cast<void*>((intptr_t)(l) + sizeof(uint16_t));
   void* r_data = reinterpret_cast<void*>((intptr_t)(r) + sizeof(uint16_t));
   k_int32 ret = memcmp(l_data, r_data, len);
-  return (ret > 0) || (ret == 0 && l_len > r_len);
+  return (ret == 0) ? (l_len - r_len) : ret;
 }
 
 bool VarColAggCalculator::isnull(size_t row) {
@@ -1751,16 +1763,12 @@ std::shared_ptr<void> VarColAggCalculator::GetMax(std::shared_ptr<void> base) {
     if (isnull(first_row_ + i)) {
       continue;
     }
-    size_t offset = start_offset_;
-    if (i > 0) {
-      offset = *reinterpret_cast<uint64_t*>(reinterpret_cast<void*>((intptr_t) (mem_) + i * size_));
-    }
-    void* var_data = reinterpret_cast<void*>((intptr_t)var_mem_.get() + (offset - start_offset_));
-    if (!max || cmp(var_data, max)) {
+    void* var_data = var_mem_[i].get();
+    if (!max || cmp(var_data, max) > 0) {
       max = var_data;
     }
   }
-  if (base && cmp(base.get(), max)) {
+  if (base && cmp(base.get(), max) > 0) {
     max = base.get();
   }
 
@@ -1777,16 +1785,12 @@ std::shared_ptr<void> VarColAggCalculator::GetMin(std::shared_ptr<void> base) {
     if (isnull(first_row_ + i)) {
       continue;
     }
-    size_t offset = start_offset_;
-    if (i > 0) {
-      offset = *reinterpret_cast<uint64_t*>(reinterpret_cast<void*>((intptr_t) (mem_) + i * size_));
-    }
-    void* var_data = reinterpret_cast<void*>((intptr_t)var_mem_.get() + (offset - start_offset_));
-    if (!min || !cmp(var_data, min)) {
+    void* var_data = var_mem_[i].get();
+    if (!min || cmp(var_data, min) < 0) {
       min = var_data;
     }
   }
-  if (base && !cmp(base.get(), min)) {
+  if (base && cmp(base.get(), min) < 0) {
     min = base.get();
   }
   uint16_t len = *(reinterpret_cast<uint16_t*>(min));
@@ -1816,13 +1820,12 @@ void VarColAggCalculator::CalAllAgg(void* min_base, void* max_base, std::shared_
       *reinterpret_cast<uint16_t*>(count_base) += 1;
     }
     void* current = reinterpret_cast<void*>((intptr_t) (mem_) + i * size_);
-    size_t offset = *reinterpret_cast<uint64_t*>(current);
-    void* var_data = reinterpret_cast<void*>((intptr_t)var_mem_.get() + (offset - start_offset_));
-    if (!max || cmp(var_data, var_max)) {
+    void* var_data = var_mem_[i].get();
+    if (!max || cmp(var_data, var_max) > 0) {
       max = current;
       var_max = var_data;
     }
-    if (!min || !cmp(var_data, var_min)) {
+    if (!min || cmp(var_data, var_min) < 0) {
       min = current;
       var_min = var_data;
     }

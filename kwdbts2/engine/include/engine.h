@@ -775,7 +775,7 @@ class AggCalculator {
   void UndoAgg(void* min_base, void* max_base, void* sum_base, void* count_base);
 
  private:
-  bool cmp(void* l, void* r);
+  int cmp(void* l, void* r);
 
   bool isnull(size_t row);
 
@@ -797,18 +797,16 @@ class AggCalculator {
 
 class VarColAggCalculator {
  public:
-  VarColAggCalculator(std::shared_ptr<void> var_mem, int32_t count) : var_mem_(var_mem), count_(count) {}
+  VarColAggCalculator(const std::vector<std::shared_ptr<void>>& var_mem, int32_t count) : var_mem_(var_mem), count_(count) {}
 
-  VarColAggCalculator(void* mem, std::shared_ptr<void> var_mem, void* bitmap,
+  VarColAggCalculator(const std::vector<std::shared_ptr<void>>& var_mem, void* bitmap,
+                      size_t first_row, int32_t size, int32_t count) :
+                      var_mem_(var_mem), bitmap_(bitmap), first_row_(first_row), size_(size), count_(count) {
+  }
+
+  VarColAggCalculator(void* mem, const std::vector<std::shared_ptr<void>>& var_mem, void* bitmap,
                       size_t first_row, int32_t size, int32_t count) :
                       mem_(mem), var_mem_(var_mem), bitmap_(bitmap), first_row_(first_row), size_(size), count_(count) {
-    for (int i = 0; i < count_; ++i) {
-      if (isnull(first_row_ + i)) {
-        continue;
-      }
-      start_offset_ = *reinterpret_cast<uint64_t*>(reinterpret_cast<void*>((intptr_t) (mem_) + i * size_));
-      break;
-    }
   }
 
   std::shared_ptr<void> GetMax(std::shared_ptr<void> base = nullptr);
@@ -818,19 +816,40 @@ class VarColAggCalculator {
   void CalAllAgg(void* min_base, void* max_base, std::shared_ptr<void> var_min_base,
                  std::shared_ptr<void> var_max_base, void* count_base, bool block_first_line, const BlockSpan& span);
 
+  static void CalAllAgg(std::list<std::shared_ptr<void>> var_values, int* min_idx, int* max_idx) {
+    void* var_max;
+    void* var_min;
+    *min_idx = -1;
+    *max_idx = -1;
+    int i = 0;
+    auto iter = var_values.begin();
+    while (iter != var_values.end()) {
+      auto cur_value = iter->get();
+      iter++;
+      if (*max_idx < 0 || cmp(cur_value, var_max)) {
+        *max_idx = i;
+        var_max = cur_value;
+      }
+      if (*min_idx < 0 || !cmp(cur_value, var_min)) {
+        *min_idx = i;
+        var_min = cur_value;
+      }
+      i++;
+    }
+  }
+
  private:
-  bool cmp(void* l, void* r);
+  static int cmp(void* l, void* r);
   bool isnull(size_t row);
   bool isDeleted(char* delete_flags, size_t row);
 
  private:
   void* mem_;
-  std::shared_ptr<void> var_mem_;
+  std::vector<std::shared_ptr<void>> var_mem_;
   void* bitmap_ = nullptr;
   size_t first_row_;
   int32_t size_;
   uint16_t count_;
-  size_t start_offset_ = 0;
 };
 
 }  //  namespace kwdbts
