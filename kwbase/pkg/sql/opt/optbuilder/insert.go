@@ -331,10 +331,6 @@ func (b *Builder) buildInsert(ins *tree.Insert, inScope *scope) (outScope *scope
 		if mb.tab.GetTableType() != tree.RelationalTable {
 			mb.buildTSInsertSelect(selectRelationalTableNum, selectTimeSeriesTableNum, ins, b)
 		} else {
-			// select time series data insert into relational table, return error
-			if selectTimeSeriesTableNum > 0 && selectRelationalTableNum == 0 {
-				panic(pgerror.New(pgcode.Warning, "insert time series data into relational table is not supported"))
-			}
 			mb.buildInsert(returning)
 		}
 
