@@ -50,8 +50,6 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
   int open(const string& url, const std::string& db_path, const string& tbl_sub_path,
            int flags, ErrorInfo& err_info) override;
 
-  int openInitEntityMeta(const int flags);
-
   int create(const vector<AttributeInfo>& schema, const uint32_t& table_version, const string& tbl_sub_path,
              uint64_t partition_interval, int encoding, ErrorInfo& err_info, bool init_data);
 

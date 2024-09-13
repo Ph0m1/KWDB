@@ -243,6 +243,44 @@ KStatus MMapRootTableManager::SetPartitionInterval(const uint64_t& partition_int
   return KStatus::SUCCESS;
 }
 
+KStatus MMapRootTableManager::GetStatisticInfo(uint64_t& entity_num, uint64_t& insert_rows_per_day) {
+  rdLock();
+  Defer defer([&]() { unLock(); });
+  entity_num = cur_root_table_->metaData()->entity_num;
+  insert_rows_per_day = cur_root_table_->metaData()->insert_rows_per_day;
+  return KStatus::SUCCESS;
+}
+
+KStatus MMapRootTableManager::SetStatisticInfo(uint64_t entity_num, uint64_t insert_rows_per_day) {
+  wrLock();
+  Defer defer([&]() { unLock(); });
+  // Record the old value for rollback processing
+  uint64_t old_entity_num = cur_root_table_->metaData()->entity_num;
+  uint64_t old_insert_rows_per_day = cur_root_table_->metaData()->insert_rows_per_day;
+  std::vector<MMapMetricsTable*> completed_tables;
+  // Iterate through all versions of the root table, updating the storage info
+  for (auto& root_table : root_tables_) {
+    if (!root_table.second) {
+      ErrorInfo err_info;
+      root_table.second = openRootTable(root_table.first, err_info);
+      if (!root_table.second) {
+        LOG_ERROR("root table[%s] set storage info failed",
+                  IdToEntityBigTableUrl(table_id_, root_table.first).c_str());
+        // rollback
+        for (auto completedTable : completed_tables) {
+          completedTable->metaData()->entity_num = old_entity_num;
+          completedTable->metaData()->insert_rows_per_day = old_insert_rows_per_day;
+        }
+        return KStatus::FAIL;
+      }
+    }
+    root_table.second->metaData()->entity_num = entity_num;
+    root_table.second->metaData()->insert_rows_per_day = insert_rows_per_day;
+    completed_tables.push_back(root_table.second);
+  }
+  return KStatus::SUCCESS;
+}
+
 const vector<AttributeInfo>& MMapRootTableManager::GetSchemaInfoWithoutHidden(uint32_t table_version) {
   MMapMetricsTable* root_table = GetRootTable(table_version);
   assert(root_table != nullptr);

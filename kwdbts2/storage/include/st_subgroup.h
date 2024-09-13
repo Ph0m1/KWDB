@@ -49,10 +49,11 @@ class TsSubEntityGroup : public TSObject {
    * @param 	db_path
    * @param 	tbl_sub_path		subgroup sub path
    * @param 	flags option to open a file; O_CREAT to create new file.
+   * @param 	max_entities_per_subgroup  max entities in subgroup
    * @return	0 succeed, otherwise < 0.
    */
   int OpenInit(SubGroupID subgroup_id, const std::string& db_path, const string& tbl_sub_path,
-               int flags, ErrorInfo& err_info);
+               int flags, uint16_t max_entities_per_subgroup, ErrorInfo& err_info);
 
   /**
   * @brief subgroup ID
@@ -73,6 +74,12 @@ class TsSubEntityGroup : public TSObject {
   * @return Set of EntityID vectors assigned
    */
   std::vector<uint32_t> GetEntities();
+
+  /**
+   * @brief Get the number of entities that SubEntityGroup can store
+   * @return uint16_t
+   */
+  uint16_t GetSubgroupEntities();
 
   /**
 * @brief delete entity

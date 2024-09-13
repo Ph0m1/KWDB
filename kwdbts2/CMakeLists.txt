@@ -237,7 +237,11 @@ set(TS_INCLUDE
         exec/include
         statistic/include
         )
+if (NOT KWBASE_OSS)
+    list(APPEND TS_INCLUDE icl/autonomy/include)
+endif()
 # kwdbts2 module cpp file
+if (KWBASE_OSS)
 file(GLOB_RECURSE KWDBTS2_SERVER_LIB_SRC
         common/src/*.cpp
         exec/src/*.cpp
@@ -248,6 +252,19 @@ file(GLOB_RECURSE KWDBTS2_SERVER_LIB_SRC
         mmap/src/lib/*.c
         statistic/src/*.cpp
         )
+else ()
+    file(GLOB_RECURSE KWDBTS2_SERVER_LIB_SRC
+            common/src/*.cpp
+            exec/src/*.cpp
+            storage/src/*.cpp
+            roachpb/*.cc
+            engine/*.cpp
+            mmap/src/*.cpp
+            mmap/src/lib/*.c
+            statistic/src/*.cpp
+            icl/autonomy/src/*.cpp
+    )
+endif()
 list(FILTER KWDBTS2_SERVER_LIB_SRC EXCLUDE REGEX ".*/tests/.*")
 
 if (ENABLE_COVERAGE)
@@ -270,13 +287,24 @@ if (WITH_TESTS)
   add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} -V)
   add_definitions(-DWITH_TESTS)
 
-  file(GLOB_RECURSE KWDBTS2_SERVER_TEST_SRC
-          mmap/tests/*.cpp
-          storage/tests/*.cpp
-          exec/tests/*.cpp
-          engine/tests/*.cpp
-          statistic/tests/*.cpp
-          )
+  if (KWBASE_OSS)
+      file(GLOB_RECURSE KWDBTS2_SERVER_TEST_SRC
+              mmap/tests/*.cpp
+              storage/tests/*.cpp
+              exec/tests/*.cpp
+              engine/tests/*.cpp
+              statistic/tests/*.cpp
+              )
+  else ()
+      file(GLOB_RECURSE KWDBTS2_SERVER_TEST_SRC
+              mmap/tests/*.cpp
+              storage/tests/*.cpp
+              exec/tests/*.cpp
+              engine/tests/*.cpp
+              statistic/tests/*.cpp
+              icl/autonomy/tests/*.cpp
+      )
+  endif()
   foreach (tsrc ${KWDBTS2_SERVER_TEST_SRC})
     # Build target name from filename (eg: icl_db_test.cc for icl/db_test.cc).
     get_filename_component(filename ${tsrc} NAME_WE)

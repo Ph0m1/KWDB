@@ -66,6 +66,7 @@ const (
 	compress
 	deleteExpiredData
 	alterCompressInterval
+	autonomy
 )
 
 // tsSchemaChangeResumer implements the jobs.Resumer interface for syncMetaCache
@@ -801,7 +802,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 			allNodePayloadInfos: [][]*sqlbase.SinglePayloadInfo{payInfo},
 		}
 		newPlanNode = tsIns
-	case compress, deleteExpiredData:
+	case compress, deleteExpiredData, autonomy:
 		log.Infof(ctx, "%s job start, jobID: %d", opType, sw.job.ID())
 		var desc []sqlbase.TableDescriptor
 		var allDesc []sqlbase.DescriptorProto
@@ -985,6 +986,8 @@ func getDDLOpType(op int32) string {
 		return "clean up expired data"
 	case alterCompressInterval:
 		return "alter compress interval"
+	case autonomy:
+		return "autonomy"
 	}
 	return ""
 }

@@ -40,6 +40,8 @@ const (
 	ScheduleCompress = "scheduled_table_compress"
 	// ScheduleRetention is the name of scheduled_table_retention
 	ScheduleRetention = "scheduled_table_retention"
+	// ScheduleAutonomy is the name of scheduled_table_autonomy
+	ScheduleAutonomy = "scheduled_table_autonomy"
 )
 
 var scheduledBackupOptionExpectValues = map[string]KVStringOptValidate{

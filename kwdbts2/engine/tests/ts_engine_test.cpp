@@ -11,6 +11,7 @@
 
 #include "engine.h"
 #include "test_util.h"
+#include "st_config.h"
 #include "utils/compress_utils.h"
 
 using namespace kwdbts;  // NOLINT
@@ -1050,7 +1051,7 @@ TEST_F(TestEngine, ClusterSetting) {
   ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
 
   CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP = 1;
-  CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT = 2;
+  CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT = 2;
   CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 10;
 
   // Write the first partition and the first segment -> 17 pieces of data
@@ -1123,8 +1124,8 @@ TEST_F(TestEngine, ClusterSetting) {
     std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
                                                                                                         1, err_info);
     EXPECT_EQ(p_tables.size(), 1);
-    EXPECT_EQ(p_tables[0]->getBlockMaxRows(), CLUSTER_SETTING_MAX_ROWS_PER_BLOCK);
-    EXPECT_EQ(p_tables[0]->getBlockMaxNum(), CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT);
+    EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxRows(), CLUSTER_SETTING_MAX_ROWS_PER_BLOCK);
+    EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxNum(), CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT);
     std::shared_ptr<MMapSegmentTable> segment1 = p_tables[0]->getSegmentTable(1);
     EXPECT_NE(segment1, nullptr);
     std::shared_ptr<MMapSegmentTable> segment2 = p_tables[0]->getSegmentTable(3);
@@ -1142,7 +1143,7 @@ TEST_F(TestEngine, ClusterSetting) {
   TSEngineImpl::CloseTSEngine(ctx_, ts_engine_);
 
   // cluster setting configuration
-  CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT = 5;
+  CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT = 5;
   CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 5;
 
   // reopen TsEngine
@@ -1173,10 +1174,10 @@ TEST_F(TestEngine, ClusterSetting) {
     std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
                                                                                                         1, err_info);
     EXPECT_EQ(p_tables.size(), 2);
-    EXPECT_EQ(p_tables[0]->getBlockMaxRows(), 10);
-    EXPECT_EQ(p_tables[0]->getBlockMaxNum(), 2);
-    EXPECT_EQ(p_tables[1]->getBlockMaxRows(), CLUSTER_SETTING_MAX_ROWS_PER_BLOCK);
-    EXPECT_EQ(p_tables[1]->getBlockMaxNum(), CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT);
+    EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxRows(), 10);
+    EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxNum(), 2);
+    EXPECT_EQ(p_tables[1]->getSegmentTable(1)->getBlockMaxRows(), CLUSTER_SETTING_MAX_ROWS_PER_BLOCK);
+    EXPECT_EQ(p_tables[1]->getSegmentTable(1)->getBlockMaxNum(), CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT);
     std::shared_ptr<MMapSegmentTable> segment4 = p_tables[0]->getSegmentTable(1);
     EXPECT_NE(segment4, nullptr);
     std::shared_ptr<MMapSegmentTable> segment5 = p_tables[0]->getSegmentTable(3);

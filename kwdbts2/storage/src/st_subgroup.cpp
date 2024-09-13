@@ -20,6 +20,7 @@
   namespace fs = std::filesystem;
 #endif
 #include "st_subgroup.h"
+#include "st_config.h"
 #include "sys_utils.h"
 #include "mmap/mmap_metrics_table.h"
 #include "lt_rw_latch.h"
@@ -175,16 +176,18 @@ int TsSubEntityGroup::ApplyCompactData(std::map<timestamp64, std::map<uint32_t, 
 }
 
 int TsSubEntityGroup::ReOpenInit(ErrorInfo& err_info) {
+  uint16_t max_entities_per_subgroup = GetMaxEntitiesPerSubgroup();
   if (entity_block_meta_ != nullptr) {
+    max_entities_per_subgroup = entity_block_meta_->GetConfigSubgroupEntities();
     delete entity_block_meta_;
     entity_block_meta_ = nullptr;
   }
   partitions_ts_.clear();
-  return OpenInit(subgroup_id_, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
+  return OpenInit(subgroup_id_, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, max_entities_per_subgroup, err_info);
 }
 
 int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_path, const string& tbl_sub_path,
-                               int flags, ErrorInfo& err_info) {
+                               int flags, uint16_t max_entities_per_subgroup, ErrorInfo& err_info) {
   wrLock();
   Defer defer{[&]() { unLock(); }};
   if (entity_block_meta_ != nullptr) {
@@ -212,7 +215,7 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
 
   entity_block_meta_ = new MMapEntityBlockMeta(true, true);
   string meta_path = table_name_ + ".et";
-  int ret = entity_block_meta_->init(meta_path, db_path_, tbl_sub_path_, flags, false, 0);
+  int ret = entity_block_meta_->init(meta_path, db_path_, tbl_sub_path_, flags, false, max_entities_per_subgroup);
   if (ret < 0) {
     err_info.setError(ret, tbl_sub_path);
     return ret;
@@ -270,6 +273,10 @@ EntityID TsSubEntityGroup::AllocateEntityID(const string& primary_tag, ErrorInfo
 std::vector<uint32_t> TsSubEntityGroup::GetEntities() {
   assert(entity_block_meta_ != nullptr);
   return entity_block_meta_->getEntities();
+}
+
+uint16_t TsSubEntityGroup::GetSubgroupEntities() {
+  return entity_block_meta_->GetConfigSubgroupEntities();
 }
 
 int TsSubEntityGroup::SetEntityNum(uint32_t entity_num) {

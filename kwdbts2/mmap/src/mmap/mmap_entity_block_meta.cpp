@@ -16,11 +16,9 @@
 #include "utils/string_utils.h"
 #include "utils/compress_utils.h"
 #include "ts_common.h"
+#include "st_config.h"
 
 size_t META_BLOCK_ITEM_MAX = 1000;  // max blockitem in one meta file
-uint32_t CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP = 500;
-uint32_t CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT = 1000;
-uint32_t CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 1000;
 
 void setRowDeleted(char* delete_flags, size_t row_index) {
   size_t byte = (row_index - 1) >> 3;
@@ -221,11 +219,7 @@ int MMapEntityBlockMeta::init(const string &file_path, const std::string &db_pat
     initAddr();
     if (entity_header_) {  // adapt history files
       max_entities = entity_header_->max_entities_per_subgroup == 0 ?
-                     CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP : entity_header_->max_entities_per_subgroup;
-    }
-  } else {
-    if (is_et_) {  //  new created subgroup parameters using configure.
-      max_entities = CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP;
+                     max_entities : entity_header_->max_entities_per_subgroup;
     }
   }
 
@@ -266,6 +260,8 @@ int MMapEntityBlockMeta::init(const string &file_path, const std::string &db_pat
     entity_header_->cur_datafile_id = 0;
     entity_header_->version = METRIC_VERSION;
   }
+
+  max_entities_per_subgroup_ = max_entities;
 
   return 0;
 }

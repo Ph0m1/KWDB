@@ -55,7 +55,11 @@ struct TSTableFileMetadata {
   time_t create_time;       ///< TSTable object (vtree) create time.
   off_t meta_data_length;   ///< length of meta data section.
   uint32_t  block_num_of_segment;
-  col_a reserved_2;
+  uint32_t max_blocks_per_segment;
+  uint32_t max_rows_per_block;
+  uint64_t insert_rows_per_day;
+  uint64_t entity_num;
+  char reserved_2[40];
   col_a ns_url;             ///< offset to the name service.
   ///< encryption vector.
   off_t attribute_offset;   ///< offset to tree attributes.

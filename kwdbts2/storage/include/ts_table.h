@@ -400,6 +400,14 @@ class TsTable {
     return entity_bt_manager_->GetPartitionInterval();
   }
 
+  MMapRootTableManager* GetRootTableManager() {
+    return entity_bt_manager_;
+  }
+
+  KStatus GetEntityNum(kwdbContext_p ctx, uint64_t* entity_num);
+
+  KStatus GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint64_t* row_num);
+
   /**
     * @brief clean ts table
     *
@@ -782,6 +790,10 @@ class TsEntityGroup {
     tag_bt_->mutexLock();
     tag_bt_->SetTableVersion(table_version);
     tag_bt_->mutexUnlock();
+  }
+
+  size_t GetTagCount() const  {
+    return tag_bt_->actual_size();
   }
 
  protected:

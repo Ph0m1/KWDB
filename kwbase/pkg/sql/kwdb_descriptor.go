@@ -2529,49 +2529,53 @@ func InitCompressInterval(ctx context.Context, ie sqlutil.InternalExecutor) erro
 	return nil
 }
 
+// ScheduleDetail schedule detail
+type ScheduleDetail struct {
+	Name     string
+	Executor string
+	CronExpr string
+}
+
+// Schedules all currently supported schedules
+var Schedules = map[string]ScheduleDetail{
+	ScheduleRetention: {
+		Name:     ScheduleRetention,
+		Executor: "scheduled-retention-executor",
+		CronExpr: "@hourly",
+	},
+	ScheduleCompress: {
+		Name:     ScheduleCompress,
+		Executor: "scheduled-compress-executor",
+		CronExpr: "@hourly",
+	},
+}
+
 // InitScheduleForKWDB inits schedules
 func InitScheduleForKWDB(ctx context.Context, db *kv.DB, ie sqlutil.InternalExecutor) error {
 	return db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		const selectStmt = `select count(1) from system.scheduled_jobs`
-		row, err := ie.QueryRow(
+		const selectStmt = `select schedule_name from system.scheduled_jobs`
+		rows, err := ie.Query(
 			ctx, `select scheduled_jobs`, txn, selectStmt)
 		if err != nil {
 			return err
 		}
-		if int(tree.MustBeDInt(row[0])) > 0 {
-			return nil
+		for _, row := range rows {
+			delete(Schedules, string(tree.MustBeDString(row[0])))
 		}
-		type ScheduleDetail struct {
-			name     string
-			executor string
-			cronExpr string
-		}
-		schedules := []ScheduleDetail{
-			{
-				name:     ScheduleRetention,
-				executor: "scheduled-retention-executor",
-				cronExpr: "@hourly",
-			},
-			{
-				name:     ScheduleCompress,
-				executor: "scheduled-compress-executor",
-				cronExpr: "@hourly",
-			},
-		}
-		for _, sched := range schedules {
+		for _, sched := range Schedules {
 			schedule := jobs.NewScheduledJob(scheduledjobs.ProdJobSchedulerEnv)
-			schedule.SetScheduleLabel(sched.name)
+			schedule.SetScheduleLabel(sched.Name)
 			schedule.SetOwner(security.NodeUser)
-			expr, err := cronexpr.Parse(sched.cronExpr)
+			expr, err := cronexpr.Parse(sched.CronExpr)
 			if err != nil {
-				return errors.Wrapf(err, "parsing schedule expression: %q", sched.cronExpr)
+				return errors.Wrapf(err, "parsing schedule expression: %q", sched.CronExpr)
 			}
 			schedule.SetNextRun(expr.Next(scheduledjobs.ProdJobSchedulerEnv.Now()))
 			schedule.SetScheduleDetails(jobspb.ScheduleDetails{Wait: jobspb.ScheduleDetails_SKIP, OnError: jobspb.ScheduleDetails_RETRY_SCHED})
-			if err := schedule.SetSchedule(sched.cronExpr); err != nil {
+			if err := schedule.SetSchedule(sched.CronExpr); err != nil {
 				return err
 			}
-			schedule.SetExecutionDetails(sched.executor, jobspb.ExecutionArguments{})
+			schedule.SetExecutionDetails(sched.Executor, jobspb.ExecutionArguments{})
 			err = schedule.Create(ctx, ie, txn)
 			if err != nil {
 				return err

@@ -78,7 +78,7 @@ class TsTimePartition : public TSObject {
  public:
   explicit TsTimePartition(MMapRootTableManager*& root_table_manager, uint16_t config_subgroup_entities) :
     TSObject(), root_table_manager_(root_table_manager) {
-    meta_manager_.config_subgroup_entities = config_subgroup_entities;
+    meta_manager_.max_entities_per_subgroup = config_subgroup_entities;
     rw_latch_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
     segments_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
     compress_mtx_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_COMPRESS_MUTEX);
@@ -133,6 +133,8 @@ class TsTimePartition : public TSObject {
 
   timestamp64& maxTimestamp() { return meta_manager_.maxTimestamp(); }
 
+  BLOCK_ID GetMaxBlockID() { return meta_manager_.getEntityHeader()->cur_block_id; }
+
   virtual int reserve(size_t size) { return KWEPERM; }
 
   virtual int remove();
@@ -147,11 +149,6 @@ class TsTimePartition : public TSObject {
     // found segment that may contain this block id.
     bool ret = data_segments_.Seek(segment_id, key, value);
     if (ret) {
-      if (UNLIKELY(segment_id >= value->segment_id() + getBlockMaxNum())) {
-        // this segment may not satisfied, means we not found segment.
-        LOG_ERROR("getSegmentTable segment[%d] is not exists", segment_id);
-        return nullptr;
-      }
       // segment has different status, if not ready means we need load segment files.
       if (value->getObjectStatus() != OBJ_READY && !lazy_open) {
         ErrorInfo err_info;
@@ -162,24 +159,36 @@ class TsTimePartition : public TSObject {
           return nullptr;
         }
       }
+      if (UNLIKELY(value->getObjectStatus() == OBJ_READY && segment_id >= value->segment_id() + value->getBlockMaxNum())) {
+        // this segment may not satisfy, means we not found segment.
+        LOG_ERROR("getSegmentTable segment[%d] is not exists", segment_id);
+        return nullptr;
+      }
       return value;
     }
     return nullptr;
   }
 
   // check if blockitem can store new data.
-  inline bool isReadOnly(BlockItem* block_item) const {
+  inline bool isReadOnly(BlockItem* block_item, uint32_t payload_table_version = 0) const {
     assert(block_item != nullptr);
     if (block_item->block_id != 0) {
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable(block_item->block_id);
       if (tbl == nullptr) {
         return true;
       }
-      if (!tbl->canWrite()) {
+      if (!tbl->canWrite() || tbl->schemaVersion() < payload_table_version) {
         return true;
       }
+      if (block_item->alloc_row_count >= tbl->getBlockMaxRows() ||
+          block_item->publish_row_count >= tbl->getBlockMaxRows()) {
+        return true;
+      }
+      if (block_item->max_rows_in_block == 0) {
+        block_item->max_rows_in_block = tbl->getBlockMaxRows();
+      }
     }
-    return block_item->alloc_row_count >= meta_manager_.getBlockMaxRows() || block_item->read_only;
+    return block_item->read_only;
   }
 
   inline void releaseSegments() {
@@ -198,10 +207,6 @@ class TsTimePartition : public TSObject {
    * @return A pointer to the newly created MMapSegmentTable on success, or nullptr if an error occurs.
    */
   MMapSegmentTable* createSegmentTable(BLOCK_ID segment_id, uint32_t table_version, ErrorInfo& err_info);
-
-  inline size_t getBlockMaxRows() const { return meta_manager_.getBlockMaxRows(); }
-
-  inline size_t getBlockMaxNum() const { return meta_manager_.getBlockMaxNum(); }
 
   inline EntityItem* getEntityItem(uint entity_id) {
     return meta_manager_.getEntityItem(entity_id);

@@ -2148,10 +2148,15 @@ func (dsp *DistSQLPlanner) operateTSData(
 	p.Processors = make([]physicalplan.Processor, 0, len(n.nodeID))
 
 	p.GateNoopInput = len(n.nodeID)
-
-	tsPro.TsOperator = execinfrapb.OperatorType_TsDeleteExpiredData
-	if n.operateType == compress {
+	switch n.operateType {
+	case compress:
 		tsPro.TsOperator = execinfrapb.OperatorType_TsCompressTsTable
+	case deleteExpiredData:
+		tsPro.TsOperator = execinfrapb.OperatorType_TsDeleteExpiredData
+	case autonomy:
+		tsPro.TsOperator = execinfrapb.OperatorType_TsAutonomy
+	default:
+		return p, pgerror.New(pgcode.WrongObjectType, "operate type is not supported")
 	}
 	for _, table := range n.desc {
 		if table.TsTable.Lifetime == 0 || table.TsTable.Lifetime == InvalidLifetime {

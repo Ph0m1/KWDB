@@ -7,14 +7,14 @@ GOPATH ?=
 CC ?= $(shell which gcc)
 CXX ?= $(shell which g++)
 
-KWBASE_MAKEFILE ?= Makefile
+KWBASE_OSS ?= ON
 
 # cmake configuration options
 BUILD_TYPE ?= Debug
 WITH_TESTS ?= OFF
 INSTALL_PATH ?= $(BASEDIR)/install
 CMAKE_CONFIG_OPTIONS ?= -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
-	-DCMAKE_INSTALL_PREFIX=$(INSTALL_PATH) -DKWBASE_MAKEFILE=$(KWBASE_MAKEFILE)
+	-DCMAKE_INSTALL_PREFIX=$(INSTALL_PATH) -DKWBASE_OSS=$(KWBASE_OSS)
 
 ALL_TESTS := cpplint kwdbts2-test kwbase-test
 

@@ -24,6 +24,7 @@
 #include "ts_time_partition.h"
 #include "lt_rw_latch.h"
 #include "perf_stat.h"
+#include "st_config.h"
 #include "sys_utils.h"
 
 extern bool g_engine_initialized;
@@ -208,11 +209,11 @@ int MMapSegmentTable::initColumn(int flags, ErrorInfo& err_info) {
       return err_info.errcode;
     }
     // calculte block header size and block size
-    col_block_header_size_[i] = meta_manager_->getBlockBitmapSize() + BLOCK_AGG_COUNT_SIZE
+    col_block_header_size_[i] = getBlockBitmapSize() + BLOCK_AGG_COUNT_SIZE
                                 + cols_info_with_hidden_[i].size * BLOCK_AGG_NUM;
     col_block_header_size_[i] = (col_block_header_size_[i] + 63) / 64 * 64;
 
-    col_block_size_[i] = col_block_header_size_[i] + cols_info_with_hidden_[i].size * meta_manager_->getBlockMaxRows();
+    col_block_size_[i] = col_block_header_size_[i] + cols_info_with_hidden_[i].size * getBlockMaxRows();
     col_block_size_[i] = (col_block_size_[i] + 63) / 64 * 64;
 
     // vartype column will use string file to store real values.
@@ -240,6 +241,32 @@ int MMapSegmentTable::open_(int char_code, const string& file_path, const std::s
   }
   name_ = getURLObjectName(file_path);
   if (metaDataLen() >= (off_t) sizeof(TSTableFileMetadata)) {
+    // Initialize segment pre allocation space size configuration
+    if (UNLIKELY(meta_data_->max_blocks_per_segment == 0 || meta_data_->max_rows_per_block == 0)) {
+      if (meta_manager_->getEntityHeader()->max_blocks_per_segment != 0 &&
+          meta_manager_->getEntityHeader()->max_rows_per_block != 0) {
+        // Compatible with lower versions(2.0.3.x)
+        max_blocks_per_segment_ = meta_manager_->getEntityHeader()->max_blocks_per_segment;
+        max_rows_per_block_ = meta_manager_->getEntityHeader()->max_rows_per_block;
+        block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
+      } else {
+        // Get the current segment configuration
+        LOG_WARN("Segment[%s] pre allocation configuration exception", file_path.c_str())
+        int64_t partition_interval = meta_manager_->maxTimestamp() - meta_manager_->minTimestamp() + 1;
+        GetSegmentConfig(max_blocks_per_segment_, max_rows_per_block_, meta_manager_->GetTableId(),
+                         meta_manager_->max_entities_per_subgroup, partition_interval);
+        block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
+      }
+      // If uncompressed, update persistent metadata
+      if (!is_compressed_) {
+        meta_data_->max_blocks_per_segment = max_blocks_per_segment_;
+        meta_data_->max_rows_per_block = max_rows_per_block_;
+      }
+    } else {
+      max_blocks_per_segment_ = meta_data_->max_blocks_per_segment;
+      max_rows_per_block_ = meta_data_->max_rows_per_block;
+      block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
+    }
     if (meta_data_->has_data) {
       if (initColumn(flags, err_info) < 0)
         return err_info.errcode;
@@ -247,8 +274,8 @@ int MMapSegmentTable::open_(int char_code, const string& file_path, const std::s
       if (isTransient(meta_data_->struct_type))
         return 0;
     }
-    setObjectReady();
     actual_writed_count_.store(meta_data_->num_node);
+    setObjectReady();
   } else {
     if (!(bt_file_.flags() & O_CREAT)) {
       err_info.errcode = KWECORR;
@@ -278,15 +305,15 @@ int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segmen
   // check if we should mount sqfs file
   string segment_dir = db_path + tbl_sub_path;
   string sqfs_path = getCompressedFilePath();
-  is_compressed = IsExists(sqfs_path);
+  is_compressed_ = IsExists(sqfs_path);
   bool is_mounted = isMounted(segment_dir);
   if (!(flags & O_CREAT) && lazy_open) {
-    if (is_compressed && !is_mounted && IsExists(segment_dir)) {
+    if (is_compressed_ && !is_mounted && IsExists(segment_dir)) {
       Remove(segment_dir);
     }
     return 0;
   }
-  if (is_compressed && !mount(sqfs_path, segment_dir, err_info)) {
+  if (is_compressed_ && !mount(sqfs_path, segment_dir, err_info)) {
     LOG_ERROR("%s mount failed", sqfs_path.c_str());
     return err_info.errcode;
   }
@@ -299,7 +326,7 @@ int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segmen
   }
 
   // check if compressed failed last time.
-  if (!(flags & O_CREAT) && !is_compressed && getSegmentStatus() >= ImmuWithRawSegment) {
+  if (!(flags & O_CREAT) && !is_compressed_ && getSegmentStatus() >= ImmuWithRawSegment) {
     setSegmentStatus(InActiveSegment);
   }
 
@@ -307,7 +334,7 @@ int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segmen
   if (meta_data_ != nullptr && _reservedSize() == 0) {
     LOG_DEBUG("reservedSize of table[ %s ] is 0.", file_path.c_str());
     setObjectReady();
-    err_info.errcode = reserve(meta_manager_->getReservedRows());
+    err_info.errcode = reserve(getReservedRows());
     if (err_info.errcode < 0) {
       err_info.setError(err_info.errcode, tbl_sub_path + file_path);
     }
@@ -346,6 +373,14 @@ int MMapSegmentTable::init(EntityBlockMetaManager* meta_manager, const vector<At
 
   meta_data_->cols_num = cols_info_with_hidden_.size();
   meta_data_->struct_type = (ST_VTREE | ST_NS_EXT);
+
+  // Get the current segment configuration
+  int64_t partition_interval = meta_manager_->maxTimestamp() - meta_manager_->minTimestamp() + 1;
+  GetSegmentConfig(max_blocks_per_segment_, max_rows_per_block_, meta_manager_->GetTableId(),
+                   meta_manager_->max_entities_per_subgroup, partition_interval);
+  block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
+  meta_data_->max_blocks_per_segment = max_blocks_per_segment_;
+  meta_data_->max_rows_per_block = max_rows_per_block_;
 
   cols_info_without_hidden_.clear();
   cols_idx_.clear();
@@ -475,7 +510,7 @@ int MMapSegmentTable::reserveBase(size_t n) {
     if (cols_info_with_hidden_[i].isFlag(AINFO_DROPPED)) {
       continue;
     }
-    err_code = col_files_[i]->mremap(meta_manager_->getBlockMaxNum() * col_block_size_[i]);
+    err_code = col_files_[i]->mremap(getBlockMaxNum() * col_block_size_[i]);
     if (err_code < 0) {
       break;
     }
@@ -817,7 +852,7 @@ int MMapSegmentTable::remove() {
 
   TsTableObject::close();
   string sqfs_file_path = getCompressedFilePath();
-  if (is_compressed) {
+  if (is_compressed_) {
     // try umount sqfs file
     umount(db_path_, tbl_sub_path_, err_info);
     // try remove sqfs file

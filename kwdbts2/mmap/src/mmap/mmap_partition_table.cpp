@@ -208,7 +208,7 @@ MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint
     }
   }
   // reserve files to has enough space storing data
-  err_info.errcode = segment_tbl->reserve(meta_manager_.getReservedRows());
+  err_info.errcode = segment_tbl->reserve(segment_tbl->getReservedRows());
   if (err_info.errcode < 0) {
     err_info.setError(err_info.errcode, segment_sand);
     return nullptr;
@@ -408,7 +408,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     entity_item->row_written -= deleted_rows;
     for (size_t i = 0; i < alloc_spans->size(); i++) {
       (*alloc_spans)[i].block_item->publish_row_count += (*alloc_spans)[i].row_num;
-      if ((*alloc_spans)[i].block_item->publish_row_count >= getBlockMaxRows()) {
+      if ((*alloc_spans)[i].block_item->publish_row_count >= (*alloc_spans)[i].block_item->max_rows_in_block) {
         full_block_idx.push_back(i);
       }
     }
@@ -522,7 +522,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
           //   1. the maximum timestamp of the data saved by the segment is less than compress_ts
           //   2. the pre allocated space of the segment is 90% full
           if (segment_tbl->maxTimestamp() / 1000 < compress_ts
-              && segment_tbl->size() >= 0.9 * meta_manager_.getReservedRows()) {
+              && segment_tbl->size() >= 0.9 * segment_tbl->getReservedRows()) {
             segment_tbl->setSegmentStatus(InActiveSegment);
             MUTEX_LOCK(segments_lock_);
             Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
@@ -566,7 +566,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
         if (!isMounted(db_path_ + segment_tbl->tbl_sub_path()) && segment_tbl.use_count() <= 2) {
-          if (segment_tbl->reopen(true, err_info) < 0) {
+          if (segment_tbl->reopen(false, err_info) < 0) {
             LOG_ERROR("MMapSegmentTable[%s] reopen failed", segment_tbl->realFilePath().c_str());
             return;
           }
@@ -579,7 +579,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
         if (!isMounted(db_path_ + segment_tbl->tbl_sub_path()) && segment_tbl.use_count() <= 2) {
-          if (segment_tbl->reopen(true, err_info) < 0) {
+          if (segment_tbl->reopen(false, err_info) < 0) {
             return;
           }
         }
@@ -892,7 +892,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     entity_item->row_written -= deleted_rows;
     for (size_t i = 0; i < alloc_spans->size(); i++) {
       (*alloc_spans)[i].block_item->publish_row_count += (*alloc_spans)[i].row_num;
-      if ((*alloc_spans)[i].block_item->publish_row_count >= getBlockMaxRows()) {
+      if ((*alloc_spans)[i].block_item->publish_row_count >= (*alloc_spans)[i].block_item->max_rows_in_block) {
         full_block_idx.push_back(i);
       }
     }
@@ -993,7 +993,7 @@ int TsTimePartition::AllocateAllDataSpace(uint entity_id, size_t batch_num, std:
     BlockSpan span;
     // Count the number of rows allocated this time and update the span
     span.start_row = block_item->alloc_row_count;
-    span.row_num = std::min(left_count, size_t(meta_manager_.getBlockMaxRows() - block_item->alloc_row_count));
+    span.row_num = std::min(left_count, size_t(block_item->max_rows_in_block - block_item->alloc_row_count));
     span.block_item = block_item;
     block_item->alloc_row_count += span.row_num;
     // block_item->publish_row_count = block_item->alloc_row_count;
@@ -1049,7 +1049,7 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
       pre_block_item->is_agg_res_available = false;
       block_item = pre_block_item;
       auto first_row = pre_block_row > 0 ? pre_block_row : 1;
-      auto row_count = std::min(left_count, size_t(meta_manager_.getBlockMaxRows() - block_item->alloc_row_count));
+      auto row_count = std::min(left_count, size_t(block_item->max_rows_in_block - block_item->alloc_row_count));
       setBatchValid(block_item->rows_delete_flags, first_row, row_count);
     } else {
       err_code = allocateBlockItem(entity_id, &block_item, payload->GetTsVersion());
@@ -1060,7 +1060,7 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
       // Count the number of rows allocated this time and update the span
     }
     span.start_row = block_item->alloc_row_count;
-    span.row_num = std::min(left_count, size_t(meta_manager_.getBlockMaxRows() - block_item->alloc_row_count));
+    span.row_num = std::min(left_count, size_t(block_item->max_rows_in_block - block_item->alloc_row_count));
     span.block_item = block_item;
     block_item->alloc_row_count += span.row_num;
     // block_item->publish_row_count = block_item->alloc_row_count;
@@ -1107,17 +1107,8 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
   } else {
     block_item = getBlockItem(entity_item->cur_block_id);
     // If all the space in the current BlockItem has been allocated or is unavailable, then it is necessary to add a new BlockItem.
-    if (isReadOnly(block_item)) {
+    if (isReadOnly(block_item, payload_table_version)) {
       need_add_block_item = true;
-    } else if (block_item->publish_row_count >= getBlockMaxRows()) {
-      need_add_block_item = true;
-    }
-    if (!need_add_block_item) {
-      std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable(block_item->block_id);
-      // If the table version of the historical segment is smaller than the payload table version, a new block item needs to be created
-      if (tbl && tbl->schemaVersion() < payload_table_version) {
-        need_add_block_item = true;
-      }
     }
   }
 
@@ -1138,7 +1129,16 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
     if (segment_table_version > payload_table_version) {
       new_segment_table_version = segment_table_version;
     }
-    if (segment_block_num >= meta_manager_.getBlockMaxNum() || segment_table_version < payload_table_version) {
+    uint32_t max_blocks_per_segment = 0;
+    if (LIKELY(active_segment_ != nullptr)) {
+      max_blocks_per_segment = active_segment_->getBlockMaxNum();
+    } else {
+      std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(meta_manager_.getEntityHeader()->cur_block_id - 1);
+      if (segment_tbl) {
+        max_blocks_per_segment = segment_tbl->getBlockMaxNum();
+      }
+    }
+    if (segment_block_num >= max_blocks_per_segment || segment_table_version < payload_table_version) {
       active_segment_ = nullptr;
     }
 
@@ -1164,6 +1164,7 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
 
     block_item->is_overflow = false;
     block_item->is_agg_res_available = false;
+    block_item->max_rows_in_block = active_segment_->getBlockMaxRows();
 
     // Updates the metadata of the active segment.
     active_segment_->metaData()->block_num_of_segment++;
@@ -1883,15 +1884,13 @@ int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
     std::shared_ptr<MMapSegmentTable> segment_table;
     BLOCK_ID key;
     bool ret = data_segments_.Seek(segment_id, key, segment_table);
-    if (ret && segment_id < segment_table->segment_id() + getBlockMaxNum()) {
-      if (segment_table->getObjectStatus() == OBJ_READY) {
-        int error_code = segment_table->remove();
-        if (error_code < 0) {
-          LOG_ERROR("remove segment[%s] failed!", segment_table->realFilePath().c_str());
-          return error_code;
-        }
-        LOG_INFO("remove segment[%s] success!", segment_table->realFilePath().c_str());
+    if (ret) {
+      int error_code = segment_table->remove();
+      if (error_code < 0) {
+        LOG_ERROR("remove segment[%s] failed!", segment_table->realFilePath().c_str());
+        return error_code;
       }
+      LOG_INFO("remove segment[%s] success!", segment_table->realFilePath().c_str());
     }
   }
   releaseSegments();

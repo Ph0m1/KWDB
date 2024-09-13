@@ -43,7 +43,13 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   MMapStringFile* m_str_file_{nullptr};
   EntityBlockMetaManager* meta_manager_{nullptr};
   // is this segment compressed.
-  bool is_compressed = false;
+  bool is_compressed_ = false;
+  // max blocks per segment
+  uint32_t max_blocks_per_segment_;
+  // max rows per block
+  uint16_t max_rows_per_block_;
+  // null bitmap size of block
+  uint16_t block_null_bitmap_size_;
 
   virtual int addColumnFile(int col, int flags, ErrorInfo& err_info);
 
@@ -117,6 +123,14 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   inline void setSegmentStatus(SegmentStatus s_status) {
     TsTableObject::setStatus(s_status);
   }
+
+  inline size_t getBlockMaxRows() const { return max_rows_per_block_; }
+
+  inline uint64_t getBlockMaxNum() { return max_blocks_per_segment_; }
+
+  inline uint64_t getBlockBitmapSize() const { return block_null_bitmap_size_; }
+
+  inline uint64_t getReservedRows() { return max_rows_per_block_ * max_blocks_per_segment_; }
 
   /**
    * @brief  check if current segment schema is same with root table.
@@ -222,7 +236,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
         return nullptr;
     }
     // agg result address: block addr + null bitmap size + agg_type offset
-    size_t offset = meta_manager_->getBlockBitmapSize() + agg_offset;
+    size_t offset = getBlockBitmapSize() + agg_offset;
     return reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
   }
 
@@ -235,7 +249,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   };
 
   inline void calculateAggAddr(BLOCK_ID data_block_id, size_t c, AggDataAddresses& addresses) {
-    size_t offset = meta_manager_->getBlockBitmapSize();
+    size_t offset = getBlockBitmapSize();
     addresses.count = reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
     addresses.max = reinterpret_cast<void*>((intptr_t) addresses.count + BLOCK_AGG_COUNT_SIZE);
     addresses.min = reinterpret_cast<void*>((intptr_t) addresses.max + cols_info_with_hidden_[c].size);
@@ -442,12 +456,12 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
   // check if current segment can writing data
   inline bool canWrite() {
-    return !is_compressed && getObjectStatus() == OBJ_READY && getSegmentStatus() < InActiveSegment;
+    return !is_compressed_ && getObjectStatus() == OBJ_READY && getSegmentStatus() < InActiveSegment;
   }
 
   // check if current segment is compressed
   inline bool sqfsIsExists() const {
-    return is_compressed;
+    return is_compressed_;
   }
 
   // check if column values are all null in block.
@@ -483,7 +497,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     }
     assert(start_row.offset_row > 0);
     // 0 ~ config_block_rows_ - 1
-    assert((start_row.offset_row - 1 + count) < meta_manager_->getBlockMaxRows());
+    assert((start_row.offset_row - 1 + count) < getBlockMaxRows());
     char* bitmap = static_cast<char*>(columnNullBitmapAddr(start_row.block_id, c));
     return !isAllNull(bitmap, start_row.offset_row, count);
   }

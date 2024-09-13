@@ -11,6 +11,7 @@
 
 #include "mmap/mmap_segment_table_iterator.h"
 #include "cm_func.h"
+#include "st_config.h"
 
 int convertFixedToNum(DATATYPE old_type, DATATYPE new_type, char* src, char* dst, ErrorInfo& err_info) {
   switch (old_type) {
@@ -168,8 +169,8 @@ KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* v
       } else {
         if (convertFixedToNum(old_type, new_type, (char*) old_mem, value + i * new_len, err_info) < 0) {
           if (!is_bitmap_new) {
-            void* new_bitmap = malloc((CLUSTER_SETTING_MAX_ROWS_PER_BLOCK + 7)/8);
-            memcpy(new_bitmap, *bitmap, (CLUSTER_SETTING_MAX_ROWS_PER_BLOCK + 7)/8);
+            void* new_bitmap = malloc((segment_tbl->getBlockMaxRows() + 7)/8);
+            memcpy(new_bitmap, *bitmap, (segment_tbl->getBlockMaxRows() + 7)/8);
             *bitmap = new_bitmap;
             is_bitmap_new = true;
             need_free_bitmap = true;
@@ -189,8 +190,8 @@ KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* v
       ErrorInfo err_info;
       if (convertStrToFixed(v_value, new_type, value + i * new_len, KUint16(old_mem.get()), err_info) < 0) {
         if (!is_bitmap_new) {
-          void* new_bitmap = malloc((CLUSTER_SETTING_MAX_ROWS_PER_BLOCK + 7)/8);
-          memcpy(new_bitmap, *bitmap, (CLUSTER_SETTING_MAX_ROWS_PER_BLOCK + 7)/8);
+          void* new_bitmap = malloc((segment_tbl->getBlockMaxRows() + 7)/8);
+          memcpy(new_bitmap, *bitmap, (segment_tbl->getBlockMaxRows() + 7)/8);
           *bitmap = new_bitmap;
           is_bitmap_new = true;
           need_free_bitmap = true;

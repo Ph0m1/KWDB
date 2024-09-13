@@ -39,7 +39,7 @@ using namespace std;
 #define KWEDATA         -20 // Incorrect data value
 #define KWELENLIMIT     -21 // Out of len limit
 #define KWEDATATYPEMISMATCH  -22 //datatype mismatch
-#define KWENOEGMENT      -23  // need create new segment directory
+#define KWENOSEGMENT      -23  // need create new segment directory
 #define KWEDUPREJECT     -24  // reject duplicate data
 #define KWERSRCBUSY      -25  // resource is busy
 

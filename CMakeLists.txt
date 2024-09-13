@@ -71,6 +71,14 @@ else()
     message(STATUS "PubSubContext reuse enabled")
 endif()
 
+option(KWBASE_OSS "Whether to compile an open-source edition" ON)
+if (KWBASE_OSS)
+    message(STATUS "Compile open-source edition")
+    add_definitions(-DKWBASE_OSS)
+else()
+    message(STATUS "Compile enterprise edition")
+endif()
+
 # Add K_DEBUG and K_RELEASE macros
 option(WITH_DEFINITION "Add macro definition control" K_DEBUG)
 if(NOT WITH_DEFINITION)
@@ -183,9 +191,9 @@ add_subdirectory(kwdbts2)
 
 # compile kwbase
 if (BUILD_KWBASE)
-    option(KWBASE_MAKEFILE "kwbase build makefile" Makefile)
-    if(NOT KWBASE_MAKEFILE)
-        set(KWBASE_MAKEFILE Makefile)
+    set(KWBASE_MAKEFILE "Makefile")
+    if(NOT KWBASE_OSS)
+        set(KWBASE_MAKEFILE "Makefile_ent")
     endif()
 
     add_custom_target(

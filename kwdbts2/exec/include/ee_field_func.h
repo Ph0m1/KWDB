@@ -222,7 +222,7 @@ class FieldFuncRightShift : public FieldFuncOp {
   Field *field_to_copy() override;
 };
 
-class FieldFuncTimeBucket : public FieldFuncOp {
+class  FieldFuncTimeBucket : public FieldFuncOp {
  public:
   using FieldFuncOp::FieldFuncOp;
   explicit FieldFuncTimeBucket(std::list<Field *> fields, k_int8 tz) : FieldFuncOp(fields) {

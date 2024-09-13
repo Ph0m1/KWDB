@@ -154,6 +154,23 @@ public:
   KStatus SetPartitionInterval(const uint64_t& partition_interval);
 
   /**
+   * @brief Get the statistic info
+   *
+   * @param[out] entity_num
+   * @param[out] insert_rows_per_day
+   * @return KStatus status
+   */
+  KStatus GetStatisticInfo(uint64_t& entity_num, uint64_t& insert_rows_per_day);
+
+  /**
+   * @brief Set the storage info
+   * @param[in] entity_num
+   * @param[in] insert_rows_per_day
+   * @return KStatus status
+   */
+  KStatus SetStatisticInfo(uint64_t entity_num, uint64_t insert_rows_per_day);
+
+  /**
    * @brief Get the actual schema information (exclude dropped columns)
    *
    * @param table_version Version number of the table.

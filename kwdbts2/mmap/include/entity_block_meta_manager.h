@@ -26,10 +26,6 @@ class EntityBlockMetaManager {
   // opening meta files, and generating meta data struct in memory, using mmap mechanism.
   int Open(const string &file_path, const std::string &db_path, const string &tbl_sub_path, bool alloc_block_item);
 
-  inline size_t getBlockMaxRows() const { return max_rows_per_block_; }
-  inline uint64_t getBlockBitmapSize() const { return block_null_bitmap_size_;}
-  inline uint64_t getBlockMaxNum() { return max_blocks_per_segment_;}
-
   // mark entity deleted by entityMeta object.
   inline void deleteEntity(uint32_t entity_id) { return entity_block_metas_[0]->deleteEntity(entity_id);}
 
@@ -42,13 +38,12 @@ class EntityBlockMetaManager {
 
   inline EntityHeader* getEntityHeader() { return entity_block_metas_[0]->getEntityHeader(); }
 
-  // segment can store data row num.
-  uint64_t getReservedRows() { return max_rows_per_block_ * max_blocks_per_segment_; }
-
   BlockItem* GetBlockItem(BLOCK_ID item_id);
 
   void lock() { pthread_mutex_lock(&obj_mutex_); }
   void unlock() { pthread_mutex_unlock(&obj_mutex_);}
+
+  inline uint64_t GetTableId() const { return table_id_; }
 
   // if current block item is full, new block item and add to entity.
   int AddBlockItem(uint entity_id, BlockItem** blk_item);
@@ -110,16 +105,15 @@ class EntityBlockMetaManager {
   // resize vector space that storing meta file names.
   void resizeMeta();
 
-  uint16_t  config_subgroup_entities = 500;   // configure item: entity max num in subgroup
+  uint16_t max_entities_per_subgroup = 500;   // configure item: entity max num in subgroup
 
  protected:
   std::vector<MMapEntityBlockMeta*> entity_block_metas_;
+  uint64_t table_id_;
   std::string file_path_base_;
   std::string db_path_;
   std::string tbl_sub_path_;
-  size_t block_null_bitmap_size_;
-  uint32_t max_blocks_per_segment_ = 1000;  //configure item
-  uint16_t max_rows_per_block_ = 1000;      // configure item
+  uint16_t block_null_bitmap_size_;
   pthread_mutex_t obj_mutex_;
   std::shared_mutex entity_block_item_mutex_;  // control entity item / block item
   uint32_t meta_num_ = 1;  // number of meta, not meta's amount

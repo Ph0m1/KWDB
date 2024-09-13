@@ -29,9 +29,6 @@ const int METRIC_VERSION = 1;                       // metric version
 const size_t BLOCK_AGG_NUM = 3;                     // Data Block has agg num.
 const size_t BLOCK_AGG_COUNT_SIZE = 2;              // COUNT agg value has bytes.
 extern size_t META_BLOCK_ITEM_MAX;                  // blockitem num in one .meta file
-extern uint32_t CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP;  // SUBGROUP_ENTITIES from cluster setting
-extern uint32_t CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT;  // PARTITION_BLOCKS from cluster setting
-extern uint32_t CLUSTER_SETTING_MAX_ROWS_PER_BLOCK; // PARTITION_ROWS from cluster setting
 const size_t BLOCK_ITEM_MAX = 1000000;              // max block item number in each segment
 const size_t BLOCK_ROWS_MAX = 1000;                 // max rows number in each block item, pay attention to the delete bitmap
 const size_t BLOCK_ROWS_MIN = 10;                   // min rows number in each block
@@ -219,7 +216,8 @@ struct BlockItem {
   uint32_t publish_row_count; // rows that already writen.
   uint32_t alloc_row_count;   // row space that already allocated.
   char rows_delete_flags[128];  // Block bitmap that mark if row is deleted.
-  char user_defined[32];      // reserved for user-defined information.
+  uint32_t max_rows_in_block;  // max rows that can be stored in a block
+  char user_defined[28];      // reserved for user-defined information.
 
   MetricRowID getRowID(uint32_t offset) {
     return std::move(MetricRowID{block_id, offset});
@@ -319,6 +317,7 @@ class MMapEntityBlockMeta : public MMapFile {
   uint32_t block_item_offset_num_ = 0; // min blockitem id in current meta file.
   bool first_meta_ = true;
   bool is_et_ = false;
+  uint16_t max_entities_per_subgroup_ = 500;
 
   // assuming mutex locked
   int incSize_(size_t len);
@@ -435,7 +434,7 @@ class MMapEntityBlockMeta : public MMapFile {
     if (entity_header_) {
       return entity_header_->max_entities_per_subgroup;
     } else {
-      return CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP;
+      return max_entities_per_subgroup_;
     }
   }
 };

@@ -123,6 +123,107 @@ func (p *planner) SetClusterSetting(
 	return &setClusterSettingNode{name: name, st: st, setting: setting, value: value}, nil
 }
 
+// CheckOperation method for checking cluster settings
+type CheckOperation func(string) error
+
+func checkTsDedupRule(encodedValue string) error {
+	if encodedValue != "merge" && encodedValue != "keep" && encodedValue != "reject" &&
+		encodedValue != "discard" && encodedValue != "override" {
+		return errors.New("ts.dedup.rule setting value is not right")
+	}
+	return nil
+}
+
+func checkTsMountLimit(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 0 || value > math.MaxInt32 {
+		return errors.New("invalid value, the range of ts.mount.max_limit is [0, 2147483647]")
+	}
+	return nil
+}
+
+func checkTsCachedPartitionsLimit(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 0 || value > math.MaxInt32 {
+		return errors.New("invalid value, the range of ts.cached_partitions_per_subgroup.max_limit is [0, 2147483647]")
+	}
+	return nil
+}
+
+func checkTsEntitiesPerSubgroupLimit(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 1 || value > math.MaxInt32 {
+		return errors.New("invalid value, the range of ts.entities_per_subgroup.max_limit is [1, 2147483647]")
+	}
+	return nil
+}
+
+func checkTsBlocksPerSegmentLimit(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 1 || value > 1000000 {
+		return errors.New("invalid value, the range of ts.blocks_per_segment.max_limit is [1, 1000000]")
+	}
+	return nil
+}
+
+func checkTsRowsPerBlockLimit(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 10 || value > 1000 {
+		return errors.New("invalid value, the range of ts.rows_per_block.max_limit is [10, 1000]")
+	}
+	return nil
+}
+
+func checkTsAutovacuumInterval(encodedValue string) error {
+	if encodedValue[:1] == "-" {
+		return errors.New("invalid value, the value of ts.autovacuum.interval can't be set to a negative number")
+	}
+	return nil
+}
+
+func checkTsCompressType(encodedValue string) error {
+	if encodedValue != "gzip" && encodedValue != "lz4" && encodedValue != "lzma" &&
+		encodedValue != "lzo" && encodedValue != "xz" && encodedValue != "zstd" {
+		return errors.New("ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd")
+	}
+	return nil
+}
+
+func checkTsCompressLevel(encodedValue string) error {
+	if encodedValue != "low" && encodedValue != "middle" && encodedValue != "high" {
+		return errors.New("ts.compression.level is incorrectly configured, and can be configured as: low, middle, high")
+	}
+	return nil
+}
+
+// CheckClusterSetting map of checking methods for saving cluster settings
+var CheckClusterSetting = map[string]CheckOperation{
+	"ts.dedup.rule":      checkTsDedupRule,
+	"ts.mount.max_limit": checkTsMountLimit,
+	"ts.cached_partitions_per_subgroup.max_limit": checkTsCachedPartitionsLimit,
+	"ts.entities_per_subgroup.max_limit":          checkTsEntitiesPerSubgroupLimit,
+	"ts.blocks_per_segment.max_limit":             checkTsBlocksPerSegmentLimit,
+	"ts.rows_per_block.max_limit":                 checkTsRowsPerBlockLimit,
+	"ts.autovacuum.interval":                      checkTsAutovacuumInterval,
+	"ts.compression.type":                         checkTsCompressType,
+	"ts.compression.level":                        checkTsCompressLevel,
+}
+
 func (n *setClusterSettingNode) startExec(params runParams) error {
 	//if n.name == mgr.ClusterSettingReplicaRole &&
 	//	!strings.Contains(params.SessionData().ApplicationName, mgr.SettingReplicaRoleOpName) {
@@ -175,64 +276,9 @@ func (n *setClusterSettingNode) startExec(params runParams) error {
 			if err != nil {
 				return err
 			}
-			switch n.name {
-			case "ts.dedup.rule":
-				if encoded != "merge" && encoded != "keep" && encoded != "reject" &&
-					encoded != "discard" && encoded != "override" {
-					return errors.New("ts.dedup.rule setting value is not right")
-				}
-			case "ts.mount.max_limit":
-				value, err := strconv.ParseInt(expectedEncodedValue, 10, 64)
-				if err != nil {
+			if function, ok := CheckClusterSetting[n.name]; ok {
+				if err = function(encoded); err != nil {
 					return err
-				}
-				if value < 0 || value > math.MaxInt32 {
-					return errors.New("invalid value, the range of ts.mount.max_limit is [0, 2147483647]")
-				}
-			case "ts.cached_partitions_per_subgroup.max_limit":
-				value, err := strconv.ParseInt(expectedEncodedValue, 10, 64)
-				if err != nil {
-					return err
-				}
-				if value < 0 || value > math.MaxInt32 {
-					return errors.New("invalid value, the range of ts.cached_partitions_per_subgroup.max_limit is [0, 2147483647]")
-				}
-			case "ts.entities_per_subgroup.max_limit":
-				value, err := strconv.ParseInt(expectedEncodedValue, 10, 64)
-				if err != nil {
-					return err
-				}
-				if value < 1 || value > math.MaxInt32 {
-					return errors.New("invalid value, the range of ts.entities_per_subgroup.max_limit is [1, 2147483647]")
-				}
-			case "ts.blocks_per_segment.max_limit":
-				value, err := strconv.ParseInt(expectedEncodedValue, 10, 64)
-				if err != nil {
-					return err
-				}
-				if value < 1 || value > 1000000 {
-					return errors.New("invalid value, the range of ts.blocks_per_segment.max_limit is [1, 1000000]")
-				}
-			case "ts.rows_per_block.max_limit":
-				value, err := strconv.ParseInt(expectedEncodedValue, 10, 64)
-				if err != nil {
-					return err
-				}
-				if value < 10 || value > 1000 {
-					return errors.New("invalid value, the range of ts.rows_per_block.max_limit is [10, 1000]")
-				}
-			case "ts.autovacuum.interval":
-				if expectedEncodedValue[:1] == "-" {
-					return errors.New("invalid value, the value of ts.autovacuum.interval can't be set to a negative number")
-				}
-			case "ts.compression.type":
-				if encoded != "gzip" && encoded != "lz4" && encoded != "lzma" &&
-					encoded != "lzo" && encoded != "xz" && encoded != "zstd" {
-					return errors.New("ts.compression.type is incorrectly configured, and can be configured as: gzip, lz4, lzma, lzo, xz, and zstd")
-				}
-			case "ts.compression.level":
-				if encoded != "low" && encoded != "middle" && encoded != "high" {
-					return errors.New("ts.compression.level is incorrectly configured, and can be configured as: low, middle, high")
 				}
 			}
 			if _, err = execCfg.InternalExecutor.ExecEx(

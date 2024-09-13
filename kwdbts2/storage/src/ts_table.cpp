@@ -1458,7 +1458,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
   KStatus s = KStatus::SUCCESS;
   std::vector<std::shared_ptr<TsEntityGroup>> compress_entity_groups;
   {
-    RW_LATCH_X_LOCK(entity_groups_mtx_);
+    RW_LATCH_S_LOCK(entity_groups_mtx_);
     Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
     // get all entity groups
     for (auto& entity_group : entity_groups_) {
@@ -2349,6 +2349,133 @@ KStatus TsTable::CompactData(kwdbContext_p ctx, uint64_t range_group_id, const K
     Return(KStatus::FAIL)
   }
   Return(KStatus::SUCCESS)
+}
+
+KStatus TsTable::GetEntityNum(kwdbContext_p ctx, uint64_t* entity_num) {
+  *entity_num = 0;
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
+  for (auto& it : entity_groups_) {
+    *entity_num += it.second->GetTagCount();
+  }
+  RW_LATCH_UNLOCK(entity_groups_mtx_);
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint64_t* row_num) {
+  LOG_INFO("GetDataRowNum begin, table[%lu] time [%ld - %ld]", table_id_, ts_span.begin, ts_span.end);
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+  *row_num = 0;
+  // get all entity group
+  std::vector<std::shared_ptr<TsEntityGroup>> entity_groups;
+  {
+    RW_LATCH_S_LOCK(entity_groups_mtx_);
+    for (auto &it: entity_groups_) {
+      it.second->RdDropLock();
+      entity_groups.push_back(it.second);
+    }
+    RW_LATCH_UNLOCK(entity_groups_mtx_);
+  }
+  ErrorInfo err_info;
+  timestamp64 block_min_ts = INT64_MAX;
+  timestamp64 block_max_ts = INT64_MIN;
+  KwTsSpan p_span{ts_span.begin / 1000, ts_span.end / 1000};
+  // Traverse all entity groups
+  for (int entity_group_idx = 0; entity_group_idx < entity_groups.size(); ++entity_group_idx) {
+    auto& entity_group = entity_groups[entity_group_idx];
+    Defer defer([&]{entity_group->DropUnlock();});
+    auto subgroup_manager = entity_group->GetSubEntityGroupManager();
+    // Traverse all subgroups
+    for (SubGroupID sub_group_id = 1; sub_group_id <= subgroup_manager->GetMaxSubGroupId(); ++sub_group_id) {
+      TsSubEntityGroup* subgroup = subgroup_manager->GetSubGroup(sub_group_id, err_info);
+      if (!subgroup) {
+        err_info.clear();
+        continue;
+      }
+      if (subgroup && !subgroup->IsAvailable()) {
+        err_info.setError(KWEOTHER, "subgroup[" + std::to_string(sub_group_id) + "] is unavailable");
+        LOG_ERROR("subgroup is unavailable");
+        break;
+      }
+      auto partition_tables = subgroup->GetPartitionTables(p_span, err_info);
+      if (err_info.errcode < 0) {
+        LOG_ERROR("GetPartitionTables failed, error_info: %s", err_info.errmsg.c_str());
+        break;
+      }
+      // Traverse all partitions
+      for (auto& partition : partition_tables) {
+        usleep(10);
+        if (!partition || partition->getObjectStatus() != OBJ_READY) {
+          err_info.setError(KWEOTHER, "partition table is nullptr or not ready");
+          break;
+        }
+        std::shared_ptr<MMapSegmentTable> segment_table = nullptr;
+        for (BLOCK_ID block_id = 1; block_id <= partition->GetMaxBlockID(); ++block_id) {
+          BlockItem* block_item = partition->GetBlockItem(block_id);
+          // Skip deleted entity
+          if (partition->getEntityItem(block_item->entity_id)->is_deleted) {
+            continue;
+          }
+          // Switch segment table
+          if (!segment_table || block_id >= segment_table->segment_id() + segment_table->metaData()->block_num_of_segment) {
+            segment_table = partition->getSegmentTable(block_item->block_id);
+            if (!segment_table) {
+              continue;
+            }
+          }
+          // Calculate the number of rows
+          timestamp64 max_ts = segment_table->getBlockMaxTs(block_item->block_id);
+          timestamp64 min_ts = segment_table->getBlockMinTs(block_item->block_id);
+          timestamp64 intersect_ts = intersectLength(ts_span.begin, ts_span.end, min_ts, max_ts + 1);
+          uint32_t count = (double)intersect_ts / (max_ts - min_ts + 1) * block_item->publish_row_count;
+          if (intersect_ts > 0 && block_item->publish_row_count > 0 && count == 0) {
+            // The estimated data volume is 0, but in cases where there is a very small amount of data,
+            // it is considered as one piece of data by default
+            count = 1;
+          }
+          *row_num += count;
+          // Calculate the maximum and minimum time range of all blocks
+          if (count != 0 && max_ts > block_max_ts) {
+            block_max_ts = max_ts;
+          }
+          if (count != 0 && min_ts < block_min_ts) {
+            block_min_ts = min_ts;
+          }
+        }
+      }
+      for (auto& partition : partition_tables) {
+        if (partition) {
+          ReleaseTable(partition);
+        }
+      }
+      if (err_info.errcode < 0) {
+        break;
+      }
+    }
+    if (err_info.errcode < 0) {
+      break;
+    }
+  }
+  if (err_info.errcode < 0) {
+    *row_num = 0;
+    return KStatus::FAIL;
+  }
+  // If the queried data falls within the ts_stpan range (such as in a scenario where data has just been written),
+  // it is necessary to estimate the daily data write volume
+  if (block_min_ts != INT64_MAX && block_min_ts > ts_span.begin) {
+    double ratio = (double)(ts_span.end - block_min_ts) / (ts_span.end - ts_span.begin);
+    *row_num = (*row_num) / ratio;
+  }
+
+  LOG_INFO("GetDataRowNum succeeded");
+  return KStatus::SUCCESS;
 }
 
 uint32_t TsTable::GetCurrentTableVersion() {

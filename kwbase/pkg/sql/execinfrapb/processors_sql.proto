@@ -174,6 +174,7 @@ enum OperatorType {
   TsRollback = 16;
   TsAlterType = 17;
   TsAlterCompressInterval = 18;
+  TsAutonomy = 19;
 }
 
 // TsInsertSelSpec build payLoads for TsInsert

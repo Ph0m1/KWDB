@@ -182,6 +182,8 @@ const (
 	// ScheduledExecSQLExecutor is an executor responsible for
 	// the execution of the scheduled SQL.
 	ScheduledExecSQLExecutor
+	// ScheduledAutonomyExecutor is an executor responsible for the execution of the scheduled autonomy
+	ScheduledAutonomyExecutor
 )
 
 var scheduleExecutorInternalNames = map[ScheduledJobExecutorType]string{
@@ -189,6 +191,7 @@ var scheduleExecutorInternalNames = map[ScheduledJobExecutorType]string{
 	ScheduledRetentionExecutor: "scheduled-retention-executor",
 	ScheduledCompressExecutor:  "scheduled-compress-executor",
 	ScheduledExecSQLExecutor:   "scheduled-sql-executor",
+	ScheduledAutonomyExecutor:  "scheduled-autonomy-executor",
 }
 
 // InternalName returns an internal executor name.
@@ -206,6 +209,8 @@ func (t ScheduledJobExecutorType) UserName() string {
 		return "COMPRESS"
 	case ScheduledExecSQLExecutor:
 		return "SQL"
+	case ScheduledAutonomyExecutor:
+		return "AUTONOMY"
 	}
 	return "unsupported-executor"
 }

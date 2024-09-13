@@ -175,6 +175,8 @@ TSStatus TSDropTsTable(TSEngine* engine, TSTableID tableId);
  */
 TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, KTimestamp ts);
 
+TSStatus TSTableAutonomy(TSEngine* engine, TSTableID table_id);
+
 TSStatus TSIsTsTableExist(TSEngine* engine, TSTableID tableId, bool* find);
 
 TSStatus TSGetMetaData(TSEngine* engine, TSTableID table_id, RangeGroup range, TSSlice* schema);

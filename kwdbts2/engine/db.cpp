@@ -19,7 +19,11 @@
 #include "cm_task.h"
 #include "perf_stat.h"
 #include "lru_cache_manager.h"
-#include "utils/compress_utils.h"
+#include "st_config.h"
+
+#ifndef KWBASE_OSS
+#include "ts_config_autonomy.h"
+#endif
 
 std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
@@ -284,6 +288,14 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts)
   }
   LOG_INFO("compress table[%lu] succeeded", table_id);
   return kTsSuccess;
+}
+
+TSStatus TSTableAutonomy(TSEngine* engine, TSTableID table_id) {
+#ifdef KWBASE_OSS
+  return kTsSuccess;
+#else
+  return TsConfigAutonomy::UpdateTableStatisticInfo(engine, table_id);
+#endif
 }
 
 TSStatus TSPutEntity(TSEngine* engine, TSTableID table_id, TSSlice* payload, size_t payload_num, RangeGroup range_group,
@@ -584,7 +596,7 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
   } else if ("ts.rows_per_block.max_limit" == key) {
     CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = atoi(value.c_str());
   } else if ("ts.blocks_per_segment.max_limit" == key) {
-    CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT = atoi(value.c_str());
+    CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT = atoi(value.c_str());
   } else if ("ts.compress_interval" == key) {
     kwdbts::g_compress_interval = atoi(value.c_str());
   } else if ("ts.autovacuum.interval" == key) {
@@ -638,7 +650,19 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
       compression.second.compression_level = level;
     }
     g_compression.compression_level = level;
-  } else {
+  }
+#ifndef KWBASE_OSS
+  else if ("ts.storage.autonomy.mode" == key) {
+    if ("auto" == value) {
+      CLUSTER_SETTING_STORAGE_AUTONOMY_ENABLE = true;
+    } else if ("manual" == value) {
+      CLUSTER_SETTING_STORAGE_AUTONOMY_ENABLE = false;
+    }
+  } else if ("ts.entities_per_subgroup.growth" == key) {
+    CLUSTER_SETTING_ENTITIES_PER_SUBGROUP_GROWTH = atof(value.c_str());
+  }
+#endif
+  else {
     LOG_INFO("Cluster setting %s has no callback function.", key.c_str());
   }
 }

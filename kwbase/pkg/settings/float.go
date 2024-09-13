@@ -120,6 +120,13 @@ func RegisterFloatSetting(key, desc string, defaultValue float64) *FloatSetting 
 	return RegisterValidatedFloatSetting(key, desc, defaultValue, nil)
 }
 
+// RegisterPublicFloatSetting defines a new setting with type float.
+func RegisterPublicFloatSetting(key, desc string, defaultValue float64) *FloatSetting {
+	s := RegisterValidatedFloatSetting(key, desc, defaultValue, nil)
+	s.SetVisibility(Public)
+	return s
+}
+
 // RegisterNonNegativeFloatSetting defines a new setting with type float.
 func RegisterNonNegativeFloatSetting(key, desc string, defaultValue float64) *FloatSetting {
 	return RegisterValidatedFloatSetting(key, desc, defaultValue, func(v float64) error {

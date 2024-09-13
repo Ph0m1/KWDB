@@ -47,13 +47,6 @@ int MMapMetricsTable::open(const string& url, const std::string& db_path, const 
     }
     return err_info.errcode;
   }
-  if (meta_data_->has_data) {
-    // load EntityMeta
-    if ((err_info.errcode = openInitEntityMeta(flags)) < 0) {
-      err_info.setError(err_info.errcode, tbl_sub_path + getURLFilePath(url));
-      return err_info.errcode;
-    }
-  }
   setObjectReady();
   return err_info.errcode;
 }
@@ -69,12 +62,6 @@ int MMapMetricsTable::create(const vector<AttributeInfo>& schema, const uint32_t
   meta_data_->partition_interval = partition_interval;
 
   meta_data_->has_data = init_data;
-  if (meta_data_->has_data) {
-    if (err_info.errcode = openInitEntityMeta(MMAP_CREAT_EXCL) < 0) {
-      err_info.setError(err_info.errcode, db_path_ + tbl_sub_path);
-      return err_info.errcode;
-    }
-  }
   setObjectReady();
 
   return 0;
@@ -114,19 +101,6 @@ int MMapMetricsTable::init(const vector<AttributeInfo>& schema, ErrorInfo& err_i
   }
 
   return err_info.errcode;
-}
-
-int MMapMetricsTable::openInitEntityMeta(const int flags) {
-  if (entity_block_meta_ == nullptr) {
-    entity_block_meta_ = new MMapEntityBlockMeta();
-  }
-  string meta_url = name_ + ".meta";
-  int ret = entity_block_meta_->init(meta_url, db_path_, tbl_sub_path_, flags, true,
-                                     CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP);
-  if (ret < 0) {
-    return ret;
-  }
-  return 0;
 }
 
 string MMapMetricsTable::URL() const {

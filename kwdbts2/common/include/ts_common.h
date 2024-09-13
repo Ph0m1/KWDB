@@ -314,6 +314,18 @@ enum EntityGroupType {
   FOLLOWER = 1,
 };
 
+// calculate the length of intersection between two intervals
+inline timestamp64 intersectLength(timestamp64 start1, timestamp64 end1, timestamp64 start2, timestamp64 end2) {
+  // Calculate the maximum start point and minimum end point
+  timestamp64 max_start = std::max(start1, start2);
+  timestamp64 min_end = std::min(end1, end2);
+  // If there is no overlap, return 0
+  if (max_start >= min_end)
+    return 0;
+  // Otherwise, the intersection length is the difference between minEnd and maxStart
+  return min_end - max_start;
+}
+
 // [start, end] cross with spans
 inline bool isTimestampInSpans(const std::vector<KwTsSpan>& spans,
                                timestamp64 start, timestamp64 end) {

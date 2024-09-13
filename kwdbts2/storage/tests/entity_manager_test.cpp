@@ -10,6 +10,7 @@
 // See the Mulan PSL v2 for more details.
 
 #include "engine.h"
+#include "st_config.h"
 #include "st_group_manager.h"
 #include "test_util.h"
 

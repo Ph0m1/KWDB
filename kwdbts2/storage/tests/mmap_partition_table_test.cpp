@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "date_time_util.h"
+#include "st_config.h"
 #include "ts_time_partition.h"
 #include "test_util.h"
 

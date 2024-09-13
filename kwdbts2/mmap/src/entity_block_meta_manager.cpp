@@ -15,14 +15,11 @@
 #include "sys/types.h"
 #include "entity_block_meta_manager.h"
 #include "utils/big_table_utils.h"
-#include "lg_api.h"
+#include "st_config.h"
 #include "sys_utils.h"
 
 EntityBlockMetaManager::EntityBlockMetaManager() {
   pthread_mutex_init(&obj_mutex_, NULL);
-  max_rows_per_block_ = CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;
-  max_blocks_per_segment_ = CLUSTER_SETTING_MAX_BLOCK_PER_SEGMENT;
-  block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
   entity_block_metas_.resize(1000, nullptr);
 }
 
@@ -34,6 +31,7 @@ EntityBlockMetaManager::~EntityBlockMetaManager() {
 
 int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_path, const string& tbl_sub_path,
                                  bool alloc_block_item) {
+  table_id_ = std::atoi(getURLObjectName(file_path).c_str());
   file_path_base_ = file_path;
   db_path_ = db_path;
   tbl_sub_path_ = tbl_sub_path;
@@ -72,7 +70,7 @@ int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_
     auto entity_meta = new MMapEntityBlockMeta(false, true);
     int flags = MMAP_CREAT_EXCL;
     err_code = entity_meta->init(file_path + ".0", db_path, tbl_sub_path, flags, alloc_block_item,
-                                 config_subgroup_entities);
+                                 max_entities_per_subgroup);
     if (err_code < 0) {
       return err_code;
     }
@@ -92,7 +90,7 @@ int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_
       }
       int flags = MMAP_OPEN_NORECURSIVE;
       auto entity_meta = new MMapEntityBlockMeta(false, num == 0);
-      err_code = entity_meta->init(file_name, db_path, tbl_sub_path, flags, alloc_block_item, config_subgroup_entities);
+      err_code = entity_meta->init(file_name, db_path, tbl_sub_path, flags, alloc_block_item, max_entities_per_subgroup);
       if (err_code < 0) {
         success = false;
         break;
@@ -114,21 +112,6 @@ int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_
       return err_code;
     }
   }
-
-  // sync meta file parameter value. with mem struct.
-  if (entity_block_metas_[0]->entity_header_->max_blocks_per_segment == 0) {
-    entity_block_metas_[0]->entity_header_->max_blocks_per_segment = max_blocks_per_segment_;
-  } else {
-    max_blocks_per_segment_ = entity_block_metas_[0]->entity_header_->max_blocks_per_segment;
-  }
-
-  if (entity_block_metas_[0]->entity_header_->max_rows_per_block == 0) {
-    entity_block_metas_[0]->entity_header_->max_rows_per_block = max_rows_per_block_;
-  } else {
-    max_rows_per_block_ = entity_block_metas_[0]->entity_header_->max_rows_per_block;
-  }
-
-  block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
 
   if (entity_block_metas_[0]->entity_header_->version != METRIC_VERSION) {
     LOG_ERROR("The [%s] versions don't match: Code Metric Version[%d], Data Metric Version[%d]",
@@ -224,7 +207,7 @@ int EntityBlockMetaManager::AddBlockItem(uint entity_id, BlockItem** blk_item) {
     std::string meta_file = file_path_base_ + "." + std::to_string(i);
 
     MMapEntityBlockMeta* entity_block_meta = new MMapEntityBlockMeta(false, false);
-    err_code = entity_block_meta->init(meta_file, db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, true, config_subgroup_entities);
+    err_code = entity_block_meta->init(meta_file, db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, true, max_entities_per_subgroup);
     if (err_code < 0) {
       LOG_ERROR("Create meta file %s fail. error_code: %d", meta_file.c_str(), err_code);
       pthread_mutex_unlock(&obj_mutex_);

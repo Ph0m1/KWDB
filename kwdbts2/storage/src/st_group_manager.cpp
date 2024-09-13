@@ -18,6 +18,7 @@
 #include "utils/compress_utils.h"
 #include "perf_stat.h"
 #include "sys_utils.h"
+#include "st_config.h"
 
 namespace kwdbts {
 
@@ -108,7 +109,12 @@ TsSubEntityGroup* SubEntityGroupManager::CreateSubGroup(SubGroupID subgroup_id, 
   TsSubEntityGroup* sub_group = new TsSubEntityGroup(root_table_manager_);
   root_table_manager_->unLock();
   string group_sanbox = GetSubGroupTblSubPath(subgroup_id);
-  if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_CREAT_EXCL, err_info) < 0) {
+  uint16_t max_entities_of_prev_subgroup = 0;
+  if (subgroups_.find(subgroup_id - 1) != subgroups_.end()) {
+    max_entities_of_prev_subgroup = subgroups_[subgroup_id-1]->GetSubgroupEntities();
+  }
+  uint16_t max_entities_per_subgroup = GetMaxEntitiesPerSubgroup(max_entities_of_prev_subgroup);
+  if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_CREAT_EXCL, max_entities_per_subgroup, err_info) < 0) {
     delete sub_group;
     return nullptr;
   }
@@ -154,7 +160,8 @@ TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, Er
   TsSubEntityGroup* sub_group = new TsSubEntityGroup(root_table_manager_);
   root_table_manager_->unLock();
   string group_sanbox = GetSubGroupTblSubPath(subgroup_id);
-  if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_OPEN_NORECURSIVE, err_info) < 0) {
+  uint16_t max_entities_per_subgroup = GetMaxEntitiesPerSubgroup();
+  if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_OPEN_NORECURSIVE, max_entities_per_subgroup, err_info) < 0) {
     delete sub_group;
     sub_group = nullptr;
   }
@@ -162,7 +169,12 @@ TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, Er
     err_info.clear();
     root_table_manager_->rdLock();
     sub_group = new TsSubEntityGroup(root_table_manager_);
-    sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_CREAT_EXCL, err_info);
+    uint16_t max_entities_of_prev_subgroup = 0;
+    if (subgroups_.find(subgroup_id - 1) != subgroups_.end()) {
+      max_entities_of_prev_subgroup = subgroups_[subgroup_id-1]->GetSubgroupEntities();
+    }
+    max_entities_per_subgroup = GetMaxEntitiesPerSubgroup(max_entities_of_prev_subgroup);
+    sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_CREAT_EXCL, max_entities_per_subgroup, err_info);
     root_table_manager_->unLock();
   }
   if (err_info.errcode < 0) {

@@ -24,6 +24,10 @@
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "ee_exec_pool.h"
 
+#ifndef KWBASE_OSS
+#include "ts_config_autonomy.h"
+#endif
+
 extern std::map<std::string, std::string> g_cluster_settings;
 extern DedupRule g_dedup_rule;
 extern std::shared_mutex g_settings_mutex;
@@ -186,6 +190,9 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
       Return(s);
     }
   }
+#ifndef KWBASE_OSS
+  TsConfigAutonomy::UpdateTableStatisticInfo(ctx, table, true);
+#endif
   tables_cache_->Put(table_id, table);
   auto it = tables_range_groups_.find(table_id);
   if (it != tables_range_groups_.end()) {
@@ -238,6 +245,9 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
   if (it != tables_range_groups_.end()) {
     tables_range_groups_.erase(it);
   }
+#ifndef KWBASE_OSS
+  TsConfigAutonomy::RemoveTableStatisticInfo(table_id);
+#endif
   LOG_INFO("drop table %ld succeeded", table_id);
   Return(SUCCESS);
 }
@@ -306,6 +316,9 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
   }
 
   if (!table->IsDropped()) {
+#ifndef KWBASE_OSS
+    TsConfigAutonomy::UpdateTableStatisticInfo(ctx, table, true);
+#endif
     tables_cache_->Put(table_id, table);
     // Load into cache
     tags_table = table;

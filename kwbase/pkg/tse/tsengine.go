@@ -788,6 +788,15 @@ func (r *TsEngine) DeleteExpiredData(tableID uint64, _ int64, end int64) error {
 	return nil
 }
 
+// TsTableAutonomy Autonomous Evaluation
+func (r *TsEngine) TsTableAutonomy(tableID uint64) error {
+	status := C.TSTableAutonomy(r.tdb, C.TSTableID(tableID))
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to ts table's autonomy")
+	}
+	return nil
+}
+
 // SetupTsFlow send timing execution plan and receive execution results
 func (r *TsEngine) SetupTsFlow(
 	ctx *context.Context, tsQueryInfo TsQueryInfo,

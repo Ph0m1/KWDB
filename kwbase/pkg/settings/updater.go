@@ -102,18 +102,16 @@ func goToTSSlice(b []byte) C.TSSlice {
 	}
 }
 
+// SendToAeList is the list of settings that need to be sent to AE.
+var SendToAeList = []string{"ts.trace.on_off_list", "ts.dedup.rule", "ts.mount.max_limit",
+	"ts.wal.files_in_group", "ts.entities_per_subgroup.max_limit", "ts.blocks_per_segment.max_limit",
+	"ts.rows_per_block.max_limit", "ts.autovacuum.interval", "ts.compression.type", "ts.compression.level"}
+
 func needSendToAE(key string) bool {
-	if key == "ts.trace.on_off_list" ||
-		key == "ts.dedup.rule" ||
-		key == "ts.mount.max_limit" ||
-		key == "ts.wal.files_in_group" ||
-		key == "ts.entities_per_subgroup.max_limit" ||
-		key == "ts.blocks_per_segment.max_limit" ||
-		key == "ts.rows_per_block.max_limit" ||
-		key == "ts.autovacuum.interval" ||
-		key == "ts.compression.type" ||
-		key == "ts.compression.level" {
-		return true
+	for _, value := range SendToAeList {
+		if value == key {
+			return true
+		}
 	}
 	return false
 }

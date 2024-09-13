@@ -139,6 +139,14 @@ func (tp *tsProcessor) Start(ctx context.Context) context.Context {
 				log.Errorf(context.Background(), "Compress TS Table Failed, tableID:%d, reason:%s \n", toDrop.TableID, err.Error())
 			}
 		}
+	case execinfrapb.OperatorType_TsAutonomy:
+		errPrefix = "Autonomy TS Table Failed, reason:%s"
+		for _, table := range tp.dropMEInfo {
+			err = tp.FlowCtx.Cfg.TsEngine.TsTableAutonomy(uint64(table.TableID))
+			if err != nil {
+				log.Errorf(context.Background(), "Autonomy TS Table Failed, tableID:%d, reason:%s \n", table.TableID, err.Error())
+			}
+		}
 	default:
 		err = errors.Newf("the TsOperatorType is not supported, TsOperatorType:%s", tp.tsOperatorType.String())
 	}
