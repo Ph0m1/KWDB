@@ -144,6 +144,7 @@ test           pg_catalog          pg_shdepend                        public   S
 test           pg_catalog          pg_shdescription                   public   SELECT
 test           pg_catalog          pg_shseclabel                      public   SELECT
 test           pg_catalog          pg_stat_activity                   public   SELECT
+test           pg_catalog          pg_stat_all_indexes                public   SELECT
 test           pg_catalog          pg_tables                          public   SELECT
 test           pg_catalog          pg_tablespace                      public   SELECT
 test           pg_catalog          pg_trigger                         public   SELECT

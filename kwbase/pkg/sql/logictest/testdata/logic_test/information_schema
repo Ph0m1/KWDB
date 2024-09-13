@@ -325,6 +325,7 @@ pg_catalog          pg_shdepend
 pg_catalog          pg_shdescription
 pg_catalog          pg_shseclabel
 pg_catalog          pg_stat_activity
+pg_catalog          pg_stat_all_indexes
 pg_catalog          pg_tables
 pg_catalog          pg_tablespace
 pg_catalog          pg_trigger
@@ -474,6 +475,7 @@ pg_shdepend
 pg_shdescription
 pg_shseclabel
 pg_stat_activity
+pg_stat_all_indexes
 pg_tables
 pg_tablespace
 pg_trigger
@@ -630,6 +632,7 @@ system         pg_catalog          pg_shdepend                        SYSTEM VIE
 system         pg_catalog          pg_shdescription                   SYSTEM VIEW        NO                  1        3758982608
 system         pg_catalog          pg_shseclabel                      SYSTEM VIEW        NO                  1        3758982608
 system         pg_catalog          pg_stat_activity                   SYSTEM VIEW        NO                  1        3758982608
+system         pg_catalog          pg_stat_all_indexes                SYSTEM VIEW        NO                  1        3758982608
 system         pg_catalog          pg_tables                          SYSTEM VIEW        NO                  1        3758982608
 system         pg_catalog          pg_tablespace                      SYSTEM VIEW        NO                  1        3758982608
 system         pg_catalog          pg_trigger                         SYSTEM VIEW        NO                  1        3758982608
@@ -1820,6 +1823,7 @@ NULL     public   system         pg_catalog          pg_shdepend                
 NULL     public   system         pg_catalog          pg_shdescription                   SELECT          NULL          YES
 NULL     public   system         pg_catalog          pg_shseclabel                      SELECT          NULL          YES
 NULL     public   system         pg_catalog          pg_stat_activity                   SELECT          NULL          YES
+NULL     public   system         pg_catalog          pg_stat_all_indexes                SELECT          NULL          YES
 NULL     public   system         pg_catalog          pg_tables                          SELECT          NULL          YES
 NULL     public   system         pg_catalog          pg_tablespace                      SELECT          NULL          YES
 NULL     public   system         pg_catalog          pg_trigger                         SELECT          NULL          YES

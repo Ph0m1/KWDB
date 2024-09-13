@@ -220,6 +220,7 @@ const (
 	PgCatalogStatActivityTableID
 	PgCatalogSecurityLabelTableID
 	PgCatalogSharedSecurityLabelTableID
+	PgCatalogStatAllIndexesTableID
 	CrdbInternalKWDBSchedulesTableID
 	CrdbInternalKWDBFunctionsTableID
 	MinVirtualID = CrdbInternalKWDBFunctionsTableID

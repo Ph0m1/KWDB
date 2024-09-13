@@ -61,6 +61,7 @@ pg_shdepend              SYSTEM VIEW
 pg_shdescription         SYSTEM VIEW
 pg_shseclabel            SYSTEM VIEW
 pg_stat_activity         SYSTEM VIEW
+pg_stat_all_indexes      SYSTEM VIEW
 pg_tables                SYSTEM VIEW
 pg_tablespace            SYSTEM VIEW
 pg_trigger               SYSTEM VIEW
@@ -137,6 +138,7 @@ pg_shdepend              SYSTEM VIEW
 pg_shdescription         SYSTEM VIEW
 pg_shseclabel            SYSTEM VIEW
 pg_stat_activity         SYSTEM VIEW
+pg_stat_all_indexes      SYSTEM VIEW
 pg_tables                SYSTEM VIEW
 pg_tablespace            SYSTEM VIEW
 pg_trigger               SYSTEM VIEW
@@ -1558,10 +1560,10 @@ objoid      classoid    objsubid  description
 4294967278  4294967221  0         node details across the entire cluster (cluster RPC; expensive!)
 4294967277  4294967221  0         store details and status (cluster RPC; expensive!)
 4294967254  4294967221  0         kwdb attribute and value info
-4294967178  4294967221  0         kwdb functions info
+4294967177  4294967221  0         kwdb functions info
 4294967253  4294967221  0         kwdb object create statement
 4294967252  4294967221  0         kwdb show retentions
-4294967179  4294967221  0         kwdb schedules info
+4294967178  4294967221  0         kwdb schedules info
 4294967257  4294967221  0         kwdb partition info for users
 4294967276  4294967221  0         acquired table leases (RAM; local node only)
 4294967293  4294967221  0         detailed identification strings (RAM, local node only)
@@ -1624,6 +1626,7 @@ objoid      classoid    objsubid  description
 4294967213  4294967221  0         shared object comments
 4294967180  4294967221  0         shared security labels (empty - feature not supported)
 4294967182  4294967221  0         backend access statistics (empty - monitoring works differently in CockroachDB)
+4294967179  4294967221  0         pg_stat_all_indexes was created for compatibility and is currently unimplemented
 4294967187  4294967221  0         tables summary (see also information_schema.tables, pg_catalog.pg_class)
 4294967186  4294967221  0         available tablespaces (incomplete; concept inapplicable to CockroachDB)
 4294967185  4294967221  0         triggers (empty - feature does not exist)

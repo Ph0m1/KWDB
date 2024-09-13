@@ -257,6 +257,7 @@ var pgCatalog = virtualSchema{
 		sqlbase.PgCatalogStatActivityTableID:        pgCatalogStatActivityTable,
 		sqlbase.PgCatalogSecurityLabelTableID:       pgCatalogSecurityLabelTable,
 		sqlbase.PgCatalogSharedSecurityLabelTableID: pgCatalogSharedSecurityLabelTable,
+		sqlbase.PgCatalogStatAllIndexesTableID:      pgCatalogStatAllIndexesTable,
 	},
 	// Postgres's catalogs are ill-defined when there is no current
 	// database set. Simply reject any attempts to use them in that
@@ -2753,6 +2754,24 @@ CREATE TABLE pg_catalog.pg_shseclabel (
 	label TEXT
 )
 `,
+	populate: func(ctx context.Context, p *planner, _ *DatabaseDescriptor, addRow func(...tree.Datum) error) error {
+		return nil
+	},
+}
+
+var pgCatalogStatAllIndexesTable = virtualSchemaTable{
+	comment: "pg_stat_all_indexes was created for compatibility and is currently unimplemented",
+	schema: `
+CREATE TABLE pg_catalog.pg_stat_all_indexes (
+	relid OID,
+	indexrelid OID,
+	schemaname NAME,
+	relname NAME,
+	indexrelname NAME,
+	idx_scan INT,
+	idx_tup_read INT,
+	idx_tup_fetch INT
+)`,
 	populate: func(ctx context.Context, p *planner, _ *DatabaseDescriptor, addRow func(...tree.Datum) error) error {
 		return nil
 	},
