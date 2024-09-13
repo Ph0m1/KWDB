@@ -240,7 +240,7 @@ TEST_F(TestFieldFunc, TestFieldTimeBucketFunc) {
   std::list<Field *> args;
   args.push_back(FieldConstValB);
   args.push_back(FieldConstValA);
-  FieldFuncTimeBucket *field = KNEW FieldFuncTimeBucket(args);
+  FieldFuncTimeBucket *field = KNEW FieldFuncTimeBucket(args, 8);
   field->set_offset_in_template(-1);
 
   k_int64 ival = field->ValInt();

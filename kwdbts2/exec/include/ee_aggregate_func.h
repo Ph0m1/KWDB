@@ -3063,6 +3063,9 @@ class LastTSAggregate : public AggregateFunc {
 
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      if (!current_data_chunk_->IsNull(target_row, col_idx_)) {
+        last_line_ptr = dest_ptr;
+      }
     }
 
     auto* arg_field = renders[arg_idx];
@@ -3208,6 +3211,9 @@ class LastRowTSAggregate : public AggregateFunc {
 
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      if (!current_data_chunk_->IsNull(target_row, col_idx_)) {
+        last_line_ptr = dest_ptr;
+      }
     }
 
     auto* ts_field = renders[ts_idx_];
