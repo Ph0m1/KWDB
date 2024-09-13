@@ -512,7 +512,7 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
       k_int64 seconds = msec / 1000;
       time_t rawtime = (time_t) seconds;
       tm timeinfo;
-      localtime_r(&rawtime, &timeinfo);
+      gmtime_r(&rawtime, &timeinfo);
 
       stm.tm_year = timeinfo.tm_year;
       stm.tm_mon = timeinfo.tm_mon;

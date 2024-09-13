@@ -896,7 +896,7 @@ void FieldFuncCastCheckTs::CalcDataType() {
 k_int64 FieldFuncCurrentDate::ValInt() {
   time_t t = time(nullptr);
   struct tm ltm;
-  localtime_r(&t, &ltm);
+  gmtime_r(&t, &ltm);
   ltm.tm_hour = 0;
   ltm.tm_min = 0;
   ltm.tm_sec = 0;
@@ -909,7 +909,7 @@ String FieldFuncCurrentDate::ValStr() {
   char buffer[80];
   time_t t = time(nullptr);
   struct tm ltm;
-  localtime_r(&t, &ltm);
+  gmtime_r(&t, &ltm);
   strftime(buffer, 80, "%Y-%m-%d", &ltm);
   String s(80);
   snprintf(s.ptr_, 80 + 1, "%s", buffer);
@@ -932,7 +932,7 @@ k_int64 FieldFuncCurrentTimeStamp::ValInt() {
   ms_since_epoch /= 1000;
   time_t t = time(nullptr);
   struct tm ltm;
-  localtime_r(&t, &ltm);
+  gmtime_r(&t, &ltm);
   ms_since_epoch -= ltm.tm_gmtoff - time_zone * 3600;
   // add precision handle
   if (arg_count_ > 0) {
@@ -1275,7 +1275,7 @@ String FieldFuncExpStrftime::ValStr() {
   k_int64 ti = args_[0]->ValInt();
   k_int64 tim = ti / 1000;
   struct tm ltm;
-  localtime_r(&tim, &ltm);
+  gmtime_r(&tim, &ltm);
   const int kArraySize = this->storage_len_;
   String s(kArraySize);
   try {
