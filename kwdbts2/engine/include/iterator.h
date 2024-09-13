@@ -124,6 +124,15 @@ class TsRawDataIterator : public TsIterator {
    * @param is_finished    identify whether the iterator has completed querying
    */
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
+
+ private:
+  void nextEntity() {
+    cur_p_bts_idx_ = -1;
+    cur_block_item_ = nullptr;
+    cur_blockdata_offset_ = 1;
+    block_item_queue_.clear();
+    ++cur_entity_idx_;
+  }
 };
 
 class TsSortedRowDataIterator : public TsIterator {

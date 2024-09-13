@@ -148,6 +148,11 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
 KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().it_next);
   *count = 0;
+  if (cur_entity_idx_ >= entity_ids_.size()) {
+    *is_finished = true;
+    return KStatus::SUCCESS;
+  }
+  cur_entity_id_ = entity_ids_[cur_entity_idx_];
   while (true) {
     // If cur_block_item_ is a null pointer and attempts to call nextBlockItem to retrieve a new BlockItem for querying:
     // 1. nextBlockItem ended normally, query cur_block_item_
@@ -169,9 +174,11 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         // 此时确定没有比ts更小的数据存在，直接返回-1，查询结束
+        nextEntity();
         return SUCCESS;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
         // 此时确定没有比ts更大的数据存在，直接返回-1，查询结束
+        nextEntity();
         return SUCCESS;
       }
     }
