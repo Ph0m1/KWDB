@@ -97,7 +97,7 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
 
-  DataChunkPtr data_batch;
+  DataChunkPtr data_batch = nullptr;
   EEIteratorErrCode code = input_->Next(ctx, data_batch);
   if (EEIteratorErrCode::EE_OK != code) {
     Return(code);

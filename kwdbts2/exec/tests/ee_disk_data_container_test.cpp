@@ -39,7 +39,7 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
   kwdbContext_p ctx = &context;
   InitServerKWDBContext(ctx);
   std::queue<DataChunkPtr> queue_data_chunk;
-  DataChunkPtr chunk;
+  DataChunkPtr chunk = nullptr;
 
   k_uint32 total_sample_rows{1};
   std::vector<ColumnInfo> col_info;

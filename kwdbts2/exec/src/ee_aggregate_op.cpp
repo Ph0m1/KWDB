@@ -744,7 +744,6 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
   int64_t read_row_num = 0;
   for (;;) {
     DataChunkPtr chunk = nullptr;
-
     // read a batch of data
     code = input_->Next(ctx, chunk);
     if (code != EEIteratorErrCode::EE_OK) {
@@ -907,7 +906,11 @@ OrderedAggregateOperator::~OrderedAggregateOperator() {
 
 EEIteratorErrCode OrderedAggregateOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
-  BaseAggregator::Init(ctx);
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  code = BaseAggregator::Init(ctx);
+  if (EEIteratorErrCode::EE_OK != code) {
+    Return(code);
+  }
 
   // construct the output column information for agg functions.
   for (int i = 0; i < param_.aggs_size_; i++) {
@@ -940,7 +943,7 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
   int64_t read_row_num = 0;
 
   do {
-    DataChunkPtr input_chunk;
+    DataChunkPtr input_chunk = nullptr;
     // read a batch of data from sub operator
     code = input_->Next(ctx, input_chunk);
     if (code != EEIteratorErrCode::EE_OK) {
