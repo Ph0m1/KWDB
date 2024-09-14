@@ -707,6 +707,12 @@ k_int64 FieldFuncTimeBucket::ValInt() {
       return 0;
     }
     // use 0000-01-01 00:00:00 as start, same as kwdbts2/exec/include/ee_agg_scan_op.h
+    if (args_[0]->isNullable() && args_[0]->is_nullable()) {
+      EEPgErrorInfo::SetPgErrorInfo(
+        ERRCODE_INVALID_PARAMETER_VALUE,
+        "time_bucket(): first arg can not be null.");
+        return 0;
+    }
     if (!var_interval_) {
       auto original_timestamp = args_[0]->ValInt();
       KTimestampTz time_diff = time_zone_ * 3600000;

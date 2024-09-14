@@ -2789,6 +2789,9 @@ func newTimeBucketAggregate(_ []*types.T, _ *tree.EvalContext, _ tree.Datums) tr
 func (a *TimeBucketAggregate) Add(
 	_ context.Context, datum1 tree.Datum, datum2 ...tree.Datum,
 ) error {
+	if _, ok := datum1.(tree.DNullExtern); ok {
+		return pgerror.New(pgcode.InvalidParameterValue, "first arg can not be null")
+	}
 	value, ok := datum1.(*tree.DTimestamp)
 	if !ok {
 		return pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
@@ -2837,9 +2840,12 @@ func newTimestamptzBucketAggregate(
 func (a *TimestamptzBucketAggregate) Add(
 	_ context.Context, datum1 tree.Datum, datum2 ...tree.Datum,
 ) error {
+	if _, ok := datum1.(tree.DNullExtern); ok {
+		return pgerror.New(pgcode.InvalidParameterValue, "first arg can not be null")
+	}
 	value, ok := datum1.(*tree.DTimestampTZ)
 	if !ok {
-		return errors.New("first arg is error")
+		return pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
 	}
 	dInterval, err := getTimeInterval(datum2[0])
 	if err != nil {

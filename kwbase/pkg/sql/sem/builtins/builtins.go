@@ -4572,6 +4572,9 @@ may increase either contention or retry errors, or both.`,
 }
 
 func timeBucketOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+	if _, ok := args[0].(tree.DNullExtern); ok {
+		return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg can not be null")
+	}
 	value, ok := args[0].(*tree.DTimestamp)
 	if !ok {
 		return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
@@ -4584,6 +4587,9 @@ func timeBucketOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum
 }
 
 func timeBucketTZOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+	if _, ok := args[0].(tree.DNullExtern); ok {
+		return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "first arg can not be null")
+	}
 	value, ok := args[0].(*tree.DTimestampTZ)
 	if !ok {
 		return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
