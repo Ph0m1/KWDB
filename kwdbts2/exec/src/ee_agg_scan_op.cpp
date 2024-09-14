@@ -42,6 +42,9 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
                                                             const_cast<TSAggregatorSpec*>(&aggregation_spec_),
                                                             const_cast<TSPostProcessSpec*>(&aggregation_post_),
                                                             table_);
+    if (aggregation_spec_.group_cols_size() <= 1) {
+      disorder_ = true;
+    }
     // get the size of renders
     agg_param_.RenderSize(ctx, &agg_num_);
 
@@ -112,8 +115,7 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
       break;
     }
 
-    ScanRowBatchPtr data_handle;
-    code = InitScanRowBatch(ctx, &data_handle);
+    code = InitScanRowBatch(ctx, &row_batch_);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -124,30 +126,30 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
         is_done_ = true;
         break;
       }
-      if (data_handle->count_ < 1) continue;
-      total_read_row_ += data_handle->count_;
+      if (row_batch_->count_ < 1) continue;
+      total_read_row_ += row_batch_->count_;
 
       if (nullptr == filter_) {
-        examined_rows_ += data_handle->count_;
+        examined_rows_ += row_batch_->count_;
         break;
       }
 
       // filter
-      for (int i = 0; i < data_handle->count_; ++i) {
+      for (int i = 0; i < row_batch_->count_; ++i) {
         if (nullptr != filter_) {
           k_int64 ret = filter_->ValInt();
           if (0 == ret) {
-            data_handle->NextLine();
+            row_batch_->NextLine();
             continue;
           }
         }
 
-        data_handle->AddSelection();
-        data_handle->NextLine();
+        row_batch_->AddSelection();
+        row_batch_->NextLine();
         ++examined_rows_;
       }
 
-      if (!data_handle->GetSelection()->empty()) {
+      if (!row_batch_->GetSelection()->empty()) {
         break;
       }
     }
@@ -155,15 +157,16 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
     if (!is_done_) {
       // If the result set is unordered, it is necessary to perform secondary
       // HASH aggregation on the basis of AGG SCAN.
-      if (handler->isDisorderedMetrics()) {
+      if (disorder_ || handler->isDisorderedMetrics()) {
+        disorder_ = true;
         if (nullptr != current_data_chunk_) {
           current_data_chunk_->setDisorder(true);
         }
       }
       // reset
-      data_handle->ResetLine();
-      if (data_handle->Count() > 0) {
-        KStatus status = AddRowBatchData(ctx, data_handle.get());
+      row_batch_->ResetLine();
+      if (row_batch_->Count() > 0) {
+        KStatus status = AddRowBatchData(ctx, row_batch_);
 
         if (status != KStatus::SUCCESS) {
           Return(EEIteratorErrCode::EE_ERROR)

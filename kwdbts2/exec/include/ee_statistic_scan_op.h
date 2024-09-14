@@ -40,7 +40,7 @@ class TableStatisticScanOperator : public BaseOperator {
 
  protected:
   EEIteratorErrCode InitHandler(kwdbContext_p ctx);
-  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch);
+  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatch **row_batch);
 
  protected:
   TSPostProcessSpec *post_{nullptr};
@@ -48,6 +48,7 @@ class TableStatisticScanOperator : public BaseOperator {
   k_uint64 object_id_{0};
   std::vector<KwTsSpan> ts_kwspans_;
   StatisticSpecResolve param_;
+  ScanRowBatch *row_batch_{nullptr};
 
  protected:
   BaseOperator *input_{nullptr};  // input iterator

@@ -65,13 +65,13 @@ class TableScanOperator : public BaseOperator {
 
   BaseOperator* Clone() override;
 
-  RowBatchPtr GetRowBatch(kwdbContext_p ctx) override;
+  RowBatch* GetRowBatch(kwdbContext_p ctx) override;
 
   k_uint32 GetTotalReadRow() {return total_read_row_;}
 
  protected:
   EEIteratorErrCode InitHandler(kwdbContext_p ctx);
-  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch);
+  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatch **row_batch);
   k_bool ResolveOffset();
 
  protected:
@@ -85,6 +85,7 @@ class TableScanOperator : public BaseOperator {
   Field* filter_{nullptr};
   StorageHandler *handler_{nullptr};
   BaseOperator* input_{nullptr};  // input iterator
+  ScanRowBatch* row_batch_{nullptr};
 
  protected:
   k_uint32 cur_offset_{0};

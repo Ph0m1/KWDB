@@ -105,14 +105,13 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
     // the chunk->isScanAgg() is always true.
     pass_agg_ &= !chunk->isDisorder();
     agg_result_counter_ += chunk->Count();
-    if ((!pass_agg_) &&
-        ((agg_result_counter_ * chunk->RowSize()) >= POST_AGG_SCAN_MAX_MEM_BUFFER_SIZE)) {
-      if (disk_sink_ == nullptr) {
-        if (initDiskSink() != KStatus::SUCCESS) {
-          Return(KStatus::FAIL);
-        }
+    if (!pass_agg_) {
+      while (!processed_chunks_.empty()) {
+        auto& buf = processed_chunks_.front();
+        accumulateBatch(ctx, buf.get());
+        processed_chunks_.pop();
       }
-      disk_sink_->Append(chunk.get());
+      accumulateBatch(ctx, chunk.get());
     } else {
       processed_chunks_.push(std::move(chunk));
     }
@@ -126,7 +125,7 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
    * scalar group
    * select max(c1) from t1 => handler_->NewTagIterator
    */
-  if (processed_chunks_.empty() && disk_sink_ == nullptr) {
+  if (agg_result_counter_ == 0) {
     if (ht_->Empty() && group_cols_.empty() &&
         group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
       // return null
@@ -145,25 +144,6 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
           // set not null
           AggregateFunc::SetNotNull(agg_ptr + agg_null_offset_, i);
         }
-      }
-    }
-  } else {
-    // combine all the result into one chunk and do HASH Agg.
-    if (!pass_agg_) {
-      if (disk_sink_ == nullptr) {
-        DataChunkPtr chunk = constructAggResults(agg_result_counter_);
-        if (chunk == nullptr) {
-          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-          Return(KStatus::FAIL);
-        }
-
-        KStatus ret = chunk->Append(processed_chunks_);
-        if (ret != SUCCESS) {
-          return ret;
-        }
-        accumulateBatch(ctx, chunk.get());
-      } else {
-        accumulateBatch(ctx, disk_sink_.get());
       }
     }
   }

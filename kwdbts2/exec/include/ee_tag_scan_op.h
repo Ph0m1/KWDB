@@ -51,7 +51,7 @@ class TagScanOperator : public BaseOperator {
 
   KStatus Close(kwdbContext_p ctx) override;
 
-  RowBatchPtr GetRowBatch(kwdbContext_p ctx) override;
+  RowBatch* GetRowBatch(kwdbContext_p ctx) override;
 
   KStatus GetEntities(kwdbContext_p ctx,
                       std::vector<EntityResultIndex>* entities,
@@ -71,7 +71,7 @@ class TagScanOperator : public BaseOperator {
   k_uint32 count_{0};
   ReaderPostResolve param_;
   Field* filter_{nullptr};
-  TagRowBatchPtr tagdata_handle_{nullptr};
+  TagRowBatchPtr tag_rowbatch_{nullptr};
   StorageHandler* handler_{nullptr};
 
  private:

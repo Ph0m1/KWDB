@@ -69,8 +69,8 @@ class SortScanOperator : public TableScanOperator {
  private:
   EEIteratorErrCode initContainer(kwdbContext_p ctx);
   EEIteratorErrCode ResolveFilter(kwdbContext_p ctx,
-                                  ScanRowBatchPtr data_handle);
-  EEIteratorErrCode PrioritySort(kwdbContext_p ctx, ScanRowBatchPtr data_handle, k_uint32 limit);
+                                  ScanRowBatch* row_batch);
+  EEIteratorErrCode PrioritySort(kwdbContext_p ctx, ScanRowBatch* row_batch, k_uint32 limit);
 
  protected:
   TSReaderSpec* spec_{nullptr};

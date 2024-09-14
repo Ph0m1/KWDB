@@ -257,6 +257,8 @@ class AggTableScanOperator : public TableScanOperator {
 
   // used to save if the current row is a new group based on the input groupby information.
   GroupByMetadata group_by_metadata;
+  bool disorder_{false};  // it is disorder if only group by timebucket
+
 };
 
 }  //  namespace kwdbts

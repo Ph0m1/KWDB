@@ -179,37 +179,37 @@ KStatus TABLE::InitField(kwdbContext_p ctx, const TSCol &col, k_uint32 index,
 }
 
 void *TABLE::GetData(int col, k_uint64 offset, roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {
-  auto data_handle = current_thd->GetRowBatchOriginalPtr();
-  return data_handle->GetData(col, offset, ctype, dt);
+  auto row_batch = current_thd->GetRowBatch();
+  return row_batch->GetData(col, offset, ctype, dt);
 }
 
 k_uint16 TABLE::GetDataLen(int col, k_uint64 offset, roachpb::KWDBKTSColumn::ColumnType ctype) {
-  auto data_handle = current_thd->GetRowBatchOriginalPtr();
-  return data_handle->GetDataLen(col, offset, ctype);
+  auto row_batch = current_thd->GetRowBatch();
+  return row_batch->GetDataLen(col, offset, ctype);
 }
 
 bool TABLE::is_nullable(int col, roachpb::KWDBKTSColumn::ColumnType ctype) {
 //  if (roachpb::KWDBKTSColumn::TYPE_PTAG == ctype) {
 //    return false;
 //  }
-  auto data_handle = current_thd->GetRowBatchOriginalPtr();
+  auto row_batch = current_thd->GetRowBatch();
 
-  return data_handle->IsNull(col, ctype);
+  return row_batch->IsNull(col, ctype);
 }
 
 void *TABLE::GetData2(int col, k_uint64 offset, roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {
-  IChunk* data_handle = current_thd->GetDataChunk();
-  return data_handle->GetData(col);
+  IChunk* data_chunk = current_thd->GetDataChunk();
+  return data_chunk->GetData(col);
 }
 
 bool TABLE::is_nullable2(int col, roachpb::KWDBKTSColumn::ColumnType ctype) {
-  IChunk* data_handle = current_thd->GetDataChunk();
-  return data_handle->IsNull(col);
+  IChunk* data_chunk = current_thd->GetDataChunk();
+  return data_chunk->IsNull(col);
 }
 
 k_bool TABLE::IsOverflow(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype) {
-  auto data_handle = current_thd->GetRowBatchOriginalPtr();
-  return data_handle->IsOverflow(col, ctype);
+  auto row_batch = current_thd->GetRowBatch();
+  return row_batch->IsOverflow(col, ctype);
 }
 
 }  // namespace kwdbts

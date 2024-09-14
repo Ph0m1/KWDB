@@ -98,14 +98,14 @@ EEIteratorErrCode TableStatisticScanOperator::Start(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode TableStatisticScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr *row_batch) {
+EEIteratorErrCode TableStatisticScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatch **row_batch) {
   EnterFunc();
   KWThdContext *thd = current_thd;
-  *row_batch = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
+  *row_batch = static_cast<ScanRowBatch *>(thd->GetRowBatch());
   if (nullptr != *row_batch) {
     (*row_batch)->Reset();
   } else {
-    *row_batch = std::make_shared<ScanRowBatch>(table_);
+    *row_batch = KNEW ScanRowBatch(table_);
     thd->SetRowBatch(*row_batch);
   }
 
@@ -184,6 +184,7 @@ KStatus TableStatisticScanOperator::Close(kwdbContext_p ctx) {
 EEIteratorErrCode TableStatisticScanOperator::Reset(kwdbContext_p ctx) {
   EnterFunc();
   SafeDeletePointer(handler_);
+  SafeDeletePointer(row_batch_);
   Return(EEIteratorErrCode::EE_OK);
 }
 
@@ -197,8 +198,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
 
   k_int64 counter = 0;
   do {
-    ScanRowBatchPtr data_handle;
-    code = InitScanRowBatch(ctx, &data_handle);
+    code = InitScanRowBatch(ctx, &row_batch_);
     if (EEIteratorErrCode::EE_OK != code) {
       Return(code);
     }
@@ -213,7 +213,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
         }
         break;
       }
-      if (data_handle->count_ < 1) {
+      if (row_batch_->count_ < 1) {
         continue;
       } else {
         break;
@@ -221,27 +221,27 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
     }
 
     // reset line
-    data_handle->ResetLine();
-    counter+=data_handle->Count();
+    row_batch_->ResetLine();
+    counter+=row_batch_->Count();
 
     if (!is_done_) {
-      if (data_handle->Count() > 0) {
-        if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < data_handle->Count()) {
+      if (row_batch_->Count() > 0) {
+        if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < row_batch_->Count()) {
           if (current_data_chunk_->Count() > 0) {
             output_queue_.push(std::move(current_data_chunk_));
           }
           k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_);
-          if (capacity >= data_handle->Count()) {
+          if (capacity >= row_batch_->Count()) {
             constructDataChunk();
           } else {
-            constructDataChunk(data_handle->Count());
+            constructDataChunk(row_batch_->Count());
           }
           if (current_data_chunk_ == nullptr) {
             EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
             Return(EEIteratorErrCode::EE_ERROR)
           }
         }
-        KStatus status = current_data_chunk_->AddRowBatchData(ctx, data_handle.get(), renders_);
+        KStatus status = current_data_chunk_->AddRowBatchData(ctx, row_batch_, renders_);
         if (status != KStatus::SUCCESS) {
           Return(EEIteratorErrCode::EE_ERROR);
         }

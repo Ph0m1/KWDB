@@ -85,7 +85,7 @@ TEST_F(TestDataChunk, TestChunk) {
   tag_data_handle->Init(&table);
 
   current_thd = KNEW KWThdContext();
-  current_thd->SetRowBatch(tag_data_handle);
+  current_thd->SetRowBatch(tag_data_handle.get());
 
   for (int i = 0; i < col_info.size(); i++) {
     renders[i]->table_ = &table;

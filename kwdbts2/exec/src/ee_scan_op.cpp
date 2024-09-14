@@ -183,8 +183,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
       break;
     }
-    ScanRowBatchPtr data_handle;
-    code = InitScanRowBatch(ctx, &data_handle);
+    code = InitScanRowBatch(ctx, &row_batch_);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -195,26 +194,26 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
         break;
       }
 
-      total_read_row_ += data_handle->count_;
+      total_read_row_ += row_batch_->count_;
 
       if (nullptr == filter_ && 0 == cur_offset_ && 0 == limit_) {
-        examined_rows_ += data_handle->count_;
+        examined_rows_ += row_batch_->count_;
         break;
       }
 
       // filter || offset || limit
-      for (int i = 0; i < data_handle->count_; ++i) {
+      for (int i = 0; i < row_batch_->count_; ++i) {
         if (nullptr != filter_) {
           k_int64 ret = filter_->ValInt();
           if (0 == ret) {
-            data_handle->NextLine();
+            row_batch_->NextLine();
             continue;
           }
         }
 
         k_bool result = ResolveOffset();
         if (result) {
-          data_handle->NextLine();
+          row_batch_->NextLine();
           continue;
         }
 
@@ -222,12 +221,12 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
           break;
         }
 
-        data_handle->AddSelection();
-        data_handle->NextLine();
+        row_batch_->AddSelection();
+        row_batch_->NextLine();
         ++examined_rows_;
       }
 
-      if (0 != data_handle->GetSelection()->size()) {
+      if (0 != row_batch_->GetSelection()->size()) {
         break;
       }
     }
@@ -255,8 +254,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
       break;
     }
 
-    ScanRowBatchPtr data_handle;
-    code = InitScanRowBatch(ctx, &data_handle);
+    code = InitScanRowBatch(ctx, &row_batch_);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -268,20 +266,20 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
         break;
       }
 
-      if (data_handle->count_ < 1) continue;
+      if (row_batch_->count_ < 1) continue;
 
       if (nullptr == filter_ && 0 == cur_offset_ && 0 == limit_) {
-        total_read_row_ += data_handle->count_;
-        examined_rows_ += data_handle->count_;
+        total_read_row_ += row_batch_->count_;
+        examined_rows_ += row_batch_->count_;
         break;
       }
 
       // filter || offset || limit
-      for (int i = 0; i < data_handle->count_; ++i) {
+      for (int i = 0; i < row_batch_->count_; ++i) {
         if (nullptr != filter_) {
           k_int64 ret = filter_->ValInt();
           if (0 == ret) {
-            data_handle->NextLine();
+            row_batch_->NextLine();
             ++total_read_row_;
             continue;
           }
@@ -289,7 +287,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
 
         k_bool result = ResolveOffset();
         if (result) {
-          data_handle->NextLine();
+          row_batch_->NextLine();
           ++total_read_row_;
           continue;
         }
@@ -298,38 +296,38 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
           break;
         }
 
-        data_handle->AddSelection();
-        data_handle->NextLine();
+        row_batch_->AddSelection();
+        row_batch_->NextLine();
         ++examined_rows_;
         ++total_read_row_;
       }
 
-      if (0 != data_handle->GetSelection()->size()) {
+      if (0 != row_batch_->GetSelection()->size()) {
         break;
       }
     }
 
     if (!is_done_) {
-      if (data_handle->Count() > 0) {
-        if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < data_handle->Count()) {
-          // the current chunk have no enough space to save the whole data results in data_handle,
+      if (row_batch_->Count() > 0) {
+        if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < row_batch_->Count()) {
+          // the current chunk have no enough space to save the whole data results in row_batch_,
           // push it into the output queue, create a new one and ensure it has enough space.
           if (current_data_chunk_->Count() > 0) {
             output_queue_.push(std::move(current_data_chunk_));
           }
           k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_);
-          if (capacity >= data_handle->Count()) {
+          if (capacity >= row_batch_->Count()) {
             constructDataChunk();
           } else {
-            constructDataChunk(data_handle->Count());
+            constructDataChunk(row_batch_->Count());
           }
           if (current_data_chunk_ == nullptr) {
             EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
             Return(EEIteratorErrCode::EE_ERROR)
           }
         }
-        current_data_chunk_->AddRowBatchData(ctx, data_handle.get(), renders_,
-                                             batch_copy_ && !data_handle->hasFilter());
+        current_data_chunk_->AddRowBatchData(ctx, row_batch_, renders_,
+                                             batch_copy_ && !row_batch_->hasFilter());
       }
     } else {
       if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
@@ -343,10 +341,9 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<int64_t, std::nano> duration = end - start;
     if (nullptr != chunk) {
-      ScanRowBatchPtr data_handle = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
       int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_, duration.count(),
-                                  int64_t(data_handle->count_), bytes_read, 0, 0);
+                                  int64_t(row_batch_->count_), bytes_read, 0, 0);
     }
   }
 
@@ -370,6 +367,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
 EEIteratorErrCode TableScanOperator::Reset(kwdbContext_p ctx) {
   EnterFunc();
   SafeDeletePointer(handler_);
+  SafeDeletePointer(row_batch_);
   Return(EEIteratorErrCode::EE_OK);
 }
 
@@ -397,26 +395,23 @@ EEIteratorErrCode TableScanOperator::InitHandler(kwdbContext_p ctx) {
   Return(ret);
 }
 
-EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatchPtr* row_batch) {
-  EnterFunc();
-  KWThdContext* thd = current_thd;
-  *row_batch = std::dynamic_pointer_cast<ScanRowBatch>(thd->GetRowBatch());
+EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRowBatch** row_batch) {
   if (nullptr != *row_batch) {
     (*row_batch)->Reset();
   } else {
-    *row_batch = std::make_shared<ScanRowBatch>(table_);
+    *row_batch = KNEW ScanRowBatch(table_);
+    KWThdContext* thd = current_thd;
     thd->SetRowBatch(*row_batch);
   }
 
   if (nullptr == (*row_batch)) {
     LOG_ERROR("make scan data handle failed");
-    Return(EEIteratorErrCode::EE_ERROR);
+    return EEIteratorErrCode::EE_ERROR;
   }
-
-  Return(EEIteratorErrCode::EE_OK);
+  return EEIteratorErrCode::EE_OK;
 }
 
-RowBatchPtr TableScanOperator::GetRowBatch(kwdbContext_p ctx) {
+RowBatch* TableScanOperator::GetRowBatch(kwdbContext_p ctx) {
   EnterFunc();
   KWThdContext* thd = current_thd;
   Return(thd->GetRowBatch());

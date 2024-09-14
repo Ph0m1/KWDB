@@ -51,50 +51,50 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
 
   while (true) {
+    ScanRowBatch* row_batch =
+        static_cast<ScanRowBatch *>(current_thd->GetRowBatch());
     if (nullptr == ts_iterator) {
       code = NewTsIterator(ctx);
       if (code != EEIteratorErrCode::EE_OK) {
         break;
       }
-      code = GetNextTagData(ctx);
+      code = GetNextTagData(ctx, row_batch);
       if (code != EEIteratorErrCode::EE_OK) {
         Return(code);
       }
     }
 
-    ScanRowBatchPtr data_handle =
-        std::dynamic_pointer_cast<ScanRowBatch>(current_thd->GetRowBatch());
-    data_handle->Reset();
-    KStatus ret = ts_iterator->Next(&data_handle->res_, &data_handle->count_, data_handle->ts_);
+    row_batch->Reset();
+    KStatus ret = ts_iterator->Next(&row_batch->res_, &row_batch->count_, row_batch->ts_);
     if (KStatus::FAIL == ret) {
       LOG_ERROR("TsTableIterator::Next() Failed\n");
       code = EEIteratorErrCode::EE_ERROR;
       break;
     }
 
-    if (0 == data_handle->count_) {
-      ret = data_handle->tag_rowbatch_->NextLine(&(current_tag_index_));
+    if (0 == row_batch->count_) {
+      ret = row_batch->tag_rowbatch_->NextLine(&(current_tag_index_));
       if (KStatus::FAIL == ret) {
         code = NewTsIterator(ctx);
         if (code != EEIteratorErrCode::EE_OK) {
           Return(code);
         }
       }
-      code = GetNextTagData(ctx);
+      code = GetNextTagData(ctx, row_batch);
       if (code != EEIteratorErrCode::EE_OK) {
         Return(code);
       }
     } else {
-      while (!data_handle->tag_rowbatch_->GetEntityIndex(current_tag_index_).equalsWithoutMem(
-             data_handle->res_.entity_index)) {
-        ret = data_handle->tag_rowbatch_->NextLine(&(current_tag_index_));
+      while (!row_batch->tag_rowbatch_->GetEntityIndex(current_tag_index_).equalsWithoutMem(
+             row_batch->res_.entity_index)) {
+        ret = row_batch->tag_rowbatch_->NextLine(&(current_tag_index_));
         if (KStatus::FAIL == ret) {
           code = NewTsIterator(ctx);
           if (code != EEIteratorErrCode::EE_OK) {
             Return(code);
           }
         }
-        code = GetNextTagData(ctx);
+        code = GetNextTagData(ctx, row_batch);
         if (code != EEIteratorErrCode::EE_OK) {
           Return(code);
         }
@@ -110,19 +110,19 @@ EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) 
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   KWThdContext *thd = current_thd;
-  RowBatchPtr ptr = thd->GetRowBatch();
-  thd->SetRowBatch(tag_datahandle_);
+  RowBatch* ptr = thd->GetRowBatch();
+  thd->SetRowBatch(tag_rowbatch_.get());
   while (true) {
-    tag_datahandle_->Reset();
-    KStatus ret = tag_iterator->Next(&(tag_datahandle_->entity_indexs_),
-                                     &(tag_datahandle_->res_),
-                                     &(tag_datahandle_->count_));
+    tag_rowbatch_->Reset();
+    KStatus ret = tag_iterator->Next(&(tag_rowbatch_->entity_indexs_),
+                                     &(tag_rowbatch_->res_),
+                                     &(tag_rowbatch_->count_));
     if (KStatus::FAIL == ret) {
       break;
     }
 
     code = EEIteratorErrCode::EE_OK;
-    if (0 == tag_datahandle_->count_) {
+    if (0 == tag_rowbatch_->count_) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
       break;
     }
@@ -131,11 +131,11 @@ EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) 
       break;
     }
     tagFilter(ctx, tag_filter);
-    if (tag_datahandle_->effect_count_ > 0) {
+    if (tag_rowbatch_->effect_count_ > 0) {
       break;
     }
   }
-  tag_datahandle_->SetPipeEntityNum(current_thd->GetDegree());
+  tag_rowbatch_->SetPipeEntityNum(current_thd->GetDegree());
   thd->SetRowBatch(ptr);
   Return(code);
 }
@@ -151,20 +151,17 @@ KStatus StorageHandler::Close() {
 
   return ret;
 }
-EEIteratorErrCode StorageHandler::GetNextTagData(kwdbContext_p ctx) {
-  EnterFunc();
+EEIteratorErrCode StorageHandler::GetNextTagData(kwdbContext_p ctx, ScanRowBatch *row_batch) {
   KStatus ret = FAIL;
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
-  ScanRowBatchPtr data_handle =
-      std::dynamic_pointer_cast<ScanRowBatch>(current_thd->GetRowBatch());
 
-  ret = data_handle->tag_rowbatch_->GetTagData(&(data_handle->tagdata_),
-                                                 &(data_handle->tag_bitmap_),
+  ret = row_batch->tag_rowbatch_->GetTagData(&(row_batch->tagdata_),
+                                                 &(row_batch->tag_bitmap_),
                                                  current_tag_index_);
   if (KStatus::FAIL == ret) {
     code = EE_END_OF_RECORD;
   }
-  Return(code)
+  return code;
 }
 
 EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
@@ -172,8 +169,8 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
   KStatus ret = FAIL;
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
 
-  ScanRowBatchPtr data_handle =
-      std::dynamic_pointer_cast<ScanRowBatch>(current_thd->GetRowBatch());
+  ScanRowBatch* data_handle =
+      static_cast<ScanRowBatch *>(current_thd->GetRowBatch());
 
   do {
     std::vector<EntityResultIndex> entities;
@@ -222,8 +219,8 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   KWThdContext *thd = current_thd;
-  RowBatchPtr old_ptr = thd->GetRowBatch();
-  thd->SetRowBatch(tag_datahandle_);
+  RowBatch* old_ptr = thd->GetRowBatch();
+  thd->SetRowBatch(tag_rowbatch_.get());
 
   std::vector<void*> primary_tags;
   do {
@@ -241,22 +238,22 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
       break;
     }
     ret = ts_table_->GetEntityIdList(
-        ctx, primary_tags, table_->scan_tags_, &tag_datahandle_->entity_indexs_,
-        &tag_datahandle_->res_, &tag_datahandle_->count_);
+        ctx, primary_tags, table_->scan_tags_, &tag_rowbatch_->entity_indexs_,
+        &tag_rowbatch_->res_, &tag_rowbatch_->count_);
     if (ret != SUCCESS) {
       break;
     }
     if (tag_filter) {
       tagFilter(ctx, tag_filter);
-      if (0 == tag_datahandle_->effect_count_) {
+      if (0 == tag_rowbatch_->effect_count_) {
         code = EEIteratorErrCode::EE_END_OF_RECORD;
         break;
       }
-    } else if (0 == tag_datahandle_->count_) {
+    } else if (0 == tag_rowbatch_->count_) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
       break;
     }
-    tag_datahandle_->SetPipeEntityNum(current_thd->GetDegree());
+    tag_rowbatch_->SetPipeEntityNum(current_thd->GetDegree());
     code = EEIteratorErrCode::EE_OK;
   } while (0);
   for (auto& it : primary_tags) {
@@ -380,17 +377,17 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc
 void StorageHandler::tagFilter(kwdbContext_p ctx, Field *tag_filter) {
   EnterFunc();
 
-  for (k_uint32 i = 0; i < tag_datahandle_->count_; ++i) {
+  for (k_uint32 i = 0; i < tag_rowbatch_->count_; ++i) {
     if (0 == tag_filter->ValInt()) {
-      tag_datahandle_->NextLine();
+      tag_rowbatch_->NextLine();
       continue;
     }
 
-    tag_datahandle_->AddSelection();
-    tag_datahandle_->NextLine();
+    tag_rowbatch_->AddSelection();
+    tag_rowbatch_->NextLine();
   }
-  tag_datahandle_->isFilter_ = true;
-  tag_datahandle_->ResetLine();
+  tag_rowbatch_->isFilter_ = true;
+  tag_rowbatch_->ResetLine();
 
   ReturnVoid();
 }

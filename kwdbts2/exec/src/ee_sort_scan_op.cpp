@@ -89,12 +89,11 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
   k_uint32 limit = limit_ + offset_;
   // read data
   while (true) {
-    ScanRowBatchPtr data_handle;
-    code = InitScanRowBatch(ctx, &data_handle);
+    code = InitScanRowBatch(ctx, &row_batch_);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
-    data_handle->ts_ = ts_;
+    row_batch_->ts_ = ts_;
     code = handler->TsNext(ctx);
     if (EEIteratorErrCode::EE_OK != code) {
       if (EEIteratorErrCode::EE_END_OF_RECORD == code ||
@@ -105,12 +104,12 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
     }
 
     // resolve filter
-    ResolveFilter(ctx, data_handle);
-    if (0 == data_handle->Count()) {
+    ResolveFilter(ctx, row_batch_);
+    if (0 == row_batch_->Count()) {
       continue;
     }
     // sort
-    PrioritySort(ctx, data_handle, limit_ + offset_);
+    PrioritySort(ctx, row_batch_, limit_ + offset_);
   }
 
   Return(code);
@@ -189,30 +188,30 @@ EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx) {
 }
 
 EEIteratorErrCode SortScanOperator::ResolveFilter(kwdbContext_p ctx,
-                                                  ScanRowBatchPtr data_handle) {
+                                                  ScanRowBatch *row_batch) {
   if (nullptr == filter_) {
     return EEIteratorErrCode::EE_OK;
   }
 
-  for (int i = 0; i < data_handle->count_; ++i) {
+  for (int i = 0; i < row_batch->count_; ++i) {
     k_int64 ret = filter_->ValInt();
     if (0 == ret) {
-      data_handle->NextLine();
+      row_batch->NextLine();
       continue;
     }
 
-    data_handle->AddSelection();
-    data_handle->NextLine();
+    row_batch->AddSelection();
+    row_batch->NextLine();
   }
-  data_handle->ResetLine();
-  data_handle->is_filter_ = true;
+  row_batch->ResetLine();
+  row_batch->is_filter_ = true;
   return EEIteratorErrCode::EE_OK;
 }
 
 EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
-                                                 ScanRowBatchPtr data_handle,
+                                                 ScanRowBatch *row_batch,
                                                  k_uint32 limit) {
-  k_uint32 count = data_handle->Count();
+  k_uint32 count = row_batch->Count();
   k_uint32 free = limit - data_chunk_->Count();
   k_uint32 num = free > count ? count : free;
   if (0 == table_->is_reverse_) {  // asc
@@ -223,7 +222,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
       data_asc_.push(data);
       FieldsToChunk(renders_, num_, data->rowno_, data_chunk_);
       data_chunk_->AddCount();
-      data_handle->NextLine();
+      row_batch->NextLine();
     }
 
     for (k_uint32 i = num; i < count; ++i) {
@@ -238,7 +237,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
         data_asc_.push(data);
         SafeDeletePointer(top);
       }
-      data_handle->NextLine();
+      row_batch->NextLine();
     }
     if (data_asc_.size() == limit) {
       ts_ = data_asc_.top()->ts_;
@@ -251,7 +250,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
       data_desc_.push(data);
       FieldsToChunk(renders_, num_, data->rowno_, data_chunk_);
       data_chunk_->AddCount();
-      data_handle->NextLine();
+      row_batch->NextLine();
     }
 
     for (k_uint32 i = num; i < count; ++i) {
@@ -266,7 +265,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
         data_desc_.push(data);
         SafeDeletePointer(top);
       }
-      data_handle->NextLine();
+      row_batch->NextLine();
     }
     if (data_desc_.size() == limit) {
       ts_ = data_desc_.top()->ts_;

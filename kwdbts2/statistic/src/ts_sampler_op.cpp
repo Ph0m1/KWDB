@@ -145,9 +145,9 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
       break;
     }
 
-    RowBatchPtr data_handle = input_->GetRowBatch(ctx);
-    data_handle->ResetLine();
-    const k_uint32 lines = data_handle->Count();
+    RowBatch* row_batch = input_->GetRowBatch(ctx);
+    row_batch->ResetLine();
+    const k_uint32 lines = row_batch->Count();
     for (k_uint32 line = 0; line < lines; ++line) {
       int i = 0;
       for (auto& sk : normalCol_sketches_) {
@@ -162,7 +162,7 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
         k_uint32 sketch_idx = normalCol_sketches_[i].sketchIdx;
         normalCol_sketches_[i].numRows++;
         Field* render = input_->GetRender(static_cast<int>(col_idx));
-        bool isNull = data_handle->IsNull(render->getColIdxInRs(), normalCol_sketches_[i].column_type);
+        bool isNull = row_batch->IsNull(render->getColIdxInRs(), normalCol_sketches_[i].column_type);
         if (isNull) {
           normalCol_sketches_[i].numNulls++;
         }
@@ -179,7 +179,7 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
         EncodeBytes(i, col_idx, isNull);
         ++i;
       }
-      data_handle->NextLine();
+      row_batch->NextLine();
     }
   }
 
@@ -226,16 +226,16 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
     Return(code)
   }
 
-  RowBatchPtr data_handle;
+  RowBatch* row_batch;
   while (true) {
     code = tagScanOp->Next(ctx);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
 
-    data_handle = tagScanOp->GetRowBatch(ctx);
-    data_handle->ResetLine();
-    const k_uint32 lines = data_handle->Count();
+    row_batch = tagScanOp->GetRowBatch(ctx);
+    row_batch->ResetLine();
+    const k_uint32 lines = row_batch->Count();
     if (lines > 0) {
       for (k_uint32 line = 0; line < lines; ++line) {
         int i = 0;
@@ -246,7 +246,7 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
           // Currently, all PTags cannot be null, so the following parts are not judged for the moment
           ++i;
         }
-        data_handle->NextLine();
+        row_batch->NextLine();
       }
     }
   }

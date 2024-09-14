@@ -20,7 +20,7 @@
 namespace kwdbts {
 class KWThdContext {
  private:
-  RowBatchPtr row_batch_{nullptr};
+  RowBatch* row_batch_{nullptr};
   ParallelGroup* parallel_group_{nullptr};
   k_uint64 thd_id_{0};
   IChunk* data_chunk_{nullptr};
@@ -29,7 +29,7 @@ class KWThdContext {
   KWThdContext() { thd_id_ = pthread_self(); }
   ~KWThdContext() { Reset(); }
 
-  void SetRowBatch(RowBatchPtr ptr) {
+  void SetRowBatch(RowBatch* ptr) {
     row_batch_ = ptr;
   }
 
@@ -37,19 +37,8 @@ class KWThdContext {
     parallel_group_ = ptr;
   }
 
-  void Reset() {
-    if (row_batch_) {
-      row_batch_.reset();
-    }
-  }
-  RowBatchPtr& GetRowBatch() { return row_batch_; }
-
-  /**
-   * Only used to read the data in row_batch_ structure.
-   * The caller should ensure the row_batch_ shared_ptr is valid during the read process.
-   * @return the original pointer for row_batch_ structure.
-   */
-  RowBatch* GetRowBatchOriginalPtr() { return row_batch_.get(); }
+  void Reset() {}
+  RowBatch* GetRowBatch() { return row_batch_; }
   ParallelGroup* GetParallelGroup() { return parallel_group_; }
   k_uint32 GetDegree() {
     if (parallel_group_) {

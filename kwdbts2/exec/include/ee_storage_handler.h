@@ -54,6 +54,7 @@ class Field;
  * differentiation, etc., * so a large expansion space is reserved
  */
 class TagScanIterator;
+class ScanRowBatch;
 class StorageHandler {
  public:
   explicit StorageHandler(TABLE *table) : table_(table) {}
@@ -61,7 +62,7 @@ class StorageHandler {
   virtual ~StorageHandler();
 
   void SetTagRowBatch(TagRowBatchPtr tag_datahandle) {
-    tag_datahandle_ = tag_datahandle;
+    tag_rowbatch_ = tag_datahandle;
   }
 
   void SetReadMode(TSTableReadMode read_mode) { read_mode_ = read_mode; }
@@ -124,7 +125,7 @@ class StorageHandler {
 
   virtual EEIteratorErrCode NewTagIterator(kwdbContext_p ctx);
 
-  virtual EEIteratorErrCode GetNextTagData(kwdbContext_p ctx);
+  virtual EEIteratorErrCode GetNextTagData(kwdbContext_p ctx, ScanRowBatch *row_batch);
 
   EEIteratorErrCode GetEntityIdList(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter);
 
@@ -144,7 +145,7 @@ class StorageHandler {
   TsTableIterator *ts_iterator{nullptr};
   //  TagIterator *tag_iterator{nullptr};
   BaseEntityIterator *tag_iterator{nullptr};
-  TagRowBatchPtr tag_datahandle_;
+  TagRowBatchPtr tag_rowbatch_;
   TSTableReadMode read_mode_{
       TSTableReadMode::tableTableMeta};
   TagScanOperator* tag_scan_{nullptr};

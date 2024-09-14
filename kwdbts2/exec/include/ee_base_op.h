@@ -83,7 +83,7 @@ class BaseOperator {
     return EEIteratorErrCode::EE_OK;
   }
 
-  virtual RowBatchPtr GetRowBatch(kwdbContext_p ctx) { return nullptr; }
+  virtual RowBatch* GetRowBatch(kwdbContext_p ctx) { return nullptr; }
 
   virtual KStatus Close(kwdbContext_p ctx) = 0;
 

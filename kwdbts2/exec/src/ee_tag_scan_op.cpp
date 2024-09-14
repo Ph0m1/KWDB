@@ -129,9 +129,9 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx) {
   EEIteratorErrCode code = EEIteratorErrCode::EE_END_OF_RECORD;
   k_uint32 access_mode = table_->GetAccessMode();
   do {
-    tagdata_handle_ = std::make_shared<TagRowBatch>();
-    tagdata_handle_->Init(table_);
-    handler_->SetTagRowBatch(tagdata_handle_);
+    tag_rowbatch_ = std::make_shared<TagRowBatch>();
+    tag_rowbatch_->Init(table_);
+    handler_->SetTagRowBatch(tag_rowbatch_);
     if (access_mode < TSTableReadMode::tableTableMeta) {
       if (!tag_index_once_) {
         break;
@@ -147,7 +147,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx) {
         break;
       }
     }
-    total_read_row_ += tagdata_handle_->count_;
+    total_read_row_ += tag_rowbatch_->count_;
   } while (0);
 
   Return(code);
@@ -160,9 +160,9 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
   k_uint32 access_mode = table_->GetAccessMode();
   auto start = std::chrono::high_resolution_clock::now();
   do {
-    tagdata_handle_ = std::make_shared<TagRowBatch>();
-    tagdata_handle_->Init(table_);
-    handler_->SetTagRowBatch(tagdata_handle_);
+    tag_rowbatch_ = std::make_shared<TagRowBatch>();
+    tag_rowbatch_->Init(table_);
+    handler_->SetTagRowBatch(tag_rowbatch_);
     if (access_mode < TSTableReadMode::tableTableMeta) {
       if (!tag_index_once_) {
         break;
@@ -178,12 +178,12 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
         break;
       }
     }
-    total_read_row_ += tagdata_handle_->count_;
-    current_thd->SetRowBatch(tagdata_handle_);
+    total_read_row_ += tag_rowbatch_->count_;
+    current_thd->SetRowBatch(tag_rowbatch_.get());
 
     // reset
-    tagdata_handle_->ResetLine();
-    if (tagdata_handle_->Count() > 0) {
+    tag_rowbatch_->ResetLine();
+    if (tag_rowbatch_->Count() > 0) {
       // init DataChunk
       if (nullptr == chunk) {
         // init column
@@ -193,7 +193,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
           col_info.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
         }
 
-        chunk = std::make_unique<DataChunk>(col_info, tagdata_handle_->Count());
+        chunk = std::make_unique<DataChunk>(col_info, tag_rowbatch_->Count());
         if (chunk->Initialize() != true) {
           EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
           chunk = nullptr;
@@ -201,7 +201,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
         }
       }
 
-      KStatus status = chunk->AddRowBatchData(ctx, tagdata_handle_.get(), renders_);
+      KStatus status = chunk->AddRowBatchData(ctx, tag_rowbatch_.get(), renders_);
       if (status != KStatus::SUCCESS) {
         Return(EEIteratorErrCode::EE_ERROR);
       }
@@ -214,17 +214,17 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
     if (nullptr != chunk) {
       int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
       chunk->GetFvec().AddAnalyse(ctx, this->processor_id_,
-                        duration.count(), int64_t(tagdata_handle_->count_), bytes_read, 0, 0);
+                        duration.count(), int64_t(tag_rowbatch_->count_), bytes_read, 0, 0);
     }
   }
 
   Return(code);
 }
 
-RowBatchPtr TagScanOperator::GetRowBatch(kwdbContext_p ctx) {
+RowBatch* TagScanOperator::GetRowBatch(kwdbContext_p ctx) {
   EnterFunc();
 
-  Return(tagdata_handle_);
+  Return(tag_rowbatch_.get());
 }
 
 EEIteratorErrCode TagScanOperator::Reset(kwdbContext_p ctx) {
@@ -258,22 +258,22 @@ KStatus TagScanOperator::GetEntities(kwdbContext_p ctx,
   EnterFunc();
   std::unique_lock l(tag_lock_);
   if (*row_batch_ptr == nullptr) {
-    *row_batch_ptr = tagdata_handle_;
+    *row_batch_ptr = tag_rowbatch_;
   }
   if (is_first_entity_ || (*row_batch_ptr != nullptr &&
                            (row_batch_ptr->get()->isAllDistributed()))) {
-    if (is_first_entity_ || *row_batch_ptr == tagdata_handle_ || tagdata_handle_->isAllDistributed()) {
+    if (is_first_entity_ || *row_batch_ptr == tag_rowbatch_ || tag_rowbatch_->isAllDistributed()) {
       is_first_entity_ = false;
       EEIteratorErrCode code = Next(ctx);
       if (code != EE_OK) {
         Return(FAIL);
       }
-    } else if (tagdata_handle_.get()->Count() == 0) {
+    } else if (tag_rowbatch_.get()->Count() == 0) {
       Return(FAIL);
     }
 
     // construct ts_iterator
-    *row_batch_ptr = tagdata_handle_;
+    *row_batch_ptr = tag_rowbatch_;
   }
   KStatus ret = row_batch_ptr->get()->GetEntities(entities, start_tag_index);
   Return(ret);
