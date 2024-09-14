@@ -429,6 +429,10 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	// cost of full scan tag table.
 	fullScanTagTblCost := tableScanCostUnit * float64(tagColsWith) * pTagRowCount
 
+	allColsWidth := pTagColsWith + tagColsWith + colsWith
+	// Calculate parallel num in timing scenarios
+	tsScan.Memo().CalculateDop(rowCount, stats.PTagCount, uint32(allColsWidth))
+
 	if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter == nil {
 		// case: TagIndex
 		return memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount +
@@ -447,10 +451,6 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 		// case: TagOnly
 		return memo.Cost(tableScanCostUnit * pTagRowCount * float64(tagColsWith))
 	}
-
-	allColsWidth := pTagColsWith + tagColsWith + colsWith
-	// Calculate parallel num in timing scenarios
-	tsScan.Memo().CalculateDop(rowCount, stats.PTagCount, uint32(allColsWidth))
 
 	// case: TsMetadate, need scan all tag table when there are tag columns in query
 	return memo.Cost(fullScanTagTblCost + fullScanTblCost)

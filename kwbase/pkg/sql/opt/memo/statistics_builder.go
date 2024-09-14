@@ -3584,3 +3584,442 @@ func RequestColStat(evalCtx *tree.EvalContext, e RelExpr, cols opt.ColSet) {
 	sb.init(evalCtx, e.Memo().Metadata())
 	sb.colStat(cols, e)
 }
+
+// computeConstraintsSelectivity computes the selectivity factor based on the constraints
+// provided in a ScalarExpr.
+//
+// Parameters:
+// - sel: The select expression being analyzed.
+// - relProps: Relational properties of the select expression, which include statistics.
+// - condition: A scalar expression representing the condition.
+// - cs: The set of constraints corresponds to condition.
+// - tight: A boolean indicating whether the constraint is "tight"
+//
+// For example:
+//
+//	(x > 1 AND y > 10) OR (x < 5 AND y < 50)
+//
+// the constraints is not tight (and thus allows combinations like x,y = 10,0).
+//
+// Returns:
+// - selectivity: A float64 value representing the estimated selectivity of the constraints,
+func (sb *statisticsBuilder) computeConstraintsSelectivity(
+	sel *SelectExpr,
+	relProps *props.Relational,
+	condition opt.ScalarExpr,
+	cs *constraint.Set,
+	tight bool,
+) float64 {
+	selectivity := float64(1)
+	s := &relProps.Stats
+
+	// Handle equalities such as `var1=var2`
+	if eq, ok := condition.(*EqExpr); ok {
+		if eq.Left.Op() == opt.VariableOp && eq.Right.Op() == opt.VariableOp {
+			equivGroup := opt.MakeColSet(eq.Left.(*VariableExpr).Col)
+			equivGroup.Add(eq.Right.(*VariableExpr).Col)
+			selectivity *= sb.tsSelectivityFromEquivalency(equivGroup, sel, s)
+			return selectivity
+		}
+	}
+
+	constrainedCols := cs.ExtractCols()
+	histCols := opt.ColSet{}
+	mapColDistinct := make(map[opt.ColumnID]float64)
+	mapColHistogram := make(map[opt.ColumnID]*props.Histogram)
+
+	canApplyConstraints, numUnappliedConjuncts := sb.processConstraints(sel, cs, mapColDistinct, mapColHistogram, &histCols, tight)
+	if !canApplyConstraints || (canApplyConstraints && !tight) {
+		numUnappliedConjuncts++
+	}
+	selectivity = sb.tsSelectivityFromHistograms(histCols, sel, relProps, mapColHistogram)
+	selectivity *= sb.tsSelectivityFromDistinctCounts(constrainedCols.Difference(histCols), sel, relProps, mapColDistinct)
+	selectivity *= sb.selectivityFromUnappliedConjuncts(float64(numUnappliedConjuncts))
+
+	return selectivity
+}
+
+// computeTSFiltersSelectivity calculates the selectivity for each filter in a SelectExpr
+// when the input expression is a TSScanExpr (time series scan expression). The function
+// returns a map where the keys are the indexes of the filters in the SelectExpr and the
+// values are the computed selectivity for those filters.
+//
+// Parameters:
+//   - sel: Pointer to a SelectExpr which contains the filters and the input relation
+//     expression.
+//   - relProps: Pointer to props.Relational which contains relational properties like
+//     statistics and functional dependencies useful for calculating selectivity.
+//
+// Returns:
+//   - A map[int]float64 where each key is an index of a filter in the SelectExpr's filter list,
+//     and each value is the selectivity calculated for that filter.
+func (sb *statisticsBuilder) computeTSFiltersSelectivity(
+	sel *SelectExpr, relProps *props.Relational,
+) map[int]float64 {
+	selectivityMap := make(map[int]float64)
+
+	// Early exit if the input is not TSScanExpr.
+	if _, ok := sel.Input.(*TSScanExpr); !ok {
+		return selectivityMap
+	}
+
+	computeConjunct := func(conjunct *FiltersItem) float64 {
+		selectivity := float64(1)
+		s := &relProps.Stats
+		// Handle equalities such as `var1=var2`
+		if isEqualityWithTwoVars(conjunct.Condition) {
+			var equivFD props.FuncDepSet
+			equivFD.AddEquivFrom(&conjunct.ScalarProps().FuncDeps)
+			equivReps := equivFD.EquivReps()
+			equivReps.ForEach(func(i opt.ColumnID) {
+				equivGroup := relProps.FuncDeps.ComputeEquivGroup(i)
+				selectivity *= sb.tsSelectivityFromEquivalency(equivGroup, sel, s)
+			})
+			return selectivity
+		}
+
+		scalarProps := conjunct.ScalarProps()
+		constrainedCols := scalarProps.OuterCols
+		histCols := opt.ColSet{}
+		mapColDistinct := make(map[opt.ColumnID]float64)
+		mapColHistogram := make(map[opt.ColumnID]*props.Histogram)
+
+		canApplyConstraints, numUnappliedConjuncts := sb.processConstraints(sel, scalarProps.Constraints, mapColDistinct, mapColHistogram, &histCols, scalarProps.TightConstraints)
+		if canApplyConstraints && !scalarProps.TightConstraints {
+			numUnappliedConjuncts++
+		}
+		selectivity = sb.tsSelectivityFromHistograms(histCols, sel, relProps, mapColHistogram)
+		selectivity *= sb.tsSelectivityFromDistinctCounts(constrainedCols.Difference(histCols), sel, relProps, mapColDistinct)
+		selectivity *= sb.selectivityFromUnappliedConjuncts(float64(numUnappliedConjuncts))
+
+		return selectivity
+	}
+
+	for i := range sel.Filters {
+		selectivityMap[i] = computeConjunct(&sel.Filters[i])
+	}
+
+	return selectivityMap
+}
+
+// processConstraints processes the constraints in a given scalar properties of a select expression to
+// compute selectivity factors such as histograms and distinct counts.
+func (sb *statisticsBuilder) processConstraints(
+	sel *SelectExpr,
+	cs *constraint.Set,
+	mapColDistinct map[opt.ColumnID]float64,
+	mapColHistogram map[opt.ColumnID]*props.Histogram,
+	histCols *opt.ColSet,
+	tight bool,
+) (bool, int) {
+	canApplyConstraints := false
+	numUnappliedConjuncts := 0
+
+	if cs != nil {
+		if cs.IsUnconstrained() || cs == constraint.Contradiction {
+			return canApplyConstraints, numUnappliedConjuncts
+		}
+		canApplyConstraints = true
+
+		for i := 0; i < cs.Length(); i++ {
+			c := cs.Constraint(i)
+			col := c.Columns.Get(0).ID()
+
+			// Calculate distinct counts.
+			applied, lastColMinDistinct := sb.getDistinctCountsFromConstraint(c, &mapColDistinct)
+			if applied == 0 {
+				// If a constraint cannot be applied, it may represent an
+				// inequality like x < 1. As a result, distinctCounts does not fully
+				// represent the selectivity of the constraint set.
+				// We return an estimate of the number of unapplied conjuncts to the
+				// caller function to be used for selectivity calculation.
+				numConjuncts := sb.numConjunctsInConstraint(c, 0 /* nth */)
+
+				// Set the distinct count for the first column of the constraint
+				// according to unknownDistinctCountRatio.
+				sb.getDistinctCountFromUnappliedConjuncts(col, sel, numConjuncts, lastColMinDistinct, &mapColDistinct)
+			}
+
+			// e.g: /1: [/null - /null]
+			if !tight {
+				continue
+			}
+
+			if sel.Relational() == nil || !sb.shouldUseHistogram(sel.Relational()) {
+				continue
+			}
+
+			// Calculate histogram
+			cols := opt.MakeColSet(col)
+			inputStat, _ := sb.colStatFromInput(cols, sel)
+			inputHist := inputStat.Histogram
+			if inputHist != nil && inputHist.CanFilter(c) {
+				newHistogram := inputHist.Filter(c)
+				mapColHistogram[col] = newHistogram
+				histCols.UnionWith(cols)
+			}
+		}
+	} else {
+		numUnappliedConjuncts++
+	}
+
+	return canApplyConstraints, numUnappliedConjuncts
+}
+
+// getDistinctCountsFromConstraint is similar as updateDistinctCountsFromConstraint. It computes the number of
+// distinct values for each column within a constraint. It returns the number of columns for which a distinct count
+// could be determined, and the minimum distinct count for the last column where the count could not be fully determined.
+func (sb *statisticsBuilder) getDistinctCountsFromConstraint(
+	c *constraint.Constraint, mapColDistinct *map[opt.ColumnID]float64,
+) (applied int, lastColMinDistinct float64) {
+	// All of the columns that are part of the prefix have a finite number of
+	// distinct values.
+	prefix := c.Prefix(sb.evalCtx)
+
+	// If there are any other columns beyond the prefix, we may be able to
+	// determine the number of distinct values for the first one. For example:
+	//   /a/b/c: [/1/2/3 - /1/2/3] [/1/4/5 - /1/4/8]
+	//       -> Column a has DistinctCount = 1.
+	//       -> Column b has DistinctCount = 2.
+	//       -> Column c has DistinctCount = 5.
+	for col := 0; col <= prefix; col++ {
+		// All columns should have at least one distinct value.
+		distinctCount := 1.0
+
+		var val tree.Datum
+		countable := true
+		for i := 0; i < c.Spans.Count(); i++ {
+			sp := c.Spans.Get(i)
+			if sp.StartKey().Length() <= col || sp.EndKey().Length() <= col {
+				// We can't determine the distinct count for this column. For example,
+				// the number of distinct values for column b in the constraint
+				// /a/b: [/1/1 - /1] cannot be determined.
+				countable = false
+				continue
+			}
+			startVal := sp.StartKey().Value(col)
+			endVal := sp.EndKey().Value(col)
+			if startVal.Compare(sb.evalCtx, endVal) != 0 {
+				var start, end float64
+				if startVal.ResolvedType().Family() == types.IntFamily &&
+					endVal.ResolvedType().Family() == types.IntFamily {
+					start = float64(*startVal.(*tree.DInt))
+					end = float64(*endVal.(*tree.DInt))
+				} else if startVal.ResolvedType().Family() == types.DateFamily &&
+					endVal.ResolvedType().Family() == types.DateFamily {
+					startDate := startVal.(*tree.DDate)
+					endDate := endVal.(*tree.DDate)
+					if !startDate.IsFinite() || !endDate.IsFinite() {
+						// One of the boundaries is not finite, so we can't determine the
+						// distinct count for this column.
+						countable = false
+						continue
+					}
+					start = float64(startDate.PGEpochDays())
+					end = float64(endDate.PGEpochDays())
+				} else {
+					// We can't determine the distinct count for this column. For example,
+					// the number of distinct values in the constraint
+					// /a: [/'cherry' - /'mango'] cannot be determined.
+					countable = false
+					continue
+				}
+				// We assume that both start and end boundaries are inclusive. This
+				// should be the case for integer and date columns (due to
+				// normalization by constraint.PreferInclusive).
+				if c.Columns.Get(col).Ascending() {
+					distinctCount += end - start
+				} else {
+					distinctCount += start - end
+				}
+			}
+			if i != 0 && val != nil {
+				compare := startVal.Compare(sb.evalCtx, val)
+				ascending := c.Columns.Get(col).Ascending()
+				if (compare > 0 && ascending) || (compare < 0 && !ascending) {
+					// This check is needed to ensure that we calculate the correct distinct
+					// value count for constraints such as:
+					//   /a/b: [/1/2 - /1/2] [/1/4 - /1/4] [/2 - /2]
+					// We should only increment the distinct count for column "a" once we
+					// reach the third span.
+					distinctCount++
+				} else if compare != 0 {
+					// This can happen if we have a prefix, but not an exact prefix. For
+					// example:
+					//   /a/b: [/1/2 - /1/4] [/3/2 - /3/5] [/6/0 - /6/0]
+					// In this case, /a is a prefix, but not an exact prefix. Trying to
+					// figure out the distinct count for column b may be more trouble
+					// than it's worth. For now, don't bother trying.
+					countable = false
+					continue
+				}
+			}
+			val = endVal
+		}
+
+		if !countable {
+			// The last column was not fully applied since there was at least one
+			// uncountable span. The calculated distinct count will be used as a
+			// lower bound for updateDistinctCountFromUnappliedConjuncts.
+			return applied, distinctCount
+		}
+
+		colID := c.Columns.Get(col).ID()
+		(*mapColDistinct)[colID] = distinctCount
+		applied = col + 1
+	}
+
+	return applied, 0
+}
+
+// getDistinctCountFromUnappliedConjuncts is used to get the distinct
+// count for a constrained column when the exact count cannot be determined.
+// The provided lowerBound serves as a lower bound on the calculated distinct
+// count.
+func (sb *statisticsBuilder) getDistinctCountFromUnappliedConjuncts(
+	colID opt.ColumnID,
+	e RelExpr,
+	numConjuncts, lowerBound float64,
+	mapColDistinct *map[opt.ColumnID]float64,
+) {
+	colSet := opt.MakeColSet(colID)
+	inputStat, _ := sb.colStatFromInput(colSet, e)
+	distinctCount := inputStat.DistinctCount * math.Pow(unknownFilterSelectivity, numConjuncts)
+	(*mapColDistinct)[colID] = max(distinctCount, lowerBound)
+}
+
+// tsSelectivityFromDistinctCounts is similar to selectivityFromDistinctCounts,
+// in that it get newDistinct by cache, for this function gets newDistinct by parameters
+// and calculates the selectivity of a filter by taking the product of selectivities
+// of each constrained column. In the general case, this can be represented by the formula:
+//
+//	               ┬-┬ ⎛ new distinct(i) ⎞
+//	selectivity =  │ │ ⎜ --------------- ⎟
+//	               ┴ ┴ ⎝ old distinct(i) ⎠
+//	              i in
+//	           {constrained
+//	             columns}
+//
+// This algorithm assumes the columns are completely independent.
+func (sb *statisticsBuilder) tsSelectivityFromDistinctCounts(
+	cols opt.ColSet, e RelExpr, relProps *props.Relational, mapColDistinct map[opt.ColumnID]float64,
+) (selectivity float64) {
+	selectivity = 1.0
+	for col, ok := cols.Next(0); ok; col, ok = cols.Next(col + 1) {
+		newDistinct, exists := mapColDistinct[col]
+		if !exists {
+			continue
+		}
+
+		inputColStat, inputStats := sb.colStatFromInput(opt.MakeColSet(col), e)
+		oldDistinct := inputColStat.DistinctCount
+
+		// Nulls are included in the distinct count, so remove 1 from the
+		// distinct counts if needed.
+		if inputColStat.NullCount > 0 {
+			oldDistinct = max(oldDistinct-1, 0)
+		}
+		newNullCount := float64(0)
+		if !opt.MakeColSet(col).SubsetOf(relProps.NotNullCols) {
+			newNullCount = inputColStat.NullCount
+		}
+
+		if newNullCount > 0 {
+			newDistinct = max(newDistinct-1, 0)
+		}
+
+		// Calculate the selectivity of the predicate.
+		nonNullSelectivity := fraction(newDistinct, oldDistinct)
+		nullSelectivity := fraction(newNullCount, inputColStat.NullCount)
+		selectivity *= sb.predicateSelectivity(
+			nonNullSelectivity, nullSelectivity, inputColStat.NullCount, inputStats.RowCount,
+		)
+	}
+
+	return selectivity
+}
+
+// tsSelectivityFromEquivalency calculates the selectivity of an equality condition
+// among columns in a given equivalency group within a relational expression. And this
+// function is same as selectivityFromEquivalency, but don't get colSet by cache.
+//
+// Parameters:
+//   - equivGroup: An opt.ColSet representing the group of columns that are considered
+//     equivalent for the purpose of this calculation. These columns are expected to have
+//     the same value across different rows due to some equality conditions applied in the query.
+//   - e: The RelExpr is the relational expression (e.g., a table or a more complex query
+//     component) from which the column statistics are derived.
+//   - s: A pointer to props.Statistics, which holds statistical information about the
+//     data set, including row counts and other relevant data needed to compute selectivity.
+//
+// Returns:
+//   - selectivity: A float64 value representing the selectivity of the equality condition.
+//     This is computed as 1 divided by the maximum distinct count among the columns in the
+//     equivalency group. The selectivity value helps in determining how many rows are likely
+//     to be returned by a query component, influencing query plan choices.
+func (sb *statisticsBuilder) tsSelectivityFromEquivalency(
+	equivGroup opt.ColSet, e RelExpr, s *props.Statistics,
+) (selectivity float64) {
+	// Find the maximum input distinct count for all columns in this equivalency
+	// group.
+	maxDistinctCount := float64(0)
+	equivGroup.ForEach(func(i opt.ColumnID) {
+		// If any of the distinct counts were updated by the filter, we want to use
+		// the updated value.
+		colSet := opt.MakeColSet(i)
+		colStat, _ := sb.colStatFromInput(colSet, e)
+		if maxDistinctCount < colStat.DistinctCount {
+			maxDistinctCount = colStat.DistinctCount
+		}
+	})
+	if maxDistinctCount > s.RowCount {
+		maxDistinctCount = s.RowCount
+	}
+
+	// The selectivity of an equality condition var1=var2 is
+	// 1/max(distinct(var1), distinct(var2)).
+	return fraction(1, maxDistinctCount)
+}
+
+// tsSelectivityFromHistograms is similar to selectivityFromDistinctCounts, in
+// that it calculates the selectivity of a filter by taking the product of
+// selectivities of each constrained column.
+//
+// For histograms, the selectivity of a constrained column is calculated as
+// (# values in histogram after filter) / (# values in histogram before filter).
+func (sb *statisticsBuilder) tsSelectivityFromHistograms(
+	cols opt.ColSet,
+	e RelExpr,
+	relProps *props.Relational,
+	mapColHistogram map[opt.ColumnID]*props.Histogram,
+) (selectivity float64) {
+	selectivity = 1.0
+	for col, ok := cols.Next(0); ok; col, ok = cols.Next(col + 1) {
+		newHist, exists := mapColHistogram[col]
+		if !exists || newHist == nil {
+			continue
+		}
+
+		inputColStat, inputStats := sb.colStatFromInput(opt.MakeColSet(col), e)
+		oldHist := inputColStat.Histogram
+		if oldHist == nil {
+			continue
+		}
+
+		newCount := newHist.ValuesCount()
+		oldCount := oldHist.ValuesCount()
+
+		newNullCount := float64(0)
+		if !opt.MakeColSet(col).SubsetOf(relProps.NotNullCols) {
+			newNullCount = inputColStat.NullCount
+		}
+
+		// Calculate the selectivity of the predicate.
+		nonNullSelectivity := fraction(newCount, oldCount)
+		nullSelectivity := fraction(newNullCount, inputColStat.NullCount)
+		selectivity *= sb.predicateSelectivity(
+			nonNullSelectivity, nullSelectivity, inputColStat.NullCount, inputStats.RowCount,
+		)
+	}
+	return selectivity
+}

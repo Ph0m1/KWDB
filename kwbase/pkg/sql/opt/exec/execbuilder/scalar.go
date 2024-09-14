@@ -28,6 +28,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/optbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -106,7 +107,7 @@ func (b *Builder) buildScalar(ctx *buildScalarCtx, scalar opt.ScalarExpr) (tree.
 		if err != nil {
 			return nil, err
 		}
-		if b.evalCtx != nil && b.isConst(texpr) {
+		if b.evalCtx != nil && b.isConst(texpr, scalar) {
 			value, err := texpr.Eval(b.evalCtx)
 			if err != nil {
 				if errors.IsAssertionFailure(err) {
@@ -591,8 +592,8 @@ func (b *Builder) addSubquery(
 	return exprNode
 }
 
-func (b *Builder) isConst(expr tree.Expr) bool {
-	return b.fastIsConstVisitor.run(expr)
+func (b *Builder) isConst(expr tree.Expr, scalar opt.ScalarExpr) bool {
+	return b.fastIsConstVisitor.run(expr) || optbuilder.CheckConstScalarWhitelist(scalar, nil)
 }
 
 // fastIsConstVisitor determines if an expression is constant by visiting

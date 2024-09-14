@@ -39,17 +39,19 @@ import (
 
 // TestNormRules tests the various Optgen normalization rules found in the rules
 // directory. The tests are data-driven cases of the form:
-//   <command>
-//   <SQL statement>
-//   ----
-//   <expected results>
+//
+//	<command>
+//	<SQL statement>
+//	----
+//	<expected results>
 //
 // See OptTester.Handle for supported commands.
 //
 // Rules files can be run separately like this:
-//   make test PKG=./pkg/sql/opt/norm TESTS="TestNormRules/bool"
-//   make test PKG=./pkg/sql/opt/norm TESTS="TestNormRules/comp"
-//   ...
+//
+//	make test PKG=./pkg/sql/opt/norm TESTS="TestNormRules/bool"
+//	make test PKG=./pkg/sql/opt/norm TESTS="TestNormRules/comp"
+//	...
 func TestNormRules(t *testing.T) {
 	const fmtFlags = memo.ExprFmtHideStats | memo.ExprFmtHideCost | memo.ExprFmtHideRuleProps |
 		memo.ExprFmtHideQualifications | memo.ExprFmtHideScalars | memo.ExprFmtHideTypes
@@ -105,7 +107,8 @@ func TestRuleFunctionAssumption(t *testing.T) {
 		}
 		if props.Category == categorySystemInfo || props.Category == categoryDateAndTime {
 			switch name {
-			case "kwdb_internal.locality_value":
+			case "kwdb_internal.locality_value", "experimental_strftime", "experimental_strptime",
+				"extract", "date_trunc", "extract_duration", "timezone":
 				// OK to fold this function.
 
 			default:

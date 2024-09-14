@@ -145,7 +145,7 @@ INSERT 1
    │         └── ts scan        |              |
    │                            | ts-table     | t1
    │                            | access mode  | metaTable
-   │                            | filter       | (abs(e3) > 0) AND (e3 > 0)
+   │                            | filter       | (e3 > 0) AND (abs(e3) > 0)
    └── subquery                 |              |
         │                       | id           | @S1
         │                       | original sql | (SELECT e2 FROM test_select_complex_rel.t1 AS tab2 ORDER BY e1 LIMIT 1)

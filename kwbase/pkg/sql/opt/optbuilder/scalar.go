@@ -117,10 +117,17 @@ func (b *Builder) buildScalar(
 
 			g.aggOutScope.appendColumn(aggInCol)
 
-			return b.finishBuildScalarRef(t, g.aggOutScope, outScope, outCol, colRefs)
+			res := b.finishBuildScalarRef(t, inScope, outScope, outCol, colRefs)
+			if res != nil {
+				res.SetConstDeductionEnabled(false)
+			}
+			return res
 		}
-
-		return b.finishBuildScalarRef(t, inScope, outScope, outCol, colRefs)
+		res := b.finishBuildScalarRef(t, inScope, outScope, outCol, colRefs)
+		if res != nil {
+			res.SetConstDeductionEnabled(false)
+		}
+		return res
 
 	case *aggregateInfo:
 		var aggOutScope *scope
@@ -136,6 +143,11 @@ func (b *Builder) buildScalar(
 		left := b.buildScalar(t.TypedLeft(), inScope, nil, nil, colRefs)
 		right := b.buildScalar(t.TypedRight(), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructAnd(left, right)
+		if left.CheckConstDeductionEnabled() && right.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.Array:
 		els := make(memo.ScalarListExpr, len(t.Exprs))
@@ -144,15 +156,21 @@ func (b *Builder) buildScalar(
 		if err := types.CheckArrayElementType(elementType); err != nil {
 			panic(err)
 		}
+		flag := true
 		for i := range t.Exprs {
 			texpr := t.Exprs[i].(tree.TypedExpr)
 			els[i] = b.buildScalar(texpr, inScope, nil, nil, colRefs)
+			if flag {
+				flag = els[i].CheckConstDeductionEnabled()
+			}
 		}
 		out = b.factory.ConstructArray(els, arrayType)
+		out.SetConstDeductionEnabled(flag)
 
 	case *tree.CollateExpr:
 		in := b.buildScalar(t.Expr.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructCollate(in, t.Locale)
+		out.SetConstDeductionEnabled(in.CheckConstDeductionEnabled())
 
 	case *tree.ArrayFlatten:
 		if b.AllowUnsupportedExpr {
@@ -203,6 +221,7 @@ func (b *Builder) buildScalar(
 			expr,
 			b.buildScalar(subscript.Begin.(tree.TypedExpr), inScope, nil, nil, colRefs),
 		)
+		out.SetConstDeductionEnabled(expr.CheckConstDeductionEnabled())
 
 	case *tree.IfErrExpr:
 		cond := b.buildScalar(t.Cond.(tree.TypedExpr), inScope, nil, nil, colRefs)
@@ -220,8 +239,12 @@ func (b *Builder) buildScalar(
 				b.buildScalar(t.ErrCode.(tree.TypedExpr), inScope, nil, nil, colRefs),
 			}
 		}
-
 		out = b.factory.ConstructIfErr(cond, orElse, errCode)
+		if cond.CheckConstDeductionEnabled() && orElse.CheckConstDeductionEnabled() && errCode.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.BinaryExpr:
 		// It's possible for an overload to be selected that expects different
@@ -237,11 +260,18 @@ func (b *Builder) buildScalar(
 
 		left := tree.ReType(t.TypedLeft(), t.ResolvedBinOp().LeftType)
 		right := tree.ReType(t.TypedRight(), t.ResolvedBinOp().RightType)
+		leftRes := b.buildScalar(left, inScope, nil, nil, colRefs)
+		rightRes := b.buildScalar(right, inScope, nil, nil, colRefs)
 		out = b.constructBinary(t.Operator,
-			b.buildScalar(left, inScope, nil, nil, colRefs),
-			b.buildScalar(right, inScope, nil, nil, colRefs),
+			leftRes,
+			rightRes,
 			t.ResolvedType(),
 		)
+		if leftRes.CheckConstDeductionEnabled() && rightRes.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.CaseExpr:
 		var input opt.ScalarExpr
@@ -269,22 +299,34 @@ func (b *Builder) buildScalar(
 			orElse = memo.NullSingleton
 		}
 		out = b.factory.ConstructCase(input, whens, orElse)
+		if input.CheckConstDeductionEnabled() && whens.CheckConstDeductionEnabled() && orElse.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.CastExpr:
 		texpr := t.Expr.(tree.TypedExpr)
 		arg := b.buildScalar(texpr, inScope, nil, nil, colRefs)
 		out = b.factory.ConstructCast(arg, t.Type)
+		out.SetConstDeductionEnabled(arg.CheckConstDeductionEnabled())
 
 	case *tree.CoalesceExpr:
 		args := make(memo.ScalarListExpr, len(t.Exprs))
+		flag := true
 		for i := range args {
 			args[i] = b.buildScalar(t.TypedExprAt(i), inScope, nil, nil, colRefs)
+			if flag {
+				flag = args[i].CheckConstDeductionEnabled()
+			}
 		}
 		out = b.factory.ConstructCoalesce(args)
+		out.SetConstDeductionEnabled(flag)
 
 	case *tree.ColumnAccessExpr:
 		input := b.buildScalar(t.Expr.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructColumnAccess(input, memo.TupleOrdinal(t.ColIndex))
+		out.SetConstDeductionEnabled(input.CheckConstDeductionEnabled())
 
 	case *tree.ComparisonExpr:
 		if sub, ok := t.Right.(*subquery); ok && sub.isMultiRow() {
@@ -300,14 +342,24 @@ func (b *Builder) buildScalar(
 			left := b.buildScalar(t.TypedLeft(), inScope, nil, nil, colRefs)
 			right := b.buildScalar(t.TypedRight(), inScope, nil, nil, colRefs)
 			out = b.constructComparison(t.Operator, left, right)
+			if left.CheckConstDeductionEnabled() && right.CheckConstDeductionEnabled() {
+				out.SetConstDeductionEnabled(true)
+			} else {
+				out.SetConstDeductionEnabled(false)
+			}
 		}
 
 	case *tree.DTuple:
 		els := make(memo.ScalarListExpr, len(t.D))
+		flag := true
 		for i := range t.D {
 			els[i] = b.buildScalar(t.D[i], inScope, nil, nil, colRefs)
+			if flag {
+				flag = els[i].CheckConstDeductionEnabled()
+			}
 		}
 		out = b.factory.ConstructTuple(els, t.ResolvedType())
+		out.SetConstDeductionEnabled(flag)
 
 	case *tree.FuncExpr:
 		return b.buildFunction(t, inScope, outScope, outCol, colRefs)
@@ -318,6 +370,11 @@ func (b *Builder) buildScalar(
 		whens := memo.ScalarListExpr{b.factory.ConstructWhen(memo.TrueSingleton, ifTrue)}
 		orElse := b.buildScalar(t.Else.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructCase(input, whens, orElse)
+		if input.CheckConstDeductionEnabled() && whens.CheckConstDeductionEnabled() && orElse.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.IndexedVar:
 		if t.Idx < 0 || t.Idx >= len(inScope.cols) {
@@ -325,10 +382,12 @@ func (b *Builder) buildScalar(
 				"invalid column ordinal: @%d", t.Idx+1))
 		}
 		out = b.factory.ConstructVariable(inScope.cols[t.Idx].id)
+		out.SetConstDeductionEnabled(false)
 
 	case *tree.NotExpr:
 		input := b.buildScalar(t.TypedInnerExpr(), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructNot(input)
+		out.SetConstDeductionEnabled(input.CheckConstDeductionEnabled())
 
 	case *tree.NullIfExpr:
 		// Ensure that the type of the first expression matches the resolved type
@@ -340,11 +399,21 @@ func (b *Builder) buildScalar(
 		cond := b.buildScalar(t.Expr2.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		whens := memo.ScalarListExpr{b.factory.ConstructWhen(cond, memo.NullSingleton)}
 		out = b.factory.ConstructCase(input, whens, input)
+		if input.CheckConstDeductionEnabled() && whens.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.OrExpr:
 		left := b.buildScalar(t.TypedLeft(), inScope, nil, nil, colRefs)
 		right := b.buildScalar(t.TypedRight(), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructOr(left, right)
+		if left.CheckConstDeductionEnabled() && right.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.ParenExpr:
 		// Treat ParenExpr as if it wasn't present.
@@ -381,10 +450,16 @@ func (b *Builder) buildScalar(
 			return b.finishBuildScalarRef(&t.cols[0], inScope, outScope, outCol, colRefs)
 		}
 		els := make(memo.ScalarListExpr, len(t.cols))
+		// check whether if col is not convert const, flag is false
+		flag := true
 		for i := range t.cols {
 			els[i] = b.buildScalar(&t.cols[i], inScope, nil, nil, colRefs)
+			if flag {
+				flag = els[i].CheckConstDeductionEnabled()
+			}
 		}
 		out = b.factory.ConstructTuple(els, t.ResolvedType())
+		out.SetConstDeductionEnabled(flag)
 
 	case *subquery:
 		out, _ = b.buildSingleRowSubquery(t, inScope)
@@ -394,10 +469,15 @@ func (b *Builder) buildScalar(
 
 	case *tree.Tuple:
 		els := make(memo.ScalarListExpr, len(t.Exprs))
+		flag := true
 		for i := range t.Exprs {
 			els[i] = b.buildScalar(t.Exprs[i].(tree.TypedExpr), inScope, nil, nil, colRefs)
+			if flag {
+				flag = els[i].CheckConstDeductionEnabled()
+			}
 		}
 		out = b.factory.ConstructTuple(els, t.ResolvedType())
+		out.SetConstDeductionEnabled(flag)
 
 	case *tree.UnaryExpr:
 		out = b.buildScalar(t.TypedInnerExpr(), inScope, nil, nil, colRefs)
@@ -421,12 +501,14 @@ func (b *Builder) buildScalar(
 		} else {
 			out = b.factory.ConstructFalse()
 		}
+		out.SetConstDeductionEnabled(true)
 
 	// NB: this is the exception to the sorting of the case statements. The
 	// tree.Datum case needs to occur after *tree.Placeholder which implements
 	// Datum.
 	case tree.Datum:
 		out = b.factory.ConstructConstVal(t, t.ResolvedType())
+		out.SetConstDeductionEnabled(true)
 
 	default:
 		if b.AllowUnsupportedExpr {
@@ -497,8 +579,12 @@ func (b *Builder) buildFunction(
 	}
 
 	args := make(memo.ScalarListExpr, len(f.Exprs))
+	isConstForLogicPlanArg := true
 	for i, pexpr := range f.Exprs {
 		args[i] = b.buildScalar(pexpr.(tree.TypedExpr), inScope, nil, nil, colRefs)
+		if isConstForLogicPlanArg {
+			isConstForLogicPlanArg = checkScalarIsConst(args[i])
+		}
 	}
 
 	// Construct a private FuncOpDef that refers to a resolved function overload.
@@ -509,11 +595,76 @@ func (b *Builder) buildFunction(
 		Overload:   f.ResolvedOverload(),
 	})
 
+	out = b.setConstForScalar(out, isConstForLogicPlanArg)
+
 	if isGenerator(def) {
 		return b.finishBuildGeneratorFunction(f, out, inScope, outScope, outCol)
 	}
 
 	return b.finishBuildScalar(f, out, inScope, outScope, outCol)
+}
+
+var (
+	// ConstScalarWhitelist if functionExpr is in the list of builtins, then it can convert constExpr
+	ConstScalarWhitelist = map[string]struct{}{
+		"client_encoding":           {},
+		"version":                   {},
+		"current_database":          {},
+		"current_schema":            {},
+		"current_user":              {},
+		"now":                       {},
+		"current_timestamp":         {},
+		"localtimestamp":            {},
+		"statement_timestamp":       {},
+		"cluster_logical_timestamp": {},
+		"clock_timestamp":           {},
+		"timeofday":                 {},
+		"transaction_timestamp":     {},
+	}
+)
+
+// check IsConstForLogicPlan
+func checkScalarIsConst(expr opt.ScalarExpr) bool {
+	switch e := expr.(type) {
+	case *memo.ConstExpr:
+		return true
+	case *memo.FunctionExpr:
+		return e.IsConstForLogicPlan
+	}
+	return false
+}
+
+// set IsConstForLogicPlan for constExpr or FunctionExpr
+func (b *Builder) setConstForScalar(
+	expr opt.ScalarExpr, isConstForLogicPlanSub bool,
+) opt.ScalarExpr {
+	switch e := expr.(type) {
+	case *memo.ConstExpr:
+		e.IsConstForLogicPlan = true
+	case *memo.FunctionExpr:
+		e.IsConstForLogicPlan = isConstForLogicPlanSub
+		if isConstForLogicPlanSub && CheckConstScalarWhitelist(expr, b.stmt) {
+			e.IsConstForLogicPlan = true
+		} else {
+			e.IsConstForLogicPlan = false
+		}
+	}
+	return expr
+}
+
+// CheckConstScalarWhitelist check whether function is in the CheckConstScalarWhitelist.
+func CheckConstScalarWhitelist(expr opt.ScalarExpr, stmt tree.Statement) bool {
+	switch s := stmt.(type) {
+	case *tree.Explain:
+		return CheckConstScalarWhitelist(expr, s.Statement)
+	case *tree.Select, *tree.ParenSelect, nil:
+		if e, ok := expr.(*memo.FunctionExpr); ok {
+			if _, ok1 := ConstScalarWhitelist[e.FunctionPrivate.Name]; ok1 && e.IsConstForLogicPlan {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // buildRangeCond builds a RANGE clause as a simpler expression. Examples:

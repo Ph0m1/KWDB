@@ -56,7 +56,7 @@ INSERT 1
                   └── ts scan |             |
                               | ts-table    | tb
                               | access mode | tableTableMeta
-                              | filter      | (e5 IN (NULL, -500000.5, 500000.5)) AND (e2 = 500)
+                              | filter      | (e2 = 500) AND (e5 IN (NULL, -500000.5, 500000.5))
 (16 rows)
 > select t6,e5 from test_select.tb where e5 in(-500000.5,500000.5,null) and e2=500 order by t6, e5;
       t6     |    e5

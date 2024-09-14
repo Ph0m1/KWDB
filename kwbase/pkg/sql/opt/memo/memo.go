@@ -28,6 +28,7 @@ import (
 	"context"
 	"math"
 	"runtime"
+	"sort"
 	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -492,6 +493,97 @@ func (m *Memo) RequestColStat(
 		return m.logPropsBuilder.sb.colStat(cols, expr), true
 	}
 	return nil, false
+}
+
+// SortFilters reorders the filter conditions based on the degree of filtering that is calculated.
+func (m *Memo) SortFilters(selectExpr *SelectExpr, rel *props.Relational) {
+	m.sortGlobalFilters(selectExpr, rel)
+	m.sortLocalFilters(selectExpr, rel)
+}
+
+// sortGlobalFilters reorders the conditions that are split by 'AND'.
+func (m *Memo) sortGlobalFilters(selectExpr *SelectExpr, rel *props.Relational) {
+	selectivityMap := m.computeTSFiltersSelectivity(selectExpr, rel)
+	if len(selectivityMap) <= 1 || len(selectivityMap) != len(selectExpr.Filters) {
+		return
+	}
+	type selectivityPair struct {
+		index       int
+		selectivity float64
+	}
+	selectivityPairs := make([]selectivityPair, 0)
+	for i := 0; i < len(selectivityMap); i++ {
+		v := selectivityMap[i]
+		s := selectivityPair{index: i, selectivity: v}
+		selectivityPairs = append(selectivityPairs, s)
+	}
+	sort.SliceStable(selectivityPairs, func(i, j int) bool {
+		return selectivityPairs[i].selectivity < selectivityPairs[j].selectivity
+	})
+	sortedFilters := make([]FiltersItem, 0)
+	for _, pair := range selectivityPairs {
+		sortedFilters = append(sortedFilters, selectExpr.Filters[pair.index])
+	}
+	selectExpr.Filters = sortedFilters
+}
+
+// computeTSFiltersSelectivity calculates filter's selectivity
+func (m *Memo) computeTSFiltersSelectivity(
+	sel *SelectExpr, relProps *props.Relational,
+) map[int]float64 {
+	if m.logPropsBuilder.sb.md != nil {
+		return m.logPropsBuilder.sb.computeTSFiltersSelectivity(sel, relProps)
+	}
+	return nil
+}
+
+// sortLocalFilters reorders the every filter's conditions tree
+func (m *Memo) sortLocalFilters(selectExpr *SelectExpr, rel *props.Relational) {
+	for i := range selectExpr.Filters {
+		scalar := selectExpr.Filters[i].Condition
+		m.sortCondition(selectExpr, rel, &scalar)
+		selectExpr.Filters[i].Condition = scalar
+	}
+}
+
+// sortCondition calculates the selectivity of the two trees left and right
+// of the AND operator and the OR operator and adjusts the position
+func (m *Memo) sortCondition(sel *SelectExpr, rel *props.Relational, e *opt.ScalarExpr) float64 {
+	switch t := (*e).(type) {
+	case *OrExpr:
+		l := m.sortCondition(sel, rel, &t.Left)
+		r := m.sortCondition(sel, rel, &t.Right)
+		if l < r {
+			tmpLeft := t.Left
+			t.Left = t.Right
+			t.Right = tmpLeft
+		}
+	case *AndExpr:
+		l := m.sortCondition(sel, rel, &t.Left)
+		r := m.sortCondition(sel, rel, &t.Right)
+		if l > r {
+			tmpLeft := t.Left
+			t.Left = t.Right
+			t.Right = tmpLeft
+		}
+	default:
+	}
+	return m.ComputeLocalTSFiltersSelectivity(sel, rel, *e)
+}
+
+// ComputeLocalTSFiltersSelectivity calculates local ts filters selectivity
+func (m *Memo) ComputeLocalTSFiltersSelectivity(
+	sel *SelectExpr, relProps *props.Relational, condition opt.ScalarExpr,
+) float64 {
+	if m.logPropsBuilder.sb.md != nil {
+		cb := constraintsBuilder{
+			md:      m.logPropsBuilder.sb.md,
+			evalCtx: m.logPropsBuilder.sb.evalCtx,
+		}
+		cs, tight := cb.buildConstraints(condition)
+		return m.logPropsBuilder.sb.computeConstraintsSelectivity(sel, relProps, condition, cs, tight)
+	}
+	return 0
 }
 
 // RowsProcessed calculates and returns the number of rows processed by the

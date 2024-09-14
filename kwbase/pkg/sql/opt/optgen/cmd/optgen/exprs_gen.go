@@ -210,6 +210,7 @@ func (g *exprsGen) genExprStruct(define *lang.DefineExpr) {
 
 	if define.Tags.Contains("Scalar") {
 		fmt.Fprintf(g.w, "\n")
+		fmt.Fprintf(g.w, "  IsConstForLogicPlan bool\n")
 		if g.needsDataTypeField(define) {
 			fmt.Fprintf(g.w, "  Typ *types.T\n")
 		}
@@ -369,6 +370,15 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		} else {
 			fmt.Fprintf(g.w, "  return e.Typ\n")
 		}
+		fmt.Fprintf(g.w, "}\n\n")
+		// Generate the CheckConstDeductionEnabled method.
+		fmt.Fprintf(g.w, "func (e *%s) CheckConstDeductionEnabled() bool {\n", opTyp.name)
+		fmt.Fprintf(g.w, "  return e.IsConstForLogicPlan\n")
+		fmt.Fprintf(g.w, "}\n\n")
+
+		// Generate the SetConstDeductionEnabled method.
+		fmt.Fprintf(g.w, "func (e *%s) SetConstDeductionEnabled(flag bool) {\n", opTyp.name)
+		fmt.Fprintf(g.w, "  e.IsConstForLogicPlan = flag\n")
 		fmt.Fprintf(g.w, "}\n\n")
 
 		// Generate the PopulateProps and ScalarProps methods.
@@ -735,6 +745,29 @@ func (g *exprsGen) genListExprFuncs(define *lang.DefineExpr) {
 	fmt.Fprintf(g.w, "  f := MakeExprFmtCtx(ExprFmtFlags(flags), nil, nil)\n")
 	fmt.Fprintf(g.w, "  f.FormatExpr(e)\n")
 	fmt.Fprintf(g.w, "  return f.Buffer.String()\n")
+	fmt.Fprintf(g.w, "}\n\n")
+
+	// Generate the CheckConstDeductionEnabled method.
+	fmt.Fprintf(g.w, "func (e *%s) CheckConstDeductionEnabled() bool {\n", opTyp.name)
+	fmt.Fprintf(g.w, "  for i := 0; i < e.ChildCount(); i++ {\n")
+	fmt.Fprintf(g.w, "    if s, ok := e.Child(i).(opt.ScalarExpr); ok{\n")
+	fmt.Fprintf(g.w, "      if !s.CheckConstDeductionEnabled() {\n")
+	fmt.Fprintf(g.w, "        return false\n")
+	fmt.Fprintf(g.w, "      }\n")
+	fmt.Fprintf(g.w, "    } else {\n")
+	fmt.Fprintf(g.w, "        return false\n")
+	fmt.Fprintf(g.w, "      }\n")
+	fmt.Fprintf(g.w, "  }\n")
+	fmt.Fprintf(g.w, "  return true\n")
+	fmt.Fprintf(g.w, "}\n\n")
+
+	// Generate the SetConstDeductionEnabled method.
+	fmt.Fprintf(g.w, "func (e *%s) SetConstDeductionEnabled(flag bool) {\n", opTyp.name)
+	fmt.Fprintf(g.w, "  for i := 0; i < e.ChildCount(); i++ {\n")
+	fmt.Fprintf(g.w, "    if s, ok := e.Child(i).(opt.ScalarExpr); ok{\n")
+	fmt.Fprintf(g.w, "      s.SetConstDeductionEnabled(flag)\n")
+	fmt.Fprintf(g.w, "    }\n")
+	fmt.Fprintf(g.w, "  }\n")
 	fmt.Fprintf(g.w, "}\n\n")
 }
 

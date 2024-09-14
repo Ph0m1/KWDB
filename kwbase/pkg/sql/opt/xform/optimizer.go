@@ -552,6 +552,16 @@ func (o *Optimizer) optimizeGroupMember(
 		o.ratchetCost(state, member, cost)
 	}
 
+	// If it is the filter layer of the time series scenario,
+	// we need to consider adjusting the order of filtering conditions
+	// to speed up the execution of queries.
+	if opt.TSFilterOrderOpt.Get(&o.evalCtx.Settings.SV) &&
+		o.mem.CheckFlag(opt.ExecInTSEngine) &&
+		o.mem.CheckFlag(opt.IncludeTSTable) {
+		if selectExpr, ok := member.(*memo.SelectExpr); ok {
+			o.mem.SortFilters(selectExpr, member.Relational())
+		}
+	}
 	return fullyOptimized
 }
 

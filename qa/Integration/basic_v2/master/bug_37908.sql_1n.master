@@ -45,5 +45,40 @@ INSERT 1
 --------
   1000
 (1 row)
+> select coalesce(e2, 1) from test_function_2.t1;
+  coalesce
+------------
+      1000
+(1 row)
+> explain select coalesce(e2, 1) from test_function_2.t1;
+        tree        |    field    |   description
+--------------------+-------------+------------------
+                    | distributed | true
+                    | vectorized  | false
+  synchronizer      |             |
+   └── render       |             |
+        │           | engine type | time series
+        │           | coalesce    | COALESCE(e2, 1)
+        └── ts scan |             |
+                    | ts-table    | t1
+                    | access mode | metaTable
+(9 rows)
+> select coalesce(e2, 1, 2) from test_function_2.t1;
+  coalesce
+------------
+      1000
+(1 row)
+> explain select coalesce(e2, 1, 2) from test_function_2.t1;
+        tree        |    field    |    description
+--------------------+-------------+---------------------
+                    | distributed | true
+                    | vectorized  | false
+  render            |             |
+   │                | coalesce    | COALESCE(e2, 1, 2)
+   └── synchronizer |             |
+        └── ts scan |             |
+                    | ts-table    | t1
+                    | access mode | metaTable
+(8 rows)
 > drop database test_function_2 cascade;
 DROP DATABASE

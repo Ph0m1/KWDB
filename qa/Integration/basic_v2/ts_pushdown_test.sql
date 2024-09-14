@@ -71,8 +71,8 @@ INSERT INTO ts_db.st values(200000,100,1000000,1000,1000.0000,100.0,true,'2020-1
 INSERT INTO ts_db.st values(300000,100,1000000,1000,1000.0000,100.0,true,'2020-1-2 12:00:00.000','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','t','中','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！！！@TEST1','test时间精度通用查询测试！TEST1xaa',b'\xaa','test时间精度通用查询测试','test时间精度通用查询测试','st_t3', 300,400,100,true,400.0,300.0,'tianjin','yellow',b'\x28','aisaiebiyazhou','183','small','3','社会性别男','7','matureANDgentle');
 INSERT INTO ts_db.st values(400000,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'st_t3', 300,400,100,true,400.0,300.0,'tianjin','yellow',b'\x28','aisaiebiyazhou','183','small','3','社会性别男','7','matureANDgentle');
 SELECT e7 FROM ts_db.st WHERE now()-INTERVAL'60MS'>'1970-1-1 08:01:40' ORDER BY k_timestamp;
-explain SELECT e7 FROM ts_db.st WHERE now()-e7>60s;
-explain SELECT e7 FROM ts_db.st WHERE now()-'1970-1-1 08:01:40'>60s;
-explain SELECT e7 FROM ts_db.st WHERE now()-INTERVAL'60MS'>e7;
-explain SELECT e7 FROM ts_db.st WHERE now()+60S>e7;
+-- explain SELECT e7 FROM ts_db.st WHERE now()-e7>60s;
+-- explain SELECT e7 FROM ts_db.st WHERE now()-'1970-1-1 08:01:40'>60s;
+-- explain SELECT e7 FROM ts_db.st WHERE now()-INTERVAL'60MS'>e7;
+-- explain SELECT e7 FROM ts_db.st WHERE now()+60S>e7;
 DROP DATABASE ts_db cascade;

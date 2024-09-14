@@ -21,4 +21,12 @@ select abs(max(e2)) from test_function_2.t1 group by e2;
 
 select abs(max(e2)) from test_function_2.t1 group by e2 order by e2;
 
+select coalesce(e2, 1) from test_function_2.t1;
+
+explain select coalesce(e2, 1) from test_function_2.t1;
+
+select coalesce(e2, 1, 2) from test_function_2.t1;
+
+explain select coalesce(e2, 1, 2) from test_function_2.t1;
+
 drop database test_function_2 cascade;

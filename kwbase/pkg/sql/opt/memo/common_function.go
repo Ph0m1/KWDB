@@ -108,6 +108,13 @@ func getChildStr(src opt.Expr) string {
 			if !ok {
 				return ""
 			}
+			// We need to handle Coalece expressions specifically here,
+			// because the time series engine does not support more than two parameters
+			if _, ok1 := src.(*CoalesceExpr); ok1 {
+				if args, ok2 := param.(*ScalarListExpr); ok2 && len(*args) >= 3 {
+					return ""
+				}
+			}
 			// if any of the children is of time data type, check if it's interval data type
 			// if it IS interval data type and includes month/year, we cannot push it down
 			if param.DataType().SupportTimeCalc() {
@@ -196,6 +203,9 @@ func GetExprType(src opt.Expr) ExprType {
 	} else if opt.IsAggregateOp(src) {
 		return ExprTypeAggOp
 	} else if src.Op() == opt.FunctionOp {
+		if e, ok := src.(*FunctionExpr); ok && e.IsConstForLogicPlan {
+			return ExprTypConst
+		}
 		return ExprTypeFuncOp
 	}
 
@@ -275,6 +285,10 @@ func CheckExprCanExecInTSEngine(
 		if !typFlag {
 			return false, 0
 		}
+	}
+
+	if scalar, ok := src.(opt.ScalarExpr); ok && scalar.CheckConstDeductionEnabled() {
+		return true, 0
 	}
 
 	// check white list to find out if src can be pushed down

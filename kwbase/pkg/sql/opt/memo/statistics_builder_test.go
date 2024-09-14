@@ -25,6 +25,7 @@
 package memo
 
 import (
+	"math"
 	"testing"
 
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
@@ -269,5 +270,151 @@ func testStats(
 
 	if s.Selectivity != expectedSelectivity {
 		t.Fatalf("\nexpected: %f\nactual  : %f", expectedSelectivity, s.Selectivity)
+	}
+}
+
+func TestComputeTSFiltersSelectivity(t *testing.T) {
+	evalCtx := tree.MakeTestingEvalContext(cluster.MakeTestingClusterSettings())
+
+	catalog := testcat.New()
+	if _, err := catalog.ExecuteDDL(
+		"CREATE TABLE sel (a INT, b INT, c INT, d STRING, e STRING)",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := catalog.ExecuteDDL(
+		`ALTER TABLE sel INJECT STATISTICS '[
+		{
+			"columns": ["a"],
+			"created_at": "2024-01-01 1:00:00.00000+00:00",
+			"row_count": 10000000000,
+			"distinct_count": 500
+		},
+		{
+			"columns": ["b"],
+			"created_at": "2024-01-01 1:30:00.00000+00:00",
+			"row_count": 10000000000,
+			"distinct_count": 500
+		},
+		{
+			"columns": ["c"],
+			"created_at": "2024-01-01 1:30:00.00000+00:00",
+			"row_count": 10000000000,
+			"distinct_count": 500
+		}
+	]'`); err != nil {
+		t.Fatal(err)
+	}
+
+	var mem Memo
+	mem.Init(&evalCtx)
+	tn := tree.NewUnqualifiedTableName("sel")
+	tab := catalog.Table(tn)
+	tabID := mem.Metadata().AddTable(tab, tn)
+
+	// Test that processConstraints correctly updates the statistics from
+	// constraint set cs, and selectivity is calculated correctly.
+	selectivityFunc := func(cs *constraint.Set, expectedSelectivity float64) {
+		t.Helper()
+
+		var cols opt.ColSet
+		for i := 0; i < tab.ColumnCount(); i++ {
+			cols.Add(tabID.ColumnID(i))
+		}
+
+		sb := &statisticsBuilder{}
+		sb.init(&evalCtx, mem.Metadata())
+
+		// Make the scan.
+		scan := mem.MemoizeScan(&ScanPrivate{Table: tabID, Cols: cols})
+
+		// Make the select.
+		sel := mem.MemoizeSelect(scan, TrueFilter)
+
+		relProps := &props.Relational{Cardinality: props.AnyCardinality}
+		relProps.NotNullCols = cs.ExtractNotNullCols(&evalCtx)
+		s := &relProps.Stats
+		s.Init(relProps)
+
+		v, _ := sel.(*SelectExpr)
+		histCols := opt.ColSet{}
+		mapColDistinct := make(map[opt.ColumnID]float64)
+		mapColHistogram := make(map[opt.ColumnID]*props.Histogram)
+		selectivity := float64(1)
+		// Calculate selectivity.
+		canApplyConstraints, numUnappliedConjuncts := sb.processConstraints(v, cs, mapColDistinct, mapColHistogram, &histCols, true)
+		if canApplyConstraints {
+			selectivity = sb.tsSelectivityFromHistograms(histCols, sel, relProps, mapColHistogram)
+			selectivity *= sb.tsSelectivityFromDistinctCounts(cs.ExtractCols(), sel, relProps, mapColDistinct)
+			selectivity *= sb.selectivityFromUnappliedConjuncts(float64(numUnappliedConjuncts))
+		}
+
+		// Check if the statistics match the expected value.
+		testFiltersSelectivity(t, selectivity, expectedSelectivity)
+	}
+
+	// Test cases
+	// Range Predicates :@1 >= 2 and @1 <= 5 or @1 >= 8 and @1 <= 10
+	c1 := constraint.ParseConstraint(&evalCtx, "/1: [/2 - /5] [/8 - /10]")
+	// Range Predicates: @2 >= 3
+	c2 := constraint.ParseConstraint(&evalCtx, "/2: [/3 - ]")
+	// Equal Predicates: @3 = 6
+	c3 := constraint.ParseConstraint(&evalCtx, "/3: [/6 - /6]")
+	// index=(@1,@2,@3); ((@1,@2,@3) = ((1,2,3))) or ((@1,@2) in ((1,2)) and @3 between 5 and 8)
+	c123 := constraint.ParseConstraint(&evalCtx, "/1/2/3: [/1/2/3 - /1/2/3] [/1/2/5 - /1/2/8]")
+	// In Predicates: @1 in (1,2,3)
+	cin := constraint.ParseConstraint(&evalCtx, "/1: [/1 - /1] [/2 - /2] [/3 - /3]")
+	// OR Predicates:
+	//  /1: [/2 - /5] [/8 - /10]
+	//	/2: [/3 - ]
+
+	// Like Predicates: @4 like 'a%' -> 1/9; @4 like '%a' -> 1/3
+	// Exists Predicates: exists(subquery)  -> 1/3
+	// @1 = @2 -> 1/max(distinct(@1), distinct(@2))
+	// scalar subquery: -> 1/3
+
+	cs1 := constraint.SingleConstraint(&c1)
+	selectivityFunc(
+		cs1,
+		7.0/500,
+	)
+
+	cs2 := constraint.SingleConstraint(&c2)
+	selectivityFunc(
+		cs2,
+		1.0/3,
+	)
+
+	cs3 := constraint.SingleConstraint(&c3)
+	selectivityFunc(
+		cs3,
+		1.0/500,
+	)
+
+	cs123 := constraint.SingleConstraint(&c123)
+	selectivityFunc(
+		cs123,
+		5.0/125000000,
+	)
+
+	// /1: [/2 - /5] [/8 - /10]
+	// /2: [/3 - ]
+	cs12 := cs1.Intersect(&evalCtx, cs2)
+	selectivityFunc(
+		cs12,
+		7.0/500*1.0/3,
+	)
+
+	csin := constraint.SingleConstraint(&cin)
+	selectivityFunc(
+		csin,
+		3.0/500,
+	)
+}
+
+func testFiltersSelectivity(t *testing.T, selectivity float64, expectedSelectivity float64) {
+	if math.Abs(selectivity-expectedSelectivity) > epsilon {
+		t.Fatalf("\nexpected: %f\nactual  : %f", expectedSelectivity, selectivity)
 	}
 }

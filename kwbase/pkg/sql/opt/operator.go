@@ -140,6 +140,12 @@ type ScalarExpr interface {
 
 	// DataType is the SQL type of the expression.
 	DataType() *types.T
+
+	// CheckConstDeductionEnabled check IsConstForLogicPlan
+	CheckConstDeductionEnabled() bool
+
+	// SetConstDeductionEnabled set IsConstForLogicPlan
+	SetConstDeductionEnabled(flag bool)
 }
 
 // MutableExpr is implemented by expressions that allow their children to be

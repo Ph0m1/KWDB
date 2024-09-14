@@ -59,6 +59,12 @@ var PushdownAll = settings.RegisterPublicBoolSetting(
 	"sql.all_push_down.enabled", "push down entire query", true,
 )
 
+// TSFilterOrderOpt is true when we want to adjust the order of filtering conditions
+var TSFilterOrderOpt = settings.RegisterPublicBoolSetting(
+	"ts.filter_order_opt.enabled",
+	"adjust the order of filtering conditions",
+	true)
+
 // TSParallelDegree ts engine parallel exec degree
 var TSParallelDegree = settings.RegisterPublicIntSetting(
 	"ts.parallel_degree",

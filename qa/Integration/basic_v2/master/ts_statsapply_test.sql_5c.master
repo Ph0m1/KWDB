@@ -1091,7 +1091,7 @@ CREATE TABLE
                             └── ts scan |                                                                                               |
                                         | ts-table                                                                                      | lineitem
                                         | access mode                                                                                   | metaTable
-                                        | filter                                                                                        | ((((l_receiptdate >= '1997-01-01 00:00:00+00:00') AND (l_receiptdate < '1998-01-01 00:00:00+00:00')) AND (l_shipmode IN ('FOB', 'TRUCK'))) AND (l_commitdate < l_receiptdate)) AND (l_shipdate < l_commitdate)
+                                        | filter                                                                                        | (((l_shipmode IN ('FOB', 'TRUCK')) AND ((l_receiptdate >= '1997-01-01 00:00:00+00:00') AND (l_receiptdate < '1998-01-01 00:00:00+00:00'))) AND (l_commitdate < l_receiptdate)) AND (l_shipdate < l_commitdate)
 (27 rows)
 > explain select
             c_count,
@@ -1254,7 +1254,7 @@ CREATE TABLE
                             └── ts scan      |             |
                                              | ts-table    | part
                                              | access mode | metaTable
-                                             | filter      | ((p_brand != 'Brand#53') AND (p_type NOT LIKE 'SMALL PLATED%')) AND (p_size IN (2, 9, 13, 22, 24, 31, 35, 46))
+                                             | filter      | ((p_size IN (2, 9, 13, 22, 24, 31, 35, 46)) AND (p_brand != 'Brand#53')) AND (p_type NOT LIKE 'SMALL PLATED%')
 (37 rows)
 > explain select
                 sum(l_extendedprice) / 7.0 as avg_yearly
@@ -1473,7 +1473,7 @@ CREATE TABLE
                   └── ts scan |                                      |
                               | ts-table                             | lineitem
                               | access mode                          | metaTable
-                              | filter                               | (l_shipmode IN ('AIR', 'AIR REG')) AND (l_shipinstruct = 'DELIVER IN PERSON')
+                              | filter                               | (l_shipinstruct = 'DELIVER IN PERSON') AND (l_shipmode IN ('AIR', 'AIR REG'))
 (21 rows)
 > explain select
             s_name,
@@ -2349,7 +2349,7 @@ CREATE STATISTICS
              └── ts scan |                              |
                          | ts-table                     | lineitem
                          | access mode                  | metaTable
-                         | filter                       | (((l_discount >= 0.03) AND (l_discount <= 0.05)) AND ((l_shipdate >= '1994-01-01 00:00:00+00:00') AND (l_shipdate < '1995-01-01 00:00:00+00:00'))) AND (l_quantity < 24.0)
+                         | filter                       | (((l_shipdate >= '1994-01-01 00:00:00+00:00') AND (l_shipdate < '1995-01-01 00:00:00+00:00')) AND ((l_discount >= 0.03) AND (l_discount <= 0.05))) AND (l_quantity < 24.0)
 (12 rows)
 > explain select
             supp_nation,
@@ -3130,7 +3130,7 @@ CREATE STATISTICS
                                                 └── ts scan |                 |
                                                             | ts-table        | part
                                                             | access mode     | metaTable
-                                                            | filter          | (p_brand = 'Brand#32') AND (p_container = 'LG BAG')
+                                                            | filter          | (p_container = 'LG BAG') AND (p_brand = 'Brand#32')
 (42 rows)
 > explain select
             c_name,
@@ -3282,7 +3282,7 @@ CREATE STATISTICS
              │    └── ts scan |                                      |
              │                | ts-table                             | lineitem
              │                | access mode                          | metaTable
-             │                | filter                               | (l_shipmode IN ('AIR', 'AIR REG')) AND (l_shipinstruct = 'DELIVER IN PERSON')
+             │                | filter                               | (l_shipinstruct = 'DELIVER IN PERSON') AND (l_shipmode IN ('AIR', 'AIR REG'))
              └── synchronizer |                                      |
                   └── ts scan |                                      |
                               | ts-table                             | part

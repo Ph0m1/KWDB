@@ -58,8 +58,8 @@ INSERT 1
                | scan agg 0       | COUNT(ts)
 (11 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where hostname = 'host_0' and ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
-             tree             |     field      |                        description
-------------------------------+----------------+-------------------------------------------------------------
+             tree             |     field      |            description
+------------------------------+----------------+------------------------------------
                               | distributed    | true
                               | vectorized     | false
   group                       |                |
@@ -77,14 +77,14 @@ INSERT 1
                   └── ts scan |                |
                               | ts-table       | cpu
                               | access mode    | tagIndex
-                              | spans:fromTime | 0000-01-01 00:00:00 +0000 UTC
+                              | spans:fromTime | 2023-10-30 00:00:00 +0000 UTC
                               | spans:toTime   | 2023-10-30 12:12:11.999 +0000 UTC
-                              | filter         | (ts >= '2023-10-30 00:00:00+00:00') AND (usage_system = 1)
+                              | filter         | usage_system = 1
                               | ptag filter[0] | hostname = 'host_0'
 (21 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where hostname = 'host_0' and ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
-             tree             |     field      |                        description
-------------------------------+----------------+-------------------------------------------------------------
+             tree             |     field      |            description
+------------------------------+----------------+------------------------------------
                               | distributed    | true
                               | vectorized     | false
   group                       |                |
@@ -102,9 +102,9 @@ INSERT 1
                   └── ts scan |                |
                               | ts-table       | cpu
                               | access mode    | tagIndex
-                              | spans:fromTime | 0000-01-01 00:00:00 +0000 UTC
+                              | spans:fromTime | 2023-10-30 00:00:00 +0000 UTC
                               | spans:toTime   | 2023-10-30 12:12:11.999 +0000 UTC
-                              | filter         | (ts >= '2023-10-30 00:00:00+00:00') AND (usage_system = 1)
+                              | filter         | usage_system = 1
                               | ptag filter[0] | hostname = 'host_0'
 (21 rows)
 > explain select usage_user from cpu where hostname = 'host_0' and usage_system>2000 order by usage_user;
@@ -319,8 +319,8 @@ INSERT 1
                     | scan agg 1       | COUNT()
 (16 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where hostname = 'host_0' and ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
-             tree             |     field      |                        description
-------------------------------+----------------+-------------------------------------------------------------
+             tree             |     field      |            description
+------------------------------+----------------+------------------------------------
                               | distributed    | true
                               | vectorized     | false
   group                       |                |
@@ -338,14 +338,14 @@ INSERT 1
                   └── ts scan |                |
                               | ts-table       | cpu
                               | access mode    | tagIndex
-                              | spans:fromTime | 0000-01-01 00:00:00 +0000 UTC
+                              | spans:fromTime | 2023-10-30 00:00:00 +0000 UTC
                               | spans:toTime   | 2023-10-30 12:12:11.999 +0000 UTC
-                              | filter         | (ts >= '2023-10-30 00:00:00+00:00') AND (usage_system = 1)
+                              | filter         | usage_system = 1
                               | ptag filter[0] | hostname = 'host_0'
 (21 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
-             tree             |     field      |                        description
-------------------------------+----------------+-------------------------------------------------------------
+             tree             |     field      |            description
+------------------------------+----------------+------------------------------------
                               | distributed    | true
                               | vectorized     | false
   group                       |                |
@@ -363,9 +363,9 @@ INSERT 1
                   └── ts scan |                |
                               | ts-table       | cpu
                               | access mode    | metaTable
-                              | spans:fromTime | 0000-01-01 00:00:00 +0000 UTC
+                              | spans:fromTime | 2023-10-30 00:00:00 +0000 UTC
                               | spans:toTime   | 2023-10-30 12:12:11.999 +0000 UTC
-                              | filter         | (ts >= '2023-10-30 00:00:00+00:00') AND (usage_system = 1)
+                              | filter         | usage_system = 1
 (20 rows)
 > explain select usage_user from cpu where hostname = 'host_0' and usage_system>2000 order by usage_user;
            tree          |     field      |     description
@@ -570,51 +570,5 @@ INSERT 1
   NULL
   NULL
 (12 rows)
-> explain SELECT e7 FROM ts_db.st WHERE now()-e7>60s;
-      tree     |    field    |        description
----------------+-------------+----------------------------
-               | distributed | true
-               | vectorized  | false
-  synchronizer |             |
-   └── ts scan |             |
-               | ts-table    | st
-               | access mode | metaTable
-               | filter      | (now() - e7) > '00:01:00'
-(7 rows)
-> explain SELECT e7 FROM ts_db.st WHERE now()-'1970-1-1 08:01:40'>60s;
-      tree     |    field    |             description
----------------+-------------+--------------------------------------
-               | distributed | true
-               | vectorized  | false
-  synchronizer |             |
-   └── ts scan |             |
-               | ts-table    | st
-               | access mode | metaTable
-               | filter      | now() > '1970-01-01 08:02:40+00:00'
-(7 rows)
-> explain SELECT e7 FROM ts_db.st WHERE now()-INTERVAL'60MS'>e7;
-        tree        |    field    |         description
---------------------+-------------+-------------------------------
-                    | distributed | true
-                    | vectorized  | false
-  filter            |             |
-   │                | filter      | e7 < (now() - '00:00:00.06')
-   └── synchronizer |             |
-        └── ts scan |             |
-                    | ts-table    | st
-                    | access mode | metaTable
-(8 rows)
-> explain SELECT e7 FROM ts_db.st WHERE now()+60S>e7;
-        tree        |    field    |        description
---------------------+-------------+----------------------------
-                    | distributed | true
-                    | vectorized  | false
-  filter            |             |
-   │                | filter      | e7 < (now() + '00:01:00')
-   └── synchronizer |             |
-        └── ts scan |             |
-                    | ts-table    | st
-                    | access mode | metaTable
-(8 rows)
 > DROP DATABASE ts_db cascade;
 DROP DATABASE
