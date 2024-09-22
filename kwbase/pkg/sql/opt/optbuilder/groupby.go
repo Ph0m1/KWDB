@@ -749,12 +749,13 @@ func (b *Builder) buildAggregateFunction(
 					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
 					f.Exprs[0] = col.Exprs[0]
 				} else { // other is not only scopeColumn
-					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
-					f.Exprs[0] = col.Exprs[0]
+					// TODO Subsequent versions will lift restrictions
+					panic(pgerror.New(pgcode.Warning,
+						"the aggregate function, as a parameter of the interpolate function, only supports columns as its parameters"))
 				}
 			}
 		} else {
-			panic(pgerror.New(pgcode.Warning, "The first parameter of interpolate must be agg func"))
+			panic(pgerror.New(pgcode.Warning, "the first parameter of interpolate must be agg func"))
 		}
 	}
 

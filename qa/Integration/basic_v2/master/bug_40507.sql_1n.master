@@ -13,14 +13,13 @@ INSERT 1
 > INSERT INTO t1.d1  VALUES (1667592600000, 333333333, 'd', 1667597779000, 98, 1, 20.999, 1234567, 210, 1435345.10, 0.0001,4);
 INSERT 1
 > select time_bucket_gapfill(k_timestamp,12345678) as tb,interpolate(avg(e6::int),'null') from t1.d1 group by tb order by tb;
-  tb | interpolate
------+--------------
-(0 rows)
+ERROR: the aggregate function, as a parameter of the interpolate function, only supports columns as its parameters
+SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,12345678) as tb,interpolate(max(e3),'null') from t1.d1 group by tb order by tb;
 ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
 SQLSTATE: 01000
 > select time_bucket_gapfill(k_timestamp,12345678) as tb,interpolate(max(substr(e2, 0, 2)),'null') from t1.d1 group by tb order by tb;
-ERROR: The type of the first parameter of interpolate must be of IntFamily, FloatFamily or DecimalFamily
+ERROR: the aggregate function, as a parameter of the interpolate function, only supports columns as its parameters
 SQLSTATE: 01000
 > drop database t1 cascade;
 DROP DATABASE
