@@ -161,7 +161,8 @@ TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, Er
   root_table_manager_->unLock();
   string group_sanbox = GetSubGroupTblSubPath(subgroup_id);
   uint16_t max_entities_per_subgroup = GetMaxEntitiesPerSubgroup();
-  if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_OPEN_NORECURSIVE, max_entities_per_subgroup, err_info) < 0) {
+  if (sub_group->OpenInit(subgroup_id, db_path_, group_sanbox, MMAP_OPEN_NORECURSIVE,
+                          max_entities_per_subgroup, err_info) < 0) {
     delete sub_group;
     sub_group = nullptr;
   }

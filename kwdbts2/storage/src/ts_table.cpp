@@ -2377,7 +2377,7 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
   std::vector<std::shared_ptr<TsEntityGroup>> entity_groups;
   {
     RW_LATCH_S_LOCK(entity_groups_mtx_);
-    for (auto &it: entity_groups_) {
+    for (auto &it : entity_groups_) {
       it.second->RdDropLock();
       entity_groups.push_back(it.second);
     }
@@ -2434,7 +2434,7 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
           timestamp64 max_ts = segment_table->getBlockMaxTs(block_item->block_id);
           timestamp64 min_ts = segment_table->getBlockMinTs(block_item->block_id);
           timestamp64 intersect_ts = intersectLength(ts_span.begin, ts_span.end, min_ts, max_ts + 1);
-          uint32_t count = (double)intersect_ts / (max_ts - min_ts + 1) * block_item->publish_row_count;
+          uint32_t count = static_cast<double>(intersect_ts) / (max_ts - min_ts + 1) * block_item->publish_row_count;
           if (intersect_ts > 0 && block_item->publish_row_count > 0 && count == 0) {
             // The estimated data volume is 0, but in cases where there is a very small amount of data,
             // it is considered as one piece of data by default
@@ -2470,7 +2470,7 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
   // If the queried data falls within the ts_stpan range (such as in a scenario where data has just been written),
   // it is necessary to estimate the daily data write volume
   if (block_min_ts != INT64_MAX && block_min_ts > ts_span.begin) {
-    double ratio = (double)(ts_span.end - block_min_ts) / (ts_span.end - ts_span.begin);
+    double ratio = static_cast<double>(ts_span.end - block_min_ts) / (ts_span.end - ts_span.begin);
     *row_num = (*row_num) / ratio;
   }
 

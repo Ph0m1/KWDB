@@ -652,7 +652,7 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     g_compression.compression_level = level;
   }
 #ifndef KWBASE_OSS
-  else if ("ts.storage.autonomy.mode" == key) {
+  else if ("ts.storage.autonomy.mode" == key) { //NOLINT
     if ("auto" == value) {
       CLUSTER_SETTING_STORAGE_AUTONOMY_ENABLE = true;
     } else if ("manual" == value) {
@@ -662,7 +662,7 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     CLUSTER_SETTING_ENTITIES_PER_SUBGROUP_GROWTH = atof(value.c_str());
   }
 #endif
-  else {
+  else { //NOLINT
     LOG_INFO("Cluster setting %s has no callback function.", key.c_str());
   }
 }
