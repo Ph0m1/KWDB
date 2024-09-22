@@ -303,7 +303,8 @@ void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id,
     timestamp64 last_ts = last_pairs_[i].second.first;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts == INVALID_TS || last_ts < ts) &&
+    if ((last_ts_points_.empty() || last_ts_points_[i] == INVALID_TS || ts <= last_ts_points_[i]) &&
+        (last_ts == INVALID_TS || last_ts < ts) &&
         !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
       last_pairs_[i] = {cur_last_idx_, {ts, row_id}};
     }
@@ -345,7 +346,8 @@ TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
     timestamp64 last_ts = last_pairs_[i].second.first;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts == INVALID_TS || last_ts < ts) &&
+    if ((last_ts_points_.empty() || last_ts_points_[i] == INVALID_TS || ts <= last_ts_points_[i]) &&
+        (last_ts == INVALID_TS || last_ts < ts) &&
         !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
       last_pairs_[i] = {cur_p_bts_idx_, {ts, row_id}};
     }

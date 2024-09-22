@@ -337,7 +337,8 @@ class TsTable {
   virtual KStatus GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                               std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
-                              TsTableIterator** iter, bool reverse, bool sorted);
+                              TsTableIterator** iter, std::vector<timestamp64> ts_points,
+                              bool reverse, bool sorted);
 
   /**
    * @brief get entityId List
@@ -663,10 +664,15 @@ class TsEntityGroup {
    * @param[in] table_version The maximum table version that needs to be queried
    * @param[out] TsIterator*
    */
-  virtual KStatus GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, vector<uint32_t> entity_ids,
-                              std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
-                              std::vector<k_uint32> ts_scan_cols, std::vector<Sumfunctype> scan_agg_types,
-                              uint32_t table_version, TsIterator** iter, std::shared_ptr<TsEntityGroup> entity_group,
+  virtual KStatus GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id,
+                              vector<uint32_t> entity_ids,
+                              std::vector<KwTsSpan> ts_spans,
+                              std::vector<k_uint32> scan_cols,
+                              std::vector<k_uint32> ts_scan_cols,
+                              std::vector<Sumfunctype> scan_agg_types,
+                              uint32_t table_version, TsIterator** iter,
+                              std::shared_ptr<TsEntityGroup> entity_group,
+                              std::vector<timestamp64> ts_points,
                               bool reverse, bool sorted, bool compaction);
 
   /**

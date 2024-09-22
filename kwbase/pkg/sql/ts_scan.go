@@ -78,7 +78,7 @@ type tsScanNode struct {
 
 // ScanAgg records scan agg col and agg type
 type ScanAgg struct {
-	ColID  int
+	Params execinfrapb.TSStatisticReaderSpec_Params
 	AggTyp execinfrapb.AggregatorSpec_Func
 }
 

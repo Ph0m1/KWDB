@@ -759,8 +759,8 @@ func ExprIsNeverNull(e opt.ScalarExpr, notNullCols opt.ColSet) bool {
 // ScanAgg records the column id of argument of agg and
 // the spec type of agg which can use statistic.
 type ScanAgg struct {
-	ParamColID opt.ColumnID
-	AggSpecTyp execinfrapb.AggregatorSpec_Func
+	Params execinfrapb.TSStatisticReaderSpec_Params
+	AggTyp execinfrapb.AggregatorSpec_Func
 }
 
 // ScanAggArray used to transmit statistics

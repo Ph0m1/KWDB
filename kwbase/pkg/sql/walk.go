@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -146,11 +147,22 @@ func (v *planVisitor) visitConcrete(plan planNode) {
 func printScanAgg(buf *bytes.Buffer, agg *ScanAgg, resultColumns *sqlbase.ResultColumns) {
 	buf.WriteString(agg.AggTyp.String())
 	buf.WriteString("(")
-	for i := range *resultColumns {
-		if sqlbase.ColumnID(agg.ColID) == (*resultColumns)[i].PGAttributeNum {
-			buf.WriteString((*resultColumns)[i].Name)
+	for idx, v := range agg.Params.Param {
+		if idx > 0 {
+			buf.WriteString(",")
+		}
+		if v.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
+			for i := range *resultColumns {
+				if sqlbase.ColumnID(v.Value) == (*resultColumns)[i].PGAttributeNum {
+					buf.WriteString((*resultColumns)[i].Name)
+					break
+				}
+			}
+		} else {
+			buf.WriteString(fmt.Sprintf("%v", v.Value))
 		}
 	}
+
 	buf.WriteString(")")
 }
 

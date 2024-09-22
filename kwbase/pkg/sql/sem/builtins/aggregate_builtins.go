@@ -269,14 +269,21 @@ var aggregates = map[string]builtinDefinition{
 		func(t *types.T) tree.Overload {
 			info := "Identifies the last selected value."
 			return makeAggOverloadWithReturnType(
+				[]*types.T{t, types.TimestampTZ, types.TimestampTZ}, tree.IdentityReturnType(0), newLastAggregate, info,
+			)
+		},
+		func(t *types.T) tree.Overload {
+			info := "Identifies the last selected value."
+			return makeAggOverloadWithReturnType(
 				[]*types.T{t, types.TimestampTZ}, tree.IdentityReturnType(0), newLastAggregate, info,
 			)
-		}),
+		},
+	),
 	"lastts": collectOverloads(aggProps(), types.Scalar,
 		func(t *types.T) tree.Overload {
 			info := "Identifies the timestamp of the last value."
 			return makeAggOverloadWithReturnType(
-				[]*types.T{t, types.TimestampTZ}, tree.FixedReturnType(types.TimestampTZ), newLasttsAggregate, info,
+				[]*types.T{t, types.TimestampTZ, types.TimestampTZ}, tree.FixedReturnType(types.TimestampTZ), newLasttsAggregate, info,
 			)
 		}),
 	"last_row": collectOverloads(aggProps(), types.Scalar,
@@ -1659,6 +1666,12 @@ func lastAndFirstAdd(
 		return datum, inTSDatum, false
 	}
 	tsDatum := otherDatum[0]
+	if isLast && len(otherDatum) >= 2 && otherDatum[1] != tree.DNull {
+		c1 := otherDatum[0].Compare(evalCtx, otherDatum[1])
+		if c1 > 0 {
+			return inDatum, inTSDatum, false
+		}
+	}
 	if (isCheckNull && datum == tree.DNull) || tsDatum == tree.DNull {
 		return inDatum, inTSDatum, false
 	}

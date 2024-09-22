@@ -127,12 +127,12 @@ k_int64 getGMT(KString *value_) {
   tm t = {};
   ss >> std::get_time(&t, "%Y-%m-%d %H:%M:%S");
   auto mt = mktime(&t);
-  auto tp = std::chrono::system_clock::from_time_t(mt);
-  // Convert to Unix millisecond timestamp
-  int64_t unixMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                       tp.time_since_epoch())
-                       .count();
-
+  // auto tp = std::chrono::system_clock::from_time_t(mt);
+  //  转换为Unix毫秒时间戳
+  // int64_t unixMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+  //                      tp.time_since_epoch())
+  //                     .count();
+  int64_t unixMs = mt * 1000;
   k_int16 pos;
   pos = forwardToTimeStringEnd(value_->data());
   k_char val = (*value_)[pos];

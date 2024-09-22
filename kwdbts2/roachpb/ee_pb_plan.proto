@@ -728,7 +728,7 @@ message TSPostProcessSpec {
   optional uint32 commandlimit = 8;
 }
 
-// TSSynchronizer Spec 
+// TSSynchronizer Spec
 message TSSynchronizerSpec{
   // dop
   optional int32 degree = 1;
@@ -740,8 +740,25 @@ message TSStatisticReaderSpec {
   repeated TsSpan tsSpans = 1;
   // table id
   required uint64 tableID = 2;
+
+  // agg function param
+  message ParamInfo {
+    enum type {
+      colID = 0;
+      const = 1;
+    }
+
+    required uint32 typ = 1;
+
+    required uint64 value = 2;
+  }
+
+  message Params {
+    repeated ParamInfo param = 1;
+  }
+
   // scan columns
-  repeated uint32 cols = 3;
+  repeated Params paramIdx = 3;
   // agg types
   repeated int32 aggTypes = 4;
   // columns meta data

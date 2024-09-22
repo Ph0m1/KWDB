@@ -741,6 +741,11 @@ func (b *Builder) buildAggregateFunction(
 							}
 						}
 					}
+					if col.Func.FunctionName() == sqlbase.LastAgg && len(agg.FuncExpr.Exprs) == 3 {
+						if _, ok1 := agg.FuncExpr.Exprs[1].(*tree.CastExpr); !ok1 {
+							panic(pgerror.New(pgcode.FeatureNotSupported, "last in interpolate does not support multiple arguments"))
+						}
+					}
 					column.typ = agg.col.typ
 					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
 					f.Exprs[0] = column
@@ -891,7 +896,7 @@ func (b *Builder) constructAggregate(name string, args []opt.ScalarExpr) opt.Sca
 	case "last_row_ts":
 		return b.factory.ConstructLastRowTimeStamp(args[0], args[1])
 	case "last":
-		return b.factory.ConstructLast(args[0], args[1])
+		return b.factory.ConstructLast(args[0], args[2], args[1])
 	case "matching":
 		return b.factory.ConstructMatching(args[0], args[1], args[2], args[3], args[4])
 	case "sqrdiff":
@@ -915,7 +920,7 @@ func (b *Builder) constructAggregate(name string, args []opt.ScalarExpr) opt.Sca
 	case "last_row":
 		return b.factory.ConstructLastRow(args[0], args[1])
 	case "lastts":
-		return b.factory.ConstructLastTimeStamp(args[0], args[1])
+		return b.factory.ConstructLastTimeStamp(args[0], args[2], args[1])
 	}
 	panic(errors.AssertionFailedf("unhandled aggregate: %s", name))
 }

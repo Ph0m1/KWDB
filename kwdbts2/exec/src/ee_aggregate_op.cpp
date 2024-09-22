@@ -262,27 +262,35 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
       case Sumfunctype::LAST: {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(1);
-
+        k_int32 pointIdx = -1;
+        if (agg.col_idx_size() > 2) {
+          pointIdx = agg.col_idx(2);
+        }
         k_uint32 len = fixLength(input_fields_[argIdx]->get_storage_length());
 
         if (IsStringType(param_.aggs_[i]->get_storage_type())) {
-          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, len + STRING_WIDE);
+          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, pointIdx, len + STRING_WIDE);
         } else if (param_.aggs_[i]->get_storage_type() == roachpb::DataType::DECIMAL) {
-          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, len + BOOL_WIDE);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx,  pointIdx, len + BOOL_WIDE);
         } else {
-          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, len);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx,  pointIdx, len);
         }
         break;
       }
       case Sumfunctype::LASTTS: {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(0);
+        k_int32 pointIdx = -1;
         if (agg.col_idx_size() > 1) {
           tsIdx = agg.col_idx(1);
         }
+        if (agg.col_idx_size() > 2) {
+          pointIdx = agg.col_idx(2);
+        }
+        LOG_DEBUG("LASTTS aggregations argument column : %u\n", argIdx);
 
         k_uint32 len = fixLength(input_fields_[tsIdx]->get_storage_length());
-        agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, len);
+        agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, pointIdx, len);
         break;
       }
       case Sumfunctype::LAST_ROW: {

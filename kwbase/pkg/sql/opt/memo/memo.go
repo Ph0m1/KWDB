@@ -30,6 +30,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -871,7 +872,50 @@ func (m *Memo) fillStatistic(child *RelExpr, aggs []AggregationsItem, gp *Groupi
 		m.tsScanFillStatistic(src, aggs, gp)
 	case *SelectExpr:
 		m.selectExprFillStatistic(src, aggs, gp)
+	case *ProjectExpr:
+		m.projectExprFillStatistic(src, aggs, gp)
 	}
+}
+
+// projectExprFillStatistic fill projectExpr's statistics.
+// aggs is the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
+// gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
+func (m *Memo) projectExprFillStatistic(
+	project *ProjectExpr, aggs []AggregationsItem, gp *GroupingPrivate,
+) {
+
+	for _, val := range project.Projections {
+		switch val.Element.(type) {
+		case *NullExpr, *ConstExpr:
+		default:
+			return
+		}
+	}
+	for _, agg := range aggs {
+		if agg.Agg.Op() == opt.LastOp || agg.Agg.Op() == opt.LastTimeStampOp {
+			continue
+		}
+		for j := 0; j < agg.Agg.ChildCount(); j++ {
+			switch arg := agg.Agg.Child(j).(type) {
+			case *VariableExpr:
+				// is not table col, null or const
+				if 0 == m.metadata.ColumnMeta(arg.Col).Table {
+					return
+				}
+			default:
+				return
+			}
+		}
+	}
+
+	child := project.Input
+	switch src := (child).(type) {
+	case *TSScanExpr:
+		m.tsScanFillStatistic(src, aggs, gp)
+	case *SelectExpr:
+		m.selectExprFillStatistic(src, aggs, gp)
+	}
+	return
 }
 
 // tsScanFillStatistic fill tsScan's statistics.
@@ -893,7 +937,11 @@ func (m *Memo) tsScanFillStatistic(
 
 	gp.GroupingCols.ForEach(func(colID opt.ColumnID) {
 		gp.AggIndex = append(gp.AggIndex, []uint32{uint32(len(tsScan.ScanAggs))})
-		tsScan.ScanAggs = append(tsScan.ScanAggs, ScanAgg{ParamColID: colID, AggSpecTyp: execinfrapb.AggregatorSpec_ANY_NOT_NULL})
+		tsScan.ScanAggs = append(tsScan.ScanAggs, ScanAgg{Params: execinfrapb.TSStatisticReaderSpec_Params{
+			Param: []execinfrapb.TSStatisticReaderSpec_ParamInfo{
+				{Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(colID)},
+			},
+		}, AggTyp: execinfrapb.AggregatorSpec_ANY_NOT_NULL})
 	})
 
 	for i := range aggs {
@@ -1040,10 +1088,10 @@ var StatisticAggTable = map[opt.Operator]statisticAgg{
 		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_FIRST_ROW, execinfrapb.AggregatorSpec_FIRST_ROW_TS},
 	},
 	opt.LastOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_LAST, execinfrapb.AggregatorSpec_LASTTS},
+		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_ANY_NOT_NULL, execinfrapb.AggregatorSpec_LASTTS, execinfrapb.AggregatorSpec_LAST},
 	},
 	opt.LastTimeStampOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_LAST, execinfrapb.AggregatorSpec_LASTTS},
+		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_ANY_NOT_NULL, execinfrapb.AggregatorSpec_LASTTS, execinfrapb.AggregatorSpec_LAST},
 	},
 	opt.LastRowOp: {
 		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_LAST_ROW, execinfrapb.AggregatorSpec_LAST_ROW_TS},
@@ -1067,18 +1115,72 @@ func (m *Memo) addScanAggs(
 			colID = m.getArgColID(agg.Child(0).(opt.ScalarExpr))
 		}
 
+		Param := []execinfrapb.TSStatisticReaderSpec_ParamInfo{
+			{Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(colID)}}
+		var ConstParam execinfrapb.TSStatisticReaderSpec_ParamInfo
+		for i := 1; i < agg.ChildCount(); i++ {
+			switch src := agg.Child(i).(type) {
+			case *VariableExpr:
+				// is not table col, null
+				if 0 == m.metadata.ColumnMeta(src.Col).Table {
+					var constVal int64
+					constVal = math.MaxInt64
+					maxBoundaryStr := tree.TsMaxTimestampString + "::TIMESTAMPTZ"
+					boundaryStr := m.metadata.ColumnMeta(src.Col).Alias
+					boundaryStr = strings.Replace(boundaryStr, "'", "", -1)
+					if boundaryStr != maxBoundaryStr {
+						constVal = parseTZ(boundaryStr)
+					}
+					ConstParam = execinfrapb.TSStatisticReaderSpec_ParamInfo{
+						Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_const, Value: constVal}
+					Param = append(Param, ConstParam)
+				} else {
+					Param = append(Param, execinfrapb.TSStatisticReaderSpec_ParamInfo{
+						Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(src.Col)})
+				}
+			}
+		}
+
 		var index []uint32
+		var tmpParam []execinfrapb.TSStatisticReaderSpec_ParamInfo
 		for _, v := range val.LocalStage {
+			if v == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
+				tmpParam = []execinfrapb.TSStatisticReaderSpec_ParamInfo{ConstParam}
+			} else {
+				tmpParam = Param
+			}
 			// exists agg , use it
-			if idx := m.fillScanAggs(scanAggs, colID, v); idx != -1 {
+			if idx := m.fillScanAggs(scanAggs, tmpParam, v); idx != -1 {
 				index = append(index, uint32(idx))
 			} else {
 				index = append(index, uint32(len(*scanAggs)-1))
 			}
 		}
-		gp.AggIndex = append(gp.AggIndex, index)
+		// We need to adjust the order of last's arguments so that
+		// the first parameter is the column to query,
+		// the second parameter is the k_timestamp column,
+		// and the third parameter is the deadline
+		if len(index) == 3 {
+			newIndex := make([]uint32, 0)
+			newIndex = append(newIndex, index[2], index[1], index[0])
+			gp.AggIndex = append(gp.AggIndex, newIndex)
+		} else {
+			gp.AggIndex = append(gp.AggIndex, index)
+		}
 	}
 	return
+}
+
+// parseTZ converts a string timestamp value to an integer timestamp value.
+func parseTZ(boundaryStr string) int64 {
+	d, err := tree.ParseDTimestampTZ(nil, boundaryStr, time.Millisecond)
+	if err != nil {
+		panic(pgerror.Newf(pgcode.DatatypeMismatch, "could not parse %s as TIMESTAMPTZ", boundaryStr))
+	}
+	nanosecond := d.Time.Nanosecond()
+	second := d.Time.Unix()
+	timeNew := second*1000 + int64(nanosecond/1000000)
+	return timeNew
 }
 
 // getArgColID return the column ID of the parameter of the agg function.
@@ -1096,11 +1198,13 @@ func (m *Memo) getArgColID(expr opt.ScalarExpr) opt.ColumnID {
 // colID is the column ID of the parameter of the agg function.
 // aggTyp is one of StatisticAggTable.
 func (m *Memo) fillScanAggs(
-	scanAggs *ScanAggArray, colID opt.ColumnID, aggTyp execinfrapb.AggregatorSpec_Func,
+	scanAggs *ScanAggArray,
+	params []execinfrapb.TSStatisticReaderSpec_ParamInfo,
+	aggTyp execinfrapb.AggregatorSpec_Func,
 ) int {
 	var agg ScanAgg
-	agg.ParamColID = colID
-	agg.AggSpecTyp = aggTyp
+	agg.Params.Param = params
+	agg.AggTyp = aggTyp
 	return addDistinctScanAgg(scanAggs, &agg)
 }
 
@@ -1108,7 +1212,19 @@ func (m *Memo) fillScanAggs(
 // scanAggs is ScanAggs of memo.TSScanExpr.
 func addDistinctScanAgg(scanAggs *ScanAggArray, scanAgg *ScanAgg) int {
 	for i, v := range *scanAggs {
-		if v.ParamColID == scanAgg.ParamColID && v.AggSpecTyp == scanAgg.AggSpecTyp {
+		if len(v.Params.Param) != len(scanAgg.Params.Param) {
+			break
+		}
+		sameColID := true
+		for j := range v.Params.Param {
+			if v.Params.Param[j].Typ != scanAgg.Params.Param[j].Typ ||
+				v.Params.Param[j].Typ != execinfrapb.TSStatisticReaderSpec_ParamInfo_colID ||
+				v.Params.Param[j].Value != scanAgg.Params.Param[j].Value {
+				sameColID = false
+				break
+			}
+		}
+		if sameColID && v.AggTyp == scanAgg.AggTyp {
 			return i
 		}
 	}

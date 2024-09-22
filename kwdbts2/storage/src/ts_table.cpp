@@ -616,8 +616,8 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
                                    std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                                    std::vector<k_uint32> ts_scan_cols, std::vector<Sumfunctype> scan_agg_types,
                                    uint32_t table_version, TsIterator** iter,
-                                   std::shared_ptr<TsEntityGroup> entity_group, bool reverse,
-                                   bool sorted, bool compaction) {
+                                   std::shared_ptr<TsEntityGroup> entity_group,
+                                   std::vector<timestamp64> ts_points, bool reverse, bool sorted, bool compaction) {
   // TODO(liuwei) update to use read_lsn to fetch Metrics data optimistically.
   // if the read_lsn is 0, ignore the read lsn checking and return all data (it's no WAL support case).
   // TS_LSN read_lsn = GetOptimisticReadLsn();
@@ -632,7 +632,7 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
     }
   } else {
     ts_iter = new TsAggIterator(entity_group, range_.range_group_id, sub_group_id, entity_ids,
-                                ts_spans, scan_cols, ts_scan_cols, scan_agg_types, table_version);
+                                ts_spans, scan_cols, ts_scan_cols, scan_agg_types, ts_points, table_version);
   }
 
   ErrorInfo err_info;
@@ -1481,7 +1481,8 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
 
 KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                              std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
-                             std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version, TsTableIterator** iter,
+                             std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
+                             TsTableIterator** iter, std::vector<timestamp64> ts_points,
                              bool reverse, bool sorted) {
   KWDB_DURATION(StStatistics::Get().get_iterator);
   if (scan_cols.empty()) {
@@ -1525,7 +1526,8 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
       TsIterator* ts_iter;
       s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
                                     scan_cols, ts_scan_cols, scan_agg_types,
-                                    table_version, &ts_iter, entity_group, reverse, sorted, false);
+                                    table_version, &ts_iter, entity_group,
+                                    ts_points, reverse, sorted, false);
       if (s == FAIL) return s;
       ts_table_iterator->AddEntityIterator(ts_iter);
 
@@ -1544,7 +1546,8 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
     TsIterator* ts_iter;
     s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
                                   scan_cols, ts_scan_cols, scan_agg_types,
-                                  table_version, &ts_iter, entity_group, reverse, sorted, false);
+                                  table_version, &ts_iter, entity_group,
+                                  ts_points, reverse, sorted, false);
     if (s == FAIL) return s;
     ts_table_iterator->AddEntityIterator(ts_iter);
   }

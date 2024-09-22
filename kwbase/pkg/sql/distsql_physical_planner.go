@@ -1738,17 +1738,27 @@ func (p *PhysicalPlan) buildPhyPlanForTSStatisticReaders(
 	typs []types.T,
 	tsColMap map[sqlbase.ColumnID]tsColIndex,
 ) error {
-	var scanCols []uint32
-	var scanAgg []int32
+	scanCols := make([]execinfrapb.TSStatisticReaderSpec_Params, len(n.ScanAggArray))
+	scanAgg := make([]int32, len(n.ScanAggArray))
 	for i, agg := range n.ScanAggArray {
-		if tsColIndex1, ok := tsColMap[sqlbase.ColumnID(agg.ColID)]; ok {
-			scanCols = append(scanCols, uint32(tsColIndex1.idx))
+		infos := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(agg.Params.Param))
+		for j := range agg.Params.Param {
+			infos[j].Typ = agg.Params.Param[j].Typ
+			if agg.Params.Param[j].Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
+				if tsColIndex1, ok := tsColMap[sqlbase.ColumnID(agg.Params.Param[j].Value)]; ok {
+					infos[j].Value = int64(tsColIndex1.idx)
+				}
+			} else {
+				infos[j].Value = agg.Params.Param[j].Value
+			}
 		}
-		scanAgg = append(scanAgg, int32(n.ScanAggArray[i].AggTyp))
+
+		scanCols[i].Param = infos
+		scanAgg[i] = int32(n.ScanAggArray[i].AggTyp)
 	}
 
 	tr := execinfrapb.TSStatisticReaderSpec{
-		TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, Cols: scanCols, AggTypes: scanAgg, TsCols: colMetas,
+		TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, ParamIdx: scanCols, AggTypes: scanAgg, TsCols: colMetas,
 		TableVersion: n.Table.GetTSVersion()}
 
 	//construct TSReaderSpec
@@ -1772,8 +1782,14 @@ func (p *PhysicalPlan) buildPhyPlanForTSStatisticReaders(
 	outCols := make([]uint32, len(n.ScanAggArray))
 	for i := range n.ScanAggArray {
 		planToStreamColMap[i] = i
-		typ := tsColMap[sqlbase.ColumnID(n.ScanAggArray[i].ColID)].internalType
-		argTypeArray[i] = []types.T{typ}
+		for _, pa := range n.ScanAggArray[i].Params.Param {
+			if pa.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
+				typ1 := tsColMap[sqlbase.ColumnID(pa.Value)].internalType
+				argTypeArray[i] = append(argTypeArray[i], typ1)
+			} else {
+				argTypeArray[i] = append(argTypeArray[i], *types.TimestampTZ)
+			}
+		}
 
 		funcType[i] = int32(n.ScanAggArray[i].AggTyp)
 		outCols[i] = uint32(i)
@@ -2484,10 +2500,22 @@ func getFinalAggFuncAndType(
 				info1 := physicalplan.DistAggregationTable[localFunc]
 				localAgg.Func = info1.FinalStage[0].Fn
 				localFunc = info1.FinalStage[0].Fn
-				localAgg.ColIdx = statisticIndex[k]
-				e.ColIdx = statisticIndex[k]
+				if localFunc == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
+					constColIndex := len(statisticIndex[k]) - 1
+					localAgg.ColIdx = []uint32{statisticIndex[k][constColIndex]}
+					e.ColIdx = []uint32{statisticIndex[k][constColIndex]}
+				} else {
+					localAgg.ColIdx = statisticIndex[k]
+					e.ColIdx = statisticIndex[k]
+				}
 			} else {
-				localAgg.ColIdx = e.ColIdx
+				if localFunc == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
+					constColIndex := len(e.ColIdx) - 1
+					localAgg.ColIdx = []uint32{e.ColIdx[constColIndex]}
+					e.ColIdx = []uint32{e.ColIdx[constColIndex]}
+				} else {
+					localAgg.ColIdx = e.ColIdx
+				}
 			}
 
 			if !checkHas(localAgg, *localAggs, &relToAbsLocalIdx[i]) {
@@ -4292,9 +4320,13 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 		if err != nil {
 			return PhysicalPlan{}, err
 		}
-		err = dsp.selectRenders(&plan, n, planCtx)
-		if err != nil {
-			return PhysicalPlan{}, err
+
+		// use statistic reader
+		if v, ok := n.source.plan.(*tsScanNode); !ok || len(v.ScanAggArray) == 0 {
+			err = dsp.selectRenders(&plan, n, planCtx)
+			if err != nil {
+				return PhysicalPlan{}, err
+			}
 		}
 
 	case *scanNode:

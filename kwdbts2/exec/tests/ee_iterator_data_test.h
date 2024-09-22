@@ -46,8 +46,12 @@ void CreateTSStatisticReaderSpec(TSStatisticReaderSpec **spec, k_uint64 objid) {
   span->set_fromtimestamp(0);
   span->set_totimestamp(100000);
   (*spec)->set_tableid(objid);
-  (*spec)->add_cols(0);
-  (*spec)->add_cols(1);
+  for (int i = 0; i < 2; i++) {
+    TSStatisticReaderSpec_Params *parm = (*spec)->add_paramidx();
+    TSStatisticReaderSpec_ParamInfo *pa = parm->add_param();
+    pa->set_value(0);
+    pa->set_typ(0);
+  }
 }
 
 void CreateReaderTSPostProcessSpec(TSPostProcessSpec **post) {

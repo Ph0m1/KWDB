@@ -104,6 +104,12 @@ class TABLE {
   std::vector<k_uint32> scan_tags_;
   std::vector<Sumfunctype> scan_agg_types_;
   std::vector<Sumfunctype> scan_real_agg_types_;
+  std::vector<k_int64>
+      scan_last_ts_points_;  // scan_last_ts_points_ and scan_real_agg_types_
+                             // remain align
+  std::vector<k_int64>
+      scan_real_last_ts_points_;  // scan_last_ts_points_ and scan_real_agg_types_
+                             // remain align
   k_uint32 table_version_{0};
   bool is_reverse_{0};
 

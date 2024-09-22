@@ -26,6 +26,7 @@ package optbuilder
 
 import (
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -922,6 +923,11 @@ func checkLastOrFirstAgg(name string) bool {
 	return checkFirstAgg(name) || checkLastAgg(name)
 }
 
+// if aggregation is last/lastTs
+func checkLastOrLastTsAgg(name string) bool {
+	return name == sqlbase.LastAgg || name == sqlbase.LastTSAgg
+}
+
 // if aggregation is first/firstts/first_row
 func checkFirstAgg(name string) bool {
 	return name == sqlbase.FirstAgg || name == sqlbase.FirstRowAgg || name == sqlbase.FirstTSAgg || name == sqlbase.FirstRowTSAgg
@@ -957,6 +963,14 @@ func handleLastAgg(s *scope, e tree.Expr, funcName string) {
 		if col, ok := f.Exprs[0].(*scopeColumn); ok {
 			tblID := s.builder.factory.Metadata().ColumnMeta(col.id).Table
 			tbl := s.builder.factory.Metadata().Table(tblID)
+			checkBoundary(s, *f, funcName)
+			// add const bound
+			if (funcName == sqlbase.LastAgg || funcName == sqlbase.LastTSAgg) && len(f.Exprs) == 1 {
+				boundary := tree.DString(tree.TsMaxTimestampString)
+				cast, _ := tree.NewTypedCastExpr(&boundary, types.TimestampTZ)
+				f.Exprs = append(f.Exprs, cast)
+			}
+			// add ts column as param3
 			f.Exprs = append(f.Exprs, &scopeColumn{name: tbl.Column(0).ColName(),
 				table: col.table, typ: types.TimestampTZ, id: tblID.ColumnID(0),
 			})
@@ -966,12 +980,45 @@ func handleLastAgg(s *scope, e tree.Expr, funcName string) {
 
 // addLastFunction add last to outScope for last(*) or last(<table>.*)
 func (b *Builder) addLastFunction(
-	aliases []string, exprs []tree.TypedExpr, funcName string, inScope, outScope *scope,
+	aliases []string,
+	exprs []tree.TypedExpr,
+	funcName string,
+	inScope, outScope *scope,
+	funcExpr tree.Expr,
 ) {
 	for j, e := range exprs {
-		b.addColumn(outScope, funcName+"("+aliases[j]+")",
-			inScope.resolveType(&tree.FuncExpr{Func: tree.ResolvableFunctionReference{
-				FunctionReference: &tree.UnresolvedName{NumParts: 1, Parts: tree.NameParts{funcName}},
-			}, Exprs: tree.Exprs{e}}, types.Any), false)
+		lastCol := &tree.FuncExpr{
+			Func: tree.ResolvableFunctionReference{
+				FunctionReference: &tree.UnresolvedName{
+					NumParts: 1,
+					Parts:    tree.NameParts{funcName}}},
+			Exprs: tree.Exprs{e},
+		}
+		if f, ok := funcExpr.(*tree.FuncExpr); ok &&
+			checkLastOrLastTsAgg(funcName) &&
+			len(f.Exprs) == 2 {
+			lastCol.Exprs = append(lastCol.Exprs, f.Exprs[1])
+		}
+		resolvedLast := inScope.resolveType(lastCol, types.Any)
+		b.addColumn(outScope, funcName+"("+aliases[j]+")", resolvedLast, false)
+	}
+}
+
+// checkBoundary checks if the second parameter of last is greater than '2970-01-01 00:00:00+00:00'
+func checkBoundary(s *scope, f tree.FuncExpr, funcName string) {
+	if funcName == sqlbase.LastAgg && len(f.Exprs) == 2 {
+		typedExpr, err := tree.TypeCheck(f.Exprs[1], s.builder.semaCtx, types.TimestampTZ)
+		if err != nil || typedExpr == nil {
+			panic(pgerror.Newf(pgcode.DatatypeMismatch, "the second parameter of last must be of timestamptz type"))
+		}
+		if datum, ok2 := typedExpr.(*tree.DTimestampTZ); ok2 {
+			maxDatum, _ := tree.ParseDTimestampTZ(s.builder.evalCtx, tree.TsMaxTimestampString, time.Millisecond)
+			res := datum.Compare(s.builder.evalCtx, maxDatum)
+			if res > 0 {
+				panic(pgerror.Newf(pgcode.FeatureNotSupported, "the second parameter of last is out of range"))
+			}
+		} else {
+			panic(pgerror.Newf(pgcode.DatatypeMismatch, "the second parameter of last must be of timestamptz type"))
+		}
 	}
 }

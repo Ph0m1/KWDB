@@ -10456,6 +10456,10 @@ special_function:
   {
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr()}}
   }
+| LAST '(' last_column ',' SCONST ')'
+	{
+		$$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr(), tree.NewStrVal($5)}}
+	}
 | LAST '(' error { return helpWithFunctionByName(sqllex, $1) }
 | LAST_ROW '(' last_column ')'
   {

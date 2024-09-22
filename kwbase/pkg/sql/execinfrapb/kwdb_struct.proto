@@ -167,8 +167,25 @@ message TSStatisticReaderSpec {
   repeated TsSpan tsSpans = 1 [(gogoproto.nullable) = false];
   // ID of the table to be queried
   required uint64 tableID = 2 [(gogoproto.nullable) = false];
+
+  // agg function param
+  message ParamInfo {
+    enum type {
+      colID = 0;
+      const = 1;
+    }
+
+    required type typ = 1 [(gogoproto.nullable) = false];
+
+    required int64 value = 2 [(gogoproto.nullable) = false];
+  }
+
+  message Params {
+    repeated ParamInfo param = 1 [(gogoproto.nullable) = false];
+  }
+
   // Columns for querying statistics. Column indexes start at 0
-  repeated uint32 cols = 3;
+  repeated Params paramIdx = 3 [(gogoproto.nullable) = false];
   // TSTableReader column agg type
   repeated int32 aggTypes = 4;
   // Metadata for all columns, excluding column ids

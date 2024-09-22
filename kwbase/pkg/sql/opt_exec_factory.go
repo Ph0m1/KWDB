@@ -189,13 +189,22 @@ func (ef *execFactory) ConstructTSScan(
 	tsScan.resultColumns = resultCols
 	tsScan.AccessMode = execinfrapb.TSTableReadMode(private.AccessMode)
 	tsScan.HintType = private.HintType
-
+	tsScan.ScanAggArray = make([]ScanAgg, len(private.ScanAggs))
 	// Convert logical column ID  in ScanAggs of memo.TSScanExpr into physical column ID and bind them to tsScanNode.
-	for _, v := range private.ScanAggs {
-		physicsIdx := private.Table.ColumnOrdinal(v.ParamColID)
-		physicsID := int(table.Column(physicsIdx).ColID())
-		scanAgg := ScanAgg{ColID: physicsID, AggTyp: v.AggSpecTyp}
-		tsScan.ScanAggArray = append(tsScan.ScanAggArray, scanAgg)
+	for funcIdx, v := range private.ScanAggs {
+		tsScan.ScanAggArray[funcIdx].AggTyp = v.AggTyp
+		tsScan.ScanAggArray[funcIdx].Params.Param = make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(v.Params.Param))
+		for paramIdx, v1 := range v.Params.Param {
+			tsScan.ScanAggArray[funcIdx].Params.Param[paramIdx].Typ = v1.Typ
+			if v1.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
+				physicsIdx := private.Table.ColumnOrdinal(opt.ColumnID(v1.Value))
+				physicsID := int(table.Column(physicsIdx).ColID())
+
+				tsScan.ScanAggArray[funcIdx].Params.Param[paramIdx].Value = int64(physicsID)
+			} else {
+				tsScan.ScanAggArray[funcIdx].Params.Param[paramIdx].Value = v1.Value
+			}
+		}
 	}
 
 	// bind tag filter and primary filter to tsScanNode.

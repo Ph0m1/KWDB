@@ -1716,48 +1716,58 @@ SQLSTATE: 22023
   2023-10-10 11:00:00.688+00:00 | 2023-10-11 11:00:00.688+00:00
 (1 row)
 > explain select lastts(k_timestamp),lastts(k_timestamp)+'1d' from t;
-        tree        |      field       |           description
---------------------+------------------+-----------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | lastts           | lastts
-   │                | ?column?         | lastts + '1 day'
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | lastts(k_timestamp, k_timestamp)
-        │           | scalar           |
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | t
-                    | access mode      | metaTable
-                    | scan agg 0       | LAST(k_timestamp)
-                    | scan agg 1       | LASTTS(k_timestamp)
-(15 rows)
+           tree          |                  field                   |                                description
+-------------------------+------------------------------------------+-----------------------------------------------------------------------------
+                         | distributed                              | true
+                         | vectorized                               | false
+  render                 |                                          |
+   │                     | lastts                                   | lastts
+   │                     | ?column?                                 | lastts + '1 day'
+   └── group             |                                          |
+        │                | engine type                              | time series
+        │                | aggregate 0                              | lastts(k_timestamp, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+        │                | scalar                                   |
+        │                | addSynchronizer                          | true
+        └── render       |                                          |
+             │           | engine type                              | time series
+             │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+             │           | k_timestamp                              | k_timestamp
+             └── ts scan |                                          |
+                         | ts-table                                 | t
+                         | access mode                              | metaTable
+                         | scan agg 0                               | ANY_NOT_NULL(9223372036854775807)
+                         | scan agg 1                               | LASTTS(k_timestamp,k_timestamp,9223372036854775807)
+                         | scan agg 2                               | LAST(k_timestamp,k_timestamp,9223372036854775807)
+(20 rows)
 > select lastts(k_timestamp),lastts(k_timestamp)+'1s' from t;
              lastts             |           ?column?
 --------------------------------+--------------------------------
   2023-10-10 11:00:00.688+00:00 | 2023-10-10 11:00:01.688+00:00
 (1 row)
 > explain select lastts(k_timestamp),lastts(k_timestamp)+'1s' from t;
-        tree        |      field       |           description
---------------------+------------------+-----------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | lastts           | lastts
-   │                | ?column?         | lastts + '00:00:01'
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | lastts(k_timestamp, k_timestamp)
-        │           | scalar           |
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | t
-                    | access mode      | metaTable
-                    | scan agg 0       | LAST(k_timestamp)
-                    | scan agg 1       | LASTTS(k_timestamp)
-(15 rows)
+           tree          |                  field                   |                                description
+-------------------------+------------------------------------------+-----------------------------------------------------------------------------
+                         | distributed                              | true
+                         | vectorized                               | false
+  render                 |                                          |
+   │                     | lastts                                   | lastts
+   │                     | ?column?                                 | lastts + '00:00:01'
+   └── group             |                                          |
+        │                | engine type                              | time series
+        │                | aggregate 0                              | lastts(k_timestamp, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+        │                | scalar                                   |
+        │                | addSynchronizer                          | true
+        └── render       |                                          |
+             │           | engine type                              | time series
+             │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+             │           | k_timestamp                              | k_timestamp
+             └── ts scan |                                          |
+                         | ts-table                                 | t
+                         | access mode                              | metaTable
+                         | scan agg 0                               | ANY_NOT_NULL(9223372036854775807)
+                         | scan agg 1                               | LASTTS(k_timestamp,k_timestamp,9223372036854775807)
+                         | scan agg 2                               | LAST(k_timestamp,k_timestamp,9223372036854775807)
+(20 rows)
 > insert into t values('2023-10-10 11:00:00.688', 0.1, -3, 'z',0.033333,-30,-300,'zz','last测试','表达式测试','zzz','zzzz','zzzzz', 1);
 INSERT 1
 > insert into t values('2023-10-10 11:00:00.688', 0.3, -3, 'z',0.0033333,-30,-300,'zz','last测试','表达式测试','zzz','zzzz','zzzzz', 1);

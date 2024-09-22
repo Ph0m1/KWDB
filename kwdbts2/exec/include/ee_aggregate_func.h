@@ -2567,10 +2567,11 @@ class STDDEVRowAggregate : public AggregateFunc {
 template<bool IS_STRING_FAMILY = false>
 class LastAggregate : public AggregateFunc {
  public:
-  LastAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx, k_uint32 len) :
-      AggregateFunc(col_idx, arg_idx, len), ts_idx_(ts_idx) {
-  }
-
+  LastAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx,
+                k_int32 point_idx, k_uint32 len)
+      : AggregateFunc(col_idx, arg_idx, len),
+        ts_idx_(ts_idx),
+        point_idx_(point_idx) {}
 
   ~LastAggregate() override = default;
 
@@ -2582,9 +2583,18 @@ class LastAggregate : public AggregateFunc {
     k_bool is_dest_null = AggregateFunc::IsNull(bitmap, col_idx_);
     DatumPtr src = chunk->GetData(line, arg_idx_[0]);
     DatumPtr ts_ptr = chunk->GetData(line, ts_idx_);
+    auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
     DatumPtr dest_ptr = dest + offset_;
+    k_int64 point_ts = INT64_MAX;
+    if (point_idx_ != -1) {  // for last point
+      DatumPtr point_ptr = chunk->GetData(line, point_idx_);
+      point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+    }
 
     if (is_dest_null) {
+      if (ts > point_ts && point_ts != INT64_MAX) {
+        return;
+      }
       // first assign
       std::memcpy(dest_ptr, src, len_ - sizeof(KTimestamp));
       SetNotNull(bitmap, col_idx_);
@@ -2592,9 +2602,9 @@ class LastAggregate : public AggregateFunc {
       return;
     }
 
-    auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
     auto last_ts = *reinterpret_cast<KTimestamp*>(dest_ptr + len_ - sizeof(KTimestamp));
-    if (ts > last_ts) {
+    if (ts > last_ts &&
+        (point_ts == INT64_MAX || (ts <= point_ts && point_ts != INT64_MAX))) {
       std::memcpy(dest_ptr, src, len_ - sizeof(KTimestamp));
       std::memcpy(dest_ptr + len_ - sizeof(KTimestamp), ts_ptr, sizeof(KTimestamp));
     }
@@ -2618,13 +2628,20 @@ class LastAggregate : public AggregateFunc {
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
     }
-
+    
     for (k_uint32 row = 0; row < data_container_count; ++row) {
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          current_data_chunk_->SetNotNull(target_row, col_idx_);
-          std::memcpy(dest_ptr, last_line_ptr, len_);
+          k_int64 point_ts = INT64_MAX;
+          if (point_idx_ != -1) {  // for last point
+            DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
+            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+          }
+          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+            current_data_chunk_->SetNotNull(target_row, col_idx_);
+            std::memcpy(dest_ptr, last_line_ptr, len_);
+          }
         }
 
         // if the current chunk is full.
@@ -2642,9 +2659,14 @@ class LastAggregate : public AggregateFunc {
 
       if (!input_chunk->IsNull(row, arg_idx)) {
         char* ts_src_ptr = input_chunk->GetData(row, ts_idx_);
-
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        if (ts > last_ts_) {
+        k_int64 point_ts = INT64_MAX;
+        if (point_idx_ != -1) {  // for last point
+          DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
+          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+        }
+        if (ts > last_ts_ && (point_ts == INT64_MAX ||
+                              (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
           last_line_ptr = input_chunk->GetData(row, arg_idx);
         }
@@ -2679,19 +2701,26 @@ class LastAggregate : public AggregateFunc {
 
     auto* arg_field = renders[arg_idx];
     auto* ts_field = renders[ts_idx_];
+    auto* point_field = renders[point_idx_];
     auto storage_type = arg_field->get_storage_type();
 
     for (k_uint32 row = 0; row < data_container_count; ++row) {
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          current_data_chunk_->SetNotNull(target_row, col_idx_);
-
-          if (IS_STRING_FAMILY) {
-            std::memcpy(dest_ptr, &str_length, STRING_WIDE);
-            std::memcpy(dest_ptr + STRING_WIDE, last_line_ptr, str_length);
-          } else {
-            std::memcpy(dest_ptr, last_line_ptr, len_);
+          k_int64 point_ts = INT64_MAX;
+          if (point_idx_ != -1) {  // for last point
+            DatumPtr point_ptr = GetFieldDataPtr(point_field, row_batch);
+            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+          }
+          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+            current_data_chunk_->SetNotNull(target_row, col_idx_);
+            if (IS_STRING_FAMILY) {
+              std::memcpy(dest_ptr, &str_length, STRING_WIDE);
+              std::memcpy(dest_ptr + STRING_WIDE, last_line_ptr, str_length);
+            } else {
+              std::memcpy(dest_ptr, last_line_ptr, len_);
+            }
           }
         }
 
@@ -2712,7 +2741,14 @@ class LastAggregate : public AggregateFunc {
         char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
 
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        if (ts > last_ts_) {
+        k_int64 point_ts = INT64_MAX;
+        if (point_idx_ != -1) {  // for last point
+          DatumPtr point_ptr = GetFieldDataPtr(point_field, row_batch);;
+          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+        }
+
+        if (ts > last_ts_ && (point_ts == INT64_MAX ||
+                              (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
           last_line_ptr = GetFieldDataPtr(arg_field, row_batch);
 
@@ -2745,6 +2781,7 @@ class LastAggregate : public AggregateFunc {
  private:
   k_uint32 ts_idx_;
   KTimestamp last_ts_ = INT64_MIN;
+  k_int32 point_idx_ = -1;
 };
 
 ////////////////////////// LastRowAggregate //////////////////////////
@@ -2960,9 +2997,11 @@ class LastRowAggregate : public AggregateFunc {
 
 class LastTSAggregate : public AggregateFunc {
  public:
-  LastTSAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx, k_uint32 len) :
-      AggregateFunc(col_idx, arg_idx, len), ts_idx_(ts_idx) {
-  }
+  LastTSAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx,
+                  k_int32 point_Idx, k_uint32 len)
+      : AggregateFunc(col_idx, arg_idx, len),
+        ts_idx_(ts_idx),
+        point_idx_(point_Idx) {}
 
   ~LastTSAggregate() override = default;
 
@@ -2974,17 +3013,26 @@ class LastTSAggregate : public AggregateFunc {
     k_bool is_dest_null = AggregateFunc::IsNull(bitmap, col_idx_);
     DatumPtr ts_ptr = chunk->GetData(line, ts_idx_);
     DatumPtr dest_ptr = dest + offset_;
-
+    auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
+    k_int64 point_ts = INT64_MAX;
+    if (point_idx_ != -1) {  // for last point
+      DatumPtr point_ptr = chunk->GetData(line, point_idx_);
+      point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+    }
     if (is_dest_null) {
+      if (ts > point_ts && point_ts != INT64_MAX) {
+        return;
+      }
       std::memcpy(dest_ptr, ts_ptr, sizeof(KTimestamp));
       SetNotNull(bitmap, col_idx_);
       std::memcpy(dest_ptr + sizeof(KTimestamp), ts_ptr, sizeof(KTimestamp));
       return;
     }
 
-    auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
-    auto last_ts = *reinterpret_cast<KTimestamp*>(dest_ptr + sizeof(KTimestamp));
-    if (ts > last_ts) {
+    auto last_ts =
+        *reinterpret_cast<KTimestamp*>(dest_ptr + sizeof(KTimestamp));
+    if (ts > last_ts &&
+        (point_ts == INT64_MAX || (ts <= point_ts && point_ts != INT64_MAX))) {
       std::memcpy(dest_ptr, ts_ptr, sizeof(KTimestamp));
       std::memcpy(dest_ptr + sizeof(KTimestamp), ts_ptr, sizeof(KTimestamp));
     }
@@ -3011,11 +3059,19 @@ class LastTSAggregate : public AggregateFunc {
     }
 
     for (k_uint32 row = 0; row < data_container_count; ++row) {
+      k_int64 point_ts = INT64_MAX;
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          current_data_chunk_->SetNotNull(target_row, col_idx_);
-          std::memcpy(dest_ptr, last_line_ptr, len_);
+          if (point_idx_ != -1) {  // for last point
+            DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
+            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+          }
+
+          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+            current_data_chunk_->SetNotNull(target_row, col_idx_);
+            std::memcpy(dest_ptr, last_line_ptr, len_);
+          }
         }
 
         // if the current chunk is full.
@@ -3032,9 +3088,14 @@ class LastTSAggregate : public AggregateFunc {
 
       if (!input_chunk->IsNull(row, arg_idx)) {
         char* ts_src_ptr = input_chunk->GetData(row, ts_idx_);
-
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        if (last_line_ptr == nullptr || ts > last_ts_) {
+        if (point_idx_ != -1) {  // for last point
+          DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
+          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+        }
+        if ((last_line_ptr == nullptr || ts > last_ts_) &&
+            (point_ts == INT64_MAX ||
+             (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
           last_line_ptr = ts_src_ptr;
         }
@@ -3070,13 +3131,20 @@ class LastTSAggregate : public AggregateFunc {
 
     auto* arg_field = renders[arg_idx];
     auto* ts_field = renders[ts_idx_];
-
+    auto* point_field = renders[point_idx_];
     for (k_uint32 row = 0; row < data_container_count; ++row) {
+      k_int64 point_ts = INT64_MAX;
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          current_data_chunk_->SetNotNull(target_row, col_idx_);
-          std::memcpy(dest_ptr, last_line_ptr, len_);
+          if (point_idx_ != -1) {  // for last point
+            DatumPtr point_ptr = GetFieldDataPtr(ts_field, row_batch);
+            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+          }
+          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+            current_data_chunk_->SetNotNull(target_row, col_idx_);
+            std::memcpy(dest_ptr, last_line_ptr, len_);
+          }
         }
 
         // if the current chunk is full.
@@ -3093,9 +3161,14 @@ class LastTSAggregate : public AggregateFunc {
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
-
+        if (point_idx_ != -1) {  // for last point
+          DatumPtr point_ptr = GetFieldDataPtr(point_field, row_batch);
+          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
+        }
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        if (last_line_ptr == nullptr || ts > last_ts_) {
+        if ((last_line_ptr == nullptr || ts > last_ts_) &&
+            (point_ts == INT64_MAX ||
+             (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
           last_line_ptr = ts_src_ptr;
         }
@@ -3113,6 +3186,7 @@ class LastTSAggregate : public AggregateFunc {
  private:
   k_uint32 ts_idx_;
   KTimestamp last_ts_ = INT64_MIN;
+  k_int32 point_idx_ = -1;
 };
 
 ////////////////////////// LastRowTSAggregate //////////////////////////

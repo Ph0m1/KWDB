@@ -188,7 +188,7 @@ class TsAggIterator : public TsIterator {
   TsAggIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                 vector<uint32_t>& entity_ids, vector<KwTsSpan>& ts_spans,
                 std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
-                std::vector<Sumfunctype>& scan_agg_types, uint32_t table_version) :
+                std::vector<Sumfunctype>& scan_agg_types, std::vector<timestamp64>& ts_points, uint32_t table_version) :
                 TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, kw_scan_cols,
                            ts_scan_cols, table_version), scan_agg_types_(scan_agg_types) {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
@@ -196,6 +196,7 @@ class TsAggIterator : public TsIterator {
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
     first_pairs_.assign(scan_agg_types_.size(), {});
     last_pairs_.assign(scan_agg_types_.size(), {});
+    last_ts_points_.assign(scan_agg_types_.size(), INVALID_TS);
     for (size_t i = 0; i < ts_scan_cols_.size(); ++i) {
       // If the query aggregation type contains first/last correlation, the corresponding member variables need to be
       // initialized to record the results during the query process.
@@ -208,6 +209,9 @@ class TsAggIterator : public TsIterator {
       } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
         no_first_last_type_ = false;
         last_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
+        if (!ts_points.empty()) {
+          last_ts_points_[i] = ts_points[i];
+        }
       } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
         no_first_last_type_ = false;
         last_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
@@ -456,6 +460,7 @@ class TsAggIterator : public TsIterator {
   // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
   std::vector<std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> first_pairs_;
   std::vector<std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> last_pairs_;
+  std::vector<timestamp64> last_ts_points_;
   // std::pair<index of column, std::pair<timestamp64, row id>>
   std::pair<k_int32, std::pair<timestamp64, MetricRowID>> first_row_pair_;
   std::pair<k_int32, std::pair<timestamp64, MetricRowID>> last_row_pair_;

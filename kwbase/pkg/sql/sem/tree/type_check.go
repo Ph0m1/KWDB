@@ -1273,6 +1273,9 @@ const TsMinTimestamp = -62167219200000
 // 2970-01-01 00:00:00+00:00
 const TsMaxTimestamp = 31556995200000
 
+// TsMaxTimestampString is the string form of the maximum value supported by the ts column
+const TsMaxTimestampString = "2970-01-01 00:00:00+00:00"
+
 // TSTypeCheck checks the value of the input numeric type against the expected type.
 func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 

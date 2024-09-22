@@ -198,7 +198,7 @@ func (b *Builder) analyzeSelectList(
 							break
 						}
 						colIndexTmp += len(exprs)
-						b.addLastFunction(aliases, exprs, name, inScope, outScope)
+						b.addLastFunction(aliases, exprs, name, inScope, outScope, expr)
 						continue
 					}
 					break
@@ -213,7 +213,7 @@ func (b *Builder) analyzeSelectList(
 						outScope.cols = make([]scopeColumn, 0, len(*selects)+len(exprs)-1)
 					}
 
-					b.addLastFunction(aliases, exprs, name, inScope, outScope)
+					b.addLastFunction(aliases, exprs, name, inScope, outScope, expr)
 					continue
 				case *tree.ColumnItem, *tree.NumVal, *tree.StrVal: //, *tree.NumVal, *tree.dNull
 					break

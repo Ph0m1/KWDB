@@ -719,9 +719,16 @@ func (h *hasher) HashTSHintType(val keys.ScanMethodHintType) {
 	h.HashInt(int(val))
 }
 
+func (h *hasher) HashParams(val execinfrapb.TSStatisticReaderSpec_Params) {
+	for v := range val.Param {
+		h.HashUint64(uint64(val.Param[v].Typ))
+		h.HashInt(int(val.Param[v].Value))
+	}
+}
+
 func (h *hasher) HashAggTypes(val ScanAgg) {
-	h.HashInt(int(val.ParamColID))
-	h.HashInt(int(val.AggSpecTyp))
+	h.HashParams(val.Params)
+	h.HashInt(int(val.AggTyp))
 }
 
 func (h *hasher) HashTSTableReadMode(val execinfrapb.TSTableReadMode) {
@@ -1136,12 +1143,24 @@ func (h *hasher) IsOpaqueMetadataEqual(l, r opt.OpaqueMetadata) bool {
 	return l == r
 }
 
+func (h *hasher) IsParamsEqual(l, r execinfrapb.TSStatisticReaderSpec_Params) bool {
+	if len(l.Param) != len(r.Param) {
+		return false
+	}
+	for i := range l.Param {
+		if l.Param[i].Typ != r.Param[i].Typ || l.Param[i].Value != r.Param[i].Value {
+			return false
+		}
+	}
+	return true
+}
+
 func (h *hasher) IsScanAggArrayEqual(l, r ScanAggArray) bool {
 	if len(l) != len(r) {
 		return false
 	}
 	for i := range l {
-		if l[i].ParamColID != r[i].ParamColID || l[i].AggSpecTyp != r[i].AggSpecTyp {
+		if !h.IsParamsEqual(l[i].Params, r[i].Params) || l[i].AggTyp != r[i].AggTyp {
 			return false
 		}
 	}

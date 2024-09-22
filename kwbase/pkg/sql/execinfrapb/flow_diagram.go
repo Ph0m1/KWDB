@@ -308,7 +308,17 @@ func (ts *TSStatisticReaderSpec) summary() (string, []string) {
 		var buf bytes.Buffer
 		buf.WriteString(AggregatorSpec_Func_name[ts.AggTypes[idx]])
 		buf.WriteByte('(')
-		buf.WriteString(colListStr([]uint32{ts.Cols[idx]}))
+		for i, val := range ts.ParamIdx[idx].Param {
+			if i > 0 {
+				buf.WriteString(",")
+			}
+			switch val.Typ {
+			case TSStatisticReaderSpec_ParamInfo_colID:
+				buf.WriteString(colListStr([]uint32{uint32(val.Value)}))
+			case TSStatisticReaderSpec_ParamInfo_const:
+				buf.WriteString(fmt.Sprintf("%v", val.Value))
+			}
+		}
 		buf.WriteByte(')')
 
 		details = append(details, fmt.Sprintf("Agg[%d]: %v", idx, buf.String()))
