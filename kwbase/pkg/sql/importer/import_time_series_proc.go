@@ -656,11 +656,10 @@ func (t *timeSeriesImportInfo) handleDedupResp(
 		//}
 	case int64(execinfrapb.DedupRule_TsDiscard):
 		// discard dedup rule: only map with bit 1 was abandon
-		if succeedCount == reqCount {
-			t.addResultCount(succeedCount)
-			break
+		t.addResultCount(succeedCount)
+		if succeedCount != reqCount {
+			atomic.AddInt64(&t.AbandonCount, reqCount-succeedCount)
 		}
-		atomic.AddInt64(&t.AbandonCount, reqCount-succeedCount)
 		// TODO(yangshuai):Evenly distributed module repair bitmap, Re record logs
 		//id := 0
 		//for ok := range rowBitMap {
