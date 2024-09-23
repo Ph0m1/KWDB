@@ -219,6 +219,19 @@ type CheckFunc func(key uint32, pos uint32) bool
 var castSupportType = []oid.Oid{oid.T_timestamp, oid.T_timestamptz, oid.T_int2, oid.T_int4, oid.T_int8,
 	oid.T_float4, oid.T_float8, oid.T_bool, oid.T_bpchar, oid.T_bytea, types.T_nchar, oid.T_varchar, types.T_nvarchar, oid.T_varbytea}
 
+// check whether type of expr support exec in ts engine
+func checkAESupportType(id oid.Oid) bool {
+	typFlag := false
+	// check returnType
+	for _, typ := range castSupportType {
+		if typ == id {
+			typFlag = true
+			break
+		}
+	}
+	return typFlag
+}
+
 // CheckExprCanExecInTSEngine checks whether expr and it's children exprs can be pushed down
 // tupleCanExecInTSEngine is true when the tuple use in InExpr or NotInExpr, tuple expr only can exec in ts engine in this case,
 // such as col in (1,2,3) or col in (col1,col2); other case such as COUNT(DISTINCT (channel, companyid)) can not exec in ts engine.
@@ -274,20 +287,12 @@ func CheckExprCanExecInTSEngine(
 			return false, 0
 		}
 	case *CastExpr:
-		typFlag := false
-		// check returnType in CastExpr
-		for _, tmp := range castSupportType {
-			if tmp == source.Typ.Oid() {
-				typFlag = true
-				break
-			}
-		}
-		if !typFlag {
+		if !checkAESupportType(source.Typ.Oid()) {
 			return false, 0
 		}
 	}
 
-	if scalar, ok := src.(opt.ScalarExpr); ok && scalar.CheckConstDeductionEnabled() {
+	if scalar, ok := src.(opt.ScalarExpr); ok && scalar.CheckConstDeductionEnabled() && checkAESupportType(scalar.DataType().Oid()) {
 		return true, 0
 	}
 
