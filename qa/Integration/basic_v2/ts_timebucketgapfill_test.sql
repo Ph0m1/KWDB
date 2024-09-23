@@ -356,3 +356,16 @@ prepare p1 as select time_bucket_gapfill(k_timestamp,9900) as tb from test_timeb
 prepare p2 as select time_bucket_gapfill(k_timestamp,9900) as tb from test_timebucket_gapfill.tb where e2 + $1 > 0 group by tb union select time_bucket_gapfill(k_timestamp,10000) as tb from test_timebucket_gapfill.tb where e2 + $2 < 0 group by tb order by tb;
 execute p2(10,20);
 DROP database test_timebucket_gapfill cascade;
+
+--- ZDP-40955
+create database test_timebucket_gapfill_rel;
+
+create table test_timebucket_gapfill_rel.tb3(k_timestamp timestamptz not null,e1 timestamptz,e2 int2,e3 int,e4 int8,e5 float4,e6 float8,e7 bool,e8 char,e9 char(100),e10 nchar,e11 nchar(255),e12 varchar,e13 varchar(254),e14 varchar(4096),e15 nvarchar,e16 nvarchar(255),e17 nvarchar(4096),e18 varbytes,e19 varchar(100),e20 varchar,e21 varchar(254),e22 varchar(100),t1 int2,t2 int,t3 int8 not null,t4 bool,t5 float4,t6 float8,t7 char,t8 char(100),t9 nchar,t10 nchar(254),t11 varchar not null,t12 varchar(128),t13 varchar not null,t14 varchar(100) not null,t15 varchar,t16 varchar(255));
+
+insert into test_timebucket_gapfill_rel.tb3 values('2025-06-06 08:00:00','2024-06-10 16:16:15.183',800,8000,80000,800000.808888,8000000.808088,true,'d','test测试！！！@TEST1 ','d','类型测试1()*  ',null,null,'255测试1cdf~# ','@TEST1  ','abc255测试1()&^%{}','deg4096测试1(','b','查询1023_2','tes_测试1',b'\xaa\xaa\xaa',b'\xbb\xcc\xbb\xbb',7,200,2000,false,-10.123,500.578578,'c','test测试！！！@TEST1  ','g','abc','\0test查询！！！@TEST1\0','64_3','t','es1023_2','f','tes4096_2');
+insert into test_timebucket_gapfill_rel.tb3 values('2025-06-06 11:15:15.783','2024-06-10 17:04:15.183',500,5000,60000,500000.505555,5000000.505055,false,'c','test测试！！！@TEST1 ','n','类型测试1()  ',null,null,'255测试1cdf~# ','@TEST1  ','abc255测试1()*&^%{}','deg4096测试1(','b','查询1023_2','tes_测试1',b'\xaa\xaa\xaa',b'\xbb\xcc\xbb\xbb',8,800,8000,false,-20.123,800.578578,'d','test测试！！！@TEST1  ','d','ddd','\0test查询！！！@TEST1\0','64_3','t','es1023_2','f','tes4096_2');
+
+select time_bucket_gapfill(k_timestamp,3600) as a,interpolate(sum(t3),'prev') from test_timebucket_gapfill_rel.tb3 group by a order by a;
+select time_bucket_gapfill(k_timestamp,21600) as a,interpolate(avg(e4),'next') from test_timebucket_gapfill_rel.tb3 group by a order by a;
+select time_bucket_gapfill(k_timestamp,604800) as a,interpolate(count(t6),'linear') from test_timebucket_gapfill_rel.tb3 group by a order by a;
+DROP database test_timebucket_gapfill_rel cascade;

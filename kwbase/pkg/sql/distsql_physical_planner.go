@@ -3776,7 +3776,7 @@ func (dsp *DistSQLPlanner) addAggregators(
 	// notNeedDist is a special identifier used for Interpolate aggregate functions.
 	// Interpolate agg should not dist.
 	notNeedDist := false
-	if canNotDist && p.Processors[0].TSSpec.Core.TagReader != nil {
+	if canNotDist {
 		notNeedDist = true
 		// The interpolate function should be computed at the gateway node.
 		prevStageNode = 0
