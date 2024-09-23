@@ -2,6 +2,7 @@
 
 g_deploy_path=$(cd $(dirname $0);pwd)
 g_cur_usr=`whoami`
+config_dir="/etc/kaiwudb"
 source $g_deploy_path/utils/kaiwudb_common.sh
 source $g_deploy_path/utils/kaiwudb_log.sh
 
