@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <unordered_map>
 #include "mmap/mmap_metrics_table.h"
 
@@ -46,6 +47,8 @@ protected:
   MMapMetricsTable* cur_root_table_;
   // Partition interval.
   uint64_t partition_interval_;
+  // Compression status.
+  std::atomic<bool> is_compressing_ = false;
   // Stores mappings of all versions of the root table.
   std::unordered_map<uint32_t, MMapMetricsTable*> root_tables_;
 
@@ -224,6 +227,13 @@ public:
    * @return Return true if the table has been deleted; Otherwise return false.
    */
   bool IsDropped();
+
+  /**
+   * @brief Set the table compress status.
+   *
+   * @return
+   */
+  bool SetCompressStatus(bool desired);
 
   /**
    * @brief Clear all data in the table.

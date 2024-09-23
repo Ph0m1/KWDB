@@ -47,7 +47,6 @@ class TsTimePartition : public TSObject {
 
   TsTimePartitionRWLatch* rw_latch_;
   TsTimePartitionLatch* segments_lock_;  // data_segments lock
-  TsTimePartitionLatch* compress_mtx_;
   TsTimePartitionLatch* partition_table_latch_;  // partition table object latch
 
  protected:
@@ -81,7 +80,6 @@ class TsTimePartition : public TSObject {
     meta_manager_.max_entities_per_subgroup = config_subgroup_entities;
     rw_latch_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
     segments_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
-    compress_mtx_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_COMPRESS_MUTEX);
     m_ref_cnt_mtx_ = new TsTimePartitionCntMutex(LATCH_ID_PARTITION_REF_COUNT_MUTEX);
     m_ref_cnt_cv_ = new TsTimePartitionCondVal(COND_ID_PARTITION_REF_COUNT_COND);
     partition_table_latch_ = new TsTimePartitionLatch(LATCH_ID_PARTITION_TABLE_MUTEX);

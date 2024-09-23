@@ -1455,6 +1455,11 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
   }
+  if (!entity_bt_manager_->SetCompressStatus(true)) {
+    // Other threads are currently being compressed, skipping this compression
+    LOG_INFO("table[%lu] is compressing, skip this compression", table_id_);
+    return KStatus::SUCCESS;
+  }
   KStatus s = KStatus::SUCCESS;
   std::vector<std::shared_ptr<TsEntityGroup>> compress_entity_groups;
   {
@@ -1476,6 +1481,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
     }
   }
 
+  entity_bt_manager_->SetCompressStatus(false);
   return s;
 }
 

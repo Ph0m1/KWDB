@@ -352,6 +352,14 @@ bool MMapRootTableManager::IsDropped() {
   return cur_root_table_->isDropped();
 }
 
+bool MMapRootTableManager::SetCompressStatus(bool desired) {
+  bool expected = !desired;
+  if (is_compressing_.compare_exchange_strong(expected, desired)) {
+    return true;
+  }
+  return false;
+}
+
 KStatus MMapRootTableManager::RemoveAll() {
   wrLock();
   Defer defer([&]() { unLock(); });

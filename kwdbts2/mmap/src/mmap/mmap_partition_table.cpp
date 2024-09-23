@@ -54,10 +54,6 @@ TsTimePartition::~TsTimePartition() {
     delete segments_lock_;
     segments_lock_ = nullptr;
   }
-  if (compress_mtx_) {
-    delete compress_mtx_;
-    compress_mtx_ = nullptr;
-  }
   if (partition_table_latch_) {
     delete partition_table_latch_;
     partition_table_latch_ = nullptr;
@@ -498,11 +494,6 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
     }
     segment_tables.emplace_back(tbl);
     return true;
-  });
-  // control concurrency
-  MUTEX_LOCK(compress_mtx_);
-  Defer defer([&]() {
-    MUTEX_UNLOCK(compress_mtx_);
   });
   // Traverse the segments that need to be processed
   // There are three types of processing for segments
