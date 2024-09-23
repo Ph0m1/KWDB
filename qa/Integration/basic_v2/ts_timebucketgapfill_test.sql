@@ -349,3 +349,10 @@ INSERT INTO test_time_addsub.t1 VALUES('2012-02-29 1:10:10.000',15,-32767,-34000
 SELECT time_bucket(k_timestamp+'1y'+'10y','15s') FROM test_time_addsub.t1 order by k_timestamp;
 SELECT time_bucket(e7+'1y'+'10y','15s') FROM test_time_addsub.t1 order by k_timestamp;
 DROP database test_time_addsub cascade;
+
+create ts database test_timebucket_gapfill;
+create table test_timebucket_gapfill.tb(k_timestamp timestamptz not null,e1 timestamptz,e2 int2,e3 int,e4 int8,e5 float4,e6 float8,e7 bool,e8 char,e9 char(100),e10 nchar,e11 nchar(255),e12 varchar,e13 varchar(254),e14 varchar(4096),e15 nvarchar,e16 nvarchar(255),e17 nvarchar(4096),e18 varbytes,e19 varbytes(100),e20 varbytes,e21 varbytes(254),e22 varbytes(4096)) tags (t1 int2 not null,t2 int,t3 int8,t4 bool not null,t5 float4,t6 float8,t7 char,t8 char(100) not null,t9 nchar,t10 nchar(254),t11 varchar,t12 varchar(128) not null,t13 varbytes,t14 varbytes(100),t15 varbytes,t16 varbytes(255)) primary tags(t1,t4,t8,t12);
+prepare p1 as select time_bucket_gapfill(k_timestamp,9900) as tb from test_timebucket_gapfill.tb where e2 + t2 > 0 group by tb union select time_bucket_gapfill(k_timestamp,10000) as tb from test_timebucket_gapfill.tb where e2 + t2 < 0 group by tb order by tb;
+prepare p2 as select time_bucket_gapfill(k_timestamp,9900) as tb from test_timebucket_gapfill.tb where e2 + $1 > 0 group by tb union select time_bucket_gapfill(k_timestamp,10000) as tb from test_timebucket_gapfill.tb where e2 + $2 < 0 group by tb order by tb;
+execute p2(10,20);
+DROP database test_timebucket_gapfill cascade;

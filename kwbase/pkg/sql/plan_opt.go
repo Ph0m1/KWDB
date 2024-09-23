@@ -399,7 +399,7 @@ func (opc *optPlanningCtx) buildReusableMemo(ctx context.Context) (_ *memo.Memo,
 		if !f.Memo().HasPlaceholders() {
 			// fix query errors during prepare
 			opc.log(ctx, "optimizing (no placeholders)")
-			if _, err := opc.optimizer.Optimize(); err != nil && bld.PhysType == tree.Invalid {
+			if _, err := opc.optimizer.Optimize(); err != nil {
 				return nil, err
 			}
 		}
