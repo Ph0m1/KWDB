@@ -29,9 +29,9 @@ int  MMapObject::openNameService(ErrorInfo &err_info, int flags) {
   return 0;
 }
 
-int MMapObject::open(const string &file_path, const std::string &db_path, const string &tbl_sub_path, int cc,
-  int flags) {
-  int error_code = MMapFile::open(file_path, db_path + tbl_sub_path + file_path, flags);
+int MMapObject::open(const string &obj_path, const std::string &db_path, const string &tbl_sub_path, int cc,
+                     int flags) {
+  int error_code = MMapFile::open(obj_path, db_path + tbl_sub_path + obj_path, flags);
   if (error_code < 0) {
     return error_code;
   }
@@ -66,7 +66,7 @@ int MMapObject::open(const string &file_path, const std::string &db_path, const 
       mem_length_ = file_length_;
   }
 
-  obj_name_ = getURLObjectName(file_path_);
+  obj_name_ = getTsObjectName(file_path_);
 
   return 0;
 }
@@ -118,9 +118,9 @@ int MMapObject::memExtend(off_t offset, size_t ps)
     return 0;
 }
 
-off_t MMapObject::urlCopy(const string &source_url, off_t offset,
-    size_t ps) {
-    off_t len = source_url.size() + 1 + offset;
+off_t MMapObject::pathCopy(const string &source_path, off_t offset,
+                           size_t ps) {
+    off_t len = source_path.size() + 1 + offset;
     off_t prev_len;
     off_t limit;
     int err_code = 0;
@@ -148,7 +148,7 @@ off_t MMapObject::urlCopy(const string &source_url, off_t offset,
 
     if (err_code >= 0)
         strcpy((char *) ((intptr_t) addr(prev_len) + offset),
-            source_url.c_str());
+               source_path.c_str());
 
     return prev_len;
 }
@@ -194,14 +194,14 @@ off_t MMapObject::writeColumnInfo(const vector<AttributeInfo> &attr_info,
     return start_addr;
 }
 
-int MMapObject::writeAttributeURL(
-    const string &source_url,
-    const string &ns_url,
+int MMapObject::writeAttributePath(
+    const string &source_path,
+    const string &ns_path,
     const string &description)
 {
-    urlCopy(&(meta_data_->source_url[0]), source_url.c_str());
-    urlCopy(&(meta_data_->ns_url[0]), ns_url.c_str());
-    assign(meta_data_->description, urlCopy(description));
+  pathCopy(&(meta_data_->source_path[0]), source_path.c_str());
+  pathCopy(&(meta_data_->ns_path[0]), ns_path.c_str());
+    assign(meta_data_->description, pathCopy(description));
 
     int err_code = 0;
     meta_data_->num_measure_info = measure_info_.size();

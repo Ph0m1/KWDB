@@ -60,6 +60,9 @@ func TestEvalResultIsZero(t *testing.T) {
 			case **storagepb.LogicalOpLog:
 				*f = new(storagepb.LogicalOpLog)
 				defer func() { *f = nil }()
+			case *bool:
+				*f = true
+				defer func() { *f = false }()
 			default:
 				tf := v.Type().Field(i)
 				t.Fatalf("unknown field %s of type %s on %T", tf.Name, tf.Type, p)

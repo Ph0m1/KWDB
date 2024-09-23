@@ -1,5 +1,4 @@
 -- prepare data
---testmode 1n 5c
 CREATE TS DATABASE test_impexp;
 use test_impexp;
 CREATE TABLE test_impexp.ds_tb(

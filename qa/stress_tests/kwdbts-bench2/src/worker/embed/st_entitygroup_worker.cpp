@@ -17,6 +17,8 @@
 #include "../statistics.h"
 #include "st_entitygroup_worker.h"
 
+DedupRule g_dedup_rule_;
+
 namespace kwdbts {
 
 KBStatus TSEntityGroupWriteWorker::do_work(KTimestamp  new_ts) {
@@ -93,7 +95,7 @@ KBStatus TSEntityGroupWriteWorkerWithScan::do_work(KTimestamp  new_ts) {
         vector<uint32_t> entity_ids = {entityIdList[0].entityId};
     s = entity_group_->GetIterator(ctx, entityIdList[0].subGroupId, entity_ids,
                                    ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_,
-                                   false, false, false);
+                                   {}, false, false, false);
     assert(s == KStatus::SUCCESS);
     int total_rows = 0;
     k_uint32 ret_cnt;
@@ -169,7 +171,7 @@ KBStatus TSEntityGroupScanWorker::do_work(KTimestamp  new_ts) {
     vector<uint32_t> entity_ids = {entityIdList[0].entityId};
     s = entity_group_->GetIterator(ctx, entityIdList[0].subGroupId, entity_ids,
                                    ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_,
-                                    false, false, false);
+                                    {}, false, false, false);
     assert(s == KStatus::SUCCESS);
     int total_rows = 0;
     k_uint32 ret_cnt;

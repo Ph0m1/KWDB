@@ -1197,7 +1197,6 @@ func (m *multiTestContext) changeReplicas(
 					NodeID:  m.idents[dest].NodeID,
 					StoreID: m.idents[dest].StoreID,
 				}),
-			false,
 		)
 
 		if err == nil || testutils.IsError(err, alreadyDoneErr) {

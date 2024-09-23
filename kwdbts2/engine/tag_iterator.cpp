@@ -26,8 +26,17 @@ KStatus EntityGroupTagIterator::Init(MMapTagColumnTable* tag_bt) {
   tag_bt_->mutexUnlock();
   return KStatus::SUCCESS;
 }
+bool in(kwdbts::k_uint32 hp, const std::vector<kwdbts::k_uint32>& hps) {
+  for (int i=0; i < hps.size(); i++) {
+    if (hps[i] == hp) {
+      return true;
+    }
+  }
+  return false;
+}
 
-KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, k_uint32* count) {
+KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_list,
+                                     ResultSet* res, k_uint32* count) {
   if  (cur_scan_rowid_ > cur_total_row_count_) {
     LOG_INFO("fetch tag table %s%s, "
       "cur_scan_rowid[%lu] > cur_total_row_count_[%lu], count: %u",
@@ -51,8 +60,14 @@ KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_l
       // *count = fetch_count;
       // return KStatus::SUCCESS;
     }
-
-    if (!tag_bt_->isValidRow(row_num)) {
+    bool needSkip = false;
+    uint32_t hash_point;
+    if (version_ == TagIteratorType::TAG_IT_HASHED) {
+      tag_bt_->getHashpointByRowNum(row_num, &hash_point);
+      needSkip = !in(hash_point, hps_);
+      LOG_DEBUG("row %lu hashpoint is %u %s in search list", row_num, hash_point, needSkip?"not":"");
+    }
+    if (!tag_bt_->isValidRow(row_num) || needSkip) {
       if (has_data) {
         for (int idx = 0; idx < scan_tags_.size(); idx++) {
           // Batch* batch = new Batch(m_tag_bt_->GetColumnAddr(start_row, tagid),
@@ -75,7 +90,11 @@ KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_l
       start_row = row_num;
       has_data = true;
     }
-    tag_bt_->getEntityIdByRownum(row_num, entity_id_list);
+    if (version_ == TagIteratorType::TAG_IT_HASHED) {
+      tag_bt_->getHashedEntityIdByRownum(row_num, hash_point, entity_id_list);
+    } else {
+      tag_bt_->getEntityIdByRownum(row_num, entity_id_list);
+    }
     fetch_count++;
   }  // end for
 if (fetch_count == *count) {
@@ -112,6 +131,7 @@ success_end:
   cur_scan_rowid_ = row_num;
   return (KStatus::SUCCESS);
 }
+
 KStatus EntityGroupTagIterator::Close() {
   if (tag_bt_ != nullptr) {
     int ref_cnt = tag_bt_->decRefCount();
@@ -163,6 +183,7 @@ KStatus TagIterator::Next(std::vector<EntityResultIndex>* entity_id_list, Result
   return KStatus::SUCCESS;
 }
 
+
 KStatus TagIterator::Close() {
   for (uint32_t idx = 0; idx < entitygrp_iterator_.size(); idx++) {
     entitygrp_iterator_[idx]->Close();
@@ -182,7 +203,7 @@ KStatus EntityGroupMetaIterator::Init() {
     }
     std::vector<uint32_t> entities = subgroup->GetEntities();
     for (auto& entity : entities) {
-      entity_list_.push_back({range_group_id_, entity, i});
+      entity_list_.push_back(EntityResultIndex(range_group_id_, entity, i));
     }
     // ebt_manager_->ReleasePartitionTable(subgroup);
   }

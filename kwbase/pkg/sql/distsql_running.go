@@ -559,6 +559,8 @@ type DistSQLReceiver struct {
 	dedupRule  int64
 	dedupRows  int64
 	insertRows int64
+
+	nodeErrForTsAlter map[int32]string
 }
 
 // rowResultWriter is a subset of CommandResult to be used with the
@@ -757,6 +759,7 @@ func (r *DistSQLReceiver) Push(
 		if meta.TsAlterColumn != nil {
 			r.status = execinfra.ConsumerClosed
 			if !meta.TsAlterColumn.AlterSuccess {
+				r.nodeErrForTsAlter = meta.TsAlterColumn.NodeIDMapErr
 				err := errors.Newf("alter ts column failed, reason:%s", meta.TsAlterColumn.AlterErr)
 				r.resultWriter.SetError(err)
 			}

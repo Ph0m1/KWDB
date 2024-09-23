@@ -73,7 +73,7 @@ func TestAtomicReplicationChange(t *testing.T) {
 
 	runChange := func(expDesc roachpb.RangeDescriptor, chgs []roachpb.ReplicationChange) roachpb.RangeDescriptor {
 		t.Helper()
-		desc, err := tc.Servers[0].DB().AdminChangeReplicas(ctx, k, expDesc, chgs, false)
+		desc, err := tc.Servers[0].DB().AdminChangeReplicas(ctx, k, expDesc, chgs)
 		require.NoError(t, err)
 
 		return *desc

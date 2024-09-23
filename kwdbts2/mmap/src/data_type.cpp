@@ -13,7 +13,6 @@
 #include "data_type.h"
 #include "utils/big_table_utils.h"
 
-
 bool isBinaryType(int type) { return (type == BINARY || type == VARBINARY); }
 
 bool isVarLenType(int type) { return ((type == VARSTRING) ||  (type == VARBINARY)); }

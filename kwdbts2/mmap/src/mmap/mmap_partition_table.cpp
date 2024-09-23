@@ -24,7 +24,7 @@
 #include "dirent.h"
 #include "ts_time_partition.h"
 #include "utils/big_table_utils.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "engine.h"
 #include "utils/compress_utils.h"
 #include "lg_api.h"
@@ -64,13 +64,13 @@ TsTimePartition::~TsTimePartition() {
   m_ref_cnt_mtx_ = nullptr;
 }
 
-int TsTimePartition::open(const string& url, const std::string& db_path, const string& tbl_sub_path,
+int TsTimePartition::open(const string& path, const std::string& db_path, const string& tbl_sub_path,
                           int flags, ErrorInfo& err_info) {
-  assert(root_table != nullptr);
-  file_path_ = getURLFilePath(url);
+  assert(root_table_manager_ != nullptr);
+  file_path_ = getTsFilePath(path);
   db_path_ = db_path;
   tbl_sub_path_ = tbl_sub_path;
-  name_ = getURLObjectName(file_path_);
+  name_ = getTsObjectName(file_path_);
 
   // load EntityMeta
   if (openBlockMeta(flags, err_info) < 0) {
@@ -81,6 +81,21 @@ int TsTimePartition::open(const string& url, const std::string& db_path, const s
   setObjectReady();
 
   return err_info.errcode;
+}
+
+int TsTimePartition::loadSegment(BLOCK_ID segment_id, ErrorInfo& err_info) {
+  std::shared_ptr<MMapSegmentTable> segment_tbl;
+  MMapSegmentTable *tbl = new MMapSegmentTable();
+  string file_path = name_ + ".bt";
+  if (tbl->open(&meta_manager_, segment_id, file_path, db_path_, segment_tbl_sub_path(segment_id),
+                MMAP_OPEN_NORECURSIVE, true, err_info) < 0) {
+    err_info.errmsg = "open segment table failed. " + segment_tbl_sub_path(segment_id);
+    err_info.errcode = KWENFILE;
+    return err_info.errcode;
+  }
+  segment_tbl.reset(tbl);
+  data_segments_.Insert(segment_id, segment_tbl);
+  return 0;
 }
 
 int TsTimePartition::loadSegments(ErrorInfo& err_info) {
@@ -110,15 +125,10 @@ int TsTimePartition::loadSegments(ErrorInfo& err_info) {
           segment_id = std::stoi(entity->d_name);
         }
         if (segment_id > 0 && segment_ids.count(segment_id) == 0) {
-          std::shared_ptr<MMapSegmentTable> segment_tbl;
-          MMapSegmentTable* tbl = new MMapSegmentTable();
-          string file_path = name_ + ".bt";
-          if (tbl->open(&meta_manager_, segment_id, file_path, db_path_, segment_tbl_sub_path(segment_id),
-                        MMAP_OPEN_NORECURSIVE, true, err_info) < 0) {
+          int err_code = loadSegment(segment_id, err_info);
+          if (err_code < 0) {
             break;
           }
-          segment_tbl.reset(tbl);
-          data_segments_.Insert(segment_id, segment_tbl);
           segment_ids.insert(segment_id);
           if (segment_id > last_segment_id) {
             last_segment_id = segment_id;
@@ -143,15 +153,6 @@ int TsTimePartition::loadSegments(ErrorInfo& err_info) {
     }
   }
 
-  if (last_sta_tbl != nullptr) {
-    root_table_manager_->rdLock();
-    bool is_consistent = true;
-    last_sta_tbl->verifySchema(root_table_manager_->GetSchemaInfoWithHidden(), is_consistent);  // handle add/drop column exception
-    if (!is_consistent) {
-      last_sta_tbl = nullptr;
-    }
-    root_table_manager_->unLock();
-  }
   if (last_sta_tbl != nullptr) {
     active_segment_ = last_sta_tbl;
   }
@@ -198,8 +199,9 @@ MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint
   string key_order = "";
   int encoding = ENTITY_TABLE | NO_DEFAULT_TABLE;
   {
-    if (segment_tbl->create(&meta_manager_, root_table_manager_->GetSchemaInfoWithHidden(table_version),
-                            table_version, encoding, err_info) < 0) {
+    std::vector<AttributeInfo> schema;
+    root_table_manager_->GetSchemaInfoIncludeDropped(&schema, table_version);
+    if (segment_tbl->create(&meta_manager_, schema, table_version, encoding, err_info) < 0) {
       return nullptr;
     }
   }
@@ -215,41 +217,40 @@ MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint
 }
 
 int TsTimePartition::openBlockMeta(const int flags, ErrorInfo& err_info) {
-  string meta_url = name_ + ".meta";
+  string meta_name = name_ + ".meta";
   // if create segment , we need create meta.0 file first.
   if (!(flags & O_CREAT)) {
     struct stat buff;
-    string meta_path = db_path_ + tbl_sub_path_ + meta_url + ".0";
+    string meta_path = db_path_ + tbl_sub_path_ + meta_name + ".0";
     if (stat(meta_path.c_str(), &buff) != 0) {
       err_info.setError(KWENOOBJ, meta_path);
       return err_info.errcode;
     }
   }
 
-  int ret = meta_manager_.Open(meta_url, db_path_, tbl_sub_path_, true);
+  int ret = meta_manager_.Open(meta_name, db_path_, tbl_sub_path_, true);
   if (ret < 0) {
-    err_info.setError(ret, tbl_sub_path_ + meta_url);
+    err_info.setError(ret, tbl_sub_path_ + meta_name);
     return err_info.errcode;
   }
   return 0;
 }
 
-int TsTimePartition::remove() {
+int TsTimePartition::remove(bool exclude_segment) {
   int error_code = 0;
-  std::string prefix_path = db_path_ + tbl_sub_path_;
-  data_segments_.Traversal([&](BLOCK_ID id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
-    error_code = tbl->remove();
-    if (error_code < 0) {
-      LOG_ERROR("remove segment[%s] failed!", tbl->realFilePath().c_str());
-      return false;
-    }
-    LOG_INFO("remove segment[%s] success!", tbl->realFilePath().c_str());
-    return true;
-  });
+  if (!exclude_segment) {
+    data_segments_.Traversal([&](BLOCK_ID id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+      error_code = tbl->remove();
+      if (error_code < 0) {
+        LOG_ERROR("remove segment[%s] failed!", tbl->realFilePath().c_str());
+        return false;
+      }
+      LOG_INFO("remove segment[%s] success!", tbl->realFilePath().c_str());
+      return true;
+    });
+  }
   releaseSegments();
-
   error_code = meta_manager_.remove();
-
   return error_code;
 }
 
@@ -263,6 +264,66 @@ void TsTimePartition::sync(int flags) {
     return true;
   });
   MUTEX_UNLOCK(segments_lock_);
+}
+
+bool TsTimePartition::JoinOtherPartitionTable(TsTimePartition* other) {
+  MUTEX_LOCK(segments_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+  // mark all segments cannot write. when joining, we cannot write rows.
+  if (active_segment_ != nullptr) {
+    active_segment_->setSegmentStatus(InActiveSegment);
+    active_segment_ = nullptr;
+  }
+  data_segments_.Traversal([&](BLOCK_ID s_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+    if (tbl->sqfsIsExists()) {
+      return true;
+    }
+    if (tbl->getObjectStatus() != OBJ_READY) {
+      ErrorInfo err_info;
+      if (tbl->reopen(false, err_info) < 0) {
+        LOG_ERROR("MMapSegmentTable[%s] reopen failed", tbl->realFilePath().c_str());
+        return true;
+      }
+    }
+    if (tbl->getSegmentStatus() == ActiveSegment) {
+      tbl->setSegmentStatus(InActiveSegment);
+    }
+    return true;
+  });
+  auto other_p_header = other->meta_manager_.getEntityHeader();
+  auto this_p_header = this->meta_manager_.getEntityHeader();
+
+  std::vector<BLOCK_ID> other_segment_ids;
+  other->data_segments_.GetAllKey(&other_segment_ids);
+  std::sort(other_segment_ids.begin(), other_segment_ids.end());
+
+  BLOCK_ID current_file_id = this_p_header->cur_block_id + 1;
+  for (size_t i = 0; i < other_segment_ids.size(); i++) {
+    std::string other_segment_path = other->GetPath() + intToString(other_segment_ids[i]);
+    std::string  new_segment_path = this->GetPath() + intToString(this_p_header->cur_block_id + other_segment_ids[i]);
+    std::string cmd = "mv " + other_segment_path + " " + new_segment_path;
+    ErrorInfo err_info;
+    if (!System(cmd, err_info)) {
+      LOG_ERROR("exec [%s] failed.", cmd.c_str());
+      return false;
+    }
+    auto err_code = loadSegment(this_p_header->cur_block_id + other_segment_ids[i], err_info);
+    if (err_code < 0) {
+      LOG_ERROR("loadSegment file faild. msg: %s.", err_info.errmsg.c_str());
+      return false;
+    }
+    current_file_id = this_p_header->cur_block_id + other_segment_ids[i];
+  }
+  BlockItem *new_blk;
+  for (size_t i = 1; i <= other_p_header->cur_block_id; i++) {
+    auto blk_item = other->getBlockItem(i);
+    this->meta_manager_.AddBlockItem(blk_item->entity_id, &new_blk);
+    new_blk->CopyMetricMetaInfo(*blk_item);
+    this->meta_manager_.UpdateEntityItem(blk_item->entity_id, new_blk);
+  }
+
+  this_p_header->cur_datafile_id = current_file_id;
+  return true;
 }
 
 size_t TsTimePartition::size(uint32_t entity_id) const {
@@ -553,6 +614,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
           LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->realFilePath().c_str());
           return;
         }
+        segment_tbl->setSqfsIsExists();
         // Check if it is mounted. If it is not, try cleaning up the original data directory before compression.
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
@@ -660,12 +722,8 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
 
     // scan all data in this blockitem
     DelRowSpan row_span;
-    for (k_uint32 row_idx = 1; row_idx <= block_item->publish_row_count ; ++row_idx) {
-      bool has_been_deleted;
-      if (block_item->isDeleted(row_idx, &has_been_deleted) < 0) {
-        return -1;
-      }
-
+    for (k_uint32 row_idx = 1; row_idx <= block_item->alloc_row_count ; ++row_idx) {
+      bool has_been_deleted = !segment_tbl->IsRowVaild(block_item, row_idx);
       auto cur_ts = KTimestamp(segment_tbl->columnAddr(block_item->getRowID(row_idx), 0));
       if (has_been_deleted || !isTimestampInSpans(ts_spans, cur_ts, cur_ts)) {
         continue;
@@ -1550,7 +1608,7 @@ int TsTimePartition::ConvertDataTypeToMem(DATATYPE old_type, DATATYPE new_type, 
       }
     } else {
       uint16_t var_len = *reinterpret_cast<uint16_t*>(old_var_mem.get());
-      std::string var_value((char*)old_var_mem.get() + MMapStringFile::kStringLenLen);
+      std::string var_value((char*)old_var_mem.get() + MMapStringColumn::kStringLenLen);
       convertStrToFixed(var_value, new_type, (char*) temp_new_mem, var_len, err_info);
     }
     std::shared_ptr<void> ptr(temp_new_mem, free);
@@ -1562,20 +1620,20 @@ int TsTimePartition::ConvertDataTypeToMem(DATATYPE old_type, DATATYPE new_type, 
     } else {
       if (old_type == VARSTRING) {
         auto old_len = *reinterpret_cast<uint16_t*>(old_var_mem.get()) - 1;
-        char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringFile::kStringLenLen));
-        memset(var_data, 0, old_len + MMapStringFile::kStringLenLen);
+        char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringColumn::kStringLenLen));
+        memset(var_data, 0, old_len + MMapStringColumn::kStringLenLen);
         *reinterpret_cast<uint16_t*>(var_data) = old_len;
-        memcpy(var_data + MMapStringFile::kStringLenLen,
-               (char*) old_var_mem.get() + MMapStringFile::kStringLenLen, old_len);
+        memcpy(var_data + MMapStringColumn::kStringLenLen,
+               (char*) old_var_mem.get() + MMapStringColumn::kStringLenLen, old_len);
         std::shared_ptr<void> ptr(var_data, free);
         *new_mem = ptr;
       } else {
         auto old_len = *reinterpret_cast<uint16_t*>(old_var_mem.get());
-        char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringFile::kStringLenLen + 1));
-        memset(var_data, 0, old_len + MMapStringFile::kStringLenLen + 1);
+        char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringColumn::kStringLenLen + 1));
+        memset(var_data, 0, old_len + MMapStringColumn::kStringLenLen + 1);
         *reinterpret_cast<uint16_t*>(var_data) = old_len + 1;
-        memcpy(var_data + MMapStringFile::kStringLenLen,
-               (char*) old_var_mem.get() + MMapStringFile::kStringLenLen, old_len);
+        memcpy(var_data + MMapStringColumn::kStringLenLen,
+               (char*) old_var_mem.get() + MMapStringColumn::kStringLenLen, old_len);
         std::shared_ptr<void> ptr(var_data, free);
         *new_mem = ptr;
       }
@@ -1753,8 +1811,17 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
   std::deque<BlockItem*> block_items;
   GetAllBlockItems(entity_id, block_items);
   EntityItem *entity = getEntityItem(entity_id);
-  std::multimap<timestamp64, MetricRowID> ts_order;  // Save every undeleted row_id under each timestamp
 
+  if (!entity->is_disordered) {
+    while (!block_items.empty()) {
+      BlockItem* block_item = block_items.front();
+      block_items.pop_front();
+      block_spans.push_back({block_item, 0, block_item->publish_row_count});
+    }
+    return 0;
+  }
+
+  std::multimap<timestamp64, MetricRowID> ts_order;  // Save every undeleted row_id under each timestamp
   while (!block_items.empty()) {
     BlockItem* block_item = block_items.front();
     block_items.pop_front();
@@ -1786,8 +1853,7 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
         MetricRowID row_id = block_item->getRowID(i);
         timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
         if (all_within_spans || (CheckIfTsInSpan(cur_ts, ts_spans))) {
-          bool is_deleted;
-          if (block_item->isDeleted(i, &is_deleted) < 0 || is_deleted) {
+          if (!segment_tbl->IsRowVaild(block_item, i)) {
             continue;
           }
           ts_order.insert(std::make_pair(cur_ts, row_id));

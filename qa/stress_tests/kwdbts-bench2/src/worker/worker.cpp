@@ -59,13 +59,9 @@ void WorkerRoutine::Run() {
   KTimestamp t_show = GetTimeNow();
   int64_t show_count = 0;
   int64_t run_count = 0;
+  KTimestamp ts_now;
   while (!stop_cmd_ && running_) {
-    // Obtaining the timestamp is also time-consuming, so consider increasing the timestamp
-    KTimestamp ts_now = GetTimeNow();
-    // Check whether you need to exit
-    if ((ts_now - t_start) / 1e9 >= params_.RUN_TIME) {
-      break;
-    }
+    ts_now = GetTimeNow();
     if (params_.RUN_COUNT > 0 && run_count >= params_.RUN_COUNT) {
       running_ = false;
       break;
@@ -118,21 +114,19 @@ void WorkerRoutine::Run() {
         data_ts += params_.BATCH_NUM * params_.time_inc;
       }
     }
+    double time = (ts_now - t_show) / 1e9;
+    if (time > params_.SHOW_INTERVAL) {
+      fprintf(stdout, "*[%s]:%s rows=%.1fw, IOPS=%.1fw/s %s **\n",
+              thread_name.c_str(), get_time_string(ts_now).c_str(), show_count / 10000.0,
+              show_count / time / 10000,
+              GetExtraInfo().c_str());
 
-    // Check whether statistics are displayed every 10 times
-    if (show_count >= 10 * params_.BATCH_NUM) {
-      double time = (ts_now - t_show) / 1e9;
-      if (time > params_.SHOW_INTERVAL) {  // Output statistical data every 60 seconds
-        fprintf(stdout, "*[%s]:%s rows=%.1fw, IOPS=%.1fw/s %s **\n",
-                thread_name.c_str(), get_time_string(ts_now).c_str(), show_count / 10000.0,
-                show_count / time / 10000,
-                GetExtraInfo().c_str());
-
-        t_show = GetTimeNow();
-        show_count = 0;
-      }
+      t_show = GetTimeNow();
+      show_count = 0;
     }
-
+    if ((ts_now - t_start) / 1e9 >= params_.RUN_TIME) {
+      break;
+    }
     run_count++;
 
     if (run_num == 0) {

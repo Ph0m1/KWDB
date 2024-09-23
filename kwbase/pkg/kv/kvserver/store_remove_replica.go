@@ -165,6 +165,8 @@ func (s *Store) removeInitializedReplicaRaftMuLocked(
 	// Replica.raftMu and the replica is present in Store.mu.replicasByKey
 	// (preventing any concurrent access to the replica's key range).
 	rep.disconnectReplicationRaftMuLocked(ctx)
+
+	log.Infof(ctx, "removing replica r%d/%d, %v", rep.RangeID, replicaID, opts.DestroyData)
 	if opts.DestroyData {
 		if err := rep.destroyRaftMuLocked(ctx, nextReplicaID); err != nil {
 			return err

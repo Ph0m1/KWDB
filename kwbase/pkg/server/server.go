@@ -96,8 +96,6 @@ import (
 	_ "gitee.com/kwbasedb/kwbase/pkg/sql/gcjob" // register jobs declared outside of pkg/sql
 	"gitee.com/kwbasedb/kwbase/pkg/sql/gcjob/gcjobnotifier"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
-	hashroutersettings "gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/querycache"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -662,6 +660,7 @@ func NewServer(cfg Config, stopper *stop.Stopper) (*Server, error) {
 		ExternalStorage:         externalStorage,
 		ExternalStorageFromURI:  externalStorageFromURI,
 		ProtectedTimestampCache: s.protectedtsProvider,
+		StartVacuum:             s.cfg.StartVacuum,
 	}
 
 	if storeTestingKnobs := s.cfg.TestingKnobs.Store; storeTestingKnobs != nil {
@@ -1871,11 +1870,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// than the timestamp used to create the bootstrap schema.
 	timeThreshold := s.clock.Now().WallTime
 
-	setTse := func() (*tse.TsEngine, error) {
+	setTse := func() (*tse.TsEngine, *tscoord.DB, error) {
 		if s.cfg.Stores.Specs != nil && s.cfg.Stores.Specs[0].Path != "" && !s.cfg.ForbidCatchCoreDump {
 			s.tsEngine, err = s.cfg.CreateTsEngine(ctx, s.stopper, s.node.Descriptor.RangeIndex)
 			if err != nil {
-				return nil, errors.Wrap(err, "failed to create ts engine")
+				return nil, nil, errors.Wrap(err, "failed to create ts engine")
 			}
 			s.stopper.AddCloser(s.tsEngine)
 			s.node.tsEngine = s.tsEngine
@@ -1885,19 +1884,20 @@ func (s *Server) Start(ctx context.Context) error {
 			s.distSQLServer.ServerConfig.TsEngine = s.tsEngine
 
 			tsDBCfg := tscoord.TsDBConfig{
-				KvDB:       s.db,
-				TsEngine:   s.tsEngine,
-				Sender:     s.distSender,
-				RPCContext: s.rpcContext,
-				Gossip:     s.gossip,
-				Stopper:    s.stopper,
-				MppMode:    GetMppModeFlag(s.cfg.ModeFlag),
+				KvDB:         s.db,
+				TsEngine:     s.tsEngine,
+				Sender:       s.distSender,
+				RPCContext:   s.rpcContext,
+				Gossip:       s.gossip,
+				Stopper:      s.stopper,
+				IsSingleNode: GetSingleNodeModeFlag(s.cfg.ModeFlag),
 			}
 			s.tseDB = tscoord.NewDB(tsDBCfg)
 			// s.node.storeCfg.TseDB = s.tseDB
 			s.distSQLServer.ServerConfig.TseDB = s.tseDB
+			s.node.storeCfg.TseDB = s.tseDB
 		}
-		return s.tsEngine, nil
+		return s.tsEngine, s.tseDB, nil
 	}
 	// Now that we have a monotonic HLC wrt previous incarnations of the process,
 	// init all the replicas. At this point *some* store has been bootstrapped or
@@ -1919,7 +1919,6 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	s.hashRouterManager, err = hashrouter.NewHashRouterManager(ctx, s.ClusterSettings(), s.db, s.tseDB, s.execCfg, s.gossip, s.leaseMgr, s.nodeLiveness, s.storePool)
-	s.stopper.RunWorker(ctx, s.startUpdateRangeGroup)
 
 	s.distSQLServer.ServerConfig.StatsRefresher = s.execCfg.StatsRefresher
 	log.Event(ctx, "started node")
@@ -1988,60 +1987,6 @@ func (s *Server) Start(ctx context.Context) error {
 	log.Infof(ctx, "advertising KaiwuDB node at %s", s.cfg.AdvertiseAddr)
 
 	log.Event(ctx, "accepting connections")
-	// todo(qzy): remove this check
-	if s.NodeID() != 1 && s.InitialBoot() {
-		if err = checkAllowStart(ctx, s); err != nil {
-			return err
-		}
-	}
-	if s.InitialBoot() && len(bootstrappedEngines) == 0 {
-		if err = s.checkAllowJoin(ctx); err != nil {
-			return err
-		}
-	} else {
-		// NOTE: init n1, get failed
-		liveness, err := s.nodeLiveness.GetLiveness(s.NodeID())
-		if err != nil {
-			log.Warning(ctx, errors.Wrap(err, "InitialBoot get liveness failed"))
-		} else {
-			needRefresh := false
-			// decommissioning node restart, reset decommissioning to false, status to healthy
-			if liveness.Decommissioning && liveness.Status == kvserver.Decommissioning {
-				needRefresh = true
-				s.nodeLiveness.SetTSNodeLiveness(ctx, liveness.NodeID, kvserver.Healthy)
-				_, setErr := s.nodeLiveness.SetDecommissioning(ctx, s.NodeID(), false)
-				if setErr != nil {
-					log.Errorf(ctx, "error during liveness update %d -> %t, err: %v", liveness.NodeID, false, setErr)
-				}
-			}
-			// joining node restart, reset node status to healthy
-			if liveness.Status == kvserver.Joining || liveness.Status == kvserver.PreJoin {
-				needRefresh = true
-				s.nodeLiveness.SetTSNodeLiveness(ctx, liveness.NodeID, kvserver.Healthy)
-			}
-			// refresh hash info before restart
-			if needRefresh {
-				api.HRManagerWLock()
-				hashRouterMgr, err := api.GetHashRouterManagerWithTxn(ctx, nil)
-				if err != nil {
-					log.Errorf(ctx, "getting hashrouter manager failed :%v", err)
-					return errors.Errorf("getting hashrouter manager failed :%v", err)
-				}
-				for r := retry.StartWithCtx(ctx, base.DefaultRetryOptions()); r.Next(); {
-					err := s.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-						return hashRouterMgr.RefreshHashRouterForAllGroups(ctx, txn, "refresh all tables", storagepb.NodeLivenessStatus_LIVE, nil)
-					})
-					if err != nil {
-						log.Error(ctx, errors.Wrap(err, "refresh hash router"))
-						continue
-					}
-					log.Info(ctx, "refresh hash router success")
-					break
-				}
-				api.HRManagerWUnLock()
-			}
-		}
-	}
 	// Begin the node liveness heartbeat. Add a callback which records the local
 	// store "last up" timestamp for every store whenever the liveness record is
 	// updated.
@@ -2291,16 +2236,6 @@ func (s *Server) Start(ctx context.Context) error {
 
 	log.Event(ctx, "server ready")
 
-	if !GetMppModeFlag(s.cfg.ModeFlag) && s.cfg.StartMode == "start" {
-		// call expansion function if not MPP mode
-		err := s.startTSExpansion(ctx, bootstrappedEngines)
-		if err != nil {
-			return err
-		}
-		// start distribute ha goroutine
-		s.nodeLiveness.StartHALivenessCheck(ctx, s.stopper, s.node.storeCfg)
-		s.nodeLiveness.StartHAProcess(ctx, s.stopper)
-	}
 	s.stopper.RunWorker(workersCtx, func(workersCtx context.Context) {
 		<-s.stopper.ShouldStop()
 	})
@@ -2670,6 +2605,19 @@ func (s *Server) bootstrapCluster(ctx context.Context, bootstrapVersion roachpb.
 
 // Decommission idempotently sets the decommissioning flag for specified nodes.
 func (s *Server) Decommission(ctx context.Context, setTo bool, nodeIDs []roachpb.NodeID) error {
+	var allNodes []roachpb.NodeID
+	for _, nl := range s.nodeLiveness.GetLivenesses() {
+		allNodes = append(allNodes, nl.NodeID)
+	}
+	nodeStatus, err := s.execCfg.StatusServer.Nodes(ctx, &serverpb.NodesRequest{})
+	if err != nil {
+		return err
+	}
+	for _, liveness := range nodeStatus.LivenessByNodeID {
+		if liveness == storagepb.NodeLivenessStatus_UPGRADING {
+			return errors.Errorf("can not run node decommission when cluster has node %+v", liveness)
+		}
+	}
 	eventLogger := sql.MakeEventLogger(s.execCfg)
 	eventType := sql.EventLogNodeDecommissioned
 	operation := target.Decommission
@@ -2681,16 +2629,6 @@ func (s *Server) Decommission(ctx context.Context, setTo bool, nodeIDs []roachpb
 		operation, target.ObjectNode, 0, nil, nil)
 
 	for _, nodeID := range nodeIDs {
-		// call the decommission function for TS
-		if s.cfg.StartMode == "start" {
-			allow := hashroutersettings.AllowAdvanceDistributeSetting.Get(&s.st.SV)
-			if !allow {
-				return errors.New("decommission node is not support now")
-			}
-			if err := s.startTSDecommission(ctx); err != nil {
-				return err
-			}
-		}
 		changeCommitted, err := s.nodeLiveness.SetDecommissioning(ctx, nodeID, setTo)
 		if err != nil {
 			return errors.Wrapf(err, "during liveness update %d -> %t", nodeID, setTo)
@@ -2731,12 +2669,26 @@ func (s *Server) Upgrade(ctx context.Context, isMppMode bool, nodeIDs []roachpb.
 	for _, nl := range s.nodeLiveness.GetLivenesses() {
 		allNodes = append(allNodes, nl.NodeID)
 	}
+	nodeStatus, err := s.execCfg.StatusServer.Nodes(ctx, &serverpb.NodesRequest{})
+	if err != nil {
+		return err
+	}
+	for _, liveness := range nodeStatus.LivenessByNodeID {
+		if liveness != storagepb.NodeLivenessStatus_LIVE && liveness != storagepb.NodeLivenessStatus_DECOMMISSIONED {
+			return errors.Errorf("can not upgrade nodes when cluster has node %+v", liveness)
+		}
+	}
 
 	for _, nodeID := range nodeIDs {
 
 		err := s.nodeLiveness.SetUpgrading(ctx, nodeID, isMppMode, s.node.storeCfg, allNodes)
 		if err != nil {
 			return errors.Wrapf(err, "during liveness update %d -> %t", nodeID, isMppMode)
+		}
+		_, err = s.execCfg.InternalExecutor.Exec(ctx, "set time_until_store_dead", nil, ""+
+			"SET cluster setting server.time_until_store_dead = '3h';")
+		if err != nil {
+			return errors.Wrapf(err, "set cluster setting server.time_until_store_dead failed when upgrade")
 		}
 	}
 	return nil
@@ -2745,11 +2697,17 @@ func (s *Server) Upgrade(ctx context.Context, isMppMode bool, nodeIDs []roachpb.
 // UpgradeComplete calls when upgrade completely.
 func (s *Server) UpgradeComplete(ctx context.Context, setTo bool, nodeID roachpb.NodeID) error {
 	l, err := s.nodeLiveness.GetLiveness(nodeID)
-	if l.Status == kvserver.Upgrading {
+	if kvserver.LivenessStatus(l, s.clock.Now().GoTime(), s.nodeLiveness.GetLivenessThreshold()) == storagepb.NodeLivenessStatus_UPGRADING {
 		err := s.nodeLiveness.SetUpgradingComplete(ctx, nodeID)
 		l.Upgrading = false
 		if err != nil {
 			return errors.Wrapf(err, "during UpgradeComplete %d -> %t", nodeID, setTo)
+		}
+		kvserver.TimeUntilStoreDead.Default()
+		_, err = s.execCfg.InternalExecutor.Exec(ctx, "reset time_until_store_dead", nil, ""+
+			"SET cluster setting server.time_until_store_dead = $1 ;", kvserver.TimeUntilStoreDead.Default())
+		if err != nil {
+			return errors.Wrapf(err, "reset cluster setting server.time_until_store_dead failed when upgrade complete")
 		}
 	}
 	if err != nil {

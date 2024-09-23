@@ -133,26 +133,31 @@ inline string compressCmd(const string& dir_path, const string& file_path) {
 }
 
 bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info) {
-  string dir_path = db_path + tbl_sub_path + dir_name;
+  return compressToPath(db_path, tbl_sub_path, dir_name, db_path + tbl_sub_path, err_info);
+}
+
+bool compressToPath(const string& db_path, const string& tbl_sub_path, const string& dir_name,
+                    const string& desc_path, ErrorInfo& err_info) {
+  string dir_path = desc_path + dir_name;
   struct stat st;
   if ((stat(dir_path.c_str(), &st) == 0) && (S_ISDIR(st.st_mode))) {
-    // if current directory is mounted. return success
+    // If the directory is a mounted directory, return success directly
     struct statfs sfs;
     int ret = statfs(dir_path.c_str(), &sfs);
     if (!ret && sfs.f_type == SQUASHFS_MAGIC) {
       return true;
     }
-    string file_path = dir_path + ".sqfs";
-    // new create sqfs postfix with tmp, not in effect.
-    string file_path_tmp = file_path + "_tmp";
-    // delete sqfs if exists. sqfs may not right.
+    // The generated sqfs file will not take effect for now, by adding the suffix _tmp
+    string file_path_tmp = desc_path + "/" + dir_name + ".sqfs_tmp";
+    string file_path_desc = desc_path + "/" + dir_name + ".sqfs";
+    // Delete previously failed sqfs files
     if (IsExists(file_path_tmp)) {
       Remove(file_path_tmp);
     }
     string cmd = compressCmd(dir_path, file_path_tmp);
     if (System(cmd)) {
       LOG_DEBUG("Compress succeeded, shell: %s", cmd.c_str());
-      cmd = "mv " + file_path_tmp + " " + file_path;
+      cmd = "mv " + file_path_tmp + " " + file_path_desc;
       if (!System(cmd)) {
         err_info.errcode = KWEOTHER;
         err_info.errmsg = "mv .sqfs_tmp .sqfs failed";
@@ -204,6 +209,7 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
   while(retry > 0 && !System(cmd)) {
     sleep(1);
     --retry;
+    MakeDirectory(dir_path, err_info);
   }
   if (!isMounted(dir_path)) {
     getErrorInfo(cmd, dir_path, "_log_mount_err");

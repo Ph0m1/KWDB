@@ -69,6 +69,8 @@ class StInstance {
 
   uint64_t rangeGroup();
 
+  uint32_t GetSnapShotTableId() { return snapshot_desc_table_id; }
+
   KStatus GetSchemaInfo(kwdbContext_p ctx, uint32_t table_id, std::vector<TagColumn*>* tag_schema,
            std::vector<AttributeInfo>* data_schema);
 
@@ -90,6 +92,7 @@ class StInstance {
   TSOptions ts_opts_;
   vector<roachpb::CreateTsTable> table_metas;
   DedupRule dedup_rule_ = DedupRule::OVERRIDE;
+  uint32_t snapshot_desc_table_id{32};
 };
 
 class StEngityGroupInstance {
@@ -116,6 +119,10 @@ class StEngityGroupInstance {
     return table_;
   }
 
+  uint64_t GetRangeGroupID() {
+    return range_group_id_;
+  }
+
   std::shared_ptr<TsEntityGroup> GetEntityGroup() {
     return entity_group_;
   }
@@ -138,6 +145,8 @@ class StEngityGroupInstance {
   }
 
  private:
+  int64_t table_id_{123};
+  uint64_t range_group_id_{456};
   BenchParams params_;
   kwdbts::kwdbContext_t g_context;
   kwdbts::kwdbContext_p ctx;

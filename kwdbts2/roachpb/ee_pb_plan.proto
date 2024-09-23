@@ -193,7 +193,6 @@ enum TSTableReadMode {
   metaTable = 3;
   onlyTag = 4;
 }
-
 // TSReaderSpec table reader
 message TSReaderSpec {
   // time range
@@ -768,6 +767,11 @@ message TSStatisticReaderSpec {
   required uint32 tableVersion = 6;
 }
 
+message HashpointSpan{
+  required uint32 hashpoint = 1;
+  repeated TsSpan tspans = 2;
+}
+
 // TSTagReader Spec
 message TSTagReaderSpec {
   // table id
@@ -786,4 +790,5 @@ message TSTagReaderSpec {
 
   // table version
   required uint32 tableVersion = 5;
+  repeated HashpointSpan rangeSpans = 6;
 }

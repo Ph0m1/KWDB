@@ -4776,7 +4776,7 @@ func TestProcessSplitAfterRightHandSideHasBeenRemoved(t *testing.T) {
 		ri, err := getRangeInfo(ctx, db, key)
 		require.NoError(t, err)
 		_, err = db.AdminChangeReplicas(ctx, ri.Desc.StartKey.AsRawKey(), ri.Desc,
-			roachpb.MakeReplicationChanges(typ, makeReplicationTargets(idx+1)...), false)
+			roachpb.MakeReplicationChanges(typ, makeReplicationTargets(idx+1)...))
 		return err
 	}
 	split := func(t *testing.T, db *kv.DB, key roachpb.Key) {

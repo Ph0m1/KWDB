@@ -1,4 +1,5 @@
 --basic test tag smallint
+set cluster setting sql.alter_tag.enabled=false;
 drop database if exists test_alter cascade;
 create ts database test_alter;
 create table test_alter.t1(k_timestamp timestamptz not null,e1 int2) tags (ptag smallint not null, attr1 smallint,attr2 smallint, attr3 smallint, attr4 smallint)primary tags(ptag);
@@ -350,3 +351,4 @@ select count(e1),max(e1),min(e1),avg(e1),sum(e1),first(e1),last(e1),first_row(e1
 
 drop database test_alter cascade;
 SET CLUSTER SETTING ts.dedup.rule = 'override';
+set cluster setting sql.alter_tag.enabled=true;

@@ -1,0 +1,45 @@
+SET CLUSTER SETTING ts.rows_per_block.max_limit = 10;
+SET CLUSTER SETTING ts.blocks_per_segment.max_limit = 50;
+SET CLUSTER SETTING server.time_until_store_dead = '1min15s';
+
+-- init
+-- sleep: 10s
+SELECT COUNT(*) FROM tsdb1.ts_t3;
+SELECT COUNT(*) FROM tsdb1.ts_t4;
+
+-- join: c6
+-- join: c7
+-- sleep: 30s
+SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 6=ANY(replicas);
+SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 7=ANY(replicas);
+
+-- kill: c2
+-- sleep: 30s
+-- background-decommission: c3
+-- join: c8
+-- sleep: 120s
+-- wait-zero-ranges: c2
+-- wait-zero-ranges: c3
+SELECT CASE WHEN COUNT(*) = 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 2=ANY(replicas);
+SELECT CASE WHEN COUNT(*) = 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 3=ANY(replicas);
+SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 8=ANY(replicas);
+SELECT COUNT(*) FROM tsdb1.ts_t3;
+SELECT COUNT(*) FROM tsdb1.ts_t4;
+
+-- kill: c4
+-- sleep: 80s
+-- background-decommission: c5
+-- join: c9
+-- sleep: 60s
+-- wait-zero-ranges: c4
+-- wait-zero-ranges: c5
+SELECT CASE WHEN COUNT(*) = 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 4=ANY(replicas);
+SELECT CASE WHEN COUNT(*) = 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 5=ANY(replicas);
+SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 9=ANY(replicas);
+SELECT COUNT(*) FROM tsdb1.ts_t3;
+SELECT COUNT(*) FROM tsdb1.ts_t4;
+
+-- kill: c6
+-- kill: c7
+-- kill: c8
+-- kill: c9

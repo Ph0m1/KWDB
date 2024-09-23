@@ -149,7 +149,9 @@ class StorageHandler {
   TSTableReadMode read_mode_{
       TSTableReadMode::tableTableMeta};
   TagScanOperator* tag_scan_{nullptr};
-  k_uint32 current_tag_index_{0};
+  k_uint32 current_line_{0};
+  std::vector<EntityResultIndex> entities_;
+  uint64_t total_read_rows_{0};
 };
 
 }  // namespace kwdbts

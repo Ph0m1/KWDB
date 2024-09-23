@@ -66,9 +66,9 @@ void DataHelper::setHelper(BigTable *bt,
 void DataHelper::setStringFile(int col, void *sf) {
   StringToVARSTRING *to_var_str =
     (StringToVARSTRING *)((to_data_handler_[col]).get());
-  to_var_str->setStringFile((MMapStringFile *)sf);
+  to_var_str->setStringFile((MMapStringColumn *)sf);
   VARSTRINGToString *to_str =
 	(VARSTRINGToString *)((to_str_handler_[col]).get());
-  to_str->setStringFile((MMapStringFile *)sf);
+  to_str->setStringFile((MMapStringColumn *)sf);
 }
 

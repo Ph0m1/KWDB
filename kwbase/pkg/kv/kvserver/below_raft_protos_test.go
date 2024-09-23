@@ -81,7 +81,7 @@ var belowRaftGoldenProtos = map[reflect.Type]fixture{
 			return enginepb.NewPopulatedRangeAppliedState(r, false)
 		},
 		emptySum:     615555020845646359,
-		populatedSum: 6873743885651366543,
+		populatedSum: 13383288837489742293,
 	},
 	reflect.TypeOf(&raftpb.HardState{}): {
 		populatedConstructor: func(r *rand.Rand) protoutil.Message {
@@ -112,15 +112,15 @@ var belowRaftGoldenProtos = map[reflect.Type]fixture{
 		populatedConstructor: func(r *rand.Rand) protoutil.Message {
 			return roachpb.NewPopulatedRangeDescriptor(r, false)
 		},
-		emptySum:     13569277364025233345,
-		populatedSum: 12100801340732345319,
+		emptySum:     13702164248888144445,
+		populatedSum: 1755682133601872458,
 	},
 	reflect.TypeOf(&storagepb.Liveness{}): {
 		populatedConstructor: func(r *rand.Rand) protoutil.Message {
 			return storagepb.NewPopulatedLiveness(r, false)
 		},
 		emptySum:     892800390935990883,
-		populatedSum: 451773449228717946,
+		populatedSum: 13857122595779760171,
 	},
 	// This is used downstream of Raft only to write it into unreplicated keyspace
 	// as part of VersionUnreplicatedRaftTruncatedState.

@@ -18,8 +18,8 @@
 #endif
 
 extern uint16_t CLUSTER_SETTING_MAX_ENTITIES_PER_SUBGROUP;  // SUBGROUP_ENTITIES from cluster setting
-extern uint32_t CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT;  // PARTITION_BLOCKS from cluster setting
-extern uint16_t CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;  // PARTITION_ROWS from cluster setting
+extern uint32_t CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT;     // PARTITION_BLOCKS from cluster setting
+extern uint16_t CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;         // PARTITION_ROWS from cluster setting
 
 namespace kwdbts {
 

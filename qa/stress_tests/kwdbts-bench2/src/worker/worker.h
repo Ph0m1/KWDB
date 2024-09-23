@@ -57,6 +57,7 @@ class Worker {
     CHAOS = 2,
     COMPRESS = 3,
     RETENTIONS = 4,
+    SNAPSHOT = 5,
   };
 
   Worker(const std::string& pname, const BenchParams& params,

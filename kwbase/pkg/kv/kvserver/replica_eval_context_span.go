@@ -39,6 +39,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/cloud"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
 )
@@ -106,6 +107,11 @@ func (rec *SpanSetReplicaEvalContext) GetNodeLocality() roachpb.Locality {
 // Engine returns the engine.
 func (rec *SpanSetReplicaEvalContext) Engine() storage.Engine {
 	return rec.i.Engine()
+}
+
+// TsEngine returns the engine.
+func (rec *SpanSetReplicaEvalContext) TsEngine() *tse.TsEngine {
+	return rec.i.TsEngine()
 }
 
 // GetFirstIndex returns the first index.

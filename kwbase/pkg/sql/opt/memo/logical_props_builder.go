@@ -149,7 +149,6 @@ func (b *logicalPropsBuilder) buildScanProps(scan *ScanExpr, rel *props.Relation
 
 func (b *logicalPropsBuilder) buildTSScanProps(scan *TSScanExpr, rel *props.Relational) {
 	md := scan.Memo().Metadata()
-	//hardLimit := scan.HardLimit.RowCount()
 
 	// Side Effects
 	// ------------
@@ -181,15 +180,15 @@ func (b *logicalPropsBuilder) buildTSScanProps(scan *TSScanExpr, rel *props.Rela
 	// Check the hard limit to determine whether there is at most one row. Note
 	// that def.HardLimit = 0 indicates there is no known limit.
 	//if hardLimit == 1 {
-	//	rel.FuncDeps.MakeMax1Row(rel.OutputCols)
+	//	//rel.FuncDeps.MakeMax1Row(rel.OutputCols)
 	//} else {
 	//	// Initialize key FD's from the table schema, including constant columns from
 	//	// the constraint, minus any columns that are not projected by the Scan
 	//	// operator.
 	//	rel.FuncDeps.CopyFrom(MakeTableFuncDep(md, scan.Table))
-	//	if scan.Constraint != nil {
-	//		rel.FuncDeps.AddConstants(scan.Constraint.ExtractConstCols(b.evalCtx))
-	//	}
+	//	//if scan.Constraint != nil {
+	//	//	rel.FuncDeps.AddConstants(scan.Constraint.ExtractConstCols(b.evalCtx))
+	//	//}
 	//	rel.FuncDeps.MakeNotNull(rel.NotNullCols)
 	//	rel.FuncDeps.ProjectCols(rel.OutputCols)
 	//}

@@ -174,14 +174,8 @@ func (ru RequestUnion) GetInner() Request {
 		return t.AdminVerifyProtectedTimestamp
 	case *RequestUnion_TsPut:
 		return t.TsPut
-	case *RequestUnion_TsRequestLease:
-		return t.TsRequestLease
-	case *RequestUnion_AdminRelocatePartition:
-		return t.AdminRelocatePartition
-	case *RequestUnion_AdminTransferPartitionLease:
-		return t.AdminTransferPartitionLease
-	case *RequestUnion_AdminChangePartitionReplicas:
-		return t.AdminChangePartitionReplicas
+	case *RequestUnion_TsRowPut:
+		return t.TsRowPut
 	case *RequestUnion_TsDelete:
 		return t.TsDelete
 	case *RequestUnion_TsDeleteEntity:
@@ -194,6 +188,8 @@ func (ru RequestUnion) GetInner() Request {
 		return t.TsTagUpdate
 	case *RequestUnion_TsDeleteMultiEntitiesData:
 		return t.TsDeleteMultiEntitiesData
+	case *RequestUnion_TsPutTag:
+		return t.TsPutTag
 	default:
 		return nil
 	}
@@ -290,16 +286,10 @@ func (ru ResponseUnion) GetInner() Response {
 		return t.AdminVerifyProtectedTimestamp
 	case *ResponseUnion_TsPut:
 		return t.TsPut
-	case *ResponseUnion_TsRequestLease:
-		return t.TsRequestLease
 	case *ResponseUnion_AdminSplitForTs:
 		return t.AdminSplitForTs
-	case *ResponseUnion_AdminRelocatePartition:
-		return t.AdminRelocatePartition
-	case *ResponseUnion_AdminTransferPartitionLease:
-		return t.AdminTransferPartitionLease
-	case *ResponseUnion_AdminChangePartitionReplicas:
-		return t.AdminChangePartitionReplicas
+	case *ResponseUnion_TsRowPut:
+		return t.TsRowPut
 	case *ResponseUnion_TsDelete:
 		return t.TsDelete
 	case *ResponseUnion_TsDeleteEntity:
@@ -312,6 +302,8 @@ func (ru ResponseUnion) GetInner() Response {
 		return t.TsTagUpdate
 	case *ResponseUnion_TsDeleteMultiEntitiesData:
 		return t.TsDeleteMultiEntitiesData
+	case *ResponseUnion_TsPutTag:
+		return t.TsPutTag
 	default:
 		return nil
 	}
@@ -486,14 +478,8 @@ func (ru *RequestUnion) SetInner(r Request) bool {
 		union = &RequestUnion_AdminVerifyProtectedTimestamp{t}
 	case *TsPutRequest:
 		union = &RequestUnion_TsPut{t}
-	case *AdminRequestLeaseForTSRequest:
-		union = &RequestUnion_TsRequestLease{t}
-	case *AdminRelocatePartitionRequest:
-		union = &RequestUnion_AdminRelocatePartition{t}
-	case *AdminTransferPartitionLeaseRequest:
-		union = &RequestUnion_AdminTransferPartitionLease{t}
-	case *AdminChangePartitionReplicasRequest:
-		union = &RequestUnion_AdminChangePartitionReplicas{t}
+	case *TsRowPutRequest:
+		union = &RequestUnion_TsRowPut{t}
 	case *TsDeleteRequest:
 		union = &RequestUnion_TsDelete{t}
 	case *TsDeleteEntityRequest:
@@ -506,6 +492,8 @@ func (ru *RequestUnion) SetInner(r Request) bool {
 		union = &RequestUnion_TsTagUpdate{t}
 	case *TsDeleteMultiEntitiesDataRequest:
 		union = &RequestUnion_TsDeleteMultiEntitiesData{t}
+	case *TsPutTagRequest:
+		union = &RequestUnion_TsPutTag{t}
 	default:
 		return false
 	}
@@ -605,16 +593,10 @@ func (ru *ResponseUnion) SetInner(r Response) bool {
 		union = &ResponseUnion_AdminVerifyProtectedTimestamp{t}
 	case *TsPutResponse:
 		union = &ResponseUnion_TsPut{t}
-	case *AdminRequestLeaseForTSResponse:
-		union = &ResponseUnion_TsRequestLease{t}
 	case *AdminSplitForTsResponse:
 		union = &ResponseUnion_AdminSplitForTs{t}
-	case *AdminRelocatePartitionResponse:
-		union = &ResponseUnion_AdminRelocatePartition{t}
-	case *AdminTransferPartitionLeaseResponse:
-		union = &ResponseUnion_AdminTransferPartitionLease{t}
-	case *AdminChangePartitionReplicasResponse:
-		union = &ResponseUnion_AdminChangePartitionReplicas{t}
+	case *TsRowPutResponse:
+		union = &ResponseUnion_TsRowPut{t}
 	case *TsDeleteResponse:
 		union = &ResponseUnion_TsDelete{t}
 	case *TsDeleteEntityResponse:
@@ -627,6 +609,8 @@ func (ru *ResponseUnion) SetInner(r Response) bool {
 		union = &ResponseUnion_TsTagUpdate{t}
 	case *TsDeleteMultiEntitiesDataResponse:
 		union = &ResponseUnion_TsDeleteMultiEntitiesData{t}
+	case *TsPutTagResponse:
+		union = &ResponseUnion_TsPutTag{t}
 	default:
 		return false
 	}
@@ -634,7 +618,7 @@ func (ru *ResponseUnion) SetInner(r Response) bool {
 	return true
 }
 
-type reqCounts [56]int32
+type reqCounts [54]int32
 
 // getReqCounts returns the number of times each
 // request type appears in the batch.
@@ -734,26 +718,22 @@ func (ba *BatchRequest) getReqCounts() reqCounts {
 			counts[44]++
 		case *RequestUnion_TsPut:
 			counts[45]++
-		case *RequestUnion_TsRequestLease:
+		case *RequestUnion_TsRowPut:
 			counts[46]++
-		case *RequestUnion_AdminRelocatePartition:
-			counts[47]++
-		case *RequestUnion_AdminTransferPartitionLease:
-			counts[48]++
-		case *RequestUnion_AdminChangePartitionReplicas:
-			counts[49]++
 		case *RequestUnion_TsDelete:
-			counts[50]++
+			counts[47]++
 		case *RequestUnion_TsDeleteEntity:
-			counts[51]++
+			counts[48]++
 		case *RequestUnion_GetReplicaStatus:
-			counts[52]++
+			counts[49]++
 		case *RequestUnion_CreateTsSnapshot:
-			counts[53]++
+			counts[50]++
 		case *RequestUnion_TsTagUpdate:
-			counts[54]++
+			counts[51]++
 		case *RequestUnion_TsDeleteMultiEntitiesData:
-			counts[55]++
+			counts[52]++
+		case *RequestUnion_TsPutTag:
+			counts[53]++
 		default:
 			panic(fmt.Sprintf("unsupported request: %+v", ru))
 		}
@@ -808,16 +788,14 @@ var requestNames = []string{
 	"RngStats",
 	"AdmVerifyProtectedTimestamp",
 	"TsPut",
-	"TsRequestLease",
-	"AdmRelocatePartition",
-	"AdmTransferPartitionLease",
-	"AdmChangePartitionReplicas",
+	"TsRowPut",
 	"TsDel",
 	"TsDelEntity",
 	"GetReplicaStatus",
 	"CreateTsSnapshot",
 	"TsTagUpdate",
 	"TsDelMultiEntitiesData",
+	"TsPutTag",
 }
 
 // Summary prints a short summary of the requests in a batch.
@@ -1029,25 +1007,13 @@ type tsPutResponseAlloc struct {
 	union ResponseUnion_TsPut
 	resp  TsPutResponse
 }
-type adminRequestLeaseForTSResponseAlloc struct {
-	union ResponseUnion_TsRequestLease
-	resp  AdminRequestLeaseForTSResponse
-}
 type adminSplitForTsResponseAlloc struct {
 	union ResponseUnion_AdminSplitForTs
 	resp  AdminSplitForTsResponse
 }
-type adminRelocatePartitionResponseAlloc struct {
-	union ResponseUnion_AdminRelocatePartition
-	resp  AdminRelocatePartitionResponse
-}
-type adminTransferPartitionLeaseResponseAlloc struct {
-	union ResponseUnion_AdminTransferPartitionLease
-	resp  AdminTransferPartitionLeaseResponse
-}
-type adminChangePartitionReplicasResponseAlloc struct {
-	union ResponseUnion_AdminChangePartitionReplicas
-	resp  AdminChangePartitionReplicasResponse
+type tsRowPutResponseAlloc struct {
+	union ResponseUnion_TsRowPut
+	resp  TsRowPutResponse
 }
 type tsDeleteResponseAlloc struct {
 	union ResponseUnion_TsDelete
@@ -1072,6 +1038,10 @@ type tsTagUpdateResponseAlloc struct {
 type tsDeleteMultiEntitiesDataResponseAlloc struct {
 	union ResponseUnion_TsDeleteMultiEntitiesData
 	resp  TsDeleteMultiEntitiesDataResponse
+}
+type tsPutTagResponseAlloc struct {
+	union ResponseUnion_TsPutTag
+	resp  TsPutTagResponse
 }
 
 // CreateReply creates replies for each of the contained requests, wrapped in a
@@ -1129,16 +1099,14 @@ func (ba *BatchRequest) CreateReply() *BatchResponse {
 	var buf43 []rangeStatsResponseAlloc
 	var buf44 []adminVerifyProtectedTimestampResponseAlloc
 	var buf45 []tsPutResponseAlloc
-	var buf46 []adminRequestLeaseForTSResponseAlloc
-	var buf47 []adminRelocatePartitionResponseAlloc
-	var buf48 []adminTransferPartitionLeaseResponseAlloc
-	var buf49 []adminChangePartitionReplicasResponseAlloc
-	var buf50 []tsDeleteResponseAlloc
-	var buf51 []tsDeleteEntityResponseAlloc
-	var buf52 []getReplicaStatusResponseAlloc
-	var buf53 []createTSSnapshotResponseAlloc
-	var buf54 []tsTagUpdateResponseAlloc
-	var buf55 []tsDeleteMultiEntitiesDataResponseAlloc
+	var buf46 []tsRowPutResponseAlloc
+	var buf47 []tsDeleteResponseAlloc
+	var buf48 []tsDeleteEntityResponseAlloc
+	var buf49 []getReplicaStatusResponseAlloc
+	var buf50 []createTSSnapshotResponseAlloc
+	var buf51 []tsTagUpdateResponseAlloc
+	var buf52 []tsDeleteMultiEntitiesDataResponseAlloc
+	var buf53 []tsPutTagResponseAlloc
 
 	for i, r := range ba.Requests {
 		switch r.GetValue().(type) {
@@ -1464,76 +1432,62 @@ func (ba *BatchRequest) CreateReply() *BatchResponse {
 			buf45[0].union.TsPut = &buf45[0].resp
 			br.Responses[i].Value = &buf45[0].union
 			buf45 = buf45[1:]
-		case *RequestUnion_TsRequestLease:
+		case *RequestUnion_TsRowPut:
 			if buf46 == nil {
-				buf46 = make([]adminRequestLeaseForTSResponseAlloc, counts[46])
+				buf46 = make([]tsRowPutResponseAlloc, counts[46])
 			}
-			buf46[0].union.TsRequestLease = &buf46[0].resp
+			buf46[0].union.TsRowPut = &buf46[0].resp
 			br.Responses[i].Value = &buf46[0].union
 			buf46 = buf46[1:]
-		case *RequestUnion_AdminRelocatePartition:
+		case *RequestUnion_TsDelete:
 			if buf47 == nil {
-				buf47 = make([]adminRelocatePartitionResponseAlloc, counts[47])
+				buf47 = make([]tsDeleteResponseAlloc, counts[47])
 			}
-			buf47[0].union.AdminRelocatePartition = &buf47[0].resp
+			buf47[0].union.TsDelete = &buf47[0].resp
 			br.Responses[i].Value = &buf47[0].union
 			buf47 = buf47[1:]
-		case *RequestUnion_AdminTransferPartitionLease:
+		case *RequestUnion_TsDeleteEntity:
 			if buf48 == nil {
-				buf48 = make([]adminTransferPartitionLeaseResponseAlloc, counts[48])
+				buf48 = make([]tsDeleteEntityResponseAlloc, counts[48])
 			}
-			buf48[0].union.AdminTransferPartitionLease = &buf48[0].resp
+			buf48[0].union.TsDeleteEntity = &buf48[0].resp
 			br.Responses[i].Value = &buf48[0].union
 			buf48 = buf48[1:]
-		case *RequestUnion_AdminChangePartitionReplicas:
+		case *RequestUnion_GetReplicaStatus:
 			if buf49 == nil {
-				buf49 = make([]adminChangePartitionReplicasResponseAlloc, counts[49])
+				buf49 = make([]getReplicaStatusResponseAlloc, counts[49])
 			}
-			buf49[0].union.AdminChangePartitionReplicas = &buf49[0].resp
+			buf49[0].union.GetReplicaStatus = &buf49[0].resp
 			br.Responses[i].Value = &buf49[0].union
 			buf49 = buf49[1:]
-		case *RequestUnion_TsDelete:
+		case *RequestUnion_CreateTsSnapshot:
 			if buf50 == nil {
-				buf50 = make([]tsDeleteResponseAlloc, counts[50])
+				buf50 = make([]createTSSnapshotResponseAlloc, counts[50])
 			}
-			buf50[0].union.TsDelete = &buf50[0].resp
+			buf50[0].union.CreateTsSnapshot = &buf50[0].resp
 			br.Responses[i].Value = &buf50[0].union
 			buf50 = buf50[1:]
-		case *RequestUnion_TsDeleteEntity:
+		case *RequestUnion_TsTagUpdate:
 			if buf51 == nil {
-				buf51 = make([]tsDeleteEntityResponseAlloc, counts[51])
+				buf51 = make([]tsTagUpdateResponseAlloc, counts[51])
 			}
-			buf51[0].union.TsDeleteEntity = &buf51[0].resp
+			buf51[0].union.TsTagUpdate = &buf51[0].resp
 			br.Responses[i].Value = &buf51[0].union
 			buf51 = buf51[1:]
-		case *RequestUnion_GetReplicaStatus:
+		case *RequestUnion_TsDeleteMultiEntitiesData:
 			if buf52 == nil {
-				buf52 = make([]getReplicaStatusResponseAlloc, counts[52])
+				buf52 = make([]tsDeleteMultiEntitiesDataResponseAlloc, counts[52])
 			}
-			buf52[0].union.GetReplicaStatus = &buf52[0].resp
+			buf52[0].union.TsDeleteMultiEntitiesData = &buf52[0].resp
 			br.Responses[i].Value = &buf52[0].union
 			buf52 = buf52[1:]
-		case *RequestUnion_CreateTsSnapshot:
+		case *RequestUnion_TsPutTag:
 			if buf53 == nil {
-				buf53 = make([]createTSSnapshotResponseAlloc, counts[53])
+				buf53 = make([]tsPutTagResponseAlloc, counts[53])
 			}
-			buf53[0].union.CreateTsSnapshot = &buf53[0].resp
+			buf53[0].union.TsPutTag = &buf53[0].resp
 			br.Responses[i].Value = &buf53[0].union
 			buf53 = buf53[1:]
-		case *RequestUnion_TsTagUpdate:
-			if buf54 == nil {
-				buf54 = make([]tsTagUpdateResponseAlloc, counts[54])
-			}
-			buf54[0].union.TsTagUpdate = &buf54[0].resp
-			br.Responses[i].Value = &buf54[0].union
-			buf54 = buf54[1:]
-		case *RequestUnion_TsDeleteMultiEntitiesData:
-			if buf55 == nil {
-				buf55 = make([]tsDeleteMultiEntitiesDataResponseAlloc, counts[55])
-			}
-			buf55[0].union.TsDeleteMultiEntitiesData = &buf55[0].resp
-			br.Responses[i].Value = &buf55[0].union
-			buf55 = buf55[1:]
 		default:
 			panic(fmt.Sprintf("unsupported request: %+v", r))
 		}

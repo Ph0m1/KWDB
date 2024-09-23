@@ -32,7 +32,6 @@ import "server/serverpb/status.proto";
 import "storage/enginepb/mvcc.proto";
 import "kv/kvserver/storagepb/liveness.proto";
 import "kv/kvserver/storagepb/log.proto";
-import "sql/hashrouter/api/entity.proto";
 import "ts/catalog/chart_catalog.proto";
 import "util/metric/metric.proto";
 import "gogoproto/gogo.proto";
@@ -496,7 +495,6 @@ message DecommissionStatusResponse {
     int64 replica_count = 3;
     bool decommissioning = 4;
     bool draining = 5;
-    bool tsMigrating = 6;
   }
   // Status of all affected nodes.
   repeated Status status = 2 [(gogoproto.nullable) = false];
@@ -801,43 +799,12 @@ message ChartCatalogResponse {
   repeated kwbase.ts.catalog.ChartSection catalog = 1 [(gogoproto.nullable) = false];
 }
 
-message GetTsTableMetaRequest {
+message GetTsTableVersionRequest {
   uint64 tableId = 1;
-  api.RangeGroup rangeGroup = 2 [(gogoproto.nullable) = false];
 }
 
-message GetTsTableMetaResponse {
-  bytes  ts_meta = 1;
-}
-
-// An UpdateRangeGroupRequest is to update the rangeGroup info in the target node
-message UpdateRangeGroupRequest {
-  uint64 tableId = 1;
-  repeated api.RangeGroup rangeGroups = 2 [(gogoproto.nullable) = false];
-  bytes  ts_meta = 3;
-}
-
-// An UpdateRangeGroupResponse is the return value for updating range groups
-message UpdateRangeGroupResponse {
-}
-
-// RemoveUnusedRangeGroupsRequest is to remove unused rangeGroups of the target table from the target node
-message RemoveUnusedRangeGroupsRequest {
-  uint64 tableId = 1;
-  repeated api.RangeGroup rangeGroups = 2 [(gogoproto.nullable) = false];
-}
-
-// RemoveUnusedRangeGroupsResponse is the return value for removing unused range groups
-message RemoveUnusedRangeGroupsResponse {
-}
-
-// TsRequestLeaseRequest is to request lease for the target ts replica to the target store
-message TsRequestLeaseRequest {
-  bytes key = 1;
-}
-
-// TsRequestLeaseResponse is the return value for TsRequestLeaseRequest
-message TsRequestLeaseResponse {
+message GetTsTableVersionResponse {
+  uint32  version = 1;
 }
 
 // AlertRequest requests alert threshold.
@@ -851,6 +818,29 @@ message AlertResponse {
   float StorageAlertThreshold = 3;
   float ConnectionsAlertThreshold = 4;
   int32 SqlConnectionMaxLimit = 5;
+}
+
+// DeleteReplicaTSDataRequest ...
+message DeleteReplicaTSDataRequest {
+  uint64 table_id = 1 [(gogoproto.customname) = "TableID"];
+  uint64 begin_hash = 2 [(gogoproto.customname) = "BeginHash"];
+  uint64 end_hash = 3 [(gogoproto.customname) = "EndHash"];
+  int64 start_ts = 4 [(gogoproto.customname) = "StartTs"];
+  int64 end_ts = 5 [(gogoproto.customname) = "EndTs"];
+}
+
+// DeleteReplicaTSDataResponse ...
+message DeleteReplicaTSDataResponse {
+}
+
+// CreateTSTableRequest ...
+message CreateTSTableRequest {
+  uint64 table_id = 1 [(gogoproto.customname) = "TableID"];
+  bytes  meta = 2 [(gogoproto.customname) = "Meta"];
+}
+
+// CreateTSTableResponse ...
+message CreateTSTableResponse {
 }
 
 // Admin is the gRPC API for the admin UI. Through grpc-gateway, we offer
@@ -1090,26 +1080,17 @@ service Admin {
     };
   }
 
-  // GetTsTableMeta get the table meta from storage on other node.
-  rpc GetTsTableMeta(GetTsTableMetaRequest) returns (GetTsTableMetaResponse) {
-  }
-
-  // UpdateRangeGroup update the TS range groups of the target table
-  rpc UpdateRangeGroup(UpdateRangeGroupRequest) returns (UpdateRangeGroupResponse) {
-  }
-
-  // RemoveUnusedRangeGroups remove unused rangeGroups of the target table
-  rpc RemoveUnusedRangeGroups(RemoveUnusedRangeGroupsRequest) returns (RemoveUnusedRangeGroupsResponse) {
-  }
-
-  // TsRequestLease request lease for the target store
-  rpc TsRequestLease(TsRequestLeaseRequest) returns (TsRequestLeaseResponse){
-  }
-
   // URL: /_admin/v1/alertthreshold
   rpc GetAlertThreshold(AlertRequest) returns (AlertResponse) {
     option (google.api.http) = {
       get: "/_admin/v1/alertthreshold"
     };
+  }
+
+  // CreateTSTable create ts table
+  rpc CreateTSTable(CreateTSTableRequest) returns (CreateTSTableResponse) {}
+
+  // GetTsTableVersion get the table version from storage on other node.
+  rpc GetTsTableVersion(GetTsTableVersionRequest) returns (GetTsTableVersionResponse) {
   }
 }

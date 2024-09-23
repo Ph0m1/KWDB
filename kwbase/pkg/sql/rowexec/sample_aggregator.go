@@ -374,11 +374,10 @@ func (s *sampleAggregator) writeResults(ctx context.Context) error {
 	if err := s.FlowCtx.Cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
 		var distinctCount int64
 		for _, si := range s.sketches {
+			distinctCount = int64(si.sketch.Estimate())
 			// Primary tag is a foreign key index, distinctCount is same as rowCount
 			if len(si.spec.ColumnTypes) > 0 && (si.spec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_PTAG) && si.spec.HasAllPTag) {
-				distinctCount = si.numRows
-			} else {
-				distinctCount = int64(si.sketch.Estimate())
+				si.numRows = distinctCount
 			}
 			var histogram *stats.HistogramData
 			if si.spec.GenerateHistogram && len(s.sr.Get()) != 0 {
@@ -509,7 +508,7 @@ func canEncodeBytes(
 	// Check if the first column type is one of the specified types and meets the condition for TYPE_PTAG
 	isSpecifiedType := sketchSpec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_DATA) ||
 		sketchSpec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_TAG) ||
-		(sketchSpec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_PTAG) && !sketchSpec.HasAllPTag)
+		sketchSpec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_PTAG)
 
 	// Check if the family is one of the allowed types
 	isAllowedFamily := family == types.IntFamily || family == types.TimestampTZFamily ||

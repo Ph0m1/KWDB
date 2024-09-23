@@ -20,6 +20,11 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
+// SpanKey is used in ctx value
+type SpanKey struct {
+	Key string
+}
+
 // MakeKWDBMetadataKeyInt returns the primaryKey of a kwdb system table containing a single primary key
 // column or a union primary key, used to obtain the kwdb metadata process. When primaryValues do not
 // correspond one-to-one with the primary key column, it returns the startKey for scanning the entire

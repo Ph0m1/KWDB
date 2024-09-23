@@ -35,6 +35,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
@@ -251,10 +252,19 @@ func (kvSS *kvBatchSnapshotStrategy) ReceiveTS(
 	}
 	defer msstw.Close()
 
-	var tableID, rangeGroupID, snapshotID uint64
-	var snapshotSize int
-	var logEntries [][]byte
+	rollbackFn := func(ctx context.Context, name string, sid uint64, tid uint64, rid roachpb.RangeID) {
+		if rollbackErr := s.TsEngine.WriteSnapshotRollback(tid, sid); rollbackErr != nil {
+			log.Errorf(ctx, "TsEngine.WriteSnapshotRollback failed r%v, %v, %v, %v", rid, tid, sid, rollbackErr)
+		}
+		log.VEventf(ctx, 3, "TsEngine.WriteSnapshotRollback success r%v, %v, %v", rid, tid, sid)
+		if delErr := s.TsEngine.DeleteSnapshot(tid, sid); delErr != nil {
+			log.Errorf(ctx, "TsEngine.DeleteSnapshot failed r%v, %v, %v, %v", rid, tid, sid, delErr)
+		}
+		log.VEventf(ctx, 3, "TsEngine.DeleteSnapshot success r%v, %v, %v", rid, tid, sid)
+	}
 
+	var tableID, writeSnapshotID uint64
+	var logEntries [][]byte
 	for {
 		req, err := stream.Recv()
 		if err != nil {
@@ -286,25 +296,31 @@ func (kvSS *kvBatchSnapshotStrategy) ReceiveTS(
 			}
 		}
 
+		tableID = req.TsTableId
+		rangeID := header.State.Desc.RangeID
 		if req.InitTsSnapshotForWrite {
-			log.Infof(ctx, "(r%)TSEngine.InitSnapshotForWrite(ID:%d)", header.State.Desc.RangeID, header.State.Desc.RangeID)
-			tableID = req.TsTableId
-			rangeGroupID = req.TsRangeGroupId
-			snapshotID = req.TsSnapshotId
-			snapshotSize = int(req.TsSnapshotSize)
-
-			err := s.TsEngine.InitSnapshotForWrite(tableID, rangeGroupID, snapshotID, snapshotSize)
+			startKey := header.State.Desc.StartKey
+			endKey := header.State.Desc.EndKey
+			_, startPoint, endPoint, startTs, endTs, err := sqlbase.DecodeTSRangeKey(startKey, endKey)
 			if err != nil {
-				return IncomingSnapshot{}, errors.Wrap(err, "failed to InitSnapshotForWrite")
+				log.Errorf(ctx, "DecodeTSRangeKey failedD: %v", err)
+				return IncomingSnapshot{}, errors.Wrap(err, "DecodeTSRangeKey failed")
+			}
+			var snapshotErr error
+			writeSnapshotID, snapshotErr = s.TsEngine.CreateSnapshotForWrite(tableID, startPoint, endPoint, startTs, endTs)
+			log.VEventf(ctx, 3, "TsEngine.CreateSnapshotForWrite r%v, %v, %v, %v, %v, %v, %v, %v, %v", rangeID, tableID, startPoint, endPoint, startTs, endTs, req.TsSnapshotId, writeSnapshotID, snapshotErr)
+			if snapshotErr != nil {
+				rollbackFn(ctx, "CreateSnapshotForWrite", writeSnapshotID, tableID, rangeID)
+				return IncomingSnapshot{}, errors.Wrap(snapshotErr, "receiveTS CreateSnapshotForWrite failed")
 			}
 		}
 
 		if req.TSBatch != nil {
-			log.Infof(ctx, "receiveTS TS snapshotid is %s, groupid is %s \n", snapshotID, rangeGroupID)
-			err := s.TsEngine.WriteSnapshotData(
-				tableID, rangeGroupID, snapshotID, int(req.TsSnapshotOffset), req.TSBatch, req.LastTsBatch)
+			err := s.TsEngine.WriteSnapshotBatchData(tableID, writeSnapshotID, req.TSBatch)
+			log.VEventf(ctx, 3, "TsEngine.WriteSnapshotBatchData r%v, %v, %v, %v, %v", rangeID, tableID, writeSnapshotID, len(req.TSBatch), err)
 			if err != nil {
-				return IncomingSnapshot{}, errors.Wrap(err, "failed to WriteSnapshotData")
+				rollbackFn(ctx, "WriteSnapshotBatchData", writeSnapshotID, tableID, rangeID)
+				return IncomingSnapshot{}, errors.Wrap(err, "receiveTS WriteSnapshotBatchData failed")
 			}
 		}
 
@@ -314,6 +330,7 @@ func (kvSS *kvBatchSnapshotStrategy) ReceiveTS(
 
 		if req.Final {
 			if err := msstw.Finish(ctx); err != nil {
+				rollbackFn(ctx, "Finish", writeSnapshotID, tableID, rangeID)
 				return noSnap, err
 			}
 
@@ -321,6 +338,7 @@ func (kvSS *kvBatchSnapshotStrategy) ReceiveTS(
 			snapUUID, err := uuid.FromBytes(header.RaftMessageRequest.Message.Snapshot.Data)
 			if err != nil {
 				err = errors.Wrap(err, "client error: invalid snapshot")
+				rollbackFn(ctx, "FromBytes", writeSnapshotID, tableID, rangeID)
 				return noSnap, sendSnapshotError(stream, err)
 			}
 
@@ -333,8 +351,7 @@ func (kvSS *kvBatchSnapshotStrategy) ReceiveTS(
 				snapType:                       header.Type,
 				IsTSSnapshot:                   true,
 				TableID:                        tableID,
-				RangeGroupID:                   rangeGroupID,
-				SnapshotID:                     snapshotID,
+				WriteSnapshotID:                writeSnapshotID,
 			}
 
 			expLen := inSnap.State.RaftAppliedIndex - inSnap.State.TruncatedState.Index
@@ -344,7 +361,7 @@ func (kvSS *kvBatchSnapshotStrategy) ReceiveTS(
 					inSnap.String(), len(logEntries), expLen)
 			}
 
-			kvSS.status = fmt.Sprintf("log entries: %d, TS snapshotSize: %d", len(logEntries), snapshotSize)
+			kvSS.status = fmt.Sprintf("log entries: %d", len(logEntries))
 			return inSnap, nil
 		}
 	}
@@ -461,7 +478,6 @@ func (kvSS *kvBatchSnapshotStrategy) SendTS(
 ) (int64, error) {
 	assertStrategy(ctx, header, SnapshotRequest_TS_BATCH)
 
-	//n := 0
 	for _, kvData := range snap.kvBatch {
 		if len(kvData) == 0 {
 			break
@@ -475,45 +491,48 @@ func (kvSS *kvBatchSnapshotStrategy) SendTS(
 	// send TS data
 	// The TSSnapshotID of an empty snapshot is 0
 	totalSize := 0
+	start := timeutil.Now()
+	rangeID := header.State.Desc.RangeID
 	if snap.TSSnapshotID != 0 {
-		log.Infof(ctx, "(r%)TSEngine.GetSnapshotData(ID:%d)", header.State.Desc.RangeID, snap.TSSnapshotID)
-		limit := 200 << 10 // Send 200KB of data each time
+		log.Infof(ctx, "(r%)TSEngine.GetSnapshotNextBatchData(ID:%d)", rangeID, snap.TSSnapshotID)
 		var err error
-		for offset := 0; offset <= totalSize; offset = offset + limit {
+		first := true
+		for {
 			var tsData []byte
-			tsData, totalSize, err = TsEngine.GetSnapshotData(snap.tableID, snap.rangeGroupID, snap.TSSnapshotID, offset, limit)
+
+			tsData, err = TsEngine.GetSnapshotNextBatchData(snap.tableID, snap.TSSnapshotID)
+			log.VEventf(ctx, 3, "TsEngine.GetSnapshotNextBatchData r%v, %v, %v, %v, %v", rangeID, snap.tableID, snap.TSSnapshotID, len(tsData), err)
 			if err != nil {
-				return 0, errors.Wrapf(err, "SendTS GetSnapshotData err")
+				return 0, errors.Wrapf(err, "SendTS GetSnapshotNextBatchData failed")
 			}
 
-			if totalSize == 0 {
+			if len(tsData) == 0 {
+				log.VEventf(ctx, 3, "TsEngine.sendTSByte end r%v, %v, %v, %v, %v, %v", rangeID, snap.tableID, snap.TSSnapshotID, totalSize, timeutil.Since(start).String(), err)
 				// If it is an empty snapshot, skip sendTSByte
 				break
 			}
-			if offset == 0 {
+			if first {
 				if err := stream.Send(&SnapshotRequest{
 					InitTsSnapshotForWrite: true,
 					TsTableId:              snap.tableID,
-					TsRangeGroupId:         snap.rangeGroupID,
 					TsSnapshotId:           snap.TSSnapshotID,
-					TsSnapshotSize:         int32(totalSize),
 				}); err != nil {
+					log.VEventf(ctx, 3, "TsEngine.stream.Send r%v, %v, %v, %v, %v", rangeID, snap.tableID, snap.TSSnapshotID, len(tsData), err)
 					return 0, errors.Wrapf(err, "SendTS init snapshot for write err")
 				}
+				first = false
 			}
 
-			if offset+limit < totalSize {
-				if err := kvSS.sendTSByte(ctx, stream, tsData, false, offset); err != nil {
-					return 0, err
+			totalSize += len(tsData)
+			if err := kvSS.sendTSByte(ctx, stream, tsData); err != nil {
+				log.VEventf(ctx, 3, "TsEngine.sendTSByte r%v, %v, %v, %v, %v, %v, %v", rangeID, snap.tableID, snap.TSSnapshotID, len(tsData), totalSize, timeutil.Since(start).String(), err)
+				if err == io.EOF {
+					log.VEventf(ctx, 3, "TsEngine.sendTSByte end r%v, %v, %v, %v, %v, %v", rangeID, snap.tableID, snap.TSSnapshotID, totalSize, timeutil.Since(start).String(), err)
+					err = nil
+					break
 				}
-			} else {
-				// The range of tsData is [offset, offset+limit-1].
-				// If offset+limit >= totalSize, the data sent this
-				// time is the last batch.
-				if err := kvSS.sendTSByte(ctx, stream, tsData, true, offset); err != nil {
-					return 0, err
-				}
-				break
+				// TODO(Yang Jie): rollback and delete remote snapshot
+				return 0, err
 			}
 		}
 	}
@@ -537,8 +556,6 @@ func (kvSS *kvBatchSnapshotStrategy) SendTS(
 		}
 		return false, err
 	}
-
-	rangeID := header.State.Desc.RangeID
 
 	if err := iterateEntries(ctx, snap.EngineSnap, rangeID, firstIndex, endIndex, scanFunc); err != nil {
 		return 0, err
@@ -785,16 +802,14 @@ func (kvSS *kvBatchSnapshotStrategy) sendKVData(
 
 // sendTSByte use stream to send data
 func (kvSS *kvBatchSnapshotStrategy) sendTSByte(
-	ctx context.Context, stream outgoingSnapshotStream, tsBytes []byte, lastSend bool, offset int,
+	ctx context.Context, stream outgoingSnapshotStream, tsBytes []byte,
 ) error {
 	if err := kvSS.limiter.WaitN(ctx, 1); err != nil {
 		return err
 	}
 	kvSS.bytesSent += int64(len(tsBytes))
 	return stream.Send(&SnapshotRequest{
-		TSBatch:          tsBytes,
-		LastTsBatch:      lastSend,
-		TsSnapshotOffset: int32(offset),
+		TSBatch: tsBytes,
 	})
 }
 
@@ -1136,16 +1151,22 @@ func (s *Store) receiveSnapshot(
 	} else if header.Strategy == SnapshotRequest_TS_BATCH {
 		inSnap, err = ss.ReceiveTS(ctx, stream, *header, s)
 	}
-	//inSnap, err := ss.Receive(ctx, stream, *header)
 	if err != nil {
 		return err
 	}
 	if err := s.processRaftSnapshotRequest(ctx, header, inSnap); err != nil {
-		errmsg := "failed to apply snapshot."
-		if tserr := s.TsEngine.DropSnapshot(inSnap.TableID, inSnap.RangeGroupID, inSnap.SnapshotID); tserr != nil {
-			errmsg += tserr.Error()
+		if inSnap.IsTSSnapshot && inSnap.WriteSnapshotID != 0 {
+			rangeID := inSnap.State.Desc.RangeID
+			if rollbackErr := s.TsEngine.WriteSnapshotRollback(inSnap.TableID, inSnap.WriteSnapshotID); rollbackErr != nil {
+				log.Errorf(ctx, "TsEngine.WriteSnapshotRollback failed r%v, %v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID, rollbackErr)
+			}
+			log.VEventf(ctx, 3, "TsEngine.WriteSnapshotRollback success r%v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID)
+			if delErr := s.TsEngine.DeleteSnapshot(inSnap.TableID, inSnap.WriteSnapshotID); delErr != nil {
+				log.Errorf(ctx, "TsEngine.DeleteSnapshot failed r%v, %v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID, delErr)
+			}
+			log.VEventf(ctx, 3, "TsEngine.DeleteSnapshot success r%v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID)
 		}
-		return sendSnapshotError(stream, errors.Wrap(err.GoError(), errmsg))
+		return sendSnapshotError(stream, err.GoError())
 	}
 
 	return stream.Send(&SnapshotResponse{Status: SnapshotResponse_APPLIED})
@@ -1281,12 +1302,14 @@ func sendTSSnapshot(
 	start = timeutil.Now()
 
 	const batchSize = 256 << 10 // 256 KB
+	const tsBatchSize = 4 << 10 // 4 KB
 	targetRate, err := snapshotRateLimit(st, header.Priority)
 	if err != nil {
 		return errors.Wrapf(err, "%s", to)
 	}
 
-	limiter := rate.NewLimiter(targetRate/batchSize, 1 /* burst size */)
+	// Convert the bytes/sec rate limit to tsBatches/sec.
+	limiter := rate.NewLimiter(targetRate/tsBatchSize, 1 /* burst size */)
 
 	var ss snapshotStrategy
 	switch header.Strategy {

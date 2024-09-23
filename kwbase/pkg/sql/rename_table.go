@@ -29,7 +29,6 @@ import (
 	"fmt"
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
@@ -116,12 +115,6 @@ func (n *renameTableNode) startExec(params runParams) error {
 	oldTn := n.oldTn
 	newTn := n.newTn
 	tableDesc := n.tableDesc
-	if n.tableDesc.IsTSTable() {
-		_, err := api.GetAvailableNodeIDs(params.ctx)
-		if err != nil {
-			return err
-		}
-	}
 	//temporary table
 	tempscname := tree.Name(p.TemporarySchemaName())
 	if oldTn.TableNamePrefix.SchemaName == tempscname {

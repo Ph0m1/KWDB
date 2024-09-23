@@ -391,7 +391,7 @@ func TestCannotTransferLeaseToVoterOutgoing(t *testing.T) {
 				scratchStartKey, desc, []roachpb.ReplicationChange{
 					{ChangeType: roachpb.REMOVE_REPLICA, Target: tc.Target(2)},
 					{ChangeType: roachpb.ADD_REPLICA, Target: tc.Target(3)},
-				}, false)
+				})
 			require.NoError(t, err)
 		}()
 		ch := <-changeReplicasChan

@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "st_config.h"
 #include "ts_time_partition.h"
 #include "test_util.h"
@@ -223,6 +223,7 @@ TEST_F(TestPartitionBigTable, override) {
   std::shared_ptr<MMapSegmentTable> segment_table = mt_table->getSegmentTable(block_item->block_id);
   ASSERT_NE(segment_table, nullptr);
   ASSERT_EQ(segment_table->getBlockMinTs(block_item->block_id), current_time_ms);
+  ASSERT_EQ(KInt16(segment_table->columnAggAddr(1, 0, kwdbts::Sumfunctype::COUNT)), 10);
 
   // Check that no rows are marked as deleted before introducing new data
   bool is_deleted = false;
@@ -613,7 +614,7 @@ TEST_F(TestPartitionBigTable, undoPut) {
   uint32_t payload_len = 0;
   std::vector<BlockSpan> cur_alloc_spans;
   std::vector<MetricRowID> to_del_rows;
-  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now + 10000, false);
+  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoIncludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now + 10000, false);
   kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
@@ -693,7 +694,7 @@ TEST_F(TestPartitionBigTable, redoPut) {
   uint32_t payload_len = 0;
   std::vector<BlockSpan> cur_alloc_spans;
   std::vector<MetricRowID> to_del_rows;
-  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now + 10000, false);
+  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoIncludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now + 10000, false);
   kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
@@ -824,7 +825,7 @@ TEST_F(TestPartitionBigTable, disorderPut) {
   uint32_t payload_len = 0;
   std::vector<BlockSpan> cur_alloc_spans;
   std::vector<MetricRowID> to_del_rows;
-  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now + 10000, false);
+  char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoExcludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now + 10000, false);
   kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
@@ -838,7 +839,7 @@ TEST_F(TestPartitionBigTable, disorderPut) {
   auto entity_item = mt_table->getEntityItem(entity_id);
   ASSERT_FALSE(entity_item->is_disordered);
   // insert disorder data
-  char* disorder_data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfo(), mt_table->getActualCols(), row_num, payload_len, ts_now, false);
+  char* disorder_data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoExcludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now, false);
   kwdbts::Payload pd_disorder(root_bt_manager, {disorder_data, payload_len});
   pd_disorder.SetLsn(lsn);
   pd_disorder.dedup_rule_ = kwdbts::DedupRule::KEEP;

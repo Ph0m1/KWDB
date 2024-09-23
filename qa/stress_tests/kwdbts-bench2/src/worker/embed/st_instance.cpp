@@ -39,7 +39,7 @@ KStatus StInstance::GetSchemaInfo(kwdbContext_p ctx, uint32_t table_id,
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  s = tags_table->GetDataSchema(ctx, data_schema);
+  s = tags_table->GetDataSchemaExcludeDropped(ctx, data_schema);
   return s;
 }
 
@@ -125,6 +125,7 @@ KBStatus StInstance::Init(BenchParams params, std::vector<uint32_t> table_ids_) 
   ts_opts_.wal_buffer_size = 4;
   ts_opts_.thread_pool_size = 0;
   ts_opts_.lg_opts.LogFileVerbosityThreshold = LgSeverity::INFO_K;
+  ts_opts_.start_vacuum = true;
   auto index = new AppliedRangeIndex[1]{AppliedRangeIndex{1, 1}};
   TSStatus t_status = TSOpen(&ts_engine_, TSSlice{db_path.data(), db_path.size()}, ts_opts_, index, 1);
   if (t_status.data != nullptr) {
@@ -134,8 +135,17 @@ KBStatus StInstance::Init(BenchParams params, std::vector<uint32_t> table_ids_) 
   }
   log_INFO("Open TSEngine %s \n", (t_status.data == nullptr ? "succeed" : "failed"));
 
-  for (int i = 0; i < table_ids_.size(); i++) {
-    KTableKey table_id = table_ids_[i];
+  for (int i = 0; i <= table_ids_.size(); i++) {
+    KTableKey table_id;
+    if (i != table_ids_.size()) {
+      table_id = table_ids_[i];
+      if (snapshot_desc_table_id <= table_id) {
+        snapshot_desc_table_id *= 2;
+      }
+    } else {
+      // create one table to receive snapshot data.
+      table_id = snapshot_desc_table_id;
+    }
     // create ts table
     roachpb::CreateTsTable meta;
     StMetaBuilder::constructRoachpbTable(&meta, table_id, params_);
@@ -178,7 +188,9 @@ KBStatus StInstance::Init(BenchParams params, std::vector<uint32_t> table_ids_) 
           buf << ", c_" << j << " varchar(" << meta.k_column(j).storage_len() << ")  NOT NULL";
           break;
         default:
-          return KBStatus::NOT_IMPLEMENTED("column type : "  +std::to_string(meta.k_column(j).storage_type()) );
+          buf << ", c_" << j << " " << meta.k_column(j).storage_type() << "(" << meta.k_column(j).storage_len() << ")  NOT NULL";
+          // return KBStatus::NOT_IMPLEMENTED("column type : "  +std::to_string(meta.k_column(j).storage_type()) );
+          break;
       }
     }
     buf << ") attributes (" ;
@@ -269,19 +281,19 @@ KBStatus StEngityGroupInstance::Init(BenchParams params) {
   EngineOptions::init();
 
   string db_path = normalizePath("entitygp_bench");
-  string ws = worksapceToDatabase(db_path);
+  string ws = rmPathSeperator(db_path);
   assert(!ws.empty());
   string dir_path = makeDirectoryPath(EngineOptions::home() + ws);
   bool ret = MakeDirectory(dir_path);
   assert(ret == true);
 
   roachpb::CreateTsTable meta;
-  constructRoachpbTable(&meta, 123, params);
+  constructRoachpbTable(&meta, table_id_, params);
   std::vector<RangeGroup> ranges;
   ranges.push_back({456, 0});
   table_ = CreateTable(ctx, &meta, dir_path, ranges);
 
-  KStatus s = table_->GetEntityGroup(ctx, 456, &entity_group_);
+  KStatus s = table_->GetEntityGroup(ctx, range_group_id_, &entity_group_);
   assert(s == KStatus::SUCCESS);
   inited_ = true;
   return KBStatus::OK();

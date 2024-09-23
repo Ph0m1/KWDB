@@ -55,7 +55,7 @@ class TagScanOperator : public BaseOperator {
 
   KStatus GetEntities(kwdbContext_p ctx,
                       std::vector<EntityResultIndex>* entities,
-                      k_uint32* start_tag_index, TagRowBatchPtr* row_batch_ptr);
+                      TagRowBatchPtr* row_batch_ptr);
 
  protected:
   k_bool ResolveOffset();

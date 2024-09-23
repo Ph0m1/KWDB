@@ -209,6 +209,7 @@ if (BUILD_KWBASE)
 endif()
 
 if (WITH_TESTS)
+    add_subdirectory(qa/stress_tests/kwdbts-bench2)
     enable_testing()
 endif()
 # install script

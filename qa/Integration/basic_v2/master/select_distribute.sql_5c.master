@@ -1,3 +1,5 @@
+> set cluster setting server.ts_range_split_mode = 1;
+SET CLUSTER SETTING
 > CREATE TS DATABASE tsdb;
 CREATE TS DATABASE
 > CREATE TABLE tsdb.tab
@@ -17,7 +19,7 @@ FROM kwdb_internal.ranges
 WHERE table_name = 'tab';
   count
 ---------
-      5
+     22
 (1 row)
 > INSERT INTO tsdb.tab
 VALUES ('2024-01-05 01:00:00', 1, NULL, 222, 1.11, 'one'),

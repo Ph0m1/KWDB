@@ -29,7 +29,6 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
-	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/pkg/errors"
 )
 
@@ -71,19 +70,9 @@ func (s *Store) MergeRange(
 	// rangefeeds with REASON_REPLICA_REMOVED. That's ok because we will have
 	// already disconnected the rangefeed here.
 
-	log.VEventf(context.Background(), 3, "xxxx registry disconnect store merge 1, rangeid %d, %p, rangeid %d, span: [%s - %s], %p",
-		leftRepl.RangeID, leftRepl, rightRepl.RangeID,
-		roachpb.KeyValue{Key: roachpb.Key(leftRepl.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(leftRepl.Desc().EndKey)},
-		rightRepl)
-
 	leftRepl.disconnectRangefeedWithReason(
 		roachpb.RangeFeedRetryError_REASON_RANGE_MERGED, rightRepl,
 	)
-
-	log.VEventf(context.Background(), 3, "xxxx registry disconnect store merge 2, rangeid %d, %p, rangeid %d, span: [%s - %s], %p",
-		leftRepl.RangeID, leftRepl, rightRepl.RangeID,
-		roachpb.KeyValue{Key: roachpb.Key(leftRepl.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(leftRepl.Desc().EndKey)},
-		rightRepl)
 
 	rightRepl.disconnectRangefeedWithReason(
 		roachpb.RangeFeedRetryError_REASON_RANGE_MERGED, nil,

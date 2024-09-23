@@ -94,6 +94,14 @@ int SubEntityGroupManager::OpenInit(const std::string& db_path, const std::strin
   return err_info.errcode;
 }
 
+TsTimePartition* SubEntityGroupManager::CreatePartitionTable(timestamp64 ts, SubGroupID subgroup_id,
+                                                              ErrorInfo& err_info) {
+  TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
+  if (sub_group == nullptr) {
+    return nullptr;
+  }
+  return sub_group->CreatePartitionTable(ts, err_info);
+}
 
 TsSubEntityGroup* SubEntityGroupManager::CreateSubGroup(SubGroupID subgroup_id, ErrorInfo& err_info) {
   assert(root_table_manager_ != nullptr);
@@ -185,13 +193,15 @@ TsSubEntityGroup* SubEntityGroupManager::openSubGroup(SubGroupID subgroup_id, Er
   return sub_group;
 }
 
-TsTimePartition* SubEntityGroupManager::CreatePartitionTable(timestamp64 ts, SubGroupID subgroup_id,
-                                                             ErrorInfo& err_info) {
+vector<timestamp64> SubEntityGroupManager::GetPartitions(const KwTsSpan& ts_span, SubGroupID subgroup_id,
+                                                           ErrorInfo& err_info) {
+  KWDB_DURATION(StStatistics::Get().get_partition);
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
-    return nullptr;
+    LOG_WARN(" cannot found subgroup %u at sandbox %s.", subgroup_id, this->tbl_sub_path_.c_str());
+    return vector<timestamp64> ();
   }
-  return sub_group->CreatePartitionTable(ts, err_info);
+  return sub_group->GetPartitions(ts_span);
 }
 
 TsTimePartition* SubEntityGroupManager::GetPartitionTable(timestamp64 ts, SubGroupID sub_group_id,
@@ -289,7 +299,7 @@ void SubEntityGroupManager::Compress(const timestamp64& compress_ts, ErrorInfo& 
     if (p_table != nullptr && !compress_error) {
       p_table->Compress(compress_ts, err_info);
       if (err_info.errcode < 0) {
-        LOG_ERROR("MMapPartitionTable[%s] compress error : %s", p_table->URL().c_str(), err_info.errmsg.c_str());
+        LOG_ERROR("MMapPartitionTable[%s] compress error : %s", p_table->path().c_str(), err_info.errmsg.c_str());
         compress_error = true;
       }
     }

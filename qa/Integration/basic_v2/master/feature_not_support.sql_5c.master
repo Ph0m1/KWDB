@@ -68,8 +68,17 @@ SQLSTATE: 0A000
 ERROR: show database indexes is not supported in timeseries table
 SQLSTATE: 0A000
 > SHOW ZONE CONFIGURATION FOR DATABASE d_error;
-ERROR: show zone config for database is not supported in timeseries table
-SQLSTATE: 0A000
+     target     |              raw_config_sql
+----------------+-------------------------------------------
+  RANGE default | ALTER RANGE default CONFIGURE ZONE USING
+                |     range_min_bytes = 134217728,
+                |     range_max_bytes = 536870912,
+                |     gc.ttlseconds = 60,
+                |     num_replicas = 3,
+                |     ts_merge.days = 240h0m0s,
+                |     constraints = '[]',
+                |     lease_preferences = '[]'
+(1 row)
 > drop database d_error;
 DROP DATABASE
 > create database db_test1;

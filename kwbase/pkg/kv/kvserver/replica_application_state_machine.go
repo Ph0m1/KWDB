@@ -25,20 +25,17 @@
 package kvserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
-	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/apply"
-	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/rditer"
-	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/stateloader"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
@@ -319,8 +316,8 @@ func checkForcedErr(
 		// again. Note that in this situation, the leaseIndex does not advance.
 		retry := proposalNoReevaluation
 		if isLocal {
-			log.VEventf(
-				ctx, 1,
+			log.Infof(
+				ctx,
 				"retry proposal %x: applied at lease index %d, required < %d",
 				idKey, leaseIndex, raftCmd.MaxLeaseIndex,
 			)
@@ -457,12 +454,17 @@ func (b *replicaAppBatch) Stage(cmdI apply.Command) (apply.CheckedCommand, error
 	// This check is deterministic on all replicas, so if one replica decides to
 	// reject a command, all will.
 	if !b.r.shouldApplyCommand(ctx, cmd, &b.state) {
-		log.VEventf(ctx, 1, "applying command with forced error: %s", cmd.forcedErr)
+		if b.r.isTs() && cmd.IsLocal() {
+			log.Infof(ctx, "r%d applying command with forced error: %s, proposal %p", b.r.RangeID, cmd.forcedErr, cmd.proposal)
+		} else {
+			log.VEventf(ctx, 1, "applying command with forced error: %s", cmd.forcedErr)
+		}
 
 		// Apply an empty command.
 		cmd.raftCmd.ReplicatedEvalResult = storagepb.ReplicatedEvalResult{}
 		cmd.raftCmd.WriteBatch = nil
 		cmd.raftCmd.LogicalOpLog = nil
+		cmd.ent.Request = nil
 	} else {
 		log.Event(ctx, "applying command")
 	}
@@ -535,105 +537,26 @@ func (b *replicaAppBatch) migrateReplicatedResult(ctx context.Context, cmd *repl
 	}
 }
 
-// CreateSnapshot use CGO TsEngine create snapshot
-func (b *replicaAppBatch) CreateSnapshot(
+// CreateSnapshotForRead use CGO TsEngine create ts snapshot
+func (r *Replica) CreateSnapshotForRead(
 	ctx context.Context, startKey []byte, endKey []byte,
 ) (uint64, error) {
-	tableID, beginHash, endHash, err := sqlbase.GetTableHashInfo(ctx, startKey, endKey)
+	tableID, startPoint, endPoint, startTs, endTs, err := sqlbase.DecodeTSRangeKey(startKey, endKey)
 	if err != nil {
-		return 0, errors.Wrapf(err, "Ts CreateTSSnapshot GetTableHashInfo err")
+		log.Errorf(ctx, "CreateSnapshotForRead failed: %v", err)
+		return 0, err
 	}
-	//TODO(fyx):
-	//      　There is a problem with creating snapshots in complex
-	//        high-availability scenarios, specifically: continuous
-	//        node death and re-joining scenarios.
-	desc := b.r.Desc()
-	tsSnapshotID, err := b.r.store.TsEngine.CreateSnapshot(tableID, uint64(desc.GroupId), beginHash, endHash)
+	tsSnapshotID, err := r.store.TsEngine.CreateSnapshotForRead(tableID, startPoint, endPoint, startTs, endTs)
+	log.VEventf(ctx, 3, "TsEngine.CreateSnapshotForRead r%v, %v, %v, %v, %v, %v, %v, %v", r.RangeID, tableID, startPoint, endPoint, startTs, endTs, tsSnapshotID, err)
 	if err != nil {
-		return 0, errors.Wrapf(err, "Ts CreateSnapshot CreateSnapshot err,Group ID is:%d", desc.GroupId)
+		return 0, errors.Wrapf(err, "Ts CreateSnapshotForRead err")
 	}
 
 	return tsSnapshotID, nil
 }
 
-// GetTSSnapshotInfo get TS snapshot info
-func (b *replicaAppBatch) GetTSSnapshotInfo(
-	ctx context.Context, rangeID roachpb.RangeID, startKey []byte,
-) (storagepb.ReplicaState, uint64, uint64, [][]byte, error) {
-	snap := b.r.store.engine.NewSnapshot()
-	var batchData [][]byte
-	var state storagepb.ReplicaState
-
-	var desc roachpb.RangeDescriptor
-	ok, err := storage.MVCCGetProto(ctx, snap, keys.RangeDescriptorKey(startKey),
-		hlc.MaxTimestamp, &desc, storage.MVCCGetOptions{Inconsistent: true})
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot failed to get desc: %s", err)
-	}
-	if !ok {
-		return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot couldn't find range descriptor")
-	}
-
-	// get SnapshotMetadata: Index and Term
-	rsl := stateloader.Make(rangeID)
-	appliedIndex, _, err := rsl.LoadAppliedIndex(ctx, snap)
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot get LoadAppliedIndex err: %s", err)
-	}
-
-	eCache := b.r.store.raftEntryCache
-	term, err := term(ctx, rsl, snap, rangeID, eCache, appliedIndex)
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot get term err: %s", err)
-	}
-
-	// get state
-	state, err = rsl.Load(ctx, snap, &desc)
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot Load state err: %s", err)
-	}
-
-	iterator := rditer.NewReplicaDataIterator(
-		&desc, snap, true /* replicatedOnly */, false /* seekEnd */)
-	defer iterator.Close()
-
-	var batch storage.Batch
-	const batchSize = 256 << 10 // 256 KB
-	for iter := iterator; ; iter.Next() {
-		if ok, err := iter.Valid(); err != nil {
-			return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot iter state err: %s", err)
-		} else if !ok {
-			break
-		}
-
-		key := iter.Key()
-		value := iter.Value()
-		if batch == nil {
-			batch = b.r.store.engine.NewBatch()
-		}
-		if err := batch.Put(key, value); err != nil {
-			batch.Close()
-			return state, 0, 0, batchData, errors.Errorf("Ts CreateTSSnapshot iter state batch Put err: %s", err)
-		}
-
-		if int64(batch.Len()) >= batchSize {
-			batchData = append(batchData, batch.Repr())
-			batch.Close()
-			batch = nil
-			iter.ResetAllocator()
-		}
-	}
-	if batch != nil {
-		batchData = append(batchData, batch.Repr())
-		batch.Close()
-	}
-
-	snap.Close()
-	return state, appliedIndex, term, batchData, nil
-}
-
 // stateInfoConversion convert state info
-func (b *replicaAppBatch) stateInfoConversion(state storagepb.ReplicaState) roachpb.ReplicaState {
+func stateInfoConversion(state storagepb.ReplicaState) roachpb.ReplicaState {
 	return roachpb.ReplicaState{
 		RaftAppliedIndex:  state.RaftAppliedIndex,
 		LeaseAppliedIndex: state.LeaseAppliedIndex,
@@ -649,6 +572,29 @@ func (b *replicaAppBatch) stateInfoConversion(state storagepb.ReplicaState) roac
 	}
 }
 
+func matchTsSpans(inSpans []*roachpb.TsSpan, startTs, endTs int64) []*roachpb.TsSpan {
+	var tsSpans []*roachpb.TsSpan
+	for _, span := range inSpans {
+		if span.TsStart > endTs || span.TsEnd < startTs {
+			continue
+		}
+		if span.TsStart >= startTs && span.TsEnd <= endTs {
+			tsSpans = append(tsSpans, span)
+			continue
+		}
+		if span.TsStart >= startTs {
+			tsSpans = append(tsSpans, &roachpb.TsSpan{TsStart: span.TsStart, TsEnd: endTs})
+			continue
+		}
+		if span.TsEnd <= endTs {
+			tsSpans = append(tsSpans, &roachpb.TsSpan{TsStart: startTs, TsEnd: span.TsEnd})
+			continue
+		}
+		tsSpans = append(tsSpans, &roachpb.TsSpan{TsStart: startTs, TsEnd: endTs})
+	}
+	return tsSpans
+}
+
 // stageWriteBatch applies the command's write batch to the application batch's
 // RocksDB batch. This batch is committed to RocksDB in replicaAppBatch.commit.
 func (b *replicaAppBatch) stageWriteBatch(ctx context.Context, cmd *replicatedCmd) error {
@@ -659,293 +605,14 @@ func (b *replicaAppBatch) stageWriteBatch(ctx context.Context, cmd *replicatedCm
 	if cmd.ent.Request != nil {
 		var reqs roachpb.BatchRequest
 		if err := protoutil.Unmarshal(cmd.ent.Request, &reqs); err == nil {
-			for _, union := range reqs.Requests {
-				if req, ok := union.GetInner().(*roachpb.TsPutRequest); ok {
-					// Parse table_id from payload
-					tableIDOffset := execbuilder.TableIDOffset
-					tableIDEnd := tableIDOffset + execbuilder.TableIDSize
-					b.tableID = binary.LittleEndian.Uint64(req.Value.RawBytes[tableIDOffset:tableIDEnd])
-					// Parse range_group_id from payload
-					rangeGroupIDOffset := execbuilder.RangeGroupIDOffset
-					rangeGroupIDEnd := rangeGroupIDOffset + execbuilder.RangeGroupIDSize
-					b.rangeGroupID = uint64(binary.LittleEndian.Uint16(req.Value.RawBytes[rangeGroupIDOffset:rangeGroupIDEnd]))
-					break
-				}
-
-				if req, ok := union.GetInner().(*roachpb.TsDeleteRequest); ok {
-					b.tableID = req.TableId
-					b.rangeGroupID = req.RangeGroupId
-					break
-				}
-				if req, ok := union.GetInner().(*roachpb.TsDeleteMultiEntitiesDataRequest); ok {
-					b.tableID = req.TableId
-					//b.rangeGroupID = req.RangeGroupId
-					break
-				}
-				if req, ok := union.GetInner().(*roachpb.TsDeleteEntityRequest); ok {
-					b.tableID = req.TableId
-					b.rangeGroupID = req.RangeGroupId
-					break
-				}
-				if req, ok := union.GetInner().(*roachpb.TsTagUpdateRequest); ok {
-					b.tableID = req.TableId
-					b.rangeGroupID = req.RangeGroupId
-					break
-				}
+			var responses []roachpb.ResponseUnion
+			isLocal := cmd.IsLocal()
+			if isLocal && cmd.proposal.Local.Reply != nil {
+				responses = cmd.proposal.Local.Reply.Responses
 			}
-
-			if b.tableID != 0 && b.rangeGroupID != 0 {
-				if b.TSTxnID, err = b.r.store.TsEngine.MtrBegin(b.tableID, b.rangeGroupID, uint64(b.r.RangeID), b.state.RaftAppliedIndex); err != nil {
-					// todo(xy): temp commit, need to replace the final solution(fyx)
-					rangeGroups, _ := b.r.store.TsEngine.GetRangeGroups(uint32(b.tableID))
-					for _, rangeGroup := range rangeGroups {
-						if rangeGroup.RangeGroupID == api.EntityRangeGroupID(b.rangeGroupID) {
-							return wrapWithNonDeterministicFailure(err, "unable to begin mini-transaction")
-						}
-					}
-					cmd.response.Err = roachpb.NewError(roachpb.NewAmbiguousResultError(err.Error()))
-					return nil
-				}
-			}
-
-			for idx, union := range reqs.Requests {
-				if req, ok := union.GetInner().(*roachpb.CreateTSSnapshotRequest); ok && cmd.IsLocal() {
-					startKey := req.Header().Key
-					endKey := req.Header().EndKey
-					needTSSnapshotData := req.NeedTsSnapshotData
-
-					currentRepl := roachpb.ReplicationTarget{
-						NodeID:  b.r.NodeID(),
-						StoreID: b.r.StoreID(),
-					}
-
-					tsSnapshotID := uint64(0)
-					var errMsg string
-					if needTSSnapshotData {
-						// The CreateTSSnapshotRequest sender and receiver must be equal, otherwise the sender cannot getTSSnapshotData
-						if req.Sender == currentRepl {
-							tsSnapshotID, err = b.CreateSnapshot(ctx, startKey, endKey)
-							log.Infof(ctx, "(r%)TSEngine.CreateSnapshot(ID:%d)", b.r.RangeID, tsSnapshotID)
-							if err != nil {
-								// Returning err will cause the CreateTSSnapshotResponse to fail to be
-								// received when creating a copy, so err cannot be returned.
-								errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts CreateSnapshot err: %v",
-									b.r.NodeID(), b.r.StoreID(), b.r.RangeID, err)
-							}
-						} else {
-							errMsg = fmt.Sprintf("The sender[n%v,s%v,r%v] and receiver[n%v,s%v,r%v] are not equal",
-								req.Sender.NodeID, req.Sender.StoreID, req.RangeID, b.r.NodeID(), b.r.StoreID(), b.r.RangeID)
-						}
-					}
-
-					if tsSnapshotID == 0 && needTSSnapshotData {
-						if cmd.proposal.Local.Reply != nil {
-							cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-								Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-									CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-										TsSnapshotId: tsSnapshotID,
-										Msg:          errMsg,
-										Sender:       currentRepl,
-									},
-								},
-							}
-						}
-					} else {
-						state, appliedIndex, termValue, batchData, err := b.GetTSSnapshotInfo(ctx, req.RangeID, startKey)
-						if err != nil {
-							// returning err will cause the CreateTSSnapshotResponse to be stuck when
-							// creating a replica. So cannot return err.
-							// If the KV data when creating a replica fails to be obtained, the sender
-							// of CreateTsSnapshot will be notified of errMsg and the sender of tsSnapshotID
-							// will be informed so that the sender can delete the created TSSnapshot.
-							log.Warningf(ctx, "stageWriteBatch Ts GetTSSnapshotInfo err: %+v", err)
-							errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts GetTSSnapshotInfo err: %v",
-								b.r.NodeID(), b.r.StoreID(), b.r.RangeID, err)
-							if cmd.proposal.Local.Reply != nil {
-								cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-									Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-										CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-											TsSnapshotId: tsSnapshotID,
-											Msg:          errMsg,
-											Sender:       currentRepl,
-										},
-									},
-								}
-							}
-						} else {
-							if cmd.proposal.Local.Reply != nil {
-								stateOfResp := b.stateInfoConversion(state)
-
-								cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-									Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-										CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-											TsSnapshotId:          tsSnapshotID,
-											State:                 &stateOfResp,
-											SnapshotMetadataIndex: appliedIndex,
-											SnapshotMetadataTerm:  termValue,
-											KvBatch:               batchData,
-											Sender:                currentRepl,
-										},
-									},
-								}
-							}
-						}
-					}
-				}
-				if req, ok := union.GetInner().(*roachpb.TsPutRequest); ok {
-					var payload [][]byte
-					var dedupResult tse.DedupResult
-					payload = append(payload, req.Value.RawBytes)
-					if payload != nil {
-						if dedupResult, err = b.r.store.TsEngine.PutData(1, payload, b.TSTxnID); err != nil {
-							errRollback := b.r.store.TsEngine.MtrRollback(b.tableID, b.rangeGroupID, b.TSTxnID)
-							if errRollback != nil {
-								// todo(xy): temp commit, need to replace the final solution(fyx)
-								rangeGroups, _ := b.r.store.TsEngine.GetRangeGroups(uint32(b.tableID))
-								for _, rangeGroup := range rangeGroups {
-									if rangeGroup.RangeGroupID == api.EntityRangeGroupID(b.rangeGroupID) {
-										return wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
-									}
-								}
-								cmd.response.Err = roachpb.NewError(roachpb.NewAmbiguousResultError(err.Error()))
-								return nil
-							}
-							return wrapWithNonDeterministicFailure(err, "unable to put data")
-						}
-						if cmd.IsLocal() && cmd.proposal.Local.Reply != nil {
-							if req, ok := cmd.proposal.Local.Reply.Responses[idx].GetInner().(*roachpb.TsPutResponse); ok {
-								if req.DedupRule != 0 {
-									continue
-								}
-							}
-							cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-								Value: &roachpb.ResponseUnion_TsPut{
-									TsPut: &roachpb.TsPutResponse{
-										ResponseHeader: roachpb.ResponseHeader{
-											NumKeys: int64(dedupResult.DedupRows),
-										},
-										DedupRule:     int64(dedupResult.DedupRule),
-										DiscardBitmap: dedupResult.DiscardBitmap,
-									},
-								},
-							}
-						}
-					}
-					continue
-				}
-				if req, ok := union.GetInner().(*roachpb.TsDeleteRequest); ok {
-					var delCnt uint64
-					if delCnt, err = b.r.store.TsEngine.DeleteData(req.TableId, req.RangeGroupId, req.PrimaryTags, req.TsSpans, b.TSTxnID); err != nil {
-						errRollback := b.r.store.TsEngine.MtrRollback(b.tableID, b.rangeGroupID, b.TSTxnID)
-						if errRollback != nil {
-							// todo(xy): temp commit, need to replace the final solution(fyx)
-							rangeGroups, _ := b.r.store.TsEngine.GetRangeGroups(uint32(b.tableID))
-							for _, rangeGroup := range rangeGroups {
-								if rangeGroup.RangeGroupID == api.EntityRangeGroupID(b.rangeGroupID) {
-									return wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
-								}
-							}
-							cmd.response.Err = roachpb.NewError(roachpb.NewAmbiguousResultError(err.Error()))
-							return nil
-						}
-						return wrapWithNonDeterministicFailure(err, "unable to delete data")
-					}
-					if cmd.IsLocal() && cmd.proposal.Local.Reply != nil {
-						cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-							Value: &roachpb.ResponseUnion_TsDelete{
-								TsDelete: &roachpb.TsDeleteResponse{
-									ResponseHeader: roachpb.ResponseHeader{NumKeys: int64(delCnt)},
-								},
-							},
-						}
-					}
-					continue
-				}
-				if req, ok := union.GetInner().(*roachpb.TsDeleteEntityRequest); ok {
-					var delCnt uint64
-					if delCnt, err = b.r.store.TsEngine.DeleteEntities(req.TableId, req.RangeGroupId, req.PrimaryTags, false, b.TSTxnID); err != nil {
-						errRollback := b.r.store.TsEngine.MtrRollback(b.tableID, b.rangeGroupID, b.TSTxnID)
-						if errRollback != nil {
-							// todo(xy): temp commit, need to replace the final solution(fyx)
-							rangeGroups, _ := b.r.store.TsEngine.GetRangeGroups(uint32(b.tableID))
-							for _, rangeGroup := range rangeGroups {
-								if rangeGroup.RangeGroupID == api.EntityRangeGroupID(b.rangeGroupID) {
-									return wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
-								}
-							}
-							cmd.response.Err = roachpb.NewError(roachpb.NewAmbiguousResultError(err.Error()))
-							return nil
-						}
-						return wrapWithNonDeterministicFailure(err, "unable to delete entity")
-					}
-					if cmd.IsLocal() && cmd.proposal.Local.Reply != nil {
-						cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-							Value: &roachpb.ResponseUnion_TsDeleteEntity{
-								TsDeleteEntity: &roachpb.TsDeleteEntityResponse{
-									ResponseHeader: roachpb.ResponseHeader{NumKeys: int64(delCnt)},
-								},
-							},
-						}
-					}
-				}
-
-				if req, ok := union.GetInner().(*roachpb.TsTagUpdateRequest); ok {
-					b.tableID = req.TableId
-					b.rangeGroupID = req.RangeGroupId
-					b.TSTxnID, _ = b.r.store.TsEngine.MtrBegin(b.tableID, b.rangeGroupID, uint64(b.r.RangeID), b.state.RaftAppliedIndex)
-					var pld [][]byte
-					pld = append(pld, req.Tags)
-					if err := b.r.store.TsEngine.PutEntity(req.RangeGroupId, req.TableId, pld, b.TSTxnID); err != nil {
-						fmt.Println("Ts update tag err:", err)
-					} else {
-						if cmd.IsLocal() && cmd.proposal.Local.Reply != nil {
-							cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-								Value: &roachpb.ResponseUnion_TsTagUpdate{
-									TsTagUpdate: &roachpb.TsTagUpdateResponse{
-										ResponseHeader: roachpb.ResponseHeader{NumKeys: 1},
-									},
-								},
-							}
-						}
-					}
-					continue
-				}
-				if req, ok := union.GetInner().(*roachpb.TsDeleteMultiEntitiesDataRequest); ok {
-					var delCnt uint64
-					_, beginHash, err := sqlbase.DecodeTsHashPointKey(b.r.mu.state.Desc.StartKey, true)
-					if err != nil {
-						return wrapWithNonDeterministicFailure(err, "unable to get beginhash")
-					}
-					_, endHash, err := sqlbase.DecodeTsHashPointKey(b.r.mu.state.Desc.EndKey, false)
-					if err != nil {
-						return wrapWithNonDeterministicFailure(err, "unable to get endhash")
-					}
-					if delCnt, err = b.r.store.TsEngine.DeleteRangeData(req.TableId, uint64(b.r.mu.state.Desc.GroupId), beginHash, endHash, req.TsSpans, b.TSTxnID); err != nil {
-						errRollback := b.r.store.TsEngine.MtrRollback(b.tableID, b.rangeGroupID, b.TSTxnID)
-						if errRollback != nil {
-							// todo(xy): temp commit, need to replace the final solution(fyx)
-							rangeGroups, _ := b.r.store.TsEngine.GetRangeGroups(uint32(b.tableID))
-							for _, rangeGroup := range rangeGroups {
-								if rangeGroup.RangeGroupID == api.EntityRangeGroupID(b.rangeGroupID) {
-									return wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
-								}
-							}
-							cmd.response.Err = roachpb.NewError(roachpb.NewAmbiguousResultError(err.Error()))
-							return nil
-						}
-						return wrapWithNonDeterministicFailure(err, "unable to delete MultiEntities")
-					}
-					if cmd.IsLocal() && cmd.proposal.Local.Reply != nil {
-						cmd.proposal.Local.Reply.Responses[idx] = roachpb.ResponseUnion{
-							Value: &roachpb.ResponseUnion_TsDeleteMultiEntitiesData{
-								TsDeleteMultiEntitiesData: &roachpb.TsDeleteMultiEntitiesDataResponse{
-									ResponseHeader: roachpb.ResponseHeader{NumKeys: int64(delCnt)},
-								},
-							},
-						}
-					}
-				}
-				continue
+			if b.tableID, b.rangeGroupID, b.TSTxnID, err = b.r.stageTsBatchRequest(
+				ctx, &reqs, responses, isLocal, &b.state, &b.stats); err != nil {
+				return err
 			}
 		}
 	}
@@ -961,6 +628,350 @@ func (b *replicaAppBatch) stageWriteBatch(ctx context.Context, cmd *replicatedCm
 		return wrapWithNonDeterministicFailure(err, "unable to apply WriteBatch")
 	}
 	return nil
+}
+
+// stageTsBatchRequest handles TsBatchRequest, write or delete data.
+func (r *Replica) stageTsBatchRequest(
+	ctx context.Context,
+	ba *roachpb.BatchRequest,
+	responses []roachpb.ResponseUnion,
+	isLocal bool,
+	replicaState *storagepb.ReplicaState,
+	mvccStats *enginepb.MVCCStats,
+) (tableID, rangeGroupID, tsTxnID uint64, err error) {
+	for _, union := range ba.Requests {
+		switch req := union.GetInner().(type) {
+		case *roachpb.TsRowPutRequest:
+			// Parse table_id from payload
+			tableIDOffset := execbuilder.TableIDOffset
+			tableIDEnd := tableIDOffset + execbuilder.TableIDSize
+			tableID = binary.LittleEndian.Uint64(req.HeaderPrefix[tableIDOffset:tableIDEnd])
+		case *roachpb.TsPutTagRequest:
+			// Parse table_id from payload
+			tableIDOffset := execbuilder.TableIDOffset
+			tableIDEnd := tableIDOffset + execbuilder.TableIDSize
+			tableID = binary.LittleEndian.Uint64(req.Value.RawBytes[tableIDOffset:tableIDEnd])
+		case *roachpb.TsDeleteRequest:
+			tableID = req.TableId
+		case *roachpb.TsDeleteMultiEntitiesDataRequest:
+			tableID = req.TableId
+		case *roachpb.TsDeleteEntityRequest:
+			tableID = req.TableId
+		case *roachpb.TsTagUpdateRequest:
+			tableID = req.TableId
+		default:
+			continue
+		}
+		break
+	}
+
+	rangeGroupID = 1 // storage only create RangeGroup 1
+	var raftAppliedIndex uint64
+	if replicaState != nil {
+		raftAppliedIndex = replicaState.RaftAppliedIndex
+	}
+	if tableID != 0 {
+		if tsTxnID, err = r.store.TsEngine.MtrBegin(tableID, rangeGroupID, uint64(r.RangeID), raftAppliedIndex); err != nil {
+			return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to begin mini-transaction")
+		}
+	}
+
+	for idx, union := range ba.Requests {
+		switch req := union.GetInner().(type) {
+		case *roachpb.CreateTSSnapshotRequest:
+			{
+				if !isLocal {
+					continue
+				}
+				startKey := req.Header().Key
+				endKey := req.Header().EndKey
+				needTSSnapshotData := req.NeedTsSnapshotData
+				log.Infof(ctx, "CreateTSSnapshot for r%d [%v, %v), needTSSnapshotData %v", r.RangeID, startKey, endKey, needTSSnapshotData)
+
+				currentRepl := roachpb.ReplicationTarget{
+					NodeID:  r.store.nodeDesc.NodeID,
+					StoreID: r.store.StoreID(),
+				}
+
+				tsSnapshotID := uint64(0)
+				var errMsg string
+				if bytes.Compare(startKey, r.Desc().StartKey) != 0 || bytes.Compare(endKey, r.Desc().EndKey) != 0 {
+					errMsg = fmt.Sprintf("mismatched range [%v, %v] to [%v, %v]", startKey, endKey, r.Desc().StartKey, r.Desc().EndKey)
+					log.Warning(ctx, errMsg)
+					if responses != nil {
+						responses[idx] = roachpb.ResponseUnion{
+							Value: &roachpb.ResponseUnion_CreateTsSnapshot{
+								CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
+									TsSnapshotId: 0,
+									Msg:          errMsg,
+									Sender:       currentRepl,
+								},
+							},
+						}
+					}
+					continue
+				}
+
+				if needTSSnapshotData {
+					// The CreateTSSnapshotRequest sender and receiver must be equal, otherwise the sender cannot getTSSnapshotData
+					if req.Sender == currentRepl {
+						tsSnapshotID, err = r.CreateSnapshotForRead(ctx, startKey, endKey)
+						log.Infof(ctx, "(r%d)TSEngine.CreateSnapshotForRead(ID:%d)", r.RangeID, tsSnapshotID)
+						if err != nil {
+							errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts CreateSnapshotForRead err: %v",
+								r.store.nodeDesc.NodeID, r.store.StoreID(), r.RangeID, err)
+						}
+					} else {
+						errMsg = fmt.Sprintf("The sender[n%v,s%v,r%v] and receiver[n%v,s%v,r%v] are not equal",
+							req.Sender.NodeID, req.Sender.StoreID, req.RangeID, r.store.nodeDesc.NodeID, r.store.StoreID(), r.RangeID)
+					}
+				}
+
+				if tsSnapshotID == 0 && needTSSnapshotData {
+					if responses != nil {
+						responses[idx] = roachpb.ResponseUnion{
+							Value: &roachpb.ResponseUnion_CreateTsSnapshot{
+								CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
+									TsSnapshotId: tsSnapshotID,
+									Msg:          errMsg,
+									Sender:       currentRepl,
+								},
+							},
+						}
+					}
+				} else {
+					state, appliedIndex, termValue, batchData, err := r.GetTSSnapshotInfo(ctx, req.RangeID, startKey)
+					if err != nil {
+						// returning err will cause the CreateTSSnapshotResponse to be stuck when
+						// creating a replica. So cannot return err.
+						// If the KV data when creating a replica fails to be obtained, the sender
+						// of CreateTsSnapshot will be notified of errMsg and the sender of tsSnapshotID
+						// will be informed so that the sender can delete the created TSSnapshot.
+						log.Warningf(ctx, "stageWriteBatch Ts GetTSSnapshotInfo err: %+v", err)
+						errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts GetTSSnapshotInfo err: %v",
+							r.NodeID(), r.StoreID(), r.RangeID, err)
+						if responses != nil {
+							responses[idx] = roachpb.ResponseUnion{
+								Value: &roachpb.ResponseUnion_CreateTsSnapshot{
+									CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
+										TsSnapshotId: tsSnapshotID,
+										Msg:          errMsg,
+										Sender:       currentRepl,
+									},
+								},
+							}
+						}
+					} else {
+						if responses != nil {
+							stateOfResp := stateInfoConversion(state)
+
+							responses[idx] = roachpb.ResponseUnion{
+								Value: &roachpb.ResponseUnion_CreateTsSnapshot{
+									CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
+										TsSnapshotId:          tsSnapshotID,
+										State:                 &stateOfResp,
+										SnapshotMetadataIndex: appliedIndex,
+										SnapshotMetadataTerm:  termValue,
+										KvBatch:               batchData,
+										Sender:                currentRepl,
+									},
+								},
+							}
+						}
+					}
+				}
+			}
+		case *roachpb.TsPutTagRequest:
+			{
+				var payload [][]byte
+				var dedupResult tse.DedupResult
+				payload = append(payload, req.Value.RawBytes)
+				if payload != nil {
+					if dedupResult, err = r.store.TsEngine.PutData(1, payload, tsTxnID); err != nil {
+						errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
+						if errRollback != nil {
+							return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
+						}
+						return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to put data")
+					}
+					if isLocal && responses != nil {
+						if req, ok := responses[idx].GetInner().(*roachpb.TsPutResponse); ok {
+							if req.DedupRule != 0 {
+								continue
+							}
+						}
+						responses[idx] = roachpb.ResponseUnion{
+							Value: &roachpb.ResponseUnion_TsPut{
+								TsPut: &roachpb.TsPutResponse{
+									ResponseHeader: roachpb.ResponseHeader{
+										NumKeys: int64(dedupResult.DedupRows),
+									},
+									DedupRule:     int64(dedupResult.DedupRule),
+									DiscardBitmap: dedupResult.DiscardBitmap,
+								},
+							},
+						}
+					}
+				}
+			}
+		case *roachpb.TsRowPutRequest:
+			{
+				var dedupResult tse.DedupResult
+				if req.Values != nil {
+					if dedupResult, err = r.store.TsEngine.PutRowData(1, req.HeaderPrefix, req.Values, req.ValueSize, tsTxnID); err != nil {
+						errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
+						if errRollback != nil {
+							return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
+						}
+						return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to put data")
+					}
+					if isLocal && responses != nil {
+						if res, ok := responses[idx].GetInner().(*roachpb.TsRowPutResponse); ok {
+							if res.DedupRule != 0 {
+								continue
+							}
+						}
+						responses[idx] = roachpb.ResponseUnion{
+							Value: &roachpb.ResponseUnion_TsRowPut{
+								TsRowPut: &roachpb.TsRowPutResponse{
+									ResponseHeader: roachpb.ResponseHeader{
+										NumKeys: int64(len(req.Values) - dedupResult.DedupRows),
+									},
+									DedupRule:     int64(dedupResult.DedupRule),
+									DiscardBitmap: dedupResult.DiscardBitmap,
+								},
+							},
+						}
+					}
+				}
+			}
+		case *roachpb.TsDeleteRequest:
+			{
+				var delCnt uint64
+				var ts1, ts2 int64
+				_, _, ts1, err = sqlbase.DecodeTsRangeKey(r.mu.state.Desc.StartKey, true)
+				if err != nil {
+					return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to get beginhash")
+				}
+				_, _, ts2, err = sqlbase.DecodeTsRangeKey(r.mu.state.Desc.EndKey, false)
+				if err != nil {
+					return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to get endhash")
+				}
+				// exclude the EndKey
+				ts2--
+				tsSpans := matchTsSpans(req.TsSpans, ts1, ts2)
+				if len(tsSpans) > 0 {
+					if delCnt, err = r.store.TsEngine.DeleteData(
+						req.TableId, rangeGroupID, req.PrimaryTags, tsSpans, tsTxnID); err != nil {
+						errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
+						if errRollback != nil {
+							return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
+						}
+						return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to delete data")
+					}
+				}
+				if isLocal && responses != nil {
+					responses[idx] = roachpb.ResponseUnion{
+						Value: &roachpb.ResponseUnion_TsDelete{
+							TsDelete: &roachpb.TsDeleteResponse{
+								ResponseHeader: roachpb.ResponseHeader{NumKeys: int64(delCnt)},
+							},
+						},
+					}
+				}
+			}
+		case *roachpb.TsDeleteEntityRequest:
+			{
+				var delCnt uint64
+				if delCnt, err = r.store.TsEngine.DeleteEntities(req.TableId, rangeGroupID, req.PrimaryTags, false, tsTxnID); err != nil {
+					errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
+					if errRollback != nil {
+						return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
+					}
+					return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to delete entity")
+				}
+				if isLocal && responses != nil {
+					responses[idx] = roachpb.ResponseUnion{
+						Value: &roachpb.ResponseUnion_TsDeleteEntity{
+							TsDeleteEntity: &roachpb.TsDeleteEntityResponse{
+								ResponseHeader: roachpb.ResponseHeader{NumKeys: int64(delCnt)},
+							},
+						},
+					}
+				}
+			}
+
+		case *roachpb.TsTagUpdateRequest:
+			{
+				tableID = req.TableId
+				tsTxnID, _ = r.store.TsEngine.MtrBegin(tableID, rangeGroupID, uint64(r.RangeID), raftAppliedIndex)
+				var pld [][]byte
+				pld = append(pld, req.Tags)
+				if err := r.store.TsEngine.PutEntity(rangeGroupID, req.TableId, pld, tsTxnID); err != nil {
+					log.Errorf(ctx, "failed update tag, err: %v", err)
+				} else {
+					if isLocal && responses != nil {
+						responses[idx] = roachpb.ResponseUnion{
+							Value: &roachpb.ResponseUnion_TsTagUpdate{
+								TsTagUpdate: &roachpb.TsTagUpdateResponse{
+									ResponseHeader: roachpb.ResponseHeader{NumKeys: 1},
+								},
+							},
+						}
+					}
+				}
+			}
+		case *roachpb.TsDeleteMultiEntitiesDataRequest:
+			{
+				var delCnt uint64
+				var beginHash, endHash uint64
+				var ts1, ts2 int64
+				tableID, beginHash, ts1, err = sqlbase.DecodeTsRangeKey(r.mu.state.Desc.StartKey, true)
+				if err != nil {
+					return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to get beginhash")
+				}
+				_, endHash, ts2, err = sqlbase.DecodeTsRangeKey(r.mu.state.Desc.EndKey, false)
+				if err != nil {
+					return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to get endhash")
+				}
+				var tsSpans []*roachpb.TsSpan
+				if beginHash == endHash {
+					// exclude the EndKey
+					ts2--
+					// the hashPoint may be split, filter the ts spans
+					tsSpans = matchTsSpans(req.TsSpans, ts1, ts2)
+				} else {
+					tsSpans = req.TsSpans
+				}
+				if len(tsSpans) > 0 {
+					if delCnt, err = r.store.TsEngine.DeleteRangeData(req.TableId, uint64(1), beginHash, endHash, tsSpans, tsTxnID); err != nil {
+						errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
+						if errRollback != nil {
+							return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
+						}
+						return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to delete MultiEntities")
+					}
+				}
+				if isLocal && responses != nil {
+					responses[idx] = roachpb.ResponseUnion{
+						Value: &roachpb.ResponseUnion_TsDeleteMultiEntitiesData{
+							TsDeleteMultiEntitiesData: &roachpb.TsDeleteMultiEntitiesDataResponse{
+								ResponseHeader: roachpb.ResponseHeader{NumKeys: int64(delCnt)},
+							},
+						},
+					}
+				}
+			}
+		case *roachpb.ClearRangeRequest:
+			if err = r.store.TsEngine.DropTsTable(req.TableId); err != nil {
+				log.Errorf(ctx, "drop table %v failed: %v", req.TableId, err.Error())
+				err = nil
+			} else {
+				log.Infof(ctx, "drop table %v succeed", req.TableId)
+			}
+		}
+	}
+	return
 }
 
 // changeRemovesStore returns true if any of the removals in this change have storeID.
@@ -1266,16 +1277,27 @@ func (b *replicaAppBatch) ApplyToStateMachine(ctx context.Context) error {
 	if err := b.batch.Commit(sync); err != nil {
 		return wrapWithNonDeterministicFailure(err, "unable to commit Raft entry batch")
 	}
+	desc := b.state.Desc
+	if desc.GetRangeType() == roachpb.TS_RANGE && b.changeRemovesReplica && r.store.TsEngine != nil && desc.TableId != 0 {
+		exist, _ := r.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
+		log.VEventf(ctx, 3, "TsEngine.TSIsTsTableExist r%v, %v, %v", desc.RangeID, desc.TableId, exist)
+		if exist {
+			tableID, beginHash, endHash, startTs, endTs, err := sqlbase.DecodeTSRangeKey(desc.StartKey, desc.EndKey)
+			if err != nil {
+				log.Errorf(ctx, "DecodeTSRangeKey failed: %v", err)
+			} else {
+				err = r.store.TsEngine.DeleteReplicaTSData(tableID, beginHash, endHash, startTs, endTs)
+				log.VEventf(ctx, 3, "TsEngine.DeleteReplicaTSData %v, r%v, %v, %v, %v, %v, %v, %v", b.r.store.StoreID(), desc.RangeID, tableID, beginHash, endHash, startTs, endTs, err)
+				if err != nil {
+					log.Errorf(ctx, "DeleteReplicaTSData failed", err)
+				}
+			}
+		}
+	}
 	if b.TSTxnID != 0 {
 		err := b.r.store.TsEngine.MtrCommit(b.tableID, b.rangeGroupID, b.TSTxnID)
 		if err != nil {
-			// todo(xy): temp commit, need to replace the final solution(fyx)
-			rangeGroups, _ := b.r.store.TsEngine.GetRangeGroups(uint32(b.tableID))
-			for _, rangeGroup := range rangeGroups {
-				if rangeGroup.RangeGroupID == api.EntityRangeGroupID(b.rangeGroupID) {
-					return wrapWithNonDeterministicFailure(err, "unable to commit mini-transaction")
-				}
-			}
+			return wrapWithNonDeterministicFailure(err, "unable to commit mini-transaction")
 		}
 	}
 	b.batch.Close()
@@ -1491,7 +1513,18 @@ func (sm *replicaStateMachine) ApplySideEffects(
 		rejected := cmd.Rejected()
 		higherReproposalsExist := cmd.raftCmd.MaxLeaseIndex != cmd.proposal.command.MaxLeaseIndex
 		if !rejected && higherReproposalsExist {
-			log.Fatalf(ctx, "finishing proposal with outstanding reproposal at a higher max lease index")
+			var reqs roachpb.BatchRequest
+			if err := protoutil.Unmarshal(cmd.ent.Request, &reqs); err == nil {
+				if len(reqs.Requests) == 0 {
+					log.Infof(ctx, "higherReproposalsExist in empty request")
+				} else {
+					switch req := reqs.Requests[0].GetInner().(type) {
+					default:
+						log.Infof(ctx, "higherReproposalsExist in %+v, r%d, table%d", req, sm.r.RangeID, sm.r.Desc().TableId)
+					}
+				}
+			}
+			log.Fatalf(ctx, "finishing proposal with outstanding reproposal at a higher max lease index, %d-%d", cmd.raftCmd.MaxLeaseIndex, cmd.proposal.command.MaxLeaseIndex)
 		}
 		if !rejected && cmd.proposal.applied {
 			// If the command already applied then we shouldn't be "finishing" its

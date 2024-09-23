@@ -63,6 +63,8 @@ class LoggedTsEntityGroup : public TsEntityGroup {
   KStatus PutData(kwdbContext_p ctx, TSSlice payload_data, TS_LSN mini_trans_id,
                   DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE) override;
 
+  KStatus PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
+                                     DedupResult* dedup_result, DedupRule dedup_rule);
   /**
    * PutData writes the Tag value and time series data to the entity
    *
@@ -125,6 +127,21 @@ class LoggedTsEntityGroup : public TsEntityGroup {
     * @return KStatus
     */
   KStatus CreateCheckpoint(kwdbContext_p ctx)  override;
+
+  /**
+    * @brief Start snapshot transaction of the current EntityGroup.
+    *
+    * @return KStatus
+    */
+  KStatus BeginSnapshotMtr(kwdbContext_p ctx, uint64_t range_id, uint64_t index,
+                           const SnapshotRange& range, uint64_t &mtr_id);
+
+  /**
+    * @brief write temp directory info to WAL log.
+    *
+    * @return KStatus
+    */
+  KStatus WriteTempDirectoryLog(kwdbContext_p ctx, uint64_t mtr_id, std::string path);
 
   /**
     * @brief Start the log recovery operation of the current EntityGroup.

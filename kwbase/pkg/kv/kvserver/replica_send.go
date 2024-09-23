@@ -26,7 +26,6 @@ package kvserver
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/batcheval"
@@ -46,7 +45,13 @@ import (
 func (r *Replica) isTsRequest(ctx context.Context, ba *roachpb.BatchRequest) bool {
 	for _, union := range ba.Requests {
 		switch union.GetInner().(type) {
-		case *roachpb.TsPutRequest, *roachpb.TsDeleteRequest, *roachpb.TsDeleteEntityRequest, *roachpb.TsTagUpdateRequest, *roachpb.CreateTSSnapshotRequest, *roachpb.TsDeleteMultiEntitiesDataRequest:
+		case *roachpb.TsPutTagRequest,
+			*roachpb.TsRowPutRequest,
+			*roachpb.TsDeleteRequest,
+			*roachpb.TsDeleteEntityRequest,
+			*roachpb.TsTagUpdateRequest,
+			*roachpb.CreateTSSnapshotRequest,
+			*roachpb.TsDeleteMultiEntitiesDataRequest:
 			return true
 		}
 	}
@@ -59,18 +64,9 @@ func (r *Replica) isTsRequest(ctx context.Context, ba *roachpb.BatchRequest) boo
 func (r *Replica) Send(
 	ctx context.Context, ba roachpb.BatchRequest,
 ) (*roachpb.BatchResponse, *roachpb.Error) {
-	// The copy type is checked against the request type. If they do
-	// not match, the process will not continue.
-	if !r.isTs() && r.isTsRequest(ctx, &ba) {
-		extraMsg := fmt.Sprintf(
-			"[n%v,s%v]r%v: DEFAULT_REPLICA should not receive TS request", r.NodeID(), r.StoreID(), r.RangeID)
-		return nil, roachpb.NewError(&roachpb.DefaultReplicaReceiveTSRequestError{
-			Key:      roachpb.Key(r.startKey()),
-			ExtraMsg: extraMsg,
-		})
-	}
 	// TsRequest processing logic
 	if r.isTsRequest(ctx, &ba) {
+		log.VEventf(ctx, 3, "replica : +%v", r)
 		return r.sendTS(ctx, &ba)
 	}
 	return r.sendWithRangeID(ctx, r.RangeID, &ba)
@@ -773,15 +769,9 @@ func (r *Replica) executeAdminBatch(
 	}
 
 	// Admin commands always require the range lease.
-	var status storagepb.LeaseStatus
-	var pErr *roachpb.Error
-	// AdminRequestLeaseForTS does not perform a lease check
-	if args.Method() != roachpb.AdminRequestLeaseForTS {
-		status, pErr = r.redirectOnOrAcquireLease(ctx)
-		if pErr != nil {
-			log.Errorf(ctx, "current request is %s, %s notLeaseHolder error", args.Method(), pErr)
-			return nil, pErr
-		}
+	status, pErr := r.redirectOnOrAcquireLease(ctx)
+	if pErr != nil {
+		return nil, pErr
 	}
 	// Note there is no need to limit transaction max timestamp on admin requests.
 	// Verify that the batch can be executed.
@@ -820,30 +810,9 @@ func (r *Replica) executeAdminBatch(
 		}
 		resp = &roachpb.AdminTransferLeaseResponse{}
 
-	case *roachpb.AdminTransferPartitionLeaseRequest:
-		pErr = roachpb.NewError(r.AdminTransferLease(ctx, tArgs.Target))
-		if pErr == nil {
-			log.Infof(ctx, "transfer lease to %s success", tArgs.Target)
-		}
-		resp = &roachpb.AdminTransferLeaseResponse{}
-
-	case *roachpb.AdminRequestLeaseForTSRequest:
-		pErr = roachpb.NewError(r.AdminRequestLease(ctx, tArgs.Target))
-		if pErr == nil {
-			log.Infof(ctx, "transfer lease to %s success", tArgs.Target)
-		}
-		resp = &roachpb.AdminRequestLeaseForTSResponse{}
-
 	case *roachpb.AdminChangeReplicasRequest:
-		log.Infof(ctx, "executeAdminBatch AdminChangeReplicasRequest change:%s.", tArgs.Changes())
 		chgs := tArgs.Changes()
-		needTsSnapshotData := tArgs.NeedTsSnapshotData
-
-		details := ""
-		if needTsSnapshotData {
-			details = NeedTsSnapshotData
-		}
-		desc, err := r.ChangeReplicas(ctx, &tArgs.ExpDesc, SnapshotRequest_REBALANCE, storagepb.ReasonAdminRequest, details, chgs)
+		desc, err := r.ChangeReplicas(ctx, &tArgs.ExpDesc, SnapshotRequest_REBALANCE, storagepb.ReasonAdminRequest, "", chgs)
 		pErr = roachpb.NewError(err)
 		if pErr != nil {
 			resp = &roachpb.AdminChangeReplicasResponse{}
@@ -852,48 +821,12 @@ func (r *Replica) executeAdminBatch(
 				Desc: *desc,
 			}
 		}
-		log.Infof(ctx, "executeAdminBatch AdminChangeReplicasRequest end of process, error:%s.", pErr)
-
-	case *roachpb.AdminChangePartitionReplicasRequest:
-		log.Infof(ctx, "executeAdminBatch AdminChangePartitionReplicasRequest change:%s.", tArgs.Changes())
-		chgs := tArgs.Changes()
-		desc, err := r.ChangeReplicas(ctx, r.Desc(), SnapshotRequest_REBALANCE, storagepb.ReasonAdminRequest, NeedTsSnapshotData, chgs)
-		pErr = roachpb.NewError(err)
-		if pErr != nil {
-			resp = &roachpb.AdminChangeReplicasResponse{}
-		} else {
-			resp = &roachpb.AdminChangeReplicasResponse{
-				Desc: *desc,
-			}
-		}
-		log.Infof(ctx, "executeAdminBatch AdminChangePartitionReplicasRequest end of process, error:%s.", pErr)
 
 	case *roachpb.AdminRelocateRangeRequest:
-		log.Infof(ctx, "executeAdminBatch AdminRelocateRangeRequest(expect %v)", tArgs.Targets)
-
-		// When creating a TSTable, the upper layer will send this request.
-		// During this time, there is no need to call CreateTSSnapshot to create
-		// snapshot data.
-		err := r.AdminRelocateForRange(ctx, tArgs.Targets, false)
+		err := r.store.AdminRelocateRange(ctx, *r.Desc(), tArgs.Targets)
 		pErr = roachpb.NewError(err)
 		resp = &roachpb.AdminRelocateRangeResponse{}
 
-		log.Infof(ctx, "executeAdminBatch AdminRelocateRangeRequest (expect %v), end of process, error:%s.", tArgs.Targets, pErr)
-	case *roachpb.AdminRelocatePartitionRequest:
-		log.Infof(ctx, "executeAdminBatch AdminRelocatePartitionRequest (expect %v)", tArgs.Targets)
-
-		// tArgs.UselessRange: true, indicating that time series snapshot
-		// data is not required; false, indicating that time series snapshot
-		// data is required
-		needTsSnapshotData := true
-		if tArgs.UselessRange {
-			needTsSnapshotData = false
-		}
-		err := r.AdminRelocateForRange(ctx, tArgs.Targets, needTsSnapshotData)
-		pErr = roachpb.NewError(err)
-		resp = &roachpb.AdminRelocateRangeResponse{}
-
-		log.Infof(ctx, "executeAdminBatch AdminRelocatePartitionRequest (expect %v), end of process, error:%s.", tArgs.Targets, pErr)
 	case *roachpb.CheckConsistencyRequest:
 		var reply roachpb.CheckConsistencyResponse
 		reply, pErr = r.CheckConsistency(ctx, *tArgs)
@@ -963,7 +896,8 @@ func (r *Replica) checkBatchRequest(ba *roachpb.BatchRequest, isReadOnly bool) e
 		}
 	} else if !consistent {
 		switch ba.Requests[0].GetInner().(type) {
-		case *roachpb.TsPutRequest,
+		case *roachpb.TsPutTagRequest,
+			*roachpb.TsRowPutRequest,
 			*roachpb.TsDeleteRequest,
 			*roachpb.TsDeleteEntityRequest,
 			*roachpb.TsDeleteMultiEntitiesDataRequest,

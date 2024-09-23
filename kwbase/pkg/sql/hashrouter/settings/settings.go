@@ -23,12 +23,7 @@
 
 package settings
 
-import (
-	"time"
-
-	"gitee.com/kwbasedb/kwbase/pkg/settings"
-	"github.com/cockroachdb/errors"
-)
+import "gitee.com/kwbasedb/kwbase/pkg/settings"
 
 // DefaultPartitionCoefficient is the balance of partition_coefficient_num
 var DefaultPartitionCoefficient = settings.RegisterIntSetting(
@@ -44,26 +39,6 @@ var DefaultEntityRangeReplicaNum = settings.RegisterIntSetting(
 	3,
 )
 
-// HaLivenessCheckInterval is the ha liveness check interval.
-var HaLivenessCheckInterval = settings.RegisterValidatedDurationSetting(
-	"server.distribute.ha_check_interval",
-	"node liveness ha check interval",
-	4*time.Second,
-	func(d time.Duration) error {
-		if d < 4*time.Second || d > 30*time.Second {
-			return errors.New("ha check interval must be >= 4 seconds and <= 30 seconds")
-		}
-		return nil
-	},
-)
-
-// GroupChangesProcesses is the number of concurrent group changes processes
-var GroupChangesProcesses = settings.RegisterIntSetting(
-	"sql.hashrouter.group_changes_processes",
-	"the number of concurrent group changes processes",
-	3,
-)
-
 // AllowAdvanceDistributeSettingName is the name of cluster setting server.allow_advanced_distributed_operations
 const AllowAdvanceDistributeSettingName = "server.advanced_distributed_operations.enabled"
 
@@ -73,4 +48,22 @@ var AllowAdvanceDistributeSetting = settings.RegisterBoolSetting(
 	AllowAdvanceDistributeSettingName,
 	"if set true, distributed function operations are allowed, including joining new node, node decommission, node death, and manual balancing",
 	false,
+)
+
+// AlterTagEnabled determines whether allow to alter tag in multi-replica mode.
+var AlterTagEnabled = settings.RegisterBoolSetting(
+	"sql.alter_tag.enabled",
+	"if enabled, alter tag is allowed in multi-replica mode",
+	true,
+)
+
+// TSRangeSplitModeName is the name of cluster setting server.ts_range_split_mod
+const TSRangeSplitModeName = "server.ts_range_split_mode"
+
+// TSRangeSplitModeSetting if set 0, ts range split only with hash_id,
+// if set 1 ,ts range split with hash_id and timestamp
+var TSRangeSplitModeSetting = settings.RegisterIntSetting(
+	TSRangeSplitModeName,
+	"if set 0, ts range split only with hash_id,if set 1 ,ts range split with hash_id and timestamp",
+	0,
 )

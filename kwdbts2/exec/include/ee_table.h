@@ -17,6 +17,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 #include "ee_encoding.h"
 #include "ee_global.h"
@@ -104,6 +105,8 @@ class TABLE {
   std::vector<k_uint32> scan_tags_;
   std::vector<Sumfunctype> scan_agg_types_;
   std::vector<Sumfunctype> scan_real_agg_types_;
+  std::vector<uint32_t> hash_points_;
+  std::unordered_map<uint32_t, std::vector<KwTsSpan>> hash_points_spans_;
   std::vector<k_int64>
       scan_last_ts_points_;  // scan_last_ts_points_ and scan_real_agg_types_
                              // remain align

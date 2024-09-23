@@ -186,8 +186,11 @@ func (rq *raftSnapshotQueue) processRaftSnapshot(
 		// The data volume of the current copy is much different from that of the leased
 		// copy, and it is necessary to quickly supplement the data by sending snapshots.
 		// In this case, needTSSnapshotData should be true.
-		isExist, _ := repl.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
-		err = repl.sendTSSnapshot(ctx, repDesc, snapType, SnapshotRequest_RECOVERY, isExist)
+		exist := false
+		if repl.store.TsEngine != nil && desc.TableId != 0 {
+			exist, _ = repl.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
+		}
+		err = repl.sendTSSnapshot(ctx, repDesc, snapType, SnapshotRequest_RECOVERY, exist)
 	} else if desc.GetRangeType() == roachpb.DEFAULT_RANGE {
 		err = repl.sendSnapshot(ctx, repDesc, snapType, SnapshotRequest_RECOVERY)
 	}

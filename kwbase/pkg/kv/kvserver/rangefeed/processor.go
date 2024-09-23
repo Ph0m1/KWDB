@@ -654,7 +654,6 @@ func (p *Processor) consumeLogicalOps(ctx context.Context, ops []enginepb.MVCCLo
 			// Publish the new value directly.
 			txnID := uuid.MakeV4()
 			p.publishValue(ctx, txnID, t.Key, t.Timestamp, t.Value, t.PrevValue, true)
-			log.VEventf(ctx, 3, "xxxx sendevt MVCCWriteValueOp %s, %s", txnID, roachpb.KeyValue{Key: t.Key}.Key.String())
 		case *enginepb.MVCCWriteIntentOp:
 			// No updates to publish.
 			if !isSystemMetaKey(t.Key) {
@@ -663,7 +662,6 @@ func (p *Processor) consumeLogicalOps(ctx context.Context, ops []enginepb.MVCCLo
 						t.Value = []byte{}
 					}
 					p.publishValue(ctx, t.TxnID, t.Key, t.Timestamp, t.Value, nil, false)
-					log.VEventf(ctx, 3, "xxxx sendevt MVCCWriteIntentOp %s, %s, %s", t.TxnID, roachpb.KeyValue{Key: t.Key}.Key.String(), t.Timestamp)
 				}
 			}
 		case *enginepb.MVCCUpdateIntentOp:
@@ -674,13 +672,11 @@ func (p *Processor) consumeLogicalOps(ctx context.Context, ops []enginepb.MVCCLo
 						t.Value = []byte{}
 					}
 					p.publishValue(ctx, t.TxnID, t.Key, t.Timestamp, t.Value, nil, false)
-					log.VEventf(ctx, 3, "xxxx sendevt MVCCUpdateIntentOp %s, %s, %s", t.TxnID, roachpb.KeyValue{Key: t.Key}.Key.String(), t.Timestamp)
 				}
 			}
 		case *enginepb.MVCCCommitIntentOp:
 			// Publish write intent here.No updates to publish.
 			if isSystemMetaKey(t.Key) {
-				log.VEventf(ctx, 3, "xxxx sendevt MVCCCommitIntentOp %s, %s, %s", t.TxnID, roachpb.KeyValue{Key: t.Key}.Key.String(), t.Timestamp)
 				p.publishValue(ctx, t.TxnID, t.Key, t.Timestamp, t.Value, nil, false)
 			}
 		case *enginepb.MVCCAbortIntentOp:
@@ -690,11 +686,9 @@ func (p *Processor) consumeLogicalOps(ctx context.Context, ops []enginepb.MVCCLo
 		case *enginepb.MVCCCommitTxnOp:
 			//if t.WriteKeyCount != 0 {}
 			p.publishCommitTxn(t.TxnID, t.Timestamp, t.WriteKeyCount)
-			log.VEventf(ctx, 3, "xxxx sendevt MVCCCommitTxnOp %s, %d", t.TxnID, t.WriteKeyCount)
 		case *enginepb.MVCCAbortOp:
 			//if t.WriteKeyCount != 0 {}
 			p.publishAbort(t.TxnID, t.WriteKeyCount)
-			log.VEventf(ctx, 3, "xxxx sendevt MVCCAbortOp %s, %d", t.TxnID, t.WriteKeyCount)
 		default:
 			panic(fmt.Sprintf("unknown logical op %T", t))
 		}

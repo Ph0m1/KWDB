@@ -29,7 +29,6 @@ import (
 	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -60,10 +59,6 @@ type createDatabaseNode struct {
 //	       mysql uses the mysqladmin command.
 func (p *planner) CreateDatabase(ctx context.Context, n *tree.CreateDatabase) (planNode, error) {
 	if n.EngineType == tree.EngineTypeTimeseries {
-		_, err := api.GetAvailableNodeIDs(ctx)
-		if err != nil {
-			return nil, err
-		}
 		// check the validity of name.
 		if sqlbase.ContainsNonAlphaNumSymbol(n.Name.String()) {
 			return nil, sqlbase.NewTSNameInvalidError(n.Name.String())

@@ -9,9 +9,9 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
-#include <memory>
-#include <gtest/gtest.h>
 #include "row_sampling.h"
+#include <gtest/gtest.h>
+#include <memory>
 
 namespace kwdbts {
 

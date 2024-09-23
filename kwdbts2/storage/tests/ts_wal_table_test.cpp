@@ -1178,8 +1178,10 @@ TEST_F(TestTSWALTable, putEntityRecover) {
   // tagiterator
   std::vector<EntityResultIndex> entity_id_list;
   std::vector<k_uint32> scan_tags = {1, 2};
+  std::vector<k_uint32> hps;
+  make_hashpoint(&hps);
   TagIterator *iter;
-  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags, &iter, 1), KStatus::SUCCESS);
+  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags,hps, &iter, 1), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_tags.size()};
   k_uint64 ptag = 0;
@@ -1240,7 +1242,9 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   std::vector<EntityResultIndex> entity_id_list;
   std::vector<k_uint32> scan_tags = {1, 2};
   TagIterator *iter;
-  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags, &iter, 1), KStatus::SUCCESS);
+  std::vector<k_uint32> hps;
+  make_hashpoint(&hps);
+  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags, hps,&iter, 1), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_tags.size()};
   k_uint64 ptag = 0;
@@ -1291,7 +1295,8 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   count = 0;
   TagIterator *iter1;
   ResultSet res1{(k_uint32) scan_tags.size()};
-  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags, &iter1, 1), KStatus::SUCCESS);
+  // std::vector<k_uint32> hps = {0,1,2,3,4,5,6,7,8,9};
+  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags,hps, &iter1, 1), KStatus::SUCCESS);
   ASSERT_EQ(iter1->Next(&entity_id_list, &res1, &count), KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
   for (int tagidx = 0; tagidx < scan_tags.size(); tagidx++) {
@@ -1318,7 +1323,8 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
   TagIterator *iter2;
   ResultSet res2{(k_uint32) scan_tags.size()};
-  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags, &iter2, 1), KStatus::SUCCESS);
+  // std::vector<k_uint32> hps = {0,1,2,3,4,5,6,7,8,9};
+  ASSERT_EQ(table_->GetTagIterator(ctx_, scan_tags,hps, &iter2, 1), KStatus::SUCCESS);
   ASSERT_EQ(iter2->Next(&entity_id_list, &res2, &count), KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
   for (int tagidx = 0; tagidx < scan_tags.size(); tagidx++) {

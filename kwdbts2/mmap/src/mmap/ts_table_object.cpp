@@ -51,16 +51,16 @@ void RecordHelper::setHelper(const vector<AttributeInfo> &attr_info, bool is_int
   }
 }
 
-int TsTableObject::open(const string& file_path, const std::string& db_path, const string& tbl_sub_path, int cc,
+int TsTableObject::open(const string& table_path, const std::string& db_path, const string& tbl_sub_path, int cc,
                         int flags) {
   db_path_ = db_path;
   tbl_sub_path_ = tbl_sub_path;
-  int error_code = bt_file_.open(file_path, db_path_ + tbl_sub_path_ + file_path, flags);
+  int error_code = bt_file_.open(table_path, db_path_ + tbl_sub_path_ + table_path, flags);
   if (error_code < 0) {
     return error_code;
   }
   if (bt_file_.fileLen() >= (off_t) sizeof(TSTableFileMetadata)) {
-    cols_info_with_hidden_.clear();
+    cols_info_include_dropped_.clear();
     // initialize all pointers first
     initSection();
     if (meta_data_->magic != cc) {
@@ -68,17 +68,17 @@ int TsTableObject::open(const string& file_path, const std::string& db_path, con
     }
 
     error_code = getColumnInfo(meta_data_->attribute_offset,
-                               meta_data_->cols_num, cols_info_with_hidden_);
+                               meta_data_->cols_num, cols_info_include_dropped_);
     if (error_code < 0) {
       return error_code;
     }
 
-    cols_info_without_hidden_.clear();
-    cols_idx_.clear();
-    for (int i = 0; i < cols_info_with_hidden_.size(); ++i) {
-      if(!cols_info_with_hidden_[i].isFlag(AINFO_DROPPED)) {
-        cols_info_without_hidden_.emplace_back(cols_info_with_hidden_[i]);
-        cols_idx_.emplace_back(i);
+    cols_info_exclude_dropped_.clear();
+    idx_for_valid_cols_.clear();
+    for (int i = 0; i < cols_info_include_dropped_.size(); ++i) {
+      if(!cols_info_include_dropped_[i].isFlag(AINFO_DROPPED)) {
+        cols_info_exclude_dropped_.emplace_back(cols_info_include_dropped_[i]);
+        idx_for_valid_cols_.emplace_back(i);
       }
     }
 
@@ -89,7 +89,7 @@ int TsTableObject::open(const string& file_path, const std::string& db_path, con
   if (meta_data_length_ == 0)
     meta_data_length_ = bt_file_.fileLen();
 
-  obj_name_ = getURLObjectName(bt_file_.filePath());
+  obj_name_ = getTsObjectName(bt_file_.filePath());
 
   return 0;
 }
@@ -167,13 +167,13 @@ off_t TsTableObject::addColumnInfo(const vector<AttributeInfo>& attr_info,
 }
 
 const vector<AttributeInfo>& TsTableObject::colsInfoWithHidden() const {
-  return cols_info_with_hidden_;
+  return cols_info_include_dropped_;
 }
 
 int TsTableObject::getColumnIndex(const AttributeInfo& attr_info) {
   int col_no = -1;
-  for (int i = 0; i < cols_info_with_hidden_.size(); ++i) {
-    if ((cols_info_with_hidden_[i].id == attr_info.id) && (!cols_info_with_hidden_[i].isFlag(AINFO_DROPPED))) {
+  for (int i = 0; i < cols_info_include_dropped_.size(); ++i) {
+    if ((cols_info_include_dropped_[i].id == attr_info.id) && (!cols_info_include_dropped_[i].isFlag(AINFO_DROPPED))) {
       col_no = i;
       break;
     }
@@ -183,8 +183,8 @@ int TsTableObject::getColumnIndex(const AttributeInfo& attr_info) {
 
 int TsTableObject::getColumnIndex(const uint32_t& col_id) {
   int col_no = -1;
-  for (int i = 0; i < cols_info_with_hidden_.size(); ++i) {
-    if (cols_info_with_hidden_[i].id == col_id) {
+  for (int i = 0; i < cols_info_include_dropped_.size(); ++i) {
+    if (cols_info_include_dropped_[i].id == col_id) {
       col_no = i;
       break;
     }

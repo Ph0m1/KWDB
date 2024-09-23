@@ -265,6 +265,9 @@ func (dir IndexDescriptor_Direction) ToEncodingDirection() (encoding.Direction, 
 // descriptor could not be found with the given id.
 var ErrDescriptorNotFound = errors.New("descriptor not found")
 
+// ErrNodeUnhealthy is returned when the cluster has node is unhealthy.
+var ErrNodeUnhealthy = errors.New("the cluster has node unhealthy")
+
 // ErrIndexGCMutationsList is returned by FindIndexByID to signal that the
 // index with the given ID does not have a descriptor and is in the garbage
 // collected mutations list.
@@ -2638,19 +2641,31 @@ func (desc *TableDescriptor) FindActiveColumnsByNames(
 // an active column or a column from the mutation list. It returns true
 // if the column is being dropped.
 func (desc *TableDescriptor) FindColumnByName(name tree.Name) (*ColumnDescriptor, bool, error) {
-	for i := range desc.Columns {
-		c := &desc.Columns[i]
-		if c.Name == string(name) {
-			return c, false, nil
-		}
-	}
+	var col, mutationCol *ColumnDescriptor
+	IsDropped := false
+	// For a time-series table, need to check Mutations and Columns.
 	for i := range desc.Mutations {
 		m := &desc.Mutations[i]
 		if c := m.GetColumn(); c != nil {
 			if c.Name == string(name) {
-				return c, m.Direction == DescriptorMutation_DROP, nil
+				mutationCol = c
+				IsDropped = m.Direction == DescriptorMutation_DROP
+				break
 			}
 		}
+	}
+
+	for i := range desc.Columns {
+		c := &desc.Columns[i]
+		if c.Name == string(name) {
+			col = c
+			break
+		}
+	}
+	if col != nil {
+		return col, IsDropped, nil
+	} else if mutationCol != nil {
+		return mutationCol, IsDropped, nil
 	}
 	return nil, false, NewUndefinedColumnError(string(name))
 }
@@ -4466,6 +4481,15 @@ type SinglePayloadInfo struct {
 	RowNum uint32
 	// PrimaryTagKey primary tag key
 	PrimaryTagKey []byte
+	// RowBytes is the row-coded value of all data column values.
+	// It is only used in distributed mode
+	RowBytes [][]byte
+	// RowTimestamps is the value of ts column values.
+	// It is only used in distributed mode.
+	RowTimestamps []int64
+	StartKey      []byte
+	EndKey        []byte
+	ValueSize     int32
 }
 
 // Count counts the row numbers in p.RowNums.

@@ -3152,10 +3152,11 @@ type EvalContext struct {
 	HintModelTiDB bool
 	HintStmtEmbed bool
 	// IsWLICollect indicates whether to collect behavioral data for the logical plan section
-	IsWLICollect    bool
-	HintID          int64
-	HintReoptimize  bool
-	StartSinglenode bool
+	IsWLICollect        bool
+	HintID              int64
+	HintReoptimize      bool
+	StartSinglenode     bool
+	StartDistributeMode bool
 }
 
 // MakeTestingEvalContext returns an EvalContext that includes a MemoryMonitor.

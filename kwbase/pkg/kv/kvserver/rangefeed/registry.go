@@ -526,8 +526,6 @@ func (reg *registry) NewFilter() *Filter {
 func (reg *registry) Register(r *registration) {
 	r.id = reg.nextID()
 	r.keys = r.span.AsRange()
-	log.VEventf(context.Background(), 3, "xxxx add span1 %s - %s", roachpb.KeyValue{Key: r.span.Key}.Key.String(), roachpb.KeyValue{Key: r.span.EndKey}.Key.String())
-
 	if err := reg.tree.Insert(r, false /* fast */); err != nil {
 		panic(err)
 	}
@@ -572,8 +570,6 @@ func (reg *registry) PublishToOverlapping(span roachpb.Span, event *roachpb.Rang
 // registration has already been disconnected, this is intended only to clean
 // up the registry.
 func (reg *registry) Unregister(r *registration) {
-	log.VEventf(context.Background(), 3, "xxxx delete span2 %s - %s", roachpb.KeyValue{Key: r.span.Key}.Key.String(), roachpb.KeyValue{Key: r.span.EndKey}.Key.String())
-
 	if err := reg.tree.Delete(r, false /* fast */); err != nil {
 		panic(err)
 	}
@@ -588,8 +584,6 @@ func (reg *registry) Disconnect(span roachpb.Span) {
 // DisconnectWithErr disconnects all registrations that overlap the specified
 // span with the provided error.
 func (reg *registry) DisconnectWithErr(span roachpb.Span, pErr *roachpb.Error) {
-	log.VEventf(context.Background(), 3, "xxxx reg len %d", reg.Len())
-
 	reg.GetAll()
 	reg.forOverlappingRegs(span, func(_ *registration) (bool, *roachpb.Error) {
 		return true, pErr
@@ -612,7 +606,6 @@ func (reg *registry) forOverlappingRegs(
 		dis, pErr := fn(r)
 		if dis {
 			r.disconnect(pErr)
-			log.VEventf(context.Background(), 3, "xxxx delete span1 %s - %s", roachpb.KeyValue{Key: r.span.Key}.Key.String(), roachpb.KeyValue{Key: r.span.EndKey}.Key.String())
 			toDelete = append(toDelete, i)
 		}
 		return false

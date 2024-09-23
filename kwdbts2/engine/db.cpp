@@ -55,6 +55,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
   } else {
     opts.wal_level = options.wal_level;
   }
+  opts.is_single_node = options.is_single_node;
   opts.wal_buffer_size = options.wal_buffer_size;
   opts.wal_file_size = options.wal_file_size;
   opts.wal_file_in_group = options.wal_file_in_group;
@@ -116,9 +117,11 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
     return ToTsStatus("OpenTSEngine Internal Error!");
   }
   *engine = ts_engine;
-  g_db_threads = std::thread([ts_engine](){
-    ts_engine->SettingChangedSensor();
-  });
+  if (options.start_vacuum) {
+    g_db_threads = std::thread([ts_engine](){
+      ts_engine->SettingChangedSensor();
+    });
+  }
   g_engine_initialized = true;
   return kTsSuccess;
 }
@@ -281,7 +284,13 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts)
     return ToTsStatus("InitServerKWDBContext Error!");
   }
   LOG_INFO("compress table[%lu] start, end_ts: %lu", table_id, ts);
-  s = engine->CompressTsTable(ctx_p, table_id, ts);
+  std::shared_ptr<TsTable> table;
+  s = engine->GetTsTable(ctx_p, table_id, table);
+  if (s != KStatus::SUCCESS) {
+    LOG_INFO("The current node does not have the table[%lu], skip compress", table_id);
+    return kTsSuccess;
+  }
+  s = table->Compress(ctx_p, ts);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("CompressTsTable Error!");
@@ -325,8 +334,12 @@ TSStatus TSPutData(TSEngine* engine, TSTableID table_id, TSSlice* payload, size_
   }
   // Parsing table_id from payload
   TSTableID tmp_table_id = *reinterpret_cast<uint64_t*>(payload[0].data + Payload::table_id_offset_);
+  // hash_point_id_offset_=16 , hash_point_id_size_=2
+  // uint16_t hash_point;
+  // memcpy(&hash_point, payload[0].data+Payload::hash_point_id_offset_, Payload::hash_point_id_size_);
+  // LOG_ERROR("TSPUT DATA HASH POINT = %d", hash_point);
   // Parse range_group_id from payload
-  uint64_t tmp_range_group_id = *reinterpret_cast<uint16_t*>(payload[0].data + Payload::range_group_id_offset_);
+  uint64_t tmp_range_group_id = 1;
   s = engine->PutData(ctx_p, tmp_table_id, tmp_range_group_id, payload, payload_num, mtr_id, dedup_result);
   if (s != KStatus::SUCCESS) {
     std::ostringstream ss;
@@ -652,7 +665,7 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     g_compression.compression_level = level;
   }
 #ifndef KWBASE_OSS
-  else if ("ts.storage.autonomy.mode" == key) { //NOLINT
+  else if ("ts.storage.autonomy.mode" == key) {  // NOLINT
     if ("auto" == value) {
       CLUSTER_SETTING_STORAGE_AUTONOMY_ENABLE = true;
     } else if ("manual" == value) {
@@ -662,7 +675,7 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     CLUSTER_SETTING_ENTITIES_PER_SUBGROUP_GROWTH = atof(value.c_str());
   }
 #endif
-  else { //NOLINT
+  else {  // NOLINT
     LOG_INFO("Cluster setting %s has no callback function.", key.c_str());
   }
 }
@@ -713,7 +726,8 @@ TSStatus TSDeleteExpiredData(TSEngine* engine, TSTableID table_id, KTimestamp en
   std::shared_ptr<TsTable> ts_tb;
   s = engine->GetTsTable(ctx_p, table_id, ts_tb);
   if (s != KStatus::SUCCESS) {
-    return ToTsStatus("GetTsTable Error!");
+    LOG_INFO("The current node does not have the table[%lu], skip delete expired data", table_id);
+    return kTsSuccess;
   }
   LOG_INFO("table[%lu] delete expired data start, expired data end time[%ld]", table_id, end_ts);
   // May be data that has expired but not deleted, so we don't care about start,
@@ -727,8 +741,184 @@ TSStatus TSDeleteExpiredData(TSEngine* engine, TSTableID table_id, KTimestamp en
   return kTsSuccess;
 }
 
-TSStatus TSCreateSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_group_id,
-                          uint64_t begin_hash, uint64_t end_hash, uint64_t* snapshot_id) {
+TSStatus TSGetAvgTableRowSize(TSEngine* engine, TSTableID table_id, uint64_t* row_size) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  std::shared_ptr<TsTable> ts_tb;
+  s = engine->GetTsTable(ctx_p, table_id, ts_tb);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetTsTable Error!");
+  }
+  s = ts_tb->GetAvgTableRowSize(ctx_p, row_size);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("table[%lu] getdatavoluem failed", table_id);
+    return ToTsStatus("TsTable getdatavolume Error!");
+  }
+  return kTsSuccess;
+}
+
+// Query the total amount of data within the range (an approximate value is sufficient)
+TSStatus TSGetDataVolume(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                        KwTsSpan ts_span, uint64_t* volume) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  std::shared_ptr<TsTable> ts_tb;
+  s = engine->GetTsTable(ctx_p, table_id, ts_tb);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetTsTable Error!");
+  }
+  s = ts_tb->GetDataVolume(ctx_p, begin_hash, end_hash, ts_span, volume);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("table[%lu] getdatavoluem failed", table_id);
+    return ToTsStatus("TsTable getdatavolume Error!");
+  }
+  if (begin_hash > end_hash) {
+    return ToTsStatus("begin hash larger than end hash.");
+  }
+  *volume = 0;
+  if (begin_hash < end_hash) {
+    uint64_t scan_all_begin_hash = begin_hash + 1;
+    uint64_t scan_all_end_hash = end_hash - 1;
+    if (ts_span.begin == INT64_MIN) {
+      scan_all_begin_hash = begin_hash;
+    }
+    if (ts_span.end == INT64_MAX) {
+      scan_all_end_hash = end_hash;
+    }
+    if (scan_all_begin_hash > begin_hash) {
+      uint64_t scan_part_volume = 0;
+      s = ts_tb->GetDataVolume(ctx_p, begin_hash, begin_hash, {ts_span.begin, INT64_MAX}, &scan_part_volume);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("table[%lu] GetDataVolume failed", table_id);
+        return ToTsStatus("TsTable getdatavolume Error!");
+      }
+      *volume += scan_part_volume;
+    }
+    if (scan_all_end_hash >= scan_all_begin_hash) {
+      uint64_t scan_all_volume = 0;
+      s = ts_tb->GetDataVolume(ctx_p, begin_hash, end_hash, {INT64_MIN, INT64_MAX}, &scan_all_volume);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("table[%lu] GetDataVolume failed", table_id);
+        return ToTsStatus("TsTable getdatavolume Error!");
+      }
+      *volume += scan_all_volume;
+    }
+    if (scan_all_end_hash < end_hash) {
+      uint64_t scan_part_volume = 0;
+      s = ts_tb->GetDataVolume(ctx_p, begin_hash, begin_hash, {INT64_MIN, ts_span.end}, &scan_part_volume);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("table[%lu] GetDataVolume failed", table_id);
+        return ToTsStatus("TsTable getdatavolume Error!");
+      }
+      *volume += scan_part_volume;
+    }
+  } else {
+    s = ts_tb->GetDataVolume(ctx_p, begin_hash, end_hash, ts_span, volume);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("table[%lu] getdatavoluem failed", table_id);
+      return ToTsStatus("TsTable getdatavolume Error!");
+    }
+  }
+  LOG_DEBUG("TSGetDataVolume range{%lu/%ld - %lu/%ld}, total volumne %lu",
+              begin_hash, ts_span.begin, end_hash, ts_span.end, *volume);
+  return kTsSuccess;
+}
+
+// The timestamp when querying half of the total data within the range (an approximate value is sufficient)
+TSStatus TSGetDataVolumeHalfTS(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                               KwTsSpan ts_span, int64_t* half_ts) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  std::shared_ptr<TsTable> ts_tb;
+  s = engine->GetTsTable(ctx_p, table_id, ts_tb);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetTsTable Error!");
+  }
+  s = ts_tb->GetDataVolumeHalfTS(ctx_p, begin_hash, end_hash, ts_span, half_ts);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("table[%lu] GetDataVolumeHalfTS failed", table_id);
+    return ToTsStatus("GetDataVolumeHalfTS Error!");
+  }
+  return kTsSuccess;
+}
+
+// Input data in Payload format based on line storage mode
+TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* payload_row, size_t payload_num,
+                           RangeGroup range_group, uint64_t mtr_id, DedupResult* dedup_result) {
+    kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  // input parameter table_id is not correct, not use this parameter anymore.
+  // Parsing table_id from payload
+  TSTableID tmp_table_id = *reinterpret_cast<uint64_t*>(payload_row[0].data + Payload::table_id_offset_);
+  // Parse range_group_id from payload
+  uint64_t tmp_range_group_id = *reinterpret_cast<uint16_t*>(payload_row[0].data + Payload::hash_point_id_offset_);
+
+  std::shared_ptr<TsTable> ts_tb;
+  s = engine->GetTsTable(ctx_p, tmp_table_id, ts_tb);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetTsTable Error!");
+  }
+  TSSlice payload;
+  for (size_t i = 0; i < payload_num; i++) {
+    s = ts_tb->ConvertRowTypePayload(ctx_p, payload_row[i], &payload);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("table[%lu] ConvertRowTypePayload failed", tmp_table_id);
+      return ToTsStatus("ConvertRowTypePayload Error!");
+    }
+    // todo(liangbo01) current interface dedup result no support multi-payload insert.
+    s = engine->PutData(ctx_p, tmp_table_id, tmp_range_group_id, &payload, payload_num, mtr_id, dedup_result);
+    if (s != KStatus::SUCCESS) {
+      free(payload.data);
+      std::ostringstream ss;
+      ss << tmp_range_group_id;
+      return ToTsStatus("PutData Error!,RangeGroup:" + ss.str());
+    }
+    free(payload.data);
+  }
+  return kTsSuccess;
+}
+
+TSStatus TsDeleteTotalRange(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                            KwTsSpan ts_span, uint64_t mtr_id) {
+  kwdbContext_t context;
+  kwdbContext_p ctx = &context;
+  KStatus s = InitServerKWDBContext(ctx);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  std::shared_ptr<TsTable> table;
+  s = engine->GetTsTable(ctx, table_id, table);
+  if (s == KStatus::FAIL) {
+    LOG_ERROR("TsDeleteTotalRange failed: GetTsTable failed, table id [%lu]", table_id)
+    return ToTsStatus("get tstable Error!");
+  }
+  s = table->DeleteTotalRange(ctx, begin_hash, end_hash, ts_span, mtr_id);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("DeleteRangeData Error!");
+  }
+  // no need drop table, disttributed level will call drop table interface.
+  return kTsSuccess;
+}
+
+// Create a snapshot object to read local data
+TSStatus TSCreateSnapshotForRead(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                                 KwTsSpan ts_span, uint64_t* snapshot_id) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -736,14 +926,15 @@ TSStatus TSCreateSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_g
     return ToTsStatus("InitServerKWDBContext Error!");
   }
 
-  s = engine->CreateSnapshot(ctx_p, table_id, range_group_id, begin_hash, end_hash, snapshot_id);
+  s = engine->CreateSnapshotForRead(ctx_p, table_id, begin_hash, end_hash, ts_span, snapshot_id);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("CreateSnapshot Error!");
   }
   return kTsSuccess;
 }
 
-TSStatus TSDropSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id) {
+// Return the data that needs to be transmitted this time. If the data is 0, it means that all data has been queried
+TSStatus TSGetSnapshotNextBatchData(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id, TSSlice* data) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -751,46 +942,31 @@ TSStatus TSDropSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_gro
     return ToTsStatus("InitServerKWDBContext Error!");
   }
 
-  s = engine->DropSnapshot(ctx_p, table_id, range_group_id, snapshot_id);
-  if (s != KStatus::SUCCESS) {
-    return ToTsStatus("DropSnapshot Error!");
-  }
-  return kTsSuccess;
-}
-
-TSStatus TSGetSnapshotData(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                           size_t offset, size_t limit, TSSlice* data, size_t* total) {
-  kwdbContext_t context;
-  kwdbContext_p ctx_p = &context;
-  KStatus s = InitServerKWDBContext(ctx_p);
-  if (s != KStatus::SUCCESS) {
-    return ToTsStatus("InitServerKWDBContext Error!");
-  }
-
-  s = engine->GetSnapshotData(ctx_p, table_id, range_group_id, snapshot_id, offset, limit, data, total);
+  s = engine->GetSnapshotNextBatchData(ctx_p, snapshot_id, data);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("GetSnapshotData Error!");
   }
   return kTsSuccess;
 }
 
-TSStatus TSInitSnapshotForWrite(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                              size_t snapshot_size) {
+// Create an object to receive data at the dest node
+TSStatus TSCreateSnapshotForWrite(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                                  KwTsSpan ts_span, uint64_t* snapshot_id) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("InitServerKWDBContext Error!");
   }
-  s = engine->InitSnapshotForWrite(ctx_p, table_id, range_group_id, snapshot_id, snapshot_size);
+  s = engine->CreateSnapshotForWrite(ctx_p, table_id, begin_hash, end_hash, ts_span, snapshot_id);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("InitSnapshot Error!");
   }
   return kTsSuccess;
 }
 
-TSStatus TSWriteSnapshotData(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                             size_t offset, TSSlice data, bool finished) {
+// dest node, after receiving data, writes the data to storage
+TSStatus TSWriteSnapshotBatchData(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id, TSSlice data) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -798,14 +974,15 @@ TSStatus TSWriteSnapshotData(TSEngine* engine, TSTableID table_id, uint64_t rang
     return ToTsStatus("InitServerKWDBContext Error!");
   }
 
-  s = engine->WriteSnapshotData(ctx_p, table_id, range_group_id, snapshot_id, offset, data, finished);
+  s = engine->WriteSnapshotBatchData(ctx_p, snapshot_id, data);
   if (s != KStatus::SUCCESS) {
-      return ToTsStatus("WriteSnapshotData Error!");
+      return ToTsStatus("WriteSnapshotBatchData Error!");
   }
   return kTsSuccess;
 }
 
-TSStatus TSEnableSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id) {
+// All writes completed, this snapshot is successful, call this function
+TSStatus TSWriteSnapshotSuccess(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -813,9 +990,40 @@ TSStatus TSEnableSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_g
     return ToTsStatus("InitServerKWDBContext Error!");
   }
 
-  s = engine->EnableSnapshot(ctx_p, table_id, range_group_id, snapshot_id);
+  s = engine->WriteSnapshotSuccess(ctx_p, snapshot_id);
   if (s != KStatus::SUCCESS) {
-    return ToTsStatus("ApplySnapShot Error!");
+      return ToTsStatus("WriteSnapshotBatchData Error!");
+  }
+  return kTsSuccess;
+}
+
+// The snapshot failed, or in other scenarios, the data written this time needs to be rolled back
+TSStatus TSWriteSnapshotRollback(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+
+  s = engine->WriteSnapshotRollback(ctx_p, snapshot_id);
+  if (s != KStatus::SUCCESS) {
+      return ToTsStatus("WriteSnapshotBatchData Error!");
+  }
+  return kTsSuccess;
+}
+
+// Delete snapshot object
+TSStatus TSDeleteSnapshot(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  s = engine->DeleteSnapshot(ctx_p, snapshot_id);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("DropSnapshot Error!");
   }
   return kTsSuccess;
 }
@@ -940,4 +1148,18 @@ TSStatus TSDeleteRangeGroup(TSEngine* engine, TSTableID table_id, RangeGroup ran
 
 bool TSDumpAllThreadBacktrace(char* folder, char* now_time_stamp) {
   return kwdbts::DumpAllThreadBacktrace(folder, now_time_stamp);
+}
+
+TSStatus TsGetTableVersion(TSEngine* engine, TSTableID table_id, uint32_t* version) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  s = engine->GetTableVersion(ctx_p, table_id, version);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetTableVersion Error!");
+  }
+  return kTsSuccess;
 }

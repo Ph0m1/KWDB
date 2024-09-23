@@ -344,8 +344,23 @@ timestamp64 TsSubEntityGroup::MaxPartitionTime() {
   return 0;
 }
 
+vector<timestamp64> TsSubEntityGroup::GetPartitions(const KwTsSpan& ts_span) {
+  std::vector<int64_t> p_times;
+  timestamp64 max_ts;
+  timestamp64 pts_begin = PartitionTime(ts_span.begin, max_ts);
+  timestamp64 pts_end = PartitionTime(ts_span.end, max_ts);
+  rdLock();
+  Defer defer{[&]() { unLock(); }};
+  for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
+    if (!(it->first > pts_end || it->second <= pts_begin)) {
+      p_times.emplace_back(it->first);
+    }
+  }
+  return p_times;
+}
+
 TsTimePartition* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
-                                                     bool create_if_not_exist, bool lru_push_back) {
+                                                      bool create_if_not_exist, bool lru_push_back) {
   timestamp64 max_ts;
   timestamp64 p_time = PartitionTime(ts, max_ts);
   TsTimePartition* mt_table = partition_cache_.Get(p_time);
@@ -404,8 +419,95 @@ vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts
   return std::move(results);
 }
 
+std::shared_ptr<TsSubGroupPTIterator> TsSubEntityGroup::GetPTIteartor(const std::vector<KwTsSpan>& ts_spans) {
+  std::vector<timestamp64> p_times;
+  {
+    // filter all partition time that match ts_spans.
+    timestamp64 max_ts, pts_begin, pts_end;
+    rdLock();
+    for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
+      for (auto& ts_span : ts_spans) {
+        pts_begin = PartitionTime(ts_span.begin / 1000, max_ts);
+        pts_end = PartitionTime(ts_span.end / 1000, max_ts);
+        if (!(it->first > pts_end || it->second <= pts_begin)) {
+          p_times.emplace_back(it->first);
+          break;
+        }
+      }
+    }
+    unLock();
+  }
+  std::shared_ptr<TsSubGroupPTIterator> ret = std::make_shared<TsSubGroupPTIterator>(this, p_times);
+  return std::move(ret);
+}
+
+KStatus TsSubGroupPTIterator::Next(TsTimePartition** p_table) {
+  *p_table = nullptr;
+  while (true) {
+    if (cur_p_table_ != nullptr) {
+      ReleaseTable(cur_p_table_);
+      cur_p_table_ = nullptr;
+    }
+    timestamp64 cur_partition;
+    if (reverse_traverse_) {
+      if (cur_partition_idx_ < 0) {
+        // scan over.
+        return KStatus::SUCCESS;
+      }
+      cur_partition = partitions_[cur_partition_idx_--];
+    } else {
+      if (cur_partition_idx_ >= partitions_.size()) {
+        // scan over.
+        return KStatus::SUCCESS;
+      }
+      cur_partition = partitions_[cur_partition_idx_++];
+    }
+    ErrorInfo err_info;
+    cur_p_table_ = sub_eg_->GetPartitionTable(cur_partition, err_info);
+    if (!err_info.isOK()) {
+      LOG_ERROR("can not parse partition [%lu] in subgroup [%u].", cur_partition, sub_eg_->GetID());
+      return KStatus::FAIL;
+    }
+    if (cur_p_table_->DeleteFlag()) {
+      cur_partition_idx_++;
+    } else {
+      break;
+    }
+  }
+  *p_table = cur_p_table_;
+  return KStatus::SUCCESS;
+}
+
+TsTimePartition* TsSubEntityGroup::CreateTmpPartitionTable(string p_name, size_t version, bool& created) {
+  string pt_tbl_sub_path = tbl_sub_path_ + p_name;
+  ErrorInfo err_info;
+  auto mt_table = new TsTimePartition(root_tbl_manager_, entity_block_meta_->GetConfigSubgroupEntities());
+  mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_OPEN_NORECURSIVE, err_info);
+  if (err_info.errcode >= 0) {
+    LOG_DEBUG("open temp partiton table [%s] success.", pt_tbl_sub_path.c_str());
+    created = false;
+    return mt_table;
+  }
+  err_info.clear();
+  delete mt_table;
+    // Create partition directory
+  if (!MakeDirectory(db_path_ + pt_tbl_sub_path, err_info)) {
+    LOG_ERROR("can not mkdir for %s", (db_path_ + pt_tbl_sub_path).c_str());
+    return nullptr;
+  }
+  mt_table = new TsTimePartition(root_tbl_manager_, entity_block_meta_->GetConfigSubgroupEntities());
+  mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_CREAT_EXCL, err_info);
+  if (!err_info.isOK()) {
+    LOG_ERROR("can not open partition for %s", (db_path_ + pt_tbl_sub_path).c_str());
+    delete mt_table;
+    return nullptr;
+  }
+  created = true;
+  return mt_table;
+}
+
 TsTimePartition* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timestamp64 max_ts, ErrorInfo& err_info,
-                                                     bool create_if_not_exist, bool lru_push_back) {
+                                                      bool create_if_not_exist, bool lru_push_back) {
   TsTimePartition* mt_table = partition_cache_.Get(p_time);
   if (mt_table != nullptr) {
     return mt_table;
@@ -694,17 +796,21 @@ inline void TsSubEntityGroup::partitionTime(timestamp64 target_ts, timestamp64 b
   // begin_ts = 0 or other partition min_ts
   if (target_ts >= begin_ts) {
     // Starting from begin_ts with a time interval of interval, retrieve the partition time of cur_ts backwards
-    min_ts = (target_ts - begin_ts) / interval * interval + begin_ts;
-    max_ts = min_ts + interval - 1;
+    min_ts = begin_ts + uint64_t(target_ts - begin_ts) / interval * interval;
+    if (min_ts < INT64_MAX - interval) {
+      max_ts = min_ts + interval - 1;
+    } else {
+      max_ts = INT64_MAX;
+    }
   } else {
     // Starting from begin_ts with a time interval of interval, retrieve the partition time where cur_ts is located forward
-    timestamp64 offset = (begin_ts - target_ts + (interval-1)) / interval * interval;
-    if (begin_ts >= INT64_MIN + offset) {
+    uint64_t offset = uint64_t(begin_ts - target_ts + interval - 1) / interval * interval;
+    if (begin_ts >= (timestamp64)(INT64_MIN + offset)) {
       min_ts = begin_ts - offset;
       max_ts = min_ts + interval - 1;
     } else {
       min_ts = INT64_MIN;
-      max_ts = begin_ts - (begin_ts - target_ts) / interval * interval - 1;
+      max_ts = begin_ts + interval - offset - 1;
     }
   }
 }

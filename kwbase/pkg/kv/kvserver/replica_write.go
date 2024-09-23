@@ -284,6 +284,55 @@ func (r *Replica) executeWriteTSBatch(
 		return nil, g, roachpb.NewError(err)
 	}
 
+	minTS, untrack := r.store.cfg.ClosedTimestamp.Tracker.Track(ctx)
+	defer untrack(ctx, 0, 0, 0) // covers all error returns below
+
+	// Examine the timestamp cache for preceding commands which require this
+	// command to move its timestamp forward. Or, in the case of a transactional
+	// write, the txn timestamp and possible write-too-old bool.
+	if bumped := r.applyTimestampCache(ctx, ba, minTS); bumped {
+		// If we bump the transaction's timestamp, we must absolutely
+		// tell the client in a response transaction (for otherwise it
+		// doesn't know about the incremented timestamp). Response
+		// transactions are set far away from this code, but at the time
+		// of writing, they always seem to be set. Since that is a
+		// likely target of future micro-optimization, this assertion is
+		// meant to protect against future correctness anomalies.
+		defer func() {
+			if br != nil && ba.Txn != nil && br.Txn == nil {
+				log.Fatalf(ctx, "assertion failed: transaction updated by "+
+					"timestamp cache, but transaction returned in response; "+
+					"updated timestamp would have been lost (recovered): "+
+					"%s in batch %s", ba.Txn, ba,
+				)
+			}
+		}()
+	}
+	log.Event(ctx, "applied timestamp cache")
+
+	// Checking the context just before proposing can help avoid ambiguous errors.
+	if err := ctx.Err(); err != nil {
+		r.readOnlyCmdMu.RUnlock()
+		log.VEventf(ctx, 2, "%s before proposing: %s", err, ba.Summary())
+		return nil, g, roachpb.NewError(errors.Wrap(err, "aborted before proposing"))
+	}
+
+	if r.store.nodeDesc.StartMode == base.StartSingleReplicaCmdName {
+		br = &roachpb.BatchResponse{}
+		br.Responses = make([]roachpb.ResponseUnion, len(ba.Requests))
+		tableID, rangeGroupID, tsTxnID, err := r.stageTsBatchRequest(ctx, ba, br.Responses, true, nil, nil)
+		if err == nil && tableID != 0 {
+			err = r.store.TsEngine.MtrCommit(tableID, rangeGroupID, tsTxnID)
+		}
+		r.readOnlyCmdMu.RUnlock()
+		if err != nil {
+			pErr = roachpb.NewError(err)
+			br = nil
+			log.Infof(ctx, "stage error: %v", err)
+		}
+		return br, g, pErr
+	}
+
 	// Checking the context just before proposing can help avoid ambiguous errors.
 	if err := ctx.Err(); err != nil {
 		r.readOnlyCmdMu.RUnlock()
@@ -326,6 +375,14 @@ func (r *Replica) executeWriteTSBatch(
 		return nil, g, pErr
 	}
 	g = nil // ownership passed to Raft, prevent misuse
+
+	// A max lease index of zero is returned when no proposal was made or a lease was proposed.
+	// In both cases, we don't need to communicate a MLAI. Furthermore, for lease proposals we
+	// cannot communicate under the lease's epoch. Instead the code calls EmitMLAI explicitly
+	// as a side effect of stepping up as leaseholder.
+	if maxLeaseIndex != 0 {
+		untrack(ctx, ctpb.Epoch(st.Lease.Epoch), r.RangeID, ctpb.LAI(maxLeaseIndex))
+	}
 
 	// We are done with pre-Raft evaluation at this point, and have to release the
 	// read-only command lock to avoid deadlocks during Raft evaluation.

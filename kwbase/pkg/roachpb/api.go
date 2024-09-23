@@ -369,6 +369,34 @@ func (dr *TsDeleteMultiEntitiesDataResponse) combine(c combinable) error {
 var _ combinable = &TsDeleteMultiEntitiesDataResponse{}
 
 // combine implements the combinable interface.
+func (dr *TsDeleteResponse) combine(c combinable) error {
+	otherDR := c.(*TsDeleteResponse)
+	if dr != nil {
+		//dr.NumKeys += otherDR.NumKeys
+		if err := dr.ResponseHeader.combine(otherDR.Header()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ combinable = &TsDeleteResponse{}
+
+// combine implements the combinable interface.
+func (dr *TsDeleteEntityResponse) combine(c combinable) error {
+	otherDR := c.(*TsDeleteEntityResponse)
+	if dr != nil {
+		//dr.NumKeys += otherDR.NumKeys
+		if err := dr.ResponseHeader.combine(otherDR.Header()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var _ combinable = &TsDeleteEntityResponse{}
+
+// combine implements the combinable interface.
 func (dr *RevertRangeResponse) combine(c combinable) error {
 	otherDR := c.(*RevertRangeResponse)
 	if dr != nil {
@@ -632,22 +660,10 @@ func (*AdminMergeRequest) Method() Method { return AdminMerge }
 func (*AdminTransferLeaseRequest) Method() Method { return AdminTransferLease }
 
 // Method implements the Request interface.
-func (*AdminRequestLeaseForTSRequest) Method() Method { return AdminRequestLeaseForTS }
-
-// Method implements the Request interface.
-func (*AdminTransferPartitionLeaseRequest) Method() Method { return AdminTransferLease }
-
-// Method implements the Request interface.
 func (*AdminChangeReplicasRequest) Method() Method { return AdminChangeReplicas }
 
 // Method implements the Request interface.
-func (*AdminChangePartitionReplicasRequest) Method() Method { return AdminChangeReplicas }
-
-// Method implements the Request interface.
 func (*AdminRelocateRangeRequest) Method() Method { return AdminRelocateRange }
-
-// Method implements the Request interface.
-func (*AdminRelocatePartitionRequest) Method() Method { return AdminRelocateRange }
 
 // Method implements the Request interface.
 func (*HeartbeatTxnRequest) Method() Method { return HeartbeatTxn }
@@ -726,6 +742,12 @@ func (*AdminVerifyProtectedTimestampRequest) Method() Method { return AdminVerif
 
 // Method implements the Request interface.
 func (*TsPutRequest) Method() Method { return TsPut }
+
+// Method implements the Request interface.
+func (*TsRowPutRequest) Method() Method { return TsRowPut }
+
+// Method implements the Request interface.
+func (*TsPutTagRequest) Method() Method { return TsPutTag }
 
 // Method implements the Request interface.
 func (*TsDeleteRequest) Method() Method { return TsDelete }
@@ -860,38 +882,14 @@ func (atlr *AdminTransferLeaseRequest) ShallowCopy() Request {
 }
 
 // ShallowCopy implements the Request interface.
-func (atlr *AdminRequestLeaseForTSRequest) ShallowCopy() Request {
-	shallowCopy := *atlr
-	return &shallowCopy
-}
-
-// ShallowCopy implements the Request interface.
-func (atplr *AdminTransferPartitionLeaseRequest) ShallowCopy() Request {
-	shallowCopy := *atplr
-	return &shallowCopy
-}
-
-// ShallowCopy implements the Request interface.
 func (acrr *AdminChangeReplicasRequest) ShallowCopy() Request {
 	shallowCopy := *acrr
 	return &shallowCopy
 }
 
 // ShallowCopy implements the Request interface.
-func (acprr *AdminChangePartitionReplicasRequest) ShallowCopy() Request {
-	shallowCopy := *acprr
-	return &shallowCopy
-}
-
-// ShallowCopy implements the Request interface.
 func (acrr *AdminRelocateRangeRequest) ShallowCopy() Request {
 	shallowCopy := *acrr
-	return &shallowCopy
-}
-
-// ShallowCopy implements the Request interface.
-func (acrrg *AdminRelocatePartitionRequest) ShallowCopy() Request {
-	shallowCopy := *acrrg
 	return &shallowCopy
 }
 
@@ -1047,6 +1045,18 @@ func (r *AdminVerifyProtectedTimestampRequest) ShallowCopy() Request {
 
 // ShallowCopy implements the Request interface.
 func (r *TsPutRequest) ShallowCopy() Request {
+	shallowCopy := *r
+	return &shallowCopy
+}
+
+// ShallowCopy implements the Request interface.
+func (r *TsRowPutRequest) ShallowCopy() Request {
+	shallowCopy := *r
+	return &shallowCopy
+}
+
+// ShallowCopy implements the Request interface.
+func (r *TsPutTagRequest) ShallowCopy() Request {
 	shallowCopy := *r
 	return &shallowCopy
 }
@@ -1222,8 +1232,16 @@ func (*TsPutRequest) flags() int {
 	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure
 }
 
+func (*TsRowPutRequest) flags() int {
+	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+}
+
+func (*TsPutTagRequest) flags() int {
+	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+}
+
 func (*TsDeleteRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure
+	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsDeleteMultiEntitiesDataRequest) flags() int {
@@ -1231,11 +1249,11 @@ func (*TsDeleteMultiEntitiesDataRequest) flags() int {
 }
 
 func (*TsDeleteEntityRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure
+	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsTagUpdateRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure
+	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
 }
 
 // ConditionalPut effectively reads without writing if it hits a
@@ -1325,20 +1343,16 @@ func (rsr *ReverseScanRequest) flags() int {
 // EndTxn updates the timestamp cache to prevent replays.
 // Replays for the same transaction key and timestamp will have
 // Txn.WriteTooOld=true and must retry on EndTxn.
-func (*EndTxnRequest) flags() int                       { return isWrite | isTxn | isAlone | updatesTSCache }
-func (*AdminSplitRequest) flags() int                   { return isAdmin | isAlone }
-func (*AdminSplitForTsRequest) flags() int              { return isAdmin | isAlone }
-func (*AdminUnsplitRequest) flags() int                 { return isAdmin | isAlone }
-func (*AdminMergeRequest) flags() int                   { return isAdmin | isAlone }
-func (*AdminTransferLeaseRequest) flags() int           { return isAdmin | isAlone }
-func (*AdminRequestLeaseForTSRequest) flags() int       { return isAdmin | isAlone }
-func (*AdminTransferPartitionLeaseRequest) flags() int  { return isAdmin | isAlone | isRange }
-func (*AdminChangeReplicasRequest) flags() int          { return isAdmin | isAlone }
-func (*AdminChangePartitionReplicasRequest) flags() int { return isAdmin | isAlone | isRange }
-func (*AdminRelocateRangeRequest) flags() int           { return isAdmin | isAlone }
-func (*AdminRelocatePartitionRequest) flags() int       { return isAdmin | isAlone | isRange }
-func (*HeartbeatTxnRequest) flags() int                 { return isWrite | isTxn }
-func (*GCRequest) flags() int                           { return isWrite | isRange }
+func (*EndTxnRequest) flags() int              { return isWrite | isTxn | isAlone | updatesTSCache }
+func (*AdminSplitRequest) flags() int          { return isAdmin | isAlone }
+func (*AdminSplitForTsRequest) flags() int     { return isAdmin | isAlone }
+func (*AdminUnsplitRequest) flags() int        { return isAdmin | isAlone }
+func (*AdminMergeRequest) flags() int          { return isAdmin | isAlone }
+func (*AdminTransferLeaseRequest) flags() int  { return isAdmin | isAlone }
+func (*AdminChangeReplicasRequest) flags() int { return isAdmin | isAlone }
+func (*AdminRelocateRangeRequest) flags() int  { return isAdmin | isAlone }
+func (*HeartbeatTxnRequest) flags() int        { return isWrite | isTxn }
+func (*GCRequest) flags() int                  { return isWrite | isRange }
 
 // PushTxnRequest updates different marker keys in the timestamp cache when
 // pushing a transaction's timestamp and when aborting a transaction.
@@ -1510,17 +1524,6 @@ func (acrr *AdminChangeReplicasRequest) AddChanges(chgs ...ReplicationChange) {
 	}
 }
 
-// AddChanges adds a batch of changes to the request in a backwards-compatible
-// way.
-func (acprr *AdminChangePartitionReplicasRequest) AddChanges(chgs ...ReplicationChange) {
-	acprr.InternalChanges = append(acprr.InternalChanges, chgs...)
-
-	acprr.DeprecatedChangeType = chgs[0].ChangeType
-	for _, chg := range chgs {
-		acprr.DeprecatedTargets = append(acprr.DeprecatedTargets, chg.Target)
-	}
-}
-
 // ReplicationChanges is a slice of ReplicationChange.
 type ReplicationChanges []ReplicationChange
 
@@ -1555,23 +1558,6 @@ func (acrr *AdminChangeReplicasRequest) Changes() []ReplicationChange {
 	for _, target := range acrr.DeprecatedTargets {
 		sl = append(sl, ReplicationChange{
 			ChangeType: acrr.DeprecatedChangeType,
-			Target:     target,
-		})
-	}
-	return sl
-}
-
-// Changes returns the changes requested by this AdminChangeReplicasRequest, taking
-// the deprecated method of doing so into account.
-func (acprr *AdminChangePartitionReplicasRequest) Changes() []ReplicationChange {
-	if len(acprr.InternalChanges) > 0 {
-		return acprr.InternalChanges
-	}
-
-	sl := make([]ReplicationChange, len(acprr.DeprecatedTargets))
-	for _, target := range acprr.DeprecatedTargets {
-		sl = append(sl, ReplicationChange{
-			ChangeType: acprr.DeprecatedChangeType,
 			Target:     target,
 		})
 	}

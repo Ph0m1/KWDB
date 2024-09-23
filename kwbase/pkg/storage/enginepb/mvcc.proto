@@ -195,4 +195,6 @@ message MVCCStats {
   optional sfixed64 sys_bytes = 12 [(gogoproto.nullable) = false];
   // sys_count is the number of meta keys tracked under sys_bytes.
   optional sfixed64 sys_count = 13 [(gogoproto.nullable) = false];
+
+  optional sfixed64 ts_per_row_size = 15[(gogoproto.nullable) = false];
 }

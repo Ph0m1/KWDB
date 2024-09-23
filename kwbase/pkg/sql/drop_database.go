@@ -33,7 +33,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
@@ -204,13 +203,13 @@ func (n *dropDatabaseNode) startExec(params runParams) error {
 
 	ctx := params.ctx
 	p := params.p
-	if n.dbDesc.EngineType == tree.EngineTypeTimeseries {
-		// check all nodes are healthy, otherwise DDL is not allowed
-		if _, err := api.GetAvailableNodeIDs(params.ctx); err != nil {
-			return err
-		}
-		return p.dropTSDatabase(ctx, *n)
-	}
+	//if n.dbDesc.EngineType == tree.EngineTypeTimeseries {
+	//	// check all nodes are healthy, otherwise DDL is not allowed
+	//	if _, err := api.GetAvailableNodeIDs(params.ctx); err != nil {
+	//		return err
+	//	}
+	//	return p.dropTSDatabase(ctx, *n)
+	//}
 	tbNameStrings := make([]string, 0, len(n.td))
 	droppedTableDetails := make([]jobspb.DroppedTableDetails, 0, len(n.td))
 
@@ -415,63 +414,63 @@ func (p *planner) removeDbComment(ctx context.Context, dbID sqlbase.ID) error {
 	return err
 }
 
-func (p *planner) dropTSDatabase(ctx context.Context, n dropDatabaseNode) error {
-	idKey := sqlbase.MakeDatabaseNameKey(ctx, p.ExecCfg().Settings, n.dbDesc.Name)
-	// Set the dbID to InvalidID in system.namespace. This means that database is being dropped.
-	// In this state, it is forbidden to create tables or create database with the same name.
-	err := p.Txn().Put(ctx, idKey.Key(), sqlbase.InvalidID)
-	if err != nil {
-		return err
-	}
-
-	// this struct represents the information required by AE when deleting an object
-	var dropInfoForAE []sqlbase.DeleteMeMsg
-	// tableDescriptors to be deleted in this database
-	var tablesToDel []sqlbase.TableDescriptor
-	cascadedObjects := make([]string, 0, len(n.td))
-	for _, table := range n.td {
-		// change the table state to DROP
-		table.desc.TableDesc().State = sqlbase.TableDescriptor_DROP
-		if err := p.writeTableDesc(ctx, table.desc); err != nil {
-			return err
-		}
-		// build drop info required by AE
-		msg := sqlbase.DeleteMeMsg{
-			DatabaseName: n.dbDesc.Name,
-			TableID:      uint32(table.desc.ID),
-			TableName:    table.desc.Name,
-			TsVersion:    uint32(table.desc.TsTable.GetTsVersion()),
-		}
-		dropInfoForAE = append(dropInfoForAE, msg)
-		tablesToDel = append(tablesToDel, table.desc.TableDescriptor)
-		cascadedObjects = append(cascadedObjects, table.desc.Name)
-	}
-	// Create a Job to perform the second stage of ts DDL.
-	syncDetail := jobspb.SyncMetaCacheDetails{
-		Type:       dropKwdbTsDatabase,
-		Database:   *n.dbDesc,
-		DropMEInfo: dropInfoForAE,
-		DropDBInfo: tablesToDel,
-	}
-	jobID, err := p.createTSSchemaChangeJob(ctx, syncDetail, tree.AsStringWithFQNames(n.n, p.EvalContext().Annotations))
-	if err != nil {
-		return err
-	}
-
-	// Actively commit a transaction, and read/write system table operations
-	// need to be performed before this.
-	if err := p.txn.Commit(ctx); err != nil {
-		return err
-	}
-	// After the transaction commits successfully, execute the Job and wait for it to complete.
-	if err = p.ExecCfg().JobRegistry.Run(
-		ctx,
-		p.extendedEvalCtx.InternalExecutor.(*InternalExecutor),
-		[]int64{jobID},
-	); err != nil {
-		return err
-	}
-	p.SetAuditTarget(uint32(n.dbDesc.ID), n.n.Name.String(), cascadedObjects)
-	log.Infof(ctx, "drop database %s finished, type: %s, id: %d", n.dbDesc.Name, tree.EngineName(n.dbDesc.EngineType), n.dbDesc.ID)
-	return nil
-}
+//func (p *planner) dropTSDatabase(ctx context.Context, n dropDatabaseNode) error {
+//	idKey := sqlbase.MakeDatabaseNameKey(ctx, p.ExecCfg().Settings, n.dbDesc.Name)
+//	// Set the dbID to InvalidID in system.namespace. This means that database is being dropped.
+//	// In this state, it is forbidden to create tables or create database with the same name.
+//	err := p.Txn().Put(ctx, idKey.Key(), sqlbase.InvalidID)
+//	if err != nil {
+//		return err
+//	}
+//
+//	// this struct represents the information required by AE when deleting an object
+//	var dropInfoForAE []sqlbase.DeleteMeMsg
+//	// tableDescriptors to be deleted in this database
+//	var tablesToDel []sqlbase.TableDescriptor
+//	cascadedObjects := make([]string, 0, len(n.td))
+//	for _, table := range n.td {
+//		// change the table state to DROP
+//		table.desc.TableDesc().State = sqlbase.TableDescriptor_DROP
+//		if err := p.writeTableDesc(ctx, table.desc); err != nil {
+//			return err
+//		}
+//		// build drop info required by AE
+//		msg := sqlbase.DeleteMeMsg{
+//			DatabaseName: n.dbDesc.Name,
+//			TableID:      uint32(table.desc.ID),
+//			TableName:    table.desc.Name,
+//			TsVersion:    uint32(table.desc.TsTable.GetTsVersion()),
+//		}
+//		dropInfoForAE = append(dropInfoForAE, msg)
+//		tablesToDel = append(tablesToDel, table.desc.TableDescriptor)
+//		cascadedObjects = append(cascadedObjects, table.desc.Name)
+//	}
+//	// Create a Job to perform the second stage of ts DDL.
+//	syncDetail := jobspb.SyncMetaCacheDetails{
+//		Type:       dropKwdbTsDatabase,
+//		Database:   *n.dbDesc,
+//		DropMEInfo: dropInfoForAE,
+//		DropDBInfo: tablesToDel,
+//	}
+//	jobID, err := p.createTSSchemaChangeJob(ctx, syncDetail, tree.AsStringWithFQNames(n.n, p.EvalContext().Annotations))
+//	if err != nil {
+//		return err
+//	}
+//
+//	// Actively commit a transaction, and read/write system table operations
+//	// need to be performed before this.
+//	if err := p.txn.Commit(ctx); err != nil {
+//		return err
+//	}
+//	// After the transaction commits successfully, execute the Job and wait for it to complete.
+//	if err = p.ExecCfg().JobRegistry.Run(
+//		ctx,
+//		p.extendedEvalCtx.InternalExecutor.(*InternalExecutor),
+//		[]int64{jobID},
+//	); err != nil {
+//		return err
+//	}
+//	p.SetAuditTarget(uint32(n.dbDesc.ID), n.n.Name.String(), cascadedObjects)
+//	log.Infof(ctx, "drop database %s finished, type: %s, id: %d", n.dbDesc.Name, tree.EngineName(n.dbDesc.EngineType), n.dbDesc.ID)
+//	return nil
+//}

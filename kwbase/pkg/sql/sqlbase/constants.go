@@ -142,7 +142,6 @@ const (
 	CrdbInternalTablesTableID
 	CrdbInternalTxnStatsTableID
 	CrdbInternalZonesTableID
-	CrdbInternalKWDBTsPartitionsTableID
 	CrdbInternalKWDBMemoryTableID
 	CrdbInternalAuditPoliciesTableID
 	CrdbInternalKWDBAttributeValueTableID

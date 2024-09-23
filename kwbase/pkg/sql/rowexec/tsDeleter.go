@@ -26,6 +26,7 @@ package rowexec
 
 import (
 	"context"
+	"math"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
@@ -78,11 +79,8 @@ func newTsDeleter(
 		primaryTagKeys: tsDeleteSpec.PrimaryTagKeys,
 		primaryTags:    tsDeleteSpec.PrimaryTags,
 	}
-	td.spans = make([]execinfrapb.Span, len(tsDeleteSpec.Spans))
-	for i := range tsDeleteSpec.Spans {
-		td.spans[i].StartTs = tsDeleteSpec.Spans[i].StartTs
-		td.spans[i].EndTs = tsDeleteSpec.Spans[i].EndTs
-	}
+	td.spans = tsDeleteSpec.Spans
+	// groups just for single node
 	td.groups = tsDeleteSpec.EntityGroups
 
 	if err := td.Init(
@@ -117,29 +115,43 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 	ba := td.FlowCtx.Txn.NewBatch()
 	switch td.tsOperatorType {
 	case execinfrapb.OperatorType_TsDeleteData:
-		r := &roachpb.TsDeleteRequest{
+		hashPoints, err := api.GetHashPointByPrimaryTag(td.primaryTags[0])
+		if err != nil || len(hashPoints) == 0 {
+			td.deleteSuccess = false
+			td.err = err
+			return ctx
+		}
+		startTs, endTs := getMinMaxTimestamp(td.spans)
+		startKey := sqlbase.MakeTsRangeKey(sqlbase.ID(td.tableID), uint64(hashPoints[0]), startTs)
+		endKey := sqlbase.MakeTsRangeKey(sqlbase.ID(td.tableID), uint64(hashPoints[0]), endTs+1)
+		req := &roachpb.TsDeleteRequest{
 			RequestHeader: roachpb.RequestHeader{
-				Key: td.primaryTagKeys[0],
+				Key:    startKey,
+				EndKey: endKey,
 			},
 			TableId:      td.tableID,
 			PrimaryTags:  td.primaryTags[0],
 			RangeGroupId: td.rangeGroupID,
 		}
-
-		for _, span := range td.spans {
-			r.TsSpans = append(r.TsSpans, &roachpb.TsSpan{TsStart: span.StartTs, TsEnd: span.EndTs})
+		req.TsSpans = make([]*roachpb.TsSpan, len(td.spans))
+		for i := range td.spans {
+			req.TsSpans[i] = &roachpb.TsSpan{TsStart: td.spans[i].StartTs, TsEnd: td.spans[i].EndTs}
 		}
+		ba.AddRawRequest(req)
+		//fmt.Println("-----TsDeleteData-----")
+		//fmt.Printf("startKey: %v, endKey: %v, TsSpan: %v\n", req.Key, req.EndKey, req.TsSpans)
 
-		ba.AddRawRequest(r)
 		err = td.FlowCtx.Cfg.TseDB.Run(ctx, ba)
 		if err == nil {
-			if v, ok := ba.RawResponse().Responses[0].Value.(*roachpb.ResponseUnion_TsDelete); ok {
-				deletedRow = uint64(v.TsDelete.NumKeys)
+			for i := range ba.RawResponse().Responses {
+				if v, ok := ba.RawResponse().Responses[i].Value.(*roachpb.ResponseUnion_TsDelete); ok {
+					deletedRow += uint64(v.TsDelete.NumKeys)
+				}
 			}
 		}
 	case execinfrapb.OperatorType_TsDeleteMultiEntitiesData:
 		startKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(td.tableID), uint64(0))
-		endKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(td.tableID), api.HashParam)
+		endKey := sqlbase.MakeTsRangeKey(sqlbase.ID(td.tableID), api.HashParamV2, math.MaxInt64)
 		req := &roachpb.TsDeleteMultiEntitiesDataRequest{
 			RequestHeader: roachpb.RequestHeader{
 				Key:    startKey,
@@ -161,6 +173,8 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 					Partitions: points,
 				})
 		}
+		//fmt.Println("-----DeleteMultiEntities-----")
+		//fmt.Printf("startKey: %v, endKey: %v, TsSpan: %v\n", req.Key, req.EndKey, req.TsSpans)
 		ba.AddRawRequest(req)
 
 		err = td.FlowCtx.Cfg.TseDB.Run(ctx, ba)
@@ -172,19 +186,47 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 			}
 		}
 	case execinfrapb.OperatorType_TsDeleteEntities:
-		ba.AddRawRequest(&roachpb.TsDeleteEntityRequest{
+		hashPoints, err := api.GetHashPointByPrimaryTag(td.primaryTags[0])
+		if err != nil || len(hashPoints) == 0 {
+			td.deleteSuccess = false
+			td.err = err
+			return ctx
+		}
+		startKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(td.tableID), uint64(hashPoints[0]))
+		endKey := sqlbase.MakeTsRangeKey(sqlbase.ID(td.tableID), uint64(hashPoints[0]), math.MaxInt64)
+		// delete data
+		delDataReq := &roachpb.TsDeleteRequest{
 			RequestHeader: roachpb.RequestHeader{
-				Key: td.primaryTagKeys[0],
+				Key:    startKey,
+				EndKey: endKey,
 			},
 			TableId:      td.tableID,
-			PrimaryTags:  td.primaryTags,
+			PrimaryTags:  td.primaryTags[0],
 			RangeGroupId: td.rangeGroupID,
-		})
+			TsSpans:      []*roachpb.TsSpan{{TsStart: math.MinInt64, TsEnd: math.MaxInt64}},
+		}
+		//fmt.Println("-----DeleteEntities-----data")
+		//fmt.Printf("startKey: %v, endKey: %v, TsSpan: %v\n", delDataReq.Key, delDataReq.EndKey, delDataReq.TsSpans)
+		ba.AddRawRequest(delDataReq)
 		err = td.FlowCtx.Cfg.TseDB.Run(ctx, ba)
 		if err == nil {
-			if v, ok := ba.RawResponse().Responses[0].Value.(*roachpb.ResponseUnion_TsDeleteEntity); ok {
-				deletedRow = uint64(v.TsDeleteEntity.NumKeys)
+			for i := range ba.RawResponse().Responses {
+				if v, ok := ba.RawResponse().Responses[i].Value.(*roachpb.ResponseUnion_TsDelete); ok {
+					deletedRow += uint64(v.TsDelete.NumKeys)
+				}
 			}
+			ba2 := td.FlowCtx.Txn.NewBatch()
+			// delete primary tag and ignore numKeys of Responses
+			ba2.AddRawRequest(&roachpb.TsDeleteEntityRequest{
+				RequestHeader: roachpb.RequestHeader{
+					Key:    startKey,
+					EndKey: endKey,
+				},
+				TableId:      td.tableID,
+				PrimaryTags:  td.primaryTags,
+				RangeGroupId: td.rangeGroupID,
+			})
+			err = td.FlowCtx.Cfg.TseDB.Run(ctx, ba2)
 		}
 	default:
 		err = errors.Newf("the TsOperatorType is not supported, TsOperatorType:%s", td.tsOperatorType.String())
@@ -222,4 +264,18 @@ func (td *tsDeleter) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata)
 func (td *tsDeleter) ConsumerClosed() {
 	// The consumer is done, Next() will not be called again.
 	td.InternalClose()
+}
+
+func getMinMaxTimestamp(tsSpans []execinfrapb.Span) (int64, int64) {
+	var minTs int64 = math.MaxInt64
+	var maxTs int64 = math.MinInt64
+	for _, span := range tsSpans {
+		if span.StartTs < minTs {
+			minTs = span.StartTs
+		}
+		if span.EndTs > maxTs {
+			maxTs = span.EndTs
+		}
+	}
+	return minTs, maxTs
 }

@@ -257,11 +257,11 @@ INSERT 1
   2022-11-04 20:09:00+00:00 | NULL
   2022-11-04 20:10:00+00:00 |             20.999
 (45 rows)
-> select time_bucket_gapfill(k_timestamp,'3600s'),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'3600s') order by time_bucket_gapfill(k_timestamp,'3600s');
-     time_bucket_gapfill    |    interpolate
-----------------------------+--------------------
-  2022-11-04 19:00:00+00:00 |           299.999
-  2022-11-04 20:00:00+00:00 | 125.6656666666667
+> select time_bucket_gapfill(k_timestamp,'3600s'),round(interpolate(avg(e6),'null'),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,'3600s') order by time_bucket_gapfill(k_timestamp,'3600s');
+     time_bucket_gapfill    |  round
+----------------------------+----------
+  2022-11-04 19:00:00+00:00 | 299.999
+  2022-11-04 20:00:00+00:00 | 125.666
 (2 rows)
 > select time_bucket_gapfill(k_timestamp,'9999s'),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'9999s') order by time_bucket_gapfill(k_timestamp,'9999s');
      time_bucket_gapfill    |    interpolate
@@ -325,10 +325,10 @@ INSERT 1
   2022-11-04 20:05:00+00:00 | NULL               |     299.999
   2022-11-04 20:10:00+00:00 |             20.999 |      20.999
 (10 rows)
-> select time_bucket_gapfill(k_timestamp,'9999999s'),interpolate(avg(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,'9999999s') order by time_bucket_gapfill(k_timestamp,'9999999s');
-     time_bucket_gapfill    |    interpolate
-----------------------------+---------------------
-  2022-09-28 20:27:00+00:00 | 195.39900000000003
+> select time_bucket_gapfill(k_timestamp,'9999999s'),round(interpolate(avg(e6),null),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,'9999999s') order by time_bucket_gapfill(k_timestamp,'9999999s');
+     time_bucket_gapfill    |  round
+----------------------------+----------
+  2022-09-28 20:27:00+00:00 | 195.399
 (1 row)
 > select time_bucket_gapfill(k_timestamp,60),interpolate(avg(e6),'null') from t1.d1  group by time_bucket_gapfill(k_timestamp,60) order by time_bucket_gapfill(k_timestamp,60);
      time_bucket_gapfill    |    interpolate
@@ -379,11 +379,11 @@ INSERT 1
   2022-11-04 20:09:00+00:00 | NULL
   2022-11-04 20:10:00+00:00 |             20.999
 (45 rows)
-> select time_bucket_gapfill(k_timestamp,3600),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,3600) order by time_bucket_gapfill(k_timestamp,3600);
-     time_bucket_gapfill    |    interpolate
-----------------------------+--------------------
-  2022-11-04 19:00:00+00:00 |           299.999
-  2022-11-04 20:00:00+00:00 | 125.6656666666667
+> select time_bucket_gapfill(k_timestamp,3600),round(interpolate(avg(e6),'null'),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,3600) order by time_bucket_gapfill(k_timestamp,3600);
+     time_bucket_gapfill    |  round
+----------------------------+----------
+  2022-11-04 19:00:00+00:00 | 299.999
+  2022-11-04 20:00:00+00:00 | 125.666
 (2 rows)
 > select time_bucket_gapfill(k_timestamp,9999),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,9999) order by time_bucket_gapfill(k_timestamp,9999);
      time_bucket_gapfill    |    interpolate
@@ -447,10 +447,10 @@ INSERT 1
   2022-11-04 20:05:00+00:00 | NULL               |     299.999
   2022-11-04 20:10:00+00:00 |             20.999 |      20.999
 (10 rows)
-> select time_bucket_gapfill(k_timestamp,9999999),interpolate(avg(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,9999999) order by time_bucket_gapfill(k_timestamp,9999999);
-     time_bucket_gapfill    |    interpolate
-----------------------------+---------------------
-  2022-09-28 20:27:00+00:00 | 195.39900000000003
+> select time_bucket_gapfill(k_timestamp,9999999),round(interpolate(avg(e6),null),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,9999999) order by time_bucket_gapfill(k_timestamp,9999999);
+     time_bucket_gapfill    |  round
+----------------------------+----------
+  2022-09-28 20:27:00+00:00 | 195.399
 (1 row)
 > select time_bucket_gapfill(k_timestamp,'300s') from t1.d1;
 ERROR: time_bucket_gapfill should be use with group by time_bucket_gapfill

@@ -52,6 +52,7 @@ type tsAlterTable struct {
 	notFirst             bool
 	alterTsColumnSuccess bool
 	err                  error
+	nodeID               int32
 }
 
 var _ execinfra.Processor = &tsAlterTable{}
@@ -102,6 +103,7 @@ func newTsAlterColumn(
 // Start is part of the RowSource interface.
 func (tct *tsAlterTable) Start(ctx context.Context) context.Context {
 	ctx = tct.StartInternal(ctx, tsAlterColumnProcName)
+	tct.nodeID = int32(tct.FlowCtx.NodeID)
 	switch tct.tsOperator {
 	case execinfrapb.OperatorType_TsAddColumn:
 		if err := tct.FlowCtx.Cfg.TsEngine.TransBegin(tct.tableID, tct.txnID); err != nil {
@@ -180,9 +182,12 @@ func (tct *tsAlterTable) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMetad
 	tct.notFirst = true
 	tsAlterMeta := &execinfrapb.RemoteProducerMetadata_TSAlterColumn{
 		AlterSuccess: tct.alterTsColumnSuccess,
+		NodeID:       tct.nodeID,
 	}
+	tsAlterMeta.NodeIDMapErr = make(map[int32]string, 0)
 	if tct.err != nil {
 		tsAlterMeta.AlterErr = tct.err.Error()
+		tsAlterMeta.NodeIDMapErr[tct.nodeID] = tct.err.Error()
 	}
 	return nil, &execinfrapb.ProducerMetadata{TsAlterColumn: tsAlterMeta}
 }

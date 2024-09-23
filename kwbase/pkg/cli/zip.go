@@ -96,7 +96,6 @@ var debugZipTablesPerCluster = []string{
 	"kwdb_internal.schema_changes",
 	"kwdb_internal.partitions",
 	"kwdb_internal.zones",
-	"kwdb_internal.kwdb_ts_partitions",
 }
 
 // Tables collected from each node in a debug zip.

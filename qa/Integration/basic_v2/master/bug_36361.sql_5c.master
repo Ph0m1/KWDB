@@ -1,5 +1,3 @@
-> set tracing  = on;
-SET TRACING
 > create ts database test_insert_select;
 CREATE TS DATABASE
 > create table test_insert_select.tb(k_timestamp timestamptz not null,e1 timestamptz,e2 int2,e3 int,e4 int8,e5 float4,e6 float8,e7 bool,e8 char,e9 char(100),e10 nchar,e11 nchar(255),e12 varchar,e13 varchar(254),e14 varchar(4096),e15 nvarchar,e16 nvarchar(255),e17 nvarchar(4096),e18 varbytes,e19 varbytes(100),e20 varbytes,e21 varbytes(254),e22 varbytes(4096)) tags (t1 int2 not null,t2 int,t3 int8,t4 bool not null,t5 float4,t6 float8,t7 char,t8 char(100) not null,t9 nchar,t10 nchar(254),t11 varchar,t12 varchar(128) not null,t13 varbytes,t14 varbytes(100),t15 varbytes,t16 varbytes(255)) primary tags(t1,t4,t8,t12);
@@ -34,5 +32,3 @@ INSERT 1
 INSERT 1
 > drop database test_insert_select cascade;
 DROP DATABASE
-> set tracing  = off;
-SET TRACING

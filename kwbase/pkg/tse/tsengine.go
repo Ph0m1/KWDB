@@ -29,12 +29,12 @@ package tse
 // #cgo linux LDFLAGS: -lrt -lpthread
 //
 // #include <stdlib.h>
+// #include <string.h>
 // #include <libkwdbts2.h>
 import "C"
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 	"unsafe"
@@ -59,6 +59,13 @@ const (
 
 const (
 	compressInterval = "ts.compress_interval"
+)
+
+// TsPayloadSizeLimit is the max size of per payload.
+var TsPayloadSizeLimit = settings.RegisterNonNegativeIntSetting(
+	"ts.payload_size_limit",
+	"max size of payload(bytes)",
+	1<<20, // (1MiB)
 )
 
 // A Error wraps an error returned from a TsEngine operation.
@@ -96,6 +103,8 @@ type TsEngineConfig struct {
 	Settings       *cluster.Settings
 	LogCfg         log.Config
 	ExtraOptions   []byte
+	StartVacuum    bool
+	IsSingleNode   bool
 }
 
 // TsQueryInfo the parameter and return value passed by the query
@@ -249,6 +258,8 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 				task_queue_size:   C.uint16_t(uint16(r.cfg.TaskQueueSize)),
 				buffer_pool_size:  C.uint32_t(uint32(r.cfg.BufferPoolSize)),
 				lg_opts:           optLog,
+				start_vacuum:      C.bool(r.cfg.StartVacuum),
+				is_single_node:    C.bool(r.cfg.IsSingleNode),
 			},
 			nil,
 			C.uint64_t(0))
@@ -275,6 +286,8 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 				task_queue_size:   C.uint16_t(uint16(r.cfg.TaskQueueSize)),
 				buffer_pool_size:  C.uint32_t(uint32(r.cfg.BufferPoolSize)),
 				lg_opts:           optLog,
+				start_vacuum:      C.bool(r.cfg.StartVacuum),
+				is_single_node:    C.bool(r.cfg.IsSingleNode),
 			},
 			&appliedRangeIndex[0],
 			C.uint64_t(len(appliedRangeIndex)))
@@ -331,121 +344,7 @@ func (r *TsEngine) TSIsTsTableExist(tableID uint64) (bool, error) {
 	return bool(isExist), nil
 }
 
-// GetRangeGroups gets all rangeGroups in store.
-func (r *TsEngine) GetRangeGroups(tableID uint32) ([]api.RangeGroup, error) {
-	cRangeGroups := C.RangeGroups{}
-	status := C.TSGetRangeGroups(r.tdb, C.TSTableID(tableID), &cRangeGroups)
-	if err := statusToError(status); err != nil {
-		log.Errorf(context.TODO(), "could not get range groups from table %v, error: %v", tableID, err)
-		return nil, errors.Wrap(err, "could not get range groups")
-	}
-	cRangesPtr := unsafe.Pointer(cRangeGroups.ranges)
-	if cRangesPtr == nil {
-		log.Errorf(context.TODO(), "get null ranges from table", tableID)
-		return nil, errors.New("get null ranges")
-	}
-	defer C.free(cRangesPtr)
-	nRange := int(cRangeGroups.len)
-	cRanges := (*[math.MaxInt16]C.RangeGroup)(cRangesPtr)[0:nRange:nRange]
-	rangeGroups := make([]api.RangeGroup, nRange)
-	for i := 0; i < nRange; i++ {
-		rangeGroups[i].RangeGroupID = api.EntityRangeGroupID(cRanges[i].range_group_id)
-		rangeGroups[i].Type = api.ReplicaType(cRanges[i].typ)
-	}
-	return rangeGroups, nil
-}
-
-// UpdateRangeGroup updates RangeGroup messages.
-func (r *TsEngine) UpdateRangeGroup(
-	tableID uint32, rangeGroups []api.RangeGroup, tsMeta []byte,
-) error {
-	nRange := len(rangeGroups)
-	if len(rangeGroups) == 0 {
-		err := &Error{msg: "RangeGroup is nil"}
-		return errors.Wrap(err, "could not update range group")
-	}
-	for i := 0; i < nRange; i++ {
-		cRanges := make([]C.RangeGroup, 1)
-		cRanges[0].range_group_id = C.uint64_t(rangeGroups[i].RangeGroupID)
-		cRanges[0].typ = C.int8_t(rangeGroups[i].Type)
-		cRangeGroups := C.RangeGroups{
-			ranges: (*C.RangeGroup)(unsafe.Pointer(&cRanges[0])),
-			len:    C.int32_t(len(cRanges)),
-		}
-		status := C.TSUpdateRangeGroup(r.tdb, C.TSTableID(tableID), cRangeGroups)
-		log.Errorf(context.TODO(), "tableID: %v, rangeGroups:%v,update RangeGroups", tableID, rangeGroups)
-		if err := statusToError(status); err != nil {
-			if tsMeta == nil {
-				log.Errorf(context.TODO(), "TSUpdateRangeGroupErr: %s", err)
-				return err
-			}
-			log.Errorf(context.TODO(), "tableID: %v, rangeGroups:%v,could not update range group:%v,add it", tableID, rangeGroups, err)
-			hasTable, err := r.TSIsTsTableExist(uint64(tableID))
-			if err != nil {
-				log.Errorf(context.TODO(), "getTableerror: %s", err)
-			}
-			var temp []api.RangeGroup
-			temp = append(temp, rangeGroups[i])
-			if hasTable {
-				err := r.AddRangeGroup(uint64(tableID), tsMeta, temp)
-				if err != nil {
-					log.Errorf(context.TODO(), "AddRangeGroup: %s for table %d", err, tableID)
-				}
-			} else {
-				err := r.CreateRangeGroup(uint64(tableID), tsMeta, temp)
-				if err != nil {
-					log.Errorf(context.TODO(), "CreateRangeGroup: %s for table %d", err, tableID)
-				}
-			}
-			if err != nil {
-				return errors.Errorf("Failed to get TS meta : %s", err)
-			}
-		}
-	}
-	return nil
-}
-
-// CreateRangeGroup creates meta data of RangeGroups.
-func (r *TsEngine) CreateRangeGroup(
-	tableID uint64, meta []byte, rangeGroups []api.RangeGroup,
-) error {
-	nRange := len(rangeGroups)
-	cRanges := make([]C.RangeGroup, nRange)
-	for i := 0; i < nRange; i++ {
-		cRanges[i].range_group_id = C.uint64_t(rangeGroups[i].RangeGroupID)
-		cRanges[i].typ = C.int8_t(api.ReplicaType_Follower)
-	}
-	cRangeGroups := C.RangeGroups{
-		ranges: (*C.RangeGroup)(unsafe.Pointer(&cRanges[0])),
-		len:    C.int32_t(len(cRanges)),
-	}
-	status := C.TSCreateTsTable(r.tdb, C.TSTableID(tableID), goToTSSlice(meta), cRangeGroups)
-	if err := statusToError(status); err != nil {
-		return errors.Wrap(err, "could not create range group")
-	}
-	return nil
-}
-
-// AddRangeGroup adds RangeGroup.
-func (r *TsEngine) AddRangeGroup(tableID uint64, meta []byte, rangeGroups []api.RangeGroup) error {
-	nRange := len(rangeGroups)
-	cRanges := make([]C.RangeGroup, nRange)
-	for i := 0; i < nRange; i++ {
-		cRanges[i].range_group_id = C.uint64_t(rangeGroups[i].RangeGroupID)
-		cRanges[i].typ = C.int8_t(api.ReplicaType_Follower)
-	}
-	cRangeGroups := C.RangeGroups{
-		ranges: (*C.RangeGroup)(unsafe.Pointer(&cRanges[0])),
-		len:    C.int32_t(len(cRanges)),
-	}
-	status := C.TSCreateRangeGroup(r.tdb, C.TSTableID(tableID), goToTSSlice(meta), cRangeGroups)
-	if err := statusToError(status); err != nil {
-		return errors.Wrap(err, "could not create range group")
-	}
-	return nil
-}
-
-// DropTsTable drop ts table
+// DropTsTable drop ts table.
 func (r *TsEngine) DropTsTable(tableID uint64) error {
 	status := C.TSDropTsTable(r.tdb, C.TSTableID(tableID))
 	if err := statusToError(status); err != nil {
@@ -581,6 +480,153 @@ func (r *TsEngine) PutData(tableID uint64, payload [][]byte, tsTxnID uint64) (De
 	}
 	defer C.free(unsafe.Pointer(dedupResult.discard_bitmap.data))
 	return res, nil
+}
+
+// PutRowData 行存tags值和时序数据写入
+func (r *TsEngine) PutRowData(
+	tableID uint64, headerPrefix []byte, payload [][]byte, size int32, tsTxnID uint64,
+) (DedupResult, error) {
+	if len(payload) == 0 {
+		return DedupResult{}, errors.New("payload is nul")
+	}
+
+	sizeLimit := int32(TsPayloadSizeLimit.Get(&r.cfg.Settings.SV))
+	var cTsSlice C.TSSlice
+	// The structure of HeaderPrefix: | Header | primary_tag_len | primary_tag | tag_ten | tags | data_len |
+	// Header: | txn(16) | group_id(2) | payload_version(4) | database_id(4) | table_id(8) | ts_version(4) | row_num(4) | flags(1) |
+	const rowNumOffset = 38 // offset of row_num, pay attention to any change of the structure of HeaderPrefix
+	const dataLen = 4       // length of data_len in HeaderPrefix. The location is at the end of HeaderPrefix
+
+	headerLen := len(headerPrefix)
+	cTsSlice.len = C.size_t(int(size) + headerLen + dataLen)
+	cTsSlice.data = (*C.char)(C.malloc(cTsSlice.len))
+	if cTsSlice.data == nil {
+		return DedupResult{}, errors.New("failed malloc")
+	}
+	defer C.free(unsafe.Pointer(cTsSlice.data))
+
+	C.memcpy(unsafe.Pointer(cTsSlice.data), unsafe.Pointer(&headerPrefix[0]), C.size_t(headerLen))
+	dataPtr := uintptr(unsafe.Pointer(cTsSlice.data)) + uintptr(headerLen) // pointer to the data_len
+
+	// mock
+	cRangeGroup := C.RangeGroup{
+		range_group_id: C.uint64_t(1),
+		typ:            C.int8_t(0),
+	}
+	payloadPtr := dataPtr + uintptr(dataLen)
+	payloadSize := 0
+	partRowCnt := 0
+	totalRowCnt := len(payload)
+	var res DedupResult
+	for i := 0; i < totalRowCnt; i++ {
+		p := payload[i]
+		if len(p) == 0 {
+			continue
+		}
+		partLen := len(p)
+		// need to check whether the payload size exceeds limit, so calculate it before add the row to payload.
+		payloadSize += partLen
+		if payloadSize > int(sizeLimit) {
+			// fill data_len
+			*(*int32)(unsafe.Pointer(dataPtr)) = int32(payloadSize - partLen)
+			// fill row_num
+			*(*int32)(unsafe.Pointer(uintptr(unsafe.Pointer(cTsSlice.data)) + rowNumOffset)) = int32(partRowCnt)
+			var dedupResult C.DedupResult
+			status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID), &dedupResult)
+			if err := statusToError(status); err != nil {
+				return DedupResult{}, errors.Wrap(err, "could not PutData")
+			}
+			res.DedupRows += int(dedupResult.dedup_rows)
+			C.free(unsafe.Pointer(dedupResult.discard_bitmap.data))
+
+			payloadSize = partLen
+			payloadPtr = dataPtr + uintptr(dataLen)
+			partRowCnt = 0
+		}
+		partRowCnt++
+		C.memcpy(unsafe.Pointer(payloadPtr), unsafe.Pointer(&p[0]), C.size_t(partLen))
+		payloadPtr += uintptr(partLen)
+	}
+
+	// fill data_len
+	*(*int32)(unsafe.Pointer(dataPtr)) = int32(payloadSize)
+	// fill row_num
+	*(*int32)(unsafe.Pointer(uintptr(unsafe.Pointer(cTsSlice.data)) + rowNumOffset)) = int32(partRowCnt)
+	var dedupResult C.DedupResult
+	status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID), &dedupResult)
+	if err := statusToError(status); err != nil {
+		return DedupResult{}, errors.Wrap(err, "could not PutData")
+	}
+
+	res.DedupRows += int(dedupResult.dedup_rows)
+	res.DedupRule = int(dedupResult.dedup_rule)
+	// the DiscardBitmap is not complete if the payload is truncated due to the size limit.
+	res.DiscardBitmap = cSliceToGoBytes(dedupResult.discard_bitmap)
+	C.free(unsafe.Pointer(dedupResult.discard_bitmap.data))
+
+	return res, nil
+}
+
+// GetDataVolume gets DataVolume for ts range.
+// should not call this for relational ranges.
+func (r *TsEngine) GetDataVolume(
+	tableID uint64, startHashPoint, endHashPoint uint64, startTimestamp, endTimestamp int64,
+) (uint64, error) {
+	var volume C.uint64_t
+	status := C.TSGetDataVolume(
+		r.tdb,
+		C.TSTableID(tableID),
+		C.uint64_t(startHashPoint),
+		C.uint64_t(endHashPoint),
+		C.KwTsSpan{
+			begin: C.int64_t(startTimestamp),
+			end:   C.int64_t(endTimestamp),
+		},
+		&volume,
+	)
+	if err := statusToError(status); err != nil {
+		log.Errorf(context.TODO(), "GetDataVolume failed. err is :%+v. tableID: %d startHashPoint: %d, endHashPoint:%d startTimeStamp: %d, endTimeStamp: %d",
+			err, tableID, startHashPoint, endHashPoint, startTimestamp, endTimestamp)
+		return 0, errors.Wrap(err, "get data Volume failed")
+	}
+	return uint64(volume), nil
+}
+
+// GetDataVolumeHalfTS returns haslTS
+func (r *TsEngine) GetDataVolumeHalfTS(
+	tableID uint64, startHashPoint, endHashPoint uint64, startTimestamp, endTimestamp int64,
+) (int64, error) {
+	var halfTimestamp C.int64_t
+	status := C.TSGetDataVolumeHalfTS(
+		r.tdb,
+		C.TSTableID(tableID),
+		C.uint64_t(startHashPoint),
+		C.uint64_t(endHashPoint),
+		C.KwTsSpan{
+			begin: C.int64_t(startTimestamp),
+			end:   C.int64_t(endTimestamp),
+		},
+		&halfTimestamp,
+	)
+	if err := statusToError(status); err != nil {
+		return 0, errors.Wrap(err, "get half timestamp data Volume failed")
+	}
+
+	return int64(halfTimestamp), nil
+}
+
+// GetAvgTableRowSize gets AvgTableRowSize
+func (r *TsEngine) GetAvgTableRowSize(tableID uint64) (uint64, error) {
+	var avgRowSize C.uint64_t
+	status := C.TSGetAvgTableRowSize(
+		r.tdb,
+		C.TSTableID(tableID),
+		&avgRowSize,
+	)
+	if err := statusToError(status); err != nil {
+		return 0, errors.Wrap(err, "get avg table row size failed")
+	}
+	return uint64(avgRowSize), nil
 }
 
 // TsFetcher collect information in explain analyse
@@ -740,6 +786,22 @@ func (r *TsEngine) DeleteRangeData(
 	return uint64(delCnt), nil
 }
 
+// DeleteTsRangeData delete entities data in the range
+func (r *TsEngine) DeleteTsRangeData(
+	tableID, beginHash, endHash uint64, startTs, endTs int64, tsTxnID uint64,
+) error {
+	tsSpan := C.KwTsSpan{
+		begin: C.int64_t(startTs),
+		end:   C.int64_t(endTs),
+	}
+	status := C.TsDeleteTotalRange(r.tdb, C.TSTableID(tableID), C.uint64_t(beginHash),
+		C.uint64_t(endHash), tsSpan, C.uint64_t(tsTxnID))
+	if err := statusToError(status); err != nil {
+		return errors.New("range data deletion failed")
+	}
+	return nil
+}
+
 // DeleteData delete some one entity data
 func (r *TsEngine) DeleteData(
 	tableID uint64, rangeGroupID uint64, primaryTag []byte, tsSpans []*roachpb.TsSpan, tsTxnID uint64,
@@ -858,60 +920,53 @@ func (r *TsEngine) DeleteRangeGroup(tableID uint64, rangeGroup api.RangeGroup) e
 	return nil
 }
 
-// CreateSnapshot create snapshot
-func (r *TsEngine) CreateSnapshot(
-	tableID uint64, rangeGroupID uint64, beginHash uint64, endHash uint64,
+// CreateSnapshotForRead create snapshot
+func (r *TsEngine) CreateSnapshotForRead(
+	tableID uint64, beginHash uint64, endHash uint64, beginTs int64, endTs int64,
 ) (uint64, error) {
-	log.Info(context.TODO(), "create SnapShot, rangeGroupID: %v ", rangeGroupID)
 	var snapshotID C.uint64_t
-	status := C.TSCreateSnapshot(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID),
-		C.uint64_t(beginHash), C.uint64_t(endHash), &snapshotID)
+	tsSpan := C.KwTsSpan{
+		begin: C.int64_t(beginTs),
+		end:   C.int64_t(endTs),
+	}
+	status := C.TSCreateSnapshotForRead(r.tdb, C.TSTableID(tableID),
+		C.uint64_t(beginHash), C.uint64_t(endHash), tsSpan, &snapshotID)
 	if err := statusToError(status); err != nil {
 		return 0, errors.Wrap(err, "failed to create snapshot")
 	}
 	return uint64(snapshotID), nil
 }
 
-// DropSnapshot drops Snapshot.
-func (r *TsEngine) DropSnapshot(tableID uint64, rangeGroupID uint64, snapshotID uint64) error {
-	status := C.TSDropSnapshot(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(snapshotID))
-	if err := statusToError(status); err != nil {
-		return errors.Wrap(err, "failed to drop snapshot")
+// CreateSnapshotForWrite preparing for writing snapshots
+func (r *TsEngine) CreateSnapshotForWrite(
+	tableID uint64, beginHash uint64, endHash uint64, beginTs int64, endTs int64,
+) (uint64, error) {
+	var snapshotID C.uint64_t
+	tsSpan := C.KwTsSpan{
+		begin: C.int64_t(beginTs),
+		end:   C.int64_t(endTs),
 	}
-	return nil
+	status := C.TSCreateSnapshotForWrite(r.tdb, C.TSTableID(tableID),
+		C.uint64_t(beginHash), C.uint64_t(endHash), tsSpan, &snapshotID)
+	if err := statusToError(status); err != nil {
+		return 0, errors.Wrap(err, "failed to create snapshot")
+	}
+	return uint64(snapshotID), nil
 }
 
-// GetSnapshotData get data of the snapshot
-func (r *TsEngine) GetSnapshotData(
-	tableID uint64, rangeGroupID uint64, snapshotID uint64, offset int, limit int,
-) ([]byte, int, error) {
+// GetSnapshotNextBatchData get data of the snapshot
+func (r *TsEngine) GetSnapshotNextBatchData(tableID uint64, snapshotID uint64) ([]byte, error) {
 	var data C.TSSlice
-	var total C.size_t
-	status := C.TSGetSnapshotData(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(snapshotID),
-		C.size_t(offset), C.size_t(limit), &data, &total)
+	status := C.TSGetSnapshotNextBatchData(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID), &data)
 	if err := statusToError(status); err != nil {
-		return nil, 0, errors.Wrap(err, "failed to get snapshot data")
+		return nil, errors.Wrap(err, "failed to get snapshot data")
 	}
 	defer C.free(unsafe.Pointer(data.data))
-	return cSliceToGoBytes(data), int(total), nil
+	return cSliceToGoBytes(data), nil
 }
 
-// InitSnapshotForWrite preparing for writing snapshots
-func (r *TsEngine) InitSnapshotForWrite(
-	tableID uint64, rangeGroupID uint64, snapshotID uint64, snapshotSize int,
-) error {
-	status := C.TSInitSnapshotForWrite(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(snapshotID),
-		C.size_t(snapshotSize))
-	if err := statusToError(status); err != nil {
-		return errors.Wrap(err, "failed to init snapshot for write")
-	}
-	return nil
-}
-
-// WriteSnapshotData write snapshot data
-func (r *TsEngine) WriteSnapshotData(
-	tableID uint64, rangeGroupID uint64, snapshotID uint64, offset int, data []byte, finished bool,
-) error {
+// WriteSnapshotBatchData write snapshot data
+func (r *TsEngine) WriteSnapshotBatchData(tableID uint64, snapshotID uint64, data []byte) error {
 	if len(data) == 0 {
 		return errors.New("snapshot data is null")
 	}
@@ -922,19 +977,36 @@ func (r *TsEngine) WriteSnapshotData(
 	}
 	defer C.free(unsafe.Pointer(cTsSlice.data))
 
-	status := C.TSWriteSnapshotData(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(snapshotID),
-		C.size_t(offset), cTsSlice, C.bool(finished))
+	status := C.TSWriteSnapshotBatchData(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID), cTsSlice)
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to write snapshot data")
 	}
 	return nil
 }
 
-// ApplySnapshot apply snapshot
-func (r *TsEngine) ApplySnapshot(tableID uint64, rangeGroupID uint64, snapshotID uint64) error {
-	status := C.TSEnableSnapshot(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(snapshotID))
+// WriteSnapshotSuccess apply snapshot
+func (r *TsEngine) WriteSnapshotSuccess(tableID uint64, snapshotID uint64) error {
+	status := C.TSWriteSnapshotSuccess(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to apply snapshot")
+	}
+	return nil
+}
+
+// WriteSnapshotRollback rollback snapshot
+func (r *TsEngine) WriteSnapshotRollback(tableID uint64, snapshotID uint64) error {
+	status := C.TSWriteSnapshotRollback(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID))
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to rollback snapshot")
+	}
+	return nil
+}
+
+// DeleteSnapshot drops Snapshot.
+func (r *TsEngine) DeleteSnapshot(tableID uint64, snapshotID uint64) error {
+	status := C.TSDeleteSnapshot(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID))
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to drop snapshot")
 	}
 	return nil
 }
@@ -1063,6 +1135,22 @@ func (r *TsEngine) manageWAL() {
 	})
 }
 
+// DeleteReplicaTSData delete replica ts data
+func (r *TsEngine) DeleteReplicaTSData(
+	tableID uint64, beginHash uint64, endHash uint64, startTs int64, endTs int64,
+) error {
+	tsSpan := C.KwTsSpan{
+		begin: C.int64_t(startTs),
+		end:   C.int64_t(endTs),
+	}
+	status := C.TsDeleteTotalRange(r.tdb, C.TSTableID(tableID),
+		C.uint64_t(beginHash), C.uint64_t(endHash), tsSpan, C.uint64_t(0))
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to delete replica ts data")
+	}
+	return nil
+}
+
 func goToTSSlice(b []byte) C.TSSlice {
 	if len(b) == 0 {
 		return C.TSSlice{data: nil, len: 0}
@@ -1169,4 +1257,14 @@ func goUnLock(goMutux C.uint64_t) {
 	if fet.Mu != nil {
 		fet.Mu.Unlock()
 	}
+}
+
+// GetTsVersion get current version of ts table
+func (r *TsEngine) GetTsVersion(tableID uint64) (uint32, error) {
+	var tsVersion C.uint32_t
+	status := C.TsGetTableVersion(r.tdb, C.TSTableID(tableID), &tsVersion)
+	if err := statusToError(status); err != nil {
+		return uint32(tsVersion), errors.Wrap(err, "failed to get ts version")
+	}
+	return uint32(tsVersion), nil
 }

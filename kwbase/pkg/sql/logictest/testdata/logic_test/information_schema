@@ -262,7 +262,6 @@ kwdb_internal       kwdb_functions
 kwdb_internal       kwdb_object_create_statement
 kwdb_internal       kwdb_retention
 kwdb_internal       kwdb_schedules
-kwdb_internal       kwdb_ts_partitions
 kwdb_internal       leases
 kwdb_internal       node_build_info
 kwdb_internal       node_metrics
@@ -412,7 +411,6 @@ kwdb_functions
 kwdb_object_create_statement
 kwdb_retention
 kwdb_schedules
-kwdb_ts_partitions
 leases
 node_build_info
 node_metrics
@@ -569,7 +567,6 @@ system         kwdb_internal       kwdb_functions                     SYSTEM VIE
 system         kwdb_internal       kwdb_object_create_statement       SYSTEM VIEW        NO                  1        1283818853
 system         kwdb_internal       kwdb_retention                     SYSTEM VIEW        NO                  1        1283818853
 system         kwdb_internal       kwdb_schedules                     SYSTEM VIEW        NO                  1        1283818853
-system         kwdb_internal       kwdb_ts_partitions                 SYSTEM VIEW        NO                  1        1283818853
 system         kwdb_internal       leases                             SYSTEM VIEW        NO                  1        1283818853
 system         kwdb_internal       node_build_info                    SYSTEM VIEW        NO                  1        1283818853
 system         kwdb_internal       node_metrics                       SYSTEM VIEW        NO                  1        1283818853
@@ -1760,7 +1757,6 @@ NULL     public   system         kwdb_internal       kwdb_functions             
 NULL     public   system         kwdb_internal       kwdb_object_create_statement       SELECT          NULL          YES
 NULL     public   system         kwdb_internal       kwdb_retention                     SELECT          NULL          YES
 NULL     public   system         kwdb_internal       kwdb_schedules                     SELECT          NULL          YES
-NULL     public   system         kwdb_internal       kwdb_ts_partitions                 SELECT          NULL          YES
 NULL     public   system         kwdb_internal       leases                             SELECT          NULL          YES
 NULL     public   system         kwdb_internal       node_build_info                    SELECT          NULL          YES
 NULL     public   system         kwdb_internal       node_metrics                       SELECT          NULL          YES

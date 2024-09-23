@@ -27,6 +27,12 @@ typedef struct {
   size_t len;
 } TSString;
 
+// A TSStatus is an alias for TSString and is used to indicate that
+// the return value indicates the success or failure of an
+// operation. If TSStatus.data == NULL the operation succeeded.
+typedef TSString TSStatus;
+typedef uint64_t TSTableID;
+typedef int64_t KTimestamp;
 
 // distribute moudule RangeGroup
 typedef struct {
@@ -70,17 +76,18 @@ typedef struct {
   TSSlice discard_bitmap;  // discard rows bitmap
 } DedupResult;
 
+// hashID span
+typedef struct {
+  TSTableID table_id;
+  HashIdSpan hash_span;
+  KwTsSpan ts_span;
+} SnapshotRange;
+
 // Define a structure to store wait threads number
 typedef struct {
   uint32_t wait_threads;
 } ThreadInfo;
 
-// A TSStatus is an alias for TSString and is used to indicate that
-// the return value indicates the success or failure of an
-// operation. If TSStatus.data == NULL the operation succeeded.
-typedef TSString TSStatus;
-typedef uint64_t TSTableID;
-typedef int64_t KTimestamp;
 
 typedef enum LgSeverity {
   UNKNOWN_K = 0, INFO_K, WARN_K, ERROR_K, FATAL_K, NONE_K, DEFAULT_K
@@ -107,6 +114,8 @@ typedef struct {
   uint16_t task_queue_size;
   uint32_t buffer_pool_size;
   TsLogOptions lg_opts;
+  bool start_vacuum;
+  bool is_single_node;
 } TSOptions;
 
 typedef enum _EnMqType {
@@ -223,21 +232,121 @@ TSStatus TSxRollback(TSEngine* engine, TSTableID tableId, char* transaction_id);
  */
 TSStatus TSDeleteExpiredData(TSEngine* engine, TSTableID table_id, KTimestamp end_ts);
 
-TSStatus TSCreateSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_group_id,
-                          uint64_t begin_hash, uint64_t end_hash, uint64_t* snapshot_id);
+/**
+ * @brief calculate row size of this table. Approximate value
+ * @param[in] table_id id of the time series table
+ * @param[out] volume   range data
+ * @return
+ */
+TSStatus TSGetAvgTableRowSize(TSEngine* engine, TSTableID table_id, uint64_t* row_size);
 
-TSStatus TSDropSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id);
+/**
+ * @brief get range(hash-hash ts-ts) data volume, Approximate value
+ * @param[in] table_id id of the time series table
+ * @param[in] begin_hash,end_hash  hash range of primary key of entities 
+ * @param[in] ts_span   timestamp span
+ * @param[out] volume   range data
+ * @return
+ */
+TSStatus TSGetDataVolume(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                         KwTsSpan ts_span, uint64_t* volume);
 
-TSStatus TSGetSnapshotData(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                           size_t offset, size_t limit, TSSlice* data, size_t* total);
+/**
+ * @brief The timestamp when querying half of the total data within the range (an approximate value)
+ * @param[in] table_id id of the time series table
+ * @param[in] begin_hash,end_hash  hash range of primary key of entities 
+ * @param[in] ts_span   timestamp span
+ * @param[out] half_ts  timestamp that half split range
+ * @return
+ */
+TSStatus TSGetDataVolumeHalfTS(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                               KwTsSpan ts_span, int64_t* half_ts);
 
-TSStatus TSInitSnapshotForWrite(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                              size_t snapshot_size);
+/**
+ * @brief Input data in Payload format based on row mode
+ * @param[in] table_id id of the time series table
+ * @param[in] payload_row  row-based payload
+ * @param[in] range_group  hash-point
+ * @param[out] dedup_result deduplicate info
+ * @return
+ */
+TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* payload_row, size_t payload_num,
+                           RangeGroup range_group, uint64_t mtr_id, DedupResult* dedup_result);
 
-TSStatus TSWriteSnapshotData(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                             size_t offset, TSSlice data, bool finished);
+/**
+ * @brief delete data in range, used after snapshot finished. 
+ * it maybe delete tstable in storage engine. in this case, before next input data, we should create table first.
+ * @param[in] table_id id of the time series table
+ * @param[in] begin_hash,end_hash  hash range of primary key of entities 
+ * @param[in] ts_span   timestamp span
+ * @return
+ */
+TSStatus TsDeleteTotalRange(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                              KwTsSpan ts_span, uint64_t mtr_id);
 
-TSStatus TSEnableSnapshot(TSEngine* engine, TSTableID table_id, uint64_t range_group_id, uint64_t snapshot_id);
+/**
+ * @brief Create a snapshot object to read local data
+ * @param[in] table_id id of the time series table
+ * @param[in] begin_hash,end_hash  hash range of primary key of entities 
+ * @param[in] ts_span   timestamp span
+ * @param[out] snapshot_id  generated snapshot id
+ * @return
+ */
+TSStatus TSCreateSnapshotForRead(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                                 KwTsSpan ts_span, uint64_t* snapshot_id);
+
+/**
+ * @brief Return the data that needs to be transmitted this time. If the data is 0, it means that all data has been queried
+ * @param[in] table_id id of the time series table
+ * @param[in] snapshot_id  generated snapshot id
+ * @param[in] data   payload type data
+ * @return
+ */
+TSStatus TSGetSnapshotNextBatchData(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id, TSSlice* data);
+
+/**
+ * @brief Create an object to receive data at the target node
+ * @param[in] table_id id of the time series table
+ * @param[in] begin_hash,end_hash  hash range of primary key of entities 
+ * @param[in] ts_span   timestamp span
+ * @param[out] snapshot_id  generated snapshot id
+ * @return
+ */
+TSStatus TSCreateSnapshotForWrite(TSEngine* engine, TSTableID table_id, uint64_t begin_hash, uint64_t end_hash,
+                                  KwTsSpan ts_span, uint64_t* snapshot_id);
+
+/**
+ * @brief Target node, after receiving data, writes the data to storage
+ * @param[in] table_id id of the time series table
+ * @param[in] snapshot_id  generated snapshot id
+ * @param[in] data   payload type data
+ * @return
+ */
+TSStatus TSWriteSnapshotBatchData(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id, TSSlice data);
+
+/**
+ * @brief All writes completed, this snapshot is successful, call this function
+ * @param[in] table_id id of the time series table
+ * @param[in] snapshot_id  generated snapshot id
+ * @return
+ */
+TSStatus TSWriteSnapshotSuccess(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id);
+
+/**
+ * @brief The snapshot failed, or in other scenarios, the data written this time needs to be rolled back
+ * @param[in] table_id id of the time series table
+ * @param[in] snapshot_id  generated snapshot id
+ * @return
+ */
+TSStatus TSWriteSnapshotRollback(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id);
+
+/**
+ * @brief Delete snapshot object
+ * @param[in] table_id id of the time series table
+ * @param[in] snapshot_id  generated snapshot id
+ * @return
+ */
+TSStatus TSDeleteSnapshot(TSEngine* engine, TSTableID table_id, uint64_t snapshot_id);
 
 TSStatus TSClose(TSEngine* engine);
 
@@ -284,6 +393,14 @@ TSStatus TSDeleteRangeGroup(TSEngine* engine, TSTableID table_id, RangeGroup ran
 * @return : TSStatus
 */
 TSStatus TSGetWaitThreadNum(TSEngine* engine, void* resp);
+
+/**
+ * @brief Get current version of table
+ * @param[in] table_id id of the time series table
+ * @param[out] version current table version
+ * @return
+ */
+TSStatus TsGetTableVersion(TSEngine* engine, TSTableID table_id, uint32_t* version);
 
 bool __attribute__((weak)) isCanceledCtx(uint64_t goCtxPtr);
 

@@ -27,6 +27,9 @@ function execute_regression_sql_basic_v2() {
       echo_err "setup ${topology} failed"
       return 1
     fi
+    if [ $topology == "5c" ]; then
+      sleep 30s
+    fi
     # rm -fr $QA_DIR/TEST_integration
     python3 $(dirname $0)/execute_regression_sql_v2.py -t ${topology} -d ${sqldirs[*]} -f $SQL_FILTER -s $SUMMARY_FILE
 
@@ -134,14 +137,17 @@ function execute_regression_sql_distribute_v2() {
 
 
 
-
     for dir in ${sqldirs[@]};
     do
       # echo "---------- Begin execute $dir sqls ----------"
       mkdir -p $QA_DIR/TEST_integration/$dir/
       for sql_file_path in `cd $QA_DIR && find Integration/$dir -type f -name *.sql | sort`
         do
-
+          echo '==============================='
+          echo $sql_file_path
+          echo $SQL_FILTER
+          echo $dir
+          echo '==============================='
 
           ut_start_time=$(date +%s)
           sql_file=$(basename $sql_file_path)
@@ -159,6 +165,8 @@ function execute_regression_sql_distribute_v2() {
             echo_err "setup ${topology} failed"
             return 1
           fi
+
+          tar -zxvf $QA_DIR/Integration/$dir/tsdb1.tar.gz -C  $QA_DIR/../install/deploy/extern/
 
           echo_info "execute ${topology} $sql_file_path"
           # use ksql exec sql file and write all output to utname.log

@@ -1119,10 +1119,10 @@ SQLSTATE: 22023
 -------+------+------+------+-------
      8 |  8.1 |   -3 |  -30 | -300
 (1 row)
-> select avg(x),avg(x2),avg(y),avg(y2),avg(y3) from t;
-         avg        |        avg        |        avg         |        avg         |        avg
---------------------+-------------------+--------------------+--------------------+---------------------
-  4.509090909090909 | 4.609090909090909 | 1.6363636363636365 | 16.363636363636363 | 163.63636363636363
+> select avg(x),avg(x2),round(avg(y),2),avg(y2),avg(y3) from t;
+         avg        |        avg        | round |        avg         |        avg
+--------------------+-------------------+-------+--------------------+---------------------
+  4.509090909090909 | 4.609090909090909 |  1.64 | 16.363636363636363 | 163.63636363636363
 (1 row)
 > select sum(x),sum(x2),sum(y),sum(y2),sum(y3) from t;
   sum  | sum  | sum | sum | sum
@@ -1845,7 +1845,7 @@ INSERT 1
 INSERT 1
 > insert into test_query.d1 values ('2022-05-01 17:00:00',666666660000,5000,5000000,600000000000000000,500000000000000000.505,500000000000000000.50505050505,false, 1);
 INSERT 1
-> select e3*e3 from test_query.d1;
+> select e3*e3 from test_query.d1 order by k_timestamp;
      ?column?
 ------------------
             NULL
@@ -1886,7 +1886,7 @@ INSERT 1
 INSERT 1
 > insert into test_query.s1 values ('2022-05-01 17:00:00',    666666660000,5000,5000000,600000000000000000,500000000000000000.505,500000000000000000.50505050505,false, 's1_1', 'd1');
 INSERT 1
-> select e3 * e3 from test_query.s1;
+> select e3 * e3 from test_query.s1 order by k_timestamp;
      ?column?
 ------------------
   49000000000000
@@ -1900,7 +1900,7 @@ INSERT 1
   36000000000000
    9000000000000
 (10 rows)
-> select e3 * e3 from test_query.s1 where name = 's1_1';
+> select e3 * e3 from test_query.s1 where name = 's1_1' order by k_timestamp;
      ?column?
 ------------------
   49000000000000

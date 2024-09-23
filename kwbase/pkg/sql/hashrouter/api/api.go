@@ -30,6 +30,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 )
 
 // GetHashRouterManagerWithTxn get the HashRouterManager object with txn
@@ -50,18 +51,6 @@ type EntityRangeGroupChange struct {
 
 // HashRouterManager the interface of ha manager
 type HashRouterManager interface {
-	// AddNode node join to the cluster
-	AddNode(ctx context.Context, nodeID roachpb.NodeID, tableID uint32, stores map[roachpb.StoreID]roachpb.StoreDescriptor) ([]EntityRangeGroupChange, error)
-	// RemoveNode node decommission from the cluster
-	RemoveNode(ctx context.Context, nodeID roachpb.NodeID, tableID uint32, stores map[roachpb.StoreID]roachpb.StoreDescriptor) ([]EntityRangeGroupChange, error) // RandomChange generate random change
-	// RandomChange generate random change
-	RandomChange(ctx context.Context, stores map[roachpb.StoreID]roachpb.StoreDescriptor) (EntityRangePartitionMessage, error)
-	// IsNodeDead the replica change when node dead
-	IsNodeDead(ctx context.Context, nodeID roachpb.NodeID, tableID uint32) ([]EntityRangeGroupChange, error)
-	// ReStartNode the replica change when dead node rejoin
-	ReStartNode(ctx context.Context, nodeID roachpb.NodeID, tableID uint32) ([]EntityRangeGroupChange, error)
-	// IsNodeUnhealthy the replica change when dead unhealthy
-	IsNodeUnhealthy(ctx context.Context, nodeID roachpb.NodeID, tableID uint32) ([]EntityRangeGroupChange, error)
 	// IsNodeUpgrading the replica change when node upgrading
 	IsNodeUpgrading(ctx context.Context, nodeID roachpb.NodeID, tableID uint32) ([]EntityRangeGroupChange, error)
 	// NodeRecover the replica change when unhealthy node rejoin
@@ -72,31 +61,18 @@ type HashRouterManager interface {
 	RefreshHashRouterWithSingleGroup(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, groupChange EntityRangeGroupChange) error
 	// RefreshHashRouterForGroups calculate the new groups distribute and write to disk without groupChange
 	RefreshHashRouterForGroups(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, nodeStatus storagepb.NodeLivenessStatus, groups map[EntityRangeGroupID]struct{}) error
-	// RefreshHashRouterForAllGroups calculate all groups distribute and write to disk without groupChange
-	RefreshHashRouterForAllGroups(ctx context.Context, txn *kv.Txn, msg string, nodeStatus storagepb.NodeLivenessStatus, groups map[EntityRangeGroupID]struct{}) error
-	// RefreshHashRouterForGroupsWithSingleGroup After the replica migration is completed, call this interface to complete the update of the hashRouter
-	RefreshHashRouterForGroupsWithSingleGroup(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, nodeStatus storagepb.NodeLivenessStatus, groupChangee EntityRangeGroupChange) error
-	ReSetHashRouterForWithFailedSingleGroup(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, nodeStatus storagepb.NodeLivenessStatus, groups map[EntityRangeGroupID]struct{}) error
 	// InitHashRouter init the table distribute when create table
 	InitHashRouter(ctx context.Context, txn *kv.Txn, databaseID uint32, tableID uint32) (HashRouter, error)
 	// GroupChange the replica change when group change distribute use to internal debug
 	GroupChange(ctx context.Context, txn *kv.Txn, tableID uint32, groupID EntityRangeGroupID, leaseHolderID roachpb.NodeID, follower1ID roachpb.NodeID, follower2ID roachpb.NodeID) ([]EntityRangePartitionMessage, error)
 	// DropTableHashInfo drop the table distribute from the disk
 	DropTableHashInfo(ctx context.Context, txn *kv.Txn, tableID uint32) error
-	// CheckFromDisk refresh the table distribute from manager object
-	CheckFromDisk(ctx context.Context, txn *kv.Txn, tableID uint32) error
 	// GetAllHashRouterInfo get all table distribute from disk
 	GetAllHashRouterInfo(ctx context.Context, txn *kv.Txn) (map[uint32]HashRouter, error)
 	// GetTableGroupsOnNodeForAddNode get all groups on every node when adding node
 	GetTableGroupsOnNodeForAddNode(ctx context.Context, tableID uint32, nodeID roachpb.NodeID) []RangeGroup
-	// GetGroupsOnNode  get all groups on every node
-	GetGroupsOnNode(ctx context.Context, nodeID roachpb.NodeID) []EntityRangeGroup
-	// GetAllGroups get all table groups
-	GetAllGroups(ctx context.Context) []EntityRangeGroup
 	// GetHashInfoByTableID get the table groups distribute
 	GetHashInfoByTableID(ctx context.Context, tableID uint32) HashRouter
-	// GetGossipMessage get the message need to gossip
-	GetGossipMessage() GossipEntityRangeGroupMessage
 
 	PutSingleHashInfoWithLock(ctx context.Context, tableID uint32, txn *kv.Txn, routing KWDBHashRouting) (err error)
 }
@@ -139,39 +115,22 @@ func GetHashPointByPrimaryTag(primaryTags ...[]byte) ([]HashPoint, error) {
 		if err != nil {
 			return nil, err
 		}
-		hashPoints = append(hashPoints, HashPoint(fnv32.Sum32()%HashParam))
+		hashPoints = append(hashPoints, HashPoint(fnv32.Sum32()%HashParamV2))
+		log.Eventf(context.TODO(), "hashID: +%v , primaryTag: +%v", HashPoint(fnv32.Sum32()%HashParamV2), primaryTag)
 		fnv32.Reset()
 	}
 
 	return hashPoints, nil
 }
 
-// GetAvailableNodeIDs get all available nodeID
-var GetAvailableNodeIDs func(ctx context.Context) ([]roachpb.NodeID, error)
-
 // GetHealthyNodeIDs get all healthy nodes
 var GetHealthyNodeIDs func(ctx context.Context) ([]roachpb.NodeID, error)
 
-// TransferPartitionLease to control all ranges lease for partition by hrMgr.
-var TransferPartitionLease func(ctx context.Context, tableID uint32, change EntityRangePartitionMessage) error
-
-// AddPartitionReplicas adding a set of replicas to all ranges for partition by hrNgr.
-var AddPartitionReplicas func(ctx context.Context, tableID uint32, change EntityRangePartitionMessage) error
-
-// RemovePartitionReplicas adding a set of replicas to all ranges for partition by hrNgr.
-var RemovePartitionReplicas func(ctx context.Context, tableID uint32, change EntityRangePartitionMessage) error
-
-// RefreshTSRangeGroup updates range group.
-var RefreshTSRangeGroup func(ctx context.Context, tableID uint32, nodeID roachpb.NodeID, rangeGroups []RangeGroup, tsMeta []byte) error
+// GetTableNodeIDs get all healthy nodes
+var GetTableNodeIDs func(ctx context.Context, txn *kv.Txn, tableID uint32) ([]roachpb.NodeID, error)
 
 // RemoveUnusedTSRangeGroups remove unused range groups of target table from the target node.
 var RemoveUnusedTSRangeGroups func(ctx context.Context, tableID uint32, nodeID roachpb.NodeID, rangeGroups []RangeGroup) error
-
-// TSRequestLease request the lease for target store
-var TSRequestLease func(ctx context.Context, tableID uint32, startPoint HashPoint, nodeID roachpb.NodeID) error
-
-// RelocatePartitionReplicas remove a set of replicas to all ranges for partition by hrNgr.
-var RelocatePartitionReplicas func(ctx context.Context, tableID uint32, change EntityRangePartitionMessage, uselessRange bool) error
 
 // HRManagerWLock HashRouterCache write lock
 var HRManagerWLock func()
@@ -182,14 +141,14 @@ var HRManagerWUnLock func()
 // GetHashInfoByTableID query kwdb_hash_routing by specific table id
 var GetHashInfoByTableID func(ctx context.Context, txn *kv.Txn, tableID uint32) ([]*KWDBHashRouting, error)
 
-// GetHashInfoByID query kwdb_hash_routing by specific entity group id
-var GetHashInfoByID func(ctx context.Context, txn *kv.Txn, entitiGroupID uint64) (*KWDBHashRouting, error)
-
 // GetHashInfoByIDInTxn query kwdb_hash_routing by specific entity group id, in an active txn.
 var GetHashInfoByIDInTxn func(ctx context.Context, entitiGroupID uint64, sender kv.Sender, header *roachpb.Header) (*KWDBHashRouting, error)
 
 // GetAllHashRoutings  query kwdb_hash_routing and fetch all rows
 var GetAllHashRoutings func(ctx context.Context, txn *kv.Txn) ([]*KWDBHashRouting, error)
+
+// CreateTSTable ...
+var CreateTSTable func(ctx context.Context, tableID uint32, nodeID roachpb.NodeID, tsMeta []byte) error
 
 // AvailableReplicaCnt return count of available status replicas.
 func (g *EntityRangeGroup) AvailableReplicaCnt() int {

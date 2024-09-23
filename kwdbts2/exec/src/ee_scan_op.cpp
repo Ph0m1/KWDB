@@ -195,7 +195,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
       }
 
       total_read_row_ += row_batch_->count_;
-
+      LOG_DEBUG("TableScanOperator::Next data_count:%d", total_read_row_);
       if (nullptr == filter_ && 0 == cur_offset_ && 0 == limit_) {
         examined_rows_ += row_batch_->count_;
         break;
@@ -372,6 +372,7 @@ EEIteratorErrCode TableScanOperator::Reset(kwdbContext_p ctx) {
 }
 
 KStatus TableScanOperator::Close(kwdbContext_p ctx) {
+  LOG_DEBUG("TableScanOperator close. reading row count: %u", total_read_row_);
   EnterFunc();
   Reset(ctx);
   KStatus ret;

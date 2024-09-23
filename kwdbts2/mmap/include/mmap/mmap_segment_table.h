@@ -16,13 +16,27 @@
 #include <linux/magic.h>
 #include "payload.h"
 #include "entity_block_meta_manager.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "ts_table_object.h"
 #include "utils/compress_utils.h"
 #include "mmap_entity_block_meta.h"
 #include "ts_common.h"
 
 using namespace std;
+
+struct TsBlockFullData {
+  uint32_t rows{0};
+  BlockItem block_item;
+  std::vector<TSSlice> col_block_addr;
+  std::list<std::shared_ptr<void>> var_col_values;
+  std::list<TSSlice> need_del_mems;
+
+  ~TsBlockFullData() {
+    for (auto& del : need_del_mems) {
+      free(del.data);
+    }
+  }
+};
 
 class MMapSegmentTable : public TSObject, public TsTableObject {
  private:
@@ -40,7 +54,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // data block size of every column.
   vector<size_t> col_block_size_;
   // varchar or varbinary values store in stringfile, which can remap size.
-  MMapStringFile* m_str_file_{nullptr};
+  MMapStringColumn* m_str_file_{nullptr};
   EntityBlockMetaManager* meta_manager_{nullptr};
   // is this segment compressed.
   bool is_compressed_ = false;
@@ -83,6 +97,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
   virtual void push_back_null_bitmap(kwdbts::Payload* payload, MetricRowID row_id, size_t segment_column,
                                      size_t payload_column, size_t payload_start_row, size_t payload_num);
+
+  int putDataIntoVarFile(char* var_value, DATATYPE type, size_t* loc);
 
   /**
    *  @brief get datablock memory address of certain column, by block index in current segment
@@ -132,6 +148,30 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
   inline uint64_t getReservedRows() { return max_rows_per_block_ * max_blocks_per_segment_; }
 
+  static size_t GetBlockHeaderSize(size_t max_rows_per_block, size_t col_size) {
+    size_t header_size = (max_rows_per_block + 7) / 8 + BLOCK_AGG_COUNT_SIZE + col_size * BLOCK_AGG_NUM;
+    return (header_size + 63) / 64 * 64;
+  }
+
+  static size_t GetBlockSize(size_t max_rows_per_block, size_t col_size) {
+    size_t header_size = (max_rows_per_block + 7) / 8 + BLOCK_AGG_COUNT_SIZE + col_size * BLOCK_AGG_NUM;
+    size_t block_size = (header_size + 63) / 64 * 64 + col_size * max_rows_per_block;
+    return (block_size + 63) / 64 * 64;
+  }
+
+  size_t GetColBlockHeaderSize(size_t col_size) {
+    return GetBlockHeaderSize(max_rows_per_block_, col_size);
+  }
+
+  size_t GetColBlockSize(size_t col_size) {
+    return GetBlockSize(max_rows_per_block_, col_size);
+  }
+
+  void CopyNullBitmap(BLOCK_ID blk_id, size_t col_id, char* desc_mem) {
+    char* bitmap = static_cast<char*>(columnNullBitmapAddr(blk_id, col_id));
+    memcpy(desc_mem, bitmap, getBlockBitmapSize());
+  }
+
   /**
    * @brief  check if current segment schema is same with root table.
   */
@@ -147,6 +187,27 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
    */
   int PushPayload(uint32_t entity_id, MetricRowID start_row, kwdbts::Payload* payload,
                   size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info);
+
+  /**
+   *  @brief copy block from snapshot to segment file  directly.
+   *
+   * @param block_item  block item.
+   * @param block       snapshot block info
+   * @param ts_span     used for deleting outrange rows.
+   * @return Return address
+ */
+  int CopyColBlocks(BlockItem* blk_item, const TsBlockFullData& block, KwTsSpan ts_span);
+
+  /**
+   *  @brief reset all agg values in column block
+   *
+   * @param block_item         block item.
+   * @param block_header       snapshot block info
+   * @param col                column schema info
+   * @param var_values         used for var-type column
+   * @return Return address
+ */
+  void ResetBlockAgg(BlockItem* blk_item, char* block_header, const AttributeInfo& col, std::list<std::shared_ptr<void>> var_values);
 
   /**
    * pushBackToColumn writes data by column, updating the bitmap and aggregate results.
@@ -196,7 +257,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
    * @brief get block header address.
   */
   inline void* getBlockHeader(BLOCK_ID data_block_id, size_t c) const {
-    assert(data_block_id > segment_id_);
+    assert(data_block_id >= segment_id_);
     return internalBlockHeader(data_block_id - segment_id_, c);
   }
 
@@ -225,10 +286,10 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
         agg_offset = BLOCK_AGG_COUNT_SIZE;
         break;
       case kwdbts::Sumfunctype::MIN :
-        agg_offset = BLOCK_AGG_COUNT_SIZE + cols_info_with_hidden_[c].size;
+        agg_offset = BLOCK_AGG_COUNT_SIZE + cols_info_include_dropped_[c].size;
         break;
       case kwdbts::Sumfunctype::SUM :
-        agg_offset = BLOCK_AGG_COUNT_SIZE + cols_info_with_hidden_[c].size * 2;
+        agg_offset = BLOCK_AGG_COUNT_SIZE + cols_info_include_dropped_[c].size * 2;
         break;
       case kwdbts::Sumfunctype::COUNT :
         break;
@@ -252,8 +313,31 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     size_t offset = getBlockBitmapSize();
     addresses.count = reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
     addresses.max = reinterpret_cast<void*>((intptr_t) addresses.count + BLOCK_AGG_COUNT_SIZE);
-    addresses.min = reinterpret_cast<void*>((intptr_t) addresses.max + cols_info_with_hidden_[c].size);
-    addresses.sum = reinterpret_cast<void*>((intptr_t) addresses.max + cols_info_with_hidden_[c].size * 2);
+    addresses.min = reinterpret_cast<void*>((intptr_t) addresses.max + cols_info_include_dropped_[c].size);
+    addresses.sum = reinterpret_cast<void*>((intptr_t) addresses.max + cols_info_include_dropped_[c].size * 2);
+  }
+
+  bool IsRowVaild(BlockItem* blk_item, k_uint32 cur_row) {
+    bool is_deleted;
+    if (blk_item->isDeleted(cur_row, &is_deleted) < 0 || is_deleted) {
+      return false;
+    }
+    if (blk_item->alloc_row_count == blk_item->publish_row_count) {
+      return true;
+    }
+    TimeStamp64LSN cur_ts(columnAddr({blk_item->block_id, cur_row}, 0));
+    if (cols_info_include_dropped_[0].type == DATATYPE::TIMESTAMP64_LSN) {
+      // lsn = 0, means this row space is not filled with data.
+      if (cur_ts.lsn == 0) {
+        return false;
+      }
+    } else {
+      // ts = 0, means this row space is not filled with data.
+      if (cur_ts.ts64 == 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void setNullBitmap(MetricRowID row_id, size_t c) {
@@ -347,7 +431,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return actual_writed_count_.load();
   }
 
-  virtual string URL() const override ;
+  virtual string path() const override ;
 
   virtual timestamp64& minTimestamp() { return meta_data_->min_ts; }
 
@@ -378,7 +462,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
   inline void* columnAddr(MetricRowID row_id, size_t c) const {
     // return: block address + bitmap size + aggs size + count size(2 bytes) + row index in block * column value size
-    size_t offset_size = col_block_header_size_[c] + cols_info_with_hidden_[c].size * (row_id.offset_row - 1);
+    size_t offset_size = col_block_header_size_[c] + cols_info_include_dropped_[c].size * (row_id.offset_row - 1);
     return reinterpret_cast<void*>((intptr_t) internalBlockHeader(row_id.block_id - segment_id_, c) + offset_size);
   }
 
@@ -388,8 +472,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     m_str_file_->rdLock();
     char* data = m_str_file_->getStringAddr(offset);
     uint16_t len = *(reinterpret_cast<uint16_t*>(data));
-    void* var_data = std::malloc(len + MMapStringFile::kStringLenLen);
-    memcpy(var_data, data, len + MMapStringFile::kStringLenLen);
+    void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
+    memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
     std::shared_ptr<void> ptr(var_data, free);
     m_str_file_->unLock();
     return ptr;
@@ -401,8 +485,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     m_str_file_->rdLock();
     char* data = m_str_file_->getStringAddr(offset);
     uint16_t len = *(reinterpret_cast<uint16_t*>(data));
-    void* var_data = std::malloc(len + MMapStringFile::kStringLenLen);
-    memcpy(var_data, data, len + MMapStringFile::kStringLenLen);
+    void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
+    memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
     std::shared_ptr<void> ptr(var_data, free);
     m_str_file_->unLock();
     return ptr;
@@ -416,7 +500,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     m_str_file_->rdLock();
     char* start_data = m_str_file_->getStringAddr(start_offset);
     char* end_data = m_str_file_->getStringAddr(end_offset);
-    uint16_t end_data_len = *(reinterpret_cast<uint16_t*>(end_data)) + MMapStringFile::kStringLenLen;
+    uint16_t end_data_len = *(reinterpret_cast<uint16_t*>(end_data)) + MMapStringColumn::kStringLenLen;
     size_t total_var_len = (end_offset - start_offset) + end_data_len;
 
     void* var_data = std::malloc(total_var_len);
@@ -429,7 +513,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   inline void* columnAddrByBlk(BLOCK_ID block_id, size_t r, size_t c) const {
     uint64_t offset_row = r;
     BLOCK_ID block_idx = block_id - segment_id_;
-    size_t offset_size = col_block_header_size_[c] + cols_info_with_hidden_[c].size * offset_row;
+    size_t offset_size = col_block_header_size_[c] + cols_info_include_dropped_[c].size * offset_row;
     return reinterpret_cast<void*>((intptr_t) internalBlockHeader(block_idx, c) + offset_size);
   }
 
@@ -439,19 +523,23 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     m_str_file_->rdLock();
     char* data = m_str_file_->getStringAddr(offset);
     uint16_t len = *(reinterpret_cast<uint16_t*>(data));
-    void* var_data = std::malloc(len + MMapStringFile::kStringLenLen);
-    memcpy(var_data, data, len + MMapStringFile::kStringLenLen);
+    void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
+    memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
     std::shared_ptr<void> ptr(var_data, free);
     m_str_file_->unLock();
     return ptr;
   }
 
   inline AttributeInfo GetColInfo(size_t c) const {
-    return cols_info_with_hidden_[c];
+    return cols_info_include_dropped_[c];
+  }
+
+  inline uint32_t GetColTypeWithoutHidden(size_t c) const {
+    return cols_info_exclude_dropped_[c].type;
   }
 
   inline uint32_t GetColType(size_t c) const {
-    return cols_info_with_hidden_[c].type;
+    return cols_info_include_dropped_[c].type;
   }
 
   // check if current segment can writing data
@@ -462,6 +550,10 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // check if current segment is compressed
   inline bool sqfsIsExists() const {
     return is_compressed_;
+  }
+
+  inline void setSqfsIsExists() {
+    is_compressed_ = true;
   }
 
   // check if column values are all null in block.
@@ -497,7 +589,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     }
     assert(start_row.offset_row > 0);
     // 0 ~ config_block_rows_ - 1
-    assert((start_row.offset_row - 1 + count) < getBlockMaxRows());
+    assert((start_row.offset_row - 1 + count) <= getBlockMaxRows());
     char* bitmap = static_cast<char*>(columnNullBitmapAddr(start_row.block_id, c));
     return !isAllNull(bitmap, start_row.offset_row, count);
   }

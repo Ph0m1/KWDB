@@ -80,6 +80,9 @@ type tsInserter struct {
 	dedupRows int64
 	// insertRows is the actual number of successfully inserted rows.
 	insertRows int64
+
+	payloadPrefix            [][]byte
+	payloadForDistributeMode []*execinfrapb.PayloadForDistributeMode
 }
 
 var _ execinfra.Processor = &tsInserter{}
@@ -94,8 +97,14 @@ func newTsInserter(
 	post *execinfrapb.PostProcessSpec,
 	output execinfra.RowReceiver,
 ) (*tsInserter, error) {
-	tsi := &tsInserter{nodeID: flowCtx.NodeID, rowNums: tsInsertSpec.RowNums, payload: tsInsertSpec.PayLoad,
-		primaryTagKey: tsInsertSpec.PrimaryTagKey}
+	tsi := &tsInserter{
+		nodeID:                   flowCtx.NodeID,
+		rowNums:                  tsInsertSpec.RowNums,
+		payload:                  tsInsertSpec.PayLoad,
+		primaryTagKey:            tsInsertSpec.PrimaryTagKey,
+		payloadPrefix:            tsInsertSpec.PayloadPrefix,
+		payloadForDistributeMode: tsInsertSpec.AllPayload,
+	}
 	if err := tsi.Init(
 		tsi,
 		post,
@@ -120,6 +129,14 @@ func newTsInserter(
 
 // Start is part of the RowSource interface.
 func (tri *tsInserter) Start(ctx context.Context) context.Context {
+
+	if !tri.EvalCtx.StartDistributeMode {
+		return startForSingleMode(ctx, tri)
+	}
+	return startForDistributeMode(ctx, tri)
+}
+
+func startForSingleMode(ctx context.Context, tri *tsInserter) context.Context {
 	ctx = tri.StartInternal(ctx, tsInsertProcName)
 	ba := tri.FlowCtx.Txn.NewBatch()
 
@@ -148,6 +165,75 @@ func (tri *tsInserter) Start(ctx context.Context) context.Context {
 		}
 	}
 	tri.insertRows = int64(insertRowSum) - tri.dedupRows
+
+	tri.insertSuccess = true
+	// Here we need to notify the statistics table of changes in the number of rows.
+	if len(tri.payload) > 0 && len(tri.rowNums) > 0 && ExtractTableIDFromPayload(tri.payload[0]) != 0 {
+		tri.FlowCtx.Cfg.StatsRefresher.NotifyTsMutation(sqlbase.ID(ExtractTableIDFromPayload(tri.payload[0])), int(tri.insertRows))
+	}
+	return ctx
+}
+
+const (
+	// BothTagAndData TsPayload contains datums consists of both tag and metric data
+	BothTagAndData = 0
+	// OnlyData TsPayload contains datums consists of metric data only
+	OnlyData = 1
+	// OnlyTag TsPayload contains datums consists of tag only data
+	OnlyTag = 2
+)
+
+// rowTypeOffset refer to func fillHeader.
+const rowTypeOffset = 42
+
+func startForDistributeMode(ctx context.Context, tri *tsInserter) context.Context {
+	ctx = tri.StartInternal(ctx, tsInsertProcName)
+	ba := tri.FlowCtx.Txn.NewBatch()
+
+	insertRowSum := 0
+	for i, pl := range tri.payloadForDistributeMode {
+		if tri.payloadPrefix[i][rowTypeOffset] == OnlyTag {
+			ba.AddRawRequest(&roachpb.TsPutTagRequest{
+				RequestHeader: roachpb.RequestHeader{
+					Key:    pl.StartKey,
+					EndKey: pl.EndKey,
+				},
+				Value: roachpb.Value{
+					RawBytes: tri.payloadPrefix[i],
+				},
+			})
+		} else {
+			ba.AddRawRequest(&roachpb.TsRowPutRequest{
+				RequestHeader: roachpb.RequestHeader{
+					Key:    pl.StartKey,
+					EndKey: pl.EndKey,
+				},
+				HeaderPrefix: tri.payloadPrefix[i],
+				Values:       pl.Row,
+				Timestamps:   pl.TimeStamps,
+				ValueSize:    pl.ValueSize,
+			})
+		}
+		insertRowSum += int(tri.rowNums[i])
+	}
+	if err := tri.FlowCtx.Cfg.TseDB.Run(ctx, ba); err != nil {
+		tri.insertSuccess = false
+		nodeIDErr := errors.Newf("nodeID %d insert failed, fail reason: %s;", tri.nodeID, err.Error())
+		log.Errorf(context.Background(), nodeIDErr.Error())
+		tri.err = nodeIDErr
+		return ctx
+	}
+
+	for _, rawResponse := range ba.RawResponse().Responses {
+		if v, ok := rawResponse.Value.(*roachpb.ResponseUnion_TsRowPut); ok {
+			tri.dedupRule = v.TsRowPut.DedupRule
+			tri.insertRows += v.TsRowPut.NumKeys
+		} else if v, ok := rawResponse.Value.(*roachpb.ResponseUnion_TsPutTag); ok {
+			tri.dedupRule = v.TsPutTag.DedupRule
+			tri.insertRows += v.TsPutTag.NumKeys
+		}
+	}
+	tri.dedupRows = int64(insertRowSum) - tri.insertRows
 
 	tri.insertSuccess = true
 	// Here we need to notify the statistics table of changes in the number of rows.

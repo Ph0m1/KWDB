@@ -530,6 +530,9 @@ func (r *importResumer) Resume(
 
 	details := r.job.Details().(jobspb.ImportDetails)
 	p := phs.(sql.PlanHookState)
+	if p.ExecCfg().StartMode != sql.StartSingleNode {
+		p.ExtendedEvalContext().EvalContext.StartDistributeMode = true
+	}
 	cfg := p.ExecCfg()
 	if details.TimeSeriesImport {
 		return r.timeSeriesResume(ctx, p, details, cfg, resultsCh)

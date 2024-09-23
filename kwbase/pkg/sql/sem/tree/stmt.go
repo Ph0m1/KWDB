@@ -1766,18 +1766,6 @@ func (*ShowRanges) StatementTag() string { return "SHOW RANGES" }
 func (*ShowRanges) StatTargetType() string { return "" }
 
 // StatementType implements the Statement interface.
-func (*ShowTsPartitions) StatementType() StatementType { return Rows }
-
-// StatOp implements the StatOp interface.
-func (*ShowTsPartitions) StatOp() string { return "" }
-
-// StatementTag returns a short string identifying the type of statement.
-func (*ShowTsPartitions) StatementTag() string { return "SHOW TS PARTITIONS" }
-
-// StatTargetType implements the StatTargetType interface.
-func (*ShowTsPartitions) StatTargetType() string { return "" }
-
-// StatementType implements the Statement interface.
 func (*ShowRangeForRow) StatementType() StatementType { return Rows }
 
 // StatOp implements the StatOp interface.
@@ -2050,7 +2038,6 @@ func (n *ShowPartitions) String() string                 { return AsString(n) }
 func (n *ShowJobs) String() string                       { return AsString(n) }
 func (n *ShowQueries) String() string                    { return AsString(n) }
 func (n *ShowRanges) String() string                     { return AsString(n) }
-func (n *ShowTsPartitions) String() string               { return AsString(n) }
 func (n *ShowRangeForRow) String() string                { return AsString(n) }
 func (n *ShowRoleGrants) String() string                 { return AsString(n) }
 func (n *ShowRoles) String() string                      { return AsString(n) }

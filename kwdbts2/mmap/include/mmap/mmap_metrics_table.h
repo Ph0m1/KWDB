@@ -13,7 +13,7 @@
 
 #include <string>
 #include "cm_kwdb_context.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "big_table.h"
 #include "mmap_object.h"
 #include "mmap_segment_table.h"
@@ -43,11 +43,11 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
   /**
    * @brief	open a big object.
    *
-   * @param 	url			big object URL to be opened.
+   * @param 	table_path			big object path to be opened.
    * @param 	flag		option to open a file; O_CREAT to create new file.
    * @return	0 succeed, otherwise -1.
    */
-  int open(const string& url, const std::string& db_path, const string& tbl_sub_path,
+  int open(const string& table_path, const std::string& db_path, const string& tbl_sub_path,
            int flags, ErrorInfo& err_info) override;
 
   int create(const vector<AttributeInfo>& schema, const uint32_t& table_version, const string& tbl_sub_path,
@@ -55,23 +55,27 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
 
   int init(const vector<AttributeInfo>& schema, ErrorInfo& err_info);
 
-  const vector<AttributeInfo>& getSchemaInfoWithHidden() const {
-    return cols_info_with_hidden_;
+  const vector<AttributeInfo>& getSchemaInfoIncludeDropped() const {
+    return cols_info_include_dropped_;
   }
 
-  const vector<AttributeInfo>& getSchemaInfoWithoutHidden() const {
-    return cols_info_without_hidden_;
+  const vector<AttributeInfo>& getSchemaInfoExcludeDropped() const {
+    return cols_info_exclude_dropped_;
   }
 
-  const vector<uint32_t>& getColsIdx() const {
-    return cols_idx_;
+  const vector<uint32_t>& getIdxForValidCols() const {
+    return idx_for_valid_cols_;
+  }
+
+  inline uint32_t GetVersionNUm() {
+    return meta_data_->schema_version;
   }
 
   virtual const string& tbl_sub_path() const { return tbl_sub_path_; }
 
   virtual string name() const override { return name_; }
 
-  virtual string URL() const override;
+  virtual string path() const override;
 
   uint64_t& partitionInterval() { return meta_data_->partition_interval; }
 

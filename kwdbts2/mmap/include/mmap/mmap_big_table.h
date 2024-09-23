@@ -11,16 +11,24 @@
 
 #pragma once
 
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "big_table.h"
 #include "mmap_object.h"
-#include "mmap_string_file.h"
+#include "mmap_string_column.h"
 
 using namespace std;
 using namespace kwdbts;
 
 // V7: table with delete marker.
 #define BT_STRUCT_FORMAT_V7             0x00000007
+
+struct VarStringObject {
+  TSObject *obj;
+  MMapStringColumn *str_col_;
+  int col;                  // column # in table.
+
+  VarStringObject() { obj = nullptr; str_col_ = nullptr; }
+};
 
 class MMapBigTable;
 
@@ -50,12 +58,12 @@ class MMapBigTable: public BigTable, public MMapObject {
 
   void initRow0();
 
-  int open_(int char_code, const string &url, const std::string &db_path, const string &tbl_sub_path, int flags,
-    ErrorInfo &err_info);
+  int open_(int char_code, const string &table_path, const std::string &db_path, const string &tbl_sub_path, int flags,
+            ErrorInfo &err_info);
 
   int init(const vector<AttributeInfo> &schema, const vector<string> &key,
-    const string &key_order, const string &ns_url, const string &description,
-    const string &source_url, int encoding, ErrorInfo &err_info);
+           const string &key_order, const string &ns_path, const string &description,
+           const string &source_path, int encoding, ErrorInfo &err_info);
 
   int opening(ErrorInfo &err_info);
 
@@ -102,19 +110,19 @@ public:
     const vector<VarStringObject> &vs_cols,
     int encoding, ErrorInfo &err_info);
 
-  int create(const string &source_url);
+  int create(const string &link_path);
 
   int magic() { return *reinterpret_cast<const int *>("MMBT"); }
 
   /**
    * @brief	open a big object.
    *
-   * @param 	url			big object URL to be opened.
+   * @param 	table_path			big object Path to be opened.
    * @param 	flag		option to open a file; O_CREAT to create new file.
    * @return	0 succeed, otherwise -1.
    */
-  virtual int open(const string &url, const std::string &db_path, const string &tbl_sub_path, int flags,
-    ErrorInfo &err_info);
+  virtual int open(const string &table_path, const std::string &db_path, const string &tbl_sub_path, int flags,
+                   ErrorInfo &err_info);
 
   virtual void sync(int flags);
 
@@ -129,7 +137,7 @@ public:
 
   virtual int permission() const;
 
-  virtual string URL() const;
+  virtual string path() const;
 
   virtual const string & tbl_sub_path() const;
 
@@ -144,7 +152,7 @@ public:
    * data model functions
    *--------------------------------------------------------------------
    */
-  virtual string nameServiceURL() const;
+  virtual string nameServicePath() const;
 
   /*--------------------------------------------------------------------
    * big table functions
@@ -152,10 +160,10 @@ public:
    */
   virtual int create(const vector<AttributeInfo> &schema,
     const vector<string> &key, const string &key_order,
-    const string &ns_url = defaultNameServiceURL(),
+    const string &ns_path = defaultNameServicePath(),
     const string &description = kwdbts::s_emptyString,
     const string &tbl_sub_path = kwdbts::s_emptyString,
-    const string &source_url = kwdbts::s_emptyString,
+    const string &source_path = kwdbts::s_emptyString,
     int encoding = DICTIONARY,
     ErrorInfo &err_info = getDummyErrorInfo());
 

@@ -33,6 +33,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/apply"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
@@ -222,6 +223,21 @@ func (r *Replica) destroyRaftMuLocked(ctx context.Context, nextReplicaID roachpb
 	// leftover replica data.
 	if err := batch.Commit(true); err != nil {
 		return err
+	}
+
+	// delete replica ts data
+	desc := r.Desc()
+	if desc.GetRangeType() == roachpb.TS_RANGE {
+		tableID, beginHash, endHash, startTs, endTs, err := sqlbase.DecodeTSRangeKey(desc.StartKey, desc.EndKey)
+		if err != nil {
+			log.Errorf(ctx, "DeleteReplicaTSData failed: %v", err)
+		} else {
+			err = r.store.TsEngine.DeleteReplicaTSData(tableID, beginHash, endHash, startTs, endTs)
+			log.VEventf(ctx, 3, "TsEngine.DeleteReplicaTSData %v, r%v, %v, %v, %v, %v, %v, %v", r.store.StoreID(), desc.RangeID, tableID, beginHash, endHash, startTs, endTs, err)
+			if err != nil {
+				log.Errorf(ctx, "DeleteReplicaTSData failed", err)
+			}
+		}
 	}
 	commitTime := timeutil.Now()
 

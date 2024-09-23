@@ -27,11 +27,11 @@ void LogObjectLockError(int type, TSObject *obj) {
   switch(type) {
     case OBJ_RD_LOCK_ERROR:
       LOG_ERROR("%lx <Cannot lock(r)>: \"%s\", db: \"%s\"\n", pthread_self(),
-              obj->URL().c_str(), obj->tbl_sub_path().c_str());
+                obj->path().c_str(), obj->tbl_sub_path().c_str());
       break;
     case OBJ_WR_LOCK_ERROR:
       LOG_ERROR("%lx <Cannot lock(w)>: \"%s\", db: \"%s\"\n", pthread_self(),
-              obj->URL().c_str(), obj->tbl_sub_path().c_str());
+                obj->path().c_str(), obj->tbl_sub_path().c_str());
       break;
   }
 }
@@ -74,11 +74,11 @@ int TSObject::decRefCount() {
   return ref_count;
 }
 
-string TSObject::URL() const
+string TSObject::path() const
 { return kwdbts::s_emptyString; }
 
 string TSObject::name() const
-{ return getURLObjectName(URL()); }
+{ return getTsObjectName(path()); }
 
 const string & TSObject::tbl_sub_path() const
 { return kwdbts::s_emptyString; }
@@ -92,8 +92,8 @@ string TSObject::directory() const {
   return db;
 }
 
-int TSObject::open(const string &url, const string& db_path, const string &tbl_sub_path, int flags,
-  ErrorInfo &err_info) { return 0; }
+int TSObject::open(const string &obj_path, const string& db_path, const string &tbl_sub_path, int flags,
+                   ErrorInfo &err_info) { return 0; }
 
 int TSObject::version() const { return 0; }
 
@@ -123,7 +123,7 @@ int TSObject::startRead(ErrorInfo &err_info) {
   if (status_ > OBJ_READY_TO_COMPACT) {
     unLock();
     LogObjectLockError(OBJ_RD_LOCK_ERROR, this);
-    return err_info.setError(KWERLOCK, getURLObjectName(URL()));
+    return err_info.setError(KWERLOCK, getTsObjectName(path()));
   }
 #if !defined(NDEBUG)
   rw_mtx_.lock();
@@ -176,7 +176,7 @@ string TSObject::toString() {
   return intToString(ref_count_);
 }
 
-std::string defaultNameServiceURL()
+std::string defaultNameServicePath()
 {
   return "default";
 }

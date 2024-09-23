@@ -30,10 +30,8 @@ import (
 	"testing"
 
 	"gitee.com/kwbasedb/kwbase/pkg/base"
-	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server"
-	"gitee.com/kwbasedb/kwbase/pkg/sql"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils/sqlutils"
@@ -53,6 +51,7 @@ func setClusterArgs(nodes int, baseDir string) base.TestClusterArgs {
 		storeID := roachpb.StoreID(i + 1)
 		path := filepath.Join(baseDir, fmt.Sprintf("s%d", storeID))
 		args.StoreSpecs = []base.StoreSpec{{Path: path}}
+		args.CatchCoreDump = true
 		clusterArgs.ServerArgsPerNode[i] = args
 	}
 	return clusterArgs
@@ -61,16 +60,17 @@ func setClusterArgs(nodes int, baseDir string) base.TestClusterArgs {
 // prepareTsTable create timeseries table return ts info
 func prepareTsTable(
 	t *testing.T, ctx context.Context, tc *testcluster.TestCluster,
-) (uint32, uint32, uint16, uint16, roachpb.NodeID, []roachpb.NodeID, []byte) {
+) (uint64, uint64, uint64, int64, int64, roachpb.NodeID, []roachpb.NodeID) {
 	sqlDB := sqlutils.MakeSQLRunner(tc.Conns[0])
 	sqlDB.Exec(t, `CREATE TS DATABASE d1`)
 	sqlDB.Exec(t, `CREATE TABLE d1.ts (ts timestamp not null, e1 int) tags(attr1 int not null) primary tags (attr1)`)
-	for i := 0; i <= 100; i++ {
+	for i := 0; i <= 1000; i++ {
 		sqlDB.Exec(t, fmt.Sprintf(`INSERT INTO d1.ts(ts, e1, attr1) VALUES (now(), %d, %d)`, i, i))
 	}
 
-	var tableID, groupID, dbID uint32
-	var startHashPoint, endHashPoint uint16
+	var tableID, dbID uint64
+	var startHashPoint, endHashPoint uint64
+	var startKey, endKey []byte
 	var leaseHolder roachpb.NodeID
 	var replicasStr string
 	const tableIDQuery = `
@@ -79,31 +79,24 @@ SELECT tables.id, tables."parentID" FROM system.namespace tables
   WHERE dbs.name = $1 AND tables.name = $2
 `
 	const partitionQuery = `
-SELECT group_id, split_part(start_pretty, '/', 4), split_part(end_pretty, '/', 4), lease_holder, replicas
-FROM kwdb_internal.kwdb_ts_partitions
+SELECT start_key, end_key, lease_holder, replicas
+FROM kwdb_internal.ranges
 WHERE database_name = $1
   AND table_name = $2
-  AND partition_id = $3
+  LIMIT 1
 `
 	sqlDB.QueryRow(t, tableIDQuery, "d1", "ts").Scan(&tableID, &dbID)
-	sqlDB.QueryRow(t, partitionQuery, "d1", "ts", 15).Scan(&groupID, &startHashPoint, &endHashPoint, &leaseHolder, &replicasStr)
+	sqlDB.QueryRow(t, partitionQuery, "d1", "ts").Scan(&startKey, &endKey, &leaseHolder, &replicasStr)
 
 	replicas := make([]roachpb.NodeID, 3)
 	_, err := fmt.Sscanf(replicasStr, "{%d,%d,%d}", &replicas[0], &replicas[1], &replicas[2])
 	require.NoError(t, err)
 
-	var meta []byte
-	err = tc.Servers[0].DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		var table *sqlbase.TableDescriptor
-		table, _, err = sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(tableID))
-		require.NoError(t, err)
-		meta, err = sql.MakeNormalTSTableMeta(table)
-		require.NoError(t, err)
-		return nil
-	})
+	var startTs, endTs int64
+	_, startHashPoint, endHashPoint, startTs, endTs, err = sqlbase.DecodeTSRangeKey(startKey, endKey)
 	require.NoError(t, err)
 
-	return tableID, groupID, startHashPoint, endHashPoint, leaseHolder, replicas, meta
+	return tableID, startHashPoint, endHashPoint, startTs, endTs, leaseHolder, replicas
 }
 
 // getOptServer return opt servers
@@ -150,56 +143,43 @@ func TestSnapshotMultiNode(t *testing.T) {
 	require.NoError(t, tc.WaitForFullReplication())
 
 	// create timeseries table and return info
-	tableID, groupID, startHashPoint, endHashPoint, leaseHolder, replicas, _ := prepareTsTable(t, ctx, tc)
+	tableID, startHashPoint, endHashPoint, startTs, endTs, leaseHolder, replicas := prepareTsTable(t, ctx, tc)
 
 	// get opt server
 	leaseServer, targetServer := getOptServer(nodes, tc, leaseHolder, replicas)
 
-	// create snapshot
-	snapshotID, err := leaseServer.TSEngine().CreateSnapshot(uint64(tableID), uint64(groupID), uint64(startHashPoint), uint64(endHashPoint))
+	srcSnapshotID, err := leaseServer.TSEngine().CreateSnapshotForRead(tableID, startHashPoint, endHashPoint, startTs, endTs)
 	require.NoError(t, err)
 
-	limit := 1024
-	totalSize := 0
-	for offset := 0; offset <= totalSize; offset = offset + limit {
-		// GetSnapshotData
-		var data []byte
-		data, totalSize, err = leaseServer.TSEngine().GetSnapshotData(uint64(tableID), uint64(groupID), snapshotID, offset, limit)
+	destSnapshotID, err := targetServer.TSEngine().CreateSnapshotForWrite(tableID, startHashPoint, endHashPoint, startTs, endTs)
+	require.NoError(t, err)
+
+	apply := false
+	var data []byte
+	for {
+		data, err = leaseServer.TSEngine().GetSnapshotNextBatchData(tableID, srcSnapshotID)
 		require.NoError(t, err)
 
-		// InitSnapshotForWrite
-		if offset == 0 {
-			err = targetServer.TSEngine().InitSnapshotForWrite(uint64(tableID), uint64(groupID), snapshotID, totalSize)
-			require.NoError(t, err)
+		if len(data) == 0 {
+			apply = true
+			break
 		}
 
-		// WriteSnapshotData
-		if offset+limit < totalSize {
-			err = targetServer.TSEngine().WriteSnapshotData(uint64(tableID), uint64(groupID), snapshotID, offset, data, false)
-			fmt.Printf("write rang: %d to %d of %d\n", offset, len(data), totalSize)
-			require.NoError(t, err)
-		} else {
-			err = targetServer.TSEngine().WriteSnapshotData(uint64(tableID), uint64(groupID), snapshotID, offset, data, true)
-			fmt.Printf("write rang: %d to %d of %d\n", offset, len(data), totalSize)
-			require.NoError(t, err)
-		}
+		err = targetServer.TSEngine().WriteSnapshotBatchData(tableID, destSnapshotID, data)
+		require.NoError(t, err)
 	}
 
-	// ApplySnapshot
-	err = targetServer.TSEngine().ApplySnapshot(uint64(tableID), uint64(groupID), snapshotID)
+	if apply {
+		err = targetServer.TSEngine().WriteSnapshotSuccess(tableID, destSnapshotID)
+		require.NoError(t, err)
+	} else {
+		err = targetServer.TSEngine().WriteSnapshotRollback(tableID, destSnapshotID)
+		require.NoError(t, err)
+	}
+
+	err = targetServer.TSEngine().DeleteSnapshot(tableID, destSnapshotID)
 	require.NoError(t, err)
 
-	// DropSnapshot target
-	err = targetServer.TSEngine().DropSnapshot(uint64(tableID), uint64(groupID), snapshotID)
+	err = leaseServer.TSEngine().DeleteSnapshot(tableID, srcSnapshotID)
 	require.NoError(t, err)
-
-	// DropSnapshot lease
-	err = leaseServer.TSEngine().DropSnapshot(uint64(tableID), uint64(groupID), snapshotID)
-	require.NoError(t, err)
-}
-
-// TestSnapshotSingleNode test two diff groups on same node
-// n1(g1) -> n1(g2)
-func TestSnapshotSingleNode(t *testing.T) {
-	t.Skip()
 }

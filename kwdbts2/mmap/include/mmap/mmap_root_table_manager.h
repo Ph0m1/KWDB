@@ -111,6 +111,17 @@ public:
                           ErrorInfo& err_info, uint32_t cur_version = 0);
 
   /**
+   * @brief add older version of the root table.
+   *
+   * @param schema Schema information for the table.
+   * @param table_version Version number of the table.
+   * @param err_info Error message
+   * @return KStatus status
+   */
+  KStatus AddRootTable(vector<AttributeInfo>& schema, uint32_t table_version,
+                        ErrorInfo& err_info);
+
+  /**
    * @brief Add the table to the manager.
    *
    * @param table_version Version number of the table.
@@ -126,6 +137,12 @@ public:
    * @return MMapMetricsTable* Pointer to root table
    */
   MMapMetricsTable* GetRootTable(uint32_t table_version, bool lock = true);
+
+  /**
+   * @brief Gets the root table of the all versions.
+   *
+   */
+  void GetAllVersion(std::vector<uint32_t>* table_versions);
 
   /**
    * @brief Gets the version number of the current table.
@@ -174,20 +191,22 @@ public:
   KStatus SetStatisticInfo(uint64_t entity_num, uint64_t insert_rows_per_day);
 
   /**
-   * @brief Get the actual schema information (exclude dropped columns)
+   * @brief Get schema information (excluding columns that had been dropped)
    *
    * @param table_version Version number of the table.
-   * @return const vector<AttributeInfo>& The actual schema information
+   * @param schema Schema information of the table excluding columns that had been dropped
+   * @return The status of the operation.
    */
-  const vector<AttributeInfo>& GetSchemaInfoWithoutHidden(uint32_t table_version = 0);
+  KStatus GetSchemaInfoExcludeDropped(std::vector<AttributeInfo>* schema, uint32_t table_version = 0);
 
   /**
-   * @brief Gets schema information for a table.
+   * @brief Get schema information (including columns that had been dropped)
    *
    * @param table_version Version number of the table. The default is 0.
-   * @return Returns schema information for the table.
+   * @param schema Schema information of the table including columns that had been dropped
+   * @return The status of the operation.
    */
-  const vector<AttributeInfo>& GetSchemaInfoWithHidden(uint32_t table_version = 0);
+  KStatus GetSchemaInfoIncludeDropped(std::vector<AttributeInfo>* schema, uint32_t table_version = 0);
 
   /**
    * @brief Gets index information for the actual column (exclude dropped columns)
@@ -195,7 +214,7 @@ public:
    * @param table_version Version number of the table. The default is 0.
    * @return Returns index information for the actual column.
    */
-  const vector<uint32_t>& GetColsIdx(uint32_t table_version = 0);
+  const vector<uint32_t>& GetIdxForValidCols(uint32_t table_version = 0);
 
   /**
    * @brief Gets the index of the column based on the attribute information.

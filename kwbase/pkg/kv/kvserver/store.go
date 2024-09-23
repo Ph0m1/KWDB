@@ -28,7 +28,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	//"gitee.com/kwbasedb/kwbase/pkg/tscoord"
 	"math"
 	"os"
 	"path/filepath"
@@ -68,7 +67,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/cloud"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
-	// "gitee.com/kwbasedb/kwbase/pkg/tscoord"
+	"gitee.com/kwbasedb/kwbase/pkg/tscoord"
 	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/contextutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
@@ -438,6 +437,7 @@ type Store struct {
 	sstSnapshotStorage SSTSnapshotStorage
 	protectedtsCache   protectedts.Cache
 
+	startVacuum bool
 	// gossipRangeCountdown and leaseRangeCountdown are countdowns of
 	// changes to range and leaseholder counts, after which the store
 	// descriptor will be re-gossiped earlier than the normal periodic
@@ -652,6 +652,7 @@ type StoreConfig struct {
 	Settings                *cluster.Settings
 	Clock                   *hlc.Clock
 	DB                      *kv.DB
+	TseDB                   *tscoord.DB
 	TsEngine                *tse.TsEngine
 	Gossip                  *gossip.Gossip
 	NodeLiveness            *NodeLiveness
@@ -749,6 +750,8 @@ type StoreConfig struct {
 	// subsystem. It is queried during the GC process and in the handling of
 	// AdminVerifyProtectedTimestampRequest.
 	ProtectedTimestampCache protectedts.Cache
+
+	StartVacuum bool
 }
 
 // ConsistencyTestingKnobs is a BatchEvalTestingKnobs struct used to control the
@@ -1375,7 +1378,7 @@ func ReadStoreIdent(ctx context.Context, eng storage.Engine) (roachpb.StoreIdent
 
 // Start the engine, set the GC and read the StoreIdent.
 func (s *Store) Start(
-	ctx context.Context, stopper *stop.Stopper, setTse func() (*tse.TsEngine, error),
+	ctx context.Context, stopper *stop.Stopper, setTse func() (*tse.TsEngine, *tscoord.DB, error),
 ) error {
 	s.stopper = stopper
 
@@ -1514,11 +1517,12 @@ func (s *Store) Start(
 	}
 
 	if setTse != nil {
-		tsEngine, err := setTse()
+		tsEngine, tseDB, err := setTse()
 		if err != nil {
 			return err
 		}
 		s.TsEngine = tsEngine
+		s.cfg.TseDB = tseDB
 	}
 
 	// Start Raft processing goroutines.

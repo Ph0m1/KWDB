@@ -125,9 +125,9 @@ INSERT INTO test_time_addsub.t1 VALUES(9223372036000,20,-1,1,-1,1.125,-2.125,fal
 SELECT k_timestamp FROM test_time_addsub.t1 GROUP BY k_timestamp HAVING k_timestamp+1month >'2020-1-1 12:00:00' ORDER BY k_timestamp;
 
 --ZDP-35825
-SELECT * FROM test_time_addsub.t1 WHERE id > 1 AND k_timestamp >= '2004-9-9 00:00:00.9' AND k_timestamp < '2012-02-29 1:10:10.000';
-SELECT * FROM test_time_addsub.t1 WHERE id > 1 AND k_timestamp >= '2004-9-9 00:00:00.9' AND k_timestamp < '2012-02-29 1:10:10.000';
-SELECT * FROM test_time_addsub.t1 WHERE id > 1 AND k_timestamp >= '2004-9-9 00:00:00.9' AND k_timestamp < '2012-02-29 1:10:10.000';
+SELECT * FROM test_time_addsub.t1 WHERE id > 1 AND k_timestamp >= '2004-9-9 00:00:00.9' AND k_timestamp < '2012-02-29 1:10:10.000' order by id;
+SELECT * FROM test_time_addsub.t1 WHERE id > 1 AND k_timestamp >= '2004-9-9 00:00:00.9' AND k_timestamp < '2012-02-29 1:10:10.000' order by id;
+SELECT * FROM test_time_addsub.t1 WHERE id > 1 AND k_timestamp >= '2004-9-9 00:00:00.9' AND k_timestamp < '2012-02-29 1:10:10.000' order by id;
 
 DROP DATABASE test_time_addsub cascade;
 

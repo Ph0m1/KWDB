@@ -93,6 +93,10 @@ func canBackpressureBatch(ba *roachpb.BatchRequest) bool {
 // relation to the split size. The method returns true if the range is more
 // than backpressureRangeSizeMultiplier times larger than the split size.
 func (r *Replica) shouldBackpressureWrites() bool {
+	// history ts range will never split.
+	if r.Desc().GetRangeType() == roachpb.TS_RANGE {
+		return false
+	}
 	mult := backpressureRangeSizeMultiplier.Get(&r.store.cfg.Settings.SV)
 	if mult == 0 {
 		// Disabled.

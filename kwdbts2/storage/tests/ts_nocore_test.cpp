@@ -80,7 +80,7 @@ class TestTsBLockItemMaxNoCore : public TestBigTableInstance {
   void GenPayloadData(KTimestamp primary_tag, KTimestamp start_ts, int count, TSSlice *payload, int inc_step = 1) {
     auto tag_schema = entity_group_leader_->GetSchema();
     std::vector<AttributeInfo> data_schema;
-    KStatus s = table_->GetDataSchema(ctx_, &data_schema);
+    KStatus s = table_->GetDataSchemaExcludeDropped(ctx_, &data_schema);
     ASSERT_EQ(s, KStatus::SUCCESS);
     int header_size = Payload::header_size_;
     k_uint32 header_len = header_size;

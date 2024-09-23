@@ -268,11 +268,8 @@ func (b *Batch) fillResults(ctx context.Context) {
 			case *roachpb.CreateTSSnapshotRequest:
 			case *roachpb.AdminUnsplitRequest:
 			case *roachpb.AdminTransferLeaseRequest:
-			case *roachpb.AdminTransferPartitionLeaseRequest:
 			case *roachpb.AdminChangeReplicasRequest:
-			case *roachpb.AdminChangePartitionReplicasRequest:
 			case *roachpb.AdminRelocateRangeRequest:
-			case *roachpb.AdminRelocatePartitionRequest:
 			case *roachpb.HeartbeatTxnRequest:
 			case *roachpb.GCRequest:
 			case *roachpb.LeaseInfoRequest:
@@ -673,7 +670,11 @@ func (b *Batch) adminMerge(key interface{}) {
 // adminSplitTs is only exported on DB. It is here for symmetry with the
 // other operations.
 func (b *Batch) adminSplitTs(
-	spanKeyIn interface{}, groupID uint32, tableID uint32, splitPoints []int32,
+	spanKeyIn interface{},
+	tableID uint32,
+	splitPoints []int32,
+	timestamps []int64,
+	isCreateTable bool,
 ) {
 	spanKey, err := marshalKey(spanKeyIn)
 	if err != nil {
@@ -684,9 +685,10 @@ func (b *Batch) adminSplitTs(
 		RequestHeader: roachpb.RequestHeader{
 			Key: spanKey,
 		},
-		GroupId: groupID,
-		TableId: tableID,
-		Keys:    splitPoints,
+		TableId:         tableID,
+		Keys:            splitPoints,
+		Timestamps:      timestamps,
+		IsCreateTsTable: isCreateTable,
 	}
 	b.AppendReqs(req)
 	b.InitResult(1, 0, notRaw, nil)
@@ -780,10 +782,7 @@ func (b *Batch) createTSSnapshot(
 // adminChangeReplicas is only exported on DB. It is here for symmetry with the
 // other operations.
 func (b *Batch) adminChangeReplicas(
-	key interface{},
-	expDesc roachpb.RangeDescriptor,
-	chgs []roachpb.ReplicationChange,
-	needTsSnapshotData bool,
+	key interface{}, expDesc roachpb.RangeDescriptor, chgs []roachpb.ReplicationChange,
 ) {
 	k, err := marshalKey(key)
 	if err != nil {
@@ -794,8 +793,7 @@ func (b *Batch) adminChangeReplicas(
 		RequestHeader: roachpb.RequestHeader{
 			Key: k,
 		},
-		ExpDesc:            expDesc,
-		NeedTsSnapshotData: needTsSnapshotData,
+		ExpDesc: expDesc,
 	}
 	req.AddChanges(chgs...)
 

@@ -1,4 +1,6 @@
 #pragma once
+#include <utility>
+#include <vector>
 #include "data_type.h"
 
 class PayloadGenerator final {
@@ -14,12 +16,14 @@ class PayloadGenerator final {
     payload_sz_ = bitmap_sz_;
     // update offset and payload_sz_
     int32_t last_off = 0;
+    int32_t ptagLength = 0;
     for (auto& c : schema_) {
       c.m_offset = last_off;
       if (c.m_data_type == DATATYPE::VARSTRING) {
         if (c.m_tag_type == PRIMARY_TAG) {
           last_off += c.m_length;
           payload_sz_ += c.m_length;
+          ptagLength += c.m_length;
         } else {
           last_off += sizeof(intptr_t);  // getDataTypeSize(c.m_data_type);
           payload_sz_ += c.m_length + 10;  // 8byte offset + 2byte len
@@ -27,10 +31,26 @@ class PayloadGenerator final {
       } else {
         last_off += c.m_size;  // getDataTypeSize(c.m_data_type);
         payload_sz_ += c.m_length;  // getDataTypeSize(c.m_data_type);
+        if (c.m_tag_type == PRIMARY_TAG) {
+          ptagLength += c.m_length;
+        }
       }
     }
+    primaryTagLen_ = ptagLength;
+    LOG_INFO("primaryTagGenerater new hashpoint ptag %d", primaryTagLen_);
+    primaryTag_ = new uint8_t[primaryTagLen_];
   }
-
+  int32_t getPtagLen() {
+    return primaryTagLen_;
+  }
+  uint32_t GetHashPoint() {
+    hashpoint = TsTable::GetConsistentHashId(reinterpret_cast<char*>(primaryTag_), primaryTagLen_);
+    LOG_INFO("primaryTagGenerater free hashpoint ptag %d", primaryTagLen_);
+    return hashpoint;
+  }
+  ~PayloadGenerator(){
+    delete[] primaryTag_;
+  }
   /**
    * @brief construct a payload with params
    * @tparam T column value types
@@ -45,11 +65,13 @@ class PayloadGenerator final {
     memset(payload_ptr, 0, payload_sz_);
     // construct
     auto varchar_ptr = payload_ptr + bitmap_sz_ + schema_.back().m_offset +
-        (schema_.back().m_tag_type == PRIMARY_TAG ? schema_.back().m_length : getDataTypeSize(schema_.back().m_data_type));
+        (schema_.back().m_tag_type == PRIMARY_TAG ?
+          schema_.back().m_length : getDataTypeSize(schema_.back().m_data_type));
     if (bitmap) {
       memcpy(payload_ptr, bitmap, bitmap_sz_);
     }
     doPayload<0>(payload_ptr, varchar_ptr, std::forward<T>(args)...);
+
     return payload_ptr;
   }
 
@@ -83,7 +105,6 @@ class PayloadGenerator final {
     // null bitmap
     if (!get_null_bitmap(payload_ptr, CI)) {
       auto buff = payload_ptr + bitmap_sz_ + schema_.at(CI).m_offset;
-
       switch (schema_.at(CI).m_data_type) {
         case DATATYPE::BOOL:
         case DATATYPE::BYTE:
@@ -95,16 +116,23 @@ class PayloadGenerator final {
         case DATATYPE::TIMESTAMP64:
         case DATATYPE::FLOAT:
         case DATATYPE::DOUBLE: {
+          if (schema_.at(CI).m_tag_type == (PRIMARY_TAG)) {
+            copy(primaryTag_, std::forward<T>(t), getDataTypeSize(schema_.at(CI).m_data_type));
+          }
           copy(buff, std::forward<T>(t), getDataTypeSize(schema_.at(CI).m_data_type));
           return doPayload<CI + 1>(payload_ptr, varchar_ptr, std::forward<Y>(y)...);
         }
         case DATATYPE::CHAR: {
+          if (schema_.at(CI).m_tag_type == (PRIMARY_TAG)) {
+            copy(primaryTag_, std::forward<T>(t), schema_.at(CI).m_length);
+          }
           copy(buff, std::forward<T>(t), schema_.at(CI).m_length);
           return doPayload<CI + 1>(payload_ptr, varchar_ptr, std::forward<Y>(y)...);
         }
         case DATATYPE::VARSTRING: {
           if (schema_.at(CI).m_tag_type == PRIMARY_TAG) {
             copy(buff, std::forward<T>(t), schema_.at(CI).m_length);
+            copy(primaryTag_, std::forward<T>(t), schema_.at(CI).m_length);
             return doPayload<CI + 1>(payload_ptr, varchar_ptr, std::forward<Y>(y)...);
           }
           // offset
@@ -218,4 +246,7 @@ class PayloadGenerator final {
   vector<TagInfo> schema_;
   size_t payload_sz_;
   size_t bitmap_sz_;
+  uint32_t hashpoint;
+  int32_t primaryTagLen_;
+  uint8_t *primaryTag_;
 };

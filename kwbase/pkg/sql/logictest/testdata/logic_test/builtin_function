@@ -2316,7 +2316,7 @@ SELECT kwdb_internal.check_consistency(true, '\x03', '\x02')
 query ITT
 SELECT range_id, status, regexp_replace(detail, '[0-9]+', '', 'g') FROM kwdb_internal.check_consistency(true, '\x02', '\xffff') WHERE range_id = 1
 ----
-1  RANGE_CONSISTENT  stats: {ContainsEstimates: LastUpdateNanos: IntentAge: GCBytesAge: LiveBytes: LiveCount: KeyBytes: KeyCount: ValBytes: ValCount: IntentBytes: IntentCount: SysBytes: SysCount:}
+1  RANGE_CONSISTENT  stats: {ContainsEstimates: LastUpdateNanos: IntentAge: GCBytesAge: LiveBytes: LiveCount: KeyBytes: KeyCount: ValBytes: ValCount: IntentBytes: IntentCount: SysBytes: SysCount: TsPerRowSize:}
 
 # Without explicit keys, scans all ranges (we don't test this too precisely to
 # avoid flaking the test when the range count changes, just want to know that
@@ -2503,7 +2503,7 @@ NULL
 query T
 SELECT kwdb_internal.get_zone_config(kwdb_internal.get_namespace_id(0, 'root_test'))::string
 ----
-\x280550015801
+\x2805500158016000
 
 query T
 SELECT kwdb_internal.get_zone_config(kwdb_internal.get_namespace_id(kwdb_internal.get_namespace_id(0, 'root_test'), 't'))::string
@@ -2553,7 +2553,7 @@ SELECT kwdb_internal.get_namespace_id(kwdb_internal.get_namespace_id(0, 'root_te
 query T
 SELECT kwdb_internal.get_zone_config(kwdb_internal.get_namespace_id(0, 'root_test'))::string
 ----
-\x280550015801
+\x2805500158016000
 
 query T
 SELECT kwdb_internal.get_zone_config(kwdb_internal.get_namespace_id(kwdb_internal.get_namespace_id(0, 'root_test'), 't'))::string

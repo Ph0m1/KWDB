@@ -237,7 +237,7 @@ message InitPutResponse {
   ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
 }
 
-// A TsPutRequest is the argument to insert value to TS DB
+// A TsPutRequest is the argument to insert value to TS DB in single node mode(MPP)
 message TsPutRequest {
   option (gogoproto.equal) = true;
 
@@ -247,6 +247,41 @@ message TsPutRequest {
 
 // A TsPutResponse is the return value for inserting value to TS DB
 message TsPutResponse {
+  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+
+  int64 dedupRule = 2;
+  bytes discardBitmap = 3;
+}
+
+// A TsRowPutRequest is the argument to insert row values to TS DB in distribution mode
+message TsRowPutRequest {
+  option (gogoproto.equal) = true;
+
+  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+  bytes headerPrefix = 2;
+  repeated bytes values = 3;
+  int32 valueSize = 4;
+  repeated int64 timestamps = 5;
+}
+
+// A TsRowPutResponse is the return value for inserting row values to TS DB
+message TsRowPutResponse {
+  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+
+  int64 dedupRule = 2;
+  bytes discardBitmap = 3;
+}
+
+// A TsPutTagRequest is the argument to insert only tag value for an entity
+message TsPutTagRequest {
+  option (gogoproto.equal) = true;
+
+  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+  Value value = 2 [(gogoproto.nullable) = false];
+}
+
+// A TsPutTagResponse is the return value for TsPutTagRequest
+message TsPutTagResponse {
   ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
 
   int64 dedupRule = 2;
@@ -420,6 +455,7 @@ message ClearRangeRequest {
   option (gogoproto.equal) = true;
 
   RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
+  uint64 table_id = 2;
 }
 
 // A ClearRangeResponse is the return value from the ClearRange() method.
@@ -917,10 +953,13 @@ message AdminSplitRequest {
   reserved 3;
   util.hlc.Timestamp expiration_time = 4 [(gogoproto.nullable) = false];
   SplitType split_type = 5;
-  repeated ReplicaDescriptor pre_dist = 6 [(gogoproto.nullable) = false];
-  ReplicaDescriptor pre_dist_lease_holder = 7 [(gogoproto.nullable) = false];
-  uint32 group_id = 8;
-  uint32 table_id = 9;
+  uint32 table_id = 6;
+  // The creation of a time series table is a multi-step process.
+  // After the RangeDesc is created, its metadata has not yet been
+  // created in the time series engine. At this time, although the
+  // Range can be split, when the Range size is actually queried in
+  // the time series engine, the corresponding Table cannot be found.
+  bool is_create_ts_table = 7;
 }
 
 message AdminSplitInfoForTs {
@@ -938,9 +977,10 @@ message AdminSplitForTsRequest {
   RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
   repeated AdminSplitInfoForTs admin_split_info = 2 [(gogoproto.nullable) = false];
 
-  uint32 group_id = 5;
   uint32 table_id = 3;
   repeated int32 keys = 4;
+  repeated int64 timestamps = 5;
+  bool is_create_ts_table = 6;
 }
 
 // An AdminSplitResponse is the return value from the AdminSplit()
@@ -1010,36 +1050,6 @@ message AdminTransferLeaseResponse {
   ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
 }
 
-// An AdminRequestLeaseRequest is the argument to the AdminTransferLease()
-// method. A lease transfer allows an external entity to control the lease
-// holder for a range. The target of the lease transfer needs to be a valid
-// replica of the range.
-message AdminRequestLeaseForTSRequest {
-  option (gogoproto.equal) = true;
-
-  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  int32 target = 2 [(gogoproto.casttype) = "StoreID"];
-}
-
-message AdminRequestLeaseForTSResponse {
-  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-}
-
-// An AdminTransferPartitionLeaseRequest is the argument to the AdminTransferLease()
-// method. A lease transfer allows an external entity to control the lease
-// holder for a range. The target of the lease transfer needs to be a valid
-// replica of the range.
-message AdminTransferPartitionLeaseRequest {
-  option (gogoproto.equal) = true;
-
-  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  int32 target = 2 [(gogoproto.casttype) = "StoreID"];
-}
-
-message AdminTransferPartitionLeaseResponse {
-  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-}
-
 // A ReplicationChange specifies the type and target of a replication change operation.
 message ReplicationChange {
   option (gogoproto.equal) = true;
@@ -1087,44 +1097,6 @@ message AdminChangeReplicasResponse {
   RangeDescriptor desc = 2 [(gogoproto.nullable) = false];
 }
 
-// An AdminChangePartitionReplicasRequest is the argument to the AdminChangeReplicas()
-// method. A change replicas operation allows adding or removing a set of
-// replicas for a range.
-message AdminChangePartitionReplicasRequest {
-  option (gogoproto.equal) = true;
-
-  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  // Never access directly: use .Changes()
-  //
-  // TODO(tbg): remove in 20.1
-  ReplicaChangeType deprecated_change_type = 2;
-  // Never access directly: use .Changes()
-  //
-  // TODO(tbg): remove in 20.1
-  repeated ReplicationTarget deprecated_targets = 3 [(gogoproto.nullable) = false];
-  // ExpDesc is the expected current range descriptor to modify. If the range
-  // descriptor is not identical to ExpDesc for the request will fail.
-  //
-  // If there is more than one change specified in targets, this expectation
-  // will be applied to the first change and subsequent changes will use the
-  // resultant descriptor from successfully applying the previous change.
-  // If a change with more than one target occurs concurrently with another
-  // it is possible that an error will occur after partial application of the
-  // change. Changes are applied in the order they appear in the request.
-  RangeDescriptor exp_desc = 4 [(gogoproto.nullable) = false];
-
-  // The changes to apply to exp_desc. Never access directly: use .Changes().
-  //
-  // TODO(tbg): rename to 'changes' in 20.1 and remove Changes().
-  repeated ReplicationChange internal_changes = 5 [(gogoproto.nullable) = false];
-}
-
-message AdminChangePartitionReplicasResponse {
-  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  // Desc is the value of the range descriptor upon success.
-  RangeDescriptor desc = 2 [(gogoproto.nullable) = false];
-}
-
 // An AdminRelocateRangeRequest is the argument to the AdminRelocateRange()
 // method. Relocates the replicas for a range to the specified target stores.
 // The first store in the list of targets becomes the new leaseholder.
@@ -1137,23 +1109,6 @@ message AdminRelocateRangeRequest {
 }
 
 message AdminRelocateRangeResponse {
-  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-}
-
-// An AdminRelocatePartitionRequest is the argument to the AdminRelocateRange()
-// method. Relocates the replicas for a range to the specified target stores.
-// The first store in the list of targets becomes the new leaseholder.
-message AdminRelocatePartitionRequest {
-  option (gogoproto.equal) = true;
-
-  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  repeated ReplicationTarget targets = 2 [(gogoproto.nullable) = false];
-  // To be true, indicates that the current range is useless and there is no table information
-  bool useless_range = 3;
-  // TODO(a-robinson): Add "reason"/"details" string fields?
-}
-
-message AdminRelocatePartitionResponse {
   ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
 }
 
@@ -2091,16 +2046,14 @@ message RequestUnion {
     RangeStatsRequest range_stats = 44;
     AdminVerifyProtectedTimestampRequest admin_verify_protected_timestamp = 49;
     TsPutRequest ts_put = 50;
-    AdminRequestLeaseForTSRequest ts_request_lease = 52;
-    AdminRelocatePartitionRequest admin_relocate_partition = 53;
-    AdminTransferPartitionLeaseRequest admin_transfer_partition_lease = 54;
-    AdminChangePartitionReplicasRequest admin_change_partition_replicas = 55;
+    TsRowPutRequest ts_row_put = 52;
     TsDeleteRequest ts_delete = 56;
     TsDeleteEntityRequest ts_delete_entity = 57;
     GetReplicaStatusRequest get_replica_status = 58;
     CreateTSSnapshotRequest create_ts_snapshot = 59;
     TsTagUpdateRequest ts_tag_update = 60;
     TsDeleteMultiEntitiesDataRequest ts_delete_multi_entities_data = 61;
+    TsPutTagRequest ts_put_tag = 62;
   }
   reserved 8, 15, 23, 25, 27;
 }
@@ -2153,17 +2106,15 @@ message ResponseUnion {
     RangeStatsResponse range_stats = 44;
     AdminVerifyProtectedTimestampResponse admin_verify_protected_timestamp = 49;
     TsPutResponse ts_put = 50;
-    AdminRequestLeaseForTSResponse ts_request_lease = 52;
     AdminSplitForTsResponse admin_split_for_ts = 51;
-    AdminRelocatePartitionResponse admin_relocate_partition = 53;
-    AdminTransferPartitionLeaseResponse admin_transfer_partition_lease = 54;
-    AdminChangePartitionReplicasResponse admin_change_partition_replicas = 55;
+    TsRowPutResponse ts_row_put = 52;
     TsDeleteResponse ts_delete = 56;
     TsDeleteEntityResponse ts_delete_entity = 57;
     GetReplicaStatusResponse get_replica_status = 58;
     CreateTSSnapshotResponse create_ts_snapshot = 59;
     TsTagUpdateResponse ts_tag_update = 60;
     TsDeleteMultiEntitiesDataResponse ts_delete_multi_entities_data = 61;
+    TsPutTagResponse ts_put_tag = 62;
   }
   reserved 8, 15, 23, 25, 27, 28;
 }
@@ -2313,9 +2264,6 @@ message Header {
   bool can_forward_read_timestamp = 16;
 
   bool should_log_logical_op = 17 ;
-
-  // used by import
-  bool import_time_series_data = 18;
 
   reserved 7, 12, 14;
 }

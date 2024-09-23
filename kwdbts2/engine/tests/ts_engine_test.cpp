@@ -24,7 +24,7 @@ const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 
 extern bool g_engine_initialized;
 
-RangeGroup kTestRange{101, 0};
+RangeGroup kTestRange{1, 0};
 
 class TestEngine : public TestBigTableInstance {
  public:
@@ -89,11 +89,14 @@ TEST_F(TestEngine, create) {
   KTableKey cur_table_id = 123456789;
   ConstructRoachpbTable(&meta, "testTableAndColumnNameTooLong_testTableAndColumnNameTooLong", cur_table_id);
 
+  std::shared_ptr<TsTable> ts_table;
+  auto ss = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
+  ASSERT_EQ(ss, KStatus::FAIL);
+
   std::vector<RangeGroup> ranges{kTestRange};
   KStatus s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
-  std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
@@ -367,8 +370,8 @@ TEST_F(TestEngine, DeleteEntities) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, tbl_range, {}, false, false, false),
-            KStatus::SUCCESS);
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
+             1, &iter1, tbl_range, {}, false, false, false), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32)scan_cols.size()};
   k_uint32 ret_cnt;
@@ -382,8 +385,8 @@ TEST_F(TestEngine, DeleteEntities) {
 
   entity_id = 2;
   is_finished = false;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, tbl_range, {}, false, false, false),
-            KStatus::SUCCESS);
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
+              1, &iter1, tbl_range, {}, false, false, false), KStatus::SUCCESS);
   ASSERT_EQ(iter1->Next(&res, &ret_cnt, &is_finished), KStatus::SUCCESS);
   EXPECT_EQ(ret_cnt, row_num_);
   delete iter1;
@@ -443,8 +446,8 @@ TEST_F(TestEngine, DeleteData) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, tbl_range, {}, false, false, false),
-            KStatus::SUCCESS);
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
+              1, &iter1, tbl_range, {}, false, false, false), KStatus::SUCCESS);
   uint64_t count = 0;
   uint64_t total = 0;
   bool is_finished = false;
@@ -709,7 +712,7 @@ TEST_F(TestEngine, DropColumn) {
 
   TSSlice column_slice{buffer, column_size};
   ASSERT_EQ(column.ParseFromArray(column_slice.data, column_slice.len), true);
-  s = ts_engine_->DropColumn(ctx_, cur_table_id, trans_id.data(), column_slice, 1, 2, err_msg);
+  s = ts_engine_->DropColumn(ctx_, cur_table_id, const_cast<char*>(trans_id.data()), column_slice, 1, 2, err_msg);
   delete[] buffer;
   ASSERT_EQ(s, KStatus::SUCCESS);
 }

@@ -27,7 +27,7 @@ namespace kwdbts {
 RangeGroup test_range{101, 0};
 void CreateTable(kwdbContext_p ctx, TSEngine* ts_engine, KTableId table_id) {
   roachpb::CreateTsTable meta;
-  constructRoachpbTable(&meta, "test_table", table_id);
+  ConstructRoachpbTable(&meta, "test_table", table_id);
 
   vector<RangeGroup> ranges{test_range};
   // TSEngine* ts_engine = static_cast<TSEngine*>(ctx->ts_engine);

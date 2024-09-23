@@ -11,9 +11,7 @@
 
 #pragma once
 
-#if !defined(NDEBUG)
 #include <mutex>
-#endif
 #include <set>
 #include <string>
 #include "ts_object_error.h"
@@ -90,11 +88,11 @@ public:
   int decRefCount();
 
   /**
-   * @brief	Get object URL.
+   * @brief	Get object path.
    *
-   * @return	TSObject URL string.
+   * @return	TSObject path string.
    */
-  virtual string URL() const;
+  virtual string path() const;
 
   virtual string name() const;
 
@@ -103,15 +101,15 @@ public:
   string directory() const;
 
   ///
-  /// @brief	Open an object via URL.
+  /// @brief	Open an object via PATH.
   ///
-  /// @param	url         TSObject URL.
+  /// @param	obj_path         TSObject PATH.
   /// @param	sandobx		Name of tbl_sub_path(directory).
   /// @param	flags		Access modes of the object.
   /// @return	0 succeed, otherwise -1.
   ///
-  virtual int open(const string &url, const string& db_path, const string &tbl_sub_path, int flags,
-    ErrorInfo &err_info);
+  virtual int open(const string &obj_path, const string& db_path, const string &tbl_sub_path, int flags,
+                   ErrorInfo &err_info);
 
   virtual int version() const;
 
@@ -143,8 +141,8 @@ public:
 
 #if defined(LOGISTIC_PLAN)
   /**
-   * @brief	obtain file URLs on which a big object depends.
-   * @param	files		a set of object URLs that will be updated.
+   * @brief	obtain file PATHs on which a big object depends.
+   * @param	files		a set of object PATHs that will be updated.
    */
   virtual void dependentFile(set<string> &files) const;
 #endif
@@ -189,15 +187,12 @@ public:
   // reference count for insertion
   int32_t ins_ref_cnt_;
 
-#if !defined(NDEBUG)
   int rd_cnt_;
   int wr_cnt_;
   mutex rw_mtx_;
-#endif
-
 };
 
-std::string defaultNameServiceURL();
+std::string defaultNameServicePath();
 
 /**
  * @brief	release an object.

@@ -100,10 +100,13 @@ class TestWALManager : public TestBigTableInstance {
     size_t p_len = 0;
     char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
     TSSlice payload{data_value, p_len};
-    auto pd1 = Payload(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), payload);
+    std::vector<AttributeInfo> schema;
+    KStatus s = mbt_->GetSchemaInfoExcludeDropped(&schema);
+    EXPECT_EQ(s, KStatus::SUCCESS);
+    auto pd1 = Payload(schema, mbt_->GetIdxForValidCols(), payload);
     auto p_tag = pd1.GetPrimaryTag();
 
-    KStatus s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
+    s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
     EXPECT_EQ(s, KStatus::SUCCESS);
 
     TS_LSN entry_lsn;
@@ -170,10 +173,12 @@ TEST_F(TestWALManager, TestWALInit) {
   size_t p_len = 0;
   char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  Payload pd1(bt->GetSchemaInfoWithHidden(), bt->GetColsIdx(), payload);
+  std::vector<AttributeInfo> schema;
+  KStatus s = bt->GetSchemaInfoExcludeDropped(&schema);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+  Payload pd1(schema, bt->GetIdxForValidCols(), payload);
 
-
-  KStatus s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
+  s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
   delete wal_;
@@ -195,10 +200,13 @@ TEST_F(TestWALManager, TestWALInsert) {
   size_t p_len = 0;
   char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), payload);
+  std::vector<AttributeInfo> schema;
+  KStatus s = mbt_->GetSchemaInfoExcludeDropped(&schema);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+  auto pd1 = Payload(schema, mbt_->GetIdxForValidCols(), payload);
   auto p_tag = pd1.GetPrimaryTag();
 
-  KStatus s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
+  s = wal_->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
   TS_LSN entry_lsn;
@@ -231,7 +239,7 @@ TEST_F(TestWALManager, TestWALInsert) {
   EXPECT_EQ(redo2->time_partition_, 0);
   EXPECT_EQ(redo2->offset_, 0);
   EXPECT_EQ(redo2->length_, payload.len);
-  Payload pd2(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), {redo2->data_, redo2->length_});
+  Payload pd2(schema, mbt_->GetIdxForValidCols(), {redo2->data_, redo2->length_});
   TSSlice sl = pd2.GetColumnValue(0, 0);
   KTimestamp ts_chk = 0;
   memcpy(&ts_chk, sl.data, sizeof(KTimestamp));
@@ -359,7 +367,10 @@ TEST_F(TestWALManager, TestWALMTRRollback) {
   size_t p_len = 0;
   char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
   TSSlice payload{data_value, p_len};
-  auto pd1 = Payload(bt->GetSchemaInfoWithHidden(), bt->GetColsIdx(), payload);
+  std::vector<AttributeInfo> schema;
+  s = bt->GetSchemaInfoExcludeDropped(&schema);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+  auto pd1 = Payload(schema, bt->GetIdxForValidCols(), payload);
 
   TS_LSN entry_lsn;
 
@@ -512,10 +523,13 @@ TEST_F(TestWALManager, TestWALSyncInsert) {
     size_t p_len = 0;
     char* data_value = GenPayloadData(ctx_, row_num, p_len, start_ts, &meta_);
     TSSlice payload{data_value, p_len};
-    auto pd1 = Payload(mbt_->GetSchemaInfoWithHidden(), mbt_->GetColsIdx(), payload);
+    std::vector<AttributeInfo> schema;
+    KStatus  s = mbt_->GetSchemaInfoExcludeDropped(&schema);
+    EXPECT_EQ(s, KStatus::SUCCESS);
+    auto pd1 = Payload(schema, mbt_->GetIdxForValidCols(), payload);
     auto p_tag = pd1.GetPrimaryTag();
 
-    KStatus s = wal2->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
+    s = wal2->WriteInsertWAL(ctx_, x_id, 0, 0, payload);
     EXPECT_EQ(s, KStatus::SUCCESS);
 
     TS_LSN entry_lsn;

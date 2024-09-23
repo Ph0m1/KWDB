@@ -551,10 +551,15 @@ func (db *DB) AdminSplit(
 
 // AdminSplitTs splits the range at splitkey.
 func (db *DB) AdminSplitTs(
-	ctx context.Context, spanKey interface{}, groupID uint32, tableID uint32, splitPoints []int32,
+	ctx context.Context,
+	spanKey interface{},
+	tableID uint32,
+	splitPoints []int32,
+	timestamps []int64,
+	isCreateTable bool,
 ) error {
 	b := &Batch{}
-	b.adminSplitTs(spanKey, groupID, tableID, splitPoints)
+	b.adminSplitTs(spanKey, tableID, splitPoints, timestamps, isCreateTable)
 	return getOneErr(db.Run(ctx, b), b)
 }
 
@@ -638,10 +643,9 @@ func (db *DB) AdminChangeReplicas(
 	key interface{},
 	expDesc roachpb.RangeDescriptor,
 	chgs []roachpb.ReplicationChange,
-	needTsSnapshotData bool,
 ) (*roachpb.RangeDescriptor, error) {
 	b := &Batch{}
-	b.adminChangeReplicas(key, expDesc, chgs, needTsSnapshotData)
+	b.adminChangeReplicas(key, expDesc, chgs)
 	if err := getOneErr(db.Run(ctx, b), b); err != nil {
 		return nil, err
 	}

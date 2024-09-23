@@ -24,6 +24,7 @@
 #include "libkwdbts2.h"
 #include "st_wal_types.h"
 #include "ts_table_object.h"
+#include "mmap/mmap_string_column.h"
 
 
 class MMapRootTableManager;
@@ -62,8 +63,8 @@ class Payload {
   const static uint8_t txn_id_offset_ = 0;  // NOLINT
   const static uint8_t txn_id_size_ = 16;  // NOLINT
 
-  const static uint8_t range_group_id_offset_ = 16;  // NOLINT
-  const static uint8_t range_group_id_size_ = 2;  // NOLINT
+  const static uint8_t hash_point_id_offset_ = 16;  // NOLINT
+  const static uint8_t hash_point_id_size_ = 2;  // NOLINT
 
   const static uint8_t payload_version_offset_ = 18;  // NOLINT
   const static uint8_t payload_version_size_ = 4;  // NOLINT
@@ -96,6 +97,27 @@ class Payload {
     delete []col_offsets_;
   }
 
+  // parse primary key from payload. memory using payload, no need free
+  static const TSSlice GetPrimaryKeyFromPayload(TSSlice* payload) {
+    int16_t primary_len = KInt16(payload->data + Payload::header_size_);
+    TSSlice primary_key;
+    primary_key.data = payload->data + Payload::header_size_ + 2;
+    primary_key.len = primary_len;
+    return primary_key;
+  }
+
+  static uint32_t GetTsVsersionFromPayload(TSSlice* payload) {
+    return *reinterpret_cast<uint32_t*> (payload->data + Payload::ts_version_offset_);
+  }
+
+  static uint32_t GetRowCountFromPayload(TSSlice* payload) {
+    return *reinterpret_cast<int32_t*> (payload->data + Payload::row_num_offset_);
+  }
+
+  static uint32_t GetTsVersionFromPayload(TSSlice* payload) {
+    return *reinterpret_cast<uint32_t*> (payload->data + ts_version_offset_);
+  }
+
   // payload version
   uint32_t GetPayloadVersion() {
     return *reinterpret_cast<uint32_t*> (slice_.data + payload_version_offset_);
@@ -114,12 +136,24 @@ class Payload {
     return count_;
   }
 
+  // rangeGroupID --> hashPoint
+  uint32_t getHashPoint() {
+    return *reinterpret_cast<uint16_t*> (slice_.data + hash_point_id_offset_);
+  }
+  void SetHashPoint(uint16_t hashpoint) {
+    uint16_t *hash = reinterpret_cast<uint16_t*>(slice_.data + hash_point_id_offset_);
+    memcpy(hash, &hashpoint, sizeof(uint16_t));
+  }
   int32_t GetStartRowId() {
     return start_row_;
   }
 
   int32_t GetDataLength() {
     return data_len_;
+  }
+
+  int32_t GetDataOffset() {
+    return data_offset_;
   }
 
   // primary tag value, multi-tags can be primary tag
@@ -286,7 +320,7 @@ class Payload {
         if (IsNull(col, row)) {
           os << s_NULL << ' ';
         } else if (schema_[col].type == VARSTRING) {
-          os << std::string(GetVarColumnAddr(row, col) + MMapStringFile::kStringLenLen, GetVarColumnLen(row, col)) << ' ';
+          os << std::string(GetVarColumnAddr(row, col) + MMapStringColumn::kStringLenLen, GetVarColumnLen(row, col)) << ' ';
         } else {
           os << rec_helper_->columnToString(col, GetColumnAddr(row, col)) << ' ';
         }

@@ -23,34 +23,24 @@
 
 vector<AttributeInfo> dummy_schema;
 
-string nameToURL(const string &name, const string &ext) {
+string nameToPath(const string &name, const string &ext) {
   size_t pos = name.rfind(ext);
   if (pos != string::npos)
     return name;
   return name + ext;
 }
 
-const string & getActualWorkspace(const string &db) {
-  if (strncmp(db.c_str(), kwdbts::s_kaiwudb.c_str(), 7) == 0) {
-    char c = db[7];
-    if (c == 0 || c == kwdbts::EngineOptions::directorySeperator())
-      return kwdbts::s_emptyString;
+const string & rmPathSeperator(string &path) {
+  if (!path.empty() && path.back() == '/') {
+    path.resize(path.size() - 1);
   }
-  return db;
-}
-
-const string & worksapceToDatabase(string &ws) {
-  if (!ws.empty() && ws.back() == '/') {
-    ws.resize(ws.size() - 1);
-  }
-  return ws;
+  return path;
 }
 
 vector<AttributeInfo> & getDummySchema() { return dummy_schema; }
 
-// URL has the form: XXXX:///
-string getURLFilePath(const string &url) {
-  string file_path = url;
+string getTsFilePath(const string &path) {
+  string file_path = path;
 
   size_t pos = file_path.find_first_not_of('/');
   if (pos != 0 && pos != string::npos)
@@ -58,31 +48,31 @@ string getURLFilePath(const string &url) {
   return file_path;
 }
 
-string getURLObjectName(const string &url) {
-  string fpath = getURLFilePath(url);
+string getTsObjectName(const string &path) {
+  string fpath = getTsFilePath(path);
   size_t found;
   found = fpath.find_last_of('.');
   return (found == std::string::npos) ? fpath : fpath.substr(0, found);
 }
 
-string nameToObjectURL(const string &name, const string &ext) {
-    return nameToURL(name, ext);
+string nameToObjectPath(const string &name, const string &ext) {
+    return nameToPath(name, ext);
 }
 
-string nameToTagBigTableURL(const string &name, const string &ext)
+string nameToTagBigTablePath(const string &name, const string &ext)
 {
-  return nameToObjectURL(name, ".pt");
+  return nameToObjectPath(name, ".pt");
 }
 
-string nameToEntityBigTableURL(const string &name, const string &ext)
-{ return nameToObjectURL(name, ext); }
+string nameToEntityBigTablePath(const string &name, const string &ext)
+{ return nameToObjectPath(name, ext); }
 
 
-string genTempObjectURL(const string &src_url) {
+string genTempObjectPath(const string &src_path) {
   static std::atomic<size_t> ts_inc = 0;
   ostringstream oss;
-  int pos = src_url.find('.');
-  string src_head = src_url.substr(0, pos);
+  int pos = src_path.find('.');
+  string src_head = src_path.substr(0, pos);
   int64_t t = ts_inc.fetch_add(1);
   oss << "_t_" << hex << t;
 
@@ -355,9 +345,8 @@ string normalizePath(const string &path) {
     if (pos == string::npos)
       break;
   }
-  const string &db = getActualWorkspace(rpath);
 
-  return makeDirectoryPath(db);
+  return makeDirectoryPath(rpath);
 }
 
 string makeDirectoryPath(const string &tbl_sub_path) {
@@ -405,19 +394,19 @@ BigTable *CreateTempTable(const vector<AttributeInfo> &schema, const std::string
                           ErrorInfo &err_info) {
   std::vector<std::string> key;
   int flags = MMAP_CREAT_EXCL;
-  std::string bt_actual_url = genTempObjectURL("");
+  std::string bt_actual_path = genTempObjectPath("");
   BigTable *bt = reinterpret_cast<BigTable*>(new MMapBigTable());
   if (unlikely(bt == nullptr)) {
-    LOG_ERROR("new MMapBigTable failed, db_path: %s name: %s ", db_path.c_str(), bt_actual_url.c_str());
+    LOG_ERROR("new MMapBigTable failed, db_path: %s name: %s ", db_path.c_str(), bt_actual_path.c_str());
     return nullptr;
   }
-  if (bt->open(bt_actual_url, db_path, "", flags, err_info) < 0) {
-    LOG_ERROR("Open temporary table failed, db_path: %s name: %s ", db_path.c_str(), bt_actual_url.c_str());
+  if (bt->open(bt_actual_path, db_path, "", flags, err_info) < 0) {
+    LOG_ERROR("Open temporary table failed, db_path: %s name: %s ", db_path.c_str(), bt_actual_path.c_str());
     delete bt;
     return nullptr;
   }
   if (bt->create(schema, key, "", "", "", "", "", encoding, err_info) < 0 ) {
-    LOG_ERROR("Create temporary table failed, db_path: %s name: %s ", db_path.c_str(), bt_actual_url.c_str());
+    LOG_ERROR("Create temporary table failed, db_path: %s name: %s ", db_path.c_str(), bt_actual_path.c_str());
     delete bt;
     return nullptr;
   }

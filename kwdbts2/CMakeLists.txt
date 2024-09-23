@@ -134,7 +134,7 @@ endif ()
 
 # Add code compilation options for mmap
 add_definitions(-DTHREAD_SAFE)
-add_definitions(-DNDEBUG)
+# add_definitions(-DNDEBUG)
 add_definitions(-DNEW_COUNT)
 
 FIND_PACKAGE(OpenMP REQUIRED)

@@ -24,6 +24,7 @@
 #include <utility>
 #include "utils/big_table_utils.h"
 #include "mmap/mmap_tag_column_table.h"
+#include "ts_table.h"
 
 // change char* memory to KTimestamp.
 #define KTimestamp(buf) (*(static_cast<timestamp64 *>(static_cast<void *>(buf))))
@@ -112,7 +113,9 @@ class TagBtUtil {
       end_ptr += ts_str.length();
     }
     ErrorInfo err_info(false);
-    row_num = bt->insert(entity_id, group_id, rec);
+    uint32_t hashpoint;
+    hashpoint = TsTable::GetConsistentHashId(rec, rec_size),
+    row_num = bt->insert(entity_id, group_id, hashpoint, rec);
     if (row_num < 0) {  // $$ push_back is the function to write table in table
       fprintf(stderr, "Fail to insert TS table,error_code:%ld \n", row_num);
       err_info.errcode = row_num;

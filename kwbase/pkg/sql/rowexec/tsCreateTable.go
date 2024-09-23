@@ -85,11 +85,20 @@ func newCreateTsTable(
 func (tct *tsCreateTable) Start(ctx context.Context) context.Context {
 	ctx = tct.StartInternal(ctx, tsCreateTableProcName)
 	log.Infof(ctx, "tsCreateTable start.")
-	hashRouter, err := api.GetHashRouterWithTable(0, uint32(tct.tableID), true, tct.EvalCtx.Txn)
-	if err != nil {
-		return ctx
+	//hashRouter, err := api.GetHashRouterWithTable(0, uint32(tct.tableID), true, tct.EvalCtx.Txn)
+	//if err != nil {
+	//	return ctx
+	//}
+
+	//TODO rangeGroup暂时保留，但对存储而言应该不再使用，只创建一个RangeGroup，GroupID=1,角色为leader
+	//rangeGroups := hashRouter.GetGroupIDAndRoleOnNode(ctx, tct.EvalCtx.NodeID)
+	rangeGroup := api.RangeGroup{
+		RangeGroupID: 1,
+		Type:         api.ReplicaType_LeaseHolder,
 	}
-	rangeGroups := hashRouter.GetGroupIDAndRoleOnNode(ctx, tct.EvalCtx.NodeID)
+	rangeGroups := make([]api.RangeGroup, 0)
+	rangeGroups = append(rangeGroups, rangeGroup)
+
 	log.Infof(ctx, "tct.tableID:", tct.tableID, "rangeGroups:", rangeGroups, "nodeID", tct.FlowCtx.Cfg.NodeID.Get())
 	if len(rangeGroups) != 0 {
 		if err := tct.FlowCtx.Cfg.TsEngine.CreateTsTable(tct.tableID, tct.meta, rangeGroups); err != nil {

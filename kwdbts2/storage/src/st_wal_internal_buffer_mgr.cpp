@@ -270,6 +270,69 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
         log_entries.push_back(drop_entry);
         break;
       }
+      case RANGE_SNAPSHOT:
+      {
+        status = readBytes(current_offset, read_queue, SnapshotEntry::header_length, read_buf);
+        if (status == FAIL) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to parse the WAL log.")
+          break;
+        }
+        TSTableID table_id;
+        uint64_t b_hash, e_hash;
+        KwTsSpan span;
+        char* read_loc = read_buf;
+        memcpy(&x_id, read_loc, sizeof(x_id));
+        read_loc += sizeof(x_id);
+        memcpy(&table_id, read_loc, sizeof(table_id));
+        read_loc += sizeof(table_id);
+        memcpy(&b_hash, read_loc, sizeof(b_hash));
+        read_loc += sizeof(b_hash);
+        memcpy(&e_hash, read_loc, sizeof(e_hash));
+        read_loc += sizeof(e_hash);
+        memcpy(&span.begin, read_loc, sizeof(span.begin));
+        read_loc += sizeof(span.begin);
+        memcpy(&span.end, read_loc, sizeof(span.end));
+        read_loc += sizeof(span.end);
+        auto* drop_entry = KNEW SnapshotEntry(current_lsn, x_id, table_id, b_hash, e_hash, span);
+        delete[] read_buf;
+        read_buf = nullptr;
+
+        log_entries.push_back(drop_entry);
+        break;
+      }
+      case WALLogType::SNAPSHOT_TMP_DIRCTORY:
+      {
+        status = readBytes(current_offset, read_queue, TempDirectoryEntry::header_length, read_buf);
+        if (status == FAIL) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to parse the WAL log.")
+          break;
+        }
+        size_t length;
+        char* read_loc = read_buf;
+        memcpy(&x_id, read_loc, sizeof(x_id));
+        read_loc += sizeof(x_id);
+        memcpy(&length, read_loc, sizeof(length));
+        delete[] read_buf;
+        read_buf = nullptr;
+        status = readBytes(current_offset, read_queue, length, read_buf);
+        if (status == FAIL) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to parse the WAL log.")
+          break;
+        }
+        std::string file_path(read_buf, length);
+        auto* drop_entry = KNEW TempDirectoryEntry(current_lsn, x_id, file_path);
+        delete[] read_buf;
+        read_buf = nullptr;
+        log_entries.push_back(drop_entry);
+        break;
+      }
+
       case DB_SETTING:
 //        break;
       default:

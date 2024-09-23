@@ -1,5 +1,4 @@
 --test dedup import
---testmode 1n 5c
 create ts database test;
 use test;
 create table test.tb1(k_timestamp timestamptz not null,  usage_user INT8,
@@ -21,14 +20,12 @@ export into csv "nodelocal://1/tbKeep/tb1/" from table test.tb1;
 export into csv "nodelocal://1/tbReject/tb1/" from table test.tb1;
 export into csv "nodelocal://1/tbDiscard/tb1/" from table test.tb1;
 -- test keep
---testmode 1n 5c
 SET CLUSTER SETTING ts.dedup.rule = 'keep';
 import into test.tb1 csv data ('nodelocal://1/tbKeep/tb1');
 select * from test.tb1 order by k_timestamp, hostname;
 drop table test.tb1;
 
 -- test discard
---testmode 1n 5c
 SET CLUSTER SETTING ts.dedup.rule = 'discard';
 create table test.tb1(k_timestamp timestamptz not null,  usage_user INT8,
      usage_system INT8,
@@ -47,7 +44,6 @@ import into test.tb1 csv data ('nodelocal://1/tbDiscard/tb1');
 select * from test.tb1 order by k_timestamp, hostname;
 drop table test.tb1;
 -- test reject
---testmode 1n 5c
 SET CLUSTER SETTING ts.dedup.rule = 'reject';
 create table test.tb1(k_timestamp timestamptz not null,  usage_user INT8,
      usage_system INT8,

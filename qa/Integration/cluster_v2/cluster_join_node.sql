@@ -3,6 +3,7 @@ SET CLUSTER SETTING server.advanced_distributed_operations.enabled = true;
 SET cluster setting ts.rows_per_block.max_limit=10;
 SET cluster setting ts.blocks_per_segment.max_limit=50;
 CREATE TS DATABASE tsdb;
+ALTER DATABASE tsdb CONFIGURE ZONE USING gc.ttlseconds=10;
 CREATE TABLE tsdb.t1(
 ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES
 ) TAGS (
@@ -109,42 +110,64 @@ INSERT INTO tsdb.t1 (ts, e1, e2, e3, e4, e5, e6, e7, e8, e10, e16, tag1, tag2, t
 INSERT INTO tsdb.t1 (ts, e1, e2, e3, e4, e5, e6, e7, e8, e10, e16, tag1, tag2, tag3, tag4, tag5, tag6, tag7, tag11, tag13) VALUES ('2000-10-10T10:11:47', '2024-02-06 07:53:45', 800, 621, 468, 8757.687332614038, 5405.484411985166, False, 'h', 'V', '2', False, 278, 231, 686, 9348.570982891488, -4284.130455467294, '3', 'b', 'G');
 INSERT INTO tsdb.t1 (ts, e1, e2, e3, e4, e5, e6, e7, e8, e10, e16, tag1, tag2, tag3, tag4, tag5, tag6, tag7, tag11, tag13) VALUES ('2000-10-10T10:11:48', '2024-02-06 07:53:45', 35, 164, 966, 8873.539765774418, -6295.051624778738, False, 'b', 'J', '6', True, 967, 656, 150, 7536.393986761272, 4845.217063334514, '6', 'j', 'u');
 INSERT INTO tsdb.t1 (ts, e1, e2, e3, e4, e5, e6, e7, e8, e10, e16, tag1, tag2, tag3, tag4, tag5, tag6, tag7, tag11, tag13) VALUES ('2000-10-10T10:11:49', '2024-02-06 07:53:45', 611, 965, 5, 7567.450800110706, -2746.5781895453874, True, 's', 'q', '6', True, 231, 311, 211, 8294.536259146378, 1809.1062291211329, 'A', 'u', 'q');
+SELECT * FROM tsdb.t1 ORDER BY ts;
+
+CREATE TABLE tsdb.t2(
+                        ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES
+) TAGS (
+tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL
+)PRIMARY TAGS(tag13);
+DROP TABLE tsdb.t2;
 
 SELECT * FROM tsdb.t1 ORDER BY ts;
 -- join: c6
--- sleep: 2s
--- wait-join: c6
-SELECT node_id,status AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
+-- sleep: 10s
+-- wait-running: c1
+SELECT node_id,decommissioning FROM kwdb_internal.gossip_liveness ORDER BY node_id;
 SELECT * FROM tsdb.t1 ORDER BY ts;
 SELECT count(*) FROM tsdb.t1;
 
--- CREATE TABLE tsdb.t2(
---                         ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES
--- ) TAGS (
--- tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL
--- )PRIMARY TAGS(tag13);
+CREATE TABLE tsdb.t2(
+                        ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES
+) TAGS (
+tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL
+)PRIMARY TAGS(tag13);
+DROP TABLE tsdb.t2;
 
 -- decommission: c6
 -- sleep: 15s
-SELECT node_id,status AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
+SELECT node_id,decommissioning AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
 select * from tsdb.t1 order by ts;
 SELECT count(*) FROM tsdb.t1;
 
+CREATE TABLE tsdb.t2(
+                        ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES
+) TAGS (
+tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL
+)PRIMARY TAGS(tag13);
+DROP TABLE tsdb.t2;
 
 -- join: c7
--- sleep: 2s
+-- sleep: 5s
 -- join: c8
--- wait-join: c7
--- sleep: 2s
--- wait-join: c8
-SELECT node_id,status AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
+-- wait-running: c1
+-- sleep: 5s
+-- wait-running: c1
+SELECT node_id,decommissioning AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
 select * from tsdb.t1 order by ts;
 SELECT count(*) FROM tsdb.t1;
 
+
+CREATE TABLE tsdb.t2(
+                        ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES
+) TAGS (
+tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL
+)PRIMARY TAGS(tag13);
+DROP TABLE tsdb.t2;
 
 -- decommission: c7
 -- sleep: 5s
-SELECT node_id,status AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
+SELECT node_id,decommissioning AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
 select * from tsdb.t1 order by ts;
 SELECT count(*) FROM tsdb.t1;
 
@@ -154,7 +177,7 @@ DROP DATABASE tsdb;
 
 -- decommission: c8
 -- sleep: 5s
-SELECT node_id,status AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
+SELECT node_id,decommissioning AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id;
 select * from tsdb.t1 order by ts;
 SELECT count(*) FROM tsdb.t1;
 

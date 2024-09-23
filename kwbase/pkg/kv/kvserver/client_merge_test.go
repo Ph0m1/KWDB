@@ -1788,7 +1788,7 @@ func TestStoreRangeMergeAddReplicaRace(t *testing.T) {
 	}()
 	go func() {
 		_, err := tc.Server(0).DB().AdminChangeReplicas(
-			ctx, scratchStartKey, beforeDesc, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(1)), false)
+			ctx, scratchStartKey, beforeDesc, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(1)))
 		addErrCh <- err
 	}()
 	mergeErr := <-mergeErrCh
@@ -1842,7 +1842,7 @@ func TestStoreRangeMergeResplitAddReplicaRace(t *testing.T) {
 	assert.NotEqual(t, origDesc.Generation, resplitDesc.Generation)
 
 	_, err := tc.Server(0).DB().AdminChangeReplicas(
-		ctx, scratchStartKey, origDesc, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(1)), false)
+		ctx, scratchStartKey, origDesc, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(1)))
 	if !testutils.IsError(err, `descriptor changed`) {
 		t.Fatalf(`expected "descriptor changed" error got: %+v`, err)
 	}
@@ -2353,7 +2353,6 @@ func TestStoreRangeReadoptedLHSFollower(t *testing.T) {
 					NodeID:  mtc.idents[2].NodeID,
 					StoreID: mtc.idents[2].StoreID,
 				}),
-			false,
 		); !testutils.IsError(err, "descriptor changed") {
 			t.Fatal(err)
 		}

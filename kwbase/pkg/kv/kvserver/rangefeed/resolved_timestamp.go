@@ -27,13 +27,11 @@ package rangefeed
 import (
 	"bytes"
 	"container/heap"
-	"context"
 	"fmt"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
-	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
 )
 
@@ -494,7 +492,6 @@ func (uiq *unresolvedIntentQueue) Del(txnID uuid.UUID) bool {
 	// This implementation is logically equivalent to the following, but
 	// it avoids underflow conditions:
 	//  return uiq.updateTxn(txnID, nil, hlc.Timestamp{}, hlc.Timestamp{}, math.MinInt64)
-	log.VEventf(context.Background(), 3, "xxxx txnrefCount5 txn %s, %p", txnID.String(), &uiq.txns)
 	txn, ok := uiq.txns[txnID]
 	if !ok {
 		// Unknown txn.
@@ -526,7 +523,6 @@ func (uiq *unresolvedIntentQueue) AllowNegRefCount(b bool) {
 func (uiq *unresolvedIntentQueue) assertOnlyPositiveRefCounts() {
 	for _, txn := range uiq.txns {
 		if txn.refCount <= 0 {
-			log.Infof(context.Background(), "xxxx negative refcount txnid %d", txn.txnID.String())
 			panic(fmt.Sprintf("negative refcount %d for txn %+v", txn.refCount, txn))
 		}
 	}

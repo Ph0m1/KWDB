@@ -413,18 +413,19 @@ func (a *Allocator) ComputeAction(
 		// removeLearnerReplicaPriority as the highest priority.
 		return AllocatorRemoveLearner, removeLearnerReplicaPriority
 	}
-
 	// computeAction expects to operate only on voters.
-	return a.computeAction(ctx, zone, desc)
+	return a.computeAction(ctx, zone, desc.RangeID, desc.Replicas().Voters())
 }
 
 func (a *Allocator) computeAction(
-	ctx context.Context, zone *zonepb.ZoneConfig, desc *roachpb.RangeDescriptor,
+	ctx context.Context,
+	zone *zonepb.ZoneConfig,
+	rangeID roachpb.RangeID,
+	voterReplicas []roachpb.ReplicaDescriptor,
 ) (AllocatorAction, float64) {
 	// TODO(mrtracy): Handle non-homogeneous and mismatched attribute sets.
-	voterReplicas := desc.Replicas().Voters()
 	have := len(voterReplicas)
-	decommissioningReplicas := a.storePool.decommissioningReplicas(desc.RangeID, voterReplicas)
+	decommissioningReplicas := a.storePool.decommissioningReplicas(rangeID, voterReplicas)
 	clusterNodes := a.storePool.ClusterNodeCount()
 	need := GetNeededReplicas(*zone.NumReplicas, clusterNodes)
 	desiredQuorum := computeQuorum(need)
@@ -441,7 +442,7 @@ func (a *Allocator) computeAction(
 		return action, priority
 	}
 
-	liveVoterReplicas, deadVoterReplicas := a.storePool.liveAndDeadReplicas(desc.RangeID, voterReplicas)
+	liveVoterReplicas, deadVoterReplicas := a.storePool.liveAndDeadReplicas(rangeID, voterReplicas)
 
 	if len(liveVoterReplicas) < quorum {
 		// Do not take any replacement/removal action if we do not have a quorum of live
@@ -519,43 +520,6 @@ type decisionDetails struct {
 	Existing string `json:",omitempty"`
 }
 
-// AllocateTsTarget get TS replica target
-func (a *Allocator) AllocateTsTarget(
-	ctx context.Context,
-	desc *roachpb.RangeDescriptor,
-	zone *zonepb.ZoneConfig,
-	existingReplicas []roachpb.ReplicaDescriptor,
-) (target *roachpb.StoreDescriptor, details string, err error) {
-	if zone.IsZoneConfigForTsRange() {
-		// According to ZoneConfig configuration
-		sl, aliveStoreCount, throttled := a.storePool.getStoreList(desc.RangeID, storeFilterThrottled)
-		target, details = a.allocateTargetFromList(ctx, sl, zone, existingReplicas, a.scorerOptions())
-		if target != nil {
-			return target, details, nil
-		}
-
-		if len(throttled) > 0 {
-			return nil, "", errors.Errorf(
-				"%d matching stores are currently throttled: %v", len(throttled), throttled,
-			)
-		}
-		return nil, "", &allocatorError{
-			constraints:      zone.Constraints,
-			existingReplicas: len(existingReplicas),
-			aliveStores:      aliveStoreCount,
-			throttledStores:  len(throttled),
-		}
-	}
-	// According to the pre-distributed configuration
-	target, details = a.allocateTsTargetFromList(ctx, desc)
-	if target != nil {
-		return target, details, nil
-	}
-	return nil, "", &allocatorError{
-		existingReplicas: len(existingReplicas),
-	}
-}
-
 // AllocateTarget returns a suitable store for a new allocation with the
 // required attributes. Nodes already accommodating existing replicas are ruled
 // out as targets. The range ID of the replica being allocated for is also
@@ -591,44 +555,6 @@ func (a *Allocator) AllocateTarget(
 		aliveStores:      aliveStoreCount,
 		throttledStores:  len(throttled),
 	}
-}
-
-func (a *Allocator) allocateTsTargetFromList(
-	ctx context.Context, desc *roachpb.RangeDescriptor,
-) (*roachpb.StoreDescriptor, string) {
-	// Check if the PreDistLeaseHolder Node has a copy
-	find := false
-	for _, repl := range desc.Replicas().All() {
-		if desc.PreDistLeaseHolder.NodeID == repl.NodeID {
-			find = true
-		}
-	}
-	if !find {
-		sd, _ := a.storePool.getStoreDescriptorAddress(desc.PreDistLeaseHolder.StoreID)
-		return sd, ""
-	}
-
-	// Check whether there are replicas on the Node that
-	// meets the pre-distribution requirements
-	for _, p := range desc.PreDist {
-		find = false
-		if p.NodeID == desc.PreDistLeaseHolder.NodeID {
-			continue
-		}
-		for _, repl := range desc.Replicas().All() {
-			if p.NodeID == repl.NodeID {
-				find = true
-				break
-			}
-		}
-		if !find {
-			sd, _ := a.storePool.getStoreDescriptorAddress(p.StoreID)
-			return sd, ""
-		}
-	}
-
-	return nil, "The pre distributed configuration nodes already have replicas, so it is not " +
-		"possible to select the store of the pre distributed nodes for creating replicas"
 }
 
 func (a *Allocator) allocateTargetFromList(
@@ -679,52 +605,6 @@ func (a Allocator) simulateRemoveTarget(
 	return a.RemoveTarget(ctx, zone, candidates, existingReplicas)
 }
 
-// RemoveTargetForTsRange remove TS target
-func (a Allocator) RemoveTargetForTsRange(
-	ctx context.Context,
-	zone *zonepb.ZoneConfig,
-	candidates []roachpb.ReplicaDescriptor,
-	existingReplicas []roachpb.ReplicaDescriptor,
-	desc *roachpb.RangeDescriptor,
-) (removeReplica roachpb.ReplicaDescriptor, details string, err error) {
-	if zone.IsZoneConfigForTsRange() {
-		// Select Target based on ZoneConfig
-		removeReplica, details, err = a.RemoveTarget(ctx, zone, candidates, existingReplicas)
-	} else {
-		// Select Target based on pre-distribution
-		removeReplica, details, err = a.RemoveTargetForPreDist(ctx, candidates, desc)
-	}
-	return removeReplica, details, err
-}
-
-// RemoveTargetForPreDist remove target
-func (a Allocator) RemoveTargetForPreDist(
-	ctx context.Context, candidates []roachpb.ReplicaDescriptor, desc *roachpb.RangeDescriptor,
-) (roachpb.ReplicaDescriptor, string, error) {
-	if len(candidates) == 0 {
-		return roachpb.ReplicaDescriptor{}, "", errors.Errorf("must supply at least one candidate " +
-			"replica to allocator.RemoveTarget()")
-	}
-
-	// Return a non-predistributed copy
-	for _, exist := range candidates {
-		find := false
-		for _, p := range desc.PreDist {
-			if exist.NodeID == p.NodeID {
-				find = true
-				break
-			}
-		}
-		if !find {
-			return exist, "", nil
-		}
-	}
-
-	// The replicas in the candidates all meet the pre-distribution requirements.
-	return roachpb.ReplicaDescriptor{}, "", errors.Errorf("All replicas meet pre distribution " +
-		"and no candidates can be selected for allocator.RemoveTarget()")
-}
-
 // RemoveTarget returns a suitable replica to remove from the provided replica
 // set. It first attempts to randomly select a target from the set of stores
 // that have greater than the average number of replicas. Failing that, it
@@ -772,198 +652,6 @@ func (a Allocator) RemoveTarget(
 	}
 
 	return roachpb.ReplicaDescriptor{}, "", errors.New("could not select an appropriate replica to be removed")
-}
-
-// RebalanceTargetForTsRange get rebalance TS target
-func (a Allocator) RebalanceTargetForTsRange(
-	ctx context.Context,
-	zone *zonepb.ZoneConfig,
-	repl *Replica,
-	rangeID roachpb.RangeID,
-	existingReplicas []roachpb.ReplicaDescriptor,
-	rangeUsageInfo RangeUsageInfo,
-) (add roachpb.ReplicationTarget, remove roachpb.ReplicationTarget, details string, ok bool) {
-	if zone.IsZoneConfigForTsRange() {
-		return a.RebalanceTarget(
-			ctx, zone, repl.RaftStatus(), rangeID, existingReplicas, rangeUsageInfo,
-			storeFilterThrottled)
-	}
-	return a.RebalanceTsTarget(
-		ctx, zone, repl, existingReplicas, rangeUsageInfo,
-		storeFilterThrottled)
-}
-
-// RebalanceTsTarget rebalance TS target
-func (a Allocator) RebalanceTsTarget(
-	ctx context.Context,
-	zone *zonepb.ZoneConfig,
-	repl *Replica,
-	existingReplicas []roachpb.ReplicaDescriptor,
-	rangeUsageInfo RangeUsageInfo,
-	filter storeFilter,
-) (add roachpb.ReplicationTarget, remove roachpb.ReplicationTarget, details string, ok bool) {
-	desc, _ := repl.DescAndZone()
-	sl, _, _ := a.storePool.getStoreList(desc.RangeID, filter)
-	zero := roachpb.ReplicationTarget{}
-
-	// Check the number of surviving replicas. If it is less than
-	// the Quorum, reject the rebalance and wait for the replicas
-	// to be replenished.
-	if len(existingReplicas) > 1 {
-		var numLiveReplicas int
-		for _, s := range sl.stores {
-			for _, repl := range existingReplicas {
-				if s.StoreID == repl.StoreID {
-					numLiveReplicas++
-					break
-				}
-			}
-		}
-		newQuorum := computeQuorum(len(existingReplicas) + 1)
-		if numLiveReplicas < newQuorum {
-			// Don't rebalance as we won't be able to make quorum after the rebalance
-			// until the new replica has been caught up.
-			return zero, zero, "", false
-		}
-	}
-
-	// According to the pre-distribution, select the replica target to be added:
-
-	//  When deleting a replica, the leaseHolder transfer will be considered.
-	//  During the rebalance process, after adding a replica successfully, the
-	//  replica deleted subsequently may not be the leaseHolder, or the leaseHolder
-	//  is not on the pre-distributed Node but on another pre-distributed Node.
-	//  Therefore, create all pre-distributed replicas first, and then consider
-	//  the leaseHolder transfer.
-	var target roachpb.ReplicaDescriptor
-	var targets []roachpb.ReplicaDescriptor
-	for _, p := range desc.PreDist {
-		find := false
-		for _, r := range existingReplicas {
-			if p.NodeID == r.NodeID {
-				find = true
-				break
-			}
-		}
-
-		if !find {
-			target.NodeID = p.NodeID
-			target.StoreID = p.StoreID
-			targets = append(targets, target)
-		}
-	}
-
-	// The current replica meets the pre-distribution
-	// requirements and does not require rebalance.
-	if len(targets) == 0 {
-		return zero, zero, "", false
-	}
-
-	// Select the rmTargets replica to be deleted, that is, the replica
-	// that is not specified by the pre-distribution. The learner generated
-	// by the downgrade will be deleted, and the learner generated by the
-	// upgrade will become the Voter, so traverse the Voter replicas
-	var rmTarget roachpb.ReplicaDescriptor
-	var rmTargets []roachpb.ReplicaDescriptor
-	for _, r := range existingReplicas {
-		find := false
-		for _, p := range desc.PreDist {
-			if r.NodeID == p.NodeID {
-				find = true
-				break
-			}
-		}
-		if !find {
-			rmTarget.NodeID = r.NodeID
-			rmTarget.StoreID = r.StoreID
-			rmTargets = append(rmTargets, rmTarget)
-		}
-	}
-
-	// There are no copies to delete
-	if len(rmTargets) == 0 {
-		return zero, zero, "", false
-	}
-
-	raftStatus := repl.RaftStatus()
-	var removeReplica roachpb.ReplicaDescriptor
-	var existingCandidates candidateList
-	for {
-		newReplica := roachpb.ReplicaDescriptor{
-			NodeID:    targets[0].NodeID,
-			StoreID:   targets[0].StoreID,
-			ReplicaID: maxReplicaID(existingReplicas) + 1,
-		}
-
-		existingPlusOneNew := append([]roachpb.ReplicaDescriptor(nil), existingReplicas...)
-		existingPlusOneNew = append(existingPlusOneNew, newReplica)
-		replicaCandidates := existingPlusOneNew
-
-		if raftStatus != nil && raftStatus.Progress != nil {
-			replicaCandidates = simulateFilterUnremovableReplicas(
-				ctx, raftStatus, replicaCandidates, newReplica.ReplicaID)
-		}
-
-		// Select replicaCandidates that do not meet the pre-distribution requirements
-		var rmCandidates []roachpb.ReplicaDescriptor
-		for _, rm := range rmTargets {
-			for _, r := range replicaCandidates {
-				if rm.NodeID == r.NodeID {
-					rmCandidates = append(rmCandidates, r)
-				}
-			}
-		}
-
-		if len(rmCandidates) == 0 {
-			log.VEventf(ctx, 2, "not rebalancing to s%d because there are no existing "+
-				"replicas that can be removed", targets[0].StoreID)
-			return zero, zero, "", false
-		}
-
-		var removeDetails string
-		var err error
-		removeReplica, removeDetails, err = a.simulateRemoveTarget(
-			ctx,
-			targets[0].StoreID,
-			zone,
-			rmCandidates,
-			existingPlusOneNew,
-			rangeUsageInfo,
-		)
-		if err != nil {
-			log.Warningf(ctx, "simulating RemoveTarget failed: %+v", err)
-			return zero, zero, "", false
-		}
-		if targets[0].StoreID != removeReplica.StoreID {
-			_, _ = targets[0], removeReplica
-			break
-		}
-
-		log.VEventf(ctx, 2, "not rebalancing to s%d because we'd immediately remove it: %s",
-			targets[0].StoreID, removeDetails)
-	}
-
-	// Compile the details entry that will be persisted into system.rangelog for
-	// debugging/auditability purposes.
-	options := a.scorerOptions()
-	dDetails := decisionDetails{
-		//Target:   targets[0].compactString(options),
-		Existing: existingCandidates.compactString(options),
-	}
-	detailsBytes, err := json.Marshal(dDetails)
-	if err != nil {
-		log.Warningf(ctx, "failed to marshal details for choosing rebalance target: %+v", err)
-	}
-
-	addTarget := roachpb.ReplicationTarget{
-		NodeID:  targets[0].NodeID,
-		StoreID: targets[0].StoreID,
-	}
-	removeTarget := roachpb.ReplicationTarget{
-		NodeID:  removeReplica.NodeID,
-		StoreID: removeReplica.StoreID,
-	}
-	return addTarget, removeTarget, string(detailsBytes), true
 }
 
 // RebalanceTarget returns a suitable store for a rebalance target with
@@ -1141,95 +829,6 @@ func (a *Allocator) scorerOptions() scorerOptions {
 	}
 }
 
-// TransferLeaseTargetForTsRange transfer TS range lease target
-func (a *Allocator) TransferLeaseTargetForTsRange(
-	ctx context.Context,
-	zone *zonepb.ZoneConfig,
-	desc *roachpb.RangeDescriptor,
-	leaseNodeID roachpb.NodeID,
-	rangeID roachpb.RangeID,
-	stats *replicaStats,
-	checkTransferLeaseSource bool,
-	checkCandidateFullness bool,
-	alwaysAllowDecisionWithoutStats bool,
-) roachpb.ReplicaDescriptor {
-	if leaseNodeID == desc.PreDistLeaseHolder.NodeID {
-		return roachpb.ReplicaDescriptor{}
-	}
-
-	var preferred []roachpb.ReplicaDescriptor
-	existing := desc.Replicas().Voters()
-	// 1. Select the copy that meets desc.PreDistLeaseHolder in the existing copy
-	for _, repl := range existing {
-		if repl.NodeID == desc.PreDistLeaseHolder.NodeID {
-			preferred = append(preferred, repl)
-			break
-		}
-	}
-	if len(preferred) != 0 {
-		return preferred[0]
-	}
-
-	// 2. Select the copy that meets desc.PreDist in the existing copy
-	for _, repl := range existing {
-		for _, p := range desc.PreDist {
-			if repl.NodeID == p.NodeID {
-				preferred = append(preferred, repl)
-			}
-		}
-	}
-	if len(preferred) != 0 {
-		// The Node corresponding to desc.PreDist is only a candidate.
-		// Select a Node to migrate leaseHolder. Wait for the Node
-		// corresponding to desc.PreDistLeaseHolder to create a copy
-		// and then migrate it through ReBalance.
-		return preferred[0]
-	}
-
-	// Only consider live, non-draining replicas.
-	existing, _ = a.storePool.liveAndDeadReplicas(rangeID, existing)
-
-	// Short-circuit if there are no valid targets out there.
-	if len(existing) == 0 || (len(existing) == 1 && existing[0].NodeID == leaseNodeID) {
-		log.VEventf(ctx, 2, "no lease transfer target found")
-		return roachpb.ReplicaDescriptor{}
-	}
-
-	// 3.desc.PreDistLeaseHolder and desc.PreDist do not match the existing
-	// copy, so only one can be selected from the existing copy. The selection
-	// principle is the lease count on the Store
-	sl, _, _ := a.storePool.getStoreList(rangeID, storeFilterNone)
-	candidates := make([]roachpb.ReplicaDescriptor, 0, len(existing))
-	var bestOption roachpb.ReplicaDescriptor
-	bestOptionLeaseCount := int32(math.MaxInt32)
-	for _, repl := range existing {
-		if leaseNodeID == repl.NodeID {
-			continue
-		}
-		storeDesc, ok := a.storePool.getStoreDescriptor(repl.StoreID)
-		if !ok {
-			continue
-		}
-		if !checkCandidateFullness || float64(storeDesc.Capacity.LeaseCount) < sl.candidateLeases.mean-0.5 {
-			candidates = append(candidates, repl)
-		} else if storeDesc.Capacity.LeaseCount < bestOptionLeaseCount {
-			bestOption = repl
-			bestOptionLeaseCount = storeDesc.Capacity.LeaseCount
-		}
-	}
-	if len(candidates) == 0 {
-		// Ignore the current copy as the leaseholder, and the candidate is
-		// empty, so only one can be selected from bestOption.
-		if !checkTransferLeaseSource {
-			return bestOption
-		}
-		return roachpb.ReplicaDescriptor{}
-	}
-	a.randGen.Lock()
-	defer a.randGen.Unlock()
-	return candidates[a.randGen.Intn(len(candidates))]
-}
-
 // TransferLeaseTarget returns a suitable replica to transfer the range lease
 // to from the provided list. It excludes the current lease holder replica
 // unless asked to do otherwise by the checkTransferLeaseSource parameter.
@@ -1376,73 +975,6 @@ func (a *Allocator) TransferLeaseTarget(
 	a.randGen.Lock()
 	defer a.randGen.Unlock()
 	return candidates[a.randGen.Intn(len(candidates))]
-}
-
-// ShouldTransferLeaseForTsRange check transferLease
-func (a *Allocator) ShouldTransferLeaseForTsRange(
-	ctx context.Context,
-	zone *zonepb.ZoneConfig,
-	existing []roachpb.ReplicaDescriptor,
-	leaseReplica roachpb.ReplicaDescriptor,
-	desc *roachpb.RangeDescriptor,
-	stats *replicaStats,
-) bool {
-	if zone.IsZoneConfigForTsRange() {
-		return a.ShouldTransferLease(ctx, zone, existing, leaseReplica.StoreID, desc.RangeID, stats)
-	}
-	// The current leaseHolder is a copy of the PreDistLeaseHolder
-	if leaseReplica.NodeID == desc.PreDistLeaseHolder.NodeID {
-		return false
-	}
-
-	var preferred []roachpb.ReplicaDescriptor
-	// Select the copy that meets desc.PreDistLeaseHolder from the existing copies.
-	for _, repl := range existing {
-		if repl.NodeID == desc.PreDistLeaseHolder.NodeID {
-			preferred = append(preferred, repl)
-			break
-		}
-	}
-	if len(preferred) != 0 {
-		return true
-	}
-
-	// The current leaseHolder is in the pre-distributed non-PreDistLeaseHolder replica
-	for _, p := range desc.PreDist {
-		if p.NodeID == leaseReplica.NodeID {
-			return false
-		}
-	}
-
-	// Select the existing copies that match desc.PreDist
-	var noPreDistPreferred []roachpb.ReplicaDescriptor
-	for _, repl := range existing {
-		if leaseReplica.NodeID == repl.NodeID {
-			continue
-		}
-		for _, p := range desc.PreDist {
-			if repl.NodeID == p.NodeID {
-				preferred = append(preferred, repl)
-			} else {
-				noPreDistPreferred = append(noPreDistPreferred, repl)
-			}
-		}
-	}
-	if len(preferred) != 0 {
-		// The Node corresponding to desc.PreDist is only a candidate.
-		// Select a Node to migrate the leaseHolder. The purpose is to m
-		// igrate the leaseHolder to the pre-distributed replica as soon
-		//as possible.
-		return true
-	}
-
-	// If no pre-distributed replica can be selected, the leaseHolder
-	// is transferred to other non-pre-distributed replicas.
-	if len(noPreDistPreferred) != 0 {
-		return true
-	}
-
-	return false
 }
 
 // ShouldTransferLease returns true if the specified store is overfull in terms

@@ -487,12 +487,14 @@ func (h ConnectionHandler) SendDTI(
 	ctx context.Context,
 	evalCtx *tree.EvalContext,
 	r CommandResult,
-	payloadNodeMap map[int]*sqlbase.PayloadForDistTSInsert,
+	di DirectInsert,
 	stmts parser.Statements,
-	rownum int,
 ) (useDeepRule bool, dedupRule int64, dedupRows int64) {
 	h.ex.metrics.StartedStatementCounters.QueryCount.Inc()
 	h.ex.metrics.StartedStatementCounters.InsertCount.Inc()
+	if !evalCtx.StartSinglenode {
+		h.ex.planner.ExtendedEvalContext().StartDistributeMode = true
+	}
 	starttime := timeutil.Now()
 	ctx, sp := tracing.EnsureChildSpan(
 		ctx, h.ex.server.cfg.AmbientCtx.Tracer,
@@ -500,7 +502,7 @@ func (h ConnectionHandler) SendDTI(
 		// statements.
 		"prepare stmt")
 	defer sp.Finish()
-	useDeepRule, dedupRule, dedupRows = h.ex.SendDirectTsInsert(ctx, evalCtx, r, payloadNodeMap)
+	useDeepRule, dedupRule, dedupRows = h.ex.SendDirectTsInsert(ctx, evalCtx, r, di.PayloadNodeMap)
 	endtime := timeutil.Now()
 	var tempStmt Statement
 	var flags planFlags
@@ -510,23 +512,13 @@ func (h ConnectionHandler) SendDTI(
 	h.ex.statsCollector.recordStatement(
 		&tempStmt, nil,
 		flags.IsSet(planFlagDistributed), flags.IsSet(planFlagImplicitTxn),
-		0, rownum, nil,
+		0, di.RowNum, nil,
 		0, 0, endtime.Sub(starttime).Seconds(), 0, 0, 0, 0,
 		user, database,
 	)
 	h.ex.metrics.ExecutedStatementCounters.QueryCount.Inc()
 	h.ex.metrics.ExecutedStatementCounters.InsertCount.Inc()
 	return
-}
-
-// SendDirectTsInsert send directTsInsert
-func (h ConnectionHandler) SendDirectTsInsert(
-	ctx context.Context,
-	evalCtx *tree.EvalContext,
-	r CommandResult,
-	payloadNodeMap map[int]*sqlbase.PayloadForDistTSInsert,
-) {
-	h.ex.SendDirectTsInsert(ctx, evalCtx, r, payloadNodeMap)
 }
 
 // GetTsinsertdirect return TsInsertShortcircuit
@@ -1610,6 +1602,9 @@ func (ex *connExecutor) execCmd(ctx context.Context) error {
 		defer sp.Finish()
 
 		if portal.Stmt.Insertdirectstmt.InsertFast {
+			if !portal.Stmt.PrepareInsertDirect.EvalContext.StartSinglenode {
+				ex.planner.ExtendedEvalContext().StartDistributeMode = true
+			}
 			ex.SendDirectTsInsert(ctx, &portal.Stmt.PrepareInsertDirect.EvalContext, portal.Stmt.PrepareInsertDirect.stmtRes, portal.Stmt.PrepareInsertDirect.payloadNodeMap)
 			err = portal.Stmt.Insertdirectstmt.ErrorInfo
 			stmtRes.IncrementRowsAffected(int(portal.Stmt.Insertdirectstmt.RowsAffected))

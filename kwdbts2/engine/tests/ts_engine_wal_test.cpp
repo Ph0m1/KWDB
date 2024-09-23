@@ -21,7 +21,7 @@ const string TestBigTableInstance::kw_home_ = kDbPath;  // NOLINT big table dir
 const string TestBigTableInstance::db_name_ = "tsdb";  // NOLINT database name
 const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 
-RangeGroup kTestRange{101, 0};
+RangeGroup kTestRange{default_entitygroup_id_in_dist_v2, 0};
 
 class TestEngineWAL : public TestBigTableInstance {
  public:
@@ -600,7 +600,9 @@ TEST_F(TestEngineWAL, updateTag) {
   std::vector<EntityResultIndex> entity_id_list;
   std::vector<k_uint32> scan_tags = {1, 2};
   TagIterator *iter;
-  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags, &iter, 1), KStatus::SUCCESS);
+  vector<uint32_t> hps;
+  make_hashpoint(&hps);
+  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags, hps, &iter, 1), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_tags.size()};
   k_uint32 fetch_total_count = 0;
@@ -778,7 +780,7 @@ TEST_F(TestEngineWAL, ShiftWalLevel) {
   roachpb::CreateTsTable meta2;
   KTableKey cur_table_id2 = 12345;
   ConstructRoachpbTable(&meta2, "testTable", cur_table_id2);
-  RangeGroup test_range2{201, 0};
+  RangeGroup test_range2{default_entitygroup_id_in_dist_v2, 0};
   std::vector<RangeGroup> ranges2{test_range2};
 
   s = ts_engine_->CreateTsTable(ctx_, cur_table_id2, &meta2, ranges2);

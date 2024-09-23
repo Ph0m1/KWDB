@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"strings"
 
-	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
@@ -43,7 +42,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil/unimplemented"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
-	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/errors"
 )
@@ -160,12 +158,12 @@ func (n *dropTableNode) startExec(params runParams) error {
 			continue
 		}
 		// drop time-series table
-		switch toDel.desc.TableType {
-		case tree.InstanceTable:
-			return params.p.dropInstanceTable(ctx, toDel.tn.Catalog(), toDel.tn.Table(), toDel.desc)
-		case tree.TemplateTable, tree.TimeseriesTable:
-			return params.p.dropTsTable(ctx, toDel.tn.Catalog(), toDel.desc)
-		}
+		//switch toDel.desc.TableType {
+		//case tree.InstanceTable:
+		//	return params.p.dropInstanceTable(ctx, toDel.tn.Catalog(), toDel.tn.Table(), toDel.desc)
+		//case tree.TemplateTable, tree.TimeseriesTable:
+		//	return params.p.dropTsTable(ctx, toDel.tn.Catalog(), toDel.desc)
+		//}
 		droppedViews, err := params.p.dropTableImpl(ctx, droppedDesc, true /* queueJob */, tree.AsStringWithFQNames(n.n, params.Ann()))
 		if err != nil {
 			params.p.SetAuditTarget(0, droppedDesc.GetName(), droppedViews)
@@ -736,133 +734,133 @@ func (p *planner) removeTableComment(
 	return err
 }
 
-func (p *planner) dropTsTable(
-	ctx context.Context, dbName string, desc *sqlbase.MutableTableDescriptor,
-) error {
-	if _, err := api.GetAvailableNodeIDs(ctx); err != nil {
-		return err
-	}
-	log.Infof(ctx, "drop ts table %s 1st txn start, id: %d", desc.Name, desc.ID)
-	var err error
-	desc.TableDesc().State = sqlbase.TableDescriptor_DROP
-	if err = p.writeTableDesc(ctx, desc); err != nil {
-		return err
-	}
-	// Create a Job to perform the second stage of ts DDL.
-	syncDetail := jobspb.SyncMetaCacheDetails{
-		Type:       dropKwdbTsTable,
-		SNTable:    desc.TableDescriptor,
-		DropMEInfo: []sqlbase.DeleteMeMsg{{DatabaseName: dbName, TableName: desc.Name, TableID: uint32(desc.ID), TsVersion: uint32(desc.TsTable.GetTsVersion())}},
-	}
-	jobID, err := p.createTSSchemaChangeJob(ctx, syncDetail, p.stmt.SQL)
-	if err != nil {
-		return err
-	}
-
-	if err := MakeEventLogger(p.ExecCfg()).InsertEventRecord(
-		ctx,
-		p.txn,
-		EventLogDropTable,
-		int32(desc.ID),
-		int32(p.ExecCfg().NodeID.Get()),
-		struct {
-			TableName string
-			TableID   uint32
-			Statement string
-			User      string
-		}{
-			desc.Name,
-			uint32(desc.ID),
-			p.stmt.SQL,
-			p.User()},
-	); err != nil {
-		return err
-	}
-	// Actively commit a transaction, and read/write system table operations
-	// need to be performed before this.
-	if err = p.txn.Commit(ctx); err != nil {
-		return err
-	}
-
-	// After the transaction commits successfully, execute the Job and wait for it to complete.
-	if err = p.ExecCfg().JobRegistry.Run(
-		ctx,
-		p.extendedEvalCtx.InternalExecutor.(*InternalExecutor),
-		[]int64{jobID},
-	); err != nil {
-		return err
-	}
-	log.Infof(ctx, "drop ts table %s 1st txn finished, id: %d", desc.Name, desc.ID)
-	return nil
-}
+//func (p *planner) dropTsTable(
+//	ctx context.Context, dbName string, desc *sqlbase.MutableTableDescriptor,
+//) error {
+//	if _, err := api.GetAvailableNodeIDs(ctx); err != nil {
+//		return err
+//	}
+//	log.Infof(ctx, "drop ts table %s 1st txn start, id: %d", desc.Name, desc.ID)
+//	var err error
+//	desc.TableDesc().State = sqlbase.TableDescriptor_DROP
+//	if err = p.writeTableDesc(ctx, desc); err != nil {
+//		return err
+//	}
+//	// Create a Job to perform the second stage of ts DDL.
+//	syncDetail := jobspb.SyncMetaCacheDetails{
+//		Type:       dropKwdbTsTable,
+//		SNTable:    desc.TableDescriptor,
+//		DropMEInfo: []sqlbase.DeleteMeMsg{{DatabaseName: dbName, TableName: desc.Name, TableID: uint32(desc.ID), TsVersion: uint32(desc.TsTable.GetTsVersion())}},
+//	}
+//	jobID, err := p.createTSSchemaChangeJob(ctx, syncDetail, p.stmt.SQL)
+//	if err != nil {
+//		return err
+//	}
+//
+//	if err := MakeEventLogger(p.ExecCfg()).InsertEventRecord(
+//		ctx,
+//		p.txn,
+//		EventLogDropTable,
+//		int32(desc.ID),
+//		int32(p.ExecCfg().NodeID.Get()),
+//		struct {
+//			TableName string
+//			TableID   uint32
+//			Statement string
+//			User      string
+//		}{
+//			desc.Name,
+//			uint32(desc.ID),
+//			p.stmt.SQL,
+//			p.User()},
+//	); err != nil {
+//		return err
+//	}
+//	// Actively commit a transaction, and read/write system table operations
+//	// need to be performed before this.
+//	if err = p.txn.Commit(ctx); err != nil {
+//		return err
+//	}
+//
+//	// After the transaction commits successfully, execute the Job and wait for it to complete.
+//	if err = p.ExecCfg().JobRegistry.Run(
+//		ctx,
+//		p.extendedEvalCtx.InternalExecutor.(*InternalExecutor),
+//		[]int64{jobID},
+//	); err != nil {
+//		return err
+//	}
+//	log.Infof(ctx, "drop ts table %s 1st txn finished, id: %d", desc.Name, desc.ID)
+//	return nil
+//}
 
 // dropInstanceTable deletes instance table record from related system table.
-func (p *planner) dropInstanceTable(
-	ctx context.Context, dbName string, tableName string, temTable *sqlbase.MutableTableDescriptor,
-) error {
-	insTable, found, err := sqlbase.ResolveInstanceName(ctx, p.txn, dbName, tableName)
-	if err != nil {
-		return err
-	} else if !found {
-		return sqlbase.NewUndefinedTableError(tableName)
-	}
-
-	insTable.State = sqlbase.ChildDesc_DROP
-	if err := writeInstTableMeta(ctx, p.txn, []sqlbase.InstNameSpace{insTable}, true); err != nil {
-		return err
-	}
-
-	// Create a Job to perform the second stage of ts DDL.
-	syncDetail := jobspb.SyncMetaCacheDetails{
-		Type: dropKwdbInsTable,
-		DropMEInfo: []sqlbase.DeleteMeMsg{{
-			DatabaseName: insTable.DBName,
-			TableName:    insTable.InstName,
-			TableID:      uint32(insTable.InstTableID),
-			TemplateID:   uint32(insTable.TmplTableID),
-		}},
-	}
-	jobID, err := p.createTSSchemaChangeJob(ctx, syncDetail, p.stmt.SQL)
-	if err != nil {
-		return err
-	}
-
-	if err := MakeEventLogger(p.ExecCfg()).InsertEventRecord(
-		ctx,
-		p.txn,
-		EventLogDropTable,
-		int32(temTable.ID),
-		int32(p.ExecCfg().NodeID.Get()),
-		struct {
-			TableName  string
-			TableID    uint32
-			TemplateID uint32
-			Statement  string
-			User       string
-		}{
-			insTable.InstName,
-			uint32(insTable.InstTableID),
-			uint32(insTable.TmplTableID),
-			p.stmt.SQL,
-			p.User()},
-	); err != nil {
-		return err
-	}
-
-	// Actively commit a transaction, and read/write system table operations
-	// need to be performed before this.
-	if err := p.txn.Commit(ctx); err != nil {
-		return err
-	}
-
-	// After the transaction commits successfully, execute the Job and wait for it to complete.
-	if err = p.ExecCfg().JobRegistry.Run(
-		ctx,
-		p.ExecCfg().InternalExecutor,
-		[]int64{jobID},
-	); err != nil {
-		return err
-	}
-
-	return nil
-}
+//func (p *planner) dropInstanceTable(
+//	ctx context.Context, dbName string, tableName string, temTable *sqlbase.MutableTableDescriptor,
+//) error {
+//	insTable, found, err := sqlbase.ResolveInstanceName(ctx, p.txn, dbName, tableName)
+//	if err != nil {
+//		return err
+//	} else if !found {
+//		return sqlbase.NewUndefinedTableError(tableName)
+//	}
+//
+//	insTable.State = sqlbase.ChildDesc_DROP
+//	if err := writeInstTableMeta(ctx, p.txn, []sqlbase.InstNameSpace{insTable}, true); err != nil {
+//		return err
+//	}
+//
+//	// Create a Job to perform the second stage of ts DDL.
+//	syncDetail := jobspb.SyncMetaCacheDetails{
+//		Type: dropKwdbInsTable,
+//		DropMEInfo: []sqlbase.DeleteMeMsg{{
+//			DatabaseName: insTable.DBName,
+//			TableName:    insTable.InstName,
+//			TableID:      uint32(insTable.InstTableID),
+//			TemplateID:   uint32(insTable.TmplTableID),
+//		}},
+//	}
+//	jobID, err := p.createTSSchemaChangeJob(ctx, syncDetail, p.stmt.SQL)
+//	if err != nil {
+//		return err
+//	}
+//
+//	if err := MakeEventLogger(p.ExecCfg()).InsertEventRecord(
+//		ctx,
+//		p.txn,
+//		EventLogDropTable,
+//		int32(temTable.ID),
+//		int32(p.ExecCfg().NodeID.Get()),
+//		struct {
+//			TableName  string
+//			TableID    uint32
+//			TemplateID uint32
+//			Statement  string
+//			User       string
+//		}{
+//			insTable.InstName,
+//			uint32(insTable.InstTableID),
+//			uint32(insTable.TmplTableID),
+//			p.stmt.SQL,
+//			p.User()},
+//	); err != nil {
+//		return err
+//	}
+//
+//	// Actively commit a transaction, and read/write system table operations
+//	// need to be performed before this.
+//	if err := p.txn.Commit(ctx); err != nil {
+//		return err
+//	}
+//
+//	// After the transaction commits successfully, execute the Job and wait for it to complete.
+//	if err = p.ExecCfg().JobRegistry.Run(
+//		ctx,
+//		p.ExecCfg().InternalExecutor,
+//		[]int64{jobID},
+//	); err != nil {
+//		return err
+//	}
+//
+//	return nil
+//}

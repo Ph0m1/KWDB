@@ -304,7 +304,7 @@ class BtUtil {
 
   static int CreateDB(const std::string& db, size_t life_cycle, ErrorInfo& err_info) {
     string db_path = normalizePath(db);
-    string ws = worksapceToDatabase(db_path);
+    string ws = rmPathSeperator(db_path);
     if (ws == "")
       return err_info.setError(KWEINVALIDNAME, db);
     int err_code = IsDbNameValid(ws);
@@ -334,8 +334,8 @@ class BtUtil {
 
 
     MMapMetricsTable* root_bt = new MMapMetricsTable();
-    string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
-    if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
+    string bt_path = nameToEntityBigTablePath(std::to_string(cur_table_id));
+    if (root_bt->open(bt_path, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
         err_info.errcode == KWECORR) {
       root_bt->create(schema, 1, tbl_sub_path, kwdbts::EngineOptions::iot_interval, encoding, err_info, true);
     }
@@ -369,8 +369,8 @@ class BtUtil {
     }
 
     MMapMetricsTable* root_bt = new MMapMetricsTable();
-    string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
-    if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
+    string bt_path = nameToEntityBigTablePath(std::to_string(cur_table_id));
+    if (root_bt->open(bt_path, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
         err_info.errcode == KWECORR) {
       root_bt->create(schema, 1, tbl_sub_path, 86400, encoding, err_info, true);
     }
@@ -404,8 +404,8 @@ class BtUtil {
     }
 
     MMapMetricsTable* root_bt = new MMapMetricsTable();
-    string bt_url = nameToEntityBigTableURL(std::to_string(cur_table_id));
-    if (root_bt->open(bt_url, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
+    string bt_path = nameToEntityBigTablePath(std::to_string(cur_table_id));
+    if (root_bt->open(bt_path, db_path, tbl_sub_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
         err_info.errcode == KWECORR) {
       root_bt->create(schema, 1, tbl_sub_path, kwdbts::EngineOptions::iot_interval, encoding, err_info, true);
     }
@@ -472,8 +472,8 @@ class TestBigTableInstance : public ::testing::Test {
       uint32_t payload_len = 0;
       std::vector<BlockSpan> cur_alloc_spans;
       std::vector<MetricRowID> del_rows;
-      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfo(), bt->getActualCols(), insert_num, payload_len, ts, false, value);
-      kwdbts::Payload pd(bt->getSchemaInfo(), bt->getActualCols(), {data, payload_len});
+      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), insert_num, payload_len, ts, false, value);
+      kwdbts::Payload pd(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), {data, payload_len});
       pd.dedup_rule_ = dedup_rule;
       bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, dedup_result);
       if (err_info.errcode >= 0) {
@@ -496,8 +496,8 @@ class TestBigTableInstance : public ::testing::Test {
       uint32_t payload_len = 0;
       std::vector<BlockSpan> cur_alloc_spans;
       std::vector<MetricRowID> del_rows;
-      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfo(), bt->getActualCols(), insert_num, payload_len, ts, true);
-      kwdbts::Payload pd(bt->getSchemaInfo(), bt->getActualCols(), {data, payload_len});
+      char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), insert_num, payload_len, ts, true);
+      kwdbts::Payload pd(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), {data, payload_len});
       pd.dedup_rule_ = dedup_rule;
       bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, dedup_result);
       if (err_info.errcode >= 0) {

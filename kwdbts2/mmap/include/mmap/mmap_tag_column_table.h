@@ -12,7 +12,7 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "big_table.h"
 #include "mmap_object.h"
 #include "mmap_hash_index.h"
@@ -41,6 +41,10 @@ struct TagInfo {
   uint32_t  m_offset;    // offset
   uint32_t  m_size;      // data size
   TagType   m_tag_type;  // tag type
+  bool      isEqual(const TagInfo& other) const { return (m_id == other.m_id) && 
+                                                         (m_data_type == other.m_data_type) &&
+                                                         (m_length == other.m_length); 
+                                                }
 };
 
 struct TagColumnMetaData {
@@ -61,7 +65,7 @@ class TagColumn : public MMapFile {
  protected:
   TagInfo m_attr_;
   int32_t      m_idx_;
-  MMapStringFile* m_str_file_;
+  MMapStringColumn* m_str_file_;
   bool          m_is_primary_tag_;
   uint32_t      m_store_size_;
   uint32_t      m_store_offset_;  // Only the primary tag column needs to be used
@@ -102,8 +106,8 @@ class TagColumn : public MMapFile {
 
   inline char *getVarValueAddr(size_t r) {
     size_t offset = *reinterpret_cast<uint64_t *>((intptr_t)startAddr() + r * (m_attr_.m_size + k_per_null_bitmap_size) + k_per_null_bitmap_size);
-    if (UNLIKELY(offset < MMapStringFile::startLoc())) {
-      offset = MMapStringFile::startLoc();
+    if (UNLIKELY(offset < MMapStringColumn::startLoc())) {
+      offset = MMapStringColumn::startLoc();
     }
     m_str_file_->rdLock();
     char* rec_ptr = m_str_file_->getStringAddr(offset);
@@ -116,6 +120,14 @@ class TagColumn : public MMapFile {
     char* rec_ptr = m_str_file_->getStringAddr(offset);
     m_str_file_->unLock();
     return rec_ptr;
+  }
+
+  uint16_t getColumnVarValueLenByOffset(size_t offset) {
+    m_str_file_->rdLock();
+    char* rec_ptr = m_str_file_->getStringAddr(offset);
+    uint16_t var_len = *reinterpret_cast<uint16_t*>(rec_ptr);
+    m_str_file_->unLock();
+    return var_len;
   }
 
   inline char *rowAddrHasNullBitmap(size_t row) const  {
@@ -223,6 +235,10 @@ using TagTableRWLatch = KRWLatch;
 using TagTableCntMutex = KLatch;
 using TagTableCondVal  = KCond_t;
 
+struct hashPointStorage {
+  uint32_t hash_point;
+};
+
 class MMapTagColumnTable: public TSObject {
  public:
   TagTableCntMutex*   m_ref_cnt_mtx_;
@@ -239,15 +255,16 @@ class MMapTagColumnTable: public TSObject {
   std::vector<TagColumn*>  m_cols_;
   TagColumn*               m_bitmap_file_{nullptr};
   TagColumn*               m_meta_file_{nullptr};
+  TagColumn*               m_hps_file_{nullptr};
   MMapHashIndex*           m_index_{nullptr};
   TagTableMutex*  m_tag_table_mutex_;
   TagTableRWLatch*  m_tag_table_rw_lock_;
   bool enableWal_;
 
-  int open_(const string &url, const std::string &db_path, const string &tbl_sub_path, int flags,
-    ErrorInfo &err_info);
+  int open_(const string &table_path, const std::string &db_path, const string &tbl_sub_path, int flags,
+            ErrorInfo &err_info);
 
-  int create_mmap_file(const string &url, const std::string &db_path,
+  int create_mmap_file(const string &path, const std::string &db_path,
                        const string &tbl_sub_path, int flags, ErrorInfo &err_info);
 
   int init(const vector<TagInfo> &schema, ErrorInfo &err_info);
@@ -264,6 +281,8 @@ class MMapTagColumnTable: public TSObject {
 
   int initBitMapColumn(ErrorInfo &err_info);
 
+  int initHashPointColumn(ErrorInfo& err_info);
+
   int initIndex(ErrorInfo &err_info);
 
   int extend(size_t new_record_count, ErrorInfo &err_info);
@@ -272,7 +291,8 @@ class MMapTagColumnTable: public TSObject {
 
   inline char * header_(size_t n) const
   { return reinterpret_cast<char *>((intptr_t)m_bitmap_file_->startAddr() + n); }
-
+  inline char* hashpoint_pos_(size_t n) const
+  { return reinterpret_cast<char *>((intptr_t)m_hps_file_->startAddr() + n*sizeof(hashPointStorage));}
   // bitmap + primarytags + tags
   int push_back(size_t r, const char *data);
 
@@ -284,6 +304,10 @@ class MMapTagColumnTable: public TSObject {
     memcpy(rec_ptr + sizeof(entity_id), &group_id, sizeof(uint32_t));
   }
 
+  inline void setHashPoint(size_t row, hashPointStorage hps) {
+    char * rec_ptr = hashpoint_pos_(row);
+    memcpy(rec_ptr, &hps, sizeof(hps));
+  }
   inline void setNull(size_t row, size_t col) {
     if (m_cols_[col]->isPrimaryTag()) {
       return;
@@ -375,15 +399,15 @@ class MMapTagColumnTable: public TSObject {
 
   int create(const vector<TagInfo> &schema, int32_t entity_group_id, ErrorInfo &err_info);
 
-  int open(const string &url, const std::string &db_path, const string &tbl_sub_path,
+  int open(const string &table_path, const std::string &db_path, const string &tbl_sub_path,
            int flags, ErrorInfo &err_info) override;
 
   int remove() override;
 
-  int insert(uint32_t entity_id, uint32_t subgroup_id, const char *rec);
+  int insert(uint32_t entity_id, uint32_t subgroup_id, uint32_t hashpoint, const char *rec);
 
   int InsertTagRecord(kwdbts::Payload &payload, int32_t sub_group_id, int32_t entity_id) {
-    return insert(entity_id, sub_group_id, payload.GetTagAddr());
+    return insert(entity_id, sub_group_id, payload.getHashPoint(), payload.GetTagAddr());
   }
 
   int UpdateTagRecord(kwdbts::Payload &payload, int32_t sub_group_id, int32_t entity_id, ErrorInfo& err_info);
@@ -407,9 +431,44 @@ class MMapTagColumnTable: public TSObject {
 
   int getColumnsByRownum(size_t row, const std::vector<uint32_t> &scan_tags, kwdbts::ResultSet* res);
 
+  inline int GetColumnsByRownumLocked(size_t row, const std::vector<uint32_t> &scan_tags, kwdbts::ResultSet* res) {
+    startRead();
+    int ret = getColumnsByRownum(row, scan_tags, res);
+    stopRead();
+    return ret;
+  }
+
+  inline int GetColumnsByRownumLocked(size_t row, const std::vector<TagInfo> &scan_tags, kwdbts::ResultSet* res) {
+    startRead();
+    std::vector<uint32_t> scan_tag_ids;
+    if (scan_tags.size() != m_cols_.size()) {
+      LOG_ERROR("scan tags size [%lu] is not equal tag table schema size[%lu].",
+               scan_tags.size(), m_cols_.size());
+      stopRead();
+      return -1;
+    }
+    for (int i = 0; i < scan_tags.size(); ++i) {
+      if (!scan_tags[i].isEqual(m_cols_[i]->attributeInfo())) {
+        LOG_ERROR("scan_tags[%d] TagInfo is not equal tag_table_schema[%d] TagInfo.", i, i);
+        stopRead();
+        return -1;
+      }
+      scan_tag_ids.push_back(i);
+    }
+    int ret = getColumnsByRownum(row, scan_tag_ids, res);
+    stopRead();
+    return ret;
+  }
+
   void setColumnValue(size_t row, size_t col, char *data);
 
   int getEntityIdGroupId(const char* primary_tag_val, int len, uint32_t& entity_id, uint32_t& group_id);
+
+  void getHashpointByRowNum(size_t row, uint32_t *hash_point);
+
+  void getHashedEntityIdByRownum(size_t row, uint32_t hps, std::vector<kwdbts::EntityResultIndex>* entityIdList);
+
+  bool hasPrimaryKey(const char* primary_tag_val, int len);
 
   const std::vector<TagColumn*>& getSchemaInfo() {return m_cols_;}
 
@@ -433,6 +492,10 @@ class MMapTagColumnTable: public TSObject {
 
   void *getColumnVarValueAddrByOffset(size_t column, size_t offset) {
     return m_cols_[column]->getVarValueAddrByOffset(offset);
+  }
+
+  uint16_t getColumnVarValueLenByOffset(size_t column, size_t offset) {
+    return m_cols_[column]->getColumnVarValueLenByOffset(offset);
   }
 
   inline bool isVarTag(size_t column) {
@@ -468,7 +531,7 @@ class MMapTagColumnTable: public TSObject {
     }
     return (columnAddr(row, column));
   }
-  
+
   inline size_t primaryTagSize() {return m_meta_data_->m_primary_tag_size;}
 
   int GetEntityIdList(const std::vector<void*>& primary_tags, const std::vector<uint32_t> &scan_tags,
@@ -526,7 +589,9 @@ class MMapTagColumnTable: public TSObject {
   inline bool IsValidVersion(uint32_t request_table_version) {
     return (m_meta_data_->m_ts_version == request_table_version);
   }
-
+  inline uint32_t GetTagLatestVersion() {
+    return m_meta_data_->m_ts_version;
+  }
   string name() const override { return m_name_; }
   const string& sandbox() const { return m_db_name_; }
 
@@ -542,11 +607,11 @@ class MMapTagColumnTable: public TSObject {
   void sync(int flags) override;
 
   TagTuplePack GenTagPack(const char* primarytag, int len);
-  int CreateTableForUndo(const std::string &url, std::string &tbl_sub_path,
-			 std::vector<TagInfo>& attr_infos,
+  int CreateTableForUndo(const std::string &path, std::string &tbl_sub_path,
+                         std::vector<TagInfo>& attr_infos,
                          int encoding);
-  int CreateTableForRedo(const std::string &url, std::string &tbl_sub_path,
-			 std::vector<TagInfo>& attr_infos,
+  int CreateTableForRedo(const std::string &path, std::string &tbl_sub_path,
+                         std::vector<TagInfo>& attr_infos,
                          int encoding);
   int InsertForUndo(uint32_t group_id, uint32_t entity_id,
 		    const TSSlice& primary_tag);

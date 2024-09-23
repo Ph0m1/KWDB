@@ -32,12 +32,17 @@
 #include "st_wal_internal_log_structure.h"
 #include "lt_rw_latch.h"
 #include "ts_snapshot.h"
+#include "ts_table_snapshot.h"
 
 namespace kwdbts {
 
 class TsEntityGroup;
 class TsTableSnapshot;
 class TsIterator;
+
+// in distributed Verison2, every ts table has just one entitygroup
+const uint64_t default_entitygroup_id_in_dist_v2 = 1;
+
 
 class TsTable {
  public:
@@ -64,15 +69,25 @@ class TsTable {
    *
    * @return std::vector<AttributeInfo>
    */
-  virtual KStatus GetDataSchema(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema);
+  KStatus GetDataSchemaIncludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema);
+
+  /**
+   * @brief Query Table Column Definition
+   *
+   * @return std::vector<AttributeInfo>
+   */
+  KStatus GetDataSchemaExcludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema);
 
   /**
    * @brief Query Table tags Definition
    *
    * @return std::vector<AttributeInfo>
    */
-  virtual KStatus GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagColumn*>* tag_schema);
+  KStatus GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagColumn*>* tag_schema);
 
+  // convert schema info to protobuf
+  KStatus GenerateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,
+                             std::vector<TagInfo>& tag_schema);
   /**
    * @brief get table id
    *
@@ -129,6 +144,17 @@ class TsTable {
    */
   virtual KStatus
   GetEntityGroup(kwdbContext_p ctx, uint64_t range_group_id, std::shared_ptr<TsEntityGroup>* entity_group);
+  virtual KStatus GetEntityGroupByHash(kwdbContext_p ctx, uint16_t hashpoint, uint64_t *range_group_id,
+                       std::shared_ptr<TsEntityGroup>* entity_group);
+  /**
+   * @brief get entitygroup by primary key of entity ,which is parsed from payload
+   * @param[in]   primary_key  parsed from payload.
+   * @param[out]  entity_group
+   *
+   * @return KStatus
+   */
+  KStatus GetEntityGroupByPrimaryKey(kwdbContext_p ctx, const TSSlice& primary_key,
+                                    std::shared_ptr<TsEntityGroup>* entity_group);
 
   /**
    * @brief put data to ts table
@@ -143,6 +169,8 @@ class TsTable {
   virtual KStatus PutData(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
                           uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule);
 
+  KStatus PutDataWithoutWAL(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
+                            uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule);
   /**
   * @brief Flush caches the WAL of all EntityGroups in the current timeline to a disk file
   *
@@ -198,6 +226,71 @@ class TsTable {
    * @return KStatus
    */
   virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts);
+
+
+  std::string GetStoreDirectory() {
+    return db_path_ + tbl_sub_path_;
+  }
+
+  /**
+   * @brief get entitygroup by primary key of entity.
+   *        in function, we will scan all entitygroups, if not found ,we will return default entitygroup.
+   * @param[in]  primary_key   Entity primary key
+   * @param[out] entity_grp_id which entitygroup the entity belong to.
+   *
+   * @return KStatus
+   */
+  KStatus GetEntityGrpByPriKey(kwdbContext_p ctx, const TSSlice& primary_key, uint64_t* entity_grp_id);
+
+  /**
+   * @brief get all entity info of hash span.
+   *        in function, we will scan all entitygroups, find matched entities.
+   * @param[in] begin_hash,end_hash Entity primary tag hashID
+   * @param[out] entity_store
+   *
+   * @return KStatus
+   */
+  KStatus GetEntityIndex(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                        std::vector<EntityResultIndex> &entity_store);
+
+  KStatus GetEntityIndexWithRowNum(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                  std::vector<std::pair<int, EntityResultIndex>> &entity_tag);
+
+  KStatus GetAvgTableRowSize(kwdbContext_p ctx, uint64_t* row_size);
+
+  virtual KStatus GetDataVolume(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                const KwTsSpan& ts_span, uint64_t* volume);
+
+  virtual KStatus GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                const KwTsSpan& ts_span, timestamp64* half_ts);
+
+  /**
+   * @brief drop all data in range. if table is empty,we will drop table directory at same time.
+   * @param[in] ts_span   timestamp span
+   * @param[in] begin_hash,end_hash Entity primary tag hashID
+   *
+   * @return KStatus
+   */
+  KStatus DeleteTotalRange(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash, KwTsSpan ts_span, uint64_t mtr_id);
+
+  /**
+   * @brief row-based payload convert to col-based payload
+   * @param[in] payload_row  row-based payload struct.
+   * @param[out] payload    col-based payload
+   *
+   * @return KStatus
+   */
+  virtual KStatus ConvertRowTypePayload(kwdbContext_p ctx,  TSSlice payload_row, TSSlice* payload);
+
+  /**
+   * @brief Get range row count.
+   * @param[in] begin_hash,end_hash Entity primary tag hashID
+   * @param[in] ts_span   timestamp span
+   *
+   * @return KStatus
+   */
+  KStatus GetRangeRowCount(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                            KwTsSpan ts_span, uint64_t* count);
 
   /**
    * @brief Create a temporary snapshot of range_group in the local temporary directory, usually used for data migration.
@@ -362,8 +455,13 @@ class TsTable {
    */
   virtual KStatus GetTagIterator(kwdbContext_p ctx,
                                  std::vector<uint32_t> scan_tags,
+                                 const vector<uint32_t> hps,
                                  TagIterator** iter, k_uint32 table_version);
 
+  KStatus GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t> scan_tags,
+                                TagIterator** iter, k_uint32 table_version) {
+    return GetTagIterator(ctx, scan_tags, {}, iter, table_version);
+  }
   /**
    * @brief create MetaIterator
    * @param[out] MetaIterator**
@@ -378,6 +476,8 @@ class TsTable {
 
   virtual KStatus AlterTableCol(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
                                 uint32_t cur_version, uint32_t new_version, string& msg);
+
+  KStatus AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* meta, MMapMetricsTable ** version_schema);
 
   virtual KStatus UndoAlterTable(kwdbContext_p ctx, LogEntry* log);
 
@@ -416,6 +516,10 @@ class TsTable {
     */
   virtual KStatus TSxClean(kwdbContext_p ctx);
 
+  inline MMapRootTableManager* GetMetricsTableMgr() {
+    return entity_bt_manager_;
+  }
+
  protected:
   string db_path_;
   KTableKey table_id_;
@@ -449,7 +553,8 @@ class TsTable {
   std::unordered_map<uint64_t, std::shared_ptr<TsTableSnapshot>>  snapshot_manage_pool_;
   std::unordered_map<uint64_t, size_t>  snapshot_get_size_pool_;
 
-  static uint32_t GetConsistentHashId(char* data, size_t length);
+  // TODO(lfl): 此hash算法和GO层一致，后续修改为此算法
+  static uint32_t GetConsistentHashId(const char* data, size_t length);
 
   static MMapRootTableManager* CreateMMapRootTableManager(string& db_path, string& tbl_sub_path, KTableKey table_id,
                                                           vector<AttributeInfo>& schema, uint32_t table_version,
@@ -572,6 +677,18 @@ class TsEntityGroup {
   virtual KStatus PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id, DedupResult* dedup_result,
                           DedupRule dedup_rule = DedupRule::OVERRIDE);
 
+  KStatus PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
+                            DedupResult* dedup_result, DedupRule dedup_rule);
+
+  /**
+   * get all partition times. not partition object.
+   *
+   * @param[out] subgrp_partitions
+   * @return Return the status code of the operation, indicating its success or failure.
+   */
+  virtual KStatus GetAllPartitions(kwdbContext_p ctx, std::unordered_map<SubGroupID,
+                                  std::vector<timestamp64>>* subgrp_partitions);
+
   /**
    * @brief Mark the deletion of temporal data within the specified time range for range entities.
    * @param[in] table_id   ID
@@ -681,7 +798,8 @@ class TsEntityGroup {
    * @param[out] TagIterator**
    */
   virtual KStatus GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t>& scan_tags, EntityGroupTagIterator** iter);
-
+  virtual KStatus GetTagIterator(kwdbContext_p ctx, std::vector<k_uint32>& scan_tags, EntityGroupTagIterator** iter,
+                          const std::vector<uint32_t>& hps);
   /**
    * @brief create EntityGroupMetaIterator
    * @param[out] EntityGroupMetaIterator**
@@ -782,6 +900,10 @@ class TsEntityGroup {
     optimistic_read_lsn_.store(optimistic_read_lsn);
   }
 
+  MMapRootTableManager* GetRootTableManager() {
+    return root_bt_manager_;
+  }
+
   MMapRootTableManager*& root_bt_manager_;
 
   void RdDropLock() {
@@ -873,6 +995,8 @@ class TsEntityGroup {
                        uint32_t entity_id, bool all_success);
 
   virtual KStatus putTagData(kwdbContext_p ctx, int32_t groupid, int32_t entity_id, Payload& payload);
+  virtual KStatus putTagDataHashed(kwdbContext_p ctx, int32_t groupid, int32_t entity_id,
+                                  uint32_t hashpoint, Payload& payload);
 
   /**
    * AllocateEntityGroupID assigns an entity group ID to an entity group
@@ -885,7 +1009,8 @@ class TsEntityGroup {
    * @param group_id Pointer to the assigned EntityGroupID, which will be returned here upon successful execution of the function.
    * @return The status of function execution, successful return is KStatus::SUCCESS, and failure return is KStatus::FAIL.
    */
-  KStatus allocateEntityGroupId(kwdbContext_p ctx, Payload& payload, uint32_t* entity_id, uint32_t* group_id);
+  KStatus allocateEntityGroupId(kwdbContext_p ctx, Payload& payload, uint32_t* entity_id,
+                                uint32_t* group_id, bool* new_tag);
 
   KStatus getTagTable(ErrorInfo& err_info);
 
@@ -898,4 +1023,5 @@ class TsEntityGroup {
   using TsEntityGroupsRWLatch = KRWLatch;
   TsEntityGroupsRWLatch* drop_mutex_;
 };
+
 }  // namespace kwdbts

@@ -33,12 +33,9 @@ import (
 	"strconv"
 	"time"
 
-	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server/serverpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -125,10 +122,6 @@ var statusNodesColumnHeadersForDecommission = []string{
 	"is_draining",
 }
 
-var statusNodesColumnHeadersForDistTSStatus = []string{
-	"status",
-}
-
 var statusNodeCmd = &cobra.Command{
 	Use:   "status [<node id>]",
 	Short: "shows the status of a node or all nodes",
@@ -213,11 +206,6 @@ SELECT node_id AS id,
        draining AS is_draining
 FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id)`
 
-	const distTSStatusQuery = `
-SELECT node_id AS id,
-       status AS status
-FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id)`
-
 	conn, err := makeSQLClient("kwbase node status", useSystemDb)
 	if err != nil {
 		return nil, nil, err
@@ -235,7 +223,6 @@ FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (n
 	if nodeCtx.statusShowAll || nodeCtx.statusShowDecommission {
 		queriesToJoin = append(queriesToJoin, decommissionQuery)
 	}
-	queriesToJoin = append(queriesToJoin, distTSStatusQuery)
 
 	if cliCtx.cmdTimeout != 0 {
 		if err := conn.Exec(fmt.Sprintf("SET statement_timeout=%d", cliCtx.cmdTimeout), nil); err != nil {
@@ -280,7 +267,6 @@ func getStatusNodeHeaders() []string {
 	if nodeCtx.statusShowAll || nodeCtx.statusShowDecommission {
 		headers = append(headers, statusNodesColumnHeadersForDecommission...)
 	}
-	headers = append(headers, statusNodesColumnHeadersForDistTSStatus...)
 	return headers
 }
 
@@ -295,7 +281,6 @@ func getStatusNodeAlignment() string {
 	if nodeCtx.statusShowAll || nodeCtx.statusShowDecommission {
 		align += decommissionResponseAlignment()
 	}
-	align += "r"
 	return align
 }
 
@@ -361,40 +346,6 @@ func expectNodesDecommissioned(
 	if err != nil {
 		return err
 	}
-
-	if !expDecommissioned {
-		if len(nodeIDs) > 1 {
-			return errors.New("decommission multiple nodes is not support now")
-		}
-
-		// restrict the simultaneous decommission of multiple nodes
-		count := 0
-		liveNum := 0
-		for nodeID, nodeResp := range resp.LivenessByNodeID {
-			if nodeResp == storagepb.NodeLivenessStatus_DECOMMISSIONING && resp.StatusByNodeID[nodeID] != kvserver.Decommissioned {
-				count++
-			}
-			if nodeResp == storagepb.NodeLivenessStatus_LIVE {
-				liveNum++
-			}
-		}
-		replicaNum := int(settings.DefaultEntityRangeReplicaNum.Get(&serverCfg.Settings.SV))
-		if liveNum <= replicaNum {
-			return errors.Errorf("decommission not supported, the cluster must have at least %v nodes", replicaNum)
-		}
-
-		if count >= 1 {
-			return errors.New("after the decommissioning is complete, quit node and try again")
-		}
-	}
-
-	connNodeStatus, err := s.Node(ctx, &serverpb.NodeRequest{})
-	if err != nil {
-		return err
-	}
-	if connNodeStatus.Desc.NodeID != nodeIDs[0] {
-		return errors.New("the address spectfied by --host must be the same node as the nodeID")
-	}
 	for _, nodeID := range nodeIDs {
 		liveness, ok := resp.LivenessByNodeID[nodeID]
 		if !ok {
@@ -444,21 +395,6 @@ func runDecommissionNodeImpl(
 		MaxBackoff:     20 * time.Second,
 	}
 
-	// decommission can only execute when node is healthy or dead
-	livenessResp, err := c.Liveness(ctx, &serverpb.LivenessRequest{})
-	if err != nil {
-		return err
-	}
-
-	if livenessResp == nil || livenessResp.Livenesses == nil {
-		return errors.New("get node liveness failed after retrying")
-	}
-	for _, liveness := range livenessResp.Livenesses {
-		if liveness.Status != kvserver.Decommissioned && liveness.Status != kvserver.Dead && liveness.Status != kvserver.Healthy {
-			return errors.Errorf("cluster have node is %s, cannot decommission the node", sql.StatusToString(liveness.Status))
-		}
-	}
-
 	prevResponse := serverpb.DecommissionStatusResponse{}
 	for r := retry.StartWithCtx(ctx, opts); r.Next(); {
 		req := &serverpb.DecommissionRequest{
@@ -484,7 +420,7 @@ func runDecommissionNodeImpl(
 		allDecommissioning := true
 		for _, status := range resp.Status {
 			replicaCount += status.ReplicaCount
-			allDecommissioning = allDecommissioning && status.Decommissioning && status.TsMigrating
+			allDecommissioning = allDecommissioning && status.Decommissioning
 		}
 		if replicaCount == 0 && allDecommissioning {
 			fmt.Fprintln(os.Stdout, "\nNo more data reported on target nodes. "+
@@ -718,19 +654,10 @@ func expectNodesUpgradable(
 			fmt.Printf("Upgrade ternimated. Hint: cannot find status of node %d\n", nodeID)
 			return errors.Errorf("Upgrade ternimated. Hint: cannot find status of node %d", nodeID)
 		}
-		tsStatus, _ := resp.StatusByNodeID[nodeID]
 		if expHealthy && liveness != storagepb.NodeLivenessStatus_LIVE && liveness != storagepb.NodeLivenessStatus_DEAD &&
-			tsStatus != kvserver.Decommissioned {
+			liveness != storagepb.NodeLivenessStatus_DECOMMISSIONED {
 			fmt.Printf("Upgrade ternimated. Hint: node %d is not eligible to upgrade, check the node status and upgrader later.\n", nodeID)
 			return errors.Errorf("Upgrade ternimated. Hint: node %d is not eligible to upgrade, check the node status and upgrader later.", nodeID)
-		}
-	}
-
-	for nodeID, nodeResp := range resp.LivenessByNodeID {
-		if nodeResp != storagepb.NodeLivenessStatus_LIVE && nodeResp != storagepb.NodeLivenessStatus_DEAD &&
-			resp.StatusByNodeID[nodeID] != kvserver.Decommissioned {
-			fmt.Printf("Upgrade ternimated. Hint: cluster is not eligible to upgrade, please check status of all nodes and upgrade later.\n")
-			return errors.Errorf("Upgrade ternimated. Hint: cluster is not eligible to upgrade, please check status of all nodes and upgrade later.")
 		}
 	}
 

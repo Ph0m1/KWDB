@@ -20,6 +20,7 @@ enum TagTableFileType {
     TTFT_INDEX = 3,
     TTFT_STR = 4,
     TTFT_PRIMARYTAG = 5,
+    TTFT_HASHPOINT = 6,
 };
 
 void CleanTagFiles(const string dirPath, uint64_t tableId, uint64_t cutoffLsn);

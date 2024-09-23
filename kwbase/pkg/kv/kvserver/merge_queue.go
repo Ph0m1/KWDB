@@ -36,6 +36,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/humanizeutil"
@@ -150,9 +151,6 @@ func (mq *mergeQueue) shouldQueue(
 	}
 
 	desc := repl.Desc()
-	if desc.GetRangeType() == roachpb.TS_RANGE {
-		return false, 0
-	}
 
 	if desc.EndKey.Equal(roachpb.RKeyMax) {
 		// The last range has no right-hand neighbor to merge with.
@@ -164,6 +162,43 @@ func (mq *mergeQueue) shouldQueue(
 		// There is thus no possible right-hand neighbor that it could be merged
 		// with.
 		return false, 0
+	}
+
+	if desc.GetRangeType() == roachpb.TS_RANGE {
+		lhsDesc := desc
+		rhsDesc, _, _, err := mq.requestRangeStats(ctx, lhsDesc.EndKey.AsRawKey())
+		if err != nil {
+			return false, 0
+		}
+		if rhsDesc != nil && lhsDesc != nil && rhsDesc.GetRangeType() != lhsDesc.GetRangeType() {
+			// skipping merge: default range merge ts range.
+			return false, 0
+		}
+		if desc.GetRangeType() == roachpb.TS_RANGE && rhsDesc.GetRangeType() == roachpb.TS_RANGE {
+			// ts merge
+			// if is active range
+			startTableID, startHashPoint, _, err := sqlbase.DecodeTsRangeKey(lhsDesc.StartKey, true)
+			if err != nil {
+				return false, 0
+			}
+			endTableID, endHashPoint, endTimestamp, err := sqlbase.DecodeTsRangeKey(rhsDesc.StartKey, true)
+			if err != nil {
+				return false, 0
+			}
+			if startTableID != endTableID || startHashPoint != endHashPoint {
+				// Time series ranges can only be merged by timestamp
+				return false, 0
+			}
+			if endTimestamp == math.MaxInt64 {
+				// active range
+				return false, 0
+			}
+		}
+
+		zone := repl.mu.zone
+		if desc.LastSplitTime.Add(zone.TimeSeriesMergeDuration.Nanoseconds(), 0).Less(now) {
+			return true, 1
+		}
 	}
 
 	sizeRatio := float64(repl.GetMVCCStats().Total()) / float64(repl.GetMinBytes())
@@ -218,7 +253,7 @@ func (mq *mergeQueue) process(
 
 	lhsStats := lhsRepl.GetMVCCStats()
 	minBytes := lhsRepl.GetMinBytes()
-	if lhsStats.Total() >= minBytes {
+	if lhsStats.Total() >= minBytes && lhsRepl.Desc().GetRangeType() == roachpb.DEFAULT_RANGE {
 		log.VEventf(ctx, 2, "skipping merge: LHS meets minimum size threshold %d with %d bytes",
 			minBytes, lhsStats.Total())
 		return nil
@@ -234,7 +269,7 @@ func (mq *mergeQueue) process(
 		// skipping merge: default range merge ts range.
 		return nil
 	}
-	if rhsStats.Total() >= minBytes {
+	if rhsStats.Total() >= minBytes && lhsRepl.Desc().GetRangeType() == roachpb.DEFAULT_RANGE {
 		log.VEventf(ctx, 2, "skipping merge: RHS meets minimum size threshold %d with %d bytes",
 			minBytes, lhsStats.Total())
 		return nil
@@ -247,6 +282,40 @@ func (mq *mergeQueue) process(
 		// TODO(jeffreyxiao): Consider returning a purgatory error to avoid
 		// repeatedly processing ranges that cannot be merged.
 		return nil
+	}
+	// Active range: a time series range with the same hashpoint and an end timestamp of IntMax
+	// Ordinary range: a left range split from an active range, whose end timestamp is not IntMax
+	// Historical range: an ordinary range is converted to a historical range after ts_merge.days.
+	//                   Historical ranges can be merged with each other.
+	// For time series ranges, only historical ranges with the same hashPoint can be merged with each other.
+	if lhsRepl.Desc().GetRangeType() == roachpb.TS_RANGE && rhsDesc.GetRangeType() == roachpb.TS_RANGE {
+		// ts merge
+		// if is active range
+		startTableID, startHashPoint, _, err := sqlbase.DecodeTsRangeKey(lhsDesc.StartKey, true)
+		if err != nil {
+			return err
+		}
+		endTableID, endHashPoint, _, err := sqlbase.DecodeTsRangeKey(rhsDesc.StartKey, true)
+		if err != nil {
+			return err
+		}
+		if startTableID != endTableID || startHashPoint != endHashPoint {
+			// Time series ranges can only be merged by timestamp
+			return nil
+		}
+		_, _, endTimestamp, err := sqlbase.DecodeTsRangeKey(rhsDesc.EndKey, false)
+		if err != nil {
+			return nil
+		}
+		if endTimestamp == math.MaxInt64 {
+			// active range
+			return nil
+		}
+		zone := lhsRepl.mu.zone
+		if !lhsDesc.LastSplitTime.Add(zone.TimeSeriesMergeDuration.Nanoseconds(), 0).Less(now) ||
+			!rhsDesc.LastSplitTime.Add(zone.TimeSeriesMergeDuration.Nanoseconds(), 0).Less(now) {
+			return nil
+		}
 	}
 
 	mergedDesc := &roachpb.RangeDescriptor{
@@ -266,7 +335,7 @@ func (mq *mergeQueue) process(
 	// in a situation where we keep merging ranges that would be split soon after
 	// by a small increase in load.
 	conservativeLoadBasedSplitThreshold := 0.5 * lhsRepl.SplitByLoadQPSThreshold()
-	if ok, _ := shouldSplitRange(mergedDesc, mergedStats, lhsRepl.GetMaxBytes(), sysCfg); ok || mergedQPS >= conservativeLoadBasedSplitThreshold {
+	if ok, _ := shouldSplitRange(mergedDesc, mergedStats, lhsRepl.GetMaxBytes(), sysCfg); (ok || mergedQPS >= conservativeLoadBasedSplitThreshold) && lhsDesc.GetRangeType() != roachpb.TS_RANGE {
 		log.VEventf(ctx, 2,
 			"skipping merge to avoid thrashing: merged range %s may split "+
 				"(estimated size, estimated QPS: %d, %v)",

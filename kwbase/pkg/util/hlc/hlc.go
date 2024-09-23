@@ -30,7 +30,6 @@ package hlc
 
 import (
 	"context"
-	"fmt"
 	//"runtime/debug"
 	"sync/atomic"
 	"time"
@@ -413,16 +412,10 @@ func (c *Clock) Update(rt Timestamp) {
 // returns an error in the event that the supplied remote timestamp exceeds
 // the wall clock time by more than the maximum clock offset.
 func (c *Clock) UpdateAndCheckMaxOffset(ctx context.Context, rt Timestamp) error {
-	var err error
 	physicalClock := c.getPhysicalClockAndCheck(ctx)
 
 	offset := time.Duration(rt.WallTime - physicalClock)
 	if c.maxOffset > 0 && offset > c.maxOffset {
-		//log.Infof(context.Background(), "xxxx debug stack: %s", debug.Stack())
-		err = fmt.Errorf("remote wall time is too far ahead (%s) to be trustworthy", offset)
-		log.VEventf(context.Background(), 3, "xxxx remote wall time is too far ahead (%s) to be trustworthy", err.Error())
-		// TODO: for later cluster mode to fix
-		//return err
 		return nil
 	}
 

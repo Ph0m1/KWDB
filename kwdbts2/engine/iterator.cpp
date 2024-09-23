@@ -14,6 +14,13 @@
 #include "iterator.h"
 #include "perf_stat.h"
 
+enum NextBlkStatus {
+  find_one = 1,
+  scan_over = 2,
+  error = 3
+};
+
+
 namespace kwdbts {
 
 Batch* CreateAggBatch(void* mem, std::shared_ptr<MMapSegmentTable> segment_table) {
@@ -77,11 +84,6 @@ TsIterator::TsIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t ent
 }
 
 TsIterator::~TsIterator() {
-  for (auto& bt : p_bts_) {
-    if (bt != nullptr) {
-      entity_group_->GetSubEntityGroupManager()->ReleasePartitionTable(bt);
-    }
-  }
   if (segment_iter_ != nullptr) {
     delete segment_iter_;
     segment_iter_ = nullptr;
@@ -90,25 +92,25 @@ TsIterator::~TsIterator() {
 }
 
 void TsIterator::fetchBlockItems(k_uint32 entity_id) {
-  p_bts_[cur_p_bts_idx_]->GetAllBlockItems(entity_id, block_item_queue_, is_reversed_);
+  cur_partiton_table_->GetAllBlockItems(entity_id, block_item_queue_);
 }
 
-KStatus TsIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) {
-  p_bts_ = std::move(p_bts);
+KStatus TsIterator::Init(bool is_reversed) {
   is_reversed_ = is_reversed;
-  if (!p_bts_.empty() && is_reversed_) {
-    reverse(p_bts_.begin(), p_bts_.end());
+  auto sub_grp_mgr = entity_group_->GetSubEntityGroupManager();
+  if (sub_grp_mgr == nullptr) {
+    LOG_ERROR("can not found sub entitygroup manager for entitygroup [%lu].", entity_group_id_);
+    return KStatus::FAIL;
   }
-  if (!p_bts_.empty()) {
-    attrs_ = (*p_bts_.begin())->getSchemaInfo(table_version_);
+  ErrorInfo err_info;
+  auto sub_grp = sub_grp_mgr->GetSubGroup(subgroup_id_, err_info);
+  if (!err_info.isOK()) {
+    LOG_ERROR("can not found sub entitygroup for entitygroup [%lu], err_msg: %s.",
+              entity_group_id_, err_info.errmsg.c_str());
+    return KStatus::FAIL;
   }
-  if (cur_entity_idx_ < entity_ids_.size()) {
-    cur_entity_id_ = entity_ids_[cur_entity_idx_];
-  }
-  if (cur_p_bts_idx_ < p_bts_.size() && cur_entity_id_ != 0) {
-    fetchBlockItems(cur_entity_id_);
-  }
-  return SUCCESS;
+  partition_table_iter_ = sub_grp->GetPTIteartor(ts_spans_);
+  return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
 
 // return -1 means all partition tables scan over.
@@ -123,13 +125,18 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
   // 3. If all partition tables have been queried, return -1
   while (true) {
     if (block_item_queue_.empty()) {
-      cur_p_bts_idx_++;
       if (segment_iter_ != nullptr) {
         delete segment_iter_;
         segment_iter_ = nullptr;
       }
-      if (cur_p_bts_idx_ >= p_bts_.size()) {
-        return -1;
+      KStatus s = partition_table_iter_->Next(&cur_partiton_table_);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("failed get next partition at entityid[%u] entitygroup [%lu]", entity_id, entity_group_id_);
+        return NextBlkStatus::error;
+      }
+      if (cur_partiton_table_ == nullptr) {
+        // all partition table scan over.
+        return NextBlkStatus::scan_over;
       }
       fetchBlockItems(entity_id);
       continue;
@@ -141,18 +148,63 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
       LOG_WARN("BlockItem[] error: No space has been allocated");
       continue;
     }
-    return 0;
+    return NextBlkStatus::find_one;
   }
+}
+
+bool TsIterator::getCurBlockSpan(BlockItem* cur_block, MMapSegmentTable* segment_tbl, uint32_t* first_row,
+                    uint32_t* count, uint32_t* blk_offset) {
+  bool has_data = false;
+  *count = 0;
+  // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
+  // there is no need to determine the timestamps for each BlockItem.
+  if (cur_block->publish_row_count > 0
+      && cur_block->publish_row_count == cur_block->alloc_row_count
+      && *blk_offset == 1
+      && cur_block->getDeletedCount() == 0
+      && isTimestampWithinSpans(ts_spans_,
+                                KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MIN)),
+                                KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MAX)))) {
+    has_data = true;
+    *first_row = 1;
+    *count = cur_block->publish_row_count;
+    *blk_offset = *first_row + *count;
+  }
+  // If it is not achieved sequential reading optimization process,
+  // the data under the BlockItem will be traversed one by one,
+  // and the maximum number of consecutive data that meets the query conditions will be obtained.
+  // The aggregation result of this continuous data will be further obtained in the future.
+  while (*blk_offset <= cur_block->alloc_row_count) {
+    bool is_deleted = !segment_tbl->IsRowVaild(cur_block, *blk_offset);
+    // If the data in the *blk_offset row is not within the ts_span range or has been deleted,
+    // continue to verify the data in the next row.
+    timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddrByBlk(cur_block->block_id, *blk_offset - 1, 0));
+    if (is_deleted || !checkIfTsInSpan(cur_ts)) {
+      ++(*blk_offset);
+      if (has_data) {
+        break;
+      }
+      continue;
+    }
+
+    if (!has_data) {
+      has_data = true;
+      *first_row = *blk_offset;
+    }
+    ++(*count);
+    ++*blk_offset;
+  }
+  return has_data;
 }
 
 KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().it_next);
   *count = 0;
+  *is_finished = false;
   if (cur_entity_idx_ >= entity_ids_.size()) {
     *is_finished = true;
     return KStatus::SUCCESS;
   }
-  cur_entity_id_ = entity_ids_[cur_entity_idx_];
   while (true) {
     // If cur_block_item_ is a null pointer and attempts to call nextBlockItem to retrieve a new BlockItem for querying:
     // 1. nextBlockItem ended normally, query cur_block_item_
@@ -160,24 +212,28 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     //    needs to be switched to the next entity before attempting to retrieve cur_block_item_
     // 3. If all entities have been queried, the current query process ends and returns directly
     if (!cur_block_item_) {
-      if (nextBlockItem(cur_entity_id_) < 0) {
+      auto ret = nextBlockItem(entity_ids_[cur_entity_idx_]);
+      if (ret == NextBlkStatus::scan_over) {
         if (++cur_entity_idx_ >= entity_ids_.size()) {
           *is_finished = true;
-          break;
+          return KStatus::SUCCESS;
         }
-        cur_entity_id_ = entity_ids_[cur_entity_idx_];
-        cur_p_bts_idx_ = -1;
+         // current entity scan over, we need scan next entity in same subgroup, and scan same partiton tables.
+        partition_table_iter_->Reset();
+      } else if (ret == NextBlkStatus::error) {
+        LOG_ERROR("can not get next block item.");
+        return KStatus::FAIL;
       }
       continue;
     }
-    TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
+    TsTimePartition* cur_pt = cur_partiton_table_;
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
-        // 此时确定没有比ts更小的数据存在，直接返回-1，查询结束
+        // At this time, if no data smaller than ts exists, -1 is returned directly, and the query is ended
         nextEntity();
         return SUCCESS;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
-        // 此时确定没有比ts更大的数据存在，直接返回-1，查询结束
+        // In this case, if no data larger than ts exists, -1 is returned and the query is completed
         nextEntity();
         return SUCCESS;
       }
@@ -185,15 +241,15 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     uint32_t first_row = 1;
     MetricRowID first_real_row = cur_block_item_->getRowID(first_row);
 
-    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(cur_block_item_->block_id);
+    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partiton_table_->getSegmentTable(cur_block_item_->block_id);
     if (segment_tbl == nullptr) {
       LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                cur_block_item_->block_id, cur_pt->GetPath().c_str());
+                cur_block_item_->block_id, cur_partiton_table_->GetPath().c_str());
       return FAIL;
     }
     if (segment_tbl->schemaVersion() > table_version_) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(cur_entity_id_);
+      nextBlockItem(entity_ids_[cur_entity_idx_]);
       continue;
     }
     if (nullptr == segment_iter_ || segment_iter_->segment_id() != segment_tbl->segment_id()) {
@@ -204,52 +260,27 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
       segment_iter_ = new MMapSegmentTableIterator(segment_tbl, ts_spans_, kw_scan_cols_, ts_scan_cols_, attrs_);
     }
 
-    bool has_data = false;
-    // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
-    // there is no need to determine the timestamps for each row data.
-    if (cur_block_item_->is_agg_res_available && cur_block_item_->publish_row_count > 0 && cur_blockdata_offset_ == 1
-        && isTimestampWithinSpans(ts_spans_,
-               KTimestamp(segment_tbl->columnAggAddr(cur_block_item_->block_id, 0, Sumfunctype::MIN)),
-               KTimestamp(segment_tbl->columnAggAddr(cur_block_item_->block_id, 0, Sumfunctype::MAX)))) {
-      k_uint32 cur_row = 1;
-      while (cur_row <= cur_block_item_->publish_row_count) {
-        bool is_deleted;
-        if (cur_block_item_->isDeleted(cur_row, &is_deleted) < 0) {
-          return KStatus::FAIL;
-        }
-        if (is_deleted) {
-          break;
-        }
-        ++cur_row;
-      }
-      if (cur_row > cur_block_item_->publish_row_count) {
-        cur_blockdata_offset_ = cur_row;
-        *count = cur_block_item_->publish_row_count;
-        first_row = 1;
-        first_real_row = cur_block_item_->getRowID(first_row);
-        has_data = true;
-      }
-    }
+    bool has_data = getCurBlockSpan(cur_block_item_, segment_tbl.get(), &first_row, count, &cur_blockdata_offset_);
     // If the data has been queried through the sequential reading optimization process, assemble Batch and return it;
     // Otherwise, traverse the data within the current BlockItem one by one,
     // and return the maximum number of consecutive data that meets the condition.
-    KStatus s;
     if (has_data) {
-      s = segment_iter_->GetBatch(cur_block_item_, first_row, res, *count);
-    } else {
-      s = segment_iter_->Next(cur_block_item_, &cur_blockdata_offset_, res, count);
+      auto s = segment_iter_->GetBatch(cur_block_item_, first_row, res, *count);
+      if (s != KStatus::SUCCESS) {
+        return s;
+      }
     }
-    if (s != KStatus::SUCCESS) {
-      return s;
-    }
+    LOG_DEBUG("block item[%d,%d] scan rows %u.", cur_block_item_->entity_id, cur_block_item_->block_id, *count);
     // If the data query within the current BlockItem is completed, switch to the next block.
     if (cur_blockdata_offset_ > cur_block_item_->publish_row_count) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(cur_entity_id_);
+      nextBlockItem(entity_ids_[cur_entity_idx_]);
     }
     if (*count > 0) {
       KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
-      res->entity_index = {entity_group_id_, cur_entity_id_, subgroup_id_};
+      LOG_DEBUG("res entityId is %d, entitygrp is %ld , count is %d, startTime is %ld, endTime is %ld",
+        entity_ids_[cur_entity_idx_], entity_group_id_, *count, ts_spans_.data()->begin, ts_spans_.data()->end);
+      res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
       return SUCCESS;
     }
   }
@@ -257,111 +288,283 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
   return SUCCESS;
 }
 
-// Used to update the value of the first/first_row member variable during the traversal process
-void TsAggIterator::updateFirstCols(timestamp64 ts, MetricRowID row_id,
-                                    const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
-  TsTimePartition* cur_pt = p_bts_[cur_first_idx_];
-  std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
-  if (segment_tbl == nullptr) {
-    LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item_->block_id, cur_pt->GetPath().c_str());
-    return;
-  }
-
-  for (int i = 0; i < first_pairs_.size(); ++i) {
-    if (scan_agg_types_[i] != Sumfunctype::FIRST && scan_agg_types_[i] != Sumfunctype::FIRSTTS) {
+KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partiton_table,
+                                      std::shared_ptr<MMapSegmentTable> segment_tbl,
+                                      const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+  for (auto& it : first_pairs_) {
+    auto bitmap = bitmaps.find(agg_col_ids_[it.first]);
+    if (bitmap == bitmaps.end()) {
       continue;
     }
-    timestamp64 first_ts = first_pairs_[i].second.first;
+    timestamp64 first_ts = it.second.row_ts;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and
     // is non-empty, update it.
-    if ((first_ts == INVALID_TS || first_ts > ts) &&
-         !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
-      first_pairs_[i] = {cur_first_idx_, {ts, row_id}};
+    if ((first_ts == INVALID_TS || first_ts > ts) && !bitmap->second->IsNull(row_id.offset_row - 1)) {
+      if (it.second.partion_tbl != nullptr) {
+        ReleaseTable(it.second.partion_tbl);
+        it.second.partion_tbl = nullptr;
+      }
+      partiton_table->incRefCount();
+      it.second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+      if (first_ts == INVALID_TS)
+        first_agg_valid_++;
     }
   }
-  timestamp64 first_row_ts = first_row_pair_.second.first;
+  timestamp64 first_row_ts = first_row_pair_.row_ts;
   // If the timestamp corresponding to the data in this row is less than the first record, update it.
   if ((first_row_ts == INVALID_TS || first_row_ts > ts)) {
-    first_row_pair_ = {cur_first_idx_, {ts, row_id}};
+    if (first_row_pair_.partion_tbl != nullptr) {
+      ReleaseTable(first_row_pair_.partion_tbl);
+      first_row_pair_.partion_tbl = nullptr;
+    }
+    partiton_table->incRefCount();
+    first_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+    if (first_row_ts == INVALID_TS)
+      first_agg_valid_++;
   }
+  return KStatus::SUCCESS;
 }
 
-// Used to update the value of the last/last_row member variable during the traversal process
-void TsAggIterator::updateLastCols(timestamp64 ts, MetricRowID row_id,
-                                   const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
-  TsTimePartition* cur_pt = p_bts_[cur_last_idx_];
-  std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
-  if (segment_tbl == nullptr) {
-    LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item_->block_id, cur_pt->GetPath().c_str());
-    return;
-  }
-
-  for (int i = 0; i < last_pairs_.size(); ++i) {
-    if (scan_agg_types_[i] != Sumfunctype::LAST && scan_agg_types_[i] != Sumfunctype::LASTTS) {
+KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
+                          TsTimePartition* partiton_table,
+                          std::shared_ptr<MMapSegmentTable> segment_tbl,
+                          const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+  for (auto& it : last_pairs_) {
+    auto bitmap = bitmaps.find(agg_col_ids_[it.first]);
+    if (bitmap == bitmaps.end()) {
       continue;
     }
-    timestamp64 last_ts = last_pairs_[i].second.first;
+    timestamp64 last_ts = it.second.row_ts;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts_points_.empty() || last_ts_points_[i] == INVALID_TS || ts <= last_ts_points_[i]) &&
-        (last_ts == INVALID_TS || last_ts < ts) &&
-        !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
-      last_pairs_[i] = {cur_last_idx_, {ts, row_id}};
+    if ((last_ts == INVALID_TS || last_ts < ts) && !bitmap->second->IsNull(row_id.offset_row - 1)) {
+      if (it.second.partion_tbl != nullptr) {
+        ReleaseTable(it.second.partion_tbl);
+        it.second.partion_tbl = nullptr;
+      }
+      partiton_table->incRefCount();
+      it.second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+      if (last_ts == INVALID_TS)
+        last_agg_valid_++;
     }
   }
-  timestamp64 last_row_ts = last_row_pair_.second.first;
+  timestamp64 last_row_ts = last_row_pair_.row_ts;
   // If the timestamp corresponding to the data in this row is greater than the last record, update it.
   if ((last_row_ts == INVALID_TS || last_row_ts < ts)) {
-    last_row_pair_ = {cur_last_idx_, {ts, row_id}};
+    if (last_row_pair_.partion_tbl != nullptr) {
+      ReleaseTable(last_row_pair_.partion_tbl);
+      last_row_pair_.partion_tbl = nullptr;
+    }
+    partiton_table->incRefCount();
+    last_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+    if (last_row_ts == INVALID_TS)
+      last_agg_valid_++;
   }
+  return KStatus::SUCCESS;
 }
 
-// Used to update the value of the last/last_row member variable during the traversal process
-void
-TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
-                                   const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
-  TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
-  std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(row_id.block_id);
-  if (segment_tbl == nullptr) {
-    LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item_->block_id, cur_pt->GetPath().c_str());
-    return;
+int TsFirstLastRow::getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable> segment_tbl,
+                                        MetricRowID real_row, uint32_t ts_col,
+                                        const AttributeInfo& attr, Batch** b) {
+  int32_t actual_col_type = segment_tbl->GetColTypeWithoutHidden(ts_col);
+  bool is_var_type = actual_col_type == VARSTRING || actual_col_type == VARBINARY;
+  // Encapsulation Batch Result:
+  // 1. If a column type conversion occurs, it is necessary to convert the data in the real_row
+  //    and write the original data into the newly applied space
+  // 2. If no column type conversion occurs, directly read the original data stored in the file
+  if (actual_col_type != attr.type) {
+    void* old_mem = nullptr;
+    std::shared_ptr<void> old_var_mem = nullptr;
+    if (!is_var_type) {
+      old_mem = segment_tbl->columnAddr(real_row, ts_col);
+    } else {
+      old_var_mem = segment_tbl->varColumnAddr(real_row, ts_col);
+    }
+    // table altered. column type changes.
+    std::shared_ptr<void> new_mem;
+    int err_code = p_bt->ConvertDataTypeToMem(static_cast<DATATYPE>(actual_col_type),
+                                              static_cast<DATATYPE>(attr.type),
+                                              attr.size, old_mem, old_var_mem, &new_mem);
+    if (err_code < 0) {
+      LOG_ERROR("failed ConvertDataType from %u to %u", actual_col_type, attr.type);
+      return FAIL;
+    }
+    *b = new AggBatch(new_mem, 1, segment_tbl);
+  } else {
+    if (!is_var_type) {
+      *b = new AggBatch(segment_tbl->columnAddr(real_row, ts_col), 1, segment_tbl);
+    } else {
+      *b = new AggBatch(segment_tbl->varColumnAddr(real_row, ts_col), 1, segment_tbl);
+    }
   }
+  return 0;
+}
 
-  for (int i = 0; i < first_pairs_.size(); ++i) {
-    if (scan_agg_types_[i] != Sumfunctype::FIRST && scan_agg_types_[i] != Sumfunctype::FIRSTTS) {
-      continue;
+KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size_t agg_idx,
+                                    const AttributeInfo& col_attr, Batch** agg_batch) {
+  switch (scan_agg_types_[agg_idx]) {
+    case FIRST: {
+      // Read the first_pairs_ result recorded during the traversal process.
+      // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
+      auto& first_row_info = first_pairs_[agg_idx];
+      auto p_table = first_row_info.partion_tbl;
+      auto& seg_table = first_row_info.segment_tbl;
+      if (p_table == nullptr) {
+        *agg_batch = CreateAggBatch(nullptr, nullptr);
+      } else {
+        int err_code = getActualColAggBatch(p_table, seg_table, first_row_info.row_id,
+                                            agg_col_ids_[agg_idx], col_attr, agg_batch);
+        if (err_code < 0) {
+          LOG_ERROR("getActualColBatch failed.");
+          return FAIL;
+        }
+      }
+      break;
     }
-    timestamp64 first_ts = first_pairs_[i].second.first;
-    // If the timestamp corresponding to the data in this row is less than the first value of the record and is
-    // non-empty, update it.
-    if ((first_ts == INVALID_TS || first_ts > ts) &&
-        !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
-      first_pairs_[i] = {cur_p_bts_idx_, {ts, row_id}};
+    case FIRSTTS: {
+      auto& first_row_info = first_pairs_[agg_idx];
+      auto p_table = first_row_info.partion_tbl;
+      auto& segment_tbl = first_row_info.segment_tbl;
+      if (p_table == nullptr) {
+        *agg_batch = new AggBatch(nullptr, 0, nullptr);
+      } else {
+        // only get the first timestamp column, no need check weather type changed.
+        *agg_batch = new AggBatch(segment_tbl->columnAddr(first_row_info.row_id, 0), 1, segment_tbl);
+      }
+      break;
     }
-  }
-  for (int i = 0; i < last_pairs_.size(); ++i) {
-    if (scan_agg_types_[i] != Sumfunctype::LAST && scan_agg_types_[i] != Sumfunctype::LASTTS) {
-      continue;
+    case FIRST_ROW: {
+      // Read the first_row_pairs_ result recorded during the traversal process.
+      // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
+      TsTimePartition* cur_pt = first_row_pair_.partion_tbl;
+      auto& segment_tbl = first_row_pair_.segment_tbl;
+      if (cur_pt == nullptr) {
+        *agg_batch = CreateAggBatch(nullptr, nullptr);
+      } else {
+        MetricRowID real_row = first_row_pair_.row_id;
+        timestamp64 first_row_ts = first_row_pair_.row_ts;
+        if (segment_tbl->isColExist(col_idx)) {
+          void* bitmap = nullptr;
+          bool need_free_bitmap = false;
+          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_attr, col_idx, 1,
+                                &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
+            return KStatus::FAIL;
+          }
+          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
+            std::shared_ptr<void> first_row_data(nullptr);
+            *agg_batch = new AggBatch(first_row_data, 1, nullptr);
+          } else {
+            // *agg_batch = CreateAggBatch(nullptr, nullptr);
+            int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, agg_col_ids_[agg_idx], col_attr, agg_batch);
+            if (err_code < 0) {
+              LOG_ERROR("getActualColBatch failed.");
+              return FAIL;
+            }
+          }
+          if (need_free_bitmap) {
+            free(bitmap);
+          }
+        } else {
+          *agg_batch = CreateAggBatch(nullptr, nullptr);
+        }
+      }
+      break;
     }
-    timestamp64 last_ts = last_pairs_[i].second.first;
-    // If the timestamp corresponding to the data in this row is greater than the last value of the record and
-    // is non-empty, update it.
-    if ((last_ts_points_.empty() || last_ts_points_[i] == INVALID_TS || ts <= last_ts_points_[i]) &&
-        (last_ts == INVALID_TS || last_ts < ts) &&
-        !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
-      last_pairs_[i] = {cur_p_bts_idx_, {ts, row_id}};
+    case FIRSTROWTS: {
+      TsTimePartition* cur_pt = first_row_pair_.partion_tbl;
+      auto& segment_tbl = first_row_pair_.segment_tbl;
+      if (cur_pt == nullptr) {
+        *agg_batch = new AggBatch(nullptr, 0, nullptr);
+      } else {
+        MetricRowID& real_row = first_row_pair_.row_id;
+        *agg_batch = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
+      }
+      break;
     }
+    case Sumfunctype::LAST: {
+        KWDB_DURATION(StStatistics::Get().agg_last);
+        auto& last_row_info = last_pairs_[agg_idx];
+        TsTimePartition* cur_pt = last_row_info.partion_tbl;
+        auto& segment_tbl = last_row_info.segment_tbl;
+        // Read the last_pairs_ result recorded during the traversal process.
+        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
+        if (cur_pt == nullptr) {
+          *agg_batch = CreateAggBatch(nullptr, nullptr);
+        } else {
+          MetricRowID real_row = last_row_info.row_id;
+          timestamp64 last_ts = last_row_info.row_ts;
+          int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, agg_col_ids_[agg_idx], col_attr, agg_batch);
+          if (err_code < 0) {
+            LOG_ERROR("getActualColBatch failed.");
+            return KStatus::FAIL;
+          }
+        }
+        break;
+      }
+      case Sumfunctype::LAST_ROW: {
+        KWDB_DURATION(StStatistics::Get().agg_lastrow);
+        TsTimePartition* cur_pt = last_row_pair_.partion_tbl;
+        auto& segment_tbl = last_row_pair_.segment_tbl;
+        // Read the last_row_pair_ result recorded during the traversal process.
+        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
+        if (cur_pt == nullptr) {
+          *agg_batch = CreateAggBatch(nullptr, nullptr);
+        } else {
+          MetricRowID real_row = last_row_pair_.row_id;
+          timestamp64 last_row_ts = last_row_pair_.row_ts;
+          if (segment_tbl->isColExist(col_idx)) {
+            void* bitmap = nullptr;
+            bool need_free_bitmap = false;
+            if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_attr, col_idx, 1,
+                                  &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
+              return KStatus::FAIL;
+            }
+            if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
+              std::shared_ptr<void> last_row_data(nullptr);
+              *agg_batch = new AggBatch(last_row_data, 1, nullptr);
+            } else {
+              int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, agg_col_ids_[agg_idx], col_attr, agg_batch);
+              if (err_code < 0) {
+                LOG_ERROR("getActualColBatch failed.");
+                return FAIL;
+              }
+            }
+            if (need_free_bitmap) {
+              free(bitmap);
+            }
+          } else {
+            *agg_batch = CreateAggBatch(nullptr, nullptr);
+          }
+        }
+        break;
+      }
+      case Sumfunctype::LASTTS: {
+        KWDB_DURATION(StStatistics::Get().agg_lastts);
+        auto& last_row_info = last_pairs_[agg_idx];
+        TsTimePartition* cur_pt = last_row_info.partion_tbl;
+        auto& segment_tbl = last_row_info.segment_tbl;
+        if (cur_pt == nullptr) {
+          *agg_batch = new AggBatch(nullptr, 0, nullptr);
+        } else {
+          *agg_batch = new AggBatch(segment_tbl->columnAddr(last_row_info.row_id, 0), 1, segment_tbl);
+        }
+        break;
+      }
+      case Sumfunctype::LASTROWTS: {
+        TsTimePartition* cur_pt = last_row_pair_.partion_tbl;
+        auto& segment_tbl = last_row_pair_.segment_tbl;
+        if (cur_pt == nullptr) {
+          *agg_batch = new AggBatch(nullptr, 0, nullptr);
+        } else {
+          *agg_batch = new AggBatch(segment_tbl->columnAddr(last_row_pair_.row_id, 0), 1, segment_tbl);
+        }
+        break;
+      }
+    default:
+      LOG_DEBUG("no need parse agg type [%d] in agg batch.", scan_agg_types_[agg_idx]);
+      break;
   }
-  timestamp64 first_row_ts = first_row_pair_.second.first;
-  // If the timestamp corresponding to the data in this row is less than the first record, update it.
-  if ((first_row_ts == INVALID_TS || first_row_ts > ts)) {
-    first_row_pair_ = {cur_p_bts_idx_, {ts, row_id}};
-  }
-  timestamp64 last_row_ts = last_row_pair_.second.first;
-  // If the timestamp corresponding to the data in this row is greater than the last record, update it.
-  if ((last_row_ts == INVALID_TS || last_row_ts < ts)) {
-    last_row_pair_ = {cur_p_bts_idx_, {ts, row_id}};
-  }
+  return KStatus::SUCCESS;
 }
 
 // first/first_row aggregate type query optimization function:
@@ -371,26 +574,27 @@ TsAggIterator::updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
 // Due to the fact that most temporal data is written in sequence, this approach is likely to quickly find the data
 // with the smallest timestamp and avoid subsequent invalid data traversal, accelerating the query time
 // for first/first_row types.
-KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts) {
-  KWDB_DURATION(StStatistics::Get().agg_first);
-  *count = 0;
-  if ((has_found_first_data || hasFoundFirstAggData()) || cur_first_idx_ >= p_bts_.size()) {
+KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
+  if (hasFoundFirstAggData()) {
     return KStatus::SUCCESS;
   }
-  for ( ; cur_first_idx_ < p_bts_.size(); ++cur_first_idx_) {
-    TsTimePartition* cur_pt = p_bts_[cur_first_idx_];
+  TsTimePartition* cur_pt = nullptr;
+  partition_table_iter_->Reset();
+  while (partition_table_iter_->Next(&cur_pt)) {
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
-        // 此时确定没有比ts更小的数据存在，跳出循环
         break;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
-        // 此时确定没有比ts更大的数据存在，直接返回-1，查询结束
         break;
       }
     }
     block_item_queue_.clear();
-    cur_pt->GetAllBlockItems(cur_entity_id_, block_item_queue_);
-    auto entity_item = cur_pt->getEntityItem(cur_entity_id_);
+    if (cur_pt == nullptr) {
+      // all partition scan over.
+      break;
+    }
+    cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
+    auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
     // Obtain the minimum timestamp for the current query entity.
     // Once a record's timestamp is traversed to be equal to it,
     // it indicates that the query result has been found and no additional data needs to be traversed.
@@ -428,10 +632,7 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
       // Traverse all data of this BlockItem
       uint32_t cur_row_offset = 1;
       while (cur_row_offset <= block_item->publish_row_count) {
-        bool is_deleted;
-        if (block_item->isDeleted(cur_row_offset, &is_deleted) < 0) {
-          return KStatus::FAIL;
-        }
+        bool is_deleted = !segment_tbl->IsRowVaild(block_item, cur_row_offset);
         // If the data in the cur_row_offset row is not within the ts_span range or has been deleted,
         // continue to verify the data in the next row.
         MetricRowID real_row = block_item->getRowID(cur_row_offset);
@@ -441,10 +642,10 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
           continue;
         }
         // Update variables that record the query results of first/first_row
-        updateFirstCols(cur_ts, real_row, bitmaps);
+        first_last_row_.UpdateFirstRow(cur_ts, real_row, cur_pt, segment_tbl, bitmaps);
         // If all queried columns and their corresponding query types already have results,
         // and the timestamp of the updated data is equal to the minimum timestamp of the entity, then the query can end.
-        if ((has_found_first_data || hasFoundFirstAggData()) && cur_ts == min_entity_ts) {
+        if ((hasFoundFirstAggData()) && cur_ts == min_entity_ts) {
           has_found = true;
           break;
         }
@@ -454,129 +655,21 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
         break;
       }
     }
-    if (has_found_first_data || hasFoundFirstAggData()) {
+    if (hasFoundFirstAggData()) {
       break;
     }
   }
+  return KStatus::SUCCESS;
+}
 
-  // The data traversal is completed, and the variable of the first/first_row query result updated by the
-  // updateFirstCols function is encapsulated as Batch and added to res to be returned to the execution layer.
-  for (k_uint32 i = 0; i < scan_agg_types_.size(); ++i) {
-    k_int32 col_idx = -1;
-    if (i < ts_scan_cols_.size()) {
-      col_idx = ts_scan_cols_[i];
-    }
-    if (col_idx < 0) {
-      continue;
-    }
-    switch (scan_agg_types_[i]) {
-      case FIRST: {
-        Batch* b;
-        k_int32 pt_idx = first_pairs_[i].first;
-        // Read the first_pairs_ result recorded during the traversal process.
-        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = first_pairs_[i].second.second;
-          timestamp64 first_ts = first_pairs_[i].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-          if (err_code < 0) {
-            LOG_ERROR("getActualColBatch failed.");
-            return FAIL;
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case FIRSTTS: {
-        Batch* b;
-        k_int32 pt_idx = first_pairs_[i].first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = first_pairs_[i].second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return KStatus::FAIL;;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case FIRST_ROW: {
-        Batch* b;
-        k_int32 pt_idx = first_row_pair_.first;
-        // Read the first_row_pairs_ result recorded during the traversal process.
-        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = first_row_pair_.second.second;
-          timestamp64 first_row_ts = first_row_pair_.second.first;
-          TsTimePartition* cur_pt = p_bts_[pt_idx];
-          std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, cur_pt->GetPath().c_str());
-            return KStatus::FAIL;;
-          }
-          void* bitmap = nullptr;
-          bool need_free_bitmap = false;
-          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
-                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
-            return KStatus::FAIL;
-          }
-          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
-            std::shared_ptr<void> first_row_data(nullptr);
-            b = new AggBatch(first_row_data, 1, nullptr);
-          } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-            if (err_code < 0) {
-              LOG_ERROR("getActualColBatch failed.");
-              return FAIL;
-            }
-          }
-          if (need_free_bitmap) {
-            free(bitmap);
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case FIRSTROWTS: {
-        Batch* b;
-        k_int32 pt_idx = first_row_pair_.first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = first_row_pair_.second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return KStatus::FAIL;;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      default:
-        break;
-    }
+KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts) {
+  KWDB_DURATION(StStatistics::Get().agg_first);
+  KStatus s = findFirstDataByIter(ts);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("find last data failed.");
+    return s;
   }
-  res->entity_index = {entity_group_id_, cur_entity_id_, subgroup_id_};
-  if (isAllAggResNull(res)) {
-    *count = 0;
-    res->clear();
-  } else {
-    *count = 1;
-  }
-  return SUCCESS;
+  return genBatchData(res, count);
 }
 
 // last/last_row aggregate type query optimization function:
@@ -585,26 +678,27 @@ KStatus TsAggIterator::findFirstData(ResultSet* res, k_uint32* count, timestamp6
 // it can be confirmed that the data record with the largest timestamp has been queried.
 // Due to the fact that most temporal data is written in sequence,
 // this approach significantly improves query speed compared to traversing from the head.
-KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64 ts) {
-  KWDB_DURATION(StStatistics::Get().agg_last);
-  *count = 0;
-  if ((has_found_last_data || hasFoundLastAggData()) || cur_last_idx_ < 0) {
+KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
+  if (hasFoundLastAggData()) {
     return KStatus::SUCCESS;
   }
-  for ( ; cur_last_idx_ >= 0; --cur_last_idx_) {
-    TsTimePartition* cur_pt = p_bts_[cur_last_idx_];
+  TsTimePartition* cur_pt = nullptr;
+  partition_table_iter_->Reset(true);
+  while (partition_table_iter_->Next(&cur_pt)) {
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
-        // 此时确定没有比ts更小的数据存在，跳出循环
         break;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
-        // 此时确定没有比ts更大的数据存在，直接返回-1，查询结束
         break;
       }
     }
     block_item_queue_.clear();
-    cur_pt->GetAllBlockItems(cur_entity_id_, block_item_queue_);
-    auto entity_item = cur_pt->getEntityItem(cur_entity_id_);
+    if (cur_pt == nullptr) {
+      // all partition scan over.
+      break;
+    }
+    cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
+    auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
     // Obtain the maximum timestamp of the current query entity.
     // Once a record's timestamp is traversed to be equal to it,
     // it indicates that the query result has been found and no additional data needs to be traversed.
@@ -643,10 +737,7 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
       // Traverse all data of this BlockItem
       uint32_t cur_row_offset = block_item->publish_row_count;
       while (cur_row_offset > 0) {
-        bool is_deleted;
-        if (block_item->isDeleted(cur_row_offset, &is_deleted) < 0) {
-          return KStatus::FAIL;
-        }
+        bool is_deleted = !segment_tbl->IsRowVaild(block_item, cur_row_offset);
         // If the data in the cur_row_offset_ row is not within the ts_span range or has been deleted,
         // continue to verify the data in the next row.
         MetricRowID real_row = block_item->getRowID(cur_row_offset);
@@ -656,10 +747,10 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
           continue;
         }
         // Update variables that record the query results of last/last_row
-        updateLastCols(cur_ts, real_row, bitmaps);
+        first_last_row_.UpdateLastRow(cur_ts, real_row, cur_pt, segment_tbl, bitmaps);
         // If all queried columns and their corresponding query types already have query results,
         // and the timestamp of the updated data is equal to the maximum timestamp of the entity, then the query can end.
-        if ((has_found_last_data || hasFoundLastAggData()) && cur_ts == max_entity_ts) {
+        if (hasFoundLastAggData() && cur_ts == max_entity_ts) {
           has_found = true;
           break;
         }
@@ -669,121 +760,46 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
         break;
       }
     }
-    if (has_found_last_data || hasFoundLastAggData()) {
+    if (hasFoundLastAggData()) {
       break;
     }
   }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64 ts) {
+  KWDB_DURATION(StStatistics::Get().agg_last);
+  *count = 0;
+  KStatus s = findLastDataByIter(ts);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("find last data failed.");
+    return s;
+  }
+  return genBatchData(res, count);
+}
+
+KStatus TsAggIterator::genBatchData(ResultSet* res, k_uint32* count) {
+  KWDB_DURATION(StStatistics::Get().agg_first_last);
+  *count = 0;
   // The data traversal is completed, and the variables of the last/last_row query result updated by the
   // updateLastCols function are encapsulated as Batch and added to res to be returned to the execution layer.
   for (k_uint32 i = 0; i < scan_agg_types_.size(); ++i) {
-    k_int32 col_idx = -1;
+    k_int32 ts_col = -1;
     if (i < ts_scan_cols_.size()) {
-      col_idx = ts_scan_cols_[i];
+      ts_col = ts_scan_cols_[i];
     }
-    if (col_idx < 0) {
+    if (ts_col < 0) {
       continue;
     }
-    switch (scan_agg_types_[i]) {
-      case LAST: {
-        Batch* b;
-        k_int32 pt_idx = last_pairs_[i].first;
-        //  Read the last_pairs_ result recorded during the traversal process.
-        //  If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = last_pairs_[i].second.second;
-          timestamp64 last_ts = last_pairs_[i].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-          if (err_code < 0) {
-            LOG_ERROR("getActualColBatch failed.");
-            return FAIL;
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case LASTTS: {
-        Batch* b;
-        k_int32 pt_idx = last_pairs_[i].first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = last_pairs_[i].second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return FAIL;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case LAST_ROW: {
-        Batch* b;
-        k_int32 pt_idx = last_row_pair_.first;
-        //  Read the last_row_pairs_ result recorded during the traversal process.
-        //  If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = last_row_pair_.second.second;
-          timestamp64 last_row_ts = last_row_pair_.second.first;
-          TsTimePartition* cur_pt = p_bts_[pt_idx];
-          std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, cur_pt->GetPath().c_str());
-            return FAIL;
-          }
-          void* bitmap = nullptr;
-          bool need_free_bitmap = false;
-          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
-                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
-            return KStatus::FAIL;
-          }
-          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
-            std::shared_ptr<void> last_row_data(nullptr);
-            b = new AggBatch(last_row_data, 1, nullptr);
-          } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-            if (err_code < 0) {
-              LOG_ERROR("getActualColBatch failed.");
-              return FAIL;
-            }
-          }
-          if (need_free_bitmap) {
-            free(bitmap);
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case LASTROWTS: {
-        Batch* b;
-        k_int32 pt_idx = last_row_pair_.first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = last_row_pair_.second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return FAIL;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      default:
-        break;
+    Batch* cur_batch = nullptr;
+    KStatus s = first_last_row_.GetAggBatch(this, ts_col, i, attrs_[ts_col], &cur_batch);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("get col[%d] agg value failed.", ts_col);
+      return KStatus::FAIL;
     }
+    res->push_back(i, cur_batch);
   }
-  res->entity_index = {entity_group_id_, cur_entity_id_, subgroup_id_};
+  res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
   if (isAllAggResNull(res)) {
     *count = 0;
     res->clear();
@@ -796,12 +812,27 @@ KStatus TsAggIterator::findLastData(ResultSet* res, k_uint32* count, timestamp64
 KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().agg_first);
   *count = 0;
-  k_uint32 count1, count2;
-  if (findFirstData(res, &count1, ts) != KStatus::SUCCESS || findLastData(res, &count2, ts) != KStatus::SUCCESS) {
-    return KStatus::FAIL;
+  KStatus s;
+  if (!only_last_type_) {
+    s = findFirstDataByIter(ts);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("cannot find first data at first last data.");
+      return s;
+    }
   }
-  *count = (count1 != 0 || count2 != 0) ? 1 : 0;
-  return SUCCESS;
+  if (!only_first_type_) {
+    s = findLastDataByIter(ts);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("cannot find last data at first last data.");
+      return s;
+    }
+  }
+  s = genBatchData(res, count);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot genBatch data at first last data.");
+    return s;
+  }
+  return KStatus::SUCCESS;
 }
 
 KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
@@ -819,8 +850,8 @@ KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_
     void* bitmap = segment_tbl->columnNullBitmapAddr(block_item->block_id, col_idx);
     bool need_free_bitmap = false;
     if (!isSameType(actual_col, attrs_[col_idx])) {
-      auto s = getActualColBitmap(segment_tbl, block_item->block_id, 1, col_idx, block_item->publish_row_count,
-                                  &bitmap, need_free_bitmap);
+      auto s = getActualColBitmap(segment_tbl, block_item->block_id, 1, attrs_[col_idx], col_idx,
+                                  block_item->publish_row_count, &bitmap, need_free_bitmap);
       if (s != KStatus::SUCCESS) {
         return KStatus::FAIL;
       }
@@ -835,33 +866,33 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
   *count = 0;
   while (true) {
     if (!cur_block_item_) {
-      if (nextBlockItem(cur_entity_id_) < 0) {
+      auto ret = nextBlockItem(entity_ids_[cur_entity_idx_]);
+      if (ret == NextBlkStatus::scan_over) {
         break;
+      } else if (ret == NextBlkStatus::error) {
+        LOG_ERROR("failed at traverseAllBlocks.");
+        return KStatus::FAIL;
       }
       continue;
     }
     BlockItem* cur_block = cur_block_item_;
-    TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
+    TsTimePartition* cur_pt = cur_partiton_table_;
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
-        // 此时确定没有比ts更小的数据存在，直接返回-1，查询结束
         return SUCCESS;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
-        // 此时确定没有比ts更大的数据存在，直接返回-1，查询结束
         return SUCCESS;
       }
     }
-    uint32_t first_row = 1;
-    MetricRowID first_real_row = cur_block->getRowID(first_row);
-    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(cur_block->block_id);
+    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partiton_table_->getSegmentTable(cur_block->block_id);
     if (segment_tbl == nullptr) {
       LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                cur_block->block_id, cur_pt->GetPath().c_str());
+                cur_block->block_id, cur_partiton_table_->GetPath().c_str());
       return KStatus::FAIL;
     }
     if (segment_tbl->schemaVersion() > table_version_) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(cur_entity_id_);
+      nextBlockItem(entity_ids_[cur_entity_idx_]);
       continue;
     }
 
@@ -870,61 +901,17 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     if (getBlockBitmap(segment_tbl, cur_block, bitmaps) != KStatus::SUCCESS) {
       return KStatus::FAIL;
     }
-    bool has_data = false;
-    // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
-    // there is no need to determine the timestamps for each BlockItem.
-    if (no_first_last_type_ && cur_block->is_agg_res_available
-        && cur_block->publish_row_count > 0 && cur_blockdata_offset_ == 1
-        && checkIfTsInSpan(KTimestamp(segment_tbl->columnAggAddr(first_real_row.block_id, 0, Sumfunctype::MAX)))
-        && checkIfTsInSpan(KTimestamp(segment_tbl->columnAggAddr(first_real_row.block_id, 0, Sumfunctype::MIN)))) {
-      k_uint32 cur_row = 1;
-      while (cur_row <= cur_block->publish_row_count) {
-        bool is_deleted;
-        if (cur_block->isDeleted(cur_row, &is_deleted) < 0) {
-          return KStatus::FAIL;
-        }
-        if (is_deleted) {
-          break;
-        }
-        ++cur_row;
+    uint32_t first_row = 1;
+    bool has_data = getCurBlockSpan(cur_block, segment_tbl.get(), &first_row, count, &cur_blockdata_offset_);
+    MetricRowID first_real_row = cur_block->getRowID(first_row);
+    if (first_last_row_.NeedFirstLastAgg()) {
+      for (uint32_t i = 0; i < *count; i++) {
+        MetricRowID real_row = cur_block->getRowID(first_row + i);
+        timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(real_row , 0));
+        // Continuously updating member variables that record first/last/first_row/last_row results during data traversal.
+        first_last_row_.UpdateFirstRow(cur_ts, real_row, cur_partiton_table_, segment_tbl, bitmaps);
+        first_last_row_.UpdateLastRow(cur_ts, real_row, cur_partiton_table_, segment_tbl, bitmaps);
       }
-      if (cur_row > cur_block->publish_row_count) {
-        cur_blockdata_offset_ = cur_row;
-        *count = cur_block->publish_row_count;
-        first_row = 1;
-        has_data = true;
-      }
-    }
-    // If it is not achieved sequential reading optimization process,
-    // the data under the BlockItem will be traversed one by one,
-    // and the maximum number of consecutive data that meets the query conditions will be obtained.
-    // The aggregation result of this continuous data will be further obtained in the future.
-    while (cur_blockdata_offset_ <= cur_block->publish_row_count) {
-      bool is_deleted;
-      if (cur_block->isDeleted(cur_blockdata_offset_, &is_deleted) < 0) {
-        return KStatus::FAIL;
-      }
-      // If the data in the cur_blockdata_offset_ row is not within the ts_span range or has been deleted,
-      // continue to verify the data in the next row.
-      MetricRowID real_row = cur_block->getRowID(cur_blockdata_offset_);
-      timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(real_row, 0));
-      if (is_deleted || !checkIfTsInSpan(cur_ts)) {
-        ++cur_blockdata_offset_;
-        if (has_data) {
-          break;
-        }
-        continue;
-      }
-
-      if (!has_data) {
-        has_data = true;
-        first_real_row = real_row;
-        first_row = cur_blockdata_offset_;
-      }
-      // Continuously updating member variables that record first/last/first_row/last_row results during data traversal.
-      updateFirstLastCols(cur_ts, real_row, bitmaps);
-      ++(*count);
-      ++cur_blockdata_offset_;
     }
     // If qualified data is obtained, further obtain the aggregation result of this continuous data
     // and package Batch to be added to res to return.
@@ -1084,59 +1071,18 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
         }
         res->push_back(i, b);
       }
-      if (cur_blockdata_offset_ > cur_block->publish_row_count) {
+      if (cur_blockdata_offset_ > cur_block->alloc_row_count) {
         cur_blockdata_offset_ = 1;
-        nextBlockItem(cur_entity_id_);
+        nextBlockItem(entity_ids_[cur_entity_idx_]);
       }
       return SUCCESS;
     }
-    if (cur_blockdata_offset_ > cur_block->publish_row_count) {
+    if (cur_blockdata_offset_ > cur_block->alloc_row_count) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(cur_entity_id_);
+      nextBlockItem(entity_ids_[cur_entity_idx_]);
     }
   }
   return SUCCESS;
-}
-
-int TsAggIterator::getActualColAggBatch(TsTimePartition* p_bt, MetricRowID real_row, uint32_t col_idx, Batch** b) {
-  std::shared_ptr<MMapSegmentTable> segment_tbl = p_bt->getSegmentTable(real_row.block_id);
-  if (segment_tbl == nullptr) {
-    LOG_ERROR("Can not find segment use block [%d], in path [%s]", real_row.block_id, p_bt->GetPath().c_str());
-    return KStatus::FAIL;
-  }
-
-  int32_t actual_col_type = segment_tbl->GetColType(col_idx);
-  bool is_var_type = actual_col_type == VARSTRING || actual_col_type == VARBINARY;
-  // Encapsulation Batch Result:
-  // 1. If a column type conversion occurs, it is necessary to convert the data in the real_row
-  //    and write the original data into the newly applied space
-  // 2. If no column type conversion occurs, directly read the original data stored in the file
-  if (actual_col_type != attrs_[col_idx].type) {
-    void* old_mem = nullptr;
-    std::shared_ptr<void> old_var_mem = nullptr;
-    if (!is_var_type) {
-      old_mem = segment_tbl->columnAddr(real_row, col_idx);
-    } else {
-      old_var_mem = segment_tbl->varColumnAddr(real_row, col_idx);
-    }
-    // table altered. column type changes.
-    std::shared_ptr<void> new_mem;
-    int err_code = p_bt->ConvertDataTypeToMem(static_cast<DATATYPE>(actual_col_type),
-                                              static_cast<DATATYPE>(attrs_[col_idx].type),
-                                              attrs_[col_idx].size, old_mem, old_var_mem, &new_mem);
-    if (err_code < 0) {
-      LOG_ERROR("failed ConvertDataType from %u to %u", actual_col_type, attrs_[col_idx].type);
-      return FAIL;
-    }
-    *b = new AggBatch(new_mem, 1, segment_tbl);
-  } else {
-    if (!is_var_type) {
-      *b = new AggBatch(segment_tbl->columnAddr(real_row, col_idx), 1, segment_tbl);
-    } else {
-      *b = new AggBatch(segment_tbl->varColumnAddr(real_row, col_idx), 1, segment_tbl);
-    }
-  }
-  return 0;
 }
 
 // Convert the obtained continuous data into a query type and write it into the new application space.
@@ -1190,33 +1136,11 @@ TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segmen
   return KStatus::SUCCESS;
 }
 
-KStatus TsAggIterator::getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
-                                      uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap) {
-  *bitmap = segment_tbl->columnNullBitmapAddr(block_id, col_idx);
-  if (nullptr == *bitmap) {
-    return KStatus::SUCCESS;
+KStatus TsAggIterator::Init(bool is_reversed) {
+  KStatus s = TsIterator::Init(is_reversed);
+  if (s != KStatus::SUCCESS) {
+    return s;
   }
-  auto schema_info = segment_tbl->getSchemaInfo();
-  if (!isVarLenType(attrs_[col_idx].type)) {
-    if (schema_info[col_idx].type != attrs_[col_idx].type) {
-      // Conversion from other types to fixed length types.
-      char* value = static_cast<char*>(malloc(attrs_[col_idx].size * count));
-      memset(value, 0, attrs_[col_idx].size * count);
-      KStatus s = ConvertToFixedLen(segment_tbl, value, block_id,
-                                    (DATATYPE)(schema_info[col_idx].type), (DATATYPE)(attrs_[col_idx].type),
-                                    attrs_[col_idx].size, start_row, count, col_idx, bitmap, need_free_bitmap);
-      if (s != KStatus::SUCCESS) {
-        free(value);
-        return s;
-      }
-      free(value);
-    }
-  }
-  return KStatus::SUCCESS;
-}
-
-KStatus TsAggIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) {
-  TsIterator::Init(p_bts, is_reversed);
   only_first_type_ = onlyHasFirstAggType();
   only_last_type_ = onlyHasLastAggType();
   only_first_last_type_ = onlyHasFirstLastAggType();
@@ -1230,12 +1154,6 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
     *is_finished = true;
     return KStatus::SUCCESS;
   }
-  if (p_bts_.empty()) {
-    reset();
-    return KStatus::SUCCESS;
-  }
-  cur_entity_id_ = entity_ids_[cur_entity_idx_];
-
   KStatus s;
   // If only queries related to first/last aggregation types are involved, the optimization process can be followed.
   if (only_first_type_ || only_last_type_ || only_first_last_type_) {
@@ -1248,6 +1166,10 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
     }
     reset();
     return s;
+  }
+  if (!partition_table_iter_->Valid()) {
+    *is_finished = true;
+    return KStatus::SUCCESS;
   }
 
   ResultSet result{(k_uint32) kw_scan_cols_.size()};
@@ -1262,7 +1184,7 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
     }
   } while (*count != 0);
 
-  if (result.empty() && no_first_last_type_) {
+  if (result.empty() && !first_last_row_.NeedFirstLastAgg()) {
     reset();
     return KStatus::SUCCESS;
   }
@@ -1352,208 +1274,22 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
         res->push_back(i, b);
         break;
       }
-      case Sumfunctype::FIRST: {
-        KWDB_DURATION(StStatistics::Get().agg_first);
-        Batch* b;
-        k_int32 pt_idx = first_pairs_[i].first;
-        // Read the first_pairs_ result recorded during the traversal process.
-        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = first_pairs_[i].second.second;
-          timestamp64 first_ts = first_pairs_[i].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-          if (err_code < 0) {
-            LOG_ERROR("getActualColBatch failed.");
-            return FAIL;
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::LAST: {
-        KWDB_DURATION(StStatistics::Get().agg_last);
-        Batch* b;
-        k_int32 pt_idx = last_pairs_[i].first;
-        // Read the last_pairs_ result recorded during the traversal process.
-        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = last_pairs_[i].second.second;
-          timestamp64 last_ts = last_pairs_[i].second.first;
-          int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-          if (err_code < 0) {
-            LOG_ERROR("getActualColBatch failed.");
-            return KStatus::FAIL;
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::FIRST_ROW: {
-        Batch* b;
-        k_int32 pt_idx = first_row_pair_.first;
-        // Read the first_row_pair_ result recorded during the traversal process.
-        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = first_row_pair_.second.second;
-          timestamp64 first_row_ts = first_row_pair_.second.first;
-          TsTimePartition* cur_pt = p_bts_[pt_idx];
-          std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, cur_pt->GetPath().c_str());
-            return KStatus::FAIL;
-          }
-          void* bitmap = nullptr;
-          bool need_free_bitmap = false;
-          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
-                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
-            return KStatus::FAIL;
-          }
-          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
-            std::shared_ptr<void> first_row_data(nullptr);
-            b = new AggBatch(first_row_data, 1, nullptr);
-          } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-            if (err_code < 0) {
-              LOG_ERROR("getActualColBatch failed.");
-              return FAIL;
-            }
-          }
-          if (need_free_bitmap) {
-            free(bitmap);
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::LAST_ROW: {
-        KWDB_DURATION(StStatistics::Get().agg_lastrow);
-        Batch* b;
-        k_int32 pt_idx = last_row_pair_.first;
-        // Read the last_row_pair_ result recorded during the traversal process.
-        // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
-        if (pt_idx < 0) {
-          b = CreateAggBatch(nullptr, nullptr);
-        } else {
-          MetricRowID real_row = last_row_pair_.second.second;
-          timestamp64 last_row_ts = last_row_pair_.second.first;
-          TsTimePartition* cur_pt = p_bts_[pt_idx];
-
-          std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, cur_pt->GetPath().c_str());
-            return KStatus::FAIL;
-          }
-          void* bitmap = nullptr;
-          bool need_free_bitmap = false;
-          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_idx, 1,
-                                 &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
-            return KStatus::FAIL;
-          }
-          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
-            std::shared_ptr<void> last_row_data(nullptr);
-            b = new AggBatch(last_row_data, 1, nullptr);
-          } else {
-            int err_code = getActualColAggBatch(p_bts_[pt_idx], real_row, col_idx, &b);
-            if (err_code < 0) {
-              LOG_ERROR("getActualColBatch failed.");
-              return FAIL;
-            }
-          }
-          if (need_free_bitmap) {
-            free(bitmap);
-          }
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::FIRSTTS: {
-        KWDB_DURATION(StStatistics::Get().agg_firstts);
-        Batch* b;
-        k_int32 pt_idx = first_pairs_[i].first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = first_pairs_[i].second.second;
-
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return KStatus::FAIL;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::LASTTS: {
-        KWDB_DURATION(StStatistics::Get().agg_lastts);
-        Batch* b;
-        k_int32 pt_idx = last_pairs_[i].first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = last_pairs_[i].second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return KStatus::FAIL;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::FIRSTROWTS: {
-        Batch* b;
-        k_int32 pt_idx = first_row_pair_.first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = first_row_pair_.second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return KStatus::FAIL;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
-      case Sumfunctype::LASTROWTS: {
-        Batch* b;
-        k_int32 pt_idx = last_row_pair_.first;
-        if (pt_idx < 0) {
-          b = new AggBatch(nullptr, 0, nullptr);
-        } else {
-          MetricRowID real_row = last_row_pair_.second.second;
-          std::shared_ptr<MMapSegmentTable> segment_tbl = p_bts_[pt_idx]->getSegmentTable(real_row.block_id);
-          if (segment_tbl == nullptr) {
-            LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                      real_row.block_id, p_bts_[pt_idx]->GetPath().c_str());
-            return KStatus::FAIL;
-          }
-          b = new AggBatch(segment_tbl->columnAddr(real_row, 0), 1, segment_tbl);
-        }
-        res->push_back(i, b);
-        break;
-      }
       default:
+      {
+        Batch* b = nullptr;
+        KStatus s = first_last_row_.GetAggBatch(this, col_idx, i, attrs_[col_idx], &b);
+        if (s != KStatus::SUCCESS) {
+          LOG_ERROR("parse col [%d] failed.", col_idx);
+          return KStatus::FAIL;
+        }
+        if (b != nullptr) {
+          res->push_back(i, b);
+        }
         break;
+      }
     }
   }
-  res->entity_index = {entity_group_id_, cur_entity_id_, subgroup_id_};
+  res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
   if (isAllAggResNull(res)) {
     *count = 0;
     res->clear();
@@ -1591,19 +1327,24 @@ KStatus TsTableIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
 }
 
 void TsSortedRowDataIterator::fetchBlockSpans(k_uint32 entity_id) {
-  p_bts_[cur_p_bts_idx_]->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, compaction_);
+  cur_partiton_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, compaction_);
 }
 
 int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {
   cur_block_span_ = BlockSpan{};
   while (true) {
     if (block_spans_.empty()) {
-      cur_p_bts_idx_++;
       if (segment_iter_ != nullptr) {
         delete segment_iter_;
         segment_iter_ = nullptr;
       }
-      if (cur_p_bts_idx_ >= p_bts_.size()) {
+      KStatus s = partition_table_iter_->Next(&cur_partiton_table_);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("failed get next partition at entityid[%u] entitygroup [%lu]", entity_id, entity_group_id_);
+        return -2;
+      }
+      if (cur_partiton_table_ == nullptr) {
+        // all partition table scan over.
         return -1;
       }
       fetchBlockSpans(entity_id);
@@ -1620,22 +1361,22 @@ int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {
   }
 }
 
-KStatus TsSortedRowDataIterator::Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) {
-  p_bts_ = std::move(p_bts);
+KStatus TsSortedRowDataIterator::Init(bool is_reversed) {
   is_reversed_ = is_reversed;
-  if (!p_bts_.empty()) {
-    if (is_reversed_) {
-      reverse(p_bts_.begin(), p_bts_.end());
-    }
-    attrs_ = (*p_bts_.begin())->getSchemaInfo(table_version_);
+  auto sub_grp_mgr = entity_group_->GetSubEntityGroupManager();
+  if (sub_grp_mgr == nullptr) {
+    LOG_ERROR("can not found sub entitygroup manager for entitygroup [%lu].", entity_group_id_);
+    return KStatus::FAIL;
   }
-  if (cur_entity_idx_ < entity_ids_.size()) {
-    cur_entity_id_ = entity_ids_[cur_entity_idx_];
+  ErrorInfo err_info;
+  auto sub_grp = sub_grp_mgr->GetSubGroup(subgroup_id_, err_info);
+  if (!err_info.isOK()) {
+    LOG_ERROR("can not found sub entitygroup for entitygroup [%lu], err_msg: %s.",
+              entity_group_id_, err_info.errmsg.c_str());
+    return KStatus::FAIL;
   }
-  if (cur_p_bts_idx_ < p_bts_.size() && cur_entity_id_ != 0) {
-    p_bts_[cur_p_bts_idx_]->GetAllBlockSpans(cur_entity_id_, ts_spans_, block_spans_, compaction_);
-  }
-  return SUCCESS;
+  partition_table_iter_ = sub_grp->GetPTIteartor(ts_spans_);
+  return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
 
 KStatus TsSortedRowDataIterator::GetBatch(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
@@ -1724,13 +1465,16 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
   *count = 0;
   while (true) {
     if (!cur_block_span_.block_item) {
-      if ( nextBlockSpan(cur_entity_id_) < 0 ) {
+      int ret = nextBlockSpan(entity_ids_[cur_entity_idx_]);
+      if (ret == -1) {
         if (++cur_entity_idx_ >= entity_ids_.size()) {
           *is_finished = true;
           break;
         }
-        cur_entity_id_ = entity_ids_[cur_entity_idx_];
-        cur_p_bts_idx_ = -1;
+        partition_table_iter_->Reset();
+      } else if (ret == -2) {
+        LOG_ERROR("can not get next block item.");
+        return KStatus::FAIL;
       }
       continue;
     }
@@ -1743,16 +1487,16 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
     BlockItem* block_item = cur_block_span_.block_item;
     MetricRowID first_real_row = block_item->getRowID(first_row);
 
-    TsTimePartition* cur_pt = p_bts_[cur_p_bts_idx_];
+    TsTimePartition* cur_pt = cur_partiton_table_;
     std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
     if (segment_tbl == nullptr) {
       LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
       return FAIL;
     }
 
-    nextBlockSpan(cur_entity_id_);
+    nextBlockSpan(entity_ids_[cur_entity_idx_]);
     GetBatch(segment_tbl, block_item, first_row, res, *count);
-    res->entity_index = {entity_group_id_, cur_entity_id_, subgroup_id_};
+    res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
     KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
     return SUCCESS;
   }

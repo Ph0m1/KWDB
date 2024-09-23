@@ -432,22 +432,6 @@ func makeKObjectTableForTs(d jobspb.SyncMetaCacheDetails) sqlbase.CreateTsTable 
 	}
 }
 
-// makeNormalTSTableMeta construct the normal time-series table meta.
-func makeNormalTSTableMeta(table *sqlbase.TableDescriptor) ([]byte, error) {
-	syncDetail := jobspb.SyncMetaCacheDetails{
-		Type:    1,
-		SNTable: *table,
-	}
-	createKObjectTable := makeKObjectTableForTs(syncDetail)
-
-	var meta []byte
-	meta, err := protoutil.Marshal(&createKObjectTable)
-	if err != nil {
-		return nil, err
-	}
-	return meta, nil
-}
-
 // GetTSSnapshotInfo get TS snapshot info
 func (r *Replica) GetTSSnapshotInfo(
 	ctx context.Context, rangeID roachpb.RangeID, startKey []byte,
@@ -594,7 +578,7 @@ func (r *Replica) GetTSSnapshot(
 		return nil, errors.Errorf("error generating TS snapshot: couldn't find TS range descriptor")
 	}
 
-	tableID, groupID := desc.TableId, desc.GroupId
+	tableID := desc.TableId
 
 	if !needTSSnapshotData {
 		snapData := OutgoingSnapshot{
@@ -620,11 +604,12 @@ func (r *Replica) GetTSSnapshot(
 	}
 
 	//r.mu.RUnlock()
-	// send CreateSnapshot request
+	// send CreateSnapshotForRead request
 	currentRepl := roachpb.ReplicationTarget{
 		NodeID:  r.NodeID(),
 		StoreID: r.StoreID(),
 	}
+	//sqlbase.WaitTableAlterOk(ctx, r.store.DB(), desc.TableId)
 	resp, err := r.store.DB().CreateTSSnapshot(ctx, desc, needTSSnapshotData, currentRepl)
 	if err != nil {
 		return nil, errors.Errorf("error CreateTSSnapshot: %s", err)
@@ -657,9 +642,8 @@ func (r *Replica) GetTSSnapshot(
 		WithSideloaded: withSideloaded,
 		EngineSnap:     snap,
 		//Iter:           iter,
-		kvBatch:      resp.KvBatch,
-		tableID:      uint64(tableID),
-		rangeGroupID: uint64(groupID),
+		kvBatch: resp.KvBatch,
+		tableID: uint64(tableID),
 		State: storagepb.ReplicaState{
 			RaftAppliedIndex:  respState.RaftAppliedIndex,
 			LeaseAppliedIndex: respState.LeaseAppliedIndex,
@@ -685,7 +669,7 @@ func (r *Replica) GetTSSnapshot(
 		},
 		snapType: snapType,
 	}
-
+	log.Infof(ctx, "resp %v, respState.Desc %v,  respState.RaftApplied Index : %v, respLeaseIndex: %v", resp, respState.Desc, respState.RaftAppliedIndex, respState.LeaseAppliedIndex)
 	snapData.onClose = release
 	return &snapData, nil
 }
@@ -763,8 +747,6 @@ type OutgoingSnapshot struct {
 	TSSnapshotID uint64
 	// TS tableID
 	tableID uint64
-	// TS table rangeGroupID
-	rangeGroupID uint64
 	// The localRange and other information obtained from the disk when creating the snapshot
 	kvBatch [][]byte
 	// The Raft snapshot message to send. Contains SnapUUID as its data.
@@ -821,8 +803,7 @@ type IncomingSnapshot struct {
 	snapType                       SnapshotRequest_Type
 	IsTSSnapshot                   bool
 	TableID                        uint64
-	RangeGroupID                   uint64
-	SnapshotID                     uint64
+	WriteSnapshotID                uint64
 }
 
 func (s *IncomingSnapshot) String() string {
@@ -1064,15 +1045,26 @@ func (r *Replica) applySnapshot(
 	subsumedRepls []*Replica,
 ) (err error) {
 	// start apply ts snapshot
-	if inSnap.IsTSSnapshot && inSnap.SnapshotID != 0 {
-		err = r.store.TsEngine.ApplySnapshot(inSnap.TableID, inSnap.RangeGroupID, inSnap.SnapshotID)
-		if err != nil {
-			msg := fmt.Sprintf("failed to ApplySnapshot, SnapshotID: %64d, RangeGroupID:%64d, TableID:%64d.", inSnap.SnapshotID, inSnap.RangeGroupID, inSnap.TableID)
-			if err := r.store.TsEngine.DropSnapshot(inSnap.TableID, inSnap.RangeGroupID, inSnap.SnapshotID); err != nil {
-				msg += fmt.Sprintf("failed to DropSnapshot.")
+	if inSnap.IsTSSnapshot && inSnap.WriteSnapshotID != 0 {
+		rangeID := inSnap.State.Desc.RangeID
+		if err = r.store.TsEngine.WriteSnapshotSuccess(inSnap.TableID, inSnap.WriteSnapshotID); err != nil {
+			log.Errorf(ctx, "TsEngine.WriteSnapshotSuccess failed r%v, %v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID, err)
+			if rollbackErr := r.store.TsEngine.WriteSnapshotRollback(inSnap.TableID, inSnap.WriteSnapshotID); rollbackErr != nil {
+				log.Errorf(ctx, "applySnapshot TsEngine.WriteSnapshotRollback failed r%v, %v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID, rollbackErr)
 			}
-			return errors.Wrap(err, msg)
+			log.VEventf(ctx, 3, "TsEngine.WriteSnapshotRollback success r%v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID)
+			if delErr := r.store.TsEngine.DeleteSnapshot(inSnap.TableID, inSnap.WriteSnapshotID); delErr != nil {
+				log.Errorf(ctx, "applySnapshot TsEngine.DeleteSnapshot failed r%v, %v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID, delErr)
+			}
+			log.VEventf(ctx, 3, "TsEngine.DeleteSnapshot success r%v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID)
+			return errors.Wrap(err, "applySnapshot WriteSnapshotSuccess failed")
 		}
+		log.VEventf(ctx, 3, "TsEngine.WriteSnapshotSuccess success r%v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID)
+		if delErr := r.store.TsEngine.DeleteSnapshot(inSnap.TableID, inSnap.WriteSnapshotID); delErr != nil {
+			log.Errorf(ctx, "applySnapshot TsEngine.DeleteSnapshot failed r%v, %v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID, delErr)
+			return errors.Wrap(delErr, "applySnapshot DeleteSnapshot failed")
+		}
+		log.VEventf(ctx, 3, "TsEngine.DeleteSnapshot success r%v, %v, %v", rangeID, inSnap.TableID, inSnap.WriteSnapshotID)
 	}
 
 	s := *inSnap.State

@@ -1,4 +1,17 @@
-#!/bin/python3
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+#
+# This software (KWDB) is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
 import os
 import sys
 import re
@@ -55,7 +68,7 @@ def is_blank(sql):
 
 
 def get_node_id_map(kwbin: str):
-    command = '{} node status --insecure --host=127.0.0.1:26257'.format(kwbin)
+    command = '{} node status --insecure --host=127.0.102.145:26257'.format(kwbin)
     res = os.popen(command)
     res = res.read()
     res = res.split('\n')
@@ -73,7 +86,7 @@ def get_node_id_map(kwbin: str):
 
 
 def get_join_node_id_map(kwbin: str):
-    command = '{} node status --insecure --host=127.0.0.1:26257'.format(kwbin)
+    command = '{} node status --insecure --host=127.0.102.145:26257'.format(kwbin)
     res = os.popen(command)
     res = res.read()
     res = res.split('\n')
@@ -85,9 +98,9 @@ def get_join_node_id_map(kwbin: str):
     for i in range(1,6):
         node_id = str(5+i)
         listen_port = 26261+i
-        join_node_id_map[node_id] = '127.0.0.1'+':'+str(listen_port)
+        join_node_id_map[node_id] = '127.0.102.145'+':'+str(listen_port)
         http_port = 8084+i
-        http_addr = '127.0.0.1'+':'+str(http_port)
+        http_addr = '127.0.102.145'+':'+str(http_port)
         join_http_ip_map[node_id] = http_addr
 
     '''for i in res:
@@ -100,21 +113,28 @@ def get_join_node_id_map(kwbin: str):
         http_addr = ip.split(':')[0]+':'+str(http_port)
         join_http_ip_map[node_id] = http_addr'''
 
+def init_load():
+    cmd = "{} sql --host={} --insecure --format=table --set \"errexit=false\" --echo-sql -e \"{}\" 2>&1 | tee -a {} > /dev/null".format(
+        kwbin_path, get_url_from_node_id(last_exec_node[0]), 'import database csv data (\\"nodelocal://1/tsdb1\\");', output_file_path)
+    cmds.append(cmd)
 
+    pass
 if __name__ == "__main__":
     args = sys.argv[1:]
+    # for i in range(len(args)):
+    #     print(i,'    ',args[i])
     sql_path = args[0]
-    kwbin_path = args[2] + ' ' + args[3]
-    output_file_path = args[4]
+    kwbin_path = args[1]
+    output_file_path = args[2]
 
-    store_dir = args[5]
+    store_dir = args[3]
 
-    output_cmd_file = args[6]
+    output_cmd_file = args[4]
+    #
     # print("=============================================")
     # print("sql_path ", sql_path)
     # print("kwbin_path ", kwbin_path)
     # print("output_file_path ", output_file_path)
-    # print("license_dir ", license_dir)
     # print("store_dir ", store_dir)
     # print("output_cmd_file ", output_cmd_file)
     # print("=============================================")
@@ -138,6 +158,9 @@ if __name__ == "__main__":
             # reset last_exec_node
             node_ids = get_nodes(sql)
             last_exec_node = node_ids
+            pass
+        elif re.match('-- init',sql):
+            init_load()
             pass
         elif re.match('-- kill:', sql):
             # kill node
@@ -169,9 +192,10 @@ if __name__ == "__main__":
                           ' --store={}/{}' \
                           ' --locality=region=CN-100000-0{}' \
                           ' --pid-file={}/kwbase.pid ' \
+                          ' --external-io-dir={}/extern' \
                           ' --join={} --background'.format(
                         kwbin_path, 'start', url, get_http_url_fot_join(node_id), store_dir, 'c' + str(store_id),
-                        "%02d" % node_id, store_dir+'/c' + str(store_id), get_url_from_node_id(1))
+                        "%02d" % node_id, store_dir+'/c' + str(store_id),store_dir, get_url_from_node_id(1))
                     cmds.append(cmd)
                 else:
                     url = get_url_from_node_id(node_id)
@@ -182,9 +206,10 @@ if __name__ == "__main__":
                           ' --store={}/{}' \
                           ' --locality=region=CN-100000-0{}' \
                           ' --pid-file={}/kwbase.pid ' \
-                          ' --join={} --background'.format(
+                          '--external-io-dir={}/extern' \
+                    ' --join={} --background'.format(
                         kwbin_path, 'start', url, get_http_url_from_node_id(node_id), store_dir, 'c' + str(store_id),
-                        "%02d" % node_id, store_dir+'/c' + str(store_id), get_url_from_node_id(1))
+                        "%02d" % node_id, store_dir+'/c' + str(store_id), store_dir,get_url_from_node_id(1))
                     cmds.append(cmd)
         elif re.match('-- join', sql):
             node_ids = get_nodes(sql)
@@ -194,11 +219,14 @@ if __name__ == "__main__":
                       ' --insecure --listen-addr={}' \
                       ' --http-addr={}' \
                       ' --store={}/{}' \
+                      ' --pid-file={}/kwbase.pid ' \
                       ' --locality=region=CN-100000-0{}' \
-                      ' --join={} --background'.format(
+                      ' --external-io-dir={}/extern' \
+                ' --join={} --background'.format(
                     kwbin_path, 'start', url, get_http_url_fot_join(node_id), store_dir,
                     'c' + str(node_id),
-                    "%02d" % node_id,
+                    store_dir+'/c' + str(node_id),
+                    "%02d" % node_id,store_dir,
                     get_url_from_node_id(1)
                 )
                 cmds.append(cmd)
@@ -213,7 +241,7 @@ if __name__ == "__main__":
                       ' --decommission --insecure ' \
                       '--host={} --drain-wait=8s'.format(kwbin_path, 'quit', url)
                 cmds.append(cmd)
-        elif re.match('-- exec-decommission', sql):
+        elif re.match('-- background-decommission', sql):
             node_ids = get_nodes(sql)
             for node_id in node_ids:
                 if node_id > 5:
@@ -224,98 +252,29 @@ if __name__ == "__main__":
                       ' decommission {} --insecure ' \
                       '--host={} --wait=none'.format(kwbin_path, 'node', node_id, url)
                 cmds.append(cmd)
-        elif re.match('-- wait-join', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                url = get_url_from_node_id(1)
-                cmd = "count=0;"\
-                    "while [ $({} node status {}" \
-                      " --insecure --host={}" \
-                      " --format=csv | tail -n1| grep -cP \"true,healthy\") -ne 1 ] && [ $count -lt 180 ];" \
-                      "do " \
-                      " sleep 1s;  count=$((count+1)) ;" \
-                      "done\nif [ $count -ge 180 ]; then echo \"wait-join timeout after 180s\" ;fi".format(kwbin_path, str(node_id), url)
-                cmds.append(cmd)
-        elif re.match('-- wait-dead', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                url = get_url_from_node_id(1)
-                cmd = "count=0;"\
-                      "while [ $({} node status {}" \
-                      " --insecure --host={}" \
-                      " --format=csv | tail -n1| grep -cP \"false,dead\") -ne 1 ] && [ $count -lt 180 ];" \
-                      "do " \
-                      " sleep 1s;  count=$((count+1)) ;" \
-                      "done\nif [ $count -ge 180 ]; then echo \"wait-dead timeout after 180s\" ;fi".format(kwbin_path, str(node_id), url)
-                cmds.append(cmd)
-        elif re.match('-- is-unhealthy', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                url = get_url_from_node_id(1)
-                cmd = "count=0;"\
-                      "while [ $({} node status {}" \
-                      " --insecure --host={}" \
-                      " --format=csv | tail -n1| grep -cP \"false,unhealthy\") -ne 1 ] && [ $count -lt 180 ];" \
-                      "do " \
-                      " sleep 1s;  count=$((count+1)) ;" \
-                      "done\nif [ $count -ge 180 ]; then echo \"is-unhealthy timeout after 180s\" ;fi".format(kwbin_path, str(node_id), url)
-                cmds.append(cmd)
-        elif re.match('-- is-prejoin', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                url = get_url_from_node_id(1)
-                cmd = "count=0;"\
-                      "while [ $({} node status {}" \
-                      " --insecure --host={}" \
-                      " --format=csv | tail -n1| grep -cP \"true,pre-join\") -ne 1 ] && [ $count -lt 180 ];" \
-                      "do " \
-                      " sleep 1s;  count=$((count+1)) ;" \
-                      "done\nif [ $count -ge 180 ]; then echo \"is-prejoin timeout after 180s\" ;fi".format(kwbin_path, str(node_id), url)
-                cmds.append(cmd)
-        elif re.match('-- is-joining', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                url = get_url_from_node_id(1)
-                cmd = "count=0;"\
-                      "while [ $({} node status {}" \
-                      " --insecure --host={}" \
-                      " --format=csv | tail -n1| grep -cP \"true,joining\") -ne 1 ] && [ $count -lt 180 ];" \
-                      "do " \
-                      " sleep 1s;  count=$((count+1)) ;" \
-                      "done\nif [ $count -ge 180 ]; then echo \"is-joining timeout after 180s\" ;fi".format(kwbin_path, str(node_id), url)
-                cmds.append(cmd)
-        elif re.match('-- is-decommissioning', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                url = get_url_from_node_id(1)
-                cmd = "count=0;"\
-                      "while [ $({} node status {}" \
-                      " --insecure --host={}" \
-                      " --format=csv | tail -n1| grep -cP \"true,decommissioning\") -ne 1 ] && [ $count -lt 180 ];" \
-                      "do " \
-                      " sleep 1s;  count=$((count+1)) ;" \
-                      "done\nif [ $count -ge 180 ]; then echo \"is-decommissioning timeout after 180s\" ;fi".format(kwbin_path, str(node_id), url)
-                cmds.append(cmd)
         elif re.match('-- wait-running', sql):
-            node_ids = get_nodes(sql)
-            url = get_url_from_node_id(node_ids[0])
-            cmd = "count=0;"\
-                  "while [ $({} sql --insecure --host={} " \
-                  "-e \"select * from [show ts partitions] where status != 'running'\" --format=csv | grep -v status | wc -l ) -ne 0 ] && [ $count -lt 180 ];" \
-                  "do " \
-                  " sleep 1s;  count=$((count+1)) ;" \
-                  "done\nif [ $count -ge 180 ]; then echo \"wait-running timeout after 180s\" ;fi".format(kwbin_path, url)
-            cmds.append(cmd)
-        elif re.match('-- wait-replicas', sql):
             node_ids = get_nodes(sql)
             url = get_url_from_node_id(node_ids[0])
             cmd = "count=0;" \
                   "while [ $({} sql --insecure --host={} " \
-                  "-e \"select * from [show ts partitions] where array_length(replicas,1) != 3\" --format=csv | grep -v status | wc -l ) -ne 0 ] && [ $count -lt 180 ];" \
+                  "-e \"SELECT sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable FROM kwdb_internal.kv_store_status;\" --format=raw | grep -v '#' | sort | tail -n 1 ) -ne 0 ] && [ $count -lt 180 ];" \
                   "do " \
                   " sleep 1s;  count=$((count+1)) ;" \
-                  "done\nif [ $count -ge 180 ]; then echo \"wait-replicas timeout after 180s\" ;fi".format(kwbin_path, url)
+                  "done\nif [ $count -ge 180 ]; then echo \"wait-running timeout after 180s\" ;fi".format(kwbin_path, url)
             cmds.append(cmd)
+        elif re.match('-- wait-zero-ranges', sql):
+            node_ids = get_nodes(sql)
+            for node_id in node_ids:
+                url = get_url_from_node_id(1)
+                cmd = "count=0;" \
+                "while [ $({} node status {} --insecure --host={} --format=csv --decommission | tail -n 1 | awk -F ',' {{'print $11'}} ) -ne 0 ] && [ $count -lt 180 ]; do" \
+                "    count=$((count+1));" \
+                "    sleep 1;" \
+                "done\n" \
+                "if [ $count -ge 180 ]; then" \
+                "    echo \"wait-zero-ranges timeout after 180s\";" \
+                "fi".format(kwbin_path, node_id, url)
+                cmds.append(cmd)
         elif re.match('-- upgrade-complete', sql):
             node_ids = get_nodes(sql)
             for node_id in node_ids:
@@ -327,22 +286,16 @@ if __name__ == "__main__":
                       ' --store={}/{}' \
                       ' --locality=region=CN-100000-0{}' \
                       ' --pid-file={}/kwbase.pid ' \
-                      ' --join={} --background'.format(
+                      ' --external-io-dir={}/extern' \
+                ' --join={} --background'.format(
                     kwbin_path, 'start --upgrade-complete', url, get_http_url_from_node_id(node_id), store_dir,
-                    'c' + str(store_id), "%02d" % node_id, store_dir+'/c' + str(store_id), get_url_from_node_id(1))
+                    'c' + str(store_id), "%02d" % node_id, store_dir+'/c' + str(store_id), store_dir, get_url_from_node_id(1))
             cmds.append(cmd)
         elif re.match('-- upgrade', sql):
             node_ids = get_nodes(sql)
             for node_id in node_ids:
                 cmd = '{}  node upgrade {} --insecure --host={}'.format(
                     kwbin_path,node_id,get_url_from_node_id(node_id)
-                )
-            cmds.append(cmd)
-        elif re.match('-- set-dead', sql):
-            node_ids = get_nodes(sql)
-            for node_id in node_ids:
-                cmd = '{}  node set-status dead --node-id={} --insecure --host={}'.format(
-                    kwbin_path,node_id,get_url_from_node_id(1)
                 )
             cmds.append(cmd)
 
@@ -366,8 +319,12 @@ if __name__ == "__main__":
                 stmt = re.sub('^ *','',stmt)
 
                 for node in last_exec_node:
-                    cmd = "{} sql --host={} --insecure --format=table --set \"errexit=false\" --echo-sql -e \"{}\" 2>&1 | tee -a {} > /dev/null".format(
-                        kwbin_path, get_url_from_node_id(node), stmt, output_file_path)
+                    if node > 5 :
+                        cmd = "{} sql --host={} --insecure --format=table --set \"errexit=false\" --echo-sql -e \"{}\" 2>&1 | tee -a {} > /dev/null".format(
+                            kwbin_path, get_url_for_join(node), stmt, output_file_path)
+                    else:
+                        cmd = "{} sql --host={} --insecure --format=table --set \"errexit=false\" --echo-sql -e \"{}\" 2>&1 | tee -a {} > /dev/null".format(
+                            kwbin_path, get_url_from_node_id(node), stmt, output_file_path)
                     cmds.append(cmd)
                 stmt = ''
             else:

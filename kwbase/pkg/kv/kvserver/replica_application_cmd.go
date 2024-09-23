@@ -157,7 +157,12 @@ func (c *replicatedCmd) CanAckBeforeApplication() bool {
 	var isTS bool
 	for _, union := range req.Requests {
 		switch union.GetInner().(type) {
-		case *roachpb.TsPutRequest, *roachpb.TsDeleteRequest, *roachpb.TsDeleteEntityRequest, *roachpb.TsTagUpdateRequest, *roachpb.TsDeleteMultiEntitiesDataRequest:
+		case *roachpb.TsPutTagRequest,
+			*roachpb.TsRowPutRequest,
+			*roachpb.TsDeleteRequest,
+			*roachpb.TsDeleteEntityRequest,
+			*roachpb.TsTagUpdateRequest,
+			*roachpb.TsDeleteMultiEntitiesDataRequest:
 			isTS = true
 			break
 		}

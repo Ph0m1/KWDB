@@ -56,8 +56,7 @@ KStatus TsTableSnapshot::Init(kwdbContext_p ctx) {
       return KStatus::FAIL;
     }
   }
-  schema_ = entity_bt_manager_->GetSchemaInfoWithHidden();
-  return KStatus::SUCCESS;
+  return entity_bt_manager_->GetSchemaInfoIncludeDropped(&schema_);
 }
 
 KStatus TsTableSnapshot::BuildSnapshot(kwdbContext_p ctx, TS_LSN lsn) {
@@ -125,7 +124,7 @@ KStatus TsTableSnapshot::GetSnapshotData(kwdbContext_p ctx, uint64_t range_group
               range_group_id, snapshot_info_.id);
     return KStatus::FAIL;
   }
-  char* get_data_area = new char[length];
+  char* get_data_area = reinterpret_cast<char*>(malloc(length));
   memset(get_data_area, 0, length);
 
   KString file_name = db_path_+ tbl_sub_path_ +
@@ -434,14 +433,17 @@ KStatus TsTableSnapshot::getMigratedTagRows() {
 KStatus TsTableSnapshot::applyTagData(int row_id, const EntityID& entity_id, const SubGroupID& subgroup_id) {
   ErrorInfo err_info;
   std::vector<TagColumn*> tag_attribute_info = entity_group_->GetSubEntityGroupTagbt()->getSchemaInfo();
-  vector<AttributeInfo> metrics_attribute_info = entity_bt_manager_->GetSchemaInfoWithoutHidden();
-
+  vector<AttributeInfo> metrics_attribute_info;
+  auto s = entity_bt_manager_->GetSchemaInfoExcludeDropped(&metrics_attribute_info);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
   ResultSet tag_res{(k_uint32)tag_attribute_info.size()};
   std::vector<uint32_t> scan_tags;
   for (int i = 0; i < tag_attribute_info.size(); i++) {
     scan_tags.push_back(i);
   }
-  snapshot_group_->GetSubEntityGroupTagbt()->getColumnsByRownum(row_id, scan_tags, &tag_res);
+  snapshot_group_->GetSubEntityGroupTagbt()->GetColumnsByRownumLocked(row_id, scan_tags, &tag_res);
   // Use PayloadBuilder to build a payload, iterate through the tag attribute information,
   // obtain the corresponding values according to different tag types, and set them to the payload.
   PayloadBuilder pl_builder(tag_attribute_info, metrics_attribute_info);
@@ -469,9 +471,13 @@ KStatus TsTableSnapshot::applyTagData(int row_id, const EntityID& entity_id, con
   }
   tag_res.clear();
 
-  const char *tag_addr = pl_builder.GetTagAddr();
+  // const char *tag_addr = pl_builder.GetTagAddr();
   // Call the insert function to insert the tag data
-  err_info.errcode = entity_group_->GetSubEntityGroupTagbt()->insert(entity_id, subgroup_id, tag_addr);
+  TSSlice payload;
+  pl_builder.Build(&payload);
+  Payload pd(entity_bt_manager_, payload);
+  err_info.errcode = entity_group_->GetSubEntityGroupTagbt()->InsertTagRecord(pd, subgroup_id, entity_id);
+  // entity_group_->getSubEntityGroupTagbt()->insert(entity_id, subgroup_id, 0, tag_addr);
   if (err_info.errcode < 0) {
     LOG_ERROR("Insert tag data failed during applyTagData, range_group_id=%ld, snapshot_id=%ld.",
               entity_group_->HashRange().range_group_id, snapshot_info_.id)
@@ -548,9 +554,13 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
 
   std::vector<k_uint32> scan_cols;
   uint32_t table_version = entity_bt_manager_->GetCurrentTableVersion();
-  vector<AttributeInfo> metrics_attribute_info = entity_bt_manager_->GetSchemaInfoWithoutHidden(table_version);
+  vector<AttributeInfo> metrics_attribute_info;
+  KStatus s = entity_bt_manager_->GetSchemaInfoExcludeDropped(&metrics_attribute_info, table_version);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
   k_uint32 num_col = metrics_attribute_info.size();
-  auto actual_cols = entity_bt_manager_->GetColsIdx(table_version);
+  auto actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
   std::vector<k_uint32> ts_scan_cols;
   for (int i = 0; i < num_col; i++) {
     scan_cols.push_back(i);
@@ -561,7 +571,7 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   // use iterator to read data from source entity group
-  KStatus s = entity_group_->GetIterator(
+  s = entity_group_->GetIterator(
       ctx, entity_id_list[0].subGroupId, {entity_id_list[0].entityId},
       {ts_span}, scan_cols, ts_scan_cols, scan_agg_types, table_version, &iter,
       entity_group_, {}, false, snapshot_info_.reorder, snapshot_info_.reorder);
@@ -598,7 +608,7 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
   }
   if (snapshot_info_.type == 0) {
     // type = 0, create snapshot, get from source entity group
-    entity_tag_bt->getColumnsByRownum(row_id, scan_tags, &tag_res);
+    entity_tag_bt->GetColumnsByRownumLocked(row_id, scan_tags, &tag_res);
   } else {
     LOG_ERROR("The function is called incorrectly, couldn't call this function when applying snapshot.");
     return KStatus::FAIL;
@@ -667,7 +677,7 @@ KStatus TsTableSnapshot::genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t 
       }
       // construct payload
       TSSlice payload_data;
-      if (!pl_builder.Build(&payload_data, table_version)) {
+      if (!pl_builder.Build(&payload_data)) {
         LOG_ERROR("Payload build failed when build snapshot, snapshot id[%lu].", snapshot_info_.id);
         return KStatus::FAIL;
       }

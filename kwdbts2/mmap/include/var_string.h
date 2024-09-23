@@ -12,13 +12,13 @@
 #pragma once
 
 #include "data_value_handler.h"
-#include "mmap/mmap_string_file.h"
+#include "mmap/mmap_string_column.h"
 
 
 class StringToVARSTRING: public StringToData {
 protected:
   BigTable *bt_;
-  MMapStringFile *strfile_;
+  MMapStringColumn *strfile_;
   int col_;
   int max_len_;
 
@@ -37,12 +37,12 @@ public:
 
   virtual void noPushToData(char *str, void *addr);
 
-  void setStringFile(MMapStringFile *sf);
+  void setStringFile(MMapStringColumn *sf);
 };
 
 class VARSTRINGToString: public DataToString {
 protected:
-  MMapStringFile *strfile_;
+  MMapStringColumn *strfile_;
 public:
   VARSTRINGToString(int max_len):
     DataToString(max_len, sizeof(size_t)) {
@@ -53,7 +53,7 @@ public:
 
   virtual string toString(void *data);
 
-  void setStringFile(MMapStringFile *sf) { strfile_ = sf; }
+  void setStringFile(MMapStringColumn *sf) { strfile_ = sf; }
 
   virtual int toString(void *data, char *str);
 

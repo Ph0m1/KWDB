@@ -439,7 +439,6 @@ func (p *PhysicalPlan) AddNoopToTsProcessors(nodeID roachpb.NodeID, local bool, 
 	if p.ResultRouters == nil {
 		return
 	}
-
 	childExecInTSEngineOld := p.ChildIsExecInTSEngine()
 	// add noop-processor to processor of time series in other Node
 	for i, idx := range p.ResultRouters {
@@ -519,18 +518,24 @@ func (p *PhysicalPlan) AddNoopForJoinToAgent(
 	leftTypes, rightTypes *[]types.T,
 ) {
 	if len(nodes) == 1 {
-		for _, idx := range leftRouters {
+		for k, idx := range leftRouters {
 			if p.Processors[idx].ExecInTSEngine && p.Processors[idx].Node != thisNodeID {
 				p.AddNoopImplementation(
-					execinfrapb.PostProcessSpec{}, idx, -1, nil, &p.ResultTypes,
+					execinfrapb.PostProcessSpec{}, idx, -1, nil, leftTypes,
 				)
+				leftRouters[k] = p.ResultRouters[k]
 			}
 		}
-		for _, idx := range rightRouters {
+		for k, idx := range rightRouters {
 			if p.Processors[idx].ExecInTSEngine && p.Processors[idx].Node != thisNodeID {
 				p.AddNoopImplementation(
-					execinfrapb.PostProcessSpec{}, idx, -1, nil, &p.ResultTypes,
+					execinfrapb.PostProcessSpec{}, idx, -1, nil, rightTypes,
 				)
+				if len(rightRouters) == len(p.ResultRouters) {
+					rightRouters[k] = p.ResultRouters[k]
+				} else {
+					rightRouters[k] = p.ResultRouters[len(leftRouters)+k]
+				}
 			}
 		}
 	} else {

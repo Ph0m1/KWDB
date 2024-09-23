@@ -33,6 +33,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/rditer"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/spanset"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
@@ -96,7 +97,7 @@ func RecomputeStats(
 	// [1]: see engine.TestBatchReadLaterWrite.
 	snap := cArgs.EvalCtx.Engine().NewSnapshot()
 	defer snap.Close()
-
+	// as for ts range, ComputeStatsForRange does nothing
 	actualMS, err := rditer.ComputeStatsForRange(desc, snap, cArgs.Header.Timestamp.WallTime)
 	if err != nil {
 		return result.Result{}, err
@@ -109,6 +110,33 @@ func RecomputeStats(
 
 	delta := actualMS
 	delta.Subtract(currentStats)
+
+	if desc.GetRangeType() == roachpb.TS_RANGE {
+		// call GetDataVolume to re compute rangeSize for ts range.
+		// GetDataVolume for relational range may cause err.
+		startTableID, startHashPoint, startTimestamp, err1 := sqlbase.DecodeTsRangeKey(desc.StartKey, true)
+		_, EndHashPoint, endTimestamp, err2 := sqlbase.DecodeTsRangeKey(desc.EndKey, false)
+
+		if err1 != nil || err2 != nil {
+			delta = enginepb.MVCCStats{}
+		} else {
+			rangeSize, err := cArgs.EvalCtx.TsEngine().GetDataVolume(
+				startTableID,
+				startHashPoint,
+				EndHashPoint,
+				startTimestamp,
+				endTimestamp,
+			)
+			if err == nil {
+				delta = enginepb.MVCCStats{
+					ValBytes:     int64(rangeSize),
+					LiveBytes:    int64(rangeSize),
+					TsPerRowSize: actualMS.TsPerRowSize,
+				}
+				delta.Subtract(currentStats)
+			}
+		}
+	}
 
 	if !dryRun {
 		// TODO(tschottdorf): do we not want to run at all if we have estimates in

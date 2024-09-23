@@ -37,6 +37,7 @@ KStatus TSxMgr::TSxCommit(kwdbContext_p ctx, const char* ts_trans_id) {
   if (status == FAIL) {
     return status;
   }
+  std::unique_lock<std::shared_mutex> lock(map_mutex_);
   ts_trans_ids_.erase(uuid);
   return SUCCESS;
 }
@@ -48,7 +49,7 @@ KStatus TSxMgr::TSxRollback(kwdbContext_p ctx, const char* ts_trans_id) {
   if (status == FAIL) {
     return status;
   }
-
+  std::unique_lock<std::shared_mutex> lock(map_mutex_);
   ts_trans_ids_.erase(uuid);
   return SUCCESS;
 }

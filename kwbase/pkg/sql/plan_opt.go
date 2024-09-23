@@ -191,6 +191,10 @@ func (p *planner) prepareUsingOptimizer(ctx context.Context) (planFlags, error) 
 func (p *planner) makeOptimizerPlan(ctx context.Context) error {
 	stmt := p.stmt
 
+	if p.ExecCfg().StartMode != StartSingleNode {
+		p.EvalContext().StartDistributeMode = true
+	}
+
 	opc := &p.optPlanningCtx
 	opc.reset()
 

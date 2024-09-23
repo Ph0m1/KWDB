@@ -2171,12 +2171,12 @@ func TestConcurrentAdminChangeReplicasRequests(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		res1, err1 = db.AdminChangeReplicas(
-			ctx, key, expects1, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, targets1...), false)
+			ctx, key, expects1, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, targets1...))
 		wg.Done()
 	}()
 	go func() {
 		res2, err2 = db.AdminChangeReplicas(
-			ctx, key, expects2, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, targets2...), false)
+			ctx, key, expects2, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, targets2...))
 		wg.Done()
 	}()
 	wg.Wait()
@@ -2251,7 +2251,7 @@ func TestRandomConcurrentAdminChangeReplicasRequests(t *testing.T) {
 	addReplicas := func() error {
 		_, err := db.AdminChangeReplicas(
 			ctx, key, rangeInfo.Desc, roachpb.MakeReplicationChanges(
-				roachpb.ADD_REPLICA, pickTargets()...), false)
+				roachpb.ADD_REPLICA, pickTargets()...))
 		return err
 	}
 	wg.Add(actors)
@@ -2890,7 +2890,7 @@ func TestChangeReplicasLeaveAtomicRacesWithMerge(t *testing.T) {
 			return db.AdminChangeReplicas(ctx, key, desc, []roachpb.ReplicationChange{
 				{ChangeType: roachpb.ADD_REPLICA, Target: tc.Target(add)},
 				{ChangeType: roachpb.REMOVE_REPLICA, Target: tc.Target(remove)},
-			}, false)
+			})
 		}
 
 		// Move the RHS and LHS to 3 from 2.
@@ -2919,7 +2919,7 @@ func TestChangeReplicasLeaveAtomicRacesWithMerge(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, err := db.AdminChangeReplicas(
-				ctx, rhs, *rhsDesc, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(2)), false,
+				ctx, rhs, *rhsDesc, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(2)),
 			)
 			// We'll ultimately fail because we're going to race with the work below.
 			msg := "descriptor changed"

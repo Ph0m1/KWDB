@@ -53,6 +53,8 @@ class TagRowBatch : public RowBatch {
                                            // allocated to each thread
   k_uint32 valid_pipe_no_{0};
 
+  std::unordered_map<k_uint32, std::vector<k_uint32>> hash_entity_indexs_;
+
   std::vector<TagSelection> selection_;
   TABLE *table_{nullptr};
 
@@ -96,11 +98,11 @@ class TagRowBatch : public RowBatch {
    *  get entityid by line
    */
   EntityResultIndex& GetEntityIndex(k_uint32 line) {
-    if (isFilter_) {
-      return entity_indexs_[selection_[line].entity_];
-    } else {
-      return entity_indexs_[line];
-    }
+    // if (isFilter_) {
+      // return entity_indexs_[selection_[line].entity_];
+    // } else {
+    return entity_indexs_[line];
+    // }
   }
 
   void AddSelection() {
@@ -118,10 +120,10 @@ class TagRowBatch : public RowBatch {
   KStatus GetTagData(TagData *tagData, void **bitmap, k_uint32 line);
   void Init(TABLE *table);
   void SetLimitOffset(k_uint32 limit, k_uint32 offset) {}
-  void SetPipeEntityNum(k_uint32 pipe_degree);
-  KStatus GetEntities(std::vector<EntityResultIndex> *entities,
-                      k_uint32 *start_tag_index);
-  bool isAllDistributed();
+  void SetPipeEntityNum(kwdbContext_p ctx, k_uint32 pipe_degree);
+  KStatus GetEntities(kwdbContext_p ctx,
+                      std::vector<EntityResultIndex> *entities);
+  bool isAllDistributed(kwdbContext_p ctx);
 };
 
 };  // namespace kwdbts

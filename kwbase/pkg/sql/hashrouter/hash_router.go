@@ -27,9 +27,9 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"math"
 
 	"gitee.com/kwbasedb/kwbase/pkg/gossip"
-	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
@@ -52,21 +52,14 @@ func init() {
 	api.GetHashRouterManagerWithTxn = GetHashRouterManagerWithTxn
 	api.GetHashRouterManagerWithCache = GetHashRouterManagerWithCache
 	api.GetHashRouterWithTable = GetHashRouterCache
-	api.GetAvailableNodeIDs = GetAvailableNodeIDs
 	api.GetHealthyNodeIDs = GetHealthyNodeIDs
-	api.TransferPartitionLease = TransferPartitionLease
-	api.AddPartitionReplicas = AddPartitionReplicas
-	api.RefreshTSRangeGroup = RefreshTSRangeGroup
-	api.RemoveUnusedTSRangeGroups = RemoveUnusedTSRangeGroups
-	api.TSRequestLease = TSRequestLease
-	api.RemovePartitionReplicas = RemovePartitionReplicas
-	api.RelocatePartitionReplicas = RelocatePartitionReplicas
+	api.GetTableNodeIDs = GetTableNodeIDs
 	api.HRManagerWLock = HRManagerWLock
 	api.HRManagerWUnLock = HRManagerWUnLock
 	api.GetHashInfoByTableID = GetHashInfoByTableID
-	api.GetHashInfoByID = GetHashInfoByID
 	api.GetHashInfoByIDInTxn = GetHashInfoByIDInTxn
 	api.GetAllHashRoutings = GetAllKWDBHashRoutings
+	api.CreateTSTable = CreateTSTable
 }
 
 // hashRouterInfo  the group distribute by table
@@ -204,43 +197,6 @@ func (mr *HRManager) GetTableGroupsOnNodeForAddNode(
 	return groups
 }
 
-// GetGroupsOnNode  get all groups on every node
-func (mr *HRManager) GetGroupsOnNode(
-	ctx context.Context, nodeID roachpb.NodeID,
-) []api.EntityRangeGroup {
-	var entityGroups []api.EntityRangeGroup
-	for _, hc := range mr.routerCaches {
-		hc.mu.RLock()
-		defer hc.mu.RUnlock()
-		for _, group := range hc.groupsMap {
-			if group.LeaseHolder.NodeID == nodeID {
-				entityGroups = append(entityGroups, *group)
-			} else {
-				for _, replica := range group.InternalReplicas {
-					if replica.NodeID == nodeID {
-						entityGroups = append(entityGroups, *group)
-						break
-					}
-				}
-			}
-		}
-	}
-	return entityGroups
-}
-
-// GetAllGroups get all table groups
-func (mr *HRManager) GetAllGroups(ctx context.Context) []api.EntityRangeGroup {
-	var groups []api.EntityRangeGroup
-	for _, hc := range mr.routerCaches {
-		hc.mu.RLock()
-		for _, group := range hc.groupsMap {
-			groups = append(groups, *group)
-		}
-		hc.mu.RUnlock()
-	}
-	return groups
-}
-
 // GetHashInfoByTableID get the table groups distribute
 func (mr *HRManager) GetHashInfoByTableID(ctx context.Context, tableID uint32) api.HashRouter {
 	var info api.HashRouter
@@ -252,11 +208,6 @@ func (mr *HRManager) GetHashInfoByTableID(ctx context.Context, tableID uint32) a
 		hc.mu.RUnlock()
 	}
 	return info
-}
-
-// GetGossipMessage return gossipMessage.
-func (mr *HRManager) GetGossipMessage() api.GossipEntityRangeGroupMessage {
-	return mr.gossipMessage
 }
 
 // InitHashRouter init the table distribute when create table
@@ -294,80 +245,183 @@ func (mr *HRManager) InitHashRouter(
 	if len(nodeList) == 0 {
 		return nil, errors.Errorf("the cluster not has available now.")
 	}
-	partitionNum := partitionBalanceNumber * int64(len(nodeList))
-	partitionSize := int(65535 / partitionNum)
-	for i, n := range nodeList {
-		// get EntityRangeGroupID
-		var entityRangeGroupID api.EntityRangeGroupID
-		if mr.execConfig.StartMode == sql.StartSingleNode {
-			entityRangeGroupID = api.EntityRangeGroupID(tableID)
-		} else {
-			entityRangeGroupID, err = GenerateUniqueEntityRangeGroupID(ctx, hrMgr.execConfig.DB)
+	var groupNum int
+	if mr.execConfig.StartMode == sql.StartSingleNode {
+		groupNum = 1
+	} else {
+		groupNum = api.HashParamV2
+	}
+	splitMode := int(settings.TSRangeSplitModeSetting.Get(mr.execConfig.SV()))
+	if splitMode == 0 {
+		for i := 0; i < groupNum; i += 4 {
+			// get EntityRangeGroupID
+			var entityRangeGroupID api.EntityRangeGroupID
+			if mr.execConfig.StartMode == sql.StartSingleNode {
+				entityRangeGroupID = api.EntityRangeGroupID(tableID)
+			} else {
+				entityRangeGroupID, err = GenerateUniqueEntityRangeGroupID(ctx, hrMgr.execConfig.DB)
+				if err != nil {
+					return nil, err
+				}
+			}
+			var internalReplicas []api.EntityRangeGroupReplica
+			leaseHolderReplicaID, err := GenerateUniqueEntityRangeReplicaID(ctx, mr.db)
 			if err != nil {
 				return nil, err
 			}
+			nodeID := nodeList[(i/4)%len(nodeList)]
+			leaseHoderReplica := api.EntityRangeGroupReplica{
+				ReplicaID: leaseHolderReplicaID,
+				NodeID:    nodeID,
+				StoreID:   getStoreIDByNodeID(nodeID, mr.storePool.GetStores()),
+			}
+			internalReplicas = append(internalReplicas, leaseHoderReplica)
+			for j := 1; j < tsRangeRplicaNum; j++ {
+				followerReplicaID, err := GenerateUniqueEntityRangeReplicaID(ctx, mr.db)
+				if err != nil {
+					return nil, err
+				}
+				// calculate the follower nodeID
+				followerIndex := (i/4)%len(nodeList) + j
+				if followerIndex > len(nodeList)-1 {
+					followerIndex %= len(nodeList)
+				}
+				// make the follower replica
+				followerReplica := api.EntityRangeGroupReplica{
+					ReplicaID: followerReplicaID,
+					NodeID:    nodeList[followerIndex],
+					StoreID:   getStoreIDByNodeID(nodeList[followerIndex], mr.storePool.GetStores()),
+				}
+				internalReplicas = append(internalReplicas, followerReplica)
+			}
+			// make entityRangeGroup
+			group := api.EntityRangeGroup{
+				GroupID:          entityRangeGroupID,
+				LeaseHolder:      leaseHoderReplica,
+				InternalReplicas: internalReplicas,
+				Status:           api.EntityRangeGroupStatus_Available,
+				TableID:          tableID,
+			}
+			partitions := make(map[uint32]api.HashPartition)
+			var tsPartition api.HashPartition
+			tsPartition.StartPoint = api.HashPoint(i)
+			tsPartition.StartTimeStamp = math.MinInt64
+			tsPartition.EndPoint = api.HashPoint(i + 4)
+			tsPartition.EndTimeStamp = math.MinInt64
+			partitions[uint32(i)] = tsPartition
+			group.Partitions = partitions
+			groupsMap[entityRangeGroupID] = &group
 		}
-		var internalReplicas []api.EntityRangeGroupReplica
-		leaseHolderReplicaID, err := GenerateUniqueEntityRangeReplicaID(ctx, mr.db)
-		if err != nil {
-			return nil, err
-		}
-		leaseHoderReplica := api.EntityRangeGroupReplica{
-			ReplicaID: leaseHolderReplicaID,
-			NodeID:    n,
-			StoreID:   getStoreIDByNodeID(n, mr.storePool.GetStores()),
-		}
-		internalReplicas = append(internalReplicas, leaseHoderReplica)
-		for j := 1; j < tsRangeRplicaNum; j++ {
-			followerReplicaID, err := GenerateUniqueEntityRangeReplicaID(ctx, mr.db)
+	} else if splitMode == 1 {
+		var partitionID uint32
+		for i := 0; i < groupNum; i += 4 {
+			// get EntityRangeGroupID
+			var entityRangeGroupID api.EntityRangeGroupID
+			if mr.execConfig.StartMode == sql.StartSingleNode {
+				entityRangeGroupID = api.EntityRangeGroupID(tableID)
+			} else {
+				entityRangeGroupID, err = GenerateUniqueEntityRangeGroupID(ctx, hrMgr.execConfig.DB)
+				if err != nil {
+					return nil, err
+				}
+			}
+			var internalReplicas []api.EntityRangeGroupReplica
+			leaseHolderReplicaID, err := GenerateUniqueEntityRangeReplicaID(ctx, mr.db)
 			if err != nil {
 				return nil, err
 			}
-			// calculate the follower nodeID
-			followerIndex := i + j
-			if followerIndex > len(nodeList)-1 {
-				followerIndex %= len(nodeList)
+			nodeID := nodeList[(i/4)%len(nodeList)]
+			leaseHoderReplica := api.EntityRangeGroupReplica{
+				ReplicaID: leaseHolderReplicaID,
+				NodeID:    nodeID,
+				StoreID:   getStoreIDByNodeID(nodeID, mr.storePool.GetStores()),
 			}
-			// make the follower replica
-			followerReplica := api.EntityRangeGroupReplica{
-				ReplicaID: followerReplicaID,
-				NodeID:    nodeList[followerIndex],
-				StoreID:   getStoreIDByNodeID(nodeList[followerIndex], mr.storePool.GetStores()),
+			internalReplicas = append(internalReplicas, leaseHoderReplica)
+			for j := 1; j < tsRangeRplicaNum; j++ {
+				followerReplicaID, err := GenerateUniqueEntityRangeReplicaID(ctx, mr.db)
+				if err != nil {
+					return nil, err
+				}
+				// calculate the follower nodeID
+				followerIndex := (i/4)%len(nodeList) + j
+				if followerIndex > len(nodeList)-1 {
+					followerIndex %= len(nodeList)
+				}
+				// make the follower replica
+				followerReplica := api.EntityRangeGroupReplica{
+					ReplicaID: followerReplicaID,
+					NodeID:    nodeList[followerIndex],
+					StoreID:   getStoreIDByNodeID(nodeList[followerIndex], mr.storePool.GetStores()),
+				}
+				internalReplicas = append(internalReplicas, followerReplica)
 			}
-			internalReplicas = append(internalReplicas, followerReplica)
+			// make entityRangeGroup
+			group := api.EntityRangeGroup{
+				GroupID:          entityRangeGroupID,
+				LeaseHolder:      leaseHoderReplica,
+				InternalReplicas: internalReplicas,
+				Status:           api.EntityRangeGroupStatus_Available,
+				TableID:          tableID,
+			}
+			partitions := make(map[uint32]api.HashPartition)
+			switch i / 4 {
+			case 2:
+				for k := 0; k < 4; k++ {
+					var tsPartition api.HashPartition
+					tsPartition.StartPoint = api.HashPoint(i + k)
+					tsPartition.StartTimeStamp = math.MinInt64
+					tsPartition.EndPoint = api.HashPoint(i + k + 1)
+					tsPartition.StartTimeStamp = math.MinInt64
+					partitions[partitionID] = tsPartition
+					partitionID++
+				}
+			case 3:
+				for k := 0; k < 4; k++ {
+					var tsPartition api.HashPartition
+					tsPartition.StartPoint = api.HashPoint(i + k)
+					tsPartition.StartTimeStamp = math.MinInt64
+					tsPartition.EndPoint = api.HashPoint(i + k + 1)
+					tsPartition.StartTimeStamp = 1681111110000
+					partitions[partitionID] = tsPartition
+					partitionID++
+					tsPartition.StartPoint = api.HashPoint(i + k)
+					tsPartition.StartTimeStamp = 1681111110000
+					tsPartition.EndPoint = api.HashPoint(i + k + 1)
+					tsPartition.StartTimeStamp = math.MinInt64
+					partitions[partitionID] = tsPartition
+					partitionID++
+				}
+			case 4:
+				for k := 0; k < 4; k++ {
+					var tsPartition api.HashPartition
+					tsPartition.StartPoint = api.HashPoint(i + k)
+					tsPartition.StartTimeStamp = math.MinInt64
+					tsPartition.EndPoint = api.HashPoint(i + k)
+					tsPartition.StartTimeStamp = -1681111110000
+					partitions[partitionID] = tsPartition
+					partitionID++
+					tsPartition.StartPoint = api.HashPoint(i + k)
+					tsPartition.StartTimeStamp = -1681111110000
+					tsPartition.EndPoint = api.HashPoint(i + k + 1)
+					tsPartition.StartTimeStamp = math.MinInt64
+					partitions[partitionID] = tsPartition
+					partitionID++
+				}
+			default:
+				var tsPartition api.HashPartition
+				tsPartition.StartPoint = api.HashPoint(i)
+				tsPartition.StartTimeStamp = math.MinInt64
+				tsPartition.EndPoint = api.HashPoint(i + 4)
+				tsPartition.EndTimeStamp = math.MinInt64
+				partitions[partitionID] = tsPartition
+				partitionID++
+			}
+			group.Partitions = partitions
+			groupsMap[entityRangeGroupID] = &group
 		}
-		// make entityRangeGroup
-		group := api.EntityRangeGroup{
-			GroupID:          entityRangeGroupID,
-			Partitions:       make(map[uint32]api.HashPartition),
-			LeaseHolder:      leaseHoderReplica,
-			InternalReplicas: internalReplicas,
-			Status:           api.EntityRangeGroupStatus_Available,
-			TableID:          tableID,
-		}
-		groupsMap[entityRangeGroupID] = &group
 	}
-
-	// distribute the HashPartition for every entityRangeGroup
-	var groupIDs []api.EntityRangeGroupID
-	for _, group := range groupsMap {
-		groupIDs = append(groupIDs, group.GroupID)
-	}
-	for j := 0; j < int(partitionNum); j++ {
-		var tsPartition api.HashPartition
-		tsPartition.StartPoint = api.HashPoint(partitionSize * j)
-		if j+1 == int(partitionNum) {
-			tsPartition.EndPoint = 65535
-		} else {
-			tsPartition.EndPoint = api.HashPoint(partitionSize * (j + 1))
-		}
-		groupsMap[groupIDs[j%len(groupIDs)]].Partitions[uint32(j)] = tsPartition
-	}
-
 	router := &hashRouterInfo{
-		hashPartitionSize: partitionSize,
-		hashPartitionNum:  partitionNum,
-		groupsMap:         groupsMap,
+		groupsMap: groupsMap,
 	}
 	var kwdbHashRoutings []api.KWDBHashRouting
 	for id, group := range groupsMap {
@@ -375,7 +429,6 @@ func (mr *HRManager) InitHashRouter(
 			EntityRangeGroupId: id,
 			TableID:            tableID,
 			EntityRangeGroup:   *group,
-			TsPartitionSize:    int32(partitionSize),
 		})
 	}
 	err = mr.PutHashInfo(ctx, txn, kwdbHashRoutings)
@@ -409,46 +462,6 @@ func GetHashRouterManagerWithCache() api.HashRouterManager {
 	return hrMgr
 }
 
-// GetAvailableNodeIDs get all available nodeID
-func GetAvailableNodeIDs(ctx context.Context) ([]roachpb.NodeID, error) {
-	var NodeIDList []roachpb.NodeID
-	nodeStatus, err := hrMgr.execConfig.StatusServer.Nodes(ctx, &serverpb.NodesRequest{})
-	if err != nil {
-		return nil, err
-	}
-	for _, n := range nodeStatus.Nodes {
-		var liveness storagepb.Liveness
-		key := keys.NodeLivenessKey(n.Desc.NodeID)
-		err = hrMgr.db.GetProto(ctx, key, &liveness)
-		if err != nil {
-			log.Error(ctx, errors.Wrap(err, "get liveness failed"))
-			liveness, err = hrMgr.nodeLiveness.GetLiveness(n.Desc.NodeID)
-			if err != nil {
-				return nil, err
-			}
-		}
-		switch liveness.Status {
-		case kvserver.Dead, kvserver.Decommissioned:
-			continue
-		case kvserver.ReJoining:
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the cluster has node rejoining")
-		case kvserver.Decommissioning:
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the cluster has node decommissioning")
-		case kvserver.Joining:
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the cluster has node joining")
-		case kvserver.UnHealthy:
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the cluster has node unhealthy")
-		case kvserver.Upgrading:
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the cluster has node upgrading")
-		case kvserver.PreJoin:
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the cluster has node prejoin")
-		default:
-			NodeIDList = append(NodeIDList, n.Desc.NodeID)
-		}
-	}
-	return NodeIDList, nil
-}
-
 // GetHealthyNodeIDs get all healthy nodes
 func GetHealthyNodeIDs(ctx context.Context) ([]roachpb.NodeID, error) {
 	var NodeIDList []roachpb.NodeID
@@ -456,14 +469,10 @@ func GetHealthyNodeIDs(ctx context.Context) ([]roachpb.NodeID, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, n := range nodeStatus.Nodes {
-		liveliness, err := hrMgr.nodeLiveness.GetLiveness(n.Desc.NodeID)
-		if err != nil {
-			return nil, err
-		}
-		switch liveliness.Status {
-		case kvserver.Healthy:
-			NodeIDList = append(NodeIDList, n.Desc.NodeID)
+	for id, n := range nodeStatus.LivenessByNodeID {
+		switch n {
+		case storagepb.NodeLivenessStatus_LIVE:
+			NodeIDList = append(NodeIDList, id)
 		}
 	}
 	if len(NodeIDList) == 0 {
@@ -507,29 +516,15 @@ func (hc *hashRouterInfo) GetNodeIDByPrimaryTag(
 	}
 	if api.MppMode {
 
-		for _, n := range nodeStatus.Nodes {
-			var liveness storagepb.Liveness
-			key := keys.NodeLivenessKey(n.Desc.NodeID)
-			err = hrMgr.db.GetProto(ctx, key, &liveness)
-			if err != nil {
-				log.Error(ctx, errors.Wrap(err, "get liveness failed"))
-				liveness, err = hrMgr.nodeLiveness.GetLiveness(n.Desc.NodeID)
-				if err != nil {
-					return nil, pgerror.Newf(pgcode.SQLRoutineException, "get node %v liveness failed: %+v", n.Desc.NodeID, err)
-				}
-			}
-			switch liveness.Status {
-			case kvserver.Dead, kvserver.Decommissioned:
+		for _, n := range nodeStatus.LivenessByNodeID {
+			switch n {
+			case storagepb.NodeLivenessStatus_DEAD:
 				return nil, pgerror.New(pgcode.SQLRoutineException, "the cluster has node dead")
-			case kvserver.ReJoining:
-				return nil, pgerror.New(pgcode.SQLRoutineException, "the cluster has node rejoining")
-			case kvserver.Decommissioning:
+			case storagepb.NodeLivenessStatus_DECOMMISSIONING:
 				return nil, pgerror.New(pgcode.SQLRoutineException, "the cluster has node decommissioning")
-			case kvserver.Joining:
-				return nil, pgerror.New(pgcode.SQLRoutineException, "the cluster has node joining")
-			case kvserver.UnHealthy:
+			case storagepb.NodeLivenessStatus_UNAVAILABLE:
 				return nil, pgerror.New(pgcode.SQLRoutineException, "the cluster has node unhealthy")
-			case kvserver.Upgrading:
+			case storagepb.NodeLivenessStatus_UPGRADING:
 				return nil, pgerror.New(pgcode.SQLRoutineException, "the cluster has node upgrading")
 			default:
 				continue
@@ -543,20 +538,9 @@ func (hc *hashRouterInfo) GetNodeIDByPrimaryTag(
 		if err != nil {
 			return nil, err
 		}
-		hash := fnv32.Sum32() % api.HashParam
-		if hc.hashPartitionSize == 0 {
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the table : %v partitions size is 0.", hc.tableID)
-		}
-		if hc.hashPartitionNum == 0 {
-			return nil, pgerror.Newf(pgcode.SQLRoutineException, "the table : %v partitions num is 0.", hc.tableID)
-		}
-		// calculate the HashPartitionID, if HashPoint/HashPartition > partition num use the max ID
-		hashPartitionID := hash / uint32(hc.hashPartitionSize)
-		if hashPartitionID == uint32(hc.hashPartitionNum) {
-			hashPartitionID--
-		}
+		hash := fnv32.Sum32() % api.HashParamV2
 		for _, v := range hc.groupsMap {
-			if _, ok := v.Partitions[hashPartitionID]; ok {
+			if _, ok := v.Partitions[hash]; ok {
 				if v.Status == api.EntityRangeGroupStatus_transferring {
 					return nil, pgerror.Newf(pgcode.SQLRoutineException, "entity group %v status is: %v", v.GroupID, v.Status)
 				}
@@ -611,6 +595,10 @@ func (hc *hashRouterInfo) GetPartitionByPoint(
 func (hc *hashRouterInfo) GetGroupIDByPrimaryTag(
 	ctx context.Context, primaryTag []byte,
 ) (api.EntityRangeGroupID, error) {
+	var groupID api.EntityRangeGroupID
+	if api.MppMode {
+		return api.EntityRangeGroupID(hc.tableID), nil
+	}
 	hc.mu.RLock()
 	defer hc.mu.RUnlock()
 	// calculate HashPoint
@@ -619,28 +607,15 @@ func (hc *hashRouterInfo) GetGroupIDByPrimaryTag(
 	if err != nil {
 		return 0, pgerror.Wrap(err, pgcode.SQLRoutineException, fmt.Sprintf("calculate hash point from primary tag %v failed", primaryTag))
 	}
-	hash := fnv32.Sum32() % api.HashParam
-	// calculate HashPartitionID,
-	if hc.hashPartitionSize == 0 {
-		return 0, pgerror.Newf(pgcode.SQLRoutineException, "the table : %v partitions size is 0.", hc.tableID)
-	}
-	if hc.hashPartitionNum == 0 {
-		return 0, pgerror.Newf(pgcode.SQLRoutineException, "the table : %v partitions num is 0.", hc.tableID)
-	}
-	hashPartitionID := hash / uint32(hc.hashPartitionSize)
-	if hashPartitionID == uint32(hc.hashPartitionNum) {
-		hashPartitionID--
-	}
-	var groupID api.EntityRangeGroupID
-	for key, v := range hc.groupsMap {
-		if _, ok := v.Partitions[hashPartitionID]; ok {
+	hash := fnv32.Sum32() % api.HashParamV2
+
+	for _, v := range hc.groupsMap {
+		if _, ok := v.Partitions[hash]; ok {
 			if v.Status == api.EntityRangeGroupStatus_transferring {
 				return 0, pgerror.Newf(pgcode.SQLRoutineException, "entity group %v status is: %v", v.GroupID, v.Status)
 			}
-			groupID = key
+			groupID = v.GroupID
 			break
-		} else {
-			continue
 		}
 	}
 	fnv32.Reset()
@@ -817,495 +792,12 @@ func (hc *hashRouterInfo) GetAllGroups(ctx context.Context) []api.EntityRangeGro
 	return groups
 }
 
-// AddNode node join to the cluster
-func (mr *HRManager) AddNode(
-	ctx context.Context,
-	nodeID roachpb.NodeID,
-	tableID uint32,
-	stores map[roachpb.StoreID]roachpb.StoreDescriptor,
-) ([]api.EntityRangeGroupChange, error) {
-	log.Info(ctx, "join Node, %v", nodeID)
-	//var message []api.EntityRangePartitionMessage
-	var groupChanges []api.EntityRangeGroupChange
-	if !mr.checkTableExists(ctx, nil, tableID) {
-		return nil, fmt.Errorf("the table %v HashRingCache is not exist", tableID)
-	}
-
-	hc, ok := mr.routerCaches[tableID]
-	if !ok {
-		return nil, fmt.Errorf("the table %v HashRingCache is not exist", tableID)
-	}
-	if hc.hashPartitionSize == 0 {
-		return nil, errors.Errorf("the table : %v partitions size is 0.", hc.tableID)
-	}
-
-	available, msg := allGroupAvailable(hc.groupsMap)
-	if !available {
-		return nil, errors.Errorf(msg)
-	}
-	hc.mu.Lock()
-	defer hc.mu.Unlock()
-	var groupIDs []api.EntityRangeGroupID
-	for _, v := range hc.groupsMap {
-		groupIDs = append(groupIDs, v.GroupID)
-	}
-	groupChangesOnAddNode(nodeID, hc.groupsMap, stores)
-	groupChanges = addMessageFromGroupChange(hc.groupsMap, nodeID, stores, hc.hashPartitionSize)
-
-	return groupChanges, nil
-}
-
-// RemoveNode node decommission from the cluster
-func (mr *HRManager) RemoveNode(
-	ctx context.Context,
-	nodeID roachpb.NodeID,
-	tableID uint32,
-	stores map[roachpb.StoreID]roachpb.StoreDescriptor,
-) ([]api.EntityRangeGroupChange, error) {
-
-	exist, available := mr.checkTableIsAvailable(ctx, tableID)
-	// descriptor not exist
-	if !exist {
-		return nil, nil
-	}
-	hc, ok := mr.routerCaches[tableID]
-	if !ok {
-		return nil, fmt.Errorf("Can not find table %v hashRouter in HashRingCache", tableID)
-	}
-	available, msg := allGroupAvailable(hc.groupsMap)
-	if !available {
-		return nil, errors.Errorf(msg)
-	}
-	if hc.hashPartitionSize == 0 {
-		return nil, errors.Errorf("the table : %v partitions size is 0.", hc.tableID)
-	}
-
-	hc.mu.Lock()
-	// the transfer follower
-	replicaSize := make(map[roachpb.NodeID]int)
-	leaseHolderSize := make(map[roachpb.NodeID]int)
-	for _, hashInfo := range mr.routerCaches {
-		for _, group := range hashInfo.groupsMap {
-			for _, replica := range group.InternalReplicas {
-				if replica.ReplicaID == group.LeaseHolder.ReplicaID {
-					leaseHolderSize[replica.NodeID]++
-				}
-				replicaSize[replica.NodeID]++
-			}
-		}
-	}
-	delete(replicaSize, nodeID)
-	delete(leaseHolderSize, nodeID)
-	for _, group := range hc.groupsMap {
-		// map copy
-		freeSize := make(map[roachpb.NodeID]int)
-		for k, v := range replicaSize {
-			freeSize[k] = v
-		}
-		var changeReplicaID uint64
-		var leaseHolderChange bool
-		for _, replica := range group.InternalReplicas {
-			if replica.NodeID == nodeID {
-				if replica.ReplicaID == group.LeaseHolder.ReplicaID {
-					leaseHolderChange = true
-				}
-				changeReplicaID = replica.ReplicaID
-			}
-			delete(freeSize, replica.NodeID)
-		}
-		if changeReplicaID != 0 {
-			group.Status = api.EntityRangeGroupStatus_relocating
-			var minNode roachpb.NodeID
-			if leaseHolderChange {
-				minNode = minRangeGroupNode(leaseHolderSize)
-				_, ok := freeSize[minNode]
-				if !ok {
-					for _, replica := range group.InternalReplicas {
-						if replica.NodeID == minNode {
-							group.LeaseHolderChange = replica
-						}
-					}
-					leaseHolderSize[minNode]++
-					minNode = minRangeGroupNode(freeSize)
-				} else {
-					leaseHolderSize[minNode]++
-				}
-			} else {
-				minNode = minRangeGroupNode(freeSize)
-			}
-			group.GroupChanges = append(group.GroupChanges, api.EntityRangeGroupReplica{
-				ReplicaID: changeReplicaID,
-				NodeID:    minNode,
-				StoreID:   getStoreIDByNodeID(minNode, stores),
-			})
-			replicaSize[minNode]++
-		}
-	}
-	groupChanges := addMessageFromGroupChange(hc.groupsMap, nodeID, stores, hc.hashPartitionSize)
-
-	hc.mu.Unlock()
-
-	return groupChanges, nil
-}
-
-// RandomChange generate random change
-func (mr *HRManager) RandomChange(
-	ctx context.Context, stores map[roachpb.StoreID]roachpb.StoreDescriptor,
-) (api.EntityRangePartitionMessage, error) {
-	var message api.EntityRangePartitionMessage
-	nodes, err := api.GetHealthyNodeIDs(ctx)
-	if err != nil {
-		return api.EntityRangePartitionMessage{}, err
-	}
-
-	var replicas []api.EntityRangeGroupReplica
-	for i, node := range nodes {
-		if i < 3 {
-			replicas = append(replicas, api.EntityRangeGroupReplica{
-				NodeID:  node,
-				StoreID: getStoreIDByNodeID(node, stores),
-			})
-		}
-	}
-	message.Partition = api.HashPartition{StartPoint: 0, EndPoint: api.HashParam}
-	message.DestLeaseHolder = replicas[0]
-	message.DestInternalReplicas = replicas
-
-	return message, nil
-}
-
-// IsNodeDead the replica change when node dead
-func (mr *HRManager) IsNodeDead(
-	ctx context.Context, nodeID roachpb.NodeID, tableID uint32,
-) ([]api.EntityRangeGroupChange, error) {
-	var message []api.EntityRangePartitionMessage
-	var groupChanges []api.EntityRangeGroupChange
-
-	hc, ok := mr.routerCaches[tableID]
-	if !ok {
-		return nil, fmt.Errorf("Can not find table %v hashRouter in HashRingCache", tableID)
-	}
-	available, msg := allGroupAvailable(hc.groupsMap)
-	if !available {
-		return nil, errors.Errorf(msg)
-	}
-	replicaNum := int(settings.DefaultEntityRangeReplicaNum.Get(hrMgr.execConfig.SV()))
-	// get all nodes
-	nodeStatus, err := hrMgr.execConfig.StatusServer.Nodes(ctx, &serverpb.NodesRequest{})
-	if err != nil {
-		return nil, err
-	}
-	if nodeStatus.LivenessByNodeID[nodeID] == storagepb.NodeLivenessStatus_LIVE {
-		log.Infof(ctx, "node %v recovered, do nothing", nodeID)
-		return nil, nil
-	}
-	nodeList := make(map[roachpb.NodeID]int)
-	for _, n := range nodeStatus.Nodes {
-		// filterate unavailable node
-		if nodeStatus.LivenessByNodeID[n.Desc.NodeID] == storagepb.NodeLivenessStatus_LIVE {
-			nodeList[n.Desc.NodeID] = 0
-		}
-	}
-	if len(nodeList) < replicaNum {
-		log.Infof(ctx, "has no enough nodes")
-		return nil, nil
-	}
-	if hc.hashPartitionSize == 0 {
-		return nil, errors.Errorf("the table : %v partitions' size is 0.", hc.tableID)
-	}
-	hc.mu.Lock()
-	for _, hashInfo := range hrMgr.routerCaches {
-		for _, group := range hashInfo.groupsMap {
-			for _, replica := range group.InternalReplicas {
-				if _, ok := nodeList[replica.NodeID]; ok {
-					nodeList[replica.NodeID]++
-				}
-			}
-		}
-	}
-	var kwdbHashRoutings []api.KWDBHashRouting
-	for _, group := range hc.groupsMap {
-		var destInternalReplicas []api.EntityRangeGroupReplica
-		needRelocate := false
-		var replicaID uint64
-		for _, replica := range group.InternalReplicas {
-			if replica.NodeID == nodeID {
-				needRelocate = true
-				replicaID = replica.ReplicaID
-			}
-		}
-		if !needRelocate {
-			continue
-		}
-		freeNode := make(map[roachpb.NodeID]int)
-		for node, size := range nodeList {
-			freeNode[node] = size
-		}
-		log.Infof(ctx, "setting group %v status", group.GroupID)
-		availableCnt := 0
-		for _, replica := range group.InternalReplicas {
-			delete(freeNode, replica.NodeID)
-			if _, ok := nodeList[replica.NodeID]; ok {
-				availableCnt++
-				destInternalReplicas = append(destInternalReplicas, replica)
-			}
-		}
-		if len(freeNode) > 0 && availableCnt > replicaNum/2 {
-			relocateNodeID := minRangeGroupNode(freeNode)
-			replica := api.EntityRangeGroupReplica{
-				ReplicaID: replicaID,
-				NodeID:    relocateNodeID,
-				StoreID:   getStoreIDByNodeID(relocateNodeID, mr.storePool.GetStores()),
-			}
-			group.GroupChanges = append(group.GroupChanges, replica)
-			destInternalReplicas = append(destInternalReplicas, replica)
-			group.Status = api.EntityRangeGroupStatus_adding
-		} else {
-			// don't change
-			destInternalReplicas = group.InternalReplicas
-			log.Warningf(ctx, "lack of node or replica, free node 0, available replica %v", availableCnt)
-		}
-
-		if group.Status != api.EntityRangeGroupStatus_adding {
-			continue
-		}
-		gc := api.EntityRangeGroupChange{}
-
-		for _, partition := range group.Partitions {
-			partitionMsg := api.EntityRangePartitionMessage{
-				Partition:            partition,
-				SrcLeaseHolder:       group.LeaseHolder,
-				SrcInternalReplicas:  group.InternalReplicas,
-				DestLeaseHolder:      group.LeaseHolder,
-				DestInternalReplicas: destInternalReplicas,
-			}
-			message = append(message, partitionMsg)
-			gc.Messages = append(gc.Messages, partitionMsg)
-		}
-		routing := api.KWDBHashRouting{
-			EntityRangeGroupId: group.GroupID,
-			TableID:            tableID,
-			EntityRangeGroup:   *group,
-			TsPartitionSize:    int32(hc.hashPartitionSize),
-		}
-		// write to dish
-		kwdbHashRoutings = append(kwdbHashRoutings, routing)
-
-		gc.Routing = routing
-		groupChanges = append(groupChanges, gc)
-	}
-	hc.mu.Unlock()
-
-	return groupChanges, nil
-}
-
-// ReStartNode the replica change when dead node rejoin
-func (mr *HRManager) ReStartNode(
-	ctx context.Context, nodeID roachpb.NodeID, tableID uint32,
-) ([]api.EntityRangeGroupChange, error) {
-	var message []api.EntityRangePartitionMessage
-	var groupChanges []api.EntityRangeGroupChange
-
-	hc, ok := mr.routerCaches[tableID]
-	if !ok {
-		return nil, fmt.Errorf("Can not find table %v hashRouter in HashRingCache", tableID)
-	}
-	available, msg := allGroupAvailable(hc.groupsMap)
-	if !available {
-		return nil, errors.Errorf(msg)
-	}
-	if hc.hashPartitionSize == 0 {
-		return nil, errors.Errorf("the table : %v partitions' size is 0.", hc.tableID)
-	}
-
-	replicaNum := int(settings.DefaultEntityRangeReplicaNum.Get(hrMgr.execConfig.SV()))
-	hc.mu.Lock()
-	for _, group := range hc.groupsMap {
-		var destInternalReplicas []api.EntityRangeGroupReplica
-		availableCnt := 0
-
-		for _, replica := range group.InternalReplicas {
-			if replica.Status == api.EntityRangeGroupReplicaStatus_unavailable {
-				if replica.NodeID == nodeID {
-					group.Status = api.EntityRangeGroupStatus_transferring
-					replica.Status = api.EntityRangeGroupReplicaStatus_available
-					group.GroupChanges = append(group.GroupChanges, replica)
-					availableCnt++
-				}
-			} else {
-				availableCnt++
-			}
-			destInternalReplicas = append(destInternalReplicas, replica)
-		}
-		if group.Status != api.EntityRangeGroupStatus_transferring {
-			continue
-		}
-		destLeaseHolder := group.LeaseHolder
-		// Coincidentally restoring the Raft consensus capability and currently having no leaseholder, elect a new leaseholder
-		if availableCnt == replicaNum/2+1 && group.LeaseHolder.Status != api.EntityRangeGroupReplicaStatus_available {
-			destLeaseHolder = group.GroupChanges[0]
-			group.LeaseHolderChange = destLeaseHolder
-		}
-		gc := api.EntityRangeGroupChange{}
-
-		for _, partition := range group.Partitions {
-			partitionMsg := api.EntityRangePartitionMessage{
-				Partition:            partition,
-				SrcLeaseHolder:       group.LeaseHolder,
-				SrcInternalReplicas:  group.InternalReplicas,
-				DestLeaseHolder:      destLeaseHolder,
-				DestInternalReplicas: destInternalReplicas,
-			}
-			message = append(message, partitionMsg)
-			gc.Messages = append(gc.Messages, partitionMsg)
-
-		}
-		// write to disk
-		routing := api.KWDBHashRouting{
-			EntityRangeGroupId: group.GroupID,
-			TableID:            tableID,
-			EntityRangeGroup:   *group,
-			TsPartitionSize:    int32(hc.hashPartitionSize),
-		}
-		gc.Routing = routing
-		groupChanges = append(groupChanges, gc)
-
-	}
-	hc.mu.Unlock()
-	return groupChanges, nil
-
-}
-
 // PutSingleHashInfoWithLock push hash info with lock.
 func (mr *HRManager) PutSingleHashInfoWithLock(
 	ctx context.Context, tableID uint32, txn *kv.Txn, routing api.KWDBHashRouting,
 ) (err error) {
 	err = mr.PutHashInfo(ctx, txn, []api.KWDBHashRouting{routing})
 	return err
-}
-
-// IsNodeUnhealthy the replica change when dead unhealthy
-func (mr *HRManager) IsNodeUnhealthy(
-	ctx context.Context, nodeID roachpb.NodeID, tableID uint32,
-) ([]api.EntityRangeGroupChange, error) {
-	var message []api.EntityRangePartitionMessage
-	var groupChanges []api.EntityRangeGroupChange
-	nodeStatus, err := hrMgr.execConfig.StatusServer.Nodes(ctx, &serverpb.NodesRequest{})
-	if err != nil {
-		return nil, err
-	}
-	if nodeStatus.LivenessByNodeID[nodeID] == storagepb.NodeLivenessStatus_LIVE {
-		log.Infof(ctx, "node %d recovered, do nothing", nodeID)
-		return nil, nil
-	}
-	hc, ok := mr.routerCaches[tableID]
-	if !ok {
-		return nil, fmt.Errorf("Can not find table %v hashRouter in HashRingCache", tableID)
-	}
-	available, msg := allGroupAvailable(hc.groupsMap)
-	if !available {
-		return nil, errors.Errorf(msg)
-	}
-
-	if hc.hashPartitionSize == 0 {
-		return nil, errors.Errorf("the table : %v partitions size is 0.", hc.tableID)
-	}
-
-	nodeList := make(map[roachpb.NodeID]interface{})
-	nodeLeaseHolders := make(map[roachpb.NodeID]int)
-	for _, n := range nodeStatus.Nodes {
-		// Filter unavailable nodes
-		if nodeStatus.LivenessByNodeID[n.Desc.NodeID] == storagepb.NodeLivenessStatus_LIVE {
-			nodeList[n.Desc.NodeID] = struct{}{}
-		}
-	}
-	for _, hashInfo := range hrMgr.routerCaches {
-		for _, group := range hashInfo.groupsMap {
-			if _, ok := nodeList[group.LeaseHolder.NodeID]; ok {
-				nodeLeaseHolders[group.LeaseHolder.NodeID]++
-			}
-		}
-	}
-	log.Infof(ctx, "live nodes %v, %+v", len(nodeList), nodeList)
-	replicaNum := int(settings.DefaultEntityRangeReplicaNum.Get(mr.execConfig.SV()))
-	var kwdbHashRoutings []api.KWDBHashRouting
-	hc.mu.Lock()
-	for _, group := range hc.groupsMap {
-		var destLeaseHolder api.EntityRangeGroupReplica
-		var destInternalReplicas []api.EntityRangeGroupReplica
-		needHandle := false
-		for _, replica := range group.InternalReplicas {
-			if replica.NodeID == nodeID {
-				needHandle = true
-			}
-		}
-		if !needHandle {
-			continue
-		}
-		availableCnt := 0
-		possibleNextLeaseHolderIdx := -1
-		for i, replica := range group.InternalReplicas {
-			if replica.NodeID == nodeID {
-				replica.Status = api.EntityRangeGroupReplicaStatus_unavailable
-				group.GroupChanges = append(group.GroupChanges, replica)
-			}
-			destInternalReplicas = append(destInternalReplicas, replica)
-			if _, ok := nodeList[replica.NodeID]; ok {
-				availableCnt++
-				if possibleNextLeaseHolderIdx != -1 {
-					if nodeLeaseHolders[group.InternalReplicas[possibleNextLeaseHolderIdx].NodeID] > nodeLeaseHolders[replica.NodeID] {
-						possibleNextLeaseHolderIdx = i
-					}
-				} else {
-					possibleNextLeaseHolderIdx = i
-				}
-			}
-		}
-		if availableCnt < replicaNum/2+1 {
-			log.Warningf(ctx, "available replicas %v is not enough for %v, don't transfer", availableCnt, replicaNum)
-			group.Status = api.EntityRangeGroupStatus_lacking
-			if nodeID == group.LeaseHolder.NodeID {
-				group.LeaseHolder.Status = api.EntityRangeGroupReplicaStatus_unavailable
-			}
-			destLeaseHolder = group.LeaseHolder
-		} else {
-			group.Status = api.EntityRangeGroupStatus_transferring
-			if nodeID == group.LeaseHolder.NodeID {
-				group.LeaseHolder.Status = api.EntityRangeGroupReplicaStatus_unavailable
-				destLeaseHolder = group.InternalReplicas[possibleNextLeaseHolderIdx]
-				group.LeaseHolderChange = destLeaseHolder
-			} else {
-				destLeaseHolder = group.LeaseHolder
-			}
-		}
-		gc := api.EntityRangeGroupChange{}
-
-		for _, partition := range group.Partitions {
-			partitionMsg := api.EntityRangePartitionMessage{
-				Partition:            partition,
-				SrcLeaseHolder:       group.LeaseHolder,
-				SrcInternalReplicas:  group.InternalReplicas,
-				DestLeaseHolder:      destLeaseHolder,
-				DestInternalReplicas: destInternalReplicas,
-			}
-			message = append(message, partitionMsg)
-			gc.Messages = append(gc.Messages, partitionMsg)
-		}
-
-		// write to disk
-		routing := api.KWDBHashRouting{
-			EntityRangeGroupId: group.GroupID,
-			TableID:            tableID,
-			EntityRangeGroup:   *group,
-			TsPartitionSize:    int32(hc.hashPartitionSize),
-		}
-		kwdbHashRoutings = append(kwdbHashRoutings, routing)
-		gc.Routing = routing
-		groupChanges = append(groupChanges, gc)
-	}
-	hc.mu.Unlock()
-
-	return groupChanges, nil
 }
 
 // IsNodeUpgrading the replica change when node upgrading
@@ -1883,241 +1375,6 @@ func (mr *HRManager) RefreshHashRouterForGroups(
 	return nil
 }
 
-// ReSetHashRouterForWithFailedSingleGroup reset hash router with failed single group.
-func (mr *HRManager) ReSetHashRouterForWithFailedSingleGroup(
-	ctx context.Context,
-	tableID uint32,
-	txn *kv.Txn,
-	msg string,
-	nodeStatus storagepb.NodeLivenessStatus,
-	groups map[api.EntityRangeGroupID]struct{},
-) error {
-	log.Infof(ctx, "refresh table %v hash router, detail:%v ", tableID, msg)
-	ring, ok := mr.routerCaches[tableID]
-	if !ok {
-		return fmt.Errorf("Can not find table %v hashRouter in HashRingCache", tableID)
-	}
-	ring.mu.Lock()
-	defer ring.mu.Unlock()
-	for _, group := range ring.groupsMap {
-		if group.Status == api.EntityRangeGroupStatus_relocating {
-			_, change := groups[group.GroupID]
-			if !change {
-				group.PartitionChanges = nil
-				group.GroupChanges = nil
-				group.Status = api.EntityRangeGroupStatus_Available
-				group.NodeStatus = nodeStatus
-				continue
-			}
-		}
-	}
-	var hashRoutings []api.KWDBHashRouting
-	for id, group := range ring.groupsMap {
-		hashRoutings = append(hashRoutings, api.KWDBHashRouting{
-			EntityRangeGroupId: id,
-			TableID:            tableID,
-			EntityRangeGroup:   *group,
-			TsPartitionSize:    int32(ring.hashPartitionSize),
-		})
-	}
-
-	err := mr.PutHashInfo(ctx, txn, hashRoutings)
-	if err != nil {
-		return fmt.Errorf("Put Info To Disk Error : %v ", err)
-	}
-	for id, group := range ring.groupsMap {
-		if len(group.Partitions) == 0 {
-			hashRoutings = append(hashRoutings, api.KWDBHashRouting{
-				EntityRangeGroupId: id,
-				TableID:            tableID,
-				EntityRangeGroup:   api.EntityRangeGroup{},
-				TsPartitionSize:    int32(ring.hashPartitionSize),
-			})
-			delete(ring.groupsMap, id)
-			err = mr.DeleteHashRoutingByID(ctx, txn, uint32(id))
-			if err != nil {
-				return err
-			}
-		}
-	}
-	log.Infof(ctx, "refresh table %v hash router succeed", tableID)
-	return nil
-}
-
-// RefreshHashRouterForGroupsWithSingleGroup After the replica migration is completed, call this interface to complete the update of the hashRouter
-func (mr *HRManager) RefreshHashRouterForGroupsWithSingleGroup(
-	ctx context.Context,
-	tableID uint32,
-	txn *kv.Txn,
-	msg string,
-	nodeStatus storagepb.NodeLivenessStatus,
-	groupChangee api.EntityRangeGroupChange,
-) error {
-	log.Infof(ctx, "refresh table %v hash router, detail:%v ", tableID, msg)
-	ring, ok := mr.routerCaches[tableID]
-	if !ok {
-		return fmt.Errorf("Can not find table %v hashRouter in HashRingCache", tableID)
-	}
-	ring.mu.Lock()
-	defer ring.mu.Unlock()
-	group := ring.groupsMap[groupChangee.Routing.EntityRangeGroupId]
-	{
-		if group.Status == api.EntityRangeGroupStatus_relocating {
-			var changePartitionID []uint32
-			for _, partitionChange := range group.PartitionChanges {
-				ring.groupsMap[partitionChange.GroupID].Partitions[partitionChange.PartitionID] = partitionChange.Partition
-				changePartitionID = append(changePartitionID, partitionChange.PartitionID)
-			}
-			for _, id := range changePartitionID {
-				delete(group.Partitions, id)
-			}
-			group.PartitionChanges = nil
-			for _, groupChange := range group.GroupChanges {
-				isAdd := true
-				for i, replica := range group.InternalReplicas {
-					if groupChange.ReplicaID == replica.ReplicaID {
-						isAdd = false
-						group.InternalReplicas[i].NodeID = groupChange.NodeID
-						group.InternalReplicas[i].StoreID = groupChange.StoreID
-					}
-					if groupChange.ReplicaID == group.LeaseHolder.ReplicaID {
-						group.LeaseHolder.NodeID = groupChange.NodeID
-						group.LeaseHolder.StoreID = groupChange.StoreID
-					}
-				}
-				if isAdd {
-					group.InternalReplicas = append(group.InternalReplicas, groupChange)
-				}
-			}
-			group.GroupChanges = nil
-			group.Status = api.EntityRangeGroupStatus_Available
-		}
-		group.NodeStatus = nodeStatus
-	}
-	if ring.hashPartitionSize == 0 {
-		return errors.Errorf("the table : %v partitions size is 0.", ring.tableID)
-	}
-	var hashRoutings []api.KWDBHashRouting
-
-	hashRoutings = append(hashRoutings, api.KWDBHashRouting{
-		EntityRangeGroupId: groupChangee.Routing.EntityRangeGroupId,
-		TableID:            tableID,
-		EntityRangeGroup:   *group,
-		TsPartitionSize:    int32(ring.hashPartitionSize),
-	})
-
-	err := mr.PutHashInfo(ctx, txn, hashRoutings)
-	if err != nil {
-		return fmt.Errorf("Put Info To Disk Error : %v ", err)
-	}
-	if len(group.Partitions) == 0 {
-		hashRoutings = append(hashRoutings, api.KWDBHashRouting{
-			EntityRangeGroupId: groupChangee.Routing.EntityRangeGroupId,
-			TableID:            tableID,
-			EntityRangeGroup:   api.EntityRangeGroup{},
-			TsPartitionSize:    int32(ring.hashPartitionSize),
-		})
-		delete(ring.groupsMap, groupChangee.Routing.EntityRangeGroupId)
-		err = mr.DeleteHashRoutingByID(ctx, txn, uint32(groupChangee.Routing.EntityRangeGroupId))
-		if err != nil {
-			return err
-		}
-	}
-	log.Infof(ctx, "refresh table %v hash router succeed", tableID)
-	return nil
-}
-
-// RefreshHashRouterForAllGroups calculate all groups distribute and write to disk without groupChange
-func (mr *HRManager) RefreshHashRouterForAllGroups(
-	ctx context.Context,
-	txn *kv.Txn,
-	msg string,
-	nodeStatus storagepb.NodeLivenessStatus,
-	groups map[api.EntityRangeGroupID]struct{},
-) error {
-	for tableID, ring := range mr.routerCaches {
-		log.Infof(ctx, "refresh table %v hash router, detail:%v ", tableID, msg)
-		ring.mu.Lock()
-		for _, group := range ring.groupsMap {
-			if group.Status == api.EntityRangeGroupStatus_relocating {
-				_, change := groups[group.GroupID]
-				if !change {
-					group.PartitionChanges = nil
-					group.GroupChanges = nil
-					group.Status = api.EntityRangeGroupStatus_Available
-					group.NodeStatus = nodeStatus
-					continue
-				}
-				var changePartitionID []uint32
-				for _, partitionChange := range group.PartitionChanges {
-					ring.groupsMap[partitionChange.GroupID].Partitions[partitionChange.PartitionID] = partitionChange.Partition
-					changePartitionID = append(changePartitionID, partitionChange.PartitionID)
-				}
-				for _, id := range changePartitionID {
-					delete(group.Partitions, id)
-				}
-				group.PartitionChanges = nil
-				for _, groupChange := range group.GroupChanges {
-					isAdd := true
-					for i, replica := range group.InternalReplicas {
-						if groupChange.ReplicaID == replica.ReplicaID {
-							isAdd = false
-							group.InternalReplicas[i].NodeID = groupChange.NodeID
-							group.InternalReplicas[i].StoreID = groupChange.StoreID
-						}
-						if groupChange.ReplicaID == group.LeaseHolder.ReplicaID {
-							group.LeaseHolder.NodeID = groupChange.NodeID
-							group.LeaseHolder.StoreID = groupChange.StoreID
-						}
-					}
-					if isAdd {
-						group.InternalReplicas = append(group.InternalReplicas, groupChange)
-					}
-				}
-				group.GroupChanges = nil
-				group.Status = api.EntityRangeGroupStatus_Available
-			}
-			group.NodeStatus = nodeStatus
-		}
-		if ring.hashPartitionSize == 0 {
-			return errors.Errorf("the table : %v partitions size is 0.", ring.tableID)
-		}
-
-		var hashRoutings []api.KWDBHashRouting
-		for id, group := range ring.groupsMap {
-			hashRoutings = append(hashRoutings, api.KWDBHashRouting{
-				EntityRangeGroupId: id,
-				TableID:            tableID,
-				EntityRangeGroup:   *group,
-				TsPartitionSize:    int32(ring.hashPartitionSize),
-			})
-		}
-
-		err := mr.PutHashInfo(ctx, txn, hashRoutings)
-		if err != nil {
-			return fmt.Errorf("Put Info To Disk Error : %v ", err)
-		}
-		for id, group := range ring.groupsMap {
-			if len(group.Partitions) == 0 {
-				hashRoutings = append(hashRoutings, api.KWDBHashRouting{
-					EntityRangeGroupId: id,
-					TableID:            tableID,
-					EntityRangeGroup:   api.EntityRangeGroup{},
-					TsPartitionSize:    int32(ring.hashPartitionSize),
-				})
-				delete(ring.groupsMap, id)
-				err = mr.DeleteHashRoutingByID(ctx, txn, uint32(id))
-				if err != nil {
-					return err
-				}
-			}
-		}
-		ring.mu.Unlock()
-		log.Infof(ctx, "refresh table %v hash router succeed", tableID)
-	}
-	return nil
-}
-
 // DropTableHashInfo drop the table distribute from the disk
 func (mr *HRManager) DropTableHashInfo(ctx context.Context, txn *kv.Txn, tableID uint32) error {
 	err := mr.DeleteHashRoutingByTableID(ctx, txn, tableID)
@@ -2342,33 +1599,6 @@ func (mr *HRManager) DeleteHashRoutingByTableID(
 	return mr.db.Txn(ctx, func(ctx context.Context, newTxn *kv.Txn) error {
 		return sql.DeleteKWDBHashRoutingByTableID(ctx, newTxn, uint64(tableID))
 	})
-}
-
-// checkTableIsAvailable table is available.
-func (mr *HRManager) checkTableIsAvailable(ctx context.Context, tableID uint32) (bool, bool) {
-	available := true
-	descErr := mr.db.Txn(ctx, func(ctx context.Context, newTxn *kv.Txn) error {
-		table, _, err := sqlbase.GetTsTableDescFromID(ctx, newTxn, sqlbase.ID(tableID))
-		if err != nil {
-			log.Warningf(ctx, "table is not exist %v", tableID)
-			return errors.Wrap(err, "[HA]get table failed")
-		}
-
-		if !(table != nil && table.State == sqlbase.TableDescriptor_PUBLIC) {
-			log.Warningf(ctx, "table %v is not public, current status %v", tableID, table.State)
-			available = false
-		}
-		return nil
-	})
-
-	if descErr != nil {
-		log.Error(ctx, descErr)
-		return false, false
-	}
-	if available {
-		return true, true
-	}
-	return true, false
 }
 
 // GroupChange the replica change when group change distribute use to internal debug

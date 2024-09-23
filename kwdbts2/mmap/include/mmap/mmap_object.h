@@ -12,7 +12,6 @@
 #pragma once
 
 #include <mutex>
-#include <data_model.h>
 #include <pthread.h>
 #include "ts_object.h"
 #include "mmap_file.h"
@@ -56,9 +55,9 @@ struct MMapMetaData {
   time_t create_time; 		///< big object (vtree) create time.
   off_t meta_data_length;   ///< length of meta data section.
 
-  col_a source_url;		    ///< Source URL.
+  col_a source_path;		    ///< Source PATH.
   col_a reserved_2;
-  col_a ns_url;             ///< offset to the name service.
+  col_a ns_path;             ///< offset to the name service.
   col_a reserved_3;
   col_a reserved_4;
 
@@ -98,7 +97,7 @@ struct MMapMetaData {
   size_t num_leaf_node;     ///< total number of leaf nodes;
   size_t reserved_15;
   off_t reserved_16;
-  col_a link_url;           ///< link URL.
+  col_a link_path;           ///< link PATH.
   col_a reserved_17;
   size_t actul_size;        ///< Actual table size.
 
@@ -178,12 +177,12 @@ public:
   /**
    * @brief	open a big object.
    *
-   * @param 	url			big object URL to be opened.
+   * @param 	obj_path			big object path to be opened.
    * @param 	flag		option to open a file; O_CREAT to create new file
    * @param	tbl_sub_path		sub path.
    * @return	>= 0 if succeed, otherwise -1.
    */
-  int open(const string &url, const std::string &db_path, const string &tbl_sub_path, int cc, int flags);
+  int open(const string &obj_path, const std::string &db_path, const string &tbl_sub_path, int cc, int flags);
 
   int close();
 
@@ -207,25 +206,25 @@ public:
   int memExtend(off_t offset = 0, size_t ps = kwdbts::EngineOptions::pageSize());
 
   /**
-   * @brief	copy url string to meta_data section (if the space is enough) or to the end of file
-   * 			the destination url format is:
-   * 			| offset | url |
+   * @brief	copy path string to meta_data section (if the space is enough) or to the end of file
+   * 			the destination path format is:
+   * 			| offset | path |
    *
-   * @param 	source_url	source url char string
+   * @param 	source_path	source path char string
    * @param 	offset 		the space reserved between the destination and string
-   * @return	the beginning location of destination url
+   * @return	the beginning location of destination path
    */
-  off_t urlCopy(const string &source_url, off_t = 0, size_t ps =
+  off_t pathCopy(const string &source_path, off_t offset = 0, size_t ps =
       kwdbts::EngineOptions::pageSize());
 
-  void urlCopy (char *d, const string &url)
-  { strncpy(d, url.c_str(), COLUMNATTR_LEN); }
+  void pathCopy (char *d, const string &path)
+  { strncpy(d, path.c_str(), COLUMNATTR_LEN); }
 
   std::string filePath() const
   { return file_path_; }
 
-  int writeAttributeURL(const string &source_url, const string &ns_url,
-    const string &description);
+  int writeAttributePath(const string &source_path, const string &ns_path,
+                         const string &description);
 
   int status() const
   { return meta_data_->status; }
@@ -239,12 +238,12 @@ public:
   { return (mem_) ? meta_data_->struct_version : 0; }
 
   /**
-   * @brief	obtain big object source URL string.
+   * @brief	obtain big object source PATH string.
    *
-   * @return 	source URL string.
+   * @return 	source PATH string.
    */
-  string nameServiceURL() const
-  { return (mem_) ? string(meta_data_->ns_url) : kwdbts::s_emptyString; }
+  string nameServicePath() const
+  { return (mem_) ? string(meta_data_->ns_path) : kwdbts::s_emptyString; }
 
   /**
    * @brief	obtain version of the big object

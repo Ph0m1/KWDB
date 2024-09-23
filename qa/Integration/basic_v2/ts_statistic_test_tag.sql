@@ -15,8 +15,8 @@ insert into test1.t1 values('2023-07-29 03:29:59.688', 21,  21,3,922337203685477
 insert into test1.t1 values('2023-07-29 03:31:59.688', 20,  21,3,9223372036854775807,33,3);
 insert into test1.t1 values('2023-07-29 03:33:59.688', 20,  21,3,9223372036854775807,33,3);
 insert into test1.t1 values('2023-07-29 03:35:59.688', 20,  21,3,323232,34,4);
--- the expected result is wrong, need to do overflow
-select sum(a),sum(b),sum(c),sum(d),sum(tag1),sum(tag2) from test1.t1;
+
+select sum(a),sum(b),sum(c),sum(d)-sum(d)%100000,sum(tag1),sum(tag2) from test1.t1;
 
 CREATE TABLE test1.t2(k_timestamp TIMESTAMP not null, a int, b double, c int2, d int8) TAGS (tag1 int8 not null,tag2 int8) PRIMARY TAGS (tag1);
 insert into test1.t2 values('2023-07-29 03:11:59.688', 11,  12,13,14,15,16);

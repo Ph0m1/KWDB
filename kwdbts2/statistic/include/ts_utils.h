@@ -177,11 +177,26 @@ std::pair<uint32_t, uint8_t> decodeHash(uint32_t k, uint8_t p, uint8_t pp);
 // Gets the bucket index and maximum leading zero(key point)
 std::pair<uint64_t, uint8_t> getPosVal(uint64_t x, uint8_t p);
 
+// EncodeVarintAscending encodes the int64 value using a variable length
+// (length-prefixed) representation. The length is encoded as a single
+// byte. If the value to be encoded is negative the length is encoded
+// as 8-numBytes. If the value is positive it is encoded as
+// 8+numBytes. The encoded bytes are appended to the supplied buffer
+// and the final buffer is returned.
+std::vector<byte> EncodeVarintAscending(std::vector<uint8_t>& b, int64_t v);
+
+// EncodeUvarintAscending encodes the uint64 value using a variable length
+// (length-prefixed) representation. The length is encoded as a single
+// byte indicating the number of encoded bytes (-8) to follow. See
+// EncodeVarintAscending for rationale. The encoded bytes are appended to the
+// supplied buffer and the final buffer is returned.
+std::vector<byte> EncodeUvarintAscending(std::vector<uint8_t>& b, uint64_t v);
+
 // EncodeFloatAscending returns the resulting byte slice with the encoded float64 appended to buf
-std::vector<byte> EncodeFloatAscending(k_float64 f);
+std::vector<byte> EncodeFloatAscending(std::vector<uint8_t>& b, k_float64 f);
 
 // EncodeStringAscending encodes the string value using an escape-based encoding.
-std::vector<uint8_t> EncodeStringAscending(const std::string& s);
+std::vector<uint8_t> EncodeStringAscending(std::vector<uint8_t>& b, const std::string& s);
 }  // namespace kwdbts
 
 #endif  // KWDBTS2_STATISTIC_INCLUDE_TS_UTILS_H_

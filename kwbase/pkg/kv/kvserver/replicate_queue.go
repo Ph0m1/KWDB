@@ -39,6 +39,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/metric"
@@ -225,11 +226,10 @@ func newReplicateQueue(store *Store, g *gossip.Gossip, allocator Allocator) *rep
 func (rq *replicateQueue) shouldQueue(
 	ctx context.Context, now hlc.Timestamp, repl *Replica, sysCfg *config.SystemConfig,
 ) (shouldQ bool, priority float64) {
-	desc, zone := repl.DescAndZone()
-	if desc.GetRangeType() == roachpb.TS_RANGE {
+	if api.MppMode {
 		return false, 0
 	}
-
+	desc, zone := repl.DescAndZone()
 	action, priority := rq.allocator.ComputeAction(ctx, zone, desc)
 
 	// For simplicity, the first thing the allocator does is remove learners, so
@@ -287,10 +287,6 @@ func (rq *replicateQueue) process(
 	// selected target.
 	for r := retry.StartWithCtx(ctx, retryOpts); r.Next(); {
 		for {
-			// If the TS Range is in the queue, it means that the
-			// Range has no corresponding table information.
-			// When scaling down, the distributed layer cannot process
-			// the Range and needs to be processed by the replica layer.
 			requeue, err := rq.processOneChange(ctx, repl, rq.canTransferLease, false /* dryRun */)
 			if IsSnapshotError(err) {
 				// If ChangeReplicas failed because the snapshot failed, we log the
@@ -322,111 +318,6 @@ func (rq *replicateQueue) process(
 	}
 
 	return errors.Errorf("failed to replicate after %d retries", retryOpts.MaxRetries)
-}
-
-func (rq *replicateQueue) processOneChangeForTsRange(
-	ctx context.Context, repl *Replica, canTransferLease func() bool, dryRun bool,
-) (requeue bool, _ error) {
-	// Check lease and destroy status here. The queue does this higher up already, but
-	// adminScatter (and potential other future callers) also call this method and don't
-	// perform this check, which could lead to infinite loops.
-	if _, err := repl.IsDestroyed(); err != nil {
-		return false, err
-	}
-	if _, pErr := repl.redirectOnOrAcquireLease(ctx); pErr != nil {
-		return false, pErr.GoError()
-	}
-
-	desc, zone := repl.DescAndZone()
-
-	// Avoid taking action if the range has too many dead replicas to make quorum.
-	voterReplicas := desc.Replicas().Voters()
-	liveVoterReplicas, deadVoterReplicas := rq.allocator.storePool.liveAndDeadReplicas(
-		desc.RangeID, voterReplicas)
-	{
-		unavailable := !desc.Replicas().CanMakeProgress(func(rDesc roachpb.ReplicaDescriptor) bool {
-			for _, inner := range liveVoterReplicas {
-				if inner.ReplicaID == rDesc.ReplicaID {
-					return true
-				}
-			}
-			return false
-		})
-		if unavailable {
-			return false, newQuorumError(
-				"range requires a replication change, but live replicas %v don't constitute a quorum for %v:",
-				liveVoterReplicas,
-				desc.Replicas().All(),
-			)
-		}
-	}
-
-	action, _ := rq.allocator.ComputeAction(ctx, zone, desc)
-	log.VEventf(ctx, 1, "next replica action: %s", action)
-
-	switch action {
-	case AllocatorNoop, AllocatorRangeUnavailable:
-		// We're either missing liveness information or the range is known to have
-		// lost quorum. Either way, it's not a good idea to make changes right now.
-		// Let the scanner requeue it again later.
-		return false, nil
-	case AllocatorAdd:
-		return rq.addOrReplaceForTsRange(ctx, repl, voterReplicas, liveVoterReplicas, -1 /* removeIdx */, dryRun)
-	case AllocatorRemove:
-		return rq.removeForTsRange(ctx, repl, voterReplicas, dryRun)
-	case AllocatorReplaceDead:
-		if len(deadVoterReplicas) == 0 {
-			// Nothing to do.
-			return false, nil
-		}
-		removeIdx := -1 // guaranteed to be changed below
-		for i, rDesc := range voterReplicas {
-			if rDesc.StoreID == deadVoterReplicas[0].StoreID {
-				removeIdx = i
-				break
-			}
-		}
-		if removeIdx < 0 {
-			return false, errors.AssertionFailedf(
-				"dead voter %v unexpectedly not found in %v",
-				deadVoterReplicas[0], voterReplicas)
-		}
-		return rq.addOrReplaceForTsRange(ctx, repl, voterReplicas, liveVoterReplicas, removeIdx, dryRun)
-	case AllocatorReplaceDecommissioning:
-		decommissioningReplicas := rq.allocator.storePool.decommissioningReplicas(
-			desc.RangeID, voterReplicas)
-		if len(decommissioningReplicas) == 0 {
-			// Nothing to do.
-			return false, nil
-		}
-		removeIdx := -1 // guaranteed to be changed below
-		for i, rDesc := range voterReplicas {
-			if rDesc.StoreID == decommissioningReplicas[0].StoreID {
-				removeIdx = i
-				break
-			}
-		}
-		if removeIdx < 0 {
-			return false, errors.AssertionFailedf(
-				"decommissioning voter %v unexpectedly not found in %v",
-				decommissioningReplicas[0], voterReplicas)
-		}
-		return rq.addOrReplaceForTsRange(ctx, repl, voterReplicas, liveVoterReplicas, removeIdx, dryRun)
-	case AllocatorRemoveDecommissioning:
-		return rq.removeDecommissioning(ctx, repl, dryRun)
-	case AllocatorRemoveDead:
-		return rq.removeDead(ctx, repl, deadVoterReplicas, dryRun)
-	case AllocatorConsiderRebalance:
-		return rq.considerRebalanceForTsRange(ctx, repl, voterReplicas, canTransferLease, dryRun)
-	case AllocatorFinalizeAtomicReplicationChange:
-		_, err := maybeLeaveAtomicChangeReplicasAndRemoveLearners(ctx, repl.store, repl.Desc())
-		// Requeue because either we failed to transition out of a joint state
-		// (bad) or we did and there might be more to do for that range.
-		return true, err
-	default:
-		return false, errors.Errorf("unknown allocator action %v", action)
-	}
-
 }
 
 func (rq *replicateQueue) processOneChange(
@@ -549,123 +440,6 @@ func (rq *replicateQueue) processOneChange(
 	}
 }
 
-func (rq *replicateQueue) addOrReplaceForTsRange(
-	ctx context.Context,
-	repl *Replica,
-	existingReplicas []roachpb.ReplicaDescriptor,
-	liveVoterReplicas []roachpb.ReplicaDescriptor,
-	removeIdx int, // -1 for no removal
-	dryRun bool,
-) (requeue bool, _ error) {
-	if len(existingReplicas) == 1 {
-		// If there is only one living copy, switch to the copy addition operation
-		removeIdx = -1
-	}
-	st := rq.store.cfg.Settings
-	if !st.Version.IsActive(ctx, clusterversion.VersionAtomicChangeReplicas) {
-		removeIdx = -1
-	}
-
-	remainingLiveReplicas := liveVoterReplicas
-	// Transferring the lease holder of a dead or retired copy
-	if removeIdx >= 0 {
-		replToRemove := existingReplicas[removeIdx]
-		for i, r := range liveVoterReplicas {
-			if r.ReplicaID == replToRemove.ReplicaID {
-				// Remove the dead Store replicas or the retired
-				// Store replicas from remainingLiveReplicas
-				remainingLiveReplicas = append(liveVoterReplicas[:i:i], liveVoterReplicas[i+1:]...)
-				break
-			}
-		}
-		// If the Store where the repl is located is a dead
-		// Store or a retired Store, transfer the leaseHolder
-		done, err := rq.maybeTransferLeaseAway(ctx, repl, existingReplicas[removeIdx].StoreID, dryRun)
-		if err != nil {
-			return false, err
-		}
-		if done {
-			// The lease has been transferred, and the copy changes are made on the new lease
-			return false, nil
-		}
-	}
-
-	desc, zone := repl.DescAndZone()
-	newStore, details, err := rq.allocator.AllocateTsTarget(
-		ctx,
-		desc,
-		zone,
-		remainingLiveReplicas,
-	)
-	if err != nil {
-		return false, err
-	}
-	// The candidate store selected is the store
-	// where the dead copy or retired copy is located.
-	if removeIdx >= 0 && newStore.StoreID == existingReplicas[removeIdx].StoreID {
-		return false, errors.AssertionFailedf("allocator suggested to replace replica "+
-			"on s%d with itself", newStore.StoreID)
-	}
-	newReplica := roachpb.ReplicationTarget{
-		NodeID:  newStore.Node.NodeID,
-		StoreID: newStore.StoreID,
-	}
-
-	clusterNodes := rq.allocator.storePool.ClusterNodeCount()
-	need := GetNeededReplicas(*zone.NumReplicas, clusterNodes)
-
-	if willHave := len(existingReplicas) + 1; removeIdx < 0 && willHave < need && willHave%2 == 0 {
-		oldPlusNewReplicas := append([]roachpb.ReplicaDescriptor(nil), existingReplicas...)
-		oldPlusNewReplicas = append(oldPlusNewReplicas, roachpb.ReplicaDescriptor{
-			NodeID:  newStore.Node.NodeID,
-			StoreID: newStore.StoreID,
-		})
-		_, _, err := rq.allocator.AllocateTsTarget(
-			ctx,
-			desc,
-			zone,
-			oldPlusNewReplicas,
-		)
-		if err != nil {
-			// It does not seem possible to go to the next odd replica state. Note
-			// that AllocateTarget returns an allocatorError (a purgatoryError)
-			// when purgatory is requested.
-			return false, errors.Wrap(err, "avoid up-replicating to fragile quorum")
-		}
-	}
-	rq.metrics.AddReplicaCount.Inc(1)
-	ops := roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, newReplica)
-	if removeIdx < 0 {
-		log.VEventf(ctx, 1, "adding replica %+v: %s",
-			newReplica, rangeRaftProgress(repl.RaftStatus(), existingReplicas))
-	} else {
-		rq.metrics.RemoveReplicaCount.Inc(1)
-		removeReplica := existingReplicas[removeIdx]
-		log.VEventf(ctx, 1, "replacing replica %s with %+v: %s",
-			removeReplica, newReplica, rangeRaftProgress(repl.RaftStatus(), existingReplicas))
-		ops = append(ops,
-			roachpb.MakeReplicationChanges(roachpb.REMOVE_REPLICA, roachpb.ReplicationTarget{
-				StoreID: removeReplica.StoreID,
-				NodeID:  removeReplica.NodeID,
-			})...)
-	}
-
-	if err := rq.changeReplicas(
-		ctx,
-		repl,
-		ops,
-		desc,
-		SnapshotRequest_RECOVERY,
-		storagepb.ReasonRangeUnderReplicated,
-		details,
-		dryRun,
-	); err != nil {
-		return false, err
-	}
-	// Always requeue to see if more work needs to be done.
-	return true, nil
-}
-
 // addOrReplace adds or replaces a replica. If removeIdx is -1, an addition is
 // carried out. Otherwise, removeIdx must be a valid index into existingReplicas
 // and specifies which replica to replace with a new one.
@@ -735,10 +509,6 @@ func (rq *replicateQueue) addOrReplace(
 	)
 	if err != nil {
 		return false, err
-	}
-
-	if desc.GetRangeType() == roachpb.TS_RANGE {
-		details = noNeedTSSnapshotDataReasonRangeWithoutTableInfo
 	}
 
 	// The candidate store selected is the store where the dead copy or retired copy is located.
@@ -931,12 +701,6 @@ func (rq *replicateQueue) maybeTransferLeaseAway(
 	)
 }
 
-func (rq *replicateQueue) removeForTsRange(
-	ctx context.Context, repl *Replica, existingReplicas []roachpb.ReplicaDescriptor, dryRun bool,
-) (requeue bool, _ error) {
-	return rq.remove(ctx, repl, existingReplicas, dryRun)
-}
-
 func (rq *replicateQueue) remove(
 	ctx context.Context, repl *Replica, existingReplicas []roachpb.ReplicaDescriptor, dryRun bool,
 ) (requeue bool, _ error) {
@@ -1084,97 +848,6 @@ func (rq *replicateQueue) removeLearner(
 		return false, err
 	}
 	return true, nil
-}
-
-func (rq *replicateQueue) considerRebalanceForTsRange(
-	ctx context.Context,
-	repl *Replica,
-	existingReplicas []roachpb.ReplicaDescriptor,
-	canTransferLease func() bool,
-	dryRun bool,
-) (requeue bool, _ error) {
-	_, zone := repl.DescAndZone()
-	if zone.IsZoneConfigForTsRange() {
-		return rq.considerRebalance(ctx, repl, existingReplicas, canTransferLease, dryRun)
-	}
-	return rq.considerTsRebalance(ctx, repl, existingReplicas, canTransferLease, dryRun)
-}
-
-func (rq *replicateQueue) considerTsRebalance(
-	ctx context.Context,
-	repl *Replica,
-	existingReplicas []roachpb.ReplicaDescriptor,
-	canTransferLease func() bool,
-	dryRun bool,
-) (requeue bool, _ error) {
-	desc, zone := repl.DescAndZone()
-	if !rq.store.TestingKnobs().DisableReplicaRebalancing {
-		rangeUsageInfo := rangeUsageInfoForRepl(repl)
-		addTarget, removeTarget, details, ok := rq.allocator.RebalanceTargetForTsRange(
-			ctx, zone, repl, desc.RangeID, existingReplicas, rangeUsageInfo)
-
-		if !ok {
-			log.VEventf(ctx, 1, "no suitable rebalance target")
-		} else if done, err := rq.maybeTransferLeaseAway(ctx, repl, removeTarget.StoreID, dryRun); err != nil {
-			log.VEventf(ctx, 1, "want to remove self, but failed to transfer lease away: %s", err)
-		} else if done {
-			// Lease is now elsewhere, so we're not in charge anymore.
-			return false, nil
-		} else {
-			// We have a replica to remove and one we can add, so let's swap them out.
-			chgs := []roachpb.ReplicationChange{
-				{Target: addTarget, ChangeType: roachpb.ADD_REPLICA},
-				{Target: removeTarget, ChangeType: roachpb.REMOVE_REPLICA},
-			}
-
-			if len(existingReplicas) == 1 {
-				// Currently there is only one copy, so add a copy
-				chgs = chgs[:1]
-				log.VEventf(ctx, 1, "can't swap replica due to lease; falling back to add")
-			}
-
-			rq.metrics.RebalanceReplicaCount.Inc(1)
-			log.VEventf(ctx, 1, "rebalancing %+v to %+v: %s",
-				removeTarget, addTarget, rangeRaftProgress(repl.RaftStatus(), existingReplicas))
-
-			if err := rq.changeReplicas(
-				ctx,
-				repl,
-				chgs,
-				desc,
-				SnapshotRequest_REBALANCE,
-				storagepb.ReasonRebalance,
-				details,
-				dryRun,
-			); err != nil {
-				return false, err
-			}
-			return true, nil
-		}
-	}
-
-	if canTransferLease() {
-		transferred, err := rq.findTargetAndTransferLease(
-			ctx,
-			repl,
-			desc,
-			zone,
-			transferLeaseOptions{
-				checkTransferLeaseSource: true,
-				checkCandidateFullness:   true,
-				dryRun:                   dryRun,
-			},
-		)
-		if err != nil {
-			return false, err
-		}
-		// Do not requeue as we transferred our lease away.
-		if transferred {
-			return false, nil
-		}
-	}
-
-	return false, nil
 }
 
 func (rq *replicateQueue) considerRebalance(
@@ -1364,6 +1037,7 @@ func (rq *replicateQueue) changeReplicas(
 		rq.allocator.storePool.updateLocalStoreAfterRebalance(
 			chg.Target.StoreID, rangeUsageInfo, chg.ChangeType)
 	}
+
 	return nil
 }
 

@@ -367,8 +367,6 @@ func TestContextualHelp(t *testing.T) {
 
 		{`SHOW RANGES ??`, `SHOW RANGES`},
 
-		{`SHOW TS PARTITIONS ??`, `SHOW TS PARTITIONS`},
-
 		{`SHOW USERS ??`, `SHOW USERS`},
 
 		// {`TRANSFER ??`, `TRANSFER`},

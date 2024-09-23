@@ -18,7 +18,7 @@
 #include "dirent.h"
 #include "mmap/mmap_metrics_table.h"
 #include "utils/big_table_utils.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "engine.h"
 #include "utils/compress_utils.h"
 
@@ -32,18 +32,18 @@ MMapMetricsTable::~MMapMetricsTable() {
 
 impl_latch_virtual_func(MMapMetricsTable, &rw_latch_)
 
-int MMapMetricsTable::open(const string& url, const std::string& db_path, const string& tbl_sub_path,
+int MMapMetricsTable::open(const string& table_path, const std::string& db_path, const string& tbl_sub_path,
                            int flags, ErrorInfo& err_info) {
-  string file_path = getURLFilePath(url);
+  string file_path = getTsFilePath(table_path);
   if ((err_info.errcode = TsTableObject::open(file_path, db_path, tbl_sub_path,
                                               magic(), flags)) < 0) {
-    err_info.setError(err_info.errcode, tbl_sub_path + getURLFilePath(url));
+    err_info.setError(err_info.errcode, tbl_sub_path + getTsFilePath(table_path));
     return err_info.errcode;
   }
-  name_ = getURLObjectName(URL());
+  name_ = getTsObjectName(path());
   if (metaDataLen() < (off_t) sizeof(TSTableFileMetadata)) {
     if (!(bt_file_.flags() & O_CREAT)) {
-      err_info.setError(KWECORR, tbl_sub_path + getURLFilePath(url));
+      err_info.setError(KWECORR, tbl_sub_path + getTsFilePath(table_path));
     }
     return err_info.errcode;
   }
@@ -74,36 +74,36 @@ int MMapMetricsTable::init(const vector<AttributeInfo>& schema, ErrorInfo& err_i
   }
   time(&meta_data_->create_time);
 
-  name_ = getURLObjectName(URL());
+  name_ = getTsObjectName(path());
 
   for (size_t i = 0 ; i < schema.size() ; ++i) {
-    cols_info_with_hidden_.push_back(schema[i]);
+    cols_info_include_dropped_.push_back(schema[i]);
   }
 
-  if ((meta_data_->record_size = setAttributeInfo(cols_info_with_hidden_)) < 0) {
+  if ((meta_data_->record_size = setAttributeInfo(cols_info_include_dropped_)) < 0) {
     return err_info.errcode;
   }
   off_t col_off = 0;
-  col_off = addColumnInfo(cols_info_with_hidden_, err_info.errcode);
+  col_off = addColumnInfo(cols_info_include_dropped_, err_info.errcode);
   if (err_info.errcode < 0) {
     return err_info.errcode;
   }
   assign(meta_data_->attribute_offset, col_off);
 
-  meta_data_->cols_num = cols_info_with_hidden_.size();
+  meta_data_->cols_num = cols_info_include_dropped_.size();
   meta_data_->struct_type = (ST_VTREE | ST_NS_EXT);
 
-  for (int i = 0; i < cols_info_with_hidden_.size(); ++i) {
-    if(!cols_info_with_hidden_[i].isFlag(AINFO_DROPPED)) {
-      cols_info_without_hidden_.emplace_back(cols_info_with_hidden_[i]);
-      cols_idx_.emplace_back(i);
+  for (int i = 0; i < cols_info_include_dropped_.size(); ++i) {
+    if(!cols_info_include_dropped_[i].isFlag(AINFO_DROPPED)) {
+      cols_info_exclude_dropped_.emplace_back(cols_info_include_dropped_[i]);
+      idx_for_valid_cols_.emplace_back(i);
     }
   }
 
   return err_info.errcode;
 }
 
-string MMapMetricsTable::URL() const {
+string MMapMetricsTable::path() const {
   return filePath();
 }
 
@@ -158,7 +158,7 @@ int MMapMetricsTable::rename(const string& new_fp, const string& file_path) {
     }
     bt_file_.realFilePath() = new_fp;
     bt_file_.filePath() = file_path;
-    name_ = getURLObjectName(bt_file_.filePath());
+    name_ = getTsObjectName(bt_file_.filePath());
   }
   return err_code;
 }

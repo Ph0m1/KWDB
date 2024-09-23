@@ -193,6 +193,10 @@ message TSStatisticReaderSpec {
   // table version
   required uint32 tableVersion = 6 [(gogoproto.nullable) = false];
 }
+message HashpointSpan{
+  required uint32 hashpoint = 1 [(gogoproto.nullable) = false];
+  repeated TsSpan tspans = 2 [(gogoproto.nullable) = false];
+}
 
 // TagTSTableReader operator
 message TSTagReaderSpec {
@@ -213,6 +217,7 @@ message TSTagReaderSpec {
   required TSTableReadMode accessMode = 4 [(gogoproto.nullable) = false];
   // table version
   required uint32 tableVersion = 5 [(gogoproto.nullable) = false];
+  repeated HashpointSpan rangeSpans = 6 [(gogoproto.nullable) = false];
 }
 
 enum SketchMethod {

@@ -488,6 +488,8 @@ func (b *Builder) buildTSUpdate(
 	tagQueryFilter := fmtctx.CloseAndGetString()
 	query := sqlbase.BuildTagHintQuery(tagName, string(alias.CatalogName), string(table.Name()))
 	query += " " + tagQueryFilter
+	// todo: add limit 1 to avoid finding multiple rows of values for the same PTAG in distributed scenarios
+	query = "select distinct * from (" + query + ") limit 1"
 	row, err := b.evalCtx.InternalExecutor.QueryRow(b.ctx, "queryTag", b.evalCtx.Txn, query)
 	if err != nil && !b.factory.CheckFlag(opt.IsPrepare) {
 		panic(err)

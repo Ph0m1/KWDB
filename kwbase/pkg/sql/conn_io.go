@@ -208,13 +208,10 @@ type PrepareStmt struct {
 
 // PrepareInsertDirect is used to save information related to short circuit preparation
 type PrepareInsertDirect struct {
-	// Column metadata information
-	ColsDesc []sqlbase.ColumnDescriptor
+	Dit DirectInsertTable
 	// Specify column names
 	Inscols        tree.NameList
 	Inscolsnum     int
-	DbID, TabID    uint32
-	Tname          *tree.TableName
 	payloadNodeMap map[int]*sqlbase.PayloadForDistTSInsert
 	stmtRes        CommandResult
 	EvalContext    tree.EvalContext

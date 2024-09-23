@@ -1,3 +1,5 @@
+> set cluster setting server.ts_range_split_mode = 1;
+SET CLUSTER SETTING
 > CREATE TS DATABASE tsdb;
 CREATE TS DATABASE
 > CREATE TABLE tsdb.tab

@@ -27,17 +27,37 @@ class BaseEntityIterator {
   virtual KStatus Close() = 0;
   virtual ~BaseEntityIterator() = default;
 };
-
+enum TagIteratorType{
+  TAG_IT,
+  TAG_IT_HASHED
+};
 class EntityGroupTagIterator {
  public:
   EntityGroupTagIterator() = delete;
   EntityGroupTagIterator(MMapTagColumnTable* tag_bt, const std::vector<k_uint32>& scan_tags) : scan_tags_(scan_tags) {
     cur_total_row_count_ = 0;
     cur_scan_rowid_ = 1;
+    version_ = TagIteratorType::TAG_IT;
     tag_bt_ = tag_bt;
     tag_bt_->mutexLock();
     cur_total_row_count_ = tag_bt_->actual_size();
     tag_bt_->mutexUnlock();
+  }
+
+  EntityGroupTagIterator(MMapTagColumnTable* tag_bt,
+   const std::vector<k_uint32>& scantags, const std::vector<uint32_t>& hps) : scan_tags_(scantags), hps_(hps) {
+    cur_total_row_count_ = 0;
+    cur_scan_rowid_ = 1;
+    version_ = TagIteratorType::TAG_IT_HASHED;
+    tag_bt_ = tag_bt;
+    tag_bt_->mutexLock();
+    cur_total_row_count_ = tag_bt_->actual_size();
+    tag_bt_->mutexUnlock();
+    #ifdef K_DEBUG
+    for (int i =0; i< hps_.size(); i++) {
+      LOG_DEBUG("Init EntityGroupTagIterator hashpoints is %d", hps_.at(i));
+    }
+    #endif
   }
   virtual ~EntityGroupTagIterator();
 
@@ -49,6 +69,8 @@ class EntityGroupTagIterator {
   size_t cur_total_row_count_;
   size_t cur_scan_rowid_;
   std::vector<k_uint32> scan_tags_;
+  std::vector<uint32_t> hps_;
+  TagIteratorType version_;
   MMapTagColumnTable* tag_bt_;
 };
 

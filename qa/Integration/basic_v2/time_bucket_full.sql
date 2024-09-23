@@ -284,7 +284,7 @@ select time_bucket(k_timestamp,'10s') as tb,sum(t3/e3),avg(t3/e3*t3) from test_s
 select time_bucket(k_timestamp,'10s') as tb,count(t1+e2-e3*t2/t3) from test_select_timebucket.tb group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,max(k_timestamp)+min(e1) from test_select_timebucket.tb group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,max(e2)-min(e3) from test_select_timebucket.tb group by tb order by tb;
-select time_bucket(k_timestamp,'10s') as tb,sum(e4)*avg(e3),sum(e5)/avg(e6) from test_select_timebucket.tb group by tb order by tb;
+select time_bucket(k_timestamp,'10s') as tb,sum(e4)*avg(e3),sum(e5)*avg(e6) from test_select_timebucket.tb group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,last_row(e3)%last_row(e6) from test_select_timebucket.tb group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,count(e7)+count(e8) from test_select_timebucket.tb group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,max(t1)+min(t1),max(t2)-min(t3) from test_select_timebucket.tb group by tb order by tb;

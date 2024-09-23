@@ -29,10 +29,10 @@ import (
 	"context"
 	"fmt"
 	"go/constant"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
@@ -60,7 +60,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil/unimplemented"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
-	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/errors"
 	"github.com/lib/pq/oid"
@@ -651,6 +650,17 @@ func (n *createTableNode) startExec(params runParams) error {
 		if err = createAndExecCreateTSTableJob(params, desc, n); err != nil {
 			return err
 		}
+		////临时广播多Range
+		//query := fmt.Sprintf(
+		//	"SELECT * FROM kwdb_internal.ranges where table_name = '%s'", desc.Name)
+		//rows, err := params.p.execCfg.InternalExecutor.QueryEx(
+		//	context.TODO(), "kwdb-internal-jobs-table", nil,
+		//	sqlbase.InternalExecutorSessionDataOverride{User: params.p.User()},
+		//	query)
+		//if err != nil {
+		//	return err
+		//}
+		//log.Errorf(context.TODO(), "xxxxxxxxxx rows:%v", rows)
 	}
 	log.Infof(params.ctx, "create table %s 1st txn finished, type: %s, id: %d", n.n.Table.String(), tree.TableTypeName(n.n.TableType), desc.ID)
 	return nil
@@ -3223,10 +3233,6 @@ func checkPrimaryTag(tagColumn sqlbase.ColumnDescriptor) error {
 func distributeAndDuplicateOfCreateTSTable(
 	params runParams, desc sqlbase.MutableTableDescriptor,
 ) error {
-	_, err := api.GetAvailableNodeIDs(params.ctx)
-	if err != nil {
-		return err
-	}
 	hashRouterMgr := api.GetHashRouterManagerWithCache()
 	hashRouter, err := hashRouterMgr.InitHashRouter(context.Background(), params.p.Txn(), uint32(desc.ParentID), uint32(desc.ID))
 	if err != nil {
@@ -3235,23 +3241,30 @@ func distributeAndDuplicateOfCreateTSTable(
 
 	entityRangeGroups := hashRouter.GetHashPartitions(params.ctx)
 	type pointGroup struct {
-		point   int32
-		groupID uint32
+		point     int32
+		timestamp int64
+		groupID   uint32
 	}
 	var pointGroups []pointGroup
 	var splitInfo []roachpb.AdminSplitInfoForTs
+	var replicasS [][]roachpb.ReplicaDescriptor
 	for _, entityRangeGroup := range entityRangeGroups {
 		var replicas []roachpb.ReplicaDescriptor
 		for _, replica := range entityRangeGroup.InternalReplicas {
 			replicas = append(replicas, roachpb.ReplicaDescriptor{NodeID: replica.NodeID, StoreID: replica.StoreID})
 		}
+		replicasS = append(replicasS, replicas)
+	}
+	for _, entityRangeGroup := range entityRangeGroups {
 		for _, hashPartition := range entityRangeGroup.Partitions {
+			rand.Seed(timeutil.Now().UnixNano())
+			random1 := rand.Intn(len(replicasS))
 			startPoint := hashPartition.StartPoint
-			pointGroups = append(pointGroups, pointGroup{int32(startPoint), uint32(entityRangeGroup.GroupID)})
-			splitKey := sqlbase.MakeTsHashPointKey(desc.ID, uint64(startPoint))
+			pointGroups = append(pointGroups, pointGroup{int32(startPoint), hashPartition.StartTimeStamp, uint32(entityRangeGroup.GroupID)})
+			splitKey := sqlbase.MakeTsRangeKey(desc.ID, uint64(startPoint), hashPartition.StartTimeStamp)
 			info := roachpb.AdminSplitInfoForTs{
 				SplitKey: splitKey,
-				PreDist:  replicas,
+				PreDist:  replicasS[random1],
 			}
 			splitInfo = append(splitInfo, info)
 		}
@@ -3260,77 +3273,30 @@ func distributeAndDuplicateOfCreateTSTable(
 	// split ts range
 	sort.Slice(pointGroups, func(i, j int) bool { return pointGroups[i].point < pointGroups[j].point })
 	for _, p := range pointGroups {
-		spanKey := sqlbase.MakeTsHashPointKey(desc.ID, uint64(p.point))
+		spanKey := sqlbase.MakeTsRangeKey(desc.ID, uint64(p.point), p.timestamp)
 		// TODO(kang): send split key
 		var tmp = []int32{p.point}
-		if err := params.extendedEvalCtx.ExecCfg.DB.AdminSplitTs(params.ctx, spanKey, p.groupID, uint32(desc.ID), tmp); err != nil {
+		var timestamps = []int64{p.timestamp}
+		if err := params.extendedEvalCtx.ExecCfg.DB.AdminSplitTs(params.ctx, spanKey, uint32(desc.ID), tmp, timestamps, true); err != nil {
 			return errors.Wrap(err, "PreDistributionError: split failed")
 		}
+		startTime := timeutil.Now()
+		for {
+			startKey := sqlbase.MakeTsHashPointKey(desc.ID, uint64(pointGroups[0].point))
+			endKey := sqlbase.MakeTsHashPointKey(desc.ID, api.HashParam)
+			isCompleted := true
+			isCompleted, _ = params.extendedEvalCtx.ExecCfg.DB.AdminReplicaVoterStatusConsistent(params.ctx, startKey, endKey)
+			if isCompleted {
+				break
+			}
+			timeElapsed := timeutil.Since(startTime)
+			if timeElapsed.Seconds() > 30 {
+				log.Error(params.ctx, "have been trying 30s, timed out of AdminReplicaVoterStatusConsistent")
+				return pgerror.Newf(pgcode.Internal, "Create table failed. Verifying replica consistency failed.")
+			}
+			time.Sleep(time.Duration(500) * time.Millisecond)
+		}
 	}
 
-	startTime := timeutil.Now()
-	for {
-		startKey := sqlbase.MakeTsHashPointKey(desc.ID, uint64(pointGroups[0].point))
-		endKey := sqlbase.MakeTsHashPointKey(desc.ID, api.HashParam)
-		isCompleted := true
-		isCompleted, _ = params.extendedEvalCtx.ExecCfg.DB.AdminReplicaVoterStatusConsistent(params.ctx, startKey, endKey)
-		if isCompleted {
-			break
-		}
-		timeElapsed := timeutil.Since(startTime)
-		if timeElapsed.Seconds() > 30 {
-			log.Error(params.ctx, "have been trying 30s, timed out of AdminReplicaVoterStatusConsistent")
-			return errors.Errorf("have been trying 30s, timed out of AdminReplicaVoterStatusConsistent")
-		}
-		time.Sleep(time.Duration(500) * time.Millisecond)
-	}
-
-	// relocate ts range
-	// TODO(Yang Jie): Specifies how many concurrent counts
-	if params.p.ExecCfg().StartMode == StartMultiReplica {
-		var res []error
-		wg := &sync.WaitGroup{}
-		wgResponse := &sync.WaitGroup{}
-
-		l := len(splitInfo)
-		response := make(chan error, l)
-
-		go func() {
-			wgResponse.Add(1)
-			for rc := range response {
-				res = append(res, rc)
-			}
-			wgResponse.Done()
-		}()
-
-		for _, info := range splitInfo {
-			var targets []roachpb.ReplicationTarget
-			for _, replica := range info.PreDist {
-				targets = append(targets, roachpb.ReplicationTarget{NodeID: replica.NodeID, StoreID: replica.StoreID})
-			}
-			wg.Add(1)
-
-			relocate := func(ctx context.Context, k interface{}, t []roachpb.ReplicationTarget) {
-				defer wg.Done()
-				for rt := retry.StartWithCtx(context.Background(), retry.Options{MaxRetries: 5}); ; {
-					err := params.extendedEvalCtx.ExecCfg.DB.AdminRelocateRange(ctx, k, t)
-					if err == nil {
-						return
-					} else if !rt.Next() {
-						response <- errors.Wrap(err, "PreDistributionError: relocate failed")
-						return
-					}
-				}
-			}
-			relocate(params.ctx, info.SplitKey, targets)
-		}
-		wg.Wait()
-		close(response)
-		wgResponse.Wait()
-
-		if len(res) != 0 {
-			return res[0]
-		}
-	}
 	return nil
 }

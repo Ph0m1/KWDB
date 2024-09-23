@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
+	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
+	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/scheduledjobs"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
+	"gitee.com/kwbasedb/kwbase/pkg/server/serverpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -165,11 +167,18 @@ func (n *alterScheduleNode) startExec(params runParams) error {
 		} else {
 			duration = int(duration1)
 		}
-		// send to all available node
-		nodeList, err := api.GetAvailableNodeIDs(params.ctx)
+
+		var nodeList []roachpb.NodeID
+		nodeStatus, err := params.ExecCfg().StatusServer.Nodes(params.ctx, &serverpb.NodesRequest{})
 		if err != nil {
 			return err
 		}
+		for _, n := range nodeStatus.Nodes {
+			if nodeStatus.LivenessByNodeID[n.Desc.NodeID] == storagepb.NodeLivenessStatus_LIVE {
+				nodeList = append(nodeList, n.Desc.NodeID)
+			}
+		}
+
 		d := jobspb.SyncMetaCacheDetails{Type: alterCompressInterval}
 		newPlanNode := &tsDDLNode{d: d, nodeID: nodeList, compressInterval: strconv.Itoa(duration)}
 		_, err = params.p.makeNewPlanAndRun(params.ctx, params.p.txn, newPlanNode)

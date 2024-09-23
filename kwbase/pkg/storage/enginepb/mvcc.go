@@ -181,6 +181,10 @@ func (ms *MVCCStats) Add(oms MVCCStats) {
 	ms.IntentCount += oms.IntentCount
 	ms.SysBytes += oms.SysBytes
 	ms.SysCount += oms.SysCount
+	// update TsPerRowSize, not add
+	if oms.TsPerRowSize != 0 {
+		ms.TsPerRowSize = oms.TsPerRowSize
+	}
 }
 
 // Subtract removes oms from ms. The ages will be moved forward to the larger of

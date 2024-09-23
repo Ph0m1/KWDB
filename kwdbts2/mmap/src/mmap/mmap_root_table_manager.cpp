@@ -15,18 +15,18 @@
 #include "dirent.h"
 #include "sys_utils.h"
 
-inline string IdToEntityBigTableUrl(const KTableKey& table_id, uint32_t table_version) {
-  return nameToEntityBigTableURL(std::to_string(table_id), s_bt + "_" + std::to_string(table_version));
+inline string IdToEntityBigTablePath(const KTableKey& table_id, uint32_t table_version) {
+  return nameToEntityBigTablePath(std::to_string(table_id), s_bt + "_" + std::to_string(table_version));
 }
 
 MMapMetricsTable* MMapRootTableManager::openRootTable(uint32_t table_version, ErrorInfo& err_info) {
   auto* tmp_bt = new MMapMetricsTable();
-  string bt_url = IdToEntityBigTableUrl(table_id_, table_version);
-  tmp_bt->open(bt_url, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
+  string bt_path = IdToEntityBigTablePath(table_id_, table_version);
+  tmp_bt->open(bt_path, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
   if (err_info.errcode < 0) {
     delete tmp_bt;
     tmp_bt = nullptr;
-    LOG_ERROR("root table[%s] open failed: %s", bt_url.c_str(), err_info.errmsg.c_str())
+    LOG_ERROR("root table[%s] open failed: %s", bt_path.c_str(), err_info.errmsg.c_str())
   }
   return tmp_bt;
 }
@@ -73,10 +73,10 @@ KStatus MMapRootTableManager::Init(ErrorInfo& err_info) {
   }
   // Open only the latest version of table
   auto* tmp_bt = new MMapMetricsTable();
-  string bt_url = IdToEntityBigTableUrl(table_id_, max_table_version);
-  tmp_bt->open(bt_url, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
+  string bt_path = IdToEntityBigTablePath(table_id_, max_table_version);
+  tmp_bt->open(bt_path, db_path_, tbl_sub_path_, MMAP_OPEN_NORECURSIVE, err_info);
   if (err_info.errcode < 0) {
-    LOG_ERROR("root table[%s] open error : %s", bt_url.c_str(), err_info.errmsg.c_str());
+    LOG_ERROR("root table[%s] open error : %s", bt_path.c_str(), err_info.errmsg.c_str());
     delete tmp_bt;
     tmp_bt = nullptr;
     return FAIL;
@@ -93,6 +93,10 @@ KStatus MMapRootTableManager::CreateRootTable(vector<AttributeInfo>& schema, uin
   assert(table_version > 0);
   wrLock();
   Defer defer([&]() { unLock(); });
+  if (root_tables_.find(table_version) != root_tables_.end()) {
+    LOG_INFO("Creating root table that already exists.");
+    return KStatus::SUCCESS;
+  }
   if (cur_table_version_ >= table_version) {
     LOG_ERROR("cannot create low version table: current version[%d], create version[%d]",
               cur_table_version_, table_version)
@@ -102,14 +106,14 @@ KStatus MMapRootTableManager::CreateRootTable(vector<AttributeInfo>& schema, uin
     attr.version = table_version;
   }
   // Create a new version of root table
-  string bt_url = IdToEntityBigTableUrl(table_id_, table_version);
+  string bt_path = IdToEntityBigTablePath(table_id_, table_version);
   int encoding = ENTITY_TABLE | NO_DEFAULT_TABLE;
   auto* tmp_bt = new MMapMetricsTable();
-  if (tmp_bt->open(bt_url, db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 || err_info.errcode == KWECORR) {
+  if (tmp_bt->open(bt_path, db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 || err_info.errcode == KWECORR) {
     tmp_bt->create(schema, table_version, tbl_sub_path_, partition_interval_, encoding, err_info, false);
   }
   if (err_info.errcode < 0) {
-    LOG_ERROR("root table[%s] create error : %s", bt_url.c_str(), err_info.errmsg.c_str());
+    LOG_ERROR("root table[%s] create error : %s", bt_path.c_str(), err_info.errmsg.c_str());
     tmp_bt->remove();
     delete tmp_bt;
     tmp_bt = nullptr;
@@ -145,6 +149,38 @@ KStatus MMapRootTableManager::CreateRootTable(vector<AttributeInfo>& schema, uin
   partition_interval_ = tmp_bt->partitionInterval();
   return SUCCESS;
 }
+
+KStatus MMapRootTableManager::AddRootTable(vector<AttributeInfo>& schema, uint32_t table_version,
+                                              ErrorInfo& err_info) {
+  assert(table_version > 0);
+  wrLock();
+  Defer defer([&]() { unLock(); });
+  if (root_tables_.find(table_version) != root_tables_.end()) {
+    return KStatus::SUCCESS;
+  }
+  for (auto& attr: schema) {
+    attr.version = table_version;
+  }
+  // Create a new version of root table
+  string tbl_name = IdToEntityBigTablePath(table_id_, table_version);
+  int encoding = ENTITY_TABLE | NO_DEFAULT_TABLE;
+  auto* tmp_bt = new MMapMetricsTable();
+  if (tmp_bt->open(tbl_name, db_path_, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 || err_info.errcode == KWECORR) {
+    tmp_bt->create(schema, table_version, tbl_sub_path_, partition_interval_, encoding, err_info, false);
+  }
+  if (err_info.errcode < 0) {
+    LOG_ERROR("root table[%s] create error : %s", tbl_name.c_str(), err_info.errmsg.c_str());
+    tmp_bt->remove();
+    delete tmp_bt;
+    tmp_bt = nullptr;
+    return FAIL;
+  }
+  tmp_bt->setObjectReady();
+  // Save to map cache
+  root_tables_.insert({table_version, tmp_bt});
+  return SUCCESS;
+}
+
 
 KStatus MMapRootTableManager::PutTable(uint32_t table_version, MMapMetricsTable *table) {
   wrLock();
@@ -202,6 +238,15 @@ MMapMetricsTable* MMapRootTableManager::GetRootTable(uint32_t table_version, boo
   return nullptr;
 }
 
+void MMapRootTableManager::GetAllVersion(std::vector<uint32_t>* table_versions) {
+  // Try to get the root table using a read lock
+  rdLock();
+  Defer defer([&]() { unLock(); });
+  for (auto& version : root_tables_) {
+    table_versions->push_back(version.first);
+  }
+}
+
 uint32_t MMapRootTableManager::GetCurrentTableVersion() const {
   return cur_table_version_;
 }
@@ -227,7 +272,7 @@ KStatus MMapRootTableManager::SetPartitionInterval(const uint64_t& partition_int
       root_table.second = openRootTable(root_table.first, err_info);
       if (!root_table.second) {
         LOG_ERROR("root table[%s] set partition interval failed",
-                  IdToEntityBigTableUrl(table_id_, root_table.first).c_str());
+                  IdToEntityBigTablePath(table_id_, root_table.first).c_str());
         // rollback
         for (auto completedTable : completed_tables) {
           completedTable->partitionInterval() = old_partition_interval;
@@ -265,7 +310,7 @@ KStatus MMapRootTableManager::SetStatisticInfo(uint64_t entity_num, uint64_t ins
       root_table.second = openRootTable(root_table.first, err_info);
       if (!root_table.second) {
         LOG_ERROR("root table[%s] set storage info failed",
-                  IdToEntityBigTableUrl(table_id_, root_table.first).c_str());
+                  IdToEntityBigTablePath(table_id_, root_table.first).c_str());
         // rollback
         for (auto completedTable : completed_tables) {
           completedTable->metaData()->entity_num = old_entity_num;
@@ -281,27 +326,36 @@ KStatus MMapRootTableManager::SetStatisticInfo(uint64_t entity_num, uint64_t ins
   return KStatus::SUCCESS;
 }
 
-const vector<AttributeInfo>& MMapRootTableManager::GetSchemaInfoWithoutHidden(uint32_t table_version) {
+KStatus MMapRootTableManager::GetSchemaInfoExcludeDropped(std::vector<AttributeInfo>* schema, uint32_t table_version) {
   MMapMetricsTable* root_table = GetRootTable(table_version);
-  assert(root_table != nullptr);
-  return root_table->getSchemaInfoWithoutHidden();
+  if (!root_table) {
+    LOG_ERROR("schema version [%u] does not exists", table_version);
+    return KStatus::FAIL;
+  }
+  *schema = root_table->getSchemaInfoExcludeDropped();
+  return KStatus::SUCCESS;
 }
 
-const vector<AttributeInfo>& MMapRootTableManager::GetSchemaInfoWithHidden(uint32_t table_version) {
+KStatus MMapRootTableManager::GetSchemaInfoIncludeDropped(std::vector<AttributeInfo>* schema, uint32_t table_version) {
   MMapMetricsTable* root_table = GetRootTable(table_version);
-  assert(root_table != nullptr);
-  return root_table->getSchemaInfoWithHidden();
+  if (!root_table) {
+    LOG_ERROR("schema version [%u] does not exists", table_version);
+    return KStatus::FAIL;
+  }
+  *schema = root_table->getSchemaInfoIncludeDropped();
+  return KStatus::SUCCESS;
 }
 
-const vector<uint32_t>& MMapRootTableManager::GetColsIdx(uint32_t table_version) {
+const vector<uint32_t>& MMapRootTableManager::GetIdxForValidCols(uint32_t table_version) {
   MMapMetricsTable* root_table = GetRootTable(table_version);
   assert(root_table != nullptr);
-  return root_table->getColsIdx();
+  return root_table->getIdxForValidCols();
 }
 
 int MMapRootTableManager::GetColumnIndex(const AttributeInfo& attr_info) {
   int col_no = -1;
-  auto schema_info = GetSchemaInfoWithHidden();
+  std::vector<AttributeInfo> schema_info;
+  GetSchemaInfoIncludeDropped(&schema_info);
   for (int i = 0; i < schema_info.size(); ++i) {
     if ((schema_info[i].id == attr_info.id) && (!schema_info[i].isFlag(AINFO_DROPPED))) {
       col_no = i;
@@ -332,7 +386,7 @@ KStatus MMapRootTableManager::SetDropped() {
       ErrorInfo err_info;
       root_table.second = openRootTable(root_table.first, err_info);
       if (!root_table.second) {
-        LOG_ERROR("root table[%s] set drop failed", IdToEntityBigTableUrl(table_id_, root_table.first).c_str());
+        LOG_ERROR("root table[%s] set drop failed", IdToEntityBigTablePath(table_id_, root_table.first).c_str());
         // rollback
         for (auto completed_table : completed_tables) {
           completed_table->setNotDropped();
@@ -366,7 +420,7 @@ KStatus MMapRootTableManager::RemoveAll() {
   // Remove all root tables
   for (auto& root_table : root_tables_) {
     if (!root_table.second) {
-      Remove(db_path_ + IdToEntityBigTableUrl(table_id_, root_table.first));
+      Remove(db_path_ + IdToEntityBigTablePath(table_id_, root_table.first));
     } else {
       root_table.second->remove();
       delete root_table.second;
@@ -382,7 +436,8 @@ KStatus MMapRootTableManager::RollBack(uint32_t old_version, uint32_t new_versio
   Defer defer([&]() { unLock(); });
   if (cur_table_version_ == old_version) {
     return SUCCESS;
-  } else if (cur_table_version_ == new_version) {
+  }
+  if (cur_table_version_ == new_version) {
     // Get the previous version of root table
     auto bt = GetRootTable(old_version, false);
     // Clear the current version of the data
@@ -393,18 +448,23 @@ KStatus MMapRootTableManager::RollBack(uint32_t old_version, uint32_t new_versio
     cur_root_table_ = bt;
     cur_table_version_ = old_version;
     partition_interval_ = bt->partitionInterval();
-  } else {
-    LOG_ERROR("the rollback version number(%u) is smaller than current table version(%u)", new_version, cur_table_version_);
+  } else if (cur_table_version_ < old_version) {
+    LOG_ERROR("incorrect version: current table version is [%u], but roll back to version is [%u]",
+              cur_table_version_, old_version);
     return FAIL;
   }
   return SUCCESS;
 }
 
 KStatus MMapRootTableManager::UpdateVersion(uint32_t cur_version, uint32_t new_version) {
-  auto schema = GetSchemaInfoWithHidden(cur_version);
+  std::vector<AttributeInfo> schema;
+  auto s = GetSchemaInfoIncludeDropped(&schema, cur_version);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
   ErrorInfo err_info;
   // Create a new version of the root table based on the resulting schema
-  auto s = CreateRootTable(schema, new_version, err_info, cur_version);
+  s = CreateRootTable(schema, new_version, err_info, cur_version);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("UpdateVersion failed: table id = %u, new_version = %u", table_id_, new_version);
     return s;

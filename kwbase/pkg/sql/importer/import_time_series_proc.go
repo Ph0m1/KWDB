@@ -294,10 +294,6 @@ func initPrettyColsAndComputeColumnSize(
 	if err != nil {
 		return nil, err
 	}
-	prettyCols := make([]*sqlbase.ColumnDescriptor, pArgs.PTagNum+pArgs.AllTagNum+pArgs.DataColNum)
-	copy(prettyCols[:pArgs.PTagNum], primaryTagCols)
-	copy(prettyCols[pArgs.PTagNum:], allTagCols)
-	copy(prettyCols[pArgs.PTagNum+pArgs.AllTagNum:], dataCols)
 
 	autoShrink := false
 	if spec.Format.Csv.AutoShrink {
@@ -329,8 +325,10 @@ func initPrettyColsAndComputeColumnSize(
 	} else if batchSize > maxBatchSize {
 		batchSize = maxBatchSize
 	}
-	t := &timeSeriesImportInfo{prettyCols: prettyCols, pArgs: pArgs, columns: columns, colIndexs: colIndexs, autoShrink: autoShrink, logColumnID: logColumnID, batchSize: batchSize, fileSplitInfos: fileSplitInfos,
-		parallelNums: parallelNums, dbID: dbID, tbID: tbID, hashRouter: hashRouter, flowCtx: flowCtx, datumsCh: datumsCh, txn: txn, primaryTagCols: primaryTagCols,
+	t := &timeSeriesImportInfo{prettyCols: pArgs.PrettyCols, pArgs: pArgs, columns: columns, colIndexs: colIndexs,
+		autoShrink: autoShrink, logColumnID: logColumnID, batchSize: batchSize, fileSplitInfos: fileSplitInfos,
+		parallelNums: parallelNums, dbID: dbID, tbID: tbID, hashRouter: hashRouter, flowCtx: flowCtx,
+		datumsCh: datumsCh, txn: txn, primaryTagCols: primaryTagCols,
 		OptimizedDispatch: spec.OptimizedDispatch}
 	t.mu.pTagToWorkerID = pTagToWorkerID
 	t.tsColTypeMap = make(map[int]oid.Oid, pArgs.PTagNum+pArgs.AllTagNum+pArgs.DataColNum)
@@ -634,49 +632,53 @@ func (t *timeSeriesImportInfo) handleDedupResp(
 	datums []tree.Datums,
 	priVal string,
 ) {
-	var ruleType, affectedCount int64
-	var rowBitMap []byte
+	var ruleType, succeedCount int64
+	//var rowBitMap []byte
 	if isResp {
-		resp := resp.(*roachpb.TsPutResponse)
-		ruleType, affectedCount, rowBitMap = resp.DedupRule, resp.Header().NumKeys, resp.DiscardBitmap
+		resp := resp.(*roachpb.TsRowPutResponse)
+		ruleType, succeedCount, _ = resp.DedupRule, resp.Header().NumKeys, resp.DiscardBitmap
 	} else {
 		resp := resp.(tse.DedupResult)
-		ruleType, affectedCount, rowBitMap = int64(resp.DedupRule), int64(resp.DedupRows), resp.DiscardBitmap
+		ruleType, succeedCount, _ = int64(resp.DedupRule), int64(resp.DedupRows), resp.DiscardBitmap
 	}
 	switch ruleType {
 	case int64(execinfrapb.DedupRule_TsReject):
 		// reject dedup rule: all rows will abandon
-		if affectedCount == 0 {
+		if succeedCount != 0 {
 			t.addResultCount(reqCount)
 			break
 		}
-		for i := range datums {
-			cols := datums[i]
-			t.recordAbandondDatums(ctx, priVal, cols, t.logColumnID, errors.Newf("import while Dedup reject"))
-		}
+		atomic.AddInt64(&t.AbandonCount, reqCount)
+		// TODO(yangshuai):Evenly distributed module repair bitmap, Re record logs
+		//for _ = range datums {
+		//cols := datums[i]
+		//t.recordAbandondDatums(ctx, priVal, cols, t.logColumnID, errors.Newf("import while Dedup reject"))
+		//}
 	case int64(execinfrapb.DedupRule_TsDiscard):
 		// discard dedup rule: only map with bit 1 was abandon
-		if affectedCount == 0 {
-			t.addResultCount(reqCount)
+		if succeedCount == reqCount {
+			t.addResultCount(succeedCount)
 			break
 		}
-		id := 0
-		for ok := range rowBitMap {
-			if eightRow := rowBitMap[ok]; eightRow != 0 {
-				binaryStr := fmt.Sprintf("%b", eightRow)
-				for _, miniRowOk := range binaryStr {
-					if miniRowOk == '1' {
-						cols := datums[id]
-						reqCount--
-						t.recordAbandondDatums(ctx, priVal, cols, t.logColumnID, errors.Newf("import while Dedup discard"))
-					}
-					id++
-				}
-			} else {
-				id += oneByteRows
-			}
-		}
-		t.addResultCount(reqCount)
+		atomic.AddInt64(&t.AbandonCount, reqCount-succeedCount)
+		// TODO(yangshuai):Evenly distributed module repair bitmap, Re record logs
+		//id := 0
+		//for ok := range rowBitMap {
+		//	if eightRow := rowBitMap[ok]; eightRow != 0 {
+		//		binaryStr := fmt.Sprintf("%b", eightRow)
+		//		for _, miniRowOk := range binaryStr {
+		//			if miniRowOk == '1' {
+		//				cols := datums[id]
+		//				reqCount--
+		//				t.recordAbandondDatums(ctx, priVal, cols, t.logColumnID, errors.Newf("import while Dedup discard"))
+		//			}
+		//			id++
+		//		}
+		//	} else {
+		//		id += oneByteRows
+		//	}
+		//}
+		//t.addResultCount(reqCount)
 	default:
 		// unknown dedup rule. only record all rows has been send to storage
 		t.addResultCount(reqCount)
@@ -707,13 +709,52 @@ func (t *timeSeriesImportInfo) ingest(
 		return nil
 	}
 
-	payload, primaryTagVal, tolerantErr, err := t.BuildPayloadForTsImport(
+	// In StartSingleNode, use column payloads and write storage directly
+	if t.flowCtx.EvalCtx.StartSinglenode {
+		payload, primaryTagVal, tolerantErr, err := t.BuildPayloadForTsImportStartSingleNode(
+			t.flowCtx.EvalCtx,
+			t.txn,
+			datums,
+			len(datums),
+		)
+
+		if err != nil {
+			for i := range datums {
+				cols := datums[i]
+				rowString := tree.ConvertDatumsToStr(cols, ',')
+				t.handleCoruptedResult(ctx, rowString, err)
+			}
+			return err
+		}
+
+		if len(tolerantErr) > 0 {
+			for _, rowErrmap := range tolerantErr {
+				for k, v := range rowErrmap.(map[string]error) {
+					t.handleCoruptedResult(ctx, k, v)
+				}
+			}
+		}
+		resp, err := t.flowCtx.Cfg.TsEngine.PutData(uint64(t.tbID), [][]byte{payload}, uint64(0))
+		if err != nil {
+			for i := range datums {
+				cols := datums[i]
+				rowString := tree.ConvertDatumsToStr(cols, ',')
+				t.handleCoruptedResult(ctx, rowString, err)
+			}
+			return err
+		}
+		t.handleDedupResp(ctx, resp, false, int64(len(datums)), datums, string(primaryTagVal))
+		return err
+	}
+
+	// In StartDistributeMode, use row payloads and write storage through distributed layers
+	ba := t.txn.NewBatch()
+	payloadNodeMap, tolerantErr, err := t.BuildPayloadForTsImportStartDistributeMode(
 		t.flowCtx.EvalCtx,
 		t.txn,
 		datums,
 		len(datums),
 	)
-
 	if err != nil {
 		for i := range datums {
 			cols := datums[i]
@@ -730,39 +771,16 @@ func (t *timeSeriesImportInfo) ingest(
 			}
 		}
 	}
-	// one kwbase server is available. can PutData directory
-	if t.OptimizedDispatch {
-		resp, err := t.flowCtx.Cfg.TsEngine.PutData(uint64(t.tbID), [][]byte{payload}, uint64(0))
-		if err != nil {
-			for i := range datums {
-				cols := datums[i]
-				rowString := tree.ConvertDatumsToStr(cols, ',')
-				t.handleCoruptedResult(ctx, rowString, err)
-			}
-			return err
-		}
-		t.handleDedupResp(ctx, resp, false, int64(len(datums)), datums, string(primaryTagVal))
-		return err
-	}
-	// more than 1 node available. wrap req and send to dist server
-	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(t.tbID, primaryTagVal)
-	ba := t.txn.NewBatch()
-	ba.Header.ImportTimeSeriesData = true
-	nodeID, rowVal, err := t.WrappeToInsertReq(t.flowCtx.EvalCtx, len(datums), payload, primaryTagVal)
-	if err != nil {
-		for i := range datums {
-			cols := datums[i]
-			rowString := tree.ConvertDatumsToStr(cols, ',')
-			t.handleCoruptedResult(ctx, rowString, err)
-		}
-		return err
-	}
-	for _, val := range rowVal[int(nodeID)].PerNodePayloads {
-		ba.AddRawRequest(&roachpb.TsPutRequest{
+	for _, val := range payloadNodeMap[int(t.flowCtx.EvalCtx.NodeID)].PerNodePayloads {
+		ba.AddRawRequest(&roachpb.TsRowPutRequest{
 			RequestHeader: roachpb.RequestHeader{
-				Key: primaryTagKey,
+				Key:    val.StartKey,
+				EndKey: val.EndKey,
 			},
-			Value: roachpb.Value{RawBytes: val.Payload},
+			HeaderPrefix: val.Payload,
+			Values:       val.RowBytes,
+			Timestamps:   val.RowTimestamps,
+			ValueSize:    val.ValueSize,
 		})
 		err = t.flowCtx.Cfg.TseDB.Run(ctx, ba)
 		if err != nil {
@@ -774,8 +792,8 @@ func (t *timeSeriesImportInfo) ingest(
 			return err
 		}
 		for respsID := range ba.RawResponse().Responses {
-			resp := ba.RawResponse().Responses[respsID].GetInner().(*roachpb.TsPutResponse)
-			t.handleDedupResp(ctx, resp, true, int64(len(datums)), datums, string(primaryTagVal))
+			resp := ba.RawResponse().Responses[respsID].GetInner().(*roachpb.TsRowPutResponse)
+			t.handleDedupResp(ctx, resp, true, int64(len(datums)), datums, string(val.PrimaryTagKey))
 		}
 	}
 
@@ -987,8 +1005,8 @@ func (t *timeSeriesImportInfo) ingestDatums(ctx context.Context, closeChan chan 
 	})
 }
 
-// BuildPayloadForTsImport construct payload for import ts table.
-func (t *timeSeriesImportInfo) BuildPayloadForTsImport(
+// BuildPayloadForTsImportStartSingleNode construct payload for StartSingleNode import ts table.
+func (t *timeSeriesImportInfo) BuildPayloadForTsImportStartSingleNode(
 	evalCtx *tree.EvalContext, txn *kv.Txn, InputDatums []tree.Datums, rowNum int,
 ) ([]byte, []byte, []interface{}, error) {
 	tsPayload := execbuilder.NewTsPayload()
@@ -1002,11 +1020,25 @@ func (t *timeSeriesImportInfo) BuildPayloadForTsImport(
 		RowNum:         uint32(rowNum),
 	})
 
-	return tsPayload.BuildRowsPayloadByDatums(InputDatums, rowNum, t.prettyCols, t.colIndexs,
-		true,
-		func(primaryTag []byte) (api.EntityRangeGroupID, error) {
-			return t.hashRouter.GetGroupIDByPrimaryTag(evalCtx.Context, primaryTag)
-		})
+	return tsPayload.BuildRowsPayloadByDatums(InputDatums, rowNum, t.prettyCols, t.colIndexs, true)
+}
+
+// BuildPayloadForTsImportStartDistributeMode construct payload of for StartDistributeMode import ts table.
+func (t *timeSeriesImportInfo) BuildPayloadForTsImportStartDistributeMode(
+	evalCtx *tree.EvalContext, txn *kv.Txn, InputDatums []tree.Datums, rowNum int,
+) (map[int]*sqlbase.PayloadForDistTSInsert, []interface{}, error) {
+	tsPayload := execbuilder.NewTsPayload()
+	tsPayload.SetArgs(t.pArgs)
+	tsPayload.SetHeader(execbuilder.PayloadHeader{
+		TxnID:          txn.ID(),
+		PayloadVersion: t.pArgs.PayloadVersion,
+		DBID:           uint32(t.dbID),
+		TBID:           uint64(t.tbID),
+		TSVersion:      t.pArgs.TSVersion,
+		RowNum:         uint32(rowNum),
+	})
+
+	return tsPayload.BuildRowBytesForTsImport(evalCtx, txn, InputDatums, rowNum, t.prettyCols, t.colIndexs, t.pArgs, uint32(t.dbID), uint32(t.tbID), true)
 }
 
 // WrappeToInsertReq wrap payload to req
@@ -1018,7 +1050,8 @@ func (t *timeSeriesImportInfo) WrappeToInsertReq(
 	if err != nil {
 		return 0, nil, err
 	}
-	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(t.tbID), primaryTagVal)
+	hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
+	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(t.tbID, hashPoints)
 	if val, ok := payloadNodeMap[int(nodeID[0])]; ok {
 		val.PerNodePayloads = append(val.PerNodePayloads, &sqlbase.SinglePayloadInfo{
 			Payload:       payload,

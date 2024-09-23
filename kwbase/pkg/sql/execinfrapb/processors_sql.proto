@@ -196,10 +196,21 @@ message TsInsertSelSpec {
   optional bool not_set_inputs_to_drain = 7[(gogoproto.nullable) = false];
 }
 
+message payloadForDistributeMode {
+  repeated bytes row = 1;
+  // timestamp for each row.
+  repeated int64 timeStamps = 2;
+  optional bytes startKey = 3;
+  optional bytes endKey = 4;
+  optional int32 valueSize = 5[(gogoproto.nullable) = false];
+}
+
 message TsInsertProSpec {
   repeated uint32 row_nums = 1;
   repeated bytes pay_load = 2;
   repeated bytes primary_tag_key = 3;
+  repeated payloadForDistributeMode allPayload = 4;
+  repeated bytes payloadPrefix = 5;
 }
 
 message Span {
@@ -231,6 +242,8 @@ message TsTagUpdateProSpec {
   repeated bytes primary_tag_keys = 4;
   repeated bytes primary_tags = 5;
   repeated bytes tags = 6;
+  optional bytes start_key = 7;
+  optional bytes end_key = 8;
 }
 
 message TsCreateTableProSpec {

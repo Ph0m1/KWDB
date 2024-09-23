@@ -17,7 +17,7 @@
 #include <thread>
 #include "mmap/mmap_big_table.h"
 #include "utils/big_table_utils.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "lt_rw_latch.h"
 
 
@@ -42,7 +42,7 @@ MMapBigTable::~MMapBigTable() {
             releaseObject(obj);
           }
         } else {
-          delete vso_[i].sf;      // internal VARSTRING
+          delete vso_[i].str_col_;      // internal VARSTRING
         }
       }
     }
@@ -55,7 +55,7 @@ MMapBigTable::~MMapBigTable() {
 impl_latch_virtual_func(MMapBigTable, &rw_latch_)
 
 int MMapBigTable::avgColumnStrLen(int col) {
-  MMapStringFile *sf = vso_[col].sf;
+  MMapStringColumn *sf = vso_[col].str_col_;
   if (sf) {
     if (col_info_[col].isFlag(AINFO_EXTERNAL)) {
       return reinterpret_cast<BigTable *>(vso_[col].obj)->avgColumnStrLen(vso_[col].col);
@@ -98,9 +98,9 @@ vector<AttributeInfo> getExternalSchema(const vector<AttributeInfo> &schema) {
 }
 
 int MMapBigTable::init(const vector<AttributeInfo> &schema,
-  const vector<string> &key, const string &key_order, const string &ns_url,
-  const string &description, const string &source_url, int encoding,
-  ErrorInfo &err_info) {
+                       const vector<string> &key, const string &key_order, const string &ns_path,
+                       const string &description, const string &source_path, int encoding,
+                       ErrorInfo &err_info) {
   err_info.errcode = initMetaData();
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
@@ -113,7 +113,7 @@ int MMapBigTable::init(const vector<AttributeInfo> &schema,
   // dummy header for legacy table without null-bitmap
   dummy_header_.resize(header_sz_, 0);
 
-  name_ = getURLObjectName(URL());
+  name_ = getTsObjectName(path());
 
   _endIndex() = _startIndex() = 1;
   for (size_t i = 0; i < schema.size(); ++i) {
@@ -133,7 +133,7 @@ int MMapBigTable::init(const vector<AttributeInfo> &schema,
   meta_data_->depth = meta_data_->level;
   meta_data_->struct_type = (ST_VTREE | ST_NS_EXT);
 
-  err_info.errcode = writeAttributeURL(source_url, ns_url, description);
+  err_info.errcode = writeAttributePath(source_path, ns_path, description);
   if (err_info.errcode < 0) {
     return err_info.errcode;
   }
@@ -169,10 +169,10 @@ void MMapBigTable::initRow0(){
 
 int MMapBigTable::create(const vector<AttributeInfo> &schema,
   const vector<string> &key, const string &key_order,
-  const string &ns_url,
+  const string &ns_path,
   const string &description,
   const string &tbl_sub_path,
-  const string &source_url,
+  const string &source_path,
   int encoding,
   ErrorInfo &err_info){
 
@@ -181,8 +181,8 @@ int MMapBigTable::create(const vector<AttributeInfo> &schema,
     return err_info.errcode;
   }
 
-  if (init(schema, key, key_order, ns_url, description, source_url, encoding,
-    err_info) < 0)
+  if (init(schema, key, key_order, ns_path, description, source_path, encoding,
+           err_info) < 0)
     return err_info.errcode;
 
   meta_data_->magic = magic();
@@ -209,20 +209,20 @@ int MMapBigTable::create(BigTable *sbt, const vector<AttributeInfo> &schema,
   // size of schema = size of vs_cols
   vso_.resize(schema.size());
   for (size_t i = 0; i < vs_cols.size(); ++i) {
-    if (vs_cols[i].sf) {
+    if (vs_cols[i].str_col_) {
       BigTable *vsbt = (BigTable *)vs_cols[i].obj;
       if (vsbt)
         vsbt->incRefCount();
       vso_[i].obj = (TSObject *)vsbt;
-      vso_[i].sf = vs_cols[i].sf;
+      vso_[i].str_col_ = vs_cols[i].str_col_;
       vso_[i].col = vs_cols[i].col;
     }
     else {
       vso_[i].obj = nullptr;
-      vso_[i].sf = nullptr;
+      vso_[i].str_col_ = nullptr;
     }
   }
-  MMapBigTable::create(schema, key, kwdbts::s_emptyString, sbt->nameServiceURL(),
+  MMapBigTable::create(schema, key, kwdbts::s_emptyString, kwdbts::s_emptyString,
       kwdbts::s_emptyString, kwdbts::s_emptyString, sbt->name(), encoding, err_info);
   return err_info.errcode;
 }
@@ -281,18 +281,16 @@ int MMapBigTable::resize(size_t size) {
   return 0;
 }
 
-int MMapBigTable::create(const string &link_url)
-{
-    int err_code = memExtend(sizeof(MMapMetaData), 512);
-    if (err_code < 0)
-        return err_code;
-    initSection();
-    meta_data_->meta_data_length = sizeof(MMapMetaData);
-    meta_data_->struct_type = (ST_TRANSIENT);
-    urlCopy(&(meta_data_->link_url[0]), link_url);
-    //   assign(meta_data_->source_url, urlCopy(source_url, 0, 512));
-    meta_data_->magic = magic();
-    return 0;
+int MMapBigTable::create(const string& link_path) {
+  int err_code = memExtend(sizeof(MMapMetaData), 512);
+  if (err_code < 0)
+    return err_code;
+  initSection();
+  meta_data_->meta_data_length = sizeof(MMapMetaData);
+  meta_data_->struct_type = (ST_TRANSIENT);
+  pathCopy(&(meta_data_->link_path[0]), link_path);
+  meta_data_->magic = magic();
+  return 0;
 }
 
 int MMapBigTable::opening(ErrorInfo &err_info) {
@@ -330,16 +328,16 @@ int MMapBigTable::opening(ErrorInfo &err_info) {
   return err_info.errcode;
 }
 
-int MMapBigTable::open_(int char_code, const string &url,const std::string &db_path,
+int MMapBigTable::open_(int char_code, const string &table_path, const std::string &db_path,
                         const string &tbl_sub_path, int flags, ErrorInfo &err_info) {
   db_path_ = db_path;
   tbl_sub_path_ = tbl_sub_path;
-  string file_path = getURLFilePath(url);
+  string file_path = getTsFilePath(table_path);
   if ((err_info.errcode = MMapObject::open(file_path, db_path, tbl_sub_path,
     char_code, flags)) < 0) {
     return err_info.errcode;
   }
-  name_ = getURLObjectName(URL());
+  name_ = getTsObjectName(path());
   if (memLen() >= (off_t) sizeof(MMapMetaData)) {
     if (opening(err_info) < 0)
       return err_info.errcode;
@@ -382,9 +380,9 @@ int MMapBigTable::open_(int char_code, const string &url,const std::string &db_p
   return err_info.errcode;
 }
 
-int MMapBigTable::open(const string &url, const std::string &db_path, const string &tbl_sub_path, int flags,
-  ErrorInfo &err_info) {
-  return open_(magic(), url, db_path, tbl_sub_path, flags, err_info);
+int MMapBigTable::open(const string &table_path, const std::string &db_path, const string &tbl_sub_path, int flags,
+                       ErrorInfo &err_info) {
+  return open_(magic(), table_path, db_path, tbl_sub_path, flags, err_info);
 }
 
 void MMapBigTable::sync(int flags) {
@@ -392,8 +390,8 @@ void MMapBigTable::sync(int flags) {
     MMapFile::sync(flags);
 
     for (size_t i = 0; i < vso_.size(); ++i) {
-      if (vso_[i].sf)
-        vso_[i].sf->sync(flags);
+      if (vso_[i].str_col_)
+        vso_[i].str_col_->sync(flags);
     }
   }
 }
@@ -403,12 +401,12 @@ int MMapBigTable::structVersion() const { return MMapObject::structVersion(); }
 void MMapBigTable::removeStringFile() {
     if (meta_data_) {
         for (size_t i = 0; i < vso_.size(); ++i) {
-            if (vso_[i].sf) {
-                string var_str_url = vso_[i].sf->realFilePath();
-                delete vso_[i].sf;
-                ::remove(var_str_url.c_str());
+            if (vso_[i].str_col_) {
+                string var_str_path = vso_[i].str_col_->realFilePath();
+                delete vso_[i].str_col_;
+                ::remove(var_str_path.c_str());
                 vso_[i].obj = nullptr;
-                vso_[i].sf = nullptr;
+                vso_[i].str_col_ = nullptr;
             }
         }
     }
@@ -598,14 +596,14 @@ size_t MMapBigTable::correctActualSize() {
 void MMapBigTable::setDataHelperVarString() {
   // set VARSTRING files in DataHelper
   for (size_t i = 0; i < vso_.size(); ++i) {
-    if (vso_[i].sf) {
-      rec_helper_.setStringFile(i, (void *)(vso_[i].sf));
+    if (vso_[i].str_col_) {
+      rec_helper_.setStringFile(i, (void *)(vso_[i].str_col_));
     }
   }
   for (size_t i = 0; i < key_idx_.size(); ++i) {
     size_t key_idx = key_idx_[i];
-    if (vso_[key_idx].sf)
-      key_helper_.setStringFile(i, (void *)(vso_[key_idx].sf));
+    if (vso_[key_idx].str_col_)
+      key_helper_.setStringFile(i, (void *)(vso_[key_idx].str_col_));
   }
 }
 
@@ -623,11 +621,11 @@ int MMapBigTable::version() const { return meta_data_->version; }
 
 int MMapBigTable::permission() const { return meta_data_->permission; }
 
-string MMapBigTable::URL() const
+string MMapBigTable::path() const
 { return filePath(); }
 
-string MMapBigTable::nameServiceURL() const
-{ return MMapObject::nameServiceURL(); }
+string MMapBigTable::nameServicePath() const
+{ return MMapObject::nameServicePath(); }
 
 const vector<AttributeInfo> & MMapBigTable::getSchemaInfo() const
 { return col_info_; }

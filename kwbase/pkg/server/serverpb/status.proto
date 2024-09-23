@@ -131,11 +131,6 @@ message NodesResponse {
     (gogoproto.nullable) = false,
     (gogoproto.customname) = "LivenessByNodeID"
   ];
-  map<int32, int32> status_by_node_id = 3 [
-    (gogoproto.castkey) = "gitee.com/kwbasedb/kwbase/pkg/roachpb.NodeID",
-    (gogoproto.nullable) = false,
-    (gogoproto.customname) = "StatusByNodeID"
-  ];
 }
 
 message NodeRequest {

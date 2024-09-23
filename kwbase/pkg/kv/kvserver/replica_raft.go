@@ -553,6 +553,7 @@ func (r *Replica) proposeTS(
 			if rDesc.ReplicaID == replID {
 				msg := fmt.Sprintf("received invalid ChangeReplicasTrigger %s to remove self (leaseholder)", crt)
 				log.Error(p.ctx, msg)
+				log.Errorf(ctx, "maxLeaseIndex :%v, r: %v, p.command: %v", p.command.MaxLeaseIndex, r, p.command)
 				return 0, roachpb.NewErrorf("%s: %s", r, msg)
 			}
 		}
@@ -563,6 +564,7 @@ func (r *Replica) proposeTS(
 		r.store.metrics.AddSSTableProposals.Inc(1)
 
 		if p.command.ReplicatedEvalResult.AddSSTable.Data == nil {
+			log.Errorf(ctx, "maxLeaseIndex :%v, r: %v, p.command: %v", p.command.MaxLeaseIndex, r, p.command)
 			return 0, roachpb.NewErrorf("cannot sideload empty SSTable")
 		}
 	} else if log.V(4) {
@@ -584,6 +586,7 @@ func (r *Replica) proposeTS(
 	// Encode body of command.
 	data = data[:preLen+cmdLen]
 	if _, err := protoutil.MarshalToWithoutFuzzing(p.command, data[preLen:]); err != nil {
+		log.Errorf(ctx, "maxLeaseIndex :%v, r: %v, p.command: %v，　err: %v", p.command.MaxLeaseIndex, r, p.command, err)
 		return 0, roachpb.NewError(err)
 	}
 
@@ -618,7 +621,11 @@ func (r *Replica) proposeTS(
 	// on the field.
 	maxLeaseIndex, err := r.mu.proposalBuf.Insert(p, data)
 	if err != nil {
+		log.Errorf(ctx, "maxLeaseIndex :%v, r: %v, p.command: %v，　err: %v", maxLeaseIndex, r, p.command, err)
 		return 0, roachpb.NewError(err)
+	}
+	if maxLeaseIndex == 0 {
+		log.Errorf(ctx, "maxLeaseIndex :%v, r: %v, p.command: %v", maxLeaseIndex, r, p.command)
 	}
 	return int64(maxLeaseIndex), nil
 }
@@ -1668,7 +1675,7 @@ func (r *Replica) refreshProposalsLocked(
 			// apply twice. We also don't want to ask the proposer to retry these
 			// special commands.
 			r.cleanupFailedProposalLocked(p)
-			log.VEventf(p.ctx, 2, "refresh (reason: %s) returning AmbiguousResultError for command "+
+			log.Errorf(p.ctx, "refresh (reason: %s) returning AmbiguousResultError for command "+
 				"without MaxLeaseIndex: %v", reason, p.command)
 			p.finishApplication(ctx, proposalResult{Err: roachpb.NewError(
 				roachpb.NewAmbiguousResultError(

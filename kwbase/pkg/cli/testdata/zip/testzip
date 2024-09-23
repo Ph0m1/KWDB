@@ -31,7 +31,6 @@ retrieving SQL data for kwdb_internal.kwdb_schedules... writing: debug/kwdb_inte
 retrieving SQL data for kwdb_internal.schema_changes... writing: debug/kwdb_internal.schema_changes.txt
 retrieving SQL data for kwdb_internal.partitions... writing: debug/kwdb_internal.partitions.txt
 retrieving SQL data for kwdb_internal.zones... writing: debug/kwdb_internal.zones.txt
-retrieving SQL data for kwdb_internal.kwdb_ts_partitions... writing: debug/kwdb_internal.kwdb_ts_partitions.txt
 requesting nodes... writing: debug/nodes.json
 requesting liveness... writing: debug/liveness.json
 writing: debug/nodes/1/status.json

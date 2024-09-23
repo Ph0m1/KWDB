@@ -168,7 +168,7 @@ const (
 	// AdminVerifyProtectedTimestamp VerifyProtectedTimestamp determines whether the specified protection record
 	// will be respected by this Range.
 	AdminVerifyProtectedTimestamp
-	//TsPut insert value to TS DB
+	// TsPut insert value to TS DB
 	TsPut
 	// AdminRequestLeaseForTS requests the range lease
 	AdminRequestLeaseForTS
@@ -187,4 +187,8 @@ const (
 	CreateTSSnapshot
 	// TsDeleteMultiEntitiesData delete multi entities data
 	TsDeleteMultiEntitiesData
+	// TsRowPut insert row values to TS DB
+	TsRowPut
+	// TsPutTag insert only tag for an entity
+	TsPutTag
 )

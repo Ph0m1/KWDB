@@ -11,6 +11,7 @@
 
 #include "st_wal_table.h"
 #include "st_logged_entity_group.h"
+#include "sys_utils.h"
 
 namespace kwdbts {
 
@@ -205,56 +206,37 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
   // and the LSN is strictly increasing but not necessarily continuous
   // 4. Write the payload into the wal log, and then write the payload into the cache.
   // 5. The latest LSN that can be read for the last update
-  if (tag_bt_ == nullptr) {
+  if (getTagTable(err_info) != KStatus::SUCCESS) {
     LOG_ERROR("The target TS table is not available.");
     return KStatus::FAIL;
   }
-  uint32_t group_id, entity_id;
+  Defer defer{[&]() {
+    releaseTagTable();
+  }};
 
+  uint32_t group_id, entity_id;
   // payload verification
   Payload pd(root_bt_manager_, payload);
   pd.dedup_rule_ = dedup_rule;
 
-  // split the payload to Tag part and Metrics part
-  TSSlice primary_tag = pd.GetPrimaryTag();
-  {
-    // require Tag lock to ensure the thread safety of putTagData
-    MUTEX_LOCK(logged_mutex_);
-    // check whether the target PRIMARY TAG already exists.
-    // if it doesn't exist, insert a new one.
-    auto ret = tag_bt_->getEntityIdGroupId(primary_tag.data, primary_tag.len, entity_id, group_id);
-    if (ret != 0) {
-      // Apply for a write lock on the Tag table (upgrade the read lock to a write lock)
-      // to ensure that the records written to the Tag table are unique.
-      // INSERT WAL LOG
-      // only save the Tag payload
-      KStatus s = wal_manager_->WriteInsertWAL(ctx, mini_trans_id, 0, 0, payload);
-      if (s == KStatus::FAIL) {
-        MUTEX_UNLOCK(logged_mutex_);
-        return s;
-      }
-
-      if (tag_bt_->getEntityIdGroupId(primary_tag.data, primary_tag.len, entity_id, group_id) != 0) {
-        // Add a new record to the tag table (including other tag values)
-        std::string tmp_str = std::to_string(table_id_);
-        uint64_t tag_hash = TsTable::GetConsistentHashId(tmp_str.data(), tmp_str.size());
-        std::string primary_tags;
-        err_info.errcode = ebt_manager_->AllocateEntity(primary_tags, tag_hash, &group_id, &entity_id);
-        if (err_info.errcode < 0) {
-          MUTEX_UNLOCK(logged_mutex_);
-          return KStatus::FAIL;
-        }
-        if (KStatus::SUCCESS != putTagData(ctx, group_id, entity_id, pd)) {
-          MUTEX_UNLOCK(logged_mutex_);
-          return KStatus::FAIL;
-        }
-      }
-    }
-    // Release the write lock
-    MUTEX_UNLOCK(logged_mutex_);
+  bool new_tag;
+  if (KStatus::SUCCESS != allocateEntityGroupId(ctx, pd, &entity_id, &group_id, &new_tag)) {
+    LOG_ERROR("allocateEntityGroupId failed, entity id: %d, group id: %d.", entity_id, group_id);
+    return KStatus::FAIL;
   }
-  // release the Tag lock
-  releaseTagTable();
+  if (new_tag) {
+    // require Tag lock to ensure the thread safety of putTagData
+    // Apply for a write lock on the Tag table (upgrade the read lock to a write lock)
+    // to ensure that the records written to the Tag table are unique.
+    // INSERT WAL LOG
+    // only save the Tag payload
+    // no need lock, lock inside.
+    KStatus s = wal_manager_->WriteInsertWAL(ctx, mini_trans_id, 0, 0, payload);
+    if (s == KStatus::FAIL) {
+      LOG_ERROR("failed WriteInsertWAL for new tag.");
+      return s;
+    }
+  }
 
   if (pd.GetFlag() == Payload::TAG_ONLY) {
     return KStatus::SUCCESS;
@@ -441,6 +423,30 @@ KStatus LoggedTsEntityGroup::CreateCheckpoint(kwdbContext_p ctx) {
   wal_manager_->Unlock();
   MUTEX_UNLOCK(logged_mutex_);
   Return(SUCCESS)
+}
+
+KStatus LoggedTsEntityGroup::BeginSnapshotMtr(kwdbContext_p ctx, uint64_t range_id, uint64_t index,
+            const SnapshotRange& range, uint64_t &mtr_id) {
+  KStatus s = MtrBegin(ctx, range_id, index, mtr_id);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("BeginSnapshotMtr failed during MtrBegin.")
+    return s;
+  }
+  s = wal_manager_->WriteSnapshotWAL(ctx, mtr_id, range.table_id, range.hash_span.begin, range.hash_span.end, range.ts_span);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("BeginSnapshotMtr failed during WriteSnapshotWAL.")
+    return s;
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus LoggedTsEntityGroup::WriteTempDirectoryLog(kwdbContext_p ctx, uint64_t mtr_id, std::string path) {
+  auto s = wal_manager_->WriteTempDirectoryWAL(ctx, mtr_id, path);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("WriteTempDirectoryLog failed during WriteTempDirectoryWAL.")
+    return s;
+  }
+  return KStatus::SUCCESS;
 }
 
 KStatus LoggedTsEntityGroup::Recover(kwdbContext_p ctx, const std::map<uint64_t, uint64_t>& applied_indexes) {
@@ -712,6 +718,38 @@ KStatus LoggedTsEntityGroup::rollback(kwdbContext_p ctx, LogEntry* wal_log) {
       break;
     case WALLogType::DB_SETTING:
       break;
+    case WALLogType::RANGE_SNAPSHOT:
+    {
+      auto snapshot_log = reinterpret_cast<SnapshotEntry*>(wal_log);
+      if (snapshot_log == nullptr) {
+        LOG_ERROR(" WAL rollback cannot prase temp dirctory object.");
+        return KStatus::FAIL;
+      }
+      HashIdSpan hash_span;
+      KwTsSpan ts_span;
+      snapshot_log->GetRangeInfo(&hash_span, &ts_span);
+      uint64_t count = 0;
+      auto s = DeleteRangeData(ctx, hash_span, 0, {ts_span}, nullptr, &count, snapshot_log->getXID(), false);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR(" WAL rollback snapshot delete range data faild.");
+        return KStatus::FAIL;
+      }
+      break;
+    }
+    case WALLogType::SNAPSHOT_TMP_DIRCTORY:
+    {
+      auto temp_path_log = reinterpret_cast<TempDirectoryEntry*>(wal_log);
+      if (temp_path_log == nullptr) {
+        LOG_ERROR(" WAL rollback cannot prase temp dirctory object.");
+        return KStatus::FAIL;
+      }
+      std::string path = temp_path_log->GetPath();
+      if (!Remove(path)) {
+        LOG_ERROR(" WAL rollback cannot remove path[%s]", path.c_str());
+        return KStatus::FAIL;
+      }
+      break;
+    }
   }
 
   return SUCCESS;
@@ -770,6 +808,7 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
       err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      ebt_manager_->ReleasePartitionTable(p_bt);
       continue;
     }
     last_p_time = p_time;
@@ -838,11 +877,13 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
     if (err_info.errcode < 0) {
       LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
       all_success = false;
+      ebt_manager_->ReleasePartitionTable(p_bt);
       break;
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
       err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      ebt_manager_->ReleasePartitionTable(p_bt);
       continue;
     }
     last_p_time = p_time;
@@ -899,6 +940,7 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
     TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
+      ebt_manager_->ReleasePartitionTable(p_bt);
       if (err_info.errcode == KWENOOBJ) {
         err_info.clear();
         continue;
@@ -909,6 +951,7 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
       err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      ebt_manager_->ReleasePartitionTable(p_bt);
       continue;
     }
     int res = p_bt->UndoDelete(entity_id, log_lsn, &(del_rows.second), err_info);
@@ -943,6 +986,7 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
     TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
+      ebt_manager_->ReleasePartitionTable(p_bt);
       if (err_info.errcode == KWENOOBJ) {
         err_info.clear();
         continue;
@@ -953,6 +997,7 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
       err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      ebt_manager_->ReleasePartitionTable(p_bt);
       continue;
     }
     int res = p_bt->RedoDelete(entity_id, log_lsn, &(del_rows.second), err_info);

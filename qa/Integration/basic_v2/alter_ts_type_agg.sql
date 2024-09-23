@@ -62,7 +62,7 @@ select pg_sleep(1);
 select first(a),first(b),first(c),first(d),first(e),first(f),first(g),first(h),last(a),last(b),last(c),last(d),last(e),last(f),last(g),last(h) from test_alter.t7;
 
 --case26 nvarchar -> char/nchar/varchar
--- create table test_alter.t8(ts timestamp not null, a nvarchar(32), b nvarchar(64), c nvarchar(32)) tags(attr int not null) primary tags(attr);
+create table test_alter.t8(ts timestamp not null, a nvarchar(32), b nvarchar(64), c nvarchar(32)) tags(attr int not null) primary tags(attr);
 insert into test_alter.t8 values(1672531211005, '1test@TEST1', '1test@TEST2',  '1test@TEST3', 1);
 insert into test_alter.t8 values(1672531211006, '2test@TEST1', '2test@TEST2',  '2test@TEST3', 1);
 

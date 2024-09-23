@@ -90,9 +90,9 @@ func (e *ScheduledRetentionExecutor) ExecuteJob(
 	}
 	jobStatus = jobs.StatusSucceeded
 
-	if jobUpdateErr := jobRegistry.Succeeded(ctx, txn, *job.ID()); jobUpdateErr != nil {
-		log.Errorf(ctx, "update job status failed. err: %s", jobUpdateErr.Error())
-	}
+	//if jobUpdateErr := jobRegistry.Succeeded(ctx, txn, *job.ID()); jobUpdateErr != nil {
+	//	log.Errorf(ctx, "update job status failed. err: %s", jobUpdateErr.Error())
+	//}
 
 	return nil
 }

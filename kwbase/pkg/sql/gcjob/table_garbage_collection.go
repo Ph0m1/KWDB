@@ -26,6 +26,7 @@ package gcjob
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
@@ -34,7 +35,9 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvclient/kvcoord"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/errors"
@@ -154,11 +157,16 @@ func clearTableData(
 				endKey = tableSpan.EndKey
 			}
 			var b kv.Batch
+			var tableID uint64
+			if table.TableType == tree.TimeseriesTable {
+				tableID = uint64(table.ID)
+			}
 			b.AddRawRequest(&roachpb.ClearRangeRequest{
 				RequestHeader: roachpb.RequestHeader{
 					Key:    lastKey.AsRawKey(),
 					EndKey: endKey.AsRawKey(),
 				},
+				TableId: tableID,
 			})
 			log.VEventf(ctx, 2, "ClearRange %s - %s", lastKey, endKey)
 			if err := db.Run(ctx, &b); err != nil {
@@ -177,6 +185,40 @@ func clearTableData(
 
 		if !ri.NeedAnother(tableSpan) {
 			break
+		}
+	}
+
+	// See also initiateDropTable in drop_table.go.
+	if table.TableType == tree.TimeseriesTable {
+		// Unsplit all manually split ranges in the table so they can be
+		// automatically merged by the merge queue.
+		err := db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			ranges, err := sql.ScanMetaKVs(ctx, txn, table.TableSpan())
+			if err != nil {
+				return err
+			}
+			for _, r := range ranges {
+				var desc roachpb.RangeDescriptor
+				if err := r.ValueProto(&desc); err != nil {
+					return err
+				}
+				if (desc.GetStickyBit() != hlc.Timestamp{}) {
+					_, keyTableID, _ := keys.DecodeTablePrefix(roachpb.Key(desc.StartKey))
+					if uint64(table.ID) != keyTableID {
+						continue
+					}
+					// Swallow "key is not the start of a range" errors because it would mean
+					// that the sticky bit was removed and merged concurrently. DROP TABLE
+					// should not fail because of this.
+					if err := db.AdminUnsplit(ctx, desc.StartKey); err != nil && !strings.Contains(err.Error(), "is not the start of a range") {
+						return err
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			log.Error(ctx, errors.Wrapf(err, "unsplit for table %v", table.ID))
 		}
 	}
 

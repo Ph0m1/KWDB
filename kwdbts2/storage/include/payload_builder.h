@@ -26,6 +26,28 @@ typedef struct {
   int len_;
 } PrimaryTagInfo;
 
+/**
+ * @brief convert row-based payload to col-based payload.
+ *        both type of payload has same header and tag section, only different is data section
+*/
+class PayloadStTypeConvert {
+ public:
+  PayloadStTypeConvert(TSSlice row_based_payload, const std::vector<AttributeInfo>& data_schema) :
+                      data_schema_(data_schema), row_based_mem_(row_based_payload) {}
+  // build and return col-based payload.
+  KStatus build(MMapRootTableManager* root_bt_manager, TSSlice* payload);
+
+ private:
+  const std::vector<AttributeInfo>& data_schema_;
+  TSSlice row_based_mem_;
+  size_t var_col_vaules_len_{0};
+  size_t fix_data_mem_len_{0};
+};
+
+/**
+ * @brief build payload struct data.
+ *        Builder function return the memroy ,which need free above.
+*/
 class PayloadBuilder {
  private:
   std::vector<TagColumn*> tag_schema_;
@@ -53,6 +75,31 @@ class PayloadBuilder {
   PayloadBuilder(const std::vector<TagColumn*>& tag_schema,
                    const std::vector<AttributeInfo>& data_schema);
 
+  // just copy other tag value info
+  PayloadBuilder(PayloadBuilder& other) {
+    tag_schema_ = other.tag_schema_;
+    data_schema_ = other.data_schema_;
+    data_schema_offset_ = other.data_schema_offset_;
+    primary_tags_ = other.primary_tags_;
+    count_ = other.count_;
+    primary_offset_ = other.primary_offset_;
+    tag_offset_ = other.tag_offset_;
+    data_offset_ = other.data_offset_;
+
+    tag_value_mem_len_ = other.tag_value_mem_len_;
+    tag_value_mem_bitmap_len_ = other.tag_value_mem_bitmap_len_;
+    if (other.tag_value_mem_ != nullptr) {
+      tag_value_mem_ = reinterpret_cast<char*>(malloc(tag_value_mem_len_));
+      memcpy(tag_value_mem_, other.tag_value_mem_, tag_value_mem_len_);
+    }
+
+    fix_data_mem_ = nullptr;
+    fix_data_mem_len_ = 0;
+    tmp_var_type_mem_ = nullptr;
+    tmp_var_type_mem_len_  = 0;
+    tmp_var_type_mem_used_ = 0;
+  }
+
   ~PayloadBuilder() {
     if (tag_value_mem_) {
       free(tag_value_mem_);
@@ -75,7 +122,7 @@ class PayloadBuilder {
 
   bool SetColumnNull(int row_num, int col_idx);
 
-  bool Build(TSSlice *payload, uint32_t table_version);
+  bool Build(TSSlice *payload);
 };
 
 }  // namespace kwdbts

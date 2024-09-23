@@ -117,7 +117,7 @@ TEST_F(TestIterator, basic) {
   ASSERT_EQ(count, 3);
   ASSERT_EQ(KTimestamp(res2.data[0][0]->mem), start_ts2);
 
-  ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(iter2->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 0);
 
   delete iter1;

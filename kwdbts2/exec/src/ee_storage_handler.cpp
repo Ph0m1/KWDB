@@ -28,6 +28,7 @@
 namespace kwdbts {
 
 StorageHandler::~StorageHandler() {
+  LOG_DEBUG("StorageHandler end. total read rows: %lu, entity num: %lu.", total_read_rows_, entities_.size());
   table_ = nullptr;
   Close();
 }
@@ -44,6 +45,25 @@ EEIteratorErrCode StorageHandler::Init(kwdbContext_p ctx) {
 
 void StorageHandler::SetSpans(std::vector<KwTsSpan> *ts_spans) {
   ts_spans_ = ts_spans;
+#ifdef K_DEBUG
+  // print range row count.
+  kwdbContext_t ctx;
+  InitKWDBContext(&ctx);
+  for (auto& range : table_->hash_points_spans_) {
+    for (auto& span : *ts_spans_) {
+      uint64_t row_count = 0;
+      ts_table_->GetRangeRowCount(&ctx, range.first, range.first, span, &row_count);
+      LOG_DEBUG("StorageHandler range{hashpoint[%u - %u], ts_span[%ld - %ld]} row count. %lu",
+                range.first, range.first, span.begin, span.end, row_count);
+    }
+    for (auto &span : range.second) {
+      uint64_t row_count = 0;
+      ts_table_->GetRangeRowCount(&ctx, range.first, range.first, span, &row_count);
+      LOG_DEBUG("StorageHandler range{hashpoint[%u - %u], ts_span[%ld - %ld]} row count. %lu",
+                range.first, range.first, span.begin, span.end, row_count);
+    }
+  }
+#endif
 }
 
 EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
@@ -66,15 +86,19 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
 
     row_batch->Reset();
     KStatus ret = ts_iterator->Next(&row_batch->res_, &row_batch->count_, row_batch->ts_);
+    // LOG_DEBUG("TsTableIterator::Next() count:%d", row_batch->count_);
     if (KStatus::FAIL == ret) {
       LOG_ERROR("TsTableIterator::Next() Failed\n");
       code = EEIteratorErrCode::EE_ERROR;
       break;
     }
+    total_read_rows_ += row_batch->count_;
 
     if (0 == row_batch->count_) {
-      ret = row_batch->tag_rowbatch_->NextLine(&(current_tag_index_));
-      if (KStatus::FAIL == ret) {
+      // ret = row_batch->tag_rowbatch_->NextLine(&(current_tag_index_));
+      // if (KStatus::FAIL == ret) {
+      current_line_++;
+      if (current_line_ >= entities_.size()) {
         code = NewTsIterator(ctx);
         if (code != EEIteratorErrCode::EE_OK) {
           Return(code);
@@ -85,10 +109,12 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
         Return(code);
       }
     } else {
-      while (!row_batch->tag_rowbatch_->GetEntityIndex(current_tag_index_).equalsWithoutMem(
+      while (!entities_[current_line_].equalsWithoutMem(
              row_batch->res_.entity_index)) {
-        ret = row_batch->tag_rowbatch_->NextLine(&(current_tag_index_));
-        if (KStatus::FAIL == ret) {
+        // ret = data_handle->tag_rowbatch_->NextLine(&(current_tag_index_));
+        // if (KStatus::FAIL == ret) {
+        current_line_++;
+        if (current_line_ >= entities_.size()) {
           code = NewTsIterator(ctx);
           if (code != EEIteratorErrCode::EE_OK) {
             Return(code);
@@ -122,6 +148,7 @@ EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) 
     }
 
     code = EEIteratorErrCode::EE_OK;
+    // LOG_DEBUG("Handler::TagNext count:%d", tag_rowbatch_->count_);
     if (0 == tag_rowbatch_->count_) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
       break;
@@ -135,7 +162,7 @@ EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) 
       break;
     }
   }
-  tag_rowbatch_->SetPipeEntityNum(current_thd->GetDegree());
+  tag_rowbatch_->SetPipeEntityNum(ctx, current_thd->GetDegree());
   thd->SetRowBatch(ptr);
   Return(code);
 }
@@ -157,7 +184,7 @@ EEIteratorErrCode StorageHandler::GetNextTagData(kwdbContext_p ctx, ScanRowBatch
 
   ret = row_batch->tag_rowbatch_->GetTagData(&(row_batch->tagdata_),
                                                  &(row_batch->tag_bitmap_),
-                                                 current_tag_index_);
+                                                 entities_[current_line_].index);
   if (KStatus::FAIL == ret) {
     code = EE_END_OF_RECORD;
   }
@@ -173,21 +200,39 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
       static_cast<ScanRowBatch *>(current_thd->GetRowBatch());
 
   do {
-    std::vector<EntityResultIndex> entities;
-    ret = tag_scan_->GetEntities(ctx, &entities, &(current_tag_index_),
+    entities_.clear();
+    ret = tag_scan_->GetEntities(ctx, &entities_,
                                  &(data_handle->tag_rowbatch_));
     if (KStatus::FAIL == ret) {
       code = EE_END_OF_RECORD;
       break;
     }
+    current_line_ = 0;
     data_handle->SetTagToColOffset(table_->GetMinTagId());
     if (ts_iterator) {
       SafeDeletePointer(ts_iterator);
     }
-    ret = ts_table_->GetIterator(
-        ctx, entities, *ts_spans_, table_->scan_cols_,
-        table_->scan_real_agg_types_, table_->table_version_, &ts_iterator,
-        table_->scan_real_last_ts_points_, table_->is_reverse_, false);
+    std::vector<KwTsSpan> ts_spans;
+    if (ctx->is_single_node) {
+      ts_spans = *ts_spans_;
+    } else {
+      auto it = table_->hash_points_spans_.find(entities_[0].hash_point);
+      if (it != table_->hash_points_spans_.end()) {
+        for (auto const &ts_span : it->second) {
+          ts_spans.push_back(ts_span);
+          // LOG_DEBUG(
+          //     "TSTable::GetIterator() entityID is %d, hashPoint is %d , ts_span.begin is %ld, "
+          //     "ts_span.end is %ld  \n",
+          //     entities[0].entityId, entities[0].hash_point, ts_span.begin, ts_span.end);
+        }
+      }
+    }
+    // LOG_DEBUG("TSTable::GetIterator() entity_size %ld", sizeof(entities_));
+
+    // LOG_DEBUG("TSTable::GetIterator() ts_span_size:%ld", sizeof(ts_spans));
+    ret = ts_table_->GetIterator(ctx, entities_, ts_spans, table_->scan_cols_,
+                                 table_->scan_real_agg_types_, table_->table_version_,
+                                 &ts_iterator, table_->scan_real_last_ts_points_, table_->is_reverse_, false);
     if (KStatus::FAIL == ret) {
       code = EEIteratorErrCode::EE_ERROR;
       LOG_ERROR("TsTable::GetIterator() error\n");
@@ -200,15 +245,20 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
 EEIteratorErrCode StorageHandler::NewTagIterator(kwdbContext_p ctx) {
   EnterFunc();
   KStatus ret = FAIL;
-
-  if (read_mode_ != TSTableReadMode::metaTable) {
-    TagIterator *tag = nullptr;
-    ret = ts_table_->GetTagIterator(ctx, table_->scan_tags_, &tag, table_->table_version_);
-    tag_iterator = tag;
+  if (ctx->is_single_node) {
+      if (read_mode_ == TSTableReadMode::metaTable) {
+        MetaIterator *meta = nullptr;
+        ret = ts_table_->GetMetaIterator(ctx, &meta, table_->table_version_);
+        tag_iterator = meta;
+      } else {
+        TagIterator *tag = nullptr;
+        ret = ts_table_->GetTagIterator(ctx, table_->scan_tags_, &tag, table_->table_version_);
+        tag_iterator = tag;
+      }
   } else {
-    MetaIterator *meta = nullptr;
-    ret = ts_table_->GetMetaIterator(ctx, &meta, table_->table_version_);
-    tag_iterator = meta;
+    TagIterator *tag = nullptr;
+    ret = ts_table_->GetTagIterator(ctx, table_->scan_tags_, table_->hash_points_, &tag, table_->table_version_);
+    tag_iterator = tag;
   }
 
   Return(ret == KStatus::FAIL ? EEIteratorErrCode::EE_ERROR
@@ -255,7 +305,7 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
       code = EEIteratorErrCode::EE_END_OF_RECORD;
       break;
     }
-    tag_rowbatch_->SetPipeEntityNum(current_thd->GetDegree());
+    tag_rowbatch_->SetPipeEntityNum(ctx, current_thd->GetDegree());
     code = EEIteratorErrCode::EE_OK;
   } while (0);
   for (auto& it : primary_tags) {

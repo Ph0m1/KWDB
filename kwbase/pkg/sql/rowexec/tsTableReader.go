@@ -168,6 +168,10 @@ func (ttr *TsTableReader) Start(ctx context.Context) context.Context {
 			return ctx
 		}
 
+		if log.V(3) {
+			log.Infof(ctx, "node: %v,\nts_physical_plan: %v\n", ttr.EvalCtx.NodeID, tsFlowSpec)
+		}
+
 		loc, err := timeutil.TimeZoneStringToLocation(ttr.EvalCtx.GetLocation().String(), timeutil.TimeZoneStringToLocationISO8601Standard)
 		if err != nil {
 			ttr.MoveToDraining(err)

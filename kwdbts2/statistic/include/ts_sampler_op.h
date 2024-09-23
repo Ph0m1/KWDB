@@ -56,6 +56,9 @@ struct SketchSpec {
     // Currently sketch index
     k_uint32 sketchIdx{0};
     roachpb::KWDBKTSColumn::ColumnType column_type;
+
+    // addRow adds a row to the sketch and updates row counts.
+    void addRow(BaseOperator* input, RowBatch* data_handle);
 };
 
 class TsSamplerOperator : public BaseOperator {
@@ -109,8 +112,7 @@ class TsSamplerOperator : public BaseOperator {
 
   KStatus GetSampleResult(kwdbContext_p ctx, DataChunkPtr& chunk);
 
- protected:
-  void EncodeBytes(k_uint32 array_idx, k_uint32 sketch_idx, bool isNull);
+  KStatus ProcessSketches(kwdbContext_p ctx, const std::vector<SketchSpec>& sketches, DataChunkPtr& chunk);
 
  private:
   // All sketch of statistic columns of normal columns
@@ -162,5 +164,9 @@ class TsSamplerOperator : public BaseOperator {
  * @OUT row->data : The data member of the row is updated with the value fetched from the field, if the data is not null.
  */
 void AssignDataToRow(SampledRow* row, Field *render, bool is_null, KWDBTypeFamily type);
+
+// EncodeBytes appends the encoded datum to the given slice using the requested
+// encoding.
+std::vector<byte> EncodeBytes(Field* render, bool isNull, std::vector<byte>& appendTo);
 
 }  // namespace kwdbts

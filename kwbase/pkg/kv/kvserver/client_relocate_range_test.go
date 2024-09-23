@@ -165,7 +165,7 @@ func TestAdminRelocateRangeForTsWithoutTSSnapshot(t *testing.T) {
 		RequestHeader: roachpb.RequestHeader{
 			Key: sqlbase.MakeTsHashPointKey(sqlbase.ID(78), uint64(BeginHash)),
 		},
-		TableId: 78,
+		TableId: keys.MinUserDescID,
 		Keys:    []int32{BeginHash},
 	}
 

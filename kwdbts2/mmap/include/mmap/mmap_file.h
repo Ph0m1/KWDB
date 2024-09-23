@@ -97,6 +97,8 @@ class MMapFile {
 
   off_t fileLen() const { return file_length_; }
 
+  off_t newLen() const { return new_length_; }
+
   std::string filePath() const { return file_path_; }
 
   std::string& filePath() { return file_path_; }

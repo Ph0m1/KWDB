@@ -134,10 +134,10 @@ void MMapHashIndex::resizeBucket(size_t  new_bucket_count) {
   mutexUnlock();
 }
 
-int MMapHashIndex::open(const std::string &url, const std::string &db_path, const std::string &tbl_sub_path,
-                        int flags,  ErrorInfo &err_info) {
+int MMapHashIndex::open(const std::string &path, const std::string &db_path, const std::string &tbl_sub_path,
+                        int flags, ErrorInfo &err_info) {
   std::thread* thds[8];
-  err_info.errcode = MMapFile::open(url, db_path + tbl_sub_path + url, flags);
+  err_info.errcode = MMapFile::open(path, db_path + tbl_sub_path + path, flags);
   if (err_info.errcode < 0)
       return err_info.errcode;
   if (file_length_ < kHashMetaDataSize)

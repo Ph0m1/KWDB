@@ -93,7 +93,7 @@ func applyOp(ctx context.Context, db *kv.DB, op *Operation) {
 		o.Result = resultError(ctx, err)
 	case *ChangeReplicasOperation:
 		desc := getRangeDesc(ctx, o.Key, db)
-		_, err := db.AdminChangeReplicas(ctx, o.Key, desc, o.Changes, false)
+		_, err := db.AdminChangeReplicas(ctx, o.Key, desc, o.Changes)
 		// TODO(dan): Save returned desc?
 		o.Result = resultError(ctx, err)
 	case *ClosureTxnOperation:

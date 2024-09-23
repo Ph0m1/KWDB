@@ -13,14 +13,16 @@ package sqlbase
 
 import (
 	"context"
+	"encoding/binary"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
-	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -45,6 +47,10 @@ const (
 	OnlyDataColumn = 1
 	// OnlyTagColumn is the flag that the insert column only contains tag column.
 	OnlyTagColumn = 2
+	// RangeGroupIDOffset offset of range_group_id in the payload header
+	RangeGroupIDOffset int = 16
+	// RangeGroupIDSize length of range_group_id in the payload header
+	RangeGroupIDSize int = 2
 )
 
 // InstNameSpace Stores the relationship between instance table names and ids
@@ -58,6 +64,13 @@ type InstNameSpace struct {
 	// db name.
 	DBName string
 	ChildDesc
+}
+
+// DecodeHashPointFromPayload decodes hash points from a payload of ts insert/import.
+// RangeGroupIDOffset and RangeGroupIDSize are copies of execbuilder.RangeGroupIDOffset and execbuilder.RangeGroupIDSize.
+func DecodeHashPointFromPayload(payload []byte) []api.HashPoint {
+	hashPoint := binary.LittleEndian.Uint16(payload[RangeGroupIDOffset : RangeGroupIDOffset+RangeGroupIDSize])
+	return []api.HashPoint{api.HashPoint(hashPoint)}
 }
 
 // GetKWDBMetadataRow obtains the keyValue pair by the primary key, decodes
@@ -594,44 +607,29 @@ func DatumToString(d tree.Datum) string {
 	return res
 }
 
-// CheckTableStatusOk check table is available now.
-func CheckTableStatusOk(
-	ctx context.Context, txn *kv.Txn, db *kv.DB, tableID uint32, wait bool,
-) error {
-	for r := retry.StartWithCtx(ctx, base.DefaultRetryOptions()); r.Next(); {
-		var table *TableDescriptor
-		var err error
-
-		if txn != nil {
-			table, _, err = GetTsTableDescFromID(ctx, txn, ID(tableID))
+// WaitTableAlterOk check table is available now.
+func WaitTableAlterOk(ctx context.Context, db *kv.DB, tableID uint32) {
+	opts := retry.Options{
+		InitialBackoff: 500 * time.Millisecond,
+		MaxBackoff:     10 * time.Second,
+		Multiplier:     2,
+	}
+	for r := retry.StartWithCtx(context.Background(), opts); r.Next(); {
+		isAltering := false
+		if err := db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			table, _, err := GetTsTableDescFromID(ctx, txn, ID(tableID))
 			if err != nil {
 				return err
 			}
-		} else {
-			if err = db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				table, _, err = GetTsTableDescFromID(ctx, txn, ID(tableID))
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				return err
+			if table.State == TableDescriptor_ALTER {
+				isAltering = true
 			}
+			return nil
+		}); err != nil {
+			log.Errorf(ctx, "get table %v state failed: %v", tableID, err.Error())
 		}
-		if table.Dropped() {
-			return errors.Errorf("table %v is dropped", tableID)
-		} else if table.State != TableDescriptor_PUBLIC {
-			if wait {
-				log.Warningf(ctx, "the state of table %v is %v, wait and try again", table.ID, table.State)
-				continue
-			} else {
-				return errors.Errorf("the state of table %v is %v, wait and try again", table.ID, table.State)
-			}
-		} else if len(table.Mutations) > 0 {
-			log.Warningf(ctx, "the table %v has schema changes in progress", table.ID)
-			continue
+		if !isAltering {
+			return
 		}
-		break
 	}
-	return nil
 }

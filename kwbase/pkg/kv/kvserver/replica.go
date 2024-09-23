@@ -53,6 +53,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/cloud"
 	enginepb "gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
@@ -717,6 +718,11 @@ func (r *Replica) DB() *kv.DB {
 // evaluation Batch should be used instead.
 func (r *Replica) Engine() storage.Engine {
 	return r.store.Engine()
+}
+
+// TsEngine returns the Replica's underlying TsEngine.
+func (r *Replica) TsEngine() *tse.TsEngine {
+	return r.store.TsEngine
 }
 
 // AbortSpan returns the Replica's AbortSpan.

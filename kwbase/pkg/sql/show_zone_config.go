@@ -110,9 +110,9 @@ func getShowZoneConfigRow(
 	}
 
 	if zoneSpecifier.TableOrIndex.Table.TableName != "" {
-		if tblDesc.IsTSTable() {
-			return nil, sqlbase.TSUnsupportedError("show zone config for table")
-		}
+		//if tblDesc.IsTSTable() {
+		//	return nil, sqlbase.TSUnsupportedError("show zone config for table")
+		//}
 		if err = p.CheckAnyPrivilege(ctx, tblDesc); err != nil {
 			return nil, err
 		}
@@ -125,9 +125,9 @@ func getShowZoneConfigRow(
 		if err != nil {
 			return nil, err
 		}
-		if database.EngineType == tree.EngineTypeTimeseries {
-			return nil, sqlbase.TSUnsupportedError("show zone config for database")
-		}
+		//if database.EngineType == tree.EngineTypeTimeseries {
+		//	return nil, sqlbase.TSUnsupportedError("show zone config for database")
+		//}
 		if err = p.CheckAnyPrivilege(ctx, database); err != nil {
 			return nil, err
 		}
@@ -218,6 +218,11 @@ func zoneConfigToSQL(zs *tree.ZoneSpecifier, zone *zonepb.ZoneConfig) (string, e
 	if zone.NumReplicas != nil {
 		writeComma(f, useComma)
 		f.Printf("\tnum_replicas = %d", *zone.NumReplicas)
+		useComma = true
+	}
+	if zone.TimeSeriesMergeDuration != 0 {
+		writeComma(f, useComma)
+		f.Printf("\tts_merge.days = %s", zone.TimeSeriesMergeDuration)
 		useComma = true
 	}
 	if !zone.InheritedConstraints {

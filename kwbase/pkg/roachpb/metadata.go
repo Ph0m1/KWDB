@@ -161,34 +161,10 @@ func (r *RangeDescriptor) Replicas() ReplicaDescriptors {
 	return MakeReplicaDescriptors(r.InternalReplicas)
 }
 
-// PreDistInfo returns the set of nodes/stores on which replicas(pre-dist) of this range are
-// stored.
-func (r *RangeDescriptor) PreDistInfo() ReplicaDescriptors {
-	return MakeReplicaDescriptors(r.PreDist)
-}
-
 // SetReplicas overwrites the set of nodes/stores on which replicas of this
 // range are stored.
 func (r *RangeDescriptor) SetReplicas(replicas ReplicaDescriptors) {
 	r.InternalReplicas = replicas.AsProto()
-}
-
-// SetPreDistReplicas overwrites the set of nodes/stores on which replicas of this
-// range are stored with pre-distribution.
-func (r *RangeDescriptor) SetPreDistReplicas(replicas ReplicaDescriptors) {
-	r.PreDist = replicas.AsProto()
-}
-
-// SetPreDistLeaseHolder overwrites the set of nodes/stores on which PreDistLeaseHolder of this
-// range are stored with pre-distribution.
-func (r *RangeDescriptor) SetPreDistLeaseHolder(replica ReplicaDescriptor) {
-	r.PreDistLeaseHolder = replica
-}
-
-// RemovePreDistInfo remove pre dist info
-func (r *RangeDescriptor) RemovePreDistInfo() {
-	r.PreDistLeaseHolder = ReplicaDescriptor{}
-	r.PreDist = []ReplicaDescriptor{}
 }
 
 // SetRangeType set range type

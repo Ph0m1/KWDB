@@ -312,13 +312,11 @@ func GetTableCollection(cfg *ExecutorConfig, ie *InternalExecutor) *TableCollect
 // IsTsTable determine the type of table, it need ctx, db ,tbname
 func (ie *InternalExecutor) IsTsTable(
 	ctx context.Context, dbName string, tbName string, user string,
-) (bool, uint32, uint32, []sqlbase.ColumnDescriptor, *tree.TableName, error) {
+) (bool, DirectInsertTable, error) {
 	var (
-		dbID, tabID uint32
-		colDesc     []sqlbase.ColumnDescriptor
-		cfg         = ie.s.cfg
-		isTsTable   bool
-		tableName   *tree.TableName
+		dit       DirectInsertTable
+		cfg       = ie.s.cfg
+		isTsTable bool
 	)
 	isTsTable = false
 	err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
@@ -330,11 +328,11 @@ func (ie *InternalExecutor) IsTsTable(
 			dbCacheSubscriber: ie.s.dbCache,
 		}
 		defer tables.releaseTables(ctx)
-		tableName = tree.NewTableName(tree.Name(dbName), tree.Name(tbName))
+		dit.Tname = tree.NewTableName(tree.Name(dbName), tree.Name(tbName))
 		var flags tree.ObjectLookupFlags
 		flags.Required = false
 
-		table, err := tables.getTableVersion(ctx, txn, tableName, flags)
+		table, err := tables.getTableVersion(ctx, txn, dit.Tname, flags)
 		if table == nil || err != nil {
 			return errors.Errorf("can not find tables")
 		}
@@ -363,14 +361,14 @@ func (ie *InternalExecutor) IsTsTable(
 		if table.TableType != tree.TimeseriesTable && table.TableType != tree.TemplateTable {
 			return errors.Errorf("%s is not a ts table", tbName)
 		}
-		dbID = uint32(table.TableDescriptor.ParentID)
-		tabID = uint32(table.TableDescriptor.ID)
-		colDesc = table.TableDesc().Columns
+		dit.DbID = uint32(table.TableDescriptor.ParentID)
+		dit.TabID = uint32(table.TableDescriptor.ID)
+		dit.ColsDesc = table.TableDesc().Columns
 		isTsTable = true
 		return nil
 	})
 
-	return isTsTable, dbID, tabID, colDesc, tableName, err
+	return isTsTable, dit, err
 }
 
 // GetAudiLogVesion determine the version

@@ -160,6 +160,48 @@ class StScanWorker : public StWorker {
   kwdbts::KTimestamp  ts_range_max_;
 };
 
+class StSnapshotWorker : public StWorker {
+ public:
+  StSnapshotWorker(const std::string& pname, const BenchParams& params, const std::vector<uint32_t>& tbl_ids) :
+      StWorker(pname, params, tbl_ids) {
+  }
+
+  KBStatus InitData(KTimestamp& new_ts) override {
+    return KBStatus::OK();
+  }
+
+  KBStatus Destroy() override {
+    return KBStatus::OK();
+  }
+
+  virtual BenchType GetType() override {
+    return Worker::BenchType::SNAPSHOT;
+  }
+
+  virtual std::string show_extra() override;
+
+ protected:
+  // ts_now is the simulated business data time
+  KBStatus do_work(KTimestamp new_ts) override;
+
+ protected:
+  kwdbts::AvgStat _init_time;
+  kwdbts::AvgStat _get_time;
+  kwdbts::AvgStat _put_time;
+  kwdbts::AvgStat _del_time;
+  kwdbts::AvgStat _total_time;
+  kwdbts::AvgStat _total_size;
+};
+
+
+class StSnapshotByBlockWorker : public StSnapshotWorker {
+ public:
+  StSnapshotByBlockWorker(const std::string& pname, const BenchParams& params, const std::vector<uint32_t>& tbl_ids) :
+      StSnapshotWorker(pname, params, tbl_ids) {
+    SnapshotFactory::TestSetType(2);
+  }
+};
+
 class StCompressWorker : public StWorker {
  public:
   StCompressWorker(const std::string& pname, const BenchParams& params, const std::vector<uint32_t>& tbl_ids) :

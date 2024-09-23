@@ -16,7 +16,7 @@
 #include <iostream>
 #include "big_table.h"
 #include "utils/big_table_utils.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 
 //#define __PROFILING__	1
 
@@ -46,9 +46,9 @@ const vector<AttributeInfo> & BigTable::getSchemaInfo() const
 int BigTable::structVersion() const { return 0; }
 
 int BigTable::create(const vector<AttributeInfo> &schema,
-  const vector<string> &key, const string &key_order, const string &ns_ur,
-  const string &description, const string &tbl_sub_path, const string &source_url,
-  int encoding, ErrorInfo &err_info) {
+                     const vector<string> &key, const string &key_order, const string &ns_ur,
+                     const string &description, const string &tbl_sub_path, const string &source_path,
+                     int encoding, ErrorInfo &err_info) {
   return -1;
 }
 

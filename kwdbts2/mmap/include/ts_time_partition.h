@@ -16,7 +16,7 @@
 #include <queue>
 #include <vector>
 #include "cm_kwdb_context.h"
-#include "date_time_util.h"
+#include "utils/date_time_util.h"
 #include "big_table.h"
 #include "mmap/mmap_object.h"
 #include "mmap/mmap_segment_table.h"
@@ -68,11 +68,18 @@ class TsTimePartition : public TSObject {
     return tbl_sub_path_ + std::to_string(segment) + "/";
   }
 
+  // segment dir file path
+  inline std::string segment_sqfs(BLOCK_ID shard) {
+    return db_path_ + tbl_sub_path_ + std::to_string(shard) + ".sqfs";
+  }
+
   // initialize column with schema
   int init(const vector<AttributeInfo>& schema, int encoding, bool init_data, ErrorInfo& err_info);
 
   // load all segments
   int loadSegments(ErrorInfo& err_info);
+
+  int loadSegment(BLOCK_ID segment_id, ErrorInfo& err_info);
 
  public:
   explicit TsTimePartition(MMapRootTableManager*& root_table_manager, uint16_t config_subgroup_entities) :
@@ -104,28 +111,36 @@ class TsTimePartition : public TSObject {
   /**
  * @brief schema using MMapMetricsTable object. no need store schema at partition level.
  *
- * @param 	url			big object URL to be opened.
+ * @param 	path			big object PATH to be opened.
  * @param 	flag		option to open a file; O_CREAT to create new file.
  * @return	0 succeed, otherwise -1.
  */
-  int open(const string& url, const std::string& db_path, const string& tbl_sub_path,
+  int open(const string& path, const std::string& db_path, const string& tbl_sub_path,
            int flags, ErrorInfo& err_info) override;
 
   int openBlockMeta(const int flags, ErrorInfo& err_info);
 
-  const vector<AttributeInfo>& getSchemaInfo(uint32_t table_version = 0) const {
-    return root_table_manager_->GetSchemaInfoWithHidden(table_version);
+  vector<AttributeInfo> getSchemaInfoIncludeDropped(uint32_t table_version = 0) const {
+    std::vector<AttributeInfo> schema;
+    root_table_manager_->GetSchemaInfoIncludeDropped(&schema, table_version);
+    return schema;
   }
 
-  const vector<uint32_t>& getActualCols() const {
-    return root_table_manager_->GetColsIdx();
+  vector<AttributeInfo> getSchemaInfoExcludeDropped(uint32_t table_version = 0) const {
+    std::vector<AttributeInfo> schema;
+    root_table_manager_->GetSchemaInfoExcludeDropped(&schema, table_version);
+    return schema;
+  }
+
+  const vector<uint32_t>& getColsIdxExcludeDropped() const {
+    return root_table_manager_->GetIdxForValidCols();
   }
 
   const string& tbl_sub_path() const { return tbl_sub_path_; }
 
   string name() const override { return name_; }
 
-  string URL() const override { return file_path_; }
+  string path() const override { return file_path_; }
 
   timestamp64& minTimestamp() { return meta_manager_.minTimestamp(); }
 
@@ -135,11 +150,14 @@ class TsTimePartition : public TSObject {
 
   virtual int reserve(size_t size) { return KWEPERM; }
 
-  virtual int remove();
+  virtual int remove(bool exclude_segment = false);
 
   void sync(int flags) override;
 
   virtual size_t size(uint32_t entity_id) const;
+
+  // merge data from other into current partition, other table will be removed.
+  bool JoinOtherPartitionTable(TsTimePartition* other);
 
   inline std::shared_ptr<MMapSegmentTable> getSegmentTable(BLOCK_ID segment_id, bool lazy_open = false) const {
     std::shared_ptr<MMapSegmentTable> value;
@@ -214,6 +232,16 @@ class TsTimePartition : public TSObject {
    * @return A pointer to the newly created MMapSegmentTable on success, or nullptr if an error occurs.
    */
   MMapSegmentTable* createSegmentTable(BLOCK_ID segment_id, uint32_t table_version, ErrorInfo& err_info);
+
+  inline bool GetBlockMinMaxTS(BlockItem* block, timestamp64* min_ts, timestamp64* max_ts) {
+    std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block->block_id);
+    if (segment_tbl == nullptr) {
+      return false;
+    }
+    *min_ts = KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, kwdbts::Sumfunctype::MIN));
+    *max_ts = KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, kwdbts::Sumfunctype::MAX));
+    return true;
+  }
 
   inline EntityItem* getEntityItem(uint entity_id) {
     return meta_manager_.getEntityItem(entity_id);

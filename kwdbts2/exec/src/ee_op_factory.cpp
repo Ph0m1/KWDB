@@ -257,6 +257,7 @@ KStatus OpFactory::NewStatisticScan(
   EnterFunc();
   // Create StatisticReader Operator
   const TSStatisticReaderSpec& statisticReaderSpec = core.statisticreader();
+  LOG_DEBUG("NewTableScan creating TableStatisticScanOperator");
   *iterator = NewIterator<TableStatisticScanOperator>(
       const_cast<TSStatisticReaderSpec*>(&statisticReaderSpec),
       const_cast<TSPostProcessSpec*>(&post), *table, childIterator, processor_id);

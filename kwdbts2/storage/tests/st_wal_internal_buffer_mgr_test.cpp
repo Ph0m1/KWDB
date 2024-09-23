@@ -1009,6 +1009,67 @@ TEST_F(TestWalManagerWriter, TestWALCheckpoint) {
   }
 }
 
+TEST_F(TestWalManagerWriter, TestWALSnapshot) {
+  TS_LSN lsn;
+  uint64_t x_id = 1;
+  TSTableID table_id = 9;
+  uint64_t b_hash = 3, e_hash = 5;
+  KwTsSpan span{123, 456};
+  KStatus s = wal_->WriteSnapshotWAL(ctx_, x_id, table_id, b_hash, e_hash, span);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+
+  s = wal_->WriteSnapshotWAL(ctx_, x_id, table_id, b_hash, e_hash, span);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+
+  vector<LogEntry*> redo_logs;
+  wal_->ReadWALLog(redo_logs, wal_->FetchCheckpointLSN(), wal_->FetchCurrentLSN());
+  EXPECT_EQ(redo_logs.size(), 2);
+
+  for (size_t i = 0; i < 2; i++) {
+    auto* redo = reinterpret_cast<SnapshotEntry*>(redo_logs[i]);
+    redo->prettyPrint();
+    EXPECT_EQ(redo->getType(), WALLogType::RANGE_SNAPSHOT);
+    EXPECT_EQ(redo->getXID(), x_id);
+    HashIdSpan hash_span;
+    KwTsSpan ts_span;
+    redo->GetRangeInfo(&hash_span, &ts_span);
+    EXPECT_EQ(hash_span.begin, b_hash);
+    EXPECT_EQ(hash_span.end, e_hash);
+    EXPECT_EQ(span.begin, ts_span.begin);
+    EXPECT_EQ(span.end, ts_span.end);
+  }
+
+  for (auto& l : redo_logs) {
+    delete l;
+  }
+}
+
+TEST_F(TestWalManagerWriter, TestWALTempDirectory) {
+  TS_LSN lsn;
+  uint64_t x_id = 1;
+  string file_path = "./test111/222/333/";
+  int log_num = 5;
+  for (size_t i = 0; i < 5; i++) {
+    KStatus s = wal_->WriteTempDirectoryWAL(ctx_, x_id, file_path + intToString(i));
+    EXPECT_EQ(s, KStatus::SUCCESS);
+  }
+  
+  vector<LogEntry*> redo_logs;
+  wal_->ReadWALLog(redo_logs, wal_->FetchCheckpointLSN(), wal_->FetchCurrentLSN());
+  EXPECT_EQ(redo_logs.size(), log_num);
+
+  for (size_t i = 0; i < log_num; i++) {
+    auto* redo = reinterpret_cast<TempDirectoryEntry*>(redo_logs[i]);
+    redo->prettyPrint();
+    EXPECT_EQ(redo->getType(), WALLogType::SNAPSHOT_TMP_DIRCTORY);
+    EXPECT_EQ(redo->getXID(), x_id);
+    EXPECT_EQ(redo->GetPath(), file_path + intToString(i));
+  }
+  for (auto& l : redo_logs) {
+    delete l;
+  }
+}
+
 TEST_F(TestWalManagerWriter, TestCleanUp) {
   EngineOptions opts;
   opts.db_path = kDbPath+ "/";

@@ -26,6 +26,7 @@ package execbuilder
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -171,8 +172,11 @@ func (b *Builder) buildTSInsert(tsInsert *memo.TSInsertExpr) (execPlan, error) {
 	for i := 0; i < tab.ColumnCount(); i++ {
 		cols[i] = tab.Column(i).(*sqlbase.ColumnDescriptor)
 	}
+	var payloadNodeMap map[int]*sqlbase.PayloadForDistTSInsert
+	var err error
+
 	// builds the payload of each node according to the input value
-	payloadNodeMap, err := BuildInputForTSInsert(
+	payloadNodeMap, err = BuildInputForTSInsert(
 		b.evalCtx,
 		tsInsert.InputRows,
 		cols,
@@ -182,6 +186,7 @@ func (b *Builder) buildTSInsert(tsInsert *memo.TSInsertExpr) (execPlan, error) {
 		tab.GetTableType() == tree.InstanceTable,
 		tsVersion,
 	)
+
 	if err != nil {
 		return execPlan{}, err
 	}
@@ -264,16 +269,8 @@ func BuildInputForTSInsert(
 	if err != nil {
 		return nil, err
 	}
-	// Reorder the columns. The order is as follows:
-	// [primary tag columns + all tag columns + data columns]
-	prettyCols := make([]*sqlbase.ColumnDescriptor, pArgs.PTagNum+pArgs.AllTagNum+pArgs.DataColNum)
-	copy(prettyCols[:pArgs.PTagNum], primaryTagCols)
-	copy(prettyCols[pArgs.PTagNum:], allTagCols)
-	copy(prettyCols[pArgs.PTagNum+pArgs.AllTagNum:], dataCols)
 
 	var inputDatums []tree.Datums
-	// partition input data based on primary tag values
-	priTagValMap := make(map[string][]int)
 
 	rowNum := len(InputRows)
 	rowLen := len(InputRows[0])
@@ -283,10 +280,17 @@ func BuildInputForTSInsert(
 	for i := 0; i < rowNum; i++ {
 		inputDatums[i], preSlice = preSlice[:rowLen:rowLen], preSlice[rowLen:]
 	}
+
+	// For insert in distributed cluster mode, the line format payload needs to be constructed.
+	if evalCtx.StartDistributeMode {
+		return BuildRowBytesForTsInsert(evalCtx, InputRows, inputDatums, dataCols, colIndexs, pArgs, dbID, tabID)
+	}
+	// partition input data based on primary tag values
+	priTagValMap := make(map[string][]int)
 	// Type check for input values.
 	var buf strings.Builder
 	for i := range InputRows {
-		for j, col := range prettyCols {
+		for j, col := range pArgs.PrettyCols {
 			valIdx := colIndexs[int(col.ID)]
 			if valIdx < 0 {
 				if !col.Nullable && valIdx == sqlbase.ColumnValIsNull {
@@ -315,12 +319,12 @@ func BuildInputForTSInsert(
 	// Build payload separately for groups with the same primary tag value.
 	payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert, len(priTagValMap))
 	for _, priTagRowIdx := range priTagValMap {
-		payload, primaryTagVal, err := BuildPayloadForTsInsert(
+		payload, _, err := BuildPayloadForTsInsert(
 			evalCtx,
 			evalCtx.Txn,
 			inputDatums,
 			priTagRowIdx,
-			prettyCols,
+			pArgs.PrettyCols,
 			colIndexs,
 			pArgs,
 			dbID,
@@ -331,13 +335,16 @@ func BuildInputForTSInsert(
 			return nil, err
 		}
 		// Calculate leaseHolder node based on primaryTag value.
-		nodeID, err := hashRouter.GetNodeIDByPrimaryTag(evalCtx.Context, primaryTagVal)
-		if err != nil {
-			return nil, err
-		}
+		//nodeID, err := hashRouter.GetNodeIDByPrimaryTag(evalCtx.Context, primaryTagVal)
+		//if err != nil {
+		//	return nil, err
+		//}
+		// use current NodeID
+		nodeID := evalCtx.NodeID
 		// Make primaryTag key.
-		primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tabID), primaryTagVal)
-		if val, ok := payloadNodeMap[int(nodeID[0])]; ok {
+		hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
+		primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tabID), hashPoints)
+		if val, ok := payloadNodeMap[int(nodeID)]; ok {
 			val.PerNodePayloads = append(val.PerNodePayloads, &sqlbase.SinglePayloadInfo{
 				Payload:       payload,
 				RowNum:        uint32(len(priTagRowIdx)),
@@ -345,13 +352,13 @@ func BuildInputForTSInsert(
 			})
 		} else {
 			rowVal := sqlbase.PayloadForDistTSInsert{
-				NodeID: nodeID[0],
+				NodeID: nodeID,
 				PerNodePayloads: []*sqlbase.SinglePayloadInfo{{
 					Payload:       payload,
 					RowNum:        uint32(len(priTagRowIdx)),
 					PrimaryTagKey: primaryTagKey,
 				}}}
-			payloadNodeMap[int(nodeID[0])] = &rowVal
+			payloadNodeMap[int(nodeID)] = &rowVal
 		}
 	}
 	return payloadNodeMap, nil
@@ -427,6 +434,8 @@ type PayloadArgs struct {
 	PreAllocTagSize int
 	// PreAllocColSize represents the pre-allocated size of data column.
 	PreAllocColSize int
+	// PrettyCols stands for columns reordered in [pTagCol + allTagCols + dataCols] order.
+	PrettyCols []*sqlbase.ColumnDescriptor
 
 	// PayloadSize represents the size of payload calculated in advance, not the final size
 	PayloadSize int
@@ -500,59 +509,82 @@ func NewTsPayload() *TsPayload {
 	return &TsPayload{}
 }
 
+// SetPayload assigns a value to payload
+func (ts *TsPayload) SetPayload(data []byte) {
+	ts.payload = data
+}
+
+// GetPayload get the value of payload
+func (ts *TsPayload) GetPayload(varDataOffset int) []byte {
+	if varDataOffset == 0 {
+		return ts.payload
+	}
+	return ts.payload[:varDataOffset]
+}
+
+// SetBit sets the value of payload
+func SetBit(tp *TsPayload, bitmapOffset int, dataColIdx int) {
+	tp.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
+}
+
+// WriteUint32ToPayload sets the value of payload
+func WriteUint32ToPayload(tp *TsPayload, value uint32) {
+	binary.LittleEndian.PutUint32(tp.payload[0:], value)
+}
+
 // SetHeader copy param from header to TsPayload
-func (t *TsPayload) SetHeader(header PayloadHeader) {
-	t.header.TxnID = header.TxnID
-	t.header.PayloadVersion = header.PayloadVersion
-	t.header.DBID = header.DBID
-	t.header.TBID = header.TBID
-	t.header.TSVersion = header.TSVersion
-	t.header.RowNum = header.RowNum
+func (ts *TsPayload) SetHeader(header PayloadHeader) {
+	ts.header.TxnID = header.TxnID
+	ts.header.PayloadVersion = header.PayloadVersion
+	ts.header.DBID = header.DBID
+	ts.header.TBID = header.TBID
+	ts.header.TSVersion = header.TSVersion
+	ts.header.RowNum = header.RowNum
 }
 
 // fillHeader fills the header of TsPayload with the obtained parameters.
-func (t *TsPayload) fillHeader() {
+func (ts *TsPayload) fillHeader() {
 	/*header part
 	  ______________________________________________________________________________________________
 	  |    16    |    2    |         4        |   4  |    8    |       4        |   4    |    1    |
 	  |----------|---------|------------------|------|---------|----------------|--------|---------|
 	  |  txnID   | groupID |  payloadVersion  | dbID |  tbID   |    TSVersion   | rowNum | rowType |
 	*/
-	t.header.offset = TxnIDOffset
-	copy(t.payload[t.header.offset:], t.header.TxnID.GetBytes())
-	t.header.offset += TxnIDSize
-	t.header.groupIDOffset = t.header.offset
-	t.header.offset += RangeGroupIDSize
+	ts.header.offset = TxnIDOffset
+	copy(ts.payload[ts.header.offset:], ts.header.TxnID.GetBytes())
+	ts.header.offset += TxnIDSize
+	ts.header.groupIDOffset = ts.header.offset
+	ts.header.offset += RangeGroupIDSize
 	// payload version
-	binary.LittleEndian.PutUint32(t.payload[t.header.offset:], t.header.PayloadVersion)
-	t.header.offset += PayloadVersionSize
-	binary.LittleEndian.PutUint32(t.payload[t.header.offset:], t.header.DBID)
-	t.header.offset += DBIDSize
-	binary.LittleEndian.PutUint64(t.payload[t.header.offset:], t.header.TBID)
-	t.header.offset += TableIDSize
+	binary.LittleEndian.PutUint32(ts.payload[ts.header.offset:], ts.header.PayloadVersion)
+	ts.header.offset += PayloadVersionSize
+	binary.LittleEndian.PutUint32(ts.payload[ts.header.offset:], ts.header.DBID)
+	ts.header.offset += DBIDSize
+	binary.LittleEndian.PutUint64(ts.payload[ts.header.offset:], ts.header.TBID)
+	ts.header.offset += TableIDSize
 	// table version
-	binary.LittleEndian.PutUint32(t.payload[t.header.offset:], t.header.TSVersion)
-	t.header.offset += TSVersionSize
-	binary.LittleEndian.PutUint32(t.payload[t.header.offset:], t.header.RowNum)
-	t.header.offset += RowNumSize
-	switch t.header.RowType {
+	binary.LittleEndian.PutUint32(ts.payload[ts.header.offset:], ts.header.TSVersion)
+	ts.header.offset += TSVersionSize
+	binary.LittleEndian.PutUint32(ts.payload[ts.header.offset:], ts.header.RowNum)
+	ts.header.offset += RowNumSize
+	switch ts.header.RowType {
 	case BothTagAndData:
-		t.payload[t.header.offset] = RowType[BothTagAndData]
+		ts.payload[ts.header.offset] = RowType[BothTagAndData]
 	case OnlyData:
-		t.payload[t.header.offset] = RowType[OnlyData]
+		ts.payload[ts.header.offset] = RowType[OnlyData]
 	case OnlyTag:
-		t.payload[t.header.offset] = RowType[OnlyTag]
+		ts.payload[ts.header.offset] = RowType[OnlyTag]
 	default:
-		t.payload[t.header.offset] = RowType[BothTagAndData]
+		ts.payload[ts.header.offset] = RowType[BothTagAndData]
 	}
-	t.header.offset++
+	ts.header.offset++
 
-	binary.LittleEndian.PutUint16(t.payload[t.header.offset:], uint16(t.args.PrimaryTagSize))
-	t.header.offset += PTagLenSize
+	binary.LittleEndian.PutUint16(ts.payload[ts.header.offset:], uint16(ts.args.PrimaryTagSize))
+	ts.header.offset += PTagLenSize
 }
 
 // SetArgs set payload args to TsPayload
-func (t *TsPayload) SetArgs(args PayloadArgs) {
+func (ts *TsPayload) SetArgs(args PayloadArgs) {
 	/*
 		args part
 		________________________________________________________
@@ -560,11 +592,11 @@ func (t *TsPayload) SetArgs(args PayloadArgs) {
 		|---------|------------|---------|----------|
 		| pTagSize| tagLen     |tagBitMap|allTagSize|
 	*/
-	t.args = args.DeepCopy()
-	t.header.otherTagBitmapLen = (t.args.AllTagNum + 7) / 8
-	t.header.otherTagLenOffset = HeadSize + PTagLenSize + t.args.PrimaryTagSize
-	t.header.otherTagBitmapOffset = t.header.otherTagLenOffset + AllTagLenSize
-	t.header.RowType = t.args.RowType
+	ts.args = args.DeepCopy()
+	ts.header.otherTagBitmapLen = (ts.args.AllTagNum + 7) / 8
+	ts.header.otherTagLenOffset = HeadSize + PTagLenSize + ts.args.PrimaryTagSize
+	ts.header.otherTagBitmapOffset = ts.header.otherTagLenOffset + AllTagLenSize
+	ts.header.RowType = ts.args.RowType
 }
 
 // BuildRowsPayloadByDatums encodes the input values according to the agreed format,
@@ -587,30 +619,29 @@ func (t *TsPayload) SetArgs(args PayloadArgs) {
 //   - payload: Complete the encoded tsPayload.
 //   - primaryTagVal: Encodings that contain only primaryTag values.
 //   - importErrorRecord: If tolerant is true, the data and errors are recorded.
-func (t *TsPayload) BuildRowsPayloadByDatums(
+func (ts *TsPayload) BuildRowsPayloadByDatums(
 	InputDatums []tree.Datums,
 	rowNum int,
 	prettyCols []*sqlbase.ColumnDescriptor,
 	colIndexs map[int]int,
 	tolerant bool,
-	getGroupIDFunc func(primaryTag []byte) (api.EntityRangeGroupID, error),
 ) ([]byte, []byte, []interface{}, error) {
 	// payloadSize, otherTagSize, dataColumnSize
-	ComputePayloadSize(&t.args, rowNum)
-	t.payload = make([]byte, t.args.PayloadSize)
-	t.fillHeader()
+	ComputePayloadSize(&ts.args, rowNum)
+	ts.payload = make([]byte, ts.args.PayloadSize)
+	ts.fillHeader()
 
 	// column data len offset
 	dataLenOffset := 0
 	// column bitmap length
-	t.header.columnBitmapLen = (rowNum + 7) / 8
+	ts.header.columnBitmapLen = (rowNum + 7) / 8
 	var importErrorRecord []interface{}
 	// offset for var-length data in tag cols
-	independentOffset := t.header.otherTagBitmapOffset + t.args.AllTagSize
+	independentOffset := ts.header.otherTagBitmapOffset + ts.args.AllTagSize
 	columnBitmapOffset := 0
 	var primaryTagVal []byte
 	var inputValues tree.Datum
-	offset := t.header.offset
+	offset := ts.header.offset
 	rowIDMapError := make(map[int]error, len(InputDatums))
 	for j := range prettyCols {
 		var curColLenth int
@@ -623,23 +654,23 @@ func (t *TsPayload) BuildRowsPayloadByDatums(
 			curColLenth = VarColumnSize
 		}
 		// other tag data
-		if IsTagCol && j == t.args.PTagNum {
-			offset += AllTagLenSize + t.header.otherTagBitmapLen
+		if IsTagCol && j == ts.args.PTagNum {
+			offset += AllTagLenSize + ts.header.otherTagBitmapLen
 		}
 
 		// first data column
-		if !IsTagCol && j == t.args.PTagNum+t.args.AllTagNum {
+		if !IsTagCol && j == ts.args.PTagNum+ts.args.AllTagNum {
 			// compute data column offset
 			dataLenOffset = independentOffset
 			columnBitmapOffset = dataLenOffset + DataLenSize
-			offset = columnBitmapOffset + t.header.columnBitmapLen
-			independentOffset = independentOffset + DataLenSize + t.args.DataColSize
-			if independentOffset > len(t.payload) {
-				addSize := rowNum * t.args.PreAllocColSize
+			offset = columnBitmapOffset + ts.header.columnBitmapLen
+			independentOffset = independentOffset + DataLenSize + ts.args.DataColSize
+			if independentOffset > len(ts.payload) {
+				addSize := rowNum * ts.args.PreAllocColSize
 				// grow payload size
 				newPayload := make([]byte, independentOffset+addSize)
-				copy(newPayload, t.payload)
-				t.payload = newPayload
+				copy(newPayload, ts.payload)
+				ts.payload = newPayload
 			}
 		}
 
@@ -651,9 +682,9 @@ func (t *TsPayload) BuildRowsPayloadByDatums(
 			}
 			if colIdx < 0 {
 				if IsTagCol {
-					t.payload[t.header.otherTagBitmapOffset+(j-t.args.PTagNum)/8] |= 1 << ((j - t.args.PTagNum) % 8)
+					ts.payload[ts.header.otherTagBitmapOffset+(j-ts.args.PTagNum)/8] |= 1 << ((j - ts.args.PTagNum) % 8)
 				} else {
-					t.payload[columnBitmapOffset+i/8] |= 1 << (i % 8)
+					ts.payload[columnBitmapOffset+i/8] |= 1 << (i % 8)
 				}
 				offset += curColLenth
 				continue
@@ -661,59 +692,67 @@ func (t *TsPayload) BuildRowsPayloadByDatums(
 			inputValues = datums[colIdx]
 			if inputValues == tree.DNull {
 				if IsTagCol {
-					t.payload[t.header.otherTagBitmapOffset+(j-t.args.PTagNum)/8] |= 1 << ((j - t.args.PTagNum) % 8)
+					ts.payload[ts.header.otherTagBitmapOffset+(j-ts.args.PTagNum)/8] |= 1 << ((j - ts.args.PTagNum) % 8)
 				} else {
-					t.payload[columnBitmapOffset+i/8] |= 1 << (i % 8)
+					ts.payload[columnBitmapOffset+i/8] |= 1 << (i % 8)
 				}
 				offset += curColLenth
 				continue
 			}
 			var err error
-			if independentOffset, err = t.fillColData(inputValues, column, IsTagCol, IsPrimaryTagCol, offset, independentOffset, columnBitmapOffset); err != nil {
+			if independentOffset, err = ts.FillColData(inputValues, column, IsTagCol, IsPrimaryTagCol, offset, independentOffset, columnBitmapOffset); err != nil {
 				if tolerant {
 					rowIDMapError[i] = errors.Wrap(rowIDMapError[i], err.Error())
 					err = nil
 					continue
 				} else {
-					return t.payload, nil, nil, err
+					return ts.payload, nil, nil, err
 				}
 
 			}
 			offset += curColLenth
 		}
-		if j == t.args.PTagNum+t.args.AllTagNum-1 {
+		if j == ts.args.PTagNum+ts.args.AllTagNum-1 {
 			// other tag len
-			tagValLen := independentOffset - t.header.otherTagBitmapOffset
-			binary.LittleEndian.PutUint32(t.payload[t.header.otherTagLenOffset:], uint32(tagValLen))
+			tagValLen := independentOffset - ts.header.otherTagBitmapOffset
+			binary.LittleEndian.PutUint32(ts.payload[ts.header.otherTagLenOffset:], uint32(tagValLen))
 		}
 		if !IsTagCol {
 			// compute next column bitmap offset
-			columnBitmapOffset += t.header.columnBitmapLen + curColLenth*rowNum
-			offset += t.header.columnBitmapLen
+			columnBitmapOffset += ts.header.columnBitmapLen + curColLenth*rowNum
+			offset += ts.header.columnBitmapLen
 		}
 	}
+	if dataLenOffset == 0 {
+		if len(ts.payload) > independentOffset {
+			ts.payload = ts.payload[:independentOffset]
+		}
+	}
+
 	// var column value length
 	colDataLen := independentOffset - dataLenOffset - DataLenSize
-	binary.LittleEndian.PutUint32(t.payload[dataLenOffset:], uint32(colDataLen))
+	binary.LittleEndian.PutUint32(ts.payload[dataLenOffset:], uint32(colDataLen))
 
 	// primary tag value
-	primaryTagVal = t.payload[HeadSize+PTagLenSize : HeadSize+PTagLenSize+t.args.PrimaryTagSize]
+	primaryTagVal = ts.payload[HeadSize+PTagLenSize : HeadSize+PTagLenSize+ts.args.PrimaryTagSize]
 	for id, err := range rowIDMapError {
 		if err != nil {
 			importErrorRecord = append(importErrorRecord,
 				map[string]error{tree.ConvertDatumsToStr(InputDatums[id], ','): err})
 		}
 	}
-	groupID, err := getGroupIDFunc(primaryTagVal)
+	// groupID, err := getGroupIDFunc(primaryTagVal)
+	hashPoints, err := api.GetHashPointByPrimaryTag(primaryTagVal)
+	log.VEventf(context.TODO(), 3, "hashPoint : %v, primaryTag : %v", hashPoints, primaryTagVal)
 	if err != nil {
 		return nil, nil, importErrorRecord, err
 	}
-	binary.LittleEndian.PutUint16(t.payload[t.header.groupIDOffset:], uint16(groupID))
-	return t.payload, primaryTagVal, importErrorRecord, nil
+	binary.LittleEndian.PutUint16(ts.payload[ts.header.groupIDOffset:], uint16(hashPoints[0]))
+	return ts.payload, primaryTagVal, importErrorRecord, nil
 }
 
-// fillColData fills the data of TsPayload with the input values.
-func (t *TsPayload) fillColData(
+// FillColData fills the data of TsPayload with the input values.
+func (ts *TsPayload) FillColData(
 	datum tree.Datum,
 	column *sqlbase.ColumnDescriptor,
 	IsTagCol bool,
@@ -729,66 +768,66 @@ func (t *TsPayload) fillColData(
 	case *tree.DInt:
 		switch column.Type.Oid() {
 		case oid.T_int2:
-			binary.LittleEndian.PutUint16(t.payload[offset:], uint16(*v))
+			binary.LittleEndian.PutUint16(ts.payload[offset:], uint16(*v))
 		case oid.T_int4:
-			binary.LittleEndian.PutUint32(t.payload[offset:], uint32(*v))
+			binary.LittleEndian.PutUint32(ts.payload[offset:], uint32(*v))
 		case oid.T_int8, oid.T_timestamp, oid.T_timestamptz:
-			binary.LittleEndian.PutUint64(t.payload[offset:], uint64(*v))
+			binary.LittleEndian.PutUint64(ts.payload[offset:], uint64(*v))
 		default:
 			return independentOffset, errors.Errorf("unsupported int oid")
 		}
 	case *tree.DFloat:
 		switch column.Type.Oid() {
 		case oid.T_float4:
-			binary.LittleEndian.PutUint32(t.payload[offset:], uint32(int32(math.Float32bits(float32(*v)))))
+			binary.LittleEndian.PutUint32(ts.payload[offset:], uint32(int32(math.Float32bits(float32(*v)))))
 		case oid.T_float8:
-			binary.LittleEndian.PutUint64(t.payload[offset:], uint64(int64(math.Float64bits(float64(*v)))))
+			binary.LittleEndian.PutUint64(ts.payload[offset:], uint64(int64(math.Float64bits(float64(*v)))))
 		default:
 			return independentOffset, errors.Errorf("unsupported float oid")
 		}
 
 	case *tree.DBool:
 		if *v {
-			t.payload[offset] = 1
+			ts.payload[offset] = 1
 		} else {
-			t.payload[offset] = 0
+			ts.payload[offset] = 0
 		}
 
 	case *tree.DTimestamp:
-		binary.LittleEndian.PutUint64(t.payload[offset:], uint64(v.UnixMilli()))
+		binary.LittleEndian.PutUint64(ts.payload[offset:], uint64(v.UnixMilli()))
 
 	case *tree.DTimestampTZ:
-		binary.LittleEndian.PutUint64(t.payload[offset:], uint64(v.UnixMilli()))
+		binary.LittleEndian.PutUint64(ts.payload[offset:], uint64(v.UnixMilli()))
 
 	case *tree.DString:
 		switch column.Type.Oid() {
 		case oid.T_char, oid.T_text, oid.T_bpchar, types.T_geometry:
-			copy(t.payload[offset:], *v)
+			copy(ts.payload[offset:], *v)
 		case types.T_nchar:
-			copy(t.payload[offset:], *v)
+			copy(ts.payload[offset:], *v)
 
 		case oid.T_varchar, types.T_nvarchar:
 			if IsPrimaryTagCol {
-				copy(t.payload[offset:], *v)
+				copy(ts.payload[offset:], *v)
 			} else {
 				//copy len
 				dataOffset := 0
 				if IsTagCol {
-					dataOffset = independentOffset - t.header.otherTagBitmapOffset
+					dataOffset = independentOffset - ts.header.otherTagBitmapOffset
 				} else {
 					dataOffset = independentOffset - columnBitmapOffset
 				}
-				binary.LittleEndian.PutUint32(t.payload[offset:], uint32(dataOffset))
+				binary.LittleEndian.PutUint32(ts.payload[offset:], uint32(dataOffset))
 				addSize := len(*v) + VarDataLenSize
-				if independentOffset+addSize > len(t.payload) {
+				if independentOffset+addSize > len(ts.payload) {
 					// grow payload size
-					newPayload := make([]byte, len(t.payload)+addSize)
-					copy(newPayload, t.payload)
-					t.payload = newPayload
+					newPayload := make([]byte, len(ts.payload)+addSize)
+					copy(newPayload, ts.payload)
+					ts.payload = newPayload
 				}
 				// next var column offset
-				binary.LittleEndian.PutUint16(t.payload[independentOffset:], uint16(len(*v)))
-				copy(t.payload[independentOffset+VarDataLenSize:], *v)
+				binary.LittleEndian.PutUint16(ts.payload[independentOffset:], uint16(len(*v)))
+				copy(ts.payload[independentOffset+VarDataLenSize:], *v)
 				independentOffset += addSize
 			}
 
@@ -801,31 +840,31 @@ func (t *TsPayload) fillColData(
 		case oid.T_bytea:
 			// Special handling: When assembling the payload related to the bytes type,
 			// write the actual length of the bytes type data at the beginning of the byte array.
-			binary.LittleEndian.PutUint16(t.payload[offset:offset+2], uint16(len(*v)))
-			copy(t.payload[offset+2:], *v)
+			binary.LittleEndian.PutUint16(ts.payload[offset:offset+2], uint16(len(*v)))
+			copy(ts.payload[offset+2:], *v)
 
 		case types.T_varbytea:
 			if IsPrimaryTagCol {
-				copy(t.payload[offset:], *v)
+				copy(ts.payload[offset:], *v)
 			} else {
 				dataOffset := 0
 				if IsTagCol {
-					dataOffset = independentOffset - t.header.otherTagBitmapOffset
+					dataOffset = independentOffset - ts.header.otherTagBitmapOffset
 				} else {
 					dataOffset = independentOffset - columnBitmapOffset
 				}
-				binary.LittleEndian.PutUint32(t.payload[offset:], uint32(dataOffset))
+				binary.LittleEndian.PutUint32(ts.payload[offset:], uint32(dataOffset))
 
 				addSize := len(*v) + VarDataLenSize
-				if independentOffset+addSize > len(t.payload) {
+				if independentOffset+addSize > len(ts.payload) {
 					// grow payload size
-					newPayload := make([]byte, len(t.payload)+addSize)
-					copy(newPayload, t.payload)
-					t.payload = newPayload
+					newPayload := make([]byte, len(ts.payload)+addSize)
+					copy(newPayload, ts.payload)
+					ts.payload = newPayload
 				}
 				// next var column offset
-				binary.LittleEndian.PutUint16(t.payload[independentOffset:], uint16(len(*v)))
-				copy(t.payload[independentOffset+VarDataLenSize:], *v)
+				binary.LittleEndian.PutUint16(ts.payload[independentOffset:], uint16(len(*v)))
+				copy(ts.payload[independentOffset+VarDataLenSize:], *v)
 				independentOffset += addSize
 			}
 		default:
@@ -836,6 +875,282 @@ func (t *TsPayload) fillColData(
 		return independentOffset, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %T", datum)
 	}
 	return independentOffset, nil
+}
+
+// BuildRowBytesForTsImport construct tsPayload for build tsImport in distributed cluster mode.
+// The main ones are as follows:
+//
+//   - 1) Calculate the memory size required rowBytes, and pre-allocate memory space.
+//
+//   - 2) Type check is performed on each input value.
+//
+//   - 3) Group each row value by the same primary tag value.
+//
+//   - 4) The values for each row of data columns are encoded in the following format.
+//     /* rowByte
+//     __________________________________________________________________________________________________________
+//     |     4     | (column/8)+1 |  col1_width  |       8         |  ...  |        2         | var_value_length |
+//     |-----------|--------------|--------------|-----------------|-------|------------------|------------------|
+//     | rowLength |    bitmap    |  col1_values | var_type_offset |  ...  | var_value_length |     var_value    |
+//     */
+//
+//   - 5) The call function constructs the header and tag part of the TsPayload.
+//
+// Parameters:
+//   - rowNum: The input values that will be checked.
+//   - inputDatums: A pre-allocated two-dimensional array for storing checked input values.
+//   - colIndexs: Mapping between column ids and input values.
+//   - pArgs: Information needed to build tsPayload.
+//
+// Returns:
+//   - PayloadForDistTSInsert: Complete the encoded tsPayload and rowBytes.
+func (ts *TsPayload) BuildRowBytesForTsImport(
+	evalCtx *tree.EvalContext,
+	txn *kv.Txn,
+	inputDatums []tree.Datums,
+	rowNum int,
+	prettyCols []*sqlbase.ColumnDescriptor,
+	colIndexs map[int]int,
+	pArgs PayloadArgs,
+	dbID uint32,
+	tableID uint32,
+	tolerant bool,
+) (map[int]*sqlbase.PayloadForDistTSInsert, []interface{}, error) {
+	var dataCols []*sqlbase.ColumnDescriptor
+	// Get data column
+	for _, col := range prettyCols {
+		if !col.IsTagCol() {
+			dataCols = append(dataCols, col)
+		}
+	}
+	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(rowNum, dataCols)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Define the required variables
+	var curColLength, valIdx, dataColIdx int
+	var isDataCol, isLastDataCol bool
+	bitmapOffset := DataLenSize
+	rowTimestamps := make([]int64, rowNum)
+	// partition input data based on primary tag values
+	priTagValMap := make(map[string][]int)
+	var importErrorRecord []interface{}
+	rowIDMapError := make(map[int]error, len(inputDatums))
+	// Type check for input values.
+	var buf strings.Builder
+	for i, datum := range inputDatums {
+		ts.payload = rowBytes[i]
+		offset := dataOffset
+		varDataOffset := independentOffset
+		for j, col := range pArgs.PrettyCols {
+			isDataCol = !col.IsTagCol()
+			valIdx = colIndexs[int(col.ID)]
+			isLastDataCol = false
+			// Return an error if column is not null, but there have no value.
+			if valIdx < 0 {
+				if !col.Nullable {
+					return nil, nil, sqlbase.NewNonNullViolationError(col.Name)
+				} else if col.IsTagCol() {
+					continue
+				}
+			}
+			if isDataCol {
+				dataColIdx = j - pArgs.PTagNum - pArgs.AllTagNum
+				isLastDataCol = dataColIdx == pArgs.DataColNum-1
+
+				if int(col.TsCol.VariableLengthType) == sqlbase.StorageTuple {
+					curColLength = int(col.TsCol.StorageLen)
+				} else {
+					curColLength = VarColumnSize
+				}
+				// deal with NULL value
+				if valIdx < 0 {
+					ts.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
+					offset += curColLength
+					// Fill the length of rowByte
+					if isLastDataCol {
+						binary.LittleEndian.PutUint32(ts.payload[0:], uint32(varDataOffset-DataLenSize))
+						rowBytes[i] = ts.payload[:varDataOffset]
+					}
+					continue
+				}
+			}
+			if j < pArgs.PTagNum {
+				buf.WriteString(sqlbase.DatumToString(datum[valIdx]))
+			}
+			if isDataCol {
+				if datum[valIdx] == tree.DNull {
+					ts.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
+					offset += curColLength
+					// Fill the length of rowByte
+					if isLastDataCol {
+						binary.LittleEndian.PutUint32(ts.payload[0:], uint32(varDataOffset-DataLenSize))
+						rowBytes[i] = ts.payload[:varDataOffset]
+					}
+					continue
+				}
+
+				// Timestamp column is always in the first column.
+				if dataColIdx == 0 {
+					rowTimestamps[i] = int64(*datum[valIdx].(*tree.DInt))
+				}
+				// Encode each value into rowByte in column order.
+				if varDataOffset, err = ts.FillColData(
+					datum[valIdx],
+					col, false, false,
+					offset, varDataOffset, bitmapOffset,
+				); err != nil {
+					if tolerant {
+						rowIDMapError[i] = errors.Wrap(rowIDMapError[i], err.Error())
+						err = nil
+						continue
+					} else {
+						return nil, nil, err
+					}
+				}
+				offset += curColLength
+				if isLastDataCol {
+					ts.payload = ts.payload[:varDataOffset]
+					binary.LittleEndian.PutUint32(ts.payload[0:], uint32(varDataOffset-DataLenSize))
+					rowBytes[i] = ts.payload[:varDataOffset]
+				}
+			}
+		}
+		// Group rows with the same primary tag value.
+		priTagValMap[buf.String()] = append(priTagValMap[buf.String()], i)
+		buf.Reset()
+	}
+	// Reset the parameters of pArgs. We only need to construct TsPayload with tag columns.
+	pArgs.DataColNum, pArgs.DataColSize, pArgs.PreAllocColSize = 0, 0, 0
+	allPayloads := make([]*sqlbase.SinglePayloadInfo, len(priTagValMap))
+	count := 0
+	for _, priTagRowIdx := range priTagValMap {
+		// Obtain payload containing only Header,PTag,Tag
+		payload, _, err := BuildPrePayloadForTsImport(
+			evalCtx,
+			txn,
+			inputDatums,
+			// For rows with the same primary tag value, we encode only the first row.
+			priTagRowIdx[:1],
+			pArgs.PrettyCols[:pArgs.PTagNum+pArgs.AllTagNum],
+			colIndexs,
+			pArgs,
+			dbID,
+			tableID,
+			nil,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Make primaryTag key.
+		hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
+		primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tableID), hashPoints)
+		groupRowBytes := make([][]byte, len(priTagRowIdx))
+		groupRowTime := make([]int64, len(priTagRowIdx))
+		// TsRowPutRequest need min and max timestamp.
+		minTimestamp := int64(math.MaxInt64)
+		maxTimeStamp := int64(math.MinInt64)
+		valueSize := int32(0)
+		for i, idx := range priTagRowIdx {
+			groupRowBytes[i] = rowBytes[idx]
+			groupRowTime[i] = rowTimestamps[idx]
+			if rowTimestamps[idx] > maxTimeStamp {
+				maxTimeStamp = rowTimestamps[idx]
+			}
+			if rowTimestamps[idx] < minTimestamp {
+				minTimestamp = rowTimestamps[idx]
+			}
+			valueSize += int32(len(groupRowBytes[i]))
+		}
+		var startKey roachpb.Key
+		var endKey roachpb.Key
+		if pArgs.RowType == OnlyTag {
+			startKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(tableID), uint64(hashPoints[0]))
+			endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), uint64(hashPoints[0]), math.MaxInt64)
+		} else {
+			startKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), uint64(hashPoints[0]), minTimestamp)
+			endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), uint64(hashPoints[0]), maxTimeStamp+1)
+		}
+		allPayloads[count] = &sqlbase.SinglePayloadInfo{
+			Payload:       payload,
+			RowNum:        uint32(len(priTagRowIdx)),
+			PrimaryTagKey: primaryTagKey,
+			RowBytes:      groupRowBytes,
+			RowTimestamps: groupRowTime,
+			StartKey:      startKey,
+			EndKey:        endKey,
+			ValueSize:     valueSize,
+		}
+		count++
+	}
+	for id, err := range rowIDMapError {
+		if err != nil {
+			importErrorRecord = append(importErrorRecord,
+				map[string]error{tree.ConvertDatumsToStr(inputDatums[id], ','): err})
+		}
+	}
+	payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert)
+	payloadNodeMap[int(evalCtx.NodeID)] = &sqlbase.PayloadForDistTSInsert{
+		NodeID: evalCtx.NodeID, PerNodePayloads: allPayloads,
+	}
+	return payloadNodeMap, importErrorRecord, nil
+}
+
+// BuildPrePayloadForTsImport construct tsPayload of PTag and Tag for IMPORT.
+// The main ones are as follows:
+//   - First create a tsPayload and set the required parameter values.
+//   - Last call function encodes the data part of tsPayload.
+//
+// Parameters:
+//   - InputDatums: Input values that have been checked and converted
+//   - primaryTagRowIdx: The index of the row subscript with the same primaryTag value.
+//   - prettyCols: Reorder the column metadata.
+//   - colIndexs: Mapping between column ids and input values.
+//   - pArgs: Information needed to build tsPayload.
+//
+// Returns:
+//   - payload: Complete the encoded tsPayload.
+//   - primaryTagVal: Encodings that contain only primaryTag values.
+func BuildPrePayloadForTsImport(
+	evalCtx *tree.EvalContext,
+	txn *kv.Txn,
+	InputDatums []tree.Datums,
+	primaryTagRowIdx []int,
+	prettyCols []*sqlbase.ColumnDescriptor,
+	colIndexs map[int]int,
+	pArgs PayloadArgs,
+	dbID uint32,
+	tableID uint32,
+	hashRouter api.HashRouter,
+) ([]byte, []byte, error) {
+	rowNum := len(primaryTagRowIdx)
+	tsPayload := NewTsPayload()
+	tsPayload.SetArgs(pArgs)
+	tsPayload.SetHeader(PayloadHeader{
+		TxnID:          txn.ID(),
+		PayloadVersion: pArgs.PayloadVersion,
+		DBID:           dbID,
+		TBID:           uint64(tableID),
+		TSVersion:      pArgs.TSVersion,
+		RowNum:         uint32(rowNum),
+	})
+	groupDatums := make([]tree.Datums, rowNum)
+	for i := range groupDatums {
+		groupDatums[i] = InputDatums[primaryTagRowIdx[i]]
+	}
+
+	payload, primaryTagVal, _, err := tsPayload.BuildRowsPayloadByDatums(
+		groupDatums,
+		rowNum,
+		prettyCols,
+		colIndexs,
+		false,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return payload, primaryTagVal, nil
 }
 
 // BuildPayloadArgs return PayloadArgs
@@ -862,10 +1177,17 @@ func BuildPayloadArgs(
 	} else if allTagNum == 0 {
 		rowType = OnlyData
 	}
+	// Reorder the columns. The order is as follows:
+	// [primary tag columns + all tag columns + data columns]
+	prettyCols := make([]*sqlbase.ColumnDescriptor, pTagNum+allTagNum+dataColNum)
+	copy(prettyCols[:pTagNum], primaryTagCols)
+	copy(prettyCols[pTagNum:], allTagCols)
+	copy(prettyCols[pTagNum+allTagNum:], dataCols)
+
 	return PayloadArgs{
 		TSVersion: tsVersion, PayloadVersion: sqlbase.TSInsertPayloadVersion, PTagNum: pTagNum, AllTagNum: allTagNum,
 		DataColNum: dataColNum, PrimaryTagSize: pTagSize, AllTagSize: allTagSize, RowType: rowType,
-		DataColSize: dataSize, PreAllocTagSize: preTagSize, PreAllocColSize: preDataSize,
+		DataColSize: dataSize, PreAllocTagSize: preTagSize, PreAllocColSize: preDataSize, PrettyCols: prettyCols,
 	}, nil
 }
 
@@ -912,18 +1234,226 @@ func BuildPayloadForTsInsert(
 		groupDatums[i] = InputDatums[primaryTagRowIdx[i]]
 	}
 
-	payload, primaryTagVal, _, err := tsPayload.BuildRowsPayloadByDatums(groupDatums, rowNum, prettyCols, colIndexs,
+	payload, primaryTagVal, _, err := tsPayload.BuildRowsPayloadByDatums(
+		groupDatums,
+		rowNum,
+		prettyCols,
+		colIndexs,
 		false,
-		func(primaryTag []byte) (api.EntityRangeGroupID, error) {
-			if evalCtx.StartSinglenode {
-				return api.EntityRangeGroupID(tableID), nil
-			}
-			return hashRouter.GetGroupIDByPrimaryTag(evalCtx.Context, primaryTag)
-		})
+	)
 	if err != nil {
 		return nil, nil, err
 	}
 	return payload, primaryTagVal, nil
+}
+
+// BuildRowBytesForTsInsert construct tsPayload for build tsInsert in distributed cluster mode.
+// The main ones are as follows:
+//
+//   - 1) Calculate the memory size required rowBytes, and pre-allocate memory space.
+//
+//   - 2) Type check is performed on each input value.
+//
+//   - 3) Group each row value by the same primary tag value.
+//
+//   - 4) The values for each row of data columns are encoded in the following format.
+//     /* rowByte
+//     __________________________________________________________________________________________________________
+//     |     4     | (column/8)+1 |  col1_width  |       8         |  ...  |        2         | var_value_length |
+//     |-----------|--------------|--------------|-----------------|-------|------------------|------------------|
+//     | rowLength |    bitmap    |  col1_values | var_type_offset |  ...  | var_value_length |     var_value    |
+//     */
+//
+//   - 5) The call function constructs the header and tag part of the TsPayload.
+//
+// Parameters:
+//   - InputRows: The input values that will be checked.
+//   - InputDatums: A pre-allocated two-dimensional array for storing checked input values.
+//   - primaryTagRowIdx: The index of the row subscript with the same primaryTag value.
+//   - dataCols: Contains only data columns.
+//   - colIndexs: Mapping between column ids and input values.
+//   - pArgs: Information needed to build tsPayload.
+//
+// Returns:
+//   - PayloadForDistTSInsert: Complete the encoded tsPayload and rowBytes.
+func BuildRowBytesForTsInsert(
+	evalCtx *tree.EvalContext,
+	InputRows opt.RowsValue,
+	inputDatums []tree.Datums,
+	dataCols []*sqlbase.ColumnDescriptor,
+	colIndexs map[int]int,
+	pArgs PayloadArgs,
+	dbID uint32,
+	tableID uint32,
+) (map[int]*sqlbase.PayloadForDistTSInsert, error) {
+	tp := NewTsPayload()
+	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(len(InputRows), dataCols)
+	if err != nil {
+		return nil, err
+	}
+	// Define the required variables
+	var curColLength, valIdx, dataColIdx int
+	var isDataCol, isLastDataCol bool
+	bitmapOffset := DataLenSize
+	rowTimestamps := make([]int64, len(InputRows))
+	// partition input data based on primary tag values
+	priTagValMap := make(map[string][]int)
+	// Type check for input values.
+	var buf strings.Builder
+	for i := range InputRows {
+		tp.payload = rowBytes[i]
+		offset := dataOffset
+		varDataOffset := independentOffset
+		for j, col := range pArgs.PrettyCols {
+			isDataCol = !col.IsTagCol()
+			valIdx = colIndexs[int(col.ID)]
+			isLastDataCol = false
+			// Return an error if column is not null, but there have no value.
+			if valIdx < 0 {
+				if !col.Nullable {
+					return nil, sqlbase.NewNonNullViolationError(col.Name)
+				} else if col.IsTagCol() {
+					continue
+				}
+			}
+			if isDataCol {
+				dataColIdx = j - pArgs.PTagNum - pArgs.AllTagNum
+				isLastDataCol = dataColIdx == pArgs.DataColNum-1
+
+				if int(col.TsCol.VariableLengthType) == sqlbase.StorageTuple {
+					curColLength = int(col.TsCol.StorageLen)
+				} else {
+					curColLength = VarColumnSize
+				}
+				// deal with NULL value
+				if valIdx < 0 {
+					tp.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
+					offset += curColLength
+					// Fill the length of rowByte
+					if isLastDataCol {
+						binary.LittleEndian.PutUint32(tp.payload[0:], uint32(varDataOffset-DataLenSize))
+						rowBytes[i] = tp.payload[:varDataOffset]
+					}
+					continue
+				}
+			}
+			// checks whether the input value is valid for target column.
+			inputDatums[i][valIdx], err = TSTypeCheckForInput(evalCtx, &InputRows[i][valIdx], &col.Type, col)
+			if err != nil {
+				return nil, err
+			}
+			if j < pArgs.PTagNum {
+				buf.WriteString(sqlbase.DatumToString(inputDatums[i][valIdx]))
+			}
+			if isDataCol {
+				if inputDatums[i][valIdx] == tree.DNull {
+					tp.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
+					offset += curColLength
+					// Fill the length of rowByte
+					if isLastDataCol {
+						binary.LittleEndian.PutUint32(tp.payload[0:], uint32(varDataOffset-DataLenSize))
+						rowBytes[i] = tp.payload[:varDataOffset]
+					}
+					continue
+				}
+
+				// Timestamp column is always in the first column.
+				if dataColIdx == 0 {
+					rowTimestamps[i] = int64(*inputDatums[i][valIdx].(*tree.DInt))
+				}
+				// Encode each value into rowByte in column order.
+				if varDataOffset, err = tp.FillColData(
+					inputDatums[i][valIdx],
+					col, false, false,
+					offset, varDataOffset, bitmapOffset,
+				); err != nil {
+					return nil, err
+				}
+				offset += curColLength
+				if isLastDataCol {
+					tp.payload = tp.payload[:varDataOffset]
+					binary.LittleEndian.PutUint32(tp.payload[0:], uint32(varDataOffset-DataLenSize))
+					rowBytes[i] = tp.payload[:varDataOffset]
+				}
+			}
+		}
+		// Group rows with the same primary tag value.
+		priTagValMap[buf.String()] = append(priTagValMap[buf.String()], i)
+		buf.Reset()
+	}
+	// Reset the parameters of pArgs. We only need to construct TsPayload with tag columns.
+	pArgs.DataColNum, pArgs.DataColSize, pArgs.PreAllocColSize = 0, 0, 0
+	allPayloads := make([]*sqlbase.SinglePayloadInfo, len(priTagValMap))
+	count := 0
+	for _, priTagRowIdx := range priTagValMap {
+		payload, _, err := BuildPayloadForTsInsert(
+			evalCtx,
+			evalCtx.Txn,
+			inputDatums,
+			// For rows with the same primary tag value, we encode only the first row.
+			priTagRowIdx[:1],
+			pArgs.PrettyCols[:pArgs.PTagNum+pArgs.AllTagNum],
+			colIndexs,
+			pArgs,
+			dbID,
+			tableID,
+			nil,
+		)
+		if err != nil {
+			return nil, err
+		}
+		//fmt.Printf("\n-------payload------\n")
+		//fmt.Printf("%v\n", payload)
+		// TODO(ZXY): need to rm
+
+		// Make primaryTag key.
+		hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
+		primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tableID), hashPoints)
+		groupRowBytes := make([][]byte, len(priTagRowIdx))
+		groupRowTime := make([]int64, len(priTagRowIdx))
+		// TsRowPutRequest need min and max timestamp.
+		minTimestamp := int64(math.MaxInt64)
+		maxTimeStamp := int64(math.MinInt64)
+		valueSize := int32(0)
+		for i, idx := range priTagRowIdx {
+			groupRowBytes[i] = rowBytes[idx]
+			groupRowTime[i] = rowTimestamps[idx]
+			if rowTimestamps[idx] > maxTimeStamp {
+				maxTimeStamp = rowTimestamps[idx]
+			}
+			if rowTimestamps[idx] < minTimestamp {
+				minTimestamp = rowTimestamps[idx]
+			}
+			valueSize += int32(len(groupRowBytes[i]))
+			//fmt.Printf("-------rowBytes------\n")
+			//fmt.Printf("row[%d]:%v\n", i, groupRowBytes[i])
+		}
+		var startKey roachpb.Key
+		var endKey roachpb.Key
+		if pArgs.RowType == OnlyTag {
+			startKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(tableID), uint64(hashPoints[0]))
+			endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), uint64(hashPoints[0]), math.MaxInt64)
+		} else {
+			startKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), uint64(hashPoints[0]), minTimestamp)
+			endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), uint64(hashPoints[0]), maxTimeStamp+1)
+		}
+		allPayloads[count] = &sqlbase.SinglePayloadInfo{
+			Payload:       payload,
+			RowNum:        uint32(len(priTagRowIdx)),
+			PrimaryTagKey: primaryTagKey,
+			RowBytes:      groupRowBytes,
+			RowTimestamps: groupRowTime,
+			StartKey:      startKey,
+			EndKey:        endKey,
+			ValueSize:     valueSize,
+		}
+		count++
+	}
+	payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert)
+	payloadNodeMap[int(evalCtx.NodeID)] = &sqlbase.PayloadForDistTSInsert{
+		NodeID: evalCtx.NodeID, PerNodePayloads: allPayloads,
+	}
+	return payloadNodeMap, nil
 }
 
 // BuildPreparePayloadForTsInsert construct payload for build tsInsert.
@@ -952,9 +1482,9 @@ func BuildPreparePayloadForTsInsert(
 	// encode payload head
 	/*header part
 	________________________________________________________________________________________________________
-	|    16    |    2    |        4        |        4        |   4  |    8   |   4       |   4    |    1    |
-	|----------|---------|-----------------|-----------------|------|--------|-----------|--------|---------|
-	|  txnID   | groupID | storage version | payload version | dbID |  tbID  | tsVersion | rowNum | rowType |
+	|    16    |    2    |        4        |   4  |      8       |   4       |   4    |    1    |
+	|----------|---------|-----------------|------|--------------|-----------|--------|---------|
+	|  txnID   | groupID | payload version | dbID |     tbID     | tsVersion | rowNum | rowType |
 	*/
 	copy(payload[offset:], txn.ID().GetBytes())
 	offset += TxnIDSize
@@ -972,15 +1502,29 @@ func BuildPreparePayloadForTsInsert(
 	offset += TSVersionSize
 	binary.LittleEndian.PutUint32(payload[offset:], uint32(rowNum))
 	offset += RowNumSize
-	if pArgs.DataColNum == 0 {
-		// without data column
-		payload[offset] = byte(2)
-	} else if pArgs.AllTagNum == 0 {
-		// only data column
-		payload[offset] = byte(1)
+
+	if evalCtx.StartSinglenode {
+		if pArgs.DataColNum == 0 {
+			// without data column
+			payload[offset] = byte(2)
+		} else if pArgs.AllTagNum == 0 {
+			// only data column
+			payload[offset] = byte(1)
+		} else {
+			// both tag And data
+			payload[offset] = byte(0)
+		}
 	} else {
-		// both tag And data
-		payload[offset] = byte(0)
+		switch pArgs.RowType {
+		case BothTagAndData:
+			payload[offset] = RowType[BothTagAndData]
+		case OnlyData:
+			payload[offset] = RowType[OnlyData]
+		case OnlyTag:
+			payload[offset] = RowType[OnlyTag]
+		default:
+			payload[offset] = RowType[BothTagAndData]
+		}
 	}
 	offset++
 
@@ -1178,17 +1722,11 @@ func BuildPreparePayloadForTsInsert(
 
 	// primary tag value
 	primaryTagVal = payload[HeadSize+PTagLenSize : HeadSize+PTagLenSize+pArgs.PrimaryTagSize]
-	var groupID api.EntityRangeGroupID
-	if evalCtx.StartSinglenode {
-		groupID = api.EntityRangeGroupID(tableID)
-	} else {
-		var err error
-		groupID, err = hashRouter.GetGroupIDByPrimaryTag(evalCtx.Context, primaryTagVal)
-		if err != nil {
-			return nil, nil, err
-		}
+	hashPoints, err := api.GetHashPointByPrimaryTag(primaryTagVal)
+	if err != nil {
+		return nil, nil, err
 	}
-	binary.LittleEndian.PutUint16(payload[groupIDOffset:], uint16(groupID))
+	binary.LittleEndian.PutUint16(payload[groupIDOffset:], uint16(hashPoints[0]))
 	return payload, primaryTagVal, nil
 }
 
@@ -1341,8 +1879,10 @@ func ComputePayloadSize(pArgs *PayloadArgs, rowCount int) {
 	if pArgs.DataColSize != 0 {
 		pArgs.DataColSize = pArgs.DataColSize*rowCount + ((rowCount+7)/8)*pArgs.DataColNum
 	}
-	pArgs.PayloadSize = HeadSize + PTagLenSize + pArgs.PrimaryTagSize + AllTagLenSize + pArgs.AllTagSize + DataLenSize + pArgs.DataColSize
-	pArgs.PayloadSize += pArgs.PreAllocTagSize + rowCount*pArgs.PreAllocColSize
+	pArgs.PayloadSize = HeadSize + PTagLenSize + pArgs.PrimaryTagSize + AllTagLenSize + pArgs.AllTagSize + pArgs.PreAllocTagSize
+	if pArgs.DataColSize != 0 {
+		pArgs.PayloadSize += DataLenSize + pArgs.DataColSize + rowCount*pArgs.PreAllocColSize
+	}
 	return
 }
 
@@ -1408,6 +1948,30 @@ func ComputeColumnSize(cols []*sqlbase.ColumnDescriptor) (int, int, error) {
 		}
 	}
 	return colSize, preAllocSize, nil
+}
+
+// preAllocateDataRowBytes calculates the memory size required by rowBytes based on the data columns
+// and preAllocates the memory space.
+func preAllocateDataRowBytes(
+	rowNum int, dataCols []*sqlbase.ColumnDescriptor,
+) (rowBytes [][]byte, dataOffset, varDataOffset int, err error) {
+	dataRowSize, preSize, err := ComputeColumnSize(dataCols)
+	if err != nil {
+		return
+	}
+	bitmapLen := (len(dataCols) + 7) / 8
+	singleRowSize := DataLenSize + bitmapLen + dataRowSize + preSize
+	rowBytesSize := singleRowSize * rowNum
+	rowBytes = make([][]byte, rowNum)
+	// allocate memory for two nested slices, for better performance
+	preBytes := make([]byte, rowBytesSize)
+	for i := 0; i < rowNum; i++ {
+		rowBytes[i], preBytes = preBytes[:singleRowSize:singleRowSize], preBytes[singleRowSize:]
+	}
+	bitmapOffset := DataLenSize
+	dataOffset = bitmapOffset + bitmapLen
+	varDataOffset = dataOffset + dataRowSize
+	return
 }
 
 // TSTypeCheckForInput checks whether the input value is valid based on the time-series table type，
@@ -2049,14 +2613,8 @@ func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
 	// prepare metadata used to construct TS delete node.
 	md := b.mem.Metadata()
 	tab := md.Table(tsDelete.STable)
-	dbID := tab.GetParentID()
 
-	// build table's hash hook
-	hashRouter, err := api.GetHashRouterWithTable(uint32(dbID), uint32(tab.ID()), false, b.evalCtx.Txn)
-	if err != nil {
-		return execPlan{}, err
-	}
-
+	var err error
 	var spans []execinfrapb.Span
 	for _, span := range tsDelete.Spans {
 		spans = append(spans, execinfrapb.Span{
@@ -2069,7 +2627,7 @@ func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
 		node, err := b.factory.ConstructTSDelete(
 			[]roachpb.NodeID{b.evalCtx.NodeID},
 			uint64(tab.ID()),
-			uint64(0), //group id
+			uint64(1), //group id
 			spans,
 			uint8(tsDelete.DeleteType),
 			[][]byte{}, // primary tag key
@@ -2134,21 +2692,17 @@ func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
 			return execPlan{}, err
 		}
 	}
-
-	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tab.ID()), primaryTagVal)
-	primaryTagVals := [][]byte{primaryTagVal}
-
-	nodeID, err := hashRouter.GetNodeIDByPrimaryTag(b.evalCtx.Context, primaryTagVal)
+	hashPoints, err := api.GetHashPointByPrimaryTag(primaryTagVal)
 	if err != nil {
 		return execPlan{}, err
 	}
-
-	groupID, err := hashRouter.GetGroupIDByPrimaryTag(b.evalCtx.Context, primaryTagVal)
+	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tab.ID()), hashPoints)
+	primaryTagVals := [][]byte{primaryTagVal}
 
 	node, err := b.factory.ConstructTSDelete(
-		nodeID,
+		[]roachpb.NodeID{b.evalCtx.NodeID},
 		uint64(tab.ID()),
-		uint64(groupID),
+		uint64(1), //groupID
 		spans,
 		uint8(tsDelete.DeleteType),
 		[][]byte{primaryTagKey},
@@ -2177,6 +2731,7 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 			[][]byte{},
 			[][]byte{},
 			tsUpdate.PTagValueNotExist,
+			nil, nil,
 		)
 		if err != nil {
 			return execPlan{}, err
@@ -2221,12 +2776,10 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 	prettyCols = append(prettyCols, primaryTagCols...)
 	prettyCols = append(prettyCols, otherTagCols...)
 
-	pTagSize, _, err := ComputeColumnSize(primaryTagCols)
-	allTagSize, _, err := ComputeColumnSize(otherTagCols)
-
-	pArgs := PayloadArgs{
-		PTagNum: len(primaryTagCols), AllTagNum: len(otherTagCols), DataColNum: 0,
-		PrimaryTagSize: pTagSize, AllTagSize: allTagSize, DataColSize: 0,
+	// Integrate the arguments required by payload
+	pArgs, err := BuildPayloadArgs(tab.GetTSVersion(), primaryTagCols, otherTagCols, nil)
+	if err != nil {
+		return execPlan{}, err
 	}
 	inputDatums := make([]tree.Datums, 1)
 	inputDatums[0] = make([]tree.Datum, len(tsUpdate.UpdateRows))
@@ -2259,24 +2812,33 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 	if err != nil {
 		return execPlan{}, err
 	}
-
-	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tab.ID()), primaryTagVal)
+	hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
+	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(sqlbase.ID(tab.ID()), hashPoints)
 	payloads := [][]byte{payload}
 
-	nodeID, err := hashRouter.GetNodeIDByPrimaryTag(b.evalCtx.Context, primaryTagVal)
-	if err != nil {
-		return execPlan{}, err
-	}
+	//nodeID, err := hashRouter.GetNodeIDByPrimaryTag(b.evalCtx.Context, primaryTagVal)
+	//if err != nil {
+	//	return execPlan{}, err
+	//}
+	// use current NodeID
+	nodeID := b.evalCtx.NodeID
 
 	groupID, err := hashRouter.GetGroupIDByPrimaryTag(b.evalCtx.Context, primaryTagVal)
-
+	var startKey roachpb.Key
+	var endKey roachpb.Key
+	if b.evalCtx.StartDistributeMode {
+		// StartDistributeMode only exec update in local node.
+		startKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(tab.ID()), uint64(hashPoints[0]))
+		endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(tab.ID()), uint64(hashPoints[0]), math.MaxInt64)
+	}
 	node, err := b.factory.ConstructTSTagUpdate(
-		nodeID,
+		[]roachpb.NodeID{nodeID},
 		uint64(tab.ID()),
 		uint64(groupID),
 		[][]byte{primaryTagKey},
 		payloads,
 		tsUpdate.PTagValueNotExist,
+		startKey, endKey,
 	)
 	if err != nil {
 		return execPlan{}, err

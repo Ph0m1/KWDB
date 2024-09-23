@@ -26,6 +26,7 @@ package kvserver
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -45,6 +46,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
@@ -739,8 +741,7 @@ func (r *Replica) evaluateProposalTS(
 	//
 	// TODO(tschottdorf): absorb all returned values in `res` below this point
 	// in the call stack as well.
-	batch, _, br, res, pErr := r.evaluateWriteBatch(ctx, idKey, ba, latchSpans)
-
+	batch, ms, br, res, pErr := r.evaluateWriteBatch(ctx, idKey, ba, latchSpans)
 	// Note: reusing the proposer's batch when applying the command on the
 	// proposer was explored as an optimization but resulted in no performance
 	// benefit.
@@ -775,6 +776,67 @@ func (r *Replica) evaluateProposalTS(
 	res.Local.Reply = br
 	res.Replicated.Timestamp = ba.Timestamp
 	// TsRequest processing requires the cluster to reach a consensus and returns true
+
+	res.Replicated.IsLeaseRequest = ba.IsLeaseRequest()
+	res.Replicated.Timestamp = ba.Timestamp
+
+	ms.TsPerRowSize = r.GetMVCCStats().TsPerRowSize
+
+	calculateMS := true
+	if ms.TsPerRowSize == 0 {
+		tableID, _, _, err := sqlbase.DecodeTsRangeKey(r.startKey(), true)
+		if err != nil {
+			calculateMS = false
+		}
+		tsPerRowSize, err := r.TsEngine().GetAvgTableRowSize(uint64(tableID))
+		if err != nil {
+			calculateMS = false
+		}
+		ms.TsPerRowSize = int64(tsPerRowSize)
+	}
+
+	if calculateMS {
+		for _, req := range ba.Requests {
+			//todo(fxy): add tsDelete and other ts requests later.
+			if tsput, ok := req.Value.(*roachpb.RequestUnion_TsPut); ok {
+				val := tsput.TsPut.Value.RawBytes
+				rowNum := val[38:42]
+				rowCount := binary.LittleEndian.Uint32(rowNum)
+
+				ms.KeyCount += int64(rowCount)
+				ms.ValCount += int64(rowCount)
+				ms.LiveBytes += int64(rowCount) * ms.TsPerRowSize
+				ms.ValBytes += int64(rowCount) * ms.TsPerRowSize
+			} else if tsput, ok := req.Value.(*roachpb.RequestUnion_TsRowPut); ok {
+				rowCount := len(tsput.TsRowPut.Values)
+				ms.LiveBytes += int64(rowCount) * ms.TsPerRowSize
+				ms.ValBytes += int64(rowCount) * ms.TsPerRowSize
+			}
+		}
+	}
+	res.Replicated.Delta = ms.ToStatsDelta()
+	_ = clusterversion.VersionContainsEstimatesCounter // see for info on ContainsEstimates migration
+	if r.ClusterSettings().Version.IsActive(ctx, clusterversion.VersionContainsEstimatesCounter) {
+		// Encode that this command (and any that follow) uses regular arithmetic for ContainsEstimates
+		// by making sure ContainsEstimates is > 1.
+		// This will be interpreted during command application.
+		if res.Replicated.Delta.ContainsEstimates > 0 {
+			res.Replicated.Delta.ContainsEstimates *= 2
+		}
+	} else {
+		// This range may still need to have its commands processed by nodes which treat ContainsEstimates
+		// as a bool, so clamp it to {0,1}. This enables use of bool semantics in command application.
+		if res.Replicated.Delta.ContainsEstimates > 1 {
+			res.Replicated.Delta.ContainsEstimates = 1
+		} else if res.Replicated.Delta.ContainsEstimates < 0 {
+			// The caller should have checked the cluster version. At the
+			// time of writing, this is only RecomputeStats and the split
+			// trigger, which both have the check, but better safe than sorry.
+			log.Fatalf(ctx, "cannot propose negative ContainsEstimates "+
+				"without VersionContainsEstimatesCounter in %s", ba.Summary())
+		}
+	}
+
 	return &res, true, nil
 }
 
@@ -854,7 +916,7 @@ func (r *Replica) evaluateProposal(
 	//    even with an empty write batch when stats are recomputed.
 	// 3. the request has replicated side-effects.
 	needConsensus := !batch.Empty() ||
-		ms != (enginepb.MVCCStats{}) ||
+		ms != (enginepb.MVCCStats{}) || res.HandleTsOp ||
 		!res.Replicated.Equal(storagepb.ReplicatedEvalResult{})
 
 	if needConsensus {

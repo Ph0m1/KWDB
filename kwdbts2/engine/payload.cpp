@@ -6,8 +6,8 @@
 
 Payload::Payload(MMapRootTableManager* root_bt_manager, TSSlice data) : slice_(data) {
   uint32_t ts_version = GetTsVersion();
-  schema_ = root_bt_manager->GetSchemaInfoWithoutHidden(ts_version);
-  actual_cols_ = root_bt_manager->GetColsIdx(ts_version);
+  root_bt_manager->GetSchemaInfoExcludeDropped(&schema_, ts_version);
+  actual_cols_ = root_bt_manager->GetIdxForValidCols(ts_version);
   start_row_ = 0;
   count_ = *reinterpret_cast<int32_t*> (slice_.data + row_num_offset_);
   flag_ = *reinterpret_cast<uint8_t*> (slice_.data + row_type_offset_);

@@ -114,7 +114,7 @@ class BtUtil {
   static int CreateDB(const std::string& db, size_t life_cycle,
                       ErrorInfo& err_info) {
     string db_path = normalizePath(db);
-    string ws = worksapceToDatabase(db_path);
+    string ws = rmPathSeperator(db_path);
     if (ws == "") return err_info.setError(KWEINVALIDNAME, db);
     int err_code = IsDbNameValid(ws);
     if (err_code != 0) err_info.setError(err_code, db);
@@ -176,7 +176,7 @@ void ConstructVarColumnMetas(std::vector<ZTableColumnMeta>* metas) {
                     roachpb::VariableLengthType::ColStorageTypeTuple});
 }
 
-void constructRoachpbTable(roachpb::CreateTsTable* meta,
+void ConstructRoachpbTable(roachpb::CreateTsTable* meta,
                            const kwdbts::KString& prefix_table_name,
                            kwdbts::KTableKey table_id,
                            uint64_t partition_interval = kwdbts::EngineOptions::iot_interval) {

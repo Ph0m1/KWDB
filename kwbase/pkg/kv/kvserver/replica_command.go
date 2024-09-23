@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"sort"
 	"strings"
@@ -64,38 +65,21 @@ import (
 	"go.etcd.io/etcd/raft/tracker"
 )
 
-// AdminRelocateForRange relocate range
-func (r *Replica) AdminRelocateForRange(
-	ctx context.Context, targets []roachpb.ReplicationTarget, needTsSnapshotData bool,
-) (err error) {
-	if r.isTs() {
-		for i, tg := range targets {
-			if tg.NodeID != 0 {
-				storeID, err := r.getCorrectStore(ctx, tg.NodeID, r.Desc())
-				if err != nil {
-					// If the storeID cannot be obtained based on the NodeID, the NodeID does not exist
-					// in the cluster and an error message needs to be returned to inform the upper layer.
-					return err
-				}
-				targets[i].StoreID = storeID
-			}
-		}
-	}
-
-	// Remove retry logic to avoid getting stuck here
-	desc := *r.Desc()
-	return r.store.AdminRelocateRange(ctx, desc, targets, needTsSnapshotData)
-}
-
 // AdminSplitForTs split range with pre dist
 func (r *Replica) AdminSplitForTs(
 	ctx context.Context, args roachpb.AdminSplitForTsRequest, reason string,
 ) (reply roachpb.AdminSplitResponse, err *roachpb.Error) {
 	splitKeys := args.Keys
+	splitTimestamps := args.Timestamps
 	//sort.Slice(splitKeys, func(i, j int) bool { return splitKeys[i] > splitKeys[j]})
+	var SplitKey roachpb.Key
+	for index, key := range splitKeys {
+		if len(splitTimestamps) == 0 || splitTimestamps[index] == math.MinInt64 {
+			SplitKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(args.TableId), uint64(key))
+		} else {
+			SplitKey = sqlbase.MakeTsRangeKey(sqlbase.ID(args.TableId), uint64(key), splitTimestamps[index])
+		}
 
-	for _, key := range splitKeys {
-		SplitKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(args.TableId), uint64(key))
 		if len(SplitKey) == 0 {
 			return roachpb.AdminSplitResponse{}, roachpb.NewErrorf("cannot split range with no key provided")
 		}
@@ -104,11 +88,12 @@ func (r *Replica) AdminSplitForTs(
 			RequestHeader: roachpb.RequestHeader{
 				Key: SplitKey,
 			},
-			SplitKey:       SplitKey,
-			SplitType:      roachpb.TS_SPLIT,
-			ExpirationTime: hlc.MaxTimestamp,
-			GroupId:        args.GroupId,
-			TableId:        args.TableId,
+			SplitKey:  SplitKey,
+			SplitType: roachpb.TS_SPLIT,
+			// todo: Consider ExpirationTime
+			ExpirationTime:  hlc.MaxTimestamp,
+			TableId:         args.TableId,
+			IsCreateTsTable: args.IsCreateTsTable,
 		}
 		reply, err = r.AdminSplit(ctx, req, reason)
 		if err != nil {
@@ -192,12 +177,10 @@ func prepareSplitDescs(
 	st *cluster.Settings,
 	rightRangeID roachpb.RangeID,
 	splitKey roachpb.RKey,
+	splitTime hlc.Timestamp,
 	expiration hlc.Timestamp,
 	leftDesc *roachpb.RangeDescriptor,
 	splitType roachpb.SplitType,
-	lease roachpb.ReplicaDescriptor,
-	replicas []roachpb.ReplicaDescriptor,
-	groupID uint32,
 	tableID uint32,
 ) (*roachpb.RangeDescriptor, *roachpb.RangeDescriptor) {
 	// Create right hand side range descriptor.
@@ -217,21 +200,19 @@ func prepareSplitDescs(
 	// (updated) left hand side. See the comment on the field for an explanation
 	// of why generations are useful.
 	if splitType == roachpb.TS_SPLIT {
+		leftDesc.LastSplitTime = &splitTime
+		rightDesc.LastSplitTime = &splitTime
 		for _, r := range rightDesc.InternalReplicas {
 			rightDesc.SetReplicaTag(r.NodeID, r.StoreID, roachpb.TS_RANGE)
 		}
 		rightDesc.SetRangeType(roachpb.TS_RANGE)
-		rightDesc.SetPreDistLeaseHolder(lease)
-		rightDesc.SetPreDistReplicas(roachpb.MakeReplicaDescriptors(replicas))
 		rightDesc.TableId = tableID
-		rightDesc.GroupId = groupID
 	} else {
 		for _, r := range rightDesc.InternalReplicas {
 			rightDesc.SetReplicaTag(r.NodeID, r.StoreID, roachpb.DEFAULT_RANGE)
 		}
 		rightDesc.SetRangeType(roachpb.DEFAULT_RANGE)
 		rightDesc.TableId = 0
-		rightDesc.GroupId = 0
 	}
 	rightDesc.Generation = leftDesc.Generation
 	rightDesc.GenerationComparable = proto.Bool(true)
@@ -263,10 +244,8 @@ func splitTxnAttempt(
 	expiration hlc.Timestamp,
 	oldDesc *roachpb.RangeDescriptor,
 	splitType roachpb.SplitType,
-	lease roachpb.ReplicaDescriptor,
-	replicas []roachpb.ReplicaDescriptor,
-	groupID uint32,
 	tableID uint32,
+	isCreateTable bool,
 ) error {
 	txn.SetDebugName(splitTxnName)
 
@@ -278,18 +257,16 @@ func splitTxnAttempt(
 	// in oldDesc any more (just the start key).
 	desc := oldDesc
 	oldDesc = nil // prevent accidental use
-
+	now := store.DB().Clock().Now()
 	leftDesc, rightDesc := prepareSplitDescs(
 		ctx,
 		store.ClusterSettings(),
 		rightRangeID,
 		splitKey,
+		now,
 		expiration,
 		desc,
 		splitType,
-		lease,
-		replicas,
-		groupID,
 		tableID,
 	)
 
@@ -338,8 +315,9 @@ func splitTxnAttempt(
 		Commit: true,
 		InternalCommitTrigger: &roachpb.InternalCommitTrigger{
 			SplitTrigger: &roachpb.SplitTrigger{
-				LeftDesc:  *leftDesc,
-				RightDesc: *rightDesc,
+				LeftDesc:        *leftDesc,
+				RightDesc:       *rightDesc,
+				IsCreateTsTable: isCreateTable,
 			},
 		},
 	})
@@ -367,32 +345,7 @@ func splitTxnStickyUpdateAttempt(
 		// Todo: splitRequest of split_queue send to ts table.
 		newDesc.SetRangeType(roachpb.TS_RANGE)
 		newDesc.SetAllReplicaTag(roachpb.TS_REPLICA)
-
-		var PreDistLeaseHolder roachpb.ReplicaDescriptor
-		var PreDist []roachpb.ReplicaDescriptor
-
-		for _, pd := range args.PreDist {
-			if pd.StoreID != 0 {
-				PreDist = append(PreDist, pd)
-				if pd.NodeID == args.PreDistLeaseHolder.NodeID {
-					PreDistLeaseHolder = args.PreDistLeaseHolder
-				}
-			} else {
-				repl := roachpb.ReplicaDescriptor{
-					NodeID:  pd.NodeID,
-					StoreID: pd.StoreID,
-				}
-				PreDist = append(PreDist, repl)
-				if pd.NodeID == args.PreDistLeaseHolder.NodeID {
-					PreDistLeaseHolder.NodeID = repl.NodeID
-					PreDistLeaseHolder.StoreID = repl.StoreID
-				}
-			}
-			newDesc.SetPreDistLeaseHolder(args.PreDistLeaseHolder)
-			newDesc.SetPreDistReplicas(roachpb.MakeReplicaDescriptors(PreDist))
-			newDesc.TableId = args.TableId
-			newDesc.GroupId = args.GroupId
-		}
+		newDesc.TableId = args.TableId
 	}
 
 	b := txn.NewBatch()
@@ -544,32 +497,6 @@ func (r *Replica) adminSplitWithDescriptor(
 		splitKey.StringWithDirs(nil /* valDirs */, 50 /* maxLen */), rightRangeID, reason, extra)
 
 	if err := r.store.DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		var PreDistLeaseHolder roachpb.ReplicaDescriptor
-		var PreDist []roachpb.ReplicaDescriptor
-		if args.SplitType == roachpb.TS_SPLIT {
-			for _, pd := range args.PreDist {
-				if pd.StoreID != 0 {
-					PreDist = append(PreDist, pd)
-					if pd.NodeID == args.PreDistLeaseHolder.NodeID {
-						PreDistLeaseHolder = args.PreDistLeaseHolder
-					}
-				} else {
-					pdStoreID, err := r.getCorrectStore(ctx, pd.NodeID, desc)
-					if err != nil {
-						return err
-					}
-					repl := roachpb.ReplicaDescriptor{
-						NodeID:  pd.NodeID,
-						StoreID: pdStoreID,
-					}
-					PreDist = append(PreDist, repl)
-					if pd.NodeID == args.PreDistLeaseHolder.NodeID {
-						PreDistLeaseHolder.NodeID = repl.NodeID
-						PreDistLeaseHolder.StoreID = repl.StoreID
-					}
-				}
-			}
-		}
 		return splitTxnAttempt(
 			ctx,
 			r.store,
@@ -579,10 +506,8 @@ func (r *Replica) adminSplitWithDescriptor(
 			args.ExpirationTime,
 			desc,
 			args.SplitType,
-			PreDistLeaseHolder,
-			PreDist,
-			args.GroupId,
 			args.TableId,
+			args.IsCreateTsTable,
 		)
 	}); err != nil {
 		// The ConditionFailedError can occur because the descriptors acting
@@ -598,32 +523,6 @@ func (r *Replica) adminSplitWithDescriptor(
 		return reply, errors.Wrapf(err, "split at key %s failed", splitKey)
 	}
 	return reply, nil
-}
-
-// getCorrectStore get storeID with nodeID
-func (r *Replica) getCorrectStore(
-	ctx context.Context, nodeID roachpb.NodeID, desc *roachpb.RangeDescriptor,
-) (roachpb.StoreID, error) {
-	if nodeID == 0 {
-		return 0, errors.Errorf("A valid NodeID must be provided")
-	}
-
-	// If there is already a replica on the Node, the StoreID of the replica is returned.
-	rangeReplicas := desc.Replicas().All()
-	for _, replicaDesc := range rangeReplicas {
-		if replicaDesc.NodeID == nodeID {
-			return replicaDesc.StoreID, nil
-		}
-	}
-
-	storeList, _, _ := r.store.allocator.storePool.getStoreList(desc.RangeID, storeFilterNone)
-	for _, s := range storeList.stores {
-		if s.Node.NodeID == nodeID {
-			return s.StoreID, nil
-		}
-	}
-
-	return 0, errors.Errorf("No suitable store available")
 }
 
 // AdminUnsplit removes the sticky bit of the range specified by the
@@ -673,10 +572,13 @@ func (r *Replica) adminUnsplitWithDescriptor(
 		// already handles that case, but nothing is won in doing so.
 		newDesc.StickyBit = nil
 		changeToDefaultRange := false
+		stickyBit := hlc.Timestamp{}
 		if desc.GetRangeType() == roachpb.TS_RANGE {
 			changeToDefaultRange = true
 			newDesc.SetRangeType(roachpb.DEFAULT_RANGE)
 			newDesc.SetAllReplicaTag(roachpb.DEFAULT_REPLICA)
+			newDesc.StickyBit = &hlc.MaxTimestamp
+			stickyBit = hlc.MaxTimestamp
 		}
 		descKey := keys.RangeDescriptorKey(newDesc.StartKey)
 
@@ -694,7 +596,7 @@ func (r *Replica) adminUnsplitWithDescriptor(
 				StickyBitTrigger: &roachpb.StickyBitTrigger{
 					// Setting StickyBit to the zero timestamp ensures that it is always
 					// eligible for automatic merging.
-					StickyBit:            hlc.Timestamp{},
+					StickyBit:            stickyBit,
 					ChangeToDefaultRange: changeToDefaultRange,
 					NewDesc:              newDesc,
 				},
@@ -1173,18 +1075,6 @@ func (r *Replica) ChangeReplicas(
 		return nil, errors.Errorf("%s: the current RangeDescriptor must not be nil", r)
 	}
 
-	if desc.GetRangeType() == roachpb.TS_RANGE {
-		for i, tg := range chgs {
-			if tg.Target.NodeID != 0 {
-				storeID, err := r.getCorrectStore(ctx, tg.Target.NodeID, desc)
-				if err != nil {
-					return nil, err
-				}
-				chgs[i].Target.StoreID = storeID
-			}
-		}
-	}
-
 	// We execute the change serially if we're not allowed to run atomic
 	// replication changes or if that was explicitly disabled.
 	st := r.ClusterSettings()
@@ -1228,6 +1118,31 @@ func (r *Replica) changeReplicasImpl(
 	}
 
 	if adds := chgs.Additions(); len(adds) > 0 {
+		if desc.GetRangeType() == roachpb.TS_RANGE && r.store.TsEngine != nil && desc.TableId != 0 {
+			exist, err := r.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
+			log.VEventf(ctx, 3, "TsEngine.TSIsTsTableExist r%v, %v, %v, %v", desc.RangeID, desc.TableId, exist, err)
+			if err != nil {
+				log.Errorf(ctx, "TSIsTsTableExist failed: %v", err)
+				return nil, err
+			}
+			if !exist {
+				log.Errorf(ctx, "TSIsTsTableExist not exist: %v", exist)
+				return nil, errors.New("TSIsTsTableExist not exist")
+			}
+			tsMeta, err := r.store.TsEngine.GetMetaData(uint64(desc.TableId), api.RangeGroup{RangeGroupID: 1})
+			if err != nil {
+				log.Errorf(ctx, "GetMetaData failed: %v", err)
+				return nil, err
+			}
+			for _, add := range adds {
+				log.Infof(ctx, "TsEngine.CreateTSTable create table %d ts meta on node %v, r%v, %v", desc.TableId, add.NodeID, desc.RangeID, len(tsMeta))
+				if err := api.CreateTSTable(ctx, desc.TableId, add.NodeID, tsMeta); err != nil {
+					log.Errorf(ctx, "CreateTSTable failed: %v", err)
+					return nil, err
+				}
+			}
+		}
+
 		// Lock learner snapshots even before we run the ConfChange txn to add them
 		// to prevent a race with the raft snapshot queue trying to send it first.
 		// Note that this lock needs to cover sending the snapshots which happens in
@@ -1247,41 +1162,7 @@ func (r *Replica) changeReplicasImpl(
 		// don't introduce fragility into the system). For details see:
 		_ = roachpb.ReplicaDescriptors.Learners
 
-		var errTxn error
-
-		if desc.GetRangeType() == roachpb.TS_RANGE && details == NeedTsSnapshotData {
-			errTxn = r.store.DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				table, _, err := sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(desc.TableId))
-				if err != nil {
-					return err
-				}
-				if table.State != sqlbase.TableDescriptor_PUBLIC {
-					return errors.Errorf("table %v,%v descriptor not public but %v", table.Name, table.ID, table.State)
-				}
-				tsMeta, err := makeNormalTSTableMeta(table)
-				if err != nil {
-					return err
-				}
-				allRangeGroups := make(map[roachpb.NodeID][]api.RangeGroup, len(adds))
-				for _, add := range adds {
-					rangeGroup := api.RangeGroup{
-						RangeGroupID: api.EntityRangeGroupID(desc.GroupId),
-						Type:         api.ReplicaType_Follower,
-					}
-					allRangeGroups[add.NodeID] = append(allRangeGroups[add.NodeID], rangeGroup)
-				}
-				for nodeID, rangeGroups := range allRangeGroups {
-					if err := api.RefreshTSRangeGroup(ctx, desc.TableId, nodeID, rangeGroups, tsMeta); err != nil {
-						return err
-					}
-				}
-				return nil
-			})
-			if errTxn != nil {
-				return nil, errTxn
-			}
-		}
-
+		var err error
 		desc, err = addLearnerReplicas(ctx, r.store, desc, reason, details, adds)
 		if err != nil {
 			return nil, err
@@ -1558,12 +1439,12 @@ func (r *Replica) atomicReplicationChange(
 		// switching between StateSnapshot and StateProbe. Even if we worked through
 		// these, it would be susceptible to future similar issues.
 		if desc.GetRangeType() == roachpb.TS_RANGE {
-			needTSSnapshotData := false
-			if details == NeedTsSnapshotData {
-				needTSSnapshotData = true
-			}
 			// for TS replicas, call the timing engine interface to obtain a snapshot and apply it
-			if err := r.sendTSSnapshot(ctx, rDesc, SnapshotRequest_LEARNER, priority, needTSSnapshotData); err != nil {
+			exist := false
+			if r.store.TsEngine != nil && desc.TableId != 0 {
+				exist, _ = r.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
+			}
+			if err := r.sendTSSnapshot(ctx, rDesc, SnapshotRequest_LEARNER, priority, exist); err != nil {
 				return nil, err
 			}
 		} else if desc.GetRangeType() == roachpb.DEFAULT_RANGE {
@@ -1663,11 +1544,6 @@ const (
 	// voter with them), see:
 	// https://gitee.com/kwbasedb/kwbase/pull/40268
 	internalChangeTypeRemove
-)
-
-const (
-	noNeedTSSnapshotDataReasonCreatingTSTable       = "create ts table"
-	noNeedTSSnapshotDataReasonRangeWithoutTableInfo = "range without table info"
 )
 
 const (
@@ -1902,6 +1778,31 @@ func execChangeReplicasTxn(
 		}
 		log.Infof(ctx, "change replicas (add %v remove %v): existing descriptor %s", crt.Added(), crt.Removed(), desc)
 
+		if desc.GetRangeType() == roachpb.TS_RANGE && desc.TableId > keys.MinNonPredefinedUserDescID {
+			nodeIDs := getNewNodeIDs(desc, crt.Desc)
+			if len(nodeIDs) != 0 {
+				// get table descriptor and check state
+				table, _, err := sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(desc.TableId))
+				if err != nil {
+					return err
+				}
+				if len(table.Mutations) > 0 {
+					return kwdberrors.Newf("waiting for table %d to be altered", table.ID)
+				}
+
+				// check version
+				for _, nodeID := range nodeIDs {
+					version, err := store.cfg.TseDB.AdminGetTsTableVersion(ctx, uint64(desc.TableId), nodeID)
+					if err != nil {
+						return err
+					}
+					if version < uint32(table.TsTable.TsVersion) {
+						return kwdberrors.Newf("wait for table %d to update version", desc.TableId)
+					}
+				}
+			}
+		}
+
 		{
 			b := txn.NewBatch()
 
@@ -1970,9 +1871,131 @@ func execChangeReplicasTxn(
 	return returnDesc, nil
 }
 
-// SendTSSnap process:
+func getNewNodeIDs(src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
+	var nodeIDs []roachpb.NodeID
+	for _, oldR := range src.InternalReplicas {
+		if oldR.GetType() == roachpb.VOTER_INCOMING || oldR.GetType() == roachpb.LEARNER {
+			for _, newR := range dst.InternalReplicas {
+				if newR.NodeID == oldR.NodeID && newR.GetType() == roachpb.VOTER_FULL {
+					nodeIDs = append(nodeIDs, oldR.NodeID)
+				}
+			}
+		}
+	}
+	return nodeIDs
+}
+
+// sendTSSnapshot sends a snapshot of the replica state to the specified replica.
+// Currently only invoked from replicateQueue and raftSnapshotQueue. Be careful
+// about adding additional calls as generating a snapshot is moderately
+// expensive.
 //
-//	(LH)CreateSnapshot
+// A snapshot is a bulk transfer of all data in a range. It consists of a
+// consistent view of all the state needed to run some replica of a range as of
+// some applied index (not as of some mvcc-time). Snapshots are used by Raft
+// when a follower is far enough behind the leader that it can no longer be
+// caught up using incremental diffs (because the leader has already garbage
+// collected the diffs, in this case because it truncated the Raft log past
+// where the follower is).
+//
+// We also proactively send a snapshot when adding a new replica to bootstrap it
+// (this is called a "learner" snapshot and is a special case of a Raft
+// snapshot, we just speed the process along). It's called a learner snapshot
+// because it's sent to what Raft terms a learner replica. As of 19.2, when we
+// add a new replica, it's first added as a learner using a Raft ConfChange,
+// which means it accepts Raft traffic but doesn't vote or affect quorum. Then
+// we immediately send it a snapshot to catch it up. After the snapshot
+// successfully applies, we turn it into a normal voting replica using another
+// ConfChange. It then uses the normal mechanisms to catch up with whatever got
+// committed to the Raft log during the snapshot transfer. In contrast to adding
+// the voting replica directly, this avoids a period of fragility when the
+// replica would be a full member, but very far behind.
+//
+// Snapshots are expensive and mostly unexpected (except learner snapshots
+// during rebalancing). The quota pool is responsible for keeping a leader from
+// getting too far ahead of any of the followers, so ideally they'd never be far
+// enough behind to need a snapshot.
+//
+// The snapshot process itself is broken into 3 parts: generating the snapshot,
+// transmitting it, and applying it.
+//
+// Generating the snapshot: The data contained in a snapshot is a full copy of
+// the replicated data plus everything the replica needs to be a healthy member
+// of a Raft group. The former is large, so we send it via streaming rpc
+// instead of keeping it all in memory at once. The `(Replica).GetSnapshot`
+// method does the necessary locking and gathers the various Raft state needed
+// to run a replica. It also creates an iterator for the range's data as it
+// looked under those locks (this is powered by a RocksDB snapshot, which is a
+// different thing but a similar idea). Notably, GetSnapshot does not do the
+// data iteration.
+//
+// Transmitting the snapshot: The transfer itself happens over the grpc
+// `RaftSnapshot` method, which is a bi-directional stream of `SnapshotRequest`s
+// and `SnapshotResponse`s. The two sides are orchestrated by the
+// `(RaftTransport).SendSnapshot` and `(Store).receiveSnapshot` methods.
+//
+// `SendSnapshot` starts up the streaming rpc and first sends a header message
+// with everything but the range data and then blocks, waiting on the first
+// streaming response from the recipient. This lets us short-circuit sending the
+// range data if the recipient can't be contacted or if it can't use the
+// snapshot (which is usually the result of a race). The recipient's grpc
+// handler for RaftSnapshot sanity checks a few things and ends up calling down
+// into `receiveSnapshot`, which does the bulk of the work. `receiveSnapshot`
+// starts by waiting for a reservation in the snapshot rate limiter. It then
+// reads the header message and hands it to `shouldAcceptSnapshotData` to
+// determine if it can use the snapshot [1]. `shouldAcceptSnapshotData` is
+// advisory and can return false positives. If `shouldAcceptSnapshotData`
+// returns true, this is communicated back to the sender, which then proceeds to
+// call `kvBatchSnapshotStrategy.Send`. This uses the iterator captured earlier
+// to send the data in chunks, each chunk a streaming grpc message. The sender
+// then sends a final message with an indicaton that it's done and blocks again,
+// waiting for a second and final response from the recipient which indicates if
+// the snapshot was a success.
+//
+// `receiveSnapshot` takes the key-value pairs sent and incrementally creates
+// three SSTs from them for direct ingestion: one for the replicated range-ID
+// local keys, one for the range local keys, and one for the user keys. The
+// reason it creates three separate SSTs is to prevent overlaps with the
+// memtable and existing SSTs in RocksDB. Each of the SSTs also has a range
+// deletion tombstone to delete the existing data in the range.
+//
+// Applying the snapshot: After the recipient has received the message
+// indicating it has all the data, it hands it all to
+// `(Store).processRaftSnapshotRequest` to be applied. First, this re-checks
+// the same things as `shouldAcceptSnapshotData` to make sure nothing has
+// changed while the snapshot was being transferred. It then guarantees that
+// there is either an initialized[2] replica or a `ReplicaPlaceholder`[3] to
+// accept the snapshot by creating a placeholder if necessary. Finally, a *Raft
+// snapshot* message is manually handed to the replica's Raft node (by calling
+// `stepRaftGroup` + `handleRaftReadyRaftMuLocked`). During the application
+// process, several other SSTs may be created for direct ingestion. An SST for
+// the unreplicated range-ID local keys is created for the Raft entries, hard
+// state, and truncated state. An SST is created for deleting each subsumed
+// replica's range-ID local keys and at most two SSTs are created for deleting
+// the user keys and range local keys of all subsumed replicas. All in all, a
+// maximum of 6 + SR SSTs will be created for direct ingestion where SR is the
+// number of subsumed replicas. In the case where there are no subsumed
+// replicas, 4 SSTs will be created.
+//
+// [1]: The largest class of rejections here is if the store contains a replica
+// that overlaps the snapshot but has a different id (we maintain an invariant
+// that replicas on a store never overlap). This usually happens when the
+// recipient has an old copy of a replica that is no longer part of a range and
+// the `replicaGCQueue` hasn't gotten around to collecting it yet. So if this
+// happens, `shouldAcceptSnapshotData` will queue it up for consideration.
+//
+// [2]: A uninitialized replica is created when a replica that's being added
+// gets traffic from its new peers before it gets a snapshot. It may be possible
+// to get rid of uninitialized replicas (by dropping all Raft traffic except
+// votes on the floor), but this is a cleanup that hasn't happened yet.
+//
+// [3]: The placeholder is essentially a snapshot lock, making any future
+// callers of `shouldAcceptSnapshotData` return an error so that we no longer
+// have to worry about racing with a second snapshot. See the comment on
+// ReplicaPlaceholder for details.
+//
+// SendTSSnap process:
+//	(LH)CreateSnapshotForRead
 //	(LH)GetSnapshotData
 //	--GRPC--
 //	(Fo)InitSnapshotForWrite
@@ -1996,9 +2019,10 @@ func (r *Replica) sendTSSnapshot(
 	snap, err := r.GetTSSnapshot(ctx, snapType, recipient.StoreID, needTSSnapshotData)
 	defer func() {
 		if snap != nil && snap.TSSnapshotID != 0 {
-			err := r.store.TsEngine.DropSnapshot(snap.tableID, snap.rangeGroupID, snap.TSSnapshotID)
+			err := r.store.TsEngine.DeleteSnapshot(snap.tableID, snap.TSSnapshotID)
+			log.VEventf(ctx, 3, "TsEngine.DeleteSnapshot r%v, %v, %v, %v", snap.State.Desc.RangeID, snap.tableID, snap.TSSnapshotID, err)
 			if err != nil {
-				log.Warningf(ctx, "error TsEngine DropSnapshot(%d): %v", snap.TSSnapshotID, err)
+				log.Errorf(ctx, "TsEngine.DeleteSnapshot r%v, %v, %v, %v", snap.State.Desc.RangeID, snap.tableID, snap.TSSnapshotID, err)
 			}
 		}
 	}()
@@ -2437,10 +2461,7 @@ func updateRangeDescriptor(
 // This is best-effort; it's possible that the replicate queue on the
 // leaseholder could take action at the same time, causing errors.
 func (s *Store) AdminRelocateRange(
-	ctx context.Context,
-	rangeDesc roachpb.RangeDescriptor,
-	targets []roachpb.ReplicationTarget,
-	needTsSnapshotData bool,
+	ctx context.Context, rangeDesc roachpb.RangeDescriptor, targets []roachpb.ReplicationTarget,
 ) error {
 	// Step 0: Remove everything that's not a full voter so we don't have to think
 	// about them.
@@ -2481,22 +2502,22 @@ func (s *Store) AdminRelocateRange(
 		// after the lease transfer is completed, it is necessary
 		// to determine whether the leaseholder and the raft leader
 		// are on the same node
-		startTime := timeutil.Now()
-		for {
-			startKey := rangeDesc.StartKey.AsRawKey()
-			endKey := rangeDesc.EndKey.AsRawKey()
-			isCompleted := true
-			isCompleted, _ = s.DB().AdminReplicaLeaseStatusConsistent(ctx, startKey, endKey, target.StoreID)
-			if isCompleted {
-				break
-			}
-			timeElapsed := timeutil.Since(startTime)
-			if timeElapsed.Seconds() > 30 {
-				log.Error(ctx, "have been trying 30s, timed out of AdminReplicaLeaseStatusConsistent")
-				return errors.Errorf("have been trying 30s, timed out of AdminReplicaLeaseStatusConsistent")
-			}
-			time.Sleep(time.Duration(500) * time.Millisecond)
-		}
+		//startTime := timeutil.Now()
+		//for {
+		//	startKey := rangeDesc.StartKey.AsRawKey()
+		//	endKey := rangeDesc.EndKey.AsRawKey()
+		//	isCompleted := true
+		//	isCompleted, _ = s.DB().AdminReplicaLeaseStatusConsistent(ctx, startKey, endKey, target.StoreID)
+		//	if isCompleted {
+		//		break
+		//	}
+		//	timeElapsed := timeutil.Since(startTime)
+		//	if timeElapsed.Seconds() > 30 {
+		//		log.Error(ctx, "have been trying 30s, timed out of AdminReplicaLeaseStatusConsistent")
+		//		return errors.Errorf("have been trying 30s, timed out of AdminReplicaLeaseStatusConsistent")
+		//	}
+		//	time.Sleep(time.Duration(500) * time.Millisecond)
+		//}
 		return nil
 	}
 
@@ -2528,14 +2549,7 @@ func (s *Store) AdminRelocateRange(
 				return err
 			}
 
-			var ops []roachpb.ReplicationChange
-			var leaseTarget *roachpb.ReplicationTarget
-			var err error
-			if (&rangeDesc).GetRangeType() == roachpb.TS_RANGE {
-				ops, leaseTarget, err = s.relocateOneForTsRange(ctx, &rangeDesc, targets)
-			} else {
-				ops, leaseTarget, err = s.relocateOne(ctx, &rangeDesc, targets)
-			}
+			ops, leaseTarget, err := s.relocateOne(ctx, &rangeDesc, targets)
 			if err != nil {
 				return err
 			}
@@ -2563,7 +2577,7 @@ func (s *Store) AdminRelocateRange(
 			opss := [][]roachpb.ReplicationChange{ops}
 			success := true
 			for _, ops := range opss {
-				newDesc, err := s.DB().AdminChangeReplicas(ctx, startKey, rangeDesc, ops, needTsSnapshotData)
+				newDesc, err := s.DB().AdminChangeReplicas(ctx, startKey, rangeDesc, ops)
 				if err != nil {
 					returnErr := errors.Wrapf(err, "while carrying out changes %v", ops)
 					if !canRetry(err) {
@@ -2583,115 +2597,6 @@ func (s *Store) AdminRelocateRange(
 		}
 	}
 
-}
-
-// relocateOneForTsRange is responsible for selecting a set of Node/Store information to
-// be added, a set of Node/Store information to be deleted, and leaseHolder migration
-// information according to the request.
-func (s *Store) relocateOneForTsRange(
-	ctx context.Context, desc *roachpb.RangeDescriptor, targets []roachpb.ReplicationTarget,
-) ([]roachpb.ReplicationChange, *roachpb.ReplicationTarget, error) {
-	rangeReplicas := desc.Replicas().All()
-	if len(rangeReplicas) != len(desc.Replicas().Voters()) {
-		return nil, nil, kwdberrors.AssertionFailedf(
-			`range %s had non-voter replicas: %v`, desc, desc.Replicas())
-	}
-
-	var addTargets []roachpb.ReplicaDescriptor
-	for _, t := range targets {
-		found := false
-		for _, replicaDesc := range rangeReplicas {
-			if replicaDesc.StoreID == t.StoreID && replicaDesc.NodeID == t.NodeID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			addTargets = append(addTargets, roachpb.ReplicaDescriptor{
-				NodeID:  t.NodeID,
-				StoreID: t.StoreID,
-			})
-		}
-	}
-
-	var removeTargets []roachpb.ReplicaDescriptor
-	for _, replicaDesc := range rangeReplicas {
-		found := false
-		for _, t := range targets {
-			if replicaDesc.StoreID == t.StoreID && replicaDesc.NodeID == t.NodeID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			removeTargets = append(removeTargets, roachpb.ReplicaDescriptor{
-				NodeID:  replicaDesc.NodeID,
-				StoreID: replicaDesc.StoreID,
-			})
-		}
-	}
-
-	var ops roachpb.ReplicationChanges
-	if len(addTargets) > 0 {
-		target := roachpb.ReplicationTarget{
-			NodeID:  addTargets[0].NodeID,
-			StoreID: addTargets[0].StoreID,
-		}
-		ops = append(ops, roachpb.MakeReplicationChanges(
-			roachpb.ADD_REPLICA,
-			target)...)
-		rangeReplicas = append(rangeReplicas, roachpb.ReplicaDescriptor{
-			NodeID:    target.NodeID,
-			StoreID:   target.StoreID,
-			ReplicaID: desc.NextReplicaID,
-			Type:      roachpb.ReplicaTypeVoterFull(),
-		})
-	}
-
-	var transferTarget *roachpb.ReplicationTarget
-	if len(removeTargets) > 0 {
-		removalTarget := roachpb.ReplicationTarget{
-			NodeID:  removeTargets[0].NodeID,
-			StoreID: removeTargets[0].StoreID,
-		}
-		var b kv.Batch
-		liReq := &roachpb.LeaseInfoRequest{}
-		liReq.Key = desc.StartKey.AsRawKey()
-		b.AddRawRequest(liReq)
-		if err := s.DB().Run(ctx, &b); err != nil {
-			return nil, nil, errors.Wrap(err, "looking up lease")
-		}
-		curLeaseholder := b.RawResponse().Responses[0].GetLeaseInfo().Lease.Replica
-		ok := curLeaseholder.StoreID != removalTarget.StoreID
-		if !ok {
-			sortedTargetReplicas := append([]roachpb.ReplicaDescriptor(nil), rangeReplicas[:len(rangeReplicas)-len(ops)]...)
-			sort.Slice(sortedTargetReplicas, func(i, j int) bool {
-				sl := sortedTargetReplicas
-				// targets[0] goes to the front (if it's present).
-				return sl[i].StoreID == targets[0].StoreID
-			})
-			for _, rDesc := range sortedTargetReplicas {
-				if rDesc.StoreID != curLeaseholder.StoreID {
-					transferTarget = &roachpb.ReplicationTarget{
-						NodeID:  rDesc.NodeID,
-						StoreID: rDesc.StoreID,
-					}
-					ok = true
-					break
-				}
-			}
-		}
-		if ok {
-			ops = append(ops, roachpb.MakeReplicationChanges(
-				roachpb.REMOVE_REPLICA,
-				removalTarget)...)
-		}
-	}
-
-	if len(ops) == 0 {
-		transferTarget = &targets[0]
-	}
-	return ops, transferTarget, nil
 }
 
 func (s *Store) relocateOne(

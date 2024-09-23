@@ -133,29 +133,28 @@ ALTER TABLE
 --------+--------+-----------+-----------+-------------------+-------------+-------------+-------------+------+--------+-----------+-----------+-------------------+-------------+-------------+--------------
    1999 | 199999 | 199999999 | 13.712882 | 13.14159267890796 | 1test@TEST1 | 1test@TEST2 | 1test@TEST3 | 2999 | 299999 | 299999999 | 23.712882 | 23.14159267890796 | 2test@TEST1 | 2test@TEST2 | 2test@TEST3
 (1 row)
+> create table test_alter.t8(ts timestamp not null, a nvarchar(32), b nvarchar(64), c nvarchar(32)) tags(attr int not null) primary tags(attr);
+CREATE TABLE
 > insert into test_alter.t8 values(1672531211005, '1test@TEST1', '1test@TEST2',  '1test@TEST3', 1);
-ERROR: relation "test_alter.t8" does not exist
-SQLSTATE: 42P01
+INSERT 1
 > insert into test_alter.t8 values(1672531211006, '2test@TEST1', '2test@TEST2',  '2test@TEST3', 1);
-ERROR: relation "test_alter.t8" does not exist
-SQLSTATE: 42P01
+INSERT 1
 > alter table test_alter.t8 alter column a type char(128);
-ERROR: relation "test_alter.t8" does not exist
-SQLSTATE: 42P01
+ALTER TABLE
 > alter table test_alter.t8 alter column b type nchar(128);
-ERROR: relation "test_alter.t8" does not exist
-SQLSTATE: 42P01
+ALTER TABLE
 > alter table test_alter.t8 alter column c type varchar(128);
-ERROR: relation "test_alter.t8" does not exist
-SQLSTATE: 42P01
+ALTER TABLE
 > select pg_sleep(1);
   pg_sleep
 ------------
     true
 (1 row)
 > select first(a),first(b),first(c),last(a),last(b),last(c) from test_alter.t8;
-ERROR: relation "test_alter.t8" does not exist
-SQLSTATE: 42P01
+     first    |    first    |    first    |    last     |    last     |    last
+--------------+-------------+-------------+-------------+-------------+--------------
+  1test@TEST1 | 1test@TEST2 | 1test@TEST3 | 2test@TEST1 | 2test@TEST2 | 2test@TEST3
+(1 row)
 > create table test_alter.t9(ts timestamp not null, a char, b nchar(64)) tags(attr int not null) primary tags(attr);
 CREATE TABLE
 > insert into test_alter.t9 values(1672531211005,  't',  '1test@TEST3', 1);

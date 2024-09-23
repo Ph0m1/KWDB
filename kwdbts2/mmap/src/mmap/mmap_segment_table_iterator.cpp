@@ -150,6 +150,74 @@ int convertFixedToStr(DATATYPE old_type, char* old_data, char* new_data, ErrorIn
   return 0;
 }
 
+KStatus convertValueType2Newblk(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
+                          const AttributeInfo& old_type, uint32_t col_id,
+                          const AttributeInfo& new_type, TSSlice* new_block_addr, std::list<std::shared_ptr<void>>* var_values) {
+  assert(old_type.type != new_type.type || old_type.size != new_type.size || isVarLenType(new_type.type));
+  ErrorInfo err_info;
+  // allocate new data type block memroy
+  size_t blk_size = segment_tbl->GetColBlockSize(new_type.size);
+  char* value = reinterpret_cast<char*>(malloc(blk_size));
+  memset(value, 0, blk_size);
+  *new_block_addr = {value, blk_size};
+  // initial block header
+  segment_tbl->CopyNullBitmap(cur_block_item->block_id, col_id, value);
+  value += segment_tbl->GetColBlockHeaderSize(new_type.size);
+  std::list<std::shared_ptr<void>> var_values_cur;
+  if (!isVarLenType(new_type.type)) {
+    if (old_type.type == new_type.type) {
+      // fixed-len column type with diff length, alter column just increased column length
+      for (int idx = 0; idx < cur_block_item->publish_row_count; idx++) {
+        memcpy(value + idx * new_type.size, segment_tbl->columnAddrByBlk(cur_block_item->block_id, idx, col_id), old_type.size);
+      }
+      return KStatus::SUCCESS;
+    } else {
+      ErrorInfo err_info;
+      if (!isVarLenType(old_type.type)) {
+        // fixed-len column type to fixed-len column type
+        for (k_uint32 i = 0; i < cur_block_item->publish_row_count; ++i) {
+          void* old_mem = segment_tbl->columnAddrByBlk(cur_block_item->block_id, i, col_id);
+          if (new_type.type == DATATYPE::CHAR || new_type.type == DATATYPE::BINARY) {
+            err_info.errcode = convertFixedToStr((DATATYPE)old_type.type, (char*) old_mem, value + i * new_type.size, err_info);
+          } else {
+            err_info.errcode = convertFixedToNum((DATATYPE)old_type.type, (DATATYPE)new_type.type, (char*) old_mem, value + i * new_type.size, err_info);
+          }
+          if (err_info.errcode < 0) {
+            return KStatus::FAIL;
+          }
+        }
+      } else {
+        // vartype cloumn to fixed-len column type
+        for (k_uint32 i = 0; i < cur_block_item->publish_row_count; ++i) {
+          std::shared_ptr<void> old_mem = segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, i, col_id);
+          std::string v_value((char*) old_mem.get() + MMapStringColumn::kStringLenLen);
+          convertStrToFixed(v_value, (DATATYPE)new_type.type, value + i * new_type.size, KUint16(old_mem.get()), err_info);
+        }
+      }
+    }
+  } else {
+    for (k_uint32 j = 0; j < cur_block_item->publish_row_count; ++j) {
+      std::shared_ptr<void> data = nullptr;
+      // row not deleted, and col not null.
+      if (!isColDeleted(cur_block_item->rows_delete_flags, new_block_addr->data, j + 1)) {
+        if (new_type.type != old_type.type) {
+          // to vartype column
+          data = ConvertToVarLen(segment_tbl, cur_block_item->block_id, static_cast<DATATYPE>(old_type.type),
+                                static_cast<DATATYPE>(new_type.type), j, col_id);
+        } else {
+          data = segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, j, col_id);
+        }
+        var_values->push_back(data);
+        var_values_cur.push_back(data);
+      }
+    }
+  }
+  // reset agg result in block.
+  if (cur_block_item->is_agg_res_available) {
+    segment_tbl->ResetBlockAgg(cur_block_item, new_block_addr->data, new_type, var_values_cur);
+  }
+  return KStatus::SUCCESS;
+}
 
 // Online DDL canceled the validity check of data, alter column from string type to numeric type can succeed
 // even if data is invalid. If convert a string column value to numeric type failed when queried, we should mark
@@ -186,7 +254,7 @@ KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* v
         continue;
       }
       std::shared_ptr<void> old_mem = segment_tbl->varColumnAddrByBlk(block_id, start_row + i - 1, col_idx);
-      std::string v_value((char*) old_mem.get() + MMapStringFile::kStringLenLen);
+      std::string v_value((char*) old_mem.get() + MMapStringColumn::kStringLenLen);
       ErrorInfo err_info;
       if (convertStrToFixed(v_value, new_type, value + i * new_len, KUint16(old_mem.get()), err_info) < 0) {
         if (!is_bitmap_new) {
@@ -214,26 +282,101 @@ std::shared_ptr<void> ConvertToVarLen(std::shared_ptr<MMapSegmentTable> segment_
     if (old_type == VARSTRING) {
       auto old_data = segment_tbl->varColumnAddrByBlk(block_id, row_idx, col_idx);
       auto old_len = KUint16(old_data.get()) - 1;
-      char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringFile::kStringLenLen));
-      memset(var_data, 0, old_len + MMapStringFile::kStringLenLen);
+      char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringColumn::kStringLenLen));
+      memset(var_data, 0, old_len + MMapStringColumn::kStringLenLen);
       KUint16(var_data) = old_len;
-      memcpy(var_data + MMapStringFile::kStringLenLen,
-             (char*) old_data.get() + MMapStringFile::kStringLenLen, old_len);
+      memcpy(var_data + MMapStringColumn::kStringLenLen,
+             (char*) old_data.get() + MMapStringColumn::kStringLenLen, old_len);
       std::shared_ptr<void> ptr(var_data, free);
       data = ptr;
     } else {
       auto old_data = segment_tbl->varColumnAddrByBlk(block_id, row_idx, col_idx);
       auto old_len = KUint16(old_data.get());
-      char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringFile::kStringLenLen + 1));
-      memset(var_data, 0, old_len + MMapStringFile::kStringLenLen + 1);
+      char* var_data = static_cast<char*>(std::malloc(old_len + MMapStringColumn::kStringLenLen + 1));
+      memset(var_data, 0, old_len + MMapStringColumn::kStringLenLen + 1);
       KUint16(var_data) = old_len + 1;
-      memcpy(var_data + MMapStringFile::kStringLenLen,
-             (char*) old_data.get() + MMapStringFile::kStringLenLen, old_len);
+      memcpy(var_data + MMapStringColumn::kStringLenLen,
+             (char*) old_data.get() + MMapStringColumn::kStringLenLen, old_len);
       std::shared_ptr<void> ptr(var_data, free);
       data = ptr;
     }
   }
   return data;
+}
+
+KStatus getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+                           AttributeInfo attr, uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap) {
+  *bitmap = segment_tbl->columnNullBitmapAddr(block_id, col_idx);
+  auto schema_info = segment_tbl->getSchemaInfo();
+  if (!isVarLenType(attr.type)) {
+    if (schema_info[col_idx].type != attr.type) {
+      // Conversion from other types to fixed length types.
+      char* value = static_cast<char*>(malloc(attr.size * count));
+      memset(value, 0, attr.size * count);
+      KStatus s = ConvertToFixedLen(segment_tbl, value, block_id,
+                                    (DATATYPE)(schema_info[col_idx].type), (DATATYPE)(attr.type),
+                                    attr.size, start_row, count, col_idx, bitmap, need_free_bitmap);
+      if (s != KStatus::SUCCESS) {
+        free(value);
+        return s;
+      }
+      free(value);
+    }
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus MMapSegmentTableIterator::GetFullBlock(BlockItem* cur_block_item, TsBlockFullData* blk_info) {
+  blk_info->col_block_addr.resize(kw_scan_cols_.size());
+  blk_info->block_item = *cur_block_item;
+  // add all column data to res
+  auto& schema_info = segment_table_->getSchemaInfo();
+  ErrorInfo err_info;
+  for (k_uint32 i = 0; i < kw_scan_cols_.size(); ++i) {
+    k_int32 ts_col = -1;
+    if (i < ts_scan_cols_.size()) {
+      ts_col = ts_scan_cols_[i];
+    }
+    assert(ts_col >= 0);
+    TSSlice block_addr;
+    if (!segment_table_->isColExist(ts_col)) {
+      // column not exist in segment table. so return nullptr.
+      block_addr.len =  segment_table_->GetColBlockSize(attrs_[i].size);
+      block_addr.data = reinterpret_cast<char*>(malloc(block_addr.len));
+      memset(block_addr.data, 0xFF, block_addr.len);   // set all data bitmap invalid.
+      // set agg count = 0
+      KUint16(block_addr.data + (segment_table_->getBlockMaxRows() + 7) / 8) = 0;
+      LOG_DEBUG("cannot found col [%d], maybe no exists in this segment.", ts_col);
+    } else {
+      if (!isVarLenType(attrs_[ts_col].type) &&
+          schema_info[ts_col].type == attrs_[ts_col].type && schema_info[ts_col].size == attrs_[ts_col].size) {
+        // normal operation.
+        block_addr.len = segment_table_->getDataBlockSize(ts_col);
+        block_addr.data = reinterpret_cast<char*>(malloc(block_addr.len));
+        void* blk_addr = segment_table_->getBlockHeader(blk_info->block_item.block_id, ts_col);
+        memcpy(block_addr.data, blk_addr, block_addr.len);
+      } else {
+        // we need new block and copy original data to new one.
+        // new block, input data, update agg result
+        auto s = convertValueType2Newblk(segment_table_, &(blk_info->block_item), schema_info[ts_col],
+                                      ts_col, attrs_[ts_col], &block_addr, &(blk_info->var_col_values));
+        if (s != KStatus::SUCCESS) {
+          LOG_ERROR("convertValueType2Newblk failed.");
+          return KStatus::FAIL;
+        }
+      }
+      // reset agg result in block.
+      if (!blk_info->block_item.is_agg_res_available) {
+        segment_table_->ResetBlockAgg(&blk_info->block_item, block_addr.data, schema_info[ts_col],
+                                      blk_info->var_col_values);
+      }
+    }
+    blk_info->col_block_addr[i] = block_addr;
+    blk_info->need_del_mems.push_back(block_addr);
+  }
+  // recaculate agg result and store into new allocated block.
+  blk_info->block_item.is_agg_res_available = true;
+  return KStatus::SUCCESS;
 }
 
 KStatus MMapSegmentTableIterator::GetBatch(BlockItem* cur_block_item, size_t block_start_idx,
@@ -318,15 +461,14 @@ KStatus MMapSegmentTableIterator::Next(BlockItem* cur_block_item, k_uint32* star
   bool has_first = false;
   size_t block_start_idx = 0;
   // scan all data in blockitem.
-  while (*start_offset <= cur_block_item->publish_row_count) {
-    bool is_deleted;
-    if (cur_block_item->isDeleted(*start_offset, &is_deleted) < 0) {
-      return KStatus::FAIL;
-    }
+  while (*start_offset <= cur_block_item->alloc_row_count) {
+    bool is_row_valid = segment_table_->IsRowVaild(cur_block_item, *start_offset);
     // if cur_blockdata_offset_  row not valid or not in ts_span or not in lsn, we should check next row continue
     timestamp64 cur_ts = KTimestamp(segment_table_->columnAddrByBlk(cur_block_item->block_id, *start_offset - 1, 0));
-    if (is_deleted || !CheckIfTsInSpan(cur_ts)) {
+    // LOG_DEBUG("ts: %ld, ts-span size %u, [%ld - %ld]", cur_ts, ts_spans_.size(), ts_spans_[0].begin, ts_spans_[0].end);
+    if (!is_row_valid || !CheckIfTsInSpan(cur_ts)) {
       ++(*start_offset);
+      // LOG_DEBUG("del or no match. %d, startoffset: %u", has_first, *start_offset);
       if (has_first) {
         break;
       }
@@ -339,7 +481,7 @@ KStatus MMapSegmentTableIterator::Next(BlockItem* cur_block_item, k_uint32* star
     ++(*count);
     ++(*start_offset);
   }
-
+  // LOG_DEBUG("has first: %d, block_start_idx: %lu, count: %u", has_first, block_start_idx, *count);
   if (has_first) {
     return GetBatch(cur_block_item, block_start_idx, res, *count);
   }

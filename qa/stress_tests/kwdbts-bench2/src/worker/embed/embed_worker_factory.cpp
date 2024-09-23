@@ -32,6 +32,8 @@ void RegisterEmbedWorker(const BenchParams& params) {
   GenericWorkerFactory<StScanWorker, Worker::BenchType::READ>::RegisterInstance("scan");
   GenericWorkerFactory<StRetentionsWorker, Worker::BenchType::RETENTIONS>::RegisterInstance("retentions");
   GenericWorkerFactory<StCompressWorker, Worker::BenchType::COMPRESS>::RegisterInstance("compress");
+  GenericWorkerFactory<StSnapshotWorker, Worker::BenchType::SNAPSHOT>::RegisterInstance("snapshot");
+  GenericWorkerFactory<StSnapshotByBlockWorker, Worker::BenchType::SNAPSHOT>::RegisterInstance("snapshot_blk");
 //  GenericWorkerFactory<SampleWorker, Worker::BenchType::READ>::RegisterInstance("sample");
 //  GenericWorkerFactory<StOrderWorker, Worker::BenchType::WRITE>::RegisterInstance("ordersave");
 //  GenericWorkerFactory<StOrderRange, Worker::BenchType::READ>::RegisterInstance("orderscan");

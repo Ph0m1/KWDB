@@ -20,167 +20,6 @@
 
 size_t META_BLOCK_ITEM_MAX = 1000;  // max blockitem in one meta file
 
-void setRowDeleted(char* delete_flags, size_t row_index) {
-  size_t byte = (row_index - 1) >> 3;
-  size_t bit = (row_index - 1) & 7;
-  delete_flags[byte] |= (1 << bit);
-}
-
-void setRowValid(char* delete_flags, size_t row_index) {
-  size_t byte = (row_index - 1) >> 3;
-  size_t bit = (row_index - 1) & 7;
-  delete_flags[byte] -= (1 << bit);
-}
-
-void setBatchDeleted(char* delete_flags, size_t start_row, size_t del_rows_count) {
-  size_t byte_start = (start_row - 1) >> 3;
-  size_t bit_start = (start_row - 1) & 7;
-  size_t byte_end = (start_row - 1 + del_rows_count - 1) >> 3;
-  size_t bit_end = (start_row - 1 + del_rows_count - 1) & 7;
-  uint8_t del_flag = 0;
-  // in same byte
-  if (byte_start == byte_end) {
-    del_flag = 0;
-    for (size_t i = bit_start; i <= bit_end; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    delete_flags[byte_start] |= (del_flag << bit_start);
-    return;
-  }
-
-  size_t memset_start = byte_start + 1;
-  size_t memset_length = byte_end - byte_start - 1;
-  // process first byte
-  if (bit_start == 0) {
-    memset_start = byte_start;
-    memset_length += 1;
-  } else {
-    del_flag = 0;
-    for (size_t i = bit_start; i < 8; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    delete_flags[byte_start] |= (del_flag << bit_start);
-  }
-  // process last byte
-  if (bit_end == 7) {
-    memset_length += 1;
-  } else {
-    del_flag = 0;
-    for (size_t i = 0; i <= bit_end; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    delete_flags[byte_end] |= del_flag;
-  }
-  // process other bytes
-  memset(delete_flags + memset_start, 0xFF, memset_length);
-}
-
-void setBatchValid(char* delete_flags, size_t start_row, size_t del_rows_count) {
-  size_t byte_start = (start_row - 1) >> 3;
-  size_t bit_start = (start_row - 1) & 7;
-  size_t byte_end = (start_row - 1 + del_rows_count - 1) >> 3;
-  size_t bit_end = (start_row - 1 + del_rows_count - 1) & 7;
-  uint8_t del_flag = 0;
-  // in same byte
-  if (byte_start == byte_end) {
-    del_flag = 0;
-    for (size_t i = bit_start; i <= bit_end; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    delete_flags[byte_start] &= ~(del_flag << bit_start);
-    return;
-  }
-
-  size_t memset_start = byte_start + 1;
-  size_t memset_length = byte_end - byte_start - 1;
-  // process first byte
-  if (bit_start == 0) {
-    memset_start = byte_start;
-    memset_length += 1;
-  } else {
-    del_flag = 0;
-    for (size_t i = bit_start; i < 8; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    delete_flags[byte_start] &= ~(del_flag << bit_start);
-  }
-  // process last byte
-  if (bit_end == 7) {
-    memset_length += 1;
-  } else {
-    del_flag = 0;
-    for (size_t i = 0; i <= bit_end; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    delete_flags[byte_end] &= ~del_flag;
-  }
-  // process other bytes
-  memset(delete_flags + memset_start, 0, memset_length);
-}
-
-bool isAllNull(char* bitmap, size_t start_row, size_t rows_count) {
-  size_t byte_start = (start_row - 1) >> 3;
-  size_t bit_start = (start_row - 1) & 7;
-  size_t byte_end = (start_row - 1 + rows_count - 1) >> 3;
-  size_t bit_end = (start_row - 1 + rows_count - 1) & 7;
-  uint8_t del_flag = 0;
-  // in same byte
-  if (byte_start == byte_end) {
-    del_flag = 0;
-    for (size_t i = bit_start; i <= bit_end; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    if (((bitmap[byte_start] >> bit_start) & del_flag) != del_flag) {
-      return false;
-    }
-    return true;
-  }
-
-  size_t bytes_start = byte_start + 1;
-  size_t bytes_length = byte_end - byte_start - 1;
-  // check first byte
-  if (bit_start == 0) {
-    bytes_start = byte_start;
-    bytes_length += 1;
-  } else {
-    del_flag = 0;
-    for (size_t i = bit_start; i < 8; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    if (((bitmap[byte_start] >> bit_start) & del_flag) != del_flag) {
-      return false;
-    }
-  }
-  // check last byte
-  if (bit_end == 7) {
-    bytes_length += 1;
-  } else {
-    del_flag = 0;
-    for (size_t i = 0; i <= bit_end; i++) {
-      del_flag <<= 1;
-      del_flag += 1;
-    }
-    if ((bitmap[byte_end] & del_flag) != del_flag) {
-      return false;
-    }
-  }
-  // check other bytes
-  for (size_t i = 0; i < bytes_length; i++) {
-    if (bitmap[bytes_start + i] != static_cast<char>(0xFF)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 MMapEntityBlockMeta::MMapEntityBlockMeta(): MMapFile() {
   obj_mutex_ = new MMapEntityMetaLatch(LATCH_ID_MMAP_ENTITY_META_MUTEX);
   entity_blockitem_mutex_ = new MMapEntityMetaRWLatch(RWLATCH_ID_MMAP_ENTITY_META_RWLOCK);
@@ -322,4 +161,61 @@ int MMapEntityBlockMeta::GetBlockItem(uint meta_block_id, uint item_id, BlockIte
   *blk_item = *b_item;
   RW_LATCH_UNLOCK(entity_blockitem_mutex_);
   return 0;
+}
+
+bool isAllNull(char* bitmap, size_t start_row, size_t rows_count) {
+  size_t byte_start = (start_row - 1) >> 3;
+  size_t bit_start = (start_row - 1) & 7;
+  size_t byte_end = (start_row - 1 + rows_count - 1) >> 3;
+  size_t bit_end = (start_row - 1 + rows_count - 1) & 7;
+  uint8_t del_flag = 0;
+  // in same byte
+  if (byte_start == byte_end) {
+    del_flag = 0;
+    for (size_t i = bit_start; i <= bit_end; i++) {
+      del_flag <<= 1;
+      del_flag += 1;
+    }
+    if (((bitmap[byte_start] >> bit_start) & del_flag) != del_flag) {
+      return false;
+    }
+    return true;
+  }
+
+  size_t bytes_start = byte_start + 1;
+  size_t bytes_length = byte_end - byte_start - 1;
+  // check first byte
+  if (bit_start == 0) {
+    bytes_start = byte_start;
+    bytes_length += 1;
+  } else {
+    del_flag = 0;
+    for (size_t i = bit_start; i < 8; i++) {
+      del_flag <<= 1;
+      del_flag += 1;
+    }
+    if (((bitmap[byte_start] >> bit_start) & del_flag) != del_flag) {
+      return false;
+    }
+  }
+  // check last byte
+  if (bit_end == 7) {
+    bytes_length += 1;
+  } else {
+    del_flag = 0;
+    for (size_t i = 0; i <= bit_end; i++) {
+      del_flag <<= 1;
+      del_flag += 1;
+    }
+    if ((bitmap[byte_end] & del_flag) != del_flag) {
+      return false;
+    }
+  }
+  // check other bytes
+  for (size_t i = 0; i < bytes_length; i++) {
+    if (bitmap[bytes_start + i] != static_cast<char>(0xFF)) {
+      return false;
+    }
+  }
+  return true;
 }

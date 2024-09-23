@@ -1,3 +1,4 @@
+set cluster setting sql.alter_tag.enabled=false;
 drop database if exists test_alter cascade;
 create ts database test_alter;
 
@@ -642,3 +643,4 @@ select count(ac20),max(ac20),min(ac20),first(ac20),last(ac20),first_row(ac20),la
 select k_timestamp,ac21 from db1.ts_t1 where k_timestamp >= '2024-06-01 00:00:00.000' and k_timestamp <= '2024-06-01 02:00:00.000' order by k_timestamp;
 
 drop database db1 cascade;
+set cluster setting sql.alter_tag.enabled=true;

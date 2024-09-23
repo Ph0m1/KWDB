@@ -27,6 +27,7 @@ package kvserver
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/config"
@@ -34,6 +35,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/humanizeutil"
@@ -137,7 +139,6 @@ func (sq *splitQueue) shouldQueue(
 			shouldQ, priority = true, 1.0 // default priority
 		}
 	}
-
 	return shouldQ, priority
 }
 
@@ -171,6 +172,7 @@ func (sq *splitQueue) process(ctx context.Context, r *Replica, sysCfg *config.Sy
 func (sq *splitQueue) processAttempt(
 	ctx context.Context, r *Replica, sysCfg *config.SystemConfig,
 ) error {
+
 	desc := r.Desc()
 	// First handle the case of splitting due to zone config maps.
 	if splitKey := sysCfg.ComputeSplitKey(desc.StartKey, desc.EndKey); splitKey != nil {
@@ -192,9 +194,9 @@ func (sq *splitQueue) processAttempt(
 		return nil
 	}
 
-	if desc.GetRangeType() == roachpb.TS_RANGE {
-		return nil
-	}
+	//if desc.GetRangeType() == roachpb.TS_RANGE {
+	//	return nil
+	//}
 
 	// Next handle case of splitting due to size. Note that we don't perform
 	// size-based splitting if maxBytes is 0 (happens in certain test
@@ -202,14 +204,102 @@ func (sq *splitQueue) processAttempt(
 	size := r.GetMVCCStats().Total()
 	maxBytes := r.GetMaxBytes()
 	if maxBytes > 0 && float64(size)/float64(maxBytes) > 1 {
-		_, err := r.adminSplitWithDescriptor(
-			ctx,
-			roachpb.AdminSplitRequest{},
-			desc,
-			false, /* delayable */
-			fmt.Sprintf("%s above threshold size %s", humanizeutil.IBytes(size), humanizeutil.IBytes(maxBytes)),
-		)
-		return err
+		if desc.GetRangeType() == roachpb.DEFAULT_RANGE {
+			_, err := r.adminSplitWithDescriptor(
+				ctx,
+				roachpb.AdminSplitRequest{},
+				desc,
+				false, /* delayable */
+				fmt.Sprintf("%s above threshold size %s", humanizeutil.IBytes(size), humanizeutil.IBytes(maxBytes)),
+			)
+			return err
+		} else if desc.GetRangeType() == roachpb.TS_RANGE {
+			r.startKey()
+			startKey := r.Desc().StartKey
+			endKey := r.Desc().EndKey
+			startTableID, startHashPoint, startTimestamp, err := sqlbase.DecodeTsRangeKey(startKey, true)
+			if err != nil {
+				//fmt.Println("DecodeTsRangeKey StartKey failed", err)
+				log.Errorf(ctx, "DecodeTsRangeKey StartKey failed", err)
+			}
+			// /Max endTableID = 0
+			endTableID, endHashPoint, endTimestamp, err := sqlbase.DecodeTsRangeKey(endKey, false)
+			if err != nil {
+				log.Errorf(ctx, "DecodeTsRangeKey endKey failed", err)
+			}
+			var splitKey roachpb.Key
+			if r.Desc().EndKey.Equal(roachpb.KeyMax) {
+				splitHashPoint := (startHashPoint + endHashPoint + 1) / 2
+				splitKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(startTableID), splitHashPoint)
+			} else if startTableID == endTableID && startHashPoint != endHashPoint && endHashPoint != 0 {
+				splitHashPoint := (startHashPoint + endHashPoint + 1) / 2
+				splitKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(startTableID), splitHashPoint)
+			} else {
+				//        when range is like
+				//        /Table/78/9/555 - /Max
+				//        Decode /Max , get tableID = 0, hashPoint=0, timestamp = 0
+				//        set endTimestamp to max
+				if endKey.Equal(roachpb.RKeyMax) {
+					endTimestamp = math.MaxInt64
+				}
+
+				if endTimestamp != math.MaxInt64 {
+					return nil
+				}
+				//rangeSize ,err := r.store.TsEngine.GetDataVolume(
+				//	uint64(startTableID),
+				//	startHashPoint,
+				//	startHashPoint,
+				//	startTimestamp,
+				//	endTimestamp,
+				//	)
+				//fmt.Println(" ======== ",r.startKey(),endKey,r.GetMVCCStats().LiveBytes,"GetDataVolume:",rangeSize,err)
+				var halfTimestamp int64
+				halfTimestamp, err = r.store.TsEngine.GetDataVolumeHalfTS(
+					uint64(startTableID),
+					startHashPoint,
+					startHashPoint,
+					startTimestamp,
+					endTimestamp,
+				)
+				//fmt.Println("halfTimestamp : ",halfTimestamp ,err ,
+				//	fmt.Sprintf("===TableID :%d  StartHashPoint : %d, EndHashPoint: %d StartTimeStamp: %d EndTimeStamp: %d",
+				//		startTableID,startHashPoint,startHashPoint,startTimestamp,endTimestamp))
+				if err != nil || (halfTimestamp < startTimestamp) {
+					//fmt.Println("GetDataVolumeHalfTS Failed ! Err: ",err ,
+					//	fmt.Sprintf("===TableID :%d  StartHashPoint : %d, EndHashPoint: %d StartTimeStamp: %d EndTimeStamp: %d",
+					//		startTableID,startHashPoint,startHashPoint,startTimestamp,endTimestamp))
+					log.Errorf(ctx, fmt.Sprintf("GetDataVolumeHalfTS Failed. Err: %v. TableID: %d, StartKey: %s, EndKey:%s,  halfTimestamp:%v, startTimeStamp: %d, endTimeStamp: %d", err, startTableID, startKey, endKey, halfTimestamp, startTimestamp, endTimestamp))
+					// GetDataVolumeHalfTS failed, set splitTimeStamp = startTimestamp + 1day
+					halfTimestamp = startTimestamp + 86400000
+				}
+				splitHashPoint := startHashPoint
+				splitTimeStamp := halfTimestamp
+				splitKey = sqlbase.MakeTsRangeKey(sqlbase.ID(startTableID), splitHashPoint, splitTimeStamp)
+			}
+			//理论上不会溢出，兼容
+			tableID := uint32(startTableID)
+			_, err = r.adminSplitWithDescriptor(
+				ctx,
+				roachpb.AdminSplitRequest{
+					RequestHeader: roachpb.RequestHeader{
+						Key: splitKey,
+					},
+					TableId:   tableID, //由于为Split，所以TableID不变
+					SplitType: roachpb.TS_SPLIT,
+					SplitKey:  splitKey,
+				},
+				desc,
+				false, /* delayable */
+				fmt.Sprintf("%s above threshold size %s", humanizeutil.IBytes(size), humanizeutil.IBytes(maxBytes)),
+			)
+			if err != nil {
+				log.Errorf(ctx, "TsSplit Failed: ", r.RangeID, splitKey, err)
+			}
+			return err
+
+		}
+
 	}
 
 	now := timeutil.Now()

@@ -245,89 +245,71 @@ struct TSEngine {
   }
 
   /**
-    * @brief create snapshot object for reading
-   * @param[in] table_id   ID
-    * @param[in] range_group_id RangeGroup ID
-    * @param[in] begin_hash,end_hash Entity primary tag hashID
-    * @param[out] path
+    * @brief create snapshot, data read from current node.
+    * @param[in] table_id              ts table ID
+    * @param[in] begin_hash,end_hash  Entity primary tag  hashID
+    * @param[in] ts_span              timestamp span
+    * @param[out] snapshot_id         generated snapshot id
     *
     * @return KStatus
     */
-  virtual KStatus CreateSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                                 uint64_t begin_hash, uint64_t end_hash,  uint64_t* snapshot_id) {
+  virtual KStatus CreateSnapshotForRead(kwdbContext_p ctx, const KTableKey& table_id,
+                                 uint64_t begin_hash, uint64_t end_hash,
+                                 const KwTsSpan& ts_span, uint64_t* snapshot_id) {
     return KStatus::FAIL;
   }
 
   /**
-   * @brief  delete snapshot
-   * @param[in] range_group_id RangeGroup ID
-   * @param[in] table_id   ID
-   * @param[in] range_group_id RangeGroup ID
-   * @param[in] path
+   * @brief delete snapshot object and temporary directory.
+   * @param[in] snapshot_id
    *
    * @return KStatus
    */
-  virtual KStatus DropSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                               uint64_t snapshot_id) {
+  virtual KStatus DeleteSnapshot(kwdbContext_p ctx, uint64_t snapshot_id) {
     return KStatus::FAIL;
   }
 
   /**
-  * @brief  get snapshot data by batch
-   * @param[in] table_id   ID
-  * @param[in] range_group_id RangeGroup ID
-  * @param[in] path   path stores snapshot
-  * @param[in] offset, limit current batch return snapshot data info
-  * @param[out] data
-  * @param[out] total snapshot total size
+  * @brief  get snapshot data  batch by batch
+  * @param[in] snapshot_id   ts table ID
+  * @param[out] data          bytes
   *
   * @return KStatus
   */
-  virtual KStatus GetSnapshotData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                                  uint64_t snapshot_id, size_t offset, size_t limit, TSSlice* data, size_t* total) {
+  virtual KStatus GetSnapshotNextBatchData(kwdbContext_p ctx, uint64_t snapshot_id, TSSlice* data) {
     return KStatus::FAIL;
   }
 
   /**
-    * @brief initialize snapshot object for receiving data
-    * @param[in] range_group RangeGroup object
-    * @param[in] snapshot_size
-    * @param[out] snapshot_id  ID
+    * @brief create snapshot for receiving data and store to current dest node.
+    * @param[in] table_id              ts table ID
+    * @param[in] begin_hash,end_hash  Entity primary tag  hashID
+    * @param[in] ts_span              timestamp span
+    * @param[out] snapshot_id         generated snapshot id
     *
     * @return KStatus
     */
-  virtual KStatus InitSnapshotForWrite(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t range_group_id,
-                                       uint64_t snapshot_id, size_t snapshot_size) {
+  virtual KStatus CreateSnapshotForWrite(kwdbContext_p ctx, const KTableKey& table_id,
+                                   uint64_t begin_hash, uint64_t end_hash,
+                                   const KwTsSpan& ts_span, uint64_t* snapshot_id) {
     return KStatus::FAIL;
   }
 
 
   /**
-   * @brief batch receive snapshot data
-   * @param[in] table_id   table ID
-   * @param[in] range_group_id  RangeGroup ID
-   * @param[in] snapshot_id  ID of snapshot
-   * @param[in] offset  snapshots file offset
-   * @param[in] data    current batch snapshot data
-   * @param[in] finished flag of the last batch of snapshot
+   * @brief receive data and store to current dest node batch by batch
+   * @param[in] data  bytes
    *
    * @return KStatus
    */
-  virtual KStatus WriteSnapshotData(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t range_group_id,
-                                    uint64_t snapshot_id, size_t offset, TSSlice data, bool finished) {
+  virtual KStatus WriteSnapshotBatchData(kwdbContext_p ctx, uint64_t snapshot_id, TSSlice data) {
+    return KStatus::FAIL;
+  }
+  virtual KStatus WriteSnapshotSuccess(kwdbContext_p ctx, uint64_t snapshot_id) {
     return KStatus::FAIL;
   }
 
-  /**
-   * @brief make snapshot available
-   * @param[in] table_id   ID
-   * @param[in] range_group_id RangeGroup ID
-   * @param[in]  path       store path for snapshot file
-   * @param[in]  is_delete  delete snapshot info
-   * @return KStatus
-   */
-  virtual KStatus EnableSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                                uint64_t snapshot_id) {
+  virtual KStatus WriteSnapshotRollback(kwdbContext_p ctx, uint64_t snapshot_id) {
     return KStatus::FAIL;
   }
 
@@ -502,6 +484,18 @@ struct TSEngine {
    * @return : KStatus
    */
   virtual KStatus GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) = 0;
+
+  /**
+  * @brief Get current version of series table
+  *
+  * @param[in] table_id   ID of the time series table
+  * @param[out] version   Table version
+  *
+  * @return KStatus
+  */
+  virtual KStatus GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) = 0;
+
+  virtual int IsSingleNode() = 0;
 };
 
 namespace kwdbts {
@@ -558,24 +552,22 @@ class TSEngineImpl : public TSEngine {
 
   KStatus DeleteRangeGroup(kwdbContext_p ctx, const KTableKey& table_id, const RangeGroup& range) override;
 
-  KStatus CreateSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                         uint64_t begin_hash, uint64_t end_hash, uint64_t* snapshot_id) override;
+  KStatus CreateSnapshotForRead(kwdbContext_p ctx, const KTableKey& table_id,
+                                 uint64_t begin_hash, uint64_t end_hash,
+                                 const KwTsSpan& ts_span, uint64_t* snapshot_id) override;
 
+  KStatus DeleteSnapshot(kwdbContext_p ctx, uint64_t snapshot_id) override;
 
-  KStatus DropSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id, uint64_t snapshot_id) override;
+  KStatus GetSnapshotNextBatchData(kwdbContext_p ctx, uint64_t snapshot_id, TSSlice* data) override;
 
+  KStatus CreateSnapshotForWrite(kwdbContext_p ctx, const KTableKey& table_id,
+                                   uint64_t begin_hash, uint64_t end_hash,
+                                   const KwTsSpan& ts_span, uint64_t* snapshot_id) override;
 
-  KStatus GetSnapshotData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id, uint64_t snapshot_id,
-                                  size_t offset, size_t limit, TSSlice* data, size_t* total) override;
+  KStatus WriteSnapshotBatchData(kwdbContext_p ctx, uint64_t snapshot_id, TSSlice data) override;
 
-  KStatus InitSnapshotForWrite(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t range_group_id,
-                               uint64_t snapshot_id, size_t snapshot_size) override;
-
-  KStatus WriteSnapshotData(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t range_group_id,
-                            uint64_t snapshot_id, size_t offset, TSSlice data, bool finished) override;
-
-  KStatus EnableSnapshot(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                        uint64_t snapshot_id) override;
+  KStatus WriteSnapshotSuccess(kwdbContext_p ctx, uint64_t snapshot_id) override;
+  KStatus WriteSnapshotRollback(kwdbContext_p ctx, uint64_t snapshot_id) override;
 
   KStatus SettingChangedSensor() override;  // detect if setting is changed, and take the setting's corresponding actions
 
@@ -637,6 +629,8 @@ class TSEngineImpl : public TSEngine {
   */
   KStatus GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) override;
 
+  KStatus GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) override;
+
   virtual KStatus Init(kwdbContext_p ctx);
 
   /**
@@ -667,10 +661,16 @@ class TSEngineImpl : public TSEngine {
   */
   KStatus GetClusterSetting(kwdbContext_p ctx, const std::string& key, std::string* value);
 
+  int IsSingleNode();
+
  private:
   EngineOptions options_;
   SharedLruUnorderedMap<KTableKey, TsTable>* tables_cache_{};
   KLatch* tables_lock_;
+
+  // store all snapshot objects of this storage engine.
+  std::unordered_map<uint64_t, TsTableEntitiesSnapshot*> snapshots_;
+
   //  engine tables range_groups info, table open with range_group filled here.
   // std::unordered_map<uint64_t, int8_t> store table all RangeGroups, uint64_t: range_group_id, int8_t: typ
   std::unordered_map<KTableKey, std::unordered_map<uint64_t, int8_t>> tables_range_groups_;
@@ -684,8 +684,10 @@ class TSEngineImpl : public TSEngine {
   KStatus parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,
                           std::vector<TagInfo>& tag_schema);
 
-  KStatus generateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,
-                             std::vector<TagInfo>& tag_schema);
+  // insert snapshot object into map snapshots_, and allocate snaphost id for this object.
+  uint64_t insertToSnapshots(TsTableEntitiesSnapshot* snapshot);
+  // get snapshot object from map snaphosts_. if not found return nullptr.
+  TsTableEntitiesSnapshot* getSnapshot(uint64_t snapshot_id);
 
   void initRangeIndexMap(AppliedRangeIndex* applied_indexes, uint64_t range_num) {
     if (applied_indexes != nullptr) {

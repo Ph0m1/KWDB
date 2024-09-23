@@ -49,11 +49,9 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/build"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
-	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/lex"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
@@ -4481,94 +4479,45 @@ may increase either contention or retry errors, or both.`,
 			Info:       "time_bucket_gapfill groups timestamps by interval.",
 		},
 	),
-	"change_ts_distribute": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
-		tree.Overload{
-			Types: tree.ArgTypes{
-				{"tableID", types.Int},
-				{"groupID", types.Int},
-				{"leaseHolder", types.Int},
-				{"follower1", types.Int},
-				{"follower2", types.Int},
-			},
-			ReturnType: tree.FixedReturnType(types.String),
-			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				_, ok := args[0].(*tree.DInt)
-				if !ok {
-					return nil, errors.AssertionFailedf("expected *DInt, found %T", args[0])
-				}
-				tableID := *(args[0].(*tree.DInt))
-
-				_, ok = args[1].(*tree.DInt)
-				if !ok {
-					return nil, errors.AssertionFailedf("expected *DInt, found %T", args[1])
-				}
-				groupID := *(args[1].(*tree.DInt))
-
-				_, ok = args[2].(*tree.DInt)
-				if !ok {
-					return nil, errors.AssertionFailedf("expected *DInt, found %T", args[2])
-				}
-				leaseHodler := *(args[2].(*tree.DInt))
-
-				_, ok = args[3].(*tree.DInt)
-				if !ok {
-					return nil, errors.AssertionFailedf("expected *DInt, found %T", args[3])
-				}
-				follower1ID := *(args[3].(*tree.DInt))
-
-				_, ok = args[4].(*tree.DInt)
-				if !ok {
-					return nil, errors.AssertionFailedf("expected *DInt, found %T", args[4])
-				}
-				follower2ID := *(args[4].(*tree.DInt))
-
-				err := evalCtx.DB.Txn(evalCtx.Context, func(ctx context.Context, txn *kv.Txn) error {
-					api.HRManagerWLock()
-					defer api.HRManagerWUnLock()
-					hrm, err := api.GetHashRouterManagerWithTxn(ctx, txn)
-					if err != nil {
-						return errors.Errorf("get hashrouter manager failed :%v", err)
-					}
-					msgs, err := hrm.GroupChange(ctx, txn, uint32(tableID), api.EntityRangeGroupID(groupID), roachpb.NodeID(leaseHodler), roachpb.NodeID(follower1ID), roachpb.NodeID(follower2ID))
-					if err != nil {
-						return err
-					}
-					for _, msg := range msgs {
-						err = api.RelocatePartitionReplicas(ctx, uint32(tableID), msg, false)
-						if err != nil {
-							return errors.Errorf("change ts group AddPartitionReplicas err : %v", err)
-						}
-					}
-					message := fmt.Sprintf("rebalance ts data table : %v", uint32(tableID))
-					err = hrm.RefreshHashRouter(ctx, uint32(tableID), txn, message, storagepb.NodeLivenessStatus_LIVE)
-					if err != nil {
-						return errors.Errorf("change ts group RefreshHashRouter err : %v", err)
-					}
-					updatedNodes := make(map[roachpb.NodeID]interface{}, 0)
-					for _, part := range msgs {
-						for _, partReplica := range part.DestInternalReplicas {
-							destNodeID := partReplica.NodeID
-							if _, ok := updatedNodes[destNodeID]; !ok {
-								updatedNodes[destNodeID] = struct{}{}
-								hashInfo := hrm.GetHashInfoByTableID(ctx, uint32(tableID))
-								rangeGroups := hashInfo.GetGroupIDAndRoleOnNode(ctx, destNodeID)
-								err = api.RefreshTSRangeGroup(ctx, uint32(tableID), destNodeID, rangeGroups, nil)
-								if err != nil {
-									return errors.Errorf("change ts group RefreshTSRangeGroup err : %v", err)
-								}
-							}
-						}
-					}
-					return nil
-				})
-				if err != nil {
-					return tree.NewDString(err.Error()), nil
-				}
-				return tree.NewDString("SUCCESS"), nil
-			},
-			Info: "time_bucket_gapfill groups timestamps by duration.",
-		},
-	),
+	//"change_ts_distribute": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
+	//	tree.Overload{
+	//		Types: tree.ArgTypes{
+	//			{"tableID", types.Int},
+	//			{"groupID", types.Int},
+	//			{"leaseHolder", types.Int},
+	//			{"follower1", types.Int},
+	//			{"follower2", types.Int},
+	//		},
+	//		ReturnType: tree.FixedReturnType(types.String),
+	//		Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+	//			_, ok := args[0].(*tree.DInt)
+	//			if !ok {
+	//				return nil, errors.AssertionFailedf("expected *DInt, found %T", args[0])
+	//			}
+	//			tableID := *(args[0].(*tree.DInt))
+	//
+	//			err := evalCtx.DB.Txn(evalCtx.Context, func(ctx context.Context, txn *kv.Txn) error {
+	//				api.HRManagerWLock()
+	//				defer api.HRManagerWUnLock()
+	//				hrm, err := api.GetHashRouterManagerWithTxn(ctx, txn)
+	//				if err != nil {
+	//					return errors.Errorf("get hashrouter manager failed :%v", err)
+	//				}
+	//				message := fmt.Sprintf("rebalance ts data table : %v", uint32(tableID))
+	//				err = hrm.RefreshHashRouter(ctx, uint32(tableID), txn, message, storagepb.NodeLivenessStatus_LIVE)
+	//				if err != nil {
+	//					return errors.Errorf("change ts group RefreshHashRouter err : %v", err)
+	//				}
+	//				return nil
+	//			})
+	//			if err != nil {
+	//				return tree.NewDString(err.Error()), nil
+	//			}
+	//			return tree.NewDString("SUCCESS"), nil
+	//		},
+	//		Info: "time_bucket_gapfill groups timestamps by duration.",
+	//	},
+	//),
 }
 
 func timeBucketOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {

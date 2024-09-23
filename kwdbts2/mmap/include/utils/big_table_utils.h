@@ -22,33 +22,30 @@
 
 using namespace kwdbts;
 
-// @return  "" if db = tsobject | tsobject/; db otherwise.
-const string & getActualWorkspace(const string &db);
-
-// trim trailing '/' from workspace, e.g., `abc/` ->  `abc`
-const string & worksapceToDatabase(string &ws);
+// trim trailing '/' from path, e.g., `abc/` ->  `abc`
+const string & rmPathSeperator(string &path);
 
 vector<AttributeInfo> & getDummySchema();
 
 /**
- * @brief	obtain the Path of an URL
+ * @brief	obtain the Path
  *
- * @param 	url	the URL to process
- * @return	url protocol.
+ * @param 	path	the path to process
+ * @return	path protocol.
  */
-string getURLFilePath(const string &url);
+string getTsFilePath(const string &path);
 
-string getURLObjectName(const string &url);
+string getTsObjectName(const string &path);
 
 int setInteger(int &n, const string &val_str, int min, int max = std::numeric_limits<int>::max());
 
 bool isInteger(const char *s, int64_t &i);
 
-string nameToTagBigTableURL(const string &name, const string &ext= kwdbts::s_bt);
+string nameToTagBigTablePath(const string &name, const string &ext= kwdbts::s_bt);
 
-string nameToEntityBigTableURL(const string &name, const string &ext = kwdbts::s_bt);
+string nameToEntityBigTablePath(const string &name, const string &ext = kwdbts::s_bt);
 
-string genTempObjectURL(const string &src_url);
+string genTempObjectPath(const string &src_path);
 
 int getDataTypeSize(int type);
 

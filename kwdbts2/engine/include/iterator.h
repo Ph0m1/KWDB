@@ -24,10 +24,147 @@
 #include "ts_time_partition.h"
 #include "mmap/mmap_segment_table_iterator.h"
 #include "ts_common.h"
+#include "st_subgroup.h"
 
 namespace kwdbts {
 class TsEntityGroup;
 class SubEntityGroupManager;
+class TsAggIterator;
+
+struct BlockBitmap {
+  uint32_t col_idx;
+  BLOCK_ID block_id;
+  void* bitmap;
+  bool need_free_bitmap;
+  BlockBitmap(BLOCK_ID id, uint32_t idx, void* mem, bool need_free) : block_id(id), col_idx(idx),
+                                                                      bitmap(mem), need_free_bitmap(need_free) { }
+  ~BlockBitmap() {
+    if (need_free_bitmap) {
+      free(bitmap);
+      bitmap = nullptr;
+    }
+  }
+
+  bool IsNull(uint32_t row_idx) const {
+    if (!bitmap) {
+      return true;
+    }
+    return kwdbts::IsObjectColNull(reinterpret_cast<char*>(bitmap), row_idx);
+  }
+};
+
+// Used for first/last query optimization:
+// If only the first/last type is included in a single aggregation query process,
+// as most temporal data is written in sequence, optimization can be carried out for this special scenario.
+// 1. For first related queries, start traversing from the head of the partition table array, which is the smallest
+// partition table.
+// 2. For last related queries, start traversing from the end of the partition table array, which is the largest
+// partition table.
+class TsFirstLastRow {
+ public:
+  TsFirstLastRow(const std::vector<uint32_t>& agg_col_ids, const std::vector<Sumfunctype>& scan_agg_types) :
+        agg_col_ids_(agg_col_ids), scan_agg_types_(scan_agg_types) {
+    // If the query aggregation type contains first/last correlation, the corresponding member variables need to be
+    // initialized to record the results during the query process.
+    Reset();
+  }
+  ~TsFirstLastRow() {
+    delObjects();
+  }
+
+  void delObjects() {
+    for (auto& it : first_pairs_) {
+      if (it.second.partion_tbl != nullptr) {
+        ReleaseTable(it.second.partion_tbl);
+        it.second.partion_tbl = nullptr;
+      }
+    }
+    for (auto& it : last_pairs_) {
+      if (it.second.partion_tbl != nullptr) {
+        ReleaseTable(it.second.partion_tbl);
+        it.second.partion_tbl = nullptr;
+      }
+    }
+    if (first_row_pair_.partion_tbl != nullptr) {
+      ReleaseTable(first_row_pair_.partion_tbl);
+      first_row_pair_.partion_tbl = nullptr;
+    }
+    if (last_row_pair_.partion_tbl != nullptr) {
+      ReleaseTable(last_row_pair_.partion_tbl);
+      last_row_pair_.partion_tbl = nullptr;
+    }
+  }
+
+  void Reset() {
+    delObjects();
+    no_first_last_type_ = true;
+    for (size_t i = 0; i < scan_agg_types_.size(); i++) {
+      if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
+        no_first_last_type_ = false;
+      } else if (scan_agg_types_[i] == Sumfunctype::FIRST_ROW || scan_agg_types_[i] == Sumfunctype::FIRSTROWTS) {
+        no_first_last_type_ = false;
+      } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
+        no_first_last_type_ = false;
+      } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
+        no_first_last_type_ = false;
+      }
+      first_pairs_[i] = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
+      last_pairs_[i] = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
+    }
+    first_row_pair_ = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
+    last_row_pair_ = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
+    first_agg_valid_ = 0;
+    last_agg_valid_ = 0;
+  }
+
+  bool NeedFirstLastAgg() {
+    return !no_first_last_type_;
+  }
+
+  inline bool FirstAggRowValid() {
+    return first_agg_valid_ == first_pairs_.size() + 1;
+  }
+
+  inline bool LastAggRowValid() {
+    return last_agg_valid_ == last_pairs_.size() + 1;
+  }
+
+  KStatus UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
+                        std::shared_ptr<MMapSegmentTable> segment_tbl,
+                        const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+
+  KStatus UpdateLastRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
+                        std::shared_ptr<MMapSegmentTable> segment_tbl,
+                        const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+
+  KStatus GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size_t col_id,
+                      const AttributeInfo& col_attr, Batch** agg_batch);
+
+  int getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable> segment_tbl,
+                          MetricRowID real_row, uint32_t ts_col,
+                          const AttributeInfo& col_attr, Batch** b);
+
+  struct TsRowTableInfo {
+    TsTimePartition* partion_tbl = nullptr;
+    std::shared_ptr<MMapSegmentTable> segment_tbl = nullptr;
+    timestamp64 row_ts;
+    MetricRowID row_id;
+  };
+
+ private:
+  std::vector<uint32_t> agg_col_ids_;
+  std::vector<Sumfunctype> scan_agg_types_;
+  // Used to record first/last related results during a traversal process.
+  // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
+  std::unordered_map<k_uint32, TsRowTableInfo> first_pairs_;
+  std::unordered_map<k_uint32, TsRowTableInfo> last_pairs_;
+  // std::pair<index of column, std::pair<timestamp64, row id>>
+  TsRowTableInfo first_row_pair_;
+  TsRowTableInfo last_row_pair_;
+  bool no_first_last_type_{true};
+  size_t first_agg_valid_{0};
+  size_t last_agg_valid_{0};
+};
 
 /**
  * @brief This is the iterator base class implemented internally in the storage layer, and its two derived classes are:
@@ -42,7 +179,7 @@ class TsIterator {
 
   virtual ~TsIterator();
 
-  virtual KStatus Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed);
+  virtual KStatus Init(bool is_reversed);
 
   /**
    * @brief An internally implemented iterator query interface that provides a subgroup data query result to the TsTableIterator class
@@ -54,8 +191,11 @@ class TsIterator {
   virtual KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) = 0;
 
   bool IsDisordered() {
-    for (auto& pt : p_bts_) {
-      EntityItem* entity_item = pt->getEntityItem(entity_ids_[cur_entity_idx_]);
+    TsSubGroupPTIterator cur_iter(partition_table_iter_.get());
+    cur_iter.Reset();
+    TsTimePartition* cur_pt;
+    while (cur_iter.Next(&cur_pt) && cur_pt != nullptr) {
+      EntityItem* entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
       if (entity_item->is_disordered) {
         return true;
       }
@@ -73,6 +213,10 @@ class TsIterator {
     return false;
   }
   int nextBlockItem(k_uint32 entity_id);
+
+  bool getCurBlockSpan(BlockItem* cur_block, MMapSegmentTable* segment_tbl, uint32_t* first_row,
+                      uint32_t* count, uint32_t* blk_offset);
+
   void fetchBlockItems(k_uint32 entity_id);
 
  protected:
@@ -86,16 +230,15 @@ class TsIterator {
   std::vector<k_uint32> ts_scan_cols_;
   // column attributes
   vector<AttributeInfo> attrs_;
-  // table version
+    // table version
   uint32_t table_version_;
-  std::vector<TsTimePartition*> p_bts_;
+  TsTimePartition* cur_partiton_table_;
+  std::shared_ptr<TsSubGroupPTIterator> partition_table_iter_;
   // save all BlockItem objects in the partition table being queried
   std::deque<BlockItem*> block_item_queue_;
   // save the data offset within the BlockItem object being queried, used for traversal
   k_uint32 cur_blockdata_offset_ = 1;
   BlockItem* cur_block_item_ = nullptr;
-  k_int32 cur_p_bts_idx_ = 0;
-  uint32_t cur_entity_id_ = 0;
   k_uint32 cur_entity_idx_ = 0;
   MMapSegmentTableIterator* segment_iter_{nullptr};
   std::shared_ptr<TsEntityGroup> entity_group_;
@@ -127,7 +270,6 @@ class TsRawDataIterator : public TsIterator {
 
  private:
   void nextEntity() {
-    cur_p_bts_idx_ = -1;
     cur_block_item_ = nullptr;
     cur_blockdata_offset_ = 1;
     block_item_queue_.clear();
@@ -144,7 +286,7 @@ class TsSortedRowDataIterator : public TsIterator {
       TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
                  kw_scan_cols, ts_scan_cols, table_version), order_type_(order_type), compaction_(compaction) {}
 
-  KStatus Init(std::vector<TsTimePartition*>& p_bts, bool is_reversed) override;
+  KStatus Init(bool is_reversed) override;
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
 
  private:
@@ -160,28 +302,6 @@ class TsSortedRowDataIterator : public TsIterator {
   bool compaction_ = false;
 };
 
-struct BlockBitmap {
-  uint32_t col_idx;
-  BLOCK_ID block_id;
-  void* bitmap;
-  bool need_free_bitmap;
-  BlockBitmap(BLOCK_ID id, uint32_t idx, void* mem, bool need_free) : block_id(id), col_idx(idx),
-                                                                      bitmap(mem), need_free_bitmap(need_free) { }
-  ~BlockBitmap() {
-    if (need_free_bitmap) {
-      free(bitmap);
-      bitmap = nullptr;
-    }
-  }
-
-  bool IsNull(uint32_t row_idx) const {
-    if (!bitmap) {
-      return true;
-    }
-    return kwdbts::IsObjectColNull(reinterpret_cast<char*>(bitmap), row_idx);
-  }
-};
-
 // used for aggregate queries
 class TsAggIterator : public TsIterator {
  public:
@@ -190,36 +310,14 @@ class TsAggIterator : public TsIterator {
                 std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
                 std::vector<Sumfunctype>& scan_agg_types, std::vector<timestamp64>& ts_points, uint32_t table_version) :
                 TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, kw_scan_cols,
-                           ts_scan_cols, table_version), scan_agg_types_(scan_agg_types) {
+                           ts_scan_cols, table_version), scan_agg_types_(scan_agg_types),
+                           first_last_row_(kw_scan_cols, scan_agg_types) {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
-    first_pairs_.assign(scan_agg_types_.size(), {});
-    last_pairs_.assign(scan_agg_types_.size(), {});
-    last_ts_points_.assign(scan_agg_types_.size(), INVALID_TS);
-    for (size_t i = 0; i < ts_scan_cols_.size(); ++i) {
-      // If the query aggregation type contains first/last correlation, the corresponding member variables need to be
-      // initialized to record the results during the query process.
-      if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
-        no_first_last_type_ = false;
-        first_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
-      } else if (scan_agg_types_[i] == Sumfunctype::FIRST_ROW || scan_agg_types_[i] == Sumfunctype::FIRSTROWTS) {
-        no_first_last_type_ = false;
-        first_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
-      } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
-        no_first_last_type_ = false;
-        last_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
-        if (!ts_points.empty()) {
-          last_ts_points_[i] = ts_points[i];
-        }
-      } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
-        no_first_last_type_ = false;
-        last_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
-      }
-    }
   }
 
-  KStatus Init(std::vector<TsTimePartition*>& p_bts, bool is_reverse) override;
+  KStatus Init(bool is_reversed) override;
   /**
    * @brief The internally implemented aggregate data query interface returns the aggregate query result of an entity
    *        when called once. When is_finished is true, it indicates that the query has ended.
@@ -237,35 +335,11 @@ class TsAggIterator : public TsIterator {
    *           in order to query the next entity normally in the future.
    */
   void reset() {
-    cur_p_bts_idx_ = -1;
     cur_block_item_ = nullptr;
     cur_blockdata_offset_ = 1;
-
     ++cur_entity_idx_;
-    if (only_first_type_ || only_first_last_type_) {
-      cur_first_idx_ = 0;
-    }
-    if (only_last_type_ || only_first_last_type_) {
-      cur_last_idx_ = p_bts_.size() - 1;
-    }
-
-    has_found_first_data = false;
-    has_found_last_data = false;
-    first_pairs_.clear();
-    last_pairs_.clear();
-    first_pairs_.assign(scan_agg_types_.size(), {});
-    last_pairs_.assign(scan_agg_types_.size(), {});
-    for (size_t i = 0; i < ts_scan_cols_.size(); ++i) {
-      if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
-        first_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
-      } else if (scan_agg_types_[i] == Sumfunctype::FIRST_ROW || scan_agg_types_[i] == Sumfunctype::FIRSTROWTS) {
-        first_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
-      } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
-        last_pairs_[i] = {-1, {INVALID_TS, MetricRowID{}}};
-      } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
-        last_row_pair_ = {-1, {INVALID_TS, MetricRowID{}}};
-      }
-    }
+    first_last_row_.Reset();
+    partition_table_iter_->Reset();
   }
 
   inline bool onlyHasFirstAggType() {
@@ -277,7 +351,6 @@ class TsAggIterator : public TsIterator {
         no_first_row_type_ = false;
       }
     }
-    cur_first_idx_ = 0;
     return true;
   }
 
@@ -290,7 +363,6 @@ class TsAggIterator : public TsIterator {
         no_last_row_type_ = false;
       }
     }
-    cur_last_idx_ = p_bts_.size() - 1;
     return true;
   }
 
@@ -301,55 +373,15 @@ class TsAggIterator : public TsIterator {
         return false;
       }
     }
-    cur_first_idx_ = 0;
-    cur_last_idx_ = p_bts_.size() - 1;
     return true;
   }
 
   inline bool hasFoundFirstAggData() {
-    for (k_uint32 i = 0; i < scan_agg_types_.size(); ++i) {
-      switch (scan_agg_types_[i]) {
-        case FIRST:
-        case FIRSTTS:
-          if (first_pairs_[i].first == -1) {
-            return false;
-          }
-          break;
-        case FIRST_ROW:
-        case FIRSTROWTS:
-          if (first_row_pair_.first == -1) {
-            return false;
-          }
-          break;
-        default:
-          break;
-      }
-    }
-    has_found_first_data = true;
-    return true;
+    return first_last_row_.FirstAggRowValid();
   }
 
   inline bool hasFoundLastAggData() {
-    for (k_uint32 i = 0; i < scan_agg_types_.size(); ++i) {
-      switch (scan_agg_types_[i]) {
-        case LAST:
-        case LASTTS:
-          if (last_pairs_[i].first == -1) {
-            return false;
-          }
-          break;
-        case LAST_ROW:
-        case LASTROWTS:
-          if (last_row_pair_.first == -1) {
-            return false;
-          }
-          break;
-        default:
-          break;
-      }
-    }
-    has_found_last_data = true;
-    return true;
+    return first_last_row_.LastAggRowValid();
   }
 
   // Determine whether certain column types have query results of certain aggregation types,
@@ -377,21 +409,25 @@ class TsAggIterator : public TsIterator {
     return true;
   }
 
-  // Used for first/last query optimization:
-  // If only the first/last type is included in a single aggregation query process,
-  // as most temporal data is written in sequence, optimization can be carried out for this special scenario.
-  // 1. For first related queries, start traversing from the head of the partition table array, which is the smallest
-  // partition table.
-  // 2. For last related queries, start traversing from the end of the partition table array, which is the largest
-  // partition table.
-  void updateFirstCols(timestamp64 ts, MetricRowID row_id,
-                       const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
-  void updateLastCols(timestamp64 ts, MetricRowID row_id,
-                      const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
-  void updateFirstLastCols(timestamp64 ts, MetricRowID row_id,
-                           const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+  /**
+   * @brief using iterator find first data info, store into first_last_row_
+  */
+  KStatus findFirstDataByIter(timestamp64 ts);
+
   KStatus findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts);
+
+  /**
+   * @brief using iterator find last data info, store into first_last_row_
+  */
+  KStatus findLastDataByIter(timestamp64 ts);
+
   KStatus findLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
+
+  /**
+   * @brief generate batch info by first_last_row_.
+  */
+  KStatus genBatchData(ResultSet* res, k_uint32* count);
+
   KStatus findFirstLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
 
   KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
@@ -422,9 +458,6 @@ class TsAggIterator : public TsIterator {
   KStatus getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
                                    uint32_t col_idx, k_uint32 count, std::shared_ptr<void>* mem,
                                    std::vector<std::shared_ptr<void>>& var_mem, void** bitmap, bool& need_free_bitmap);
-
-  KStatus getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
-                             uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap);
   /**
    * @brief Used to obtain the actual Batch object for a specific row of data, if a column type conversion occurs,
    *        the corresponding conversion needs to be performed on the row of data first.
@@ -441,29 +474,12 @@ class TsAggIterator : public TsIterator {
   // The aggregation type corresponding to each column.
   // It can be empty, but if it is not empty, the size must be consistent with the size of scan.cols_
   std::vector<Sumfunctype> scan_agg_types_;
-  // Used for the first/last query optimization process, recording the array index of the partition table being queried,
-  // where cur_first_idx_ starts from the head and cur_last_idx_ starts from the tail.
-  k_int32 cur_first_idx_;
-  k_int32 cur_last_idx_;
-
   bool only_first_type_ = false;
   bool no_first_row_type_ = true;
   bool only_last_type_ = false;
   bool no_last_row_type_ = true;
   bool only_first_last_type_ = false;
-  bool no_first_last_type_ = true;
-
-  bool has_found_first_data = false;
-  bool has_found_last_data = false;
-
-  // Used to record first/last related results during a traversal process.
-  // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
-  std::vector<std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> first_pairs_;
-  std::vector<std::pair<k_int32, std::pair<timestamp64, MetricRowID>>> last_pairs_;
-  std::vector<timestamp64> last_ts_points_;
-  // std::pair<index of column, std::pair<timestamp64, row id>>
-  std::pair<k_int32, std::pair<timestamp64, MetricRowID>> first_row_pair_;
-  std::pair<k_int32, std::pair<timestamp64, MetricRowID>> last_row_pair_;
+  TsFirstLastRow first_last_row_;
 };
 
 /**
@@ -480,6 +496,10 @@ class TsTableIterator {
 
   void AddEntityIterator(TsIterator* iter) {
     iterators_.push_back(iter);
+  }
+
+  inline size_t GetIterNumber() {
+    return iterators_.size();
   }
 
   /**

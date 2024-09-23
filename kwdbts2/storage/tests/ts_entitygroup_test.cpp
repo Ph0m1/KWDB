@@ -98,7 +98,7 @@ class TestTsEntityGroup : public TestBigTableInstance {
   void GenPayloadData(KTimestamp primary_tag, KTimestamp start_ts, int count, TSSlice* payload, int inc_step = 1) {
     auto tag_schema = entity_group_leader_->GetSchema();
     std::vector<AttributeInfo> data_schema;
-    KStatus s = table_->GetDataSchema(ctx_, &data_schema);
+    KStatus s = table_->GetDataSchemaExcludeDropped(ctx_, &data_schema);
     ASSERT_EQ(s, KStatus::SUCCESS);
     PayloadBuilder payload_gen(tag_schema, data_schema);
     // tag values are primarytag 
@@ -114,7 +114,7 @@ class TestTsEntityGroup : public TestBigTableInstance {
                                    reinterpret_cast<char*>(&col_value), sizeof(KTimestamp));
       }
     }
-    auto ret = payload_gen.Build(payload, 1);
+    auto ret = payload_gen.Build(payload);
     EXPECT_TRUE(ret);
   }
 
@@ -204,7 +204,7 @@ TEST_F(TestTsEntityGroup, create) {
   EXPECT_EQ(s, KStatus::SUCCESS);
   s = entity_group_other_->PutData(ctx_, payload, 0, &dedup_result);
   EXPECT_EQ(s, KStatus::SUCCESS);
-  delete[] payload.data;
+  free(payload.data);
 
   primary_tags.push_back(&primary_key);
   res.clear();
@@ -289,7 +289,7 @@ TEST_F(TestTsEntityGroup, InsertSometimes) {
     s = entity_group_leader_->PutData(ctx_, payload, 0, &dedup_result,kwdbts::DedupRule::KEEP);
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
-  delete[] payload.data;
+  free(payload.data);
 
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -328,7 +328,7 @@ TEST_F(TestTsEntityGroup, InsertCrossPartitionSometimes) {
     s = entity_group_leader_->PutData(ctx_, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
-  delete[] payload.data;
+  free(payload.data);
 
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -379,8 +379,7 @@ TEST_F(TestTsEntityGroup, mulitiInsert) {
   for (size_t i = 0; i < threads.size(); i++) {
     threads[i].join();
   }
-
-  delete[] payload.data;
+  free(payload.data);
 
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -431,8 +430,7 @@ TEST_F(TestTsEntityGroup, mulitiInsertCrossPartition) {
   for (size_t i = 0; i < threads.size(); i++) {
     threads[i].join();
   }
-
-  delete[] payload.data;
+  free(payload.data);
 
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -510,9 +508,8 @@ TEST_F(TestTsEntityGroup, mulitiInsertMultiEntity) {
   for (size_t i = 0; i < threads.size(); i++) {
     threads[i].join();
   }
-
-  delete[] payload.data;
-  delete[] payload1.data;
+  free(payload.data);
+  free(payload1.data);
 
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -566,7 +563,7 @@ TEST_F(TestTsEntityGroup, InsertAndDel) {
     ASSERT_EQ(s, KStatus::SUCCESS);
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
-  delete[] payload.data;
+  free(payload.data);
 
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);

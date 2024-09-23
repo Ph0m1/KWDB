@@ -37,7 +37,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	kwdberrors "github.com/cockroachdb/errors"
-	"github.com/pkg/errors"
 	"go.etcd.io/etcd/raft/raftpb"
 )
 
@@ -357,11 +356,11 @@ func (s *Store) processRaftSnapshotRequest(
 			_, expl, err = r.handleRaftReadyRaftMuLocked(ctx, inSnap)
 		}
 		if !r.IsInitialized() {
-			log.Warning(ctx, "current range is %s is not initialized, inSnap.IsTSSnapshot:%s  \n", r.RangeID, inSnap.IsTSSnapshot)
+			log.Warningf(ctx, "current range %d is not initialized, inSnap.IsTSSnapshot:%v \n", r.RangeID, inSnap.IsTSSnapshot)
 		}
 		maybeFatalOnRaftReadyErr(ctx, expl, err)
 		if inSnap.IsTSSnapshot && !r.IsInitialized() {
-			return roachpb.NewError(errors.Errorf("Apply TS snapshot failed, replica is uninitialized."))
+			return roachpb.NewError(kwdberrors.Errorf("apply ts snapshot failed, replica %d is uninitialized.", r.RangeID))
 		}
 		removePlaceholder = false
 		return nil

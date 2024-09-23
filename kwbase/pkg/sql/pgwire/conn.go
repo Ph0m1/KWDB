@@ -43,7 +43,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/security/audit/setting"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
@@ -860,16 +859,12 @@ func (c *conn) handleSimpleQuery(
 	tracing.AnnotateTrace()
 
 	c.parser.IsShortcircuit = unqis.GetTsinsertdirect()
-	var (
-		dbID, tabID uint32
-		colsDesc    []sqlbase.ColumnDescriptor
-		insertErr   error
-		tname       *tree.TableName
-	)
+	var dit sql.DirectInsertTable
 	c.parser.Dudgetstable = func(dbName string, tableName string) bool {
 		user := c.sessionArgs.User
 		var isTsTable bool
-		isTsTable, dbID, tabID, colsDesc, tname, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, dbName, tableName, user)
+		var insertErr error
+		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, dbName, tableName, user)
 		if insertErr != nil {
 			return false
 		}
@@ -900,9 +895,9 @@ func (c *conn) handleSimpleQuery(
 				if !isInsert {
 					break
 				}
-				colNum, insertLength, rowNum := sql.NumofInsertDirect(ins, colsDesc, stmts)
+				var di sql.DirectInsert
 				// the number of inserted values cannot be evenly divided by the number of inserted columns
-				if insertLength != rowNum*colNum {
+				if sql.NumofInsertDirect(ins, dit.ColsDesc, stmts, &di) != di.RowNum*di.ColNum {
 					c.parser.IsShortcircuit = false
 					actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize)
 					if expectedErr != nil {
@@ -918,57 +913,49 @@ func (c *conn) handleSimpleQuery(
 					defer tables.ReleaseTSTables(ctx)
 					var flags tree.ObjectLookupFlags
 					flags.Required = false
-					table, err := tables.GetTableVersion(ctx, txn, tname, flags)
+					table, err := tables.GetTableVersion(ctx, txn, dit.Tname, flags)
 					if table == nil || err != nil {
 						return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 					}
-					IDMap, PosMap, colIndexs, pArgs, prettyCols, primaryTagCols, err := sql.GetColsInfo(&colsDesc, ins)
-					if err != nil {
+					if err = sql.GetColsInfo(&dit.ColsDesc, ins, &di); err != nil {
 						return err
 					}
-					pArgs.TSVersion = uint32(table.TsTable.TsVersion)
+					di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
 					var ptCtx tree.ParseTimeContext
 					if con, ok := unqis.(sql.ConnectionHandler); ok {
 						ptCtx = tree.NewParseTimeContext(con.GetTsZone())
 					}
-					inputValues, err := sql.GetInputValues(ptCtx, rowNum, &colsDesc, IDMap, PosMap, stmts, colNum)
-					if err != nil {
-						return err
-					}
 					EvalContext := getEvalContext(ctx, txn, server)
-					if err != nil {
-						return err
-					}
-					priTagValMap := sql.BuildpriTagValMap(inputValues, primaryTagCols, colIndexs)
 					EvalContext.StartSinglenode = (server.GetCFG().StartMode == sql.StartSingleNode)
-					var hashRouter api.HashRouter
-					if EvalContext.StartSinglenode {
-						hashRouter = nil
-					} else {
-						hashRouter, err = api.GetHashRouterWithTable(dbID, tabID, false, EvalContext.Txn)
-						if err != nil {
-							return err
-						}
-					}
-					payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert)
-					for _, priTagRowIdx := range priTagValMap {
-						if err = sql.BuildPayload(payloadNodeMap, &EvalContext, inputValues, priTagRowIdx,
-							prettyCols, colIndexs, pArgs, dbID, tabID, hashRouter); err != nil {
-							return err
-						}
-					}
-
 					r := c.allocCommandResult()
 					*r = commandResult{
 						conn: c,
 						typ:  commandComplete,
 					}
+					if !EvalContext.StartSinglenode {
+						// start mode
+						if err = sql.GetPayloadMapForMuiltNode(ptCtx, dit, &di, stmts, EvalContext, table, cfg.NodeInfo.NodeID.Get()); err != nil {
+							return err
+						}
+					} else {
+						// start-single-node mode
+						if di.InputValues, err = sql.GetInputValues(ptCtx, &dit.ColsDesc, di, stmts); err != nil {
+							return err
+						}
+						priTagValMap := sql.BuildpriTagValMap(di)
+						di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
+						for _, priTagRowIdx := range priTagValMap {
+							if err = sql.BuildPayload(&EvalContext, priTagRowIdx, &di, dit, nil); err != nil {
+								return err
+							}
+						}
+					}
+
 					//for audit log
-					if err = handleInsertDirectAuditLog(ctx, server, startParse, stmts, unqis, tabID, query); err != nil {
+					if err = handleInsertDirectAuditLog(ctx, server, startParse, stmts, unqis, dit.TabID, query); err != nil {
 						return err
 					}
-					if err = Send(ctx, unqis, EvalContext, r, payloadNodeMap,
-						stmts, rowNum, c, timeReceived, startParse, endParse); err != nil {
+					if err = Send(ctx, unqis, EvalContext, r, stmts, di, c, timeReceived, startParse, endParse); err != nil {
 						return err
 					}
 					return nil
@@ -1072,18 +1059,15 @@ func Send(
 	unqis unqualifiedIntSizer,
 	EvalContext tree.EvalContext,
 	r *commandResult,
-	payloadNodeMap map[int]*sqlbase.PayloadForDistTSInsert,
 	stmts parser.Statements,
-	rowNum int,
+	di sql.DirectInsert,
 	c *conn,
-	timeReceived time.Time,
-	startParse time.Time,
-	endParse time.Time,
+	timeReceived, startParse, endParse time.Time,
 ) error {
 	if con, ok := unqis.(sql.ConnectionHandler); ok {
-		stmts[0].Insertdirectstmt.UseDeepRule, stmts[0].Insertdirectstmt.DedupRule, stmts[0].Insertdirectstmt.DedupRows = con.SendDTI(EvalContext.Context, &EvalContext, r, payloadNodeMap, stmts, rowNum)
+		stmts[0].Insertdirectstmt.UseDeepRule, stmts[0].Insertdirectstmt.DedupRule, stmts[0].Insertdirectstmt.DedupRows = con.SendDTI(EvalContext.Context, &EvalContext, r, di, stmts)
 		stmts[0].Insertdirectstmt.InsertFast = true
-		stmts[0].Insertdirectstmt.RowsAffected = int64(rowNum)
+		stmts[0].Insertdirectstmt.RowsAffected = int64(di.RowNum)
 		if err := c.stmtBuf.Push(
 			ctx,
 			sql.ExecStmt{
@@ -1167,17 +1151,12 @@ func (c *conn) handleParse(
 	}
 
 	c.parser.IsShortcircuit = unqis.GetTsinsertdirect()
-	var (
-		dbID, tabID uint32
-		colsDesc    []sqlbase.ColumnDescriptor
-		insertErr   error
-		tname       *tree.TableName
-		desc        tree.NameList
-	)
+	var dit sql.DirectInsertTable
 	c.parser.Dudgetstable = func(dbName string, tableName string) bool {
 		user := c.sessionArgs.User
 		var isTsTable bool
-		isTsTable, dbID, tabID, colsDesc, tname, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, dbName, tableName, user)
+		var insertErr error
+		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, dbName, tableName, user)
 		if insertErr != nil {
 			return false
 		}
@@ -1245,14 +1224,14 @@ Reparse:
 	var insclosnum int
 	if stmt.Insertdirectstmt.InsertFast {
 		if v, ok := stmt.AST.(*tree.Insert); ok {
-			desc = make(tree.NameList, len(v.Columns))
+			dit.Desc = make(tree.NameList, len(v.Columns))
 			if v.Columns != nil {
-				copy(desc, v.Columns)
+				copy(dit.Desc, v.Columns)
 			}
-			if len(desc) == 0 {
-				insclosnum = len(colsDesc)
+			if len(dit.Desc) == 0 {
+				insclosnum = len(dit.ColsDesc)
 			} else {
-				insclosnum = len(desc)
+				insclosnum = len(dit.Desc)
 			}
 		}
 	}
@@ -1267,12 +1246,8 @@ Reparse:
 			ParseStart:   startParse,
 			ParseEnd:     endParse,
 			PrepareInsertDirect: sql.PrepareInsertDirect{
-				ColsDesc:   colsDesc,
-				Inscols:    desc,
+				Dit:        dit,
 				Inscolsnum: insclosnum,
-				DbID:       dbID,
-				TabID:      tabID,
-				Tname:      tname,
 			},
 		})
 }

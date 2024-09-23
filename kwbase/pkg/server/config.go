@@ -325,6 +325,8 @@ type Config struct {
 
 	// Forbid cache coredump for go test, for example TestFuncNull
 	ForbidCatchCoreDump bool
+
+	StartVacuum bool
 }
 
 const (
@@ -436,7 +438,7 @@ func MakeConfig(ctx context.Context, st *cluster.Settings) Config {
 		ScanMaxIdleTime:                defaultScanMaxIdleTime,
 		EventLogEnabled:                defaultEventLogEnabled,
 		EnableWebSessionAuthentication: !disableWebLogin,
-
+		StartVacuum:                    true,
 		Stores: base.StoreSpecList{
 			Specs: []base.StoreSpec{storeSpec},
 		},
@@ -692,6 +694,8 @@ func (cfg *Config) CreateTsEngine(
 		TaskQueueSize:  taskQueueSize,
 		BufferPoolSize: bufferPoolSize,
 		LogCfg:         cfg.LogConfig,
+		StartVacuum:    cfg.StartVacuum,
+		IsSingleNode:   GetSingleNodeModeFlag(cfg.ModeFlag),
 	}
 	tsDB, err := tse.NewTsEngine(ctx, tsConfig, stopper, rangeIndex)
 	if err != nil {

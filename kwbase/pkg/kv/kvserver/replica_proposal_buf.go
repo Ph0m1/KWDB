@@ -486,26 +486,34 @@ func (b *propBuf) FlushLockedWithRaftGroup(raftGroup *raft.RawNode) (int, error)
 			// TsRequest is encapsulated into entry.request. When it is stored on
 			// disk, the corresponding processing interface is called according to
 			// the request type.
-			var IsTsPut, IsTsDelete, IsTsDeleteEntity, IsCreateTSSnapshot, IsTsTagUpdate, IsMultiEntities bool
+			var IsTsDML, isClearTsRange bool
 			if p.Request.Replica.GetTag() == roachpb.TS_REPLICA {
 				for _, ru := range p.Request.Requests {
 					req := ru.GetInner()
-					if _, IsTsPut = req.(*roachpb.TsPutRequest); IsTsPut {
-						break
-					} else if _, IsTsDelete = req.(*roachpb.TsDeleteRequest); IsTsDelete {
-						break
-					} else if _, IsTsDeleteEntity = req.(*roachpb.TsDeleteEntityRequest); IsTsDeleteEntity {
-						break
-					} else if _, IsCreateTSSnapshot = req.(*roachpb.CreateTSSnapshotRequest); IsCreateTSSnapshot {
-						break
-					} else if _, IsTsTagUpdate = req.(*roachpb.TsTagUpdateRequest); IsTsTagUpdate {
-						break
-					} else if _, IsMultiEntities = req.(*roachpb.TsDeleteMultiEntitiesDataRequest); IsMultiEntities {
+					switch req.(type) {
+					case *roachpb.TsPutTagRequest,
+						*roachpb.TsRowPutRequest,
+						*roachpb.TsDeleteRequest,
+						*roachpb.TsDeleteEntityRequest,
+						*roachpb.CreateTSSnapshotRequest,
+						*roachpb.TsTagUpdateRequest,
+						*roachpb.TsDeleteMultiEntitiesDataRequest:
+						IsTsDML = true
+					default:
+						continue
+					}
+					break
+				}
+			} else {
+				for _, ru := range p.Request.Requests {
+					req := ru.GetInner()
+					if r, isClearReq := req.(*roachpb.ClearRangeRequest); isClearReq && r.TableId != 0 {
+						isClearTsRange = true
 						break
 					}
 				}
 			}
-			if IsTsPut || IsTsDelete || IsTsDeleteEntity || IsCreateTSSnapshot || IsTsTagUpdate || IsMultiEntities {
+			if IsTsDML || isClearTsRange {
 				request, _ := protoutil.Marshal(p.Request)
 				ents = append(ents, raftpb.Entry{
 					Request: request,

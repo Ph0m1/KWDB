@@ -80,6 +80,9 @@ KBStatus StWriteWorker::do_work(KTimestamp  new_ts) {
     KWDB_START();
     DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
     stat = st_inst_->GetTSEngine()->PutData(ctx, w_table, st_inst_->rangeGroup(),  &payload, 1, 0, &dedup_result);
+    if (stat != KStatus::SUCCESS) {
+      std::cout << "failed put data." << std::endl;
+    }
     s = dump_zstatus("PutData", ctx, stat);
     KWDB_DURATION(_row_put_time);
   }
@@ -186,7 +189,7 @@ KBStatus StScanWorker::do_work(KTimestamp  new_ts) {
   ts_spans.push_back(ts_span);
   std::vector<k_uint32> scan_cols;
   std::vector<AttributeInfo> data_schema;
-  stat = ts_table->GetDataSchema(ctx, &data_schema);
+  stat = ts_table->GetDataSchemaExcludeDropped(ctx, &data_schema);
   for (size_t i = 0; i < data_schema.size(); i++) {
     scan_cols.push_back(i);
   }
@@ -197,7 +200,7 @@ KBStatus StScanWorker::do_work(KTimestamp  new_ts) {
 
   vector<uint32_t> entity_ids = {entity_index};
   stat = tbl_range->GetIterator(ctx, group_id, entity_ids, ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range,
-                      false, false, false);
+                      {}, false, false, false);
   s = dump_zstatus("GetIterator", ctx, stat);
   if (s.isNotOK()) {
     return s;
@@ -230,6 +233,95 @@ std::string StScanWorker::show_extra() {
       , _agg_time.avg() / 1e6 ,_agg_time.max() / 1e6);
   _scan_time.reset();
   _agg_time.reset();
+  return msg;
+}
+
+KBStatus StSnapshotWorker::do_work(KTimestamp  new_ts) {
+  if (table_ids_.empty()) {
+    can_run_ = false;
+    return KBStatus::Invalid("no table to run");
+  }
+  // select the table in order and execute compress
+  uint32_t r_table = table_ids_[table_i];
+  if (!IsTableCreated(r_table, table_i)) {
+    log_INFO("Table[%d] not created!", r_table);
+    return KBStatus::OK();
+  }
+  table_i++;
+  if (table_i >= table_ids_.size()) {
+    table_i = 0;
+  }
+  uint64_t read_snapshot_id, write_snapshot_id;
+  KStatus s;
+  size_t snapshot_size = 0;
+  KWDB_START();
+  {
+    KWDB_START();
+    s = st_inst_->GetTSEngine()->CreateSnapshotForRead(ctx, table_ids_[table_i], 0, UINT64_MAX,
+                                                        {INT64_MIN, INT64_MAX}, &read_snapshot_id);
+    if (s != KStatus::SUCCESS) {
+      return dump_zstatus("CreateSnapshotForRead", ctx, s);
+    }
+    s = st_inst_->GetTSEngine()->CreateSnapshotForWrite(ctx, st_inst_->GetSnapShotTableId(), 0,
+                                            UINT64_MAX, {INT64_MIN, INT64_MAX}, &write_snapshot_id);
+    if (s != KStatus::SUCCESS) {
+      return dump_zstatus("CreateSnapshotForWrite", ctx, s);
+    }
+    KWDB_DURATION(_init_time);
+  }
+  while (true) {
+    TSSlice payload{nullptr, 0};
+    {
+      KWDB_START();
+      s = st_inst_->GetTSEngine()->GetSnapshotNextBatchData(ctx, read_snapshot_id, &payload);
+      if (s != KStatus::SUCCESS) {
+        return dump_zstatus("GetSnapshotNextBatchData", ctx, s);
+      }
+      KWDB_DURATION(_get_time);
+    }
+    snapshot_size += payload.len;
+    if (payload.data != nullptr) {
+      KWDB_START();
+      s = st_inst_->GetTSEngine()->WriteSnapshotBatchData(ctx, write_snapshot_id, payload);
+      if (s != KStatus::SUCCESS) {
+        return dump_zstatus("WriteSnapshotBatchData", ctx, s);
+      }
+      delete payload.data;
+      KWDB_DURATION(_put_time);
+    } else {
+      break;
+    }
+  }
+  {
+    KWDB_START();
+    st_inst_->GetTSEngine()->WriteSnapshotSuccess(ctx, write_snapshot_id);
+    st_inst_->GetTSEngine()->DeleteSnapshot(ctx, read_snapshot_id);
+    st_inst_->GetTSEngine()->DeleteSnapshot(ctx, write_snapshot_id);
+    KWDB_DURATION(_del_time);
+  }
+  KWDB_DURATION(_total_time);
+  _total_size.add(snapshot_size);
+
+  return KBStatus::OK();
+}
+
+std::string StSnapshotWorker::show_extra() {
+  char msg[256];
+  snprintf(msg, sizeof(msg), ",init Time=%.3f(%.0f) ms , gen Time=%.3f(%.0f) ms,"
+                     "write Time=%.3f(%.0f) ms, drop Time=%.3f(%.0f) ms,"
+                     " total Time=%.3f(%.0f) ms, data size %.3f(%.0f)",
+                    _init_time.avg() / 1e6, _init_time.max() / 1e6,
+                    _get_time.avg() / 1e6, _get_time.max() / 1e6,
+                    _put_time.avg() / 1e6, _put_time.max() / 1e6,
+                    _del_time.avg() / 1e6, _del_time.max() / 1e6,
+                    _total_time.avg() / 1e6, _total_time.max() / 1e6,
+                    _total_size.avg(), _total_size.max());
+  _init_time.reset();
+  _get_time.reset();
+  _put_time.reset();
+  _del_time.reset();
+  _total_time.reset();
+  _total_size.reset();
   return msg;
 }
 

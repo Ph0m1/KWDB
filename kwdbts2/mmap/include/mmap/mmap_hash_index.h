@@ -162,8 +162,8 @@ class MMapHashIndex: public MMapFile {
   IndexMetaData& metaData() const
   { return *(reinterpret_cast<IndexMetaData *>(mem_)); }
 
-  virtual int open(const string &url, const std::string &db_path, const string &tbl_sub_path, int flag,
-    ErrorInfo &err_info);
+  virtual int open(const string &path, const std::string &db_path, const string &tbl_sub_path, int flag,
+                   ErrorInfo &err_info);
 
   inline uint8_t type() const  { return type_; }
 

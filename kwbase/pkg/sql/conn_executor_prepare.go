@@ -29,7 +29,6 @@ import (
 	"fmt"
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgwirebase"
@@ -98,7 +97,7 @@ func (ex *connExecutor) execPrepare(
 		// both map to TypeInt), so we need to maintain the types sent by
 		// the client.
 		if ps.Insertdirectstmt.InsertFast && ps.TypeHints[i] == nil {
-			inferredTypes[i] = parseCmd.PrepareInsertDirect.ColsDesc[i%parseCmd.PrepareInsertDirect.Inscolsnum].Type.InternalType.Oid
+			inferredTypes[i] = parseCmd.PrepareInsertDirect.Dit.ColsDesc[i%parseCmd.PrepareInsertDirect.Inscolsnum].Type.InternalType.Oid
 			continue
 		}
 		if inferredTypes[i] == 0 {
@@ -308,10 +307,12 @@ func (ex *connExecutor) execBind(
 	}
 
 	numQArgs := uint16(len(ps.InferredTypes))
-	// Decode the arguments, except for internal queries for which we just verify
-	// that the arguments match what's expected.
-	qargs := make(tree.QueryArguments, numQArgs)
-
+	var qargs tree.QueryArguments
+	if ps.PrepareInsertDirect.Dit.ColsDesc == nil {
+		// Decode the arguments, except for internal queries for which we just verify
+		// that the arguments match what's expected.
+		qargs = make(tree.QueryArguments, numQArgs)
+	}
 	if bindCmd.internalArgs != nil {
 		if len(bindCmd.internalArgs) != int(numQArgs) {
 			return retErr(
@@ -359,19 +360,21 @@ func (ex *connExecutor) execBind(
 		}
 
 		ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
-		for i, arg := range bindCmd.Args {
-			k := tree.PlaceholderIdx(i)
-			t := ps.InferredTypes[i]
-			if arg == nil {
-				// nil indicates a NULL argument value.
-				qargs[k] = tree.DNull
-			} else {
-				d, err := pgwirebase.DecodeOidDatum(ptCtx, t, qArgFormatCodes[i], arg)
-				if err != nil {
-					return retErr(pgerror.Wrapf(err, pgcode.ProtocolViolation,
-						"error in argument for %s", k))
+		if ps.PrepareInsertDirect.Dit.ColsDesc == nil {
+			for i, arg := range bindCmd.Args {
+				k := tree.PlaceholderIdx(i)
+				t := ps.InferredTypes[i]
+				if arg == nil {
+					// nil indicates a NULL argument value.
+					qargs[k] = tree.DNull
+				} else {
+					d, err := pgwirebase.DecodeOidDatum(ptCtx, t, qArgFormatCodes[i], arg)
+					if err != nil {
+						return retErr(pgerror.Wrapf(err, pgcode.ProtocolViolation,
+							"error in argument for %s", k))
+					}
+					qargs[k] = d
 				}
-				qargs[k] = d
 			}
 		}
 	}
@@ -433,6 +436,7 @@ func (ex *connExecutor) execPreparedirectBind(
 			"unknown prepared statement %q", bindCmd.PreparedStatementName))
 	}
 	if ins, ok := ps.PrepareMetadata.Statement.AST.(*tree.Insert); ok {
+		var di DirectInsert
 		copy(ins.Columns, ps.PrepareInsertDirect.Inscols)
 		ie := ex.server.GetCFG().InternalExecutor
 		cfg := ie.GetServer().GetCFG()
@@ -441,13 +445,17 @@ func (ex *connExecutor) execPreparedirectBind(
 			defer tables.ReleaseTSTables(ctx)
 			var flags tree.ObjectLookupFlags
 			flags.Required = false
-			IDMap, PosMap, colIndexs, pArgs, prettyCols, primaryTagCols, err := GetColsInfo(&ps.PrepareInsertDirect.ColsDesc, ins)
-			if err != nil {
+			table, err := tables.GetTableVersion(ctx, txn, ps.PrepareInsertDirect.Dit.Tname, flags)
+			if table == nil || err != nil {
+
+			}
+			if err := GetColsInfo(&ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di); err != nil {
 				return err
 			}
-			valueNum, colNum := len(bindCmd.Args), len(IDMap)
+			di.RowNum, di.ColNum = len(bindCmd.Args), len(di.IDMap)
 			ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
-			inputValues, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, ps.PrepareInsertDirect.ColsDesc, IDMap, PosMap, valueNum, colNum)
+			// Calculate rowTimestamps and save the value of the timestamp column
+			inputValues, rowTimestamps, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, ps.PrepareInsertDirect.Dit.ColsDesc, di)
 			if err != nil {
 				return err
 			}
@@ -459,26 +467,27 @@ func (ex *connExecutor) execPreparedirectBind(
 				InternalExecutor: ex.server.GetCFG().InternalExecutor,
 				Settings:         ex.server.GetCFG().Settings,
 			}
-			var hashRouter api.HashRouter
-			EvalContext.StartSinglenode = (ex.server.GetCFG().StartMode == StartSingleNode)
-			if EvalContext.StartSinglenode {
-				hashRouter = nil
-			} else {
-				var err error
-				if hashRouter, err = api.GetHashRouterWithTable(ps.PrepareInsertDirect.DbID, ps.PrepareInsertDirect.TabID, false, EvalContext.Txn); err != nil {
-					return err
-				}
-			}
-			priTagValMap := BuildPreparepriTagValMap(bindCmd.Args, primaryTagCols, colIndexs, valueNum, colNum)
-			payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert)
 			EvalContext.StartSinglenode = (ex.server.GetCFG().StartMode == StartSingleNode)
 
-			for _, priTagRowIdx := range priTagValMap {
-				if err = BuildPreparePayload(payloadNodeMap, &EvalContext, inputValues, priTagRowIdx,
-					prettyCols, colIndexs, pArgs, ps.PrepareInsertDirect.DbID, ps.PrepareInsertDirect.TabID, hashRouter, bindCmd.Args, colNum); err != nil {
+			if !EvalContext.StartSinglenode {
+				//start mode
+				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
+				if err = BuildRowBytesForPrepareTsInsert(ptCtx, bindCmd.Args, ps.PrepareInsertDirect.Dit, &di, EvalContext, table, cfg.NodeInfo.NodeID.Get(), rowTimestamps); err != nil {
 					return err
 				}
+
+			} else {
+				// start-single-node mode
+				priTagValMap := BuildPreparepriTagValMap(bindCmd.Args, di)
+				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
+				for _, priTagRowIdx := range priTagValMap {
+					if err = BuildPreparePayload(&EvalContext, inputValues, priTagRowIdx,
+						&di, ps.PrepareInsertDirect.Dit, nil, bindCmd.Args); err != nil {
+						return err
+					}
+				}
 			}
+
 			numCols := len(ps.Columns)
 			columnFormatCodes := bindCmd.OutFormats
 			if len(bindCmd.OutFormats) == 1 && numCols > 1 {
@@ -501,7 +510,7 @@ func (ex *connExecutor) execPreparedirectBind(
 				ex.implicitTxn(),
 			)
 
-			ps.PrepareInsertDirect.payloadNodeMap = payloadNodeMap
+			ps.PrepareInsertDirect.payloadNodeMap = di.PayloadNodeMap
 			ps.PrepareInsertDirect.stmtRes = stmtRes
 			ps.PrepareInsertDirect.EvalContext = EvalContext
 			ps.PrepareInsertDirect.EvalContext.Txn = nil

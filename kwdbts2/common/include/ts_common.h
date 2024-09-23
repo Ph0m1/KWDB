@@ -20,7 +20,6 @@
 #include <utility>
 #include <vector>
 #include <algorithm>
-
 #include "data_type.h"
 #include "kwdb_type.h"
 #include "lg_commonv2.h"
@@ -240,10 +239,20 @@ struct VarColumnBatch : public Batch {
 
 // EntityResultIndex
 struct EntityResultIndex {
+  EntityResultIndex() {}
+  EntityResultIndex(uint64_t entityGroupId, uint32_t entityId, uint32_t subGroupId):
+                      entityGroupId(entityGroupId), entityId(entityId), subGroupId(subGroupId) {}
+  EntityResultIndex(uint64_t entityGroupId, uint32_t entityId, uint32_t subGroupId, void* mem) :
+                     entityGroupId(entityGroupId), entityId(entityId), subGroupId(subGroupId), mem(mem) {}
+  EntityResultIndex(uint64_t entityGroupId, uint32_t entityId, uint32_t subGroupId, uint32_t hash_point, void* mem) :
+                     entityGroupId(entityGroupId), entityId(entityId), subGroupId(subGroupId),
+                     hash_point(hash_point), mem(mem) {}
   uint64_t entityGroupId{0};
   uint32_t entityId{0};
   uint32_t subGroupId{0};
-  void* mem{nullptr};  // primary_tags address
+  uint32_t hash_point{0};
+  uint32_t index{0};
+  void* mem{nullptr};  // primaryTags address
 
   bool equalsWithoutMem(const EntityResultIndex& entity_index) {
     if (entityId != entity_index.entityId ||
@@ -826,6 +835,16 @@ inline int64_t convertToTimestamp(std::string& ts_str) {
     LOG_ERROR("Convert string to timestamp failed.");
     abort();
   }
+}
+
+inline std::string convertTsToDirectoryName(timestamp64 ts) {
+  std::string ret;
+  if (ts < 0) {
+    ret = "m";
+    ts = 0 - ts;
+  }
+  ret += std::to_string(ts);
+  return ret;
 }
 
 inline string booleanToString(bool v) {

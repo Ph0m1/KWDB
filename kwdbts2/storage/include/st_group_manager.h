@@ -79,6 +79,24 @@ class SubEntityGroupManager : public TSObject {
   TsSubEntityGroup* GetSubGroup(SubGroupID subgroup_id, ErrorInfo& err_info, bool create_not_exist = false);
 
   /**
+   * @brief Alter SubGroup column
+   * @param[in] attr_info Attribute information
+   * @param[out] err_info error information
+   * @return
+   */
+  int AlterSubGroupColumn(AttributeInfo& attr_info, ErrorInfo& err_info);
+
+  /**
+   * @brief Query the Partition time of time span in the specified SubGroup directory.
+   * @param[in] ts_span  time span
+   * @param[in] subgroup_id   subgroup number
+   * @param[in] for_new Whether to create a new partition table if it does not exist
+   *
+   * @return vector<timestamp64>  partition time vector
+   */
+  vector<timestamp64> GetPartitions(const KwTsSpan& ts_span, SubGroupID subgroup_id, ErrorInfo& err_info);
+
+  /**
    * @brief Query the PartitionTable of the specified partition time in the specified SubGroup directory.
    * @param[in] ts  time in seconds
    * @param[in] subgroup_id   subgroup number
@@ -148,10 +166,6 @@ class SubEntityGroupManager : public TSObject {
 
   inline std::string GetSubGroupTblSubPath(SubGroupID subgroup_id) {
     return tbl_sub_path_ + std::to_string(table_id_) + "_" + std::to_string(subgroup_id) + "/";
-  }
-
-  inline std::string GetPartitionUrl(SubGroupID subgroup_id, timestamp64 partition_time) {
-    return GetSubGroupTblSubPath(subgroup_id) + std::to_string(partition_time) + "/";
   }
 
   inline SubGroupID GetMaxSubGroupId() {

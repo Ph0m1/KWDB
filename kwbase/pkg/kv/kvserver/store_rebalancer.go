@@ -333,7 +333,7 @@ func (sr *StoreRebalancer) rebalanceStore(
 			replWithStats.repl.RangeID, replWithStats.qps, descBeforeRebalance.Replicas(), targets)
 		timeout := sr.rq.processTimeoutFunc(sr.st, replWithStats.repl)
 		if err := contextutil.RunWithTimeout(ctx, "relocate range", timeout, func(ctx context.Context) error {
-			return sr.rq.store.AdminRelocateRange(ctx, *descBeforeRebalance, targets, false)
+			return sr.rq.store.AdminRelocateRange(ctx, *descBeforeRebalance, targets)
 		}); err != nil {
 			log.Errorf(ctx, "unable to relocate range to %v: %+v", targets, err)
 			continue

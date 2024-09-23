@@ -148,10 +148,10 @@ void TagRowBatch::ResetLine() {
 
 KStatus TagRowBatch::GetTagData(TagData *tagData, void **bitmap,
                                 k_uint32 line) {
-  if (line >= Count()) {
+  if (line >= count_) {
     LOG_ERROR("failed to get the %uth line, "
       "exceeds the TagRowBatch total number of rows %u",
-      line, Count());
+      line, count_);
     return KStatus::FAIL;
   }
   if (res_.data.size() == 0) {
@@ -163,20 +163,20 @@ KStatus TagRowBatch::GetTagData(TagData *tagData, void **bitmap,
   tagData->resize(tag_num);
 
   k_uint32 batch_no = 0, batch_line = 0;
-  if (isFilter_) {
-    batch_no = selection_[line].batch_;
-    batch_line = selection_[line].line_;
-  } else {
-    auto &colBatchs = res_.data[0];
-    batch_line = line;
-    for (auto &it : colBatchs) {
-      if (batch_line >= it->count) {
-        batch_line -= it->count;
-        batch_no++;
-      } else {
-        break;
-      }
+  // if (isFilter_) {
+  //   batch_no = selection_[line].batch_;
+  //   batch_line = selection_[line].line_;
+  // } else {
+  auto &colBatchs = res_.data[0];
+  batch_line = line;
+  for (auto &it : colBatchs) {
+    if (batch_line >= it->count) {
+      batch_line -= it->count;
+      batch_no++;
+    } else {
+      break;
     }
+    // }
   }
 
   for (int idx = 0; idx < tag_num; idx++) {
@@ -264,54 +264,104 @@ void TagRowBatch::Init(TABLE *table) {
   res_.setColumnNum(table_->scan_tags_.size());
 }
 
-KStatus TagRowBatch::GetEntities(std::vector<EntityResultIndex> *entities,
-                                 k_uint32 *start_tag_index) {
-  k_uint32 entities_num_per_pipe, remainder;
-  *(start_tag_index) = current_pipe_line_;
-  if (current_pipe_no_ >= pipe_entity_num_.size()) {
-    return FAIL;
-  }
-  if (isFilter_) {
-    for (k_uint32 i = 0; i < pipe_entity_num_[current_pipe_no_]; i++) {
-      entities->emplace_back(
-          entity_indexs_[selection_[current_pipe_line_].entity_]);
-      current_pipe_line_++;
+KStatus TagRowBatch::GetEntities(kwdbContext_p ctx,
+                                 std::vector<EntityResultIndex> *entities) {
+  if (ctx->is_single_node) {
+    k_uint32 entities_num_per_pipe, remainder;
+    if (current_pipe_no_ >= pipe_entity_num_.size()) {
+      return FAIL;
     }
+    entities->reserve(pipe_entity_num_[current_pipe_no_]);
+    if (isFilter_) {
+      for (k_uint32 i = 0; i < pipe_entity_num_[current_pipe_no_]; i++) {
+        entity_indexs_[selection_[current_pipe_line_].entity_].index = selection_[current_pipe_line_].entity_;
+        entities->push_back(
+            entity_indexs_[selection_[current_pipe_line_].entity_]);
+        current_pipe_line_++;
+      }
+    } else {
+      for (k_uint32 i = 0; i < pipe_entity_num_[current_pipe_no_]; i++) {
+        entity_indexs_[current_pipe_line_].index = current_pipe_line_;
+        entities->push_back(entity_indexs_[current_pipe_line_]);
+        current_pipe_line_++;
+      }
+    }
+    current_pipe_no_++;
+    return SUCCESS;
   } else {
-    for (k_uint32 i = 0; i < pipe_entity_num_[current_pipe_no_]; i++) {
-      entities->emplace_back(entity_indexs_[current_pipe_line_]);
-      current_pipe_line_++;
+    if (hash_entity_indexs_.empty()) {
+      return FAIL;
     }
+    // 获取指向第一个元素的迭代器
+    auto it = hash_entity_indexs_.begin();
+    entities->reserve(it->second.size());
+
+    for (const k_int32 i : it->second) {
+      entity_indexs_[i].index = i;
+      entities->push_back(entity_indexs_[i]);
+    }
+
+    // 从map中删除第一个元素
+    hash_entity_indexs_.erase(it);
+    return SUCCESS;
   }
-  current_pipe_no_++;
-  return SUCCESS;
 }
 
-bool TagRowBatch::isAllDistributed() {
-  return current_pipe_no_ >= valid_pipe_no_;
+bool TagRowBatch::isAllDistributed(kwdbContext_p ctx) {
+  if (ctx->is_single_node) {
+    return current_pipe_no_ >= valid_pipe_no_;
+  } else {
+    return hash_entity_indexs_.empty();
+  }
 }
-void TagRowBatch::SetPipeEntityNum(k_uint32 pipe_degree) {
+
+void TagRowBatch::SetPipeEntityNum(kwdbContext_p ctx, k_uint32 pipe_degree) {
   current_pipe_no_ = 0;
   current_pipe_line_ = 0;
-  k_int32 entities_num_per_pipe, remainder;
-  if (isFilter_) {
-    entities_num_per_pipe = selection_.size() / pipe_degree;
-    remainder = selection_.size() % pipe_degree;
-  } else {
-    entities_num_per_pipe = entity_indexs_.size() / pipe_degree;
-    remainder = entity_indexs_.size() % pipe_degree;
-  }
-  for (k_int32 i = 0; i < pipe_degree; i++) {
-    int current_size = entities_num_per_pipe;
-    if (remainder > 0) {
-      current_size++;
-      remainder--;
+  k_int32 remainder;
+  if (ctx->is_single_node) {
+    k_int32 entities_num_per_pipe;
+    if (isFilter_) {
+      entities_num_per_pipe = selection_.size() / pipe_degree;
+      remainder = selection_.size() % pipe_degree;
+    } else {
+      entities_num_per_pipe = entity_indexs_.size() / pipe_degree;
+      remainder = entity_indexs_.size() % pipe_degree;
     }
-    pipe_entity_num_.emplace_back(current_size);
-    if (current_size > 0) {
-      valid_pipe_no_++;
+    for (k_int32 i = 0; i < pipe_degree; i++) {
+      int current_size = entities_num_per_pipe;
+      if (remainder > 0) {
+        current_size++;
+        remainder--;
+      }
+      pipe_entity_num_.emplace_back(current_size);
+      if (current_size > 0) {
+        valid_pipe_no_++;
+      }
+    }
+  } else {
+    if (isFilter_) {
+      for (const auto &selection : selection_) {
+        k_uint32 key = entity_indexs_[selection.entity_].hash_point;
+        // 如果映射中没有这个键，就创建一个新的vector
+        if (hash_entity_indexs_.find(key) == hash_entity_indexs_.end()) {
+          hash_entity_indexs_[key] = std::vector<k_uint32>();
+        }
+        // 将EntityResultIndex对象添加到对应的vector中
+        hash_entity_indexs_[key].emplace_back(selection.entity_);
+      }
+
+    } else {
+      for (size_t i = 0; i < entity_indexs_.size(); ++i) {
+        k_uint32 key = entity_indexs_[i].hash_point;
+        // 如果映射中没有这个键，就创建一个新的vector
+        if (hash_entity_indexs_.find(key) == hash_entity_indexs_.end()) {
+          hash_entity_indexs_[key] = std::vector<k_uint32>();
+        }
+        // 将EntityResultIndex对象添加到对应的vector中
+        hash_entity_indexs_[key].emplace_back(i);
+      }
     }
   }
 }
-
 }  // namespace kwdbts

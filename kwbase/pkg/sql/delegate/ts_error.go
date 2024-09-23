@@ -67,9 +67,6 @@ func TSUnsupportedShowError(n tree.Statement) error {
 	case *tree.ShowRanges:
 		op = "show ranges"
 
-	case *tree.ShowTsPartitions:
-		op = "show ts partitions"
-
 	case *tree.ShowZoneConfig:
 		op = "show zone config"
 

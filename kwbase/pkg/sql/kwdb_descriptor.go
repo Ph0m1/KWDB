@@ -2641,6 +2641,8 @@ func (p *planner) createTSSchemaChangeJob(
 		Username:    p.User(),
 		Details:     details,
 		Progress:    jobspb.SyncMetaCacheProgress{},
+		// ts schema change job can not be canceled
+		NonCancelable: true,
 	}
 	job, err := p.extendedEvalCtx.QueueJob(jobRecord)
 	if err != nil {

@@ -58,8 +58,8 @@ class TestEntityTableManager : public TestBigTableInstance {
       MakeDirectory(kDbPath + tbl_sub_path_);
       int encoding = ENTITY_TABLE | NO_DEFAULT_TABLE;
       MMapMetricsTable* tmp_bt = new MMapMetricsTable();
-      string bt_url = nameToEntityBigTableURL(std::to_string(table_id_));
-      if (tmp_bt->open(bt_url, kDbPath, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 ||
+      string bt_path = nameToEntityBigTablePath(std::to_string(table_id_));
+      if (tmp_bt->open(bt_path, kDbPath, tbl_sub_path_, MMAP_CREAT_EXCL, err_info) >= 0 ||
           err_info.errcode == KWECORR) {
         tmp_bt->create(schema_, 1, tbl_sub_path_, kwdbts::EngineOptions::iot_interval, encoding, err_info, false);
       }
@@ -100,7 +100,7 @@ TEST_F(TestEntityTableManager, group) {
   // et_manager_->ReleasePartitionTable(g1_bt);
   TsTimePartition* sg1_bt = et_manager_->CreatePartitionTable(1704280045000, 0, err_info);
   ASSERT_EQ(err_info.errmsg, "");
-  ASSERT_EQ(sg1_bt->getSchemaInfo().size(), 3);
+  ASSERT_EQ(sg1_bt->getSchemaInfoIncludeDropped().size(), 3);
   et_manager_->ReleasePartitionTable(sg1_bt);
 
   TsSubEntityGroup* g2_bt = et_manager_->CreateSubGroup(1, err_info);
@@ -109,7 +109,7 @@ TEST_F(TestEntityTableManager, group) {
   // et_manager_->ReleasePartitionTable(g2_bt);
   TsTimePartition* sg2_bt = et_manager_->CreatePartitionTable(1704280045000, 1, err_info);
   ASSERT_EQ(err_info.errmsg, "");
-  ASSERT_EQ(sg2_bt->getSchemaInfo().size(), 3);
+  ASSERT_EQ(sg2_bt->getSchemaInfoIncludeDropped().size(), 3);
   et_manager_->ReleasePartitionTable(sg2_bt);
 
   et_manager_->CreatePartitionTable(1704280045000, 0, err_info);
@@ -151,7 +151,7 @@ TEST_F(TestEntityTableManager, partition) {
     // et_manager_->ReleasePartitionTable(g1_bt);
     TsTimePartition* sg1_bt = et_manager_->CreatePartitionTable(p1_time, 0, err_info);
     ASSERT_EQ(err_info.errmsg, "");
-    ASSERT_EQ(sg1_bt->getSchemaInfo().size(), 3);
+    ASSERT_EQ(sg1_bt->getSchemaInfoIncludeDropped().size(), 3);
     et_manager_->ReleasePartitionTable(sg1_bt);
 
     TsSubEntityGroup* g2_bt = et_manager_->CreateSubGroup(1, err_info);
@@ -160,7 +160,7 @@ TEST_F(TestEntityTableManager, partition) {
     // et_manager_->ReleasePartitionTable(g2_bt);
     TsTimePartition* sg2_bt = et_manager_->CreatePartitionTable(p1_time, 1, err_info);
     ASSERT_EQ(err_info.errmsg, "");
-    ASSERT_EQ(sg2_bt->getSchemaInfo().size(), 3);
+    ASSERT_EQ(sg2_bt->getSchemaInfoIncludeDropped().size(), 3);
     et_manager_->ReleasePartitionTable(sg2_bt);
 
     TsSubEntityGroup* g3_bt = et_manager_->CreateSubGroup(2, err_info);
@@ -169,7 +169,7 @@ TEST_F(TestEntityTableManager, partition) {
     // et_manager_->ReleasePartitionTable(g3_bt);
     TsTimePartition* sg3_bt = et_manager_->CreatePartitionTable(p1_time, 2, err_info);
     ASSERT_EQ(err_info.errmsg, "");
-    ASSERT_EQ(sg3_bt->getSchemaInfo().size(), 3);
+    ASSERT_EQ(sg3_bt->getSchemaInfoIncludeDropped().size(), 3);
     et_manager_->ReleasePartitionTable(sg3_bt);
 
     // recreate group1 failed
@@ -183,7 +183,7 @@ TEST_F(TestEntityTableManager, partition) {
     // SubGroup1 create SubGroupTable, partition 7200
     TsTimePartition* g2_bt = et_manager_->CreatePartitionTable(p2_time, 1, err_info);
     ASSERT_EQ(err_info.errmsg, "");
-    ASSERT_EQ(g2_bt->getSchemaInfo().size(), 3);
+    ASSERT_EQ(g2_bt->getSchemaInfoIncludeDropped().size(), 3);
     et_manager_->ReleasePartitionTable(g2_bt);
   }
 }

@@ -253,7 +253,6 @@ KStatus TagScanOperator::Close(kwdbContext_p ctx) {
 
 KStatus TagScanOperator::GetEntities(kwdbContext_p ctx,
                                      std::vector<EntityResultIndex> *entities,
-                                     k_uint32 *start_tag_index,
                                      TagRowBatchPtr *row_batch_ptr) {
   EnterFunc();
   std::unique_lock l(tag_lock_);
@@ -261,8 +260,8 @@ KStatus TagScanOperator::GetEntities(kwdbContext_p ctx,
     *row_batch_ptr = tag_rowbatch_;
   }
   if (is_first_entity_ || (*row_batch_ptr != nullptr &&
-                           (row_batch_ptr->get()->isAllDistributed()))) {
-    if (is_first_entity_ || *row_batch_ptr == tag_rowbatch_ || tag_rowbatch_->isAllDistributed()) {
+                           (row_batch_ptr->get()->isAllDistributed(ctx)))) {
+    if (is_first_entity_ || *row_batch_ptr == tag_rowbatch_ || tag_rowbatch_->isAllDistributed(ctx)) {
       is_first_entity_ = false;
       EEIteratorErrCode code = Next(ctx);
       if (code != EE_OK) {
@@ -275,7 +274,7 @@ KStatus TagScanOperator::GetEntities(kwdbContext_p ctx,
     // construct ts_iterator
     *row_batch_ptr = tag_rowbatch_;
   }
-  KStatus ret = row_batch_ptr->get()->GetEntities(entities, start_tag_index);
+  KStatus ret = row_batch_ptr->get()->GetEntities(ctx, entities);
   Return(ret);
 }
 

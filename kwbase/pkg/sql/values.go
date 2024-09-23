@@ -162,6 +162,8 @@ type tsTagUpdateNode struct {
 	TagValue      [][]byte
 	// if primary tag of type int out of range, we will return UPDATE 0 directly
 	wrongPTag bool
+	startKey  roachpb.Key
+	endKey    roachpb.Key
 }
 
 func (t *tsTagUpdateNode) startExec(params runParams) error {

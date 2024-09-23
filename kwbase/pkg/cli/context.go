@@ -118,6 +118,8 @@ func initCLIDefaults() {
 	serverCfg.JoinList = nil
 	serverCfg.JoinPreferSRVRecords = false
 	serverCfg.DefaultZoneConfig = zonepb.DefaultZoneConfig()
+	// default ts_merge.days = 10d
+	serverCfg.DefaultZoneConfig.TimeSeriesMergeDuration = time.Hour * 24 * 10
 	serverCfg.DefaultSystemZoneConfig = zonepb.DefaultSystemZoneConfig()
 	// Attempt to default serverCfg.SQLMemoryPoolSize to 25% if possible.
 	if bytes, _ := memoryPercentResolver(25); bytes != 0 {

@@ -304,6 +304,30 @@ INSERT INTO test_select.t1 VALUES('2000-1-1 4:00:00',20,1,-1,1,-2.125,2,true,'20
 CREATE STATISTICS st0 FROM test_select.t1;
 select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st0';
 
+-------- Test multi-columns distinct-count for primary tag
+Create table t6(k_timestamp timestamp not null,c1 int,c2 int,c3 double) tags (c4 float, c5 char not null, c6 bool not null,size int not null) primary tags (c5, c6 ,size) ;
+Insert into t6 values ('2024-1-1 1:00:00',1,100,0.1,0.1,'a',true,2);
+Insert into t6 values ('2024-1-1 1:01:00',2,200,0.2,0.1,'a',false,2);
+Insert into t6 values ('2024-1-1 2:00:00',3,200,0.3,0.1,'a',true,2);
+Insert into t6 values ('2024-1-1 3:00:00',4,500,0.4,0.2,'b',false,4);
+Insert into t6 values ('2024-1-1 4:00:00',5,500,0.5,0.2,'b',true,5);
+Insert into t6 values ('2024-1-1 5:00:00',6,6,0.6,0.2,'b',true,5);
+Insert into t6 values ('2024-1-1 6:00:00',7,7,0.7,0.3,'c',true,7);
+Insert into t6 values ('2024-1-1 7:00:00',8,8,0.8,0.3,'c',false,8);
+Insert into t6 values ('2024-1-1 8:00:00',9,9,0.9,0.3,'c',true,9);
+Insert into t6 values ('2024-1-1 9:00:00',10,10,1.0,0.3,'c',false,10);
+
+create statistics st_multiy on c1,c2 from t6;
+create statistics st_multiy on c5,c6 from t6;
+create statistics st_multiy1 on c5,c6,size from t6;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_multiy1';
+create statistics st_multiy2 on c5,size,c6 from t6;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_multiy2';
+create statistics st_multiy3 on size,c5,c6 from t6;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_multiy3';
+create statistics auto_multiy on [6,7,8] from t6;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'auto_multiy';
+
 set timezone = 0;
 use default;
 drop database test cascade;

@@ -143,6 +143,11 @@ KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload) {
 
 KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
                                DedupResult* dedup_result, DedupRule dedup_rule) {
+  return PutDataWithoutWAL(ctx, payload, mini_trans_id, dedup_result, dedup_rule);
+}
+
+KStatus TsEntityGroup::PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
+                               DedupResult* dedup_result, DedupRule dedup_rule) {
   // If wal is not enabled, this function will be used.
   KStatus status = SUCCESS;
   uint32_t group_id, entity_id;
@@ -157,6 +162,9 @@ KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_t
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     return KStatus::FAIL;
   }
+  Defer defer{[&]() {
+    releaseTagTable();
+  }};
   // check if lsn is set, in wal-off mode, lsn will not set, we should set lsn to 1 for marking lsn exist.
   TS_LSN pl_lsn;
   if (pd.GetLsn(pl_lsn)) {
@@ -164,23 +172,23 @@ KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_t
       pd.SetLsn(1);
     }
   }
-
+  LOG_DEBUG("PutDataWithoutWAL write rows: %d.", pd.GetRowCount());
   // Query or assign EntityGroupID and EntityID based on the provided payload.
   // Initially, attempt to retrieve the IDs directly from the tag table.
   // If it does not exist, allocate and insert it into the tag table.
-  if (KStatus::SUCCESS != allocateEntityGroupId(ctx, pd, &entity_id, &group_id)) {
+  bool new_one;
+  if (KStatus::SUCCESS != allocateEntityGroupId(ctx, pd, &entity_id, &group_id, &new_one)) {
     LOG_ERROR("allocateEntityGroupId failed, entity id: %d, group id: %d.", entity_id, group_id);
-    releaseTagTable();
     return KStatus::FAIL;
   }
   if (pd.GetFlag() == Payload::TAG_ONLY) {
     // Only when a tag is present, do not write data
-    releaseTagTable();
     return KStatus::SUCCESS;
   }
-  releaseTagTable();
-  status = putDataColumnar(ctx, group_id, entity_id, pd, dedup_result);
-  return status;
+  if (pd.GetRowCount() > 0) {
+    return putDataColumnar(ctx, group_id, entity_id, pd, dedup_result);
+  }
+  return KStatus::SUCCESS;
 }
 
 KStatus TsEntityGroup::putTagData(kwdbContext_p ctx, int32_t groupid, int32_t entity_id, Payload& payload) {
@@ -190,7 +198,8 @@ KStatus TsEntityGroup::putTagData(kwdbContext_p ctx, int32_t groupid, int32_t en
   uint8_t payload_data_flag = payload.GetFlag();
   if (payload_data_flag == Payload::DATA_AND_TAG || payload_data_flag == Payload::TAG_ONLY) {
     // tag
-    err_info.errcode = tag_bt_->insert(entity_id, groupid, payload.GetTagAddr());
+    LOG_DEBUG("tag bt insert hashPoint=%d", payload.getHashPoint());
+    err_info.errcode = tag_bt_->insert(entity_id, groupid, payload.getHashPoint(), payload.GetTagAddr());
   }
   if (err_info.errcode < 0) {
     return KStatus::FAIL;
@@ -198,8 +207,58 @@ KStatus TsEntityGroup::putTagData(kwdbContext_p ctx, int32_t groupid, int32_t en
   return KStatus::SUCCESS;
 }
 
-KStatus
-TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload, uint32_t* entity_id, uint32_t* group_id) {
+KStatus TsEntityGroup::putTagDataHashed(kwdbContext_p ctx, int32_t groupid, int32_t entity_id,
+                                        uint32_t hashpoint, Payload& payload) {
+  KWDB_DURATION(StStatistics::Get().put_tag);
+  ErrorInfo err_info;
+  // 1.Write tag data
+  uint8_t payload_data_flag = payload.GetFlag();
+  if (payload_data_flag == Payload::DATA_AND_TAG || payload_data_flag == Payload::TAG_ONLY) {
+    // tag
+    err_info.errcode = tag_bt_->insert(entity_id, groupid, payload.getHashPoint(), payload.GetTagAddr());
+  }
+  if (err_info.errcode < 0) {
+    return KStatus::FAIL;
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsEntityGroup::GetAllPartitions(kwdbContext_p ctx, std::unordered_map<SubGroupID,
+                                        std::vector<timestamp64>>* subgrp_partitions) {
+  std::vector<void*> primary_tags;
+  std::vector<uint32_t> scantags;
+  std::vector<EntityResultIndex> entity_list;
+  ResultSet res;
+  uint32_t count;
+  KStatus s = GetEntityIdList(ctx, primary_tags, scantags, &entity_list , &res, &count);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("GetAllPartitionDirs failed at GetEntityIdList.");
+    return s;
+  }
+  KwTsSpan span{INT64_MIN, INT64_MAX};
+  ErrorInfo err_info;
+  for (auto& entity_index : entity_list) {
+    if (entity_index.entityGroupId != range_.range_group_id) {
+      // just filter this entitygroup only
+      continue;
+    }
+    if (subgrp_partitions->find(entity_index.subGroupId) != subgrp_partitions->end()) {
+      // this subgroup and its parttions already inserted.
+      continue;
+    }
+    const auto& p_bts = ebt_manager_->GetPartitions(span, entity_index.subGroupId, err_info);
+    if (err_info.errcode < 0) {
+      LOG_ERROR("GetPartitionTables failed.");
+      return KStatus::FAIL;
+    }
+    (*subgrp_partitions)[entity_index.subGroupId] = p_bts;
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload, uint32_t* entity_id,
+                                            uint32_t* group_id, bool* new_tag) {
+  *new_tag = false;
   KWDB_DURATION(StStatistics::Get().alloc_entity);
   ErrorInfo err_info;
   // Attempting to retrieve the group ID and entity ID from the tag table
@@ -218,10 +277,10 @@ TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload, uint32
   {
     // Locking, concurrency control, and the putTagData operation must not be executed repeatedly
     MUTEX_LOCK(mutex_);
+    Defer defer{[&]() { MUTEX_UNLOCK(mutex_); }};
     if (tag_bt_->getEntityIdGroupId(tmp_slice.data, tmp_slice.len, entityid, groupid) == 0) {
       *entity_id = entityid;
       *group_id = groupid;
-      MUTEX_UNLOCK(mutex_);
       return KStatus::SUCCESS;
     }
     // not found
@@ -230,16 +289,14 @@ TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload, uint32
     std::string primary_tags;
     err_info.errcode = ebt_manager_->AllocateEntity(primary_tags, tag_hash, &groupid, &entityid);
     if (err_info.errcode < 0) {
-      MUTEX_UNLOCK(mutex_);
       return KStatus::FAIL;
     }
     // insert tag table
     if (KStatus::SUCCESS != putTagData(ctx, groupid, entityid, payload)) {
-      MUTEX_UNLOCK(mutex_);
       return KStatus::FAIL;
     }
-    MUTEX_UNLOCK(mutex_);
   }
+  *new_tag = true;
   *entity_id = entityid;
   *group_id = groupid;
   return KStatus::SUCCESS;
@@ -289,10 +346,10 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
   KTimestamp first_ts_ms = payload.GetTimestamp(payload.GetStartRowId());
   KTimestamp first_ts = first_ts_ms / 1000;
   timestamp64 first_max_ts;
-
+  uint32_t hash_point = payload.getHashPoint();
   last_p_time = sub_group->PartitionTime(first_ts, first_max_ts);
   k_int32 row_id = 0;
-
+  LOG_DEBUG("Insert primaryTag is %d ", *(payload.GetPrimaryTag().data));
   // Based on the obtained partition timestamp, determine whether the current payload needs to switch partitions.
   // If necessary, first call push_back_payload to write the current partition data.
   // Then continue to call payloadNextSlice until the traversal of the Payload data is complete.
@@ -301,11 +358,13 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     if (err_info.errcode < 0) {
       LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
       all_success = false;
+      ebt_manager_->ReleasePartitionTable(p_bt);
       break;
     }
     if (!p_bt->isValid()) {
       LOG_WARN("Partition is invalid.");
       err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      ebt_manager_->ReleasePartitionTable(p_bt);
       continue;
     }
     last_p_time = p_time;
@@ -343,6 +402,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     }
     return KStatus::FAIL;
   }
+  LOG_DEBUG("table[%s] input data num[%d].", this->tbl_sub_path_.c_str(), payload.GetRowCount());
   return KStatus::SUCCESS;
 }
 
@@ -453,7 +513,6 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
       res = p_bt->DeleteData(entity_id, 0, ts_spans, nullptr, &cnt, err_info, evaluate_del);
     }
     if (res < 0) {
-      ebt_manager_->ReleasePartitionTable(p_bt);
       del_failed = true;
     }
     if (rows && evaluate_del) {
@@ -634,39 +693,11 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
     ts_iter = new TsAggIterator(entity_group, range_.range_group_id, sub_group_id, entity_ids,
                                 ts_spans, scan_cols, ts_scan_cols, scan_agg_types, ts_points, table_version);
   }
-
-  ErrorInfo err_info;
-  timestamp64 min_ts = INT64_MAX, max_ts = INT64_MIN;
-  getMaxAndMinTs(ts_spans, &min_ts, &max_ts);
-  KwTsSpan p_span{min_ts / 1000, max_ts / 1000};
-  std::vector<TsTimePartition*> p_bts = ebt_manager_->GetPartitionTables(p_span, sub_group_id, err_info);
-  if (err_info.errcode < 0) {
-    LOG_ERROR("GetPartitionTables error : %s", err_info.errmsg.c_str());
+  KStatus s = ts_iter->Init(reverse);
+  if (s != KStatus::SUCCESS) {
     delete ts_iter;
-    ts_iter = nullptr;
-    return KStatus::FAIL;
+    return s;
   }
-  for (auto it = p_bts.begin(); it != p_bts.end(); ) {
-    bool has_data = false;
-
-    if (!(*it)->DeleteFlag()) {
-      for (auto id : entity_ids) {
-        EntityItem* entity_item = (*it)->getEntityItem(id);
-        if (entity_item->row_written > 0) {
-          has_data = true;
-          break;
-        }
-      }
-    }
-
-    if (has_data) {
-      ++it;
-    } else {
-      ebt_manager_->ReleasePartitionTable(*it);
-      it = p_bts.erase(it);
-    }
-  }
-  ts_iter->Init(p_bts, reverse);
   *iter = ts_iter;
   return KStatus::SUCCESS;
 }
@@ -682,6 +713,20 @@ TsEntityGroup::GetTagIterator(kwdbContext_p ctx, std::vector<k_uint32>& scan_tag
   *iter = entity_group_iter;
   return KStatus::SUCCESS;
 }
+
+KStatus
+TsEntityGroup::GetTagIterator(kwdbContext_p ctx, std::vector<k_uint32>& scan_tags, EntityGroupTagIterator** iter,
+                          const std::vector<uint32_t>& hps) {
+  ErrorInfo err_info;
+  if (getTagTable(err_info) != KStatus::SUCCESS) {
+    LOG_ERROR("getTagTable failed. error: %s ", err_info.errmsg.c_str());
+    return KStatus::FAIL;
+  }
+  EntityGroupTagIterator* entitygroupIter = new EntityGroupTagIterator(tag_bt_, scan_tags, hps);
+  *iter = entitygroupIter;
+  return KStatus::SUCCESS;
+}
+
 
 KStatus
 TsEntityGroup::GetMetaIterator(kwdbContext_p ctx, EntityGroupMetaIterator** iter) {
@@ -1032,9 +1077,14 @@ TsEntityGroup::GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roa
   }
   return KStatus::SUCCESS;
 }
-
-uint32_t TsTable::GetConsistentHashId(char* data, size_t length) {
-  const uint32_t offset_basis = 2166136261;
+/// @brief RangeGroupID compute function. new used in hashPoint. RangeGroupID % 65535. hashPoint % 10
+/// @param data primaryKey to compute which HashPoint it belongs to
+/// @param length how long the primaryKey to compute
+/// @return hashPoint ID
+uint32_t TsTable::GetConsistentHashId(const char* data, size_t length) {
+  // TODO(jiadx): 使用与GO层相同的一致性hashID算法，可能还需要一些方法参数
+//  uint64_t hash_id = std::hash<string>()(primary_tags);
+  const uint32_t offset_basis = 2166136261;  // 32位offset basis
   const uint32_t prime = 16777619;
   uint32_t hash_val = offset_basis;
   for (int i = 0; i < length; i++) {
@@ -1042,7 +1092,7 @@ uint32_t TsTable::GetConsistentHashId(char* data, size_t length) {
     hash_val *= prime;
     hash_val ^= b;
   }
-  uint32_t range_num = 65535;
+  uint32_t range_num = 20;
   return hash_val % range_num;
 }
 
@@ -1121,7 +1171,7 @@ KStatus TsTable::Init(kwdbContext_p ctx, std::unordered_map<uint64_t, int8_t>& r
   string dir_path = db_path_ + tbl_sub_path_;
   if (access(dir_path.c_str(), 0)) {
     err_info.setError(KWENOOBJ, "invalid path: " + db_path_ + tbl_sub_path_);
-    LOG_ERROR("invalid path : %s", ((db_path_ + tbl_sub_path_)).c_str())
+    LOG_WARN("can not access table path [%s].", ((db_path_ + tbl_sub_path_)).c_str())
     return KStatus::FAIL;
   }
 
@@ -1206,13 +1256,20 @@ KStatus TsTable::Create(kwdbContext_p ctx, vector<AttributeInfo>& metric_schema,
   return KStatus::SUCCESS;
 }
 
-KStatus TsTable::GetDataSchema(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema) {
+KStatus TsTable::GetDataSchemaIncludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
   }
-  *data_schema = entity_bt_manager_->GetSchemaInfoWithHidden();
-  return KStatus::SUCCESS;
+  return entity_bt_manager_->GetSchemaInfoIncludeDropped(data_schema);
+}
+
+KStatus TsTable::GetDataSchemaExcludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema) {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+  return entity_bt_manager_->GetSchemaInfoExcludeDropped(data_schema);
 }
 
 KStatus TsTable::GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagColumn*>* tag_schema) {
@@ -1227,6 +1284,40 @@ KStatus TsTable::GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<T
   }
   *tag_schema = entity_groups_[range.range_group_id]->GetSchema();
   return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GenerateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta,
+                                         std::vector<AttributeInfo>& metric_schema,
+                                         std::vector<TagInfo>& tag_schema) {
+  EnterFunc()
+  // Traverse metric schema and use attribute info to construct metric column info of meta.
+  for (auto col_var : metric_schema) {
+    // meta's column pointer.
+    roachpb::KWDBKTSColumn* col = meta->add_k_column();
+    KStatus s = TsEntityGroup::GetMetricColumnInfo(ctx, col_var, *col);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("GetColTypeStr[%d] failed during generate metric Schema", col_var.type);
+      Return(s);
+    }
+  }
+
+  // Traverse tag schema and use tag info to construct metric column info of meta
+  for (auto tag_info : tag_schema) {
+    // meta's column pointer.
+    roachpb::KWDBKTSColumn* col = meta->add_k_column();
+    // XXX Notice: tag_info don't has tag column name,
+    KStatus s = TsEntityGroup::GetTagColumnInfo(ctx, tag_info, *col);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("GetColTypeStr[%d] failed during generate tag Schema", tag_info.m_data_type);
+      Return(s);
+    }
+    // Set storage length.
+    if (col->has_storage_len() && col->storage_len() == 0) {
+      col->set_storage_len(tag_info.m_size);
+    }
+  }
+
+  Return(KStatus::SUCCESS);
 }
 
 KStatus TsTable::CreateEntityGroup(kwdbContext_p ctx, RangeGroup range, vector<TagInfo>& tag_schema,
@@ -1324,22 +1415,97 @@ TsTable::GetEntityGroup(kwdbContext_p ctx, uint64_t range_group_id, std::shared_
   return s;
 }
 
+KStatus TsTable::GetEntityGroupByPrimaryKey(kwdbContext_p ctx, const TSSlice& primary_key,
+                                            std::shared_ptr<TsEntityGroup>* entity_group) {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+  KStatus s = KStatus::SUCCESS;
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  // scan all tags in entitygroup to check if entity in existed entitygroup.
+  for (auto& entity_grp : entity_groups_) {
+    if (entity_grp.second->GetSubEntityGroupTagbt()->hasPrimaryKey(primary_key.data, primary_key.len)) {
+      *entity_group = entity_grp.second;
+      return KStatus::SUCCESS;
+    }
+  }
+  // if entity no exists in storage. store it to default entitygroup.
+  auto iter = entity_groups_.find(default_entitygroup_id_in_dist_v2);
+  if (iter != entity_groups_.end()) {
+    *entity_group = iter->second;
+    return KStatus::SUCCESS;
+  }
+  LOG_ERROR("can not find entitygroup for primary key %s", primary_key.data);
+  return KStatus::FAIL;
+}
+
+KStatus
+TsTable::GetEntityGroupByHash(kwdbContext_p ctx, uint16_t hashpoint, uint64_t *range_group_id,
+                       std::shared_ptr<TsEntityGroup>* entity_group) {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+  // *range_group_id = getRangeIdByHash(hashpoint);
+  KStatus s = KStatus::SUCCESS;
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  auto it = entity_groups_.find(*range_group_id);
+  if (it != entity_groups_.end()) {
+    *entity_group = it->second;
+  } else {
+    // s = CreateTableRange(ctx, range, table_range);
+    LOG_ERROR("no hash range: %ln", range_group_id);
+    return KStatus::FAIL;
+  }
+  return s;
+}
+
 KStatus TsTable::PutData(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
                          uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
   }
-  RW_LATCH_X_LOCK(entity_groups_mtx_);
-  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
-  // entity_groups_: Data from entities in an EntityRangeGroup is stored in an EntityGroup.
-  // EntityGroup is a logical unit to persist entities' data, including tag data and measurement data.
-  auto it = entity_groups_.find(range_group_id);
-  if (it == entity_groups_.end()) {
-    LOG_ERROR("no entity group with id: %lu", range_group_id);
+  std::shared_ptr<TsEntityGroup> entity_grp;
+  {
+    RW_LATCH_X_LOCK(entity_groups_mtx_);
+    Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+    // entity_groups_: Data from entities in an EntityRangeGroup is stored in an EntityGroup.
+    // EntityGroup is a logical unit to persist entities' data, including tag data and measurement data.
+    auto it = entity_groups_.find(range_group_id);
+    if (it == entity_groups_.end()) {
+      LOG_ERROR("no entity group with id: %lu", range_group_id);
+      return KStatus::FAIL;
+    }
+    entity_grp = it->second;
+  }
+  KStatus s = entity_grp->PutData(ctx, payload, payload_num, mtr_id, dedup_result, dedup_rule);
+  return s;
+}
+
+KStatus TsTable::PutDataWithoutWAL(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
+                         uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule) {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
   }
-  KStatus s = it->second->PutData(ctx, payload, payload_num, mtr_id, dedup_result, dedup_rule);
+  std::shared_ptr<TsEntityGroup> entity_grp;
+  {
+    RW_LATCH_X_LOCK(entity_groups_mtx_);
+    Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+    // entity_groups_: Data from entities in an EntityRangeGroup is stored in an EntityGroup.
+    // EntityGroup is a logical unit to persist entities' data, including tag data and measurement data.
+    auto it = entity_groups_.find(range_group_id);
+    if (it == entity_groups_.end()) {
+      LOG_ERROR("no entity group with id: %lu", range_group_id);
+      return KStatus::FAIL;
+    }
+    entity_grp = it->second;
+  }
+  KStatus s = entity_grp->PutDataWithoutWAL(ctx, *payload, mtr_id, dedup_result, dedup_rule);
   return s;
 }
 
@@ -1370,17 +1536,17 @@ KStatus TsTable::GetAllLeaderEntityGroup(kwdbts::kwdbContext_p ctx,
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto& entity_group : entity_groups_) {
-    if (entity_group.second->HashRange().typ == EntityGroupType::UNINITIALIZED) {
-      string err_msg = "table[" + std::to_string(table_id_) +
-                       "] range group[" + std::to_string(entity_group.first) +
-                       "] is uninitialized";
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
-      LOG_ERROR("%s", err_msg.c_str());
-      return KStatus::FAIL;
-    }
-    if (entity_group.second->HashRange().typ == EntityGroupType::LEADER) {
+    // if (entity_group.second->hashRange().typ == EntityGroupType::UNINITIALIZED) {
+    //   string err_msg = "table[" + std::to_string(table_id_) +
+    //                    "] range group[" + std::to_string(entity_group.first) +
+    //                    "] is uninitialized";
+    //   EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
+    //   LOG_ERROR("%s", err_msg.c_str());
+    //   return KStatus::FAIL;
+    // }
+    // if (entity_group.second->hashRange().typ == EntityGroupType::LEADER) {
       leader_entity_groups->push_back(entity_group.second);
-    }
+    // }
   }
   return s;
 }
@@ -1485,6 +1651,449 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
   return s;
 }
 
+KStatus TsTable::GetEntityIndex(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                std::vector<EntityResultIndex> &entity_store) {
+  KStatus s;
+  RW_LATCH_X_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  for (auto &p : entity_groups_) {
+    MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
+    entity_tag_bt->startRead();
+    for (int rownum = 1; rownum <= entity_tag_bt->size(); rownum++) {
+      if (!entity_tag_bt->isValidRow(rownum)) {
+        continue;
+      }
+      uint32_t tag_hash = TsTable::GetConsistentHashId(
+                          reinterpret_cast<char*>(entity_tag_bt->record(rownum)), entity_tag_bt->primaryTagSize());
+      if (begin_hash <= tag_hash && tag_hash <= end_hash) {
+        entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
+      }
+    }
+    entity_tag_bt->stopRead();
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetEntityGrpByPriKey(kwdbContext_p ctx, const TSSlice& primary_key, uint64_t* entity_grp_idp) {
+  KStatus s;
+  RW_LATCH_X_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  for (auto &p : entity_groups_) {
+    MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
+    int entity_id;
+    SubGroupID sub_grp_id;
+    if (entity_tag_bt->hasPrimaryKey(primary_key.data, primary_key.len)) {
+      *entity_grp_idp = p.first;
+      return KStatus::SUCCESS;
+    }
+  }
+  *entity_grp_idp = default_entitygroup_id_in_dist_v2;
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetEntityIndexWithRowNum(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                          std::vector<std::pair<int, EntityResultIndex>> &entity_tag) {
+  KStatus s;
+  RW_LATCH_X_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  for (auto &p : entity_groups_) {
+    MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
+    entity_tag_bt->startRead();
+    for (int rownum = 1; rownum <= entity_tag_bt->actual_size(); rownum++) {
+      if (!entity_tag_bt->isValidRow(rownum)) {
+        continue;
+      }
+      std::vector<EntityResultIndex> entity_store;
+      uint32_t tag_hash = TsTable::GetConsistentHashId(
+                          reinterpret_cast<char*>(entity_tag_bt->record(rownum)), entity_tag_bt->primaryTagSize());
+      if (begin_hash <= tag_hash && tag_hash <= end_hash) {
+        entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
+        entity_tag.push_back(std::pair<int, EntityResultIndex>(rownum, entity_store[0]));
+      }
+    }
+    entity_tag_bt->stopRead();
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetAvgTableRowSize(kwdbContext_p ctx, uint64_t* row_size) {
+  // fixed tuple length of one row.
+  size_t row_length = 0;
+  std::vector<AttributeInfo> schemas;
+  auto s = entity_bt_manager_->GetSchemaInfoExcludeDropped(&schemas);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
+  for (auto& col : schemas) {
+    if (col.type == DATATYPE::VARSTRING || col.type == DATATYPE::VARBINARY) {
+      row_length += col.max_len;
+    } else {
+      row_length += col.length;
+    }
+  }
+  // todo(liangbo01): make precise estimate if needed.
+  *row_size = row_length;
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetDataVolume(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                const KwTsSpan& ts_span, uint64_t* volume) {
+  LOG_DEBUG("GetDataVolume begin. table[%lu] hash[%lu - %lu], time [%ld - %ld]",
+            table_id_, begin_hash, end_hash, ts_span.begin, ts_span.end);
+  uint64_t row_length = 0;
+  KStatus s = GetAvgTableRowSize(ctx, &row_length);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("GetAvgTableRowSize failed. table [%lu] ", table_id_);
+    return s;
+  }
+  // total row num that  satisfied ts_span and hash span.
+  std::vector<EntityResultIndex> entity_store;
+  s = GetEntityIndex(ctx, begin_hash, end_hash, entity_store);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot get entities from table [%lu] ", table_id_);
+    return s;
+  }
+  std::unordered_map<uint64_t, std::unordered_map<SubGroupID, std::vector<EntityID>>> entities;
+  for (auto& et : entity_store) {
+    entities[et.entityGroupId][et.subGroupId].push_back(et.entityId);
+  }
+  size_t total_rows = 0;
+  std::shared_ptr<TsEntityGroup> cur_entity_group{nullptr};
+  TsSubEntityGroup* cur_sub_group = nullptr;
+  ErrorInfo err_info;
+  std::vector<TsTimePartition*> partitions;
+  for (auto entity_grp : entities) {
+    s = GetEntityGroup(ctx, entity_grp.first, &cur_entity_group);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("cannot get entitygroup [%lu]", entity_grp.first);
+      return s;
+    }
+    for (auto sub_grp : entity_grp.second) {
+      err_info.clear();
+      cur_sub_group = cur_entity_group->GetSubEntityGroupManager()->GetSubGroup(sub_grp.first, err_info, false);
+      if (err_info.errcode < 0) {
+        cur_sub_group = nullptr;
+        LOG_ERROR("cannot get subgroup [%u] in entitygroup [%lu]", sub_grp.first, entity_grp.first);
+        return KStatus::FAIL;
+      }
+      partitions = cur_sub_group->GetPartitionTables({ts_span.begin / 1000, ts_span.end / 1000}, err_info);
+      if (err_info.errcode < 0) {
+          LOG_ERROR("cannot get partitions [%lu - %u]", entity_grp.first, sub_grp.first);
+          return KStatus::FAIL;
+      }
+      std::deque<BlockItem*> block_item_queue;
+      timestamp64 min_ts, max_ts;
+      for (auto& partition : partitions) {
+        for (auto cur_entity_id : sub_grp.second) {
+          block_item_queue.clear();
+          partition->GetAllBlockItems(cur_entity_id, block_item_queue);
+          for (auto& block_item : block_item_queue) {
+            if (partition->GetBlockMinMaxTS(block_item, &min_ts, &max_ts) &&
+                isTimestampWithinSpans({ts_span}, min_ts, max_ts)) {
+              total_rows += block_item->publish_row_count - block_item->getDeletedCount();
+            }
+          }
+        }
+        ReleaseTable(partition);
+      }
+    }
+  }
+  LOG_DEBUG("GetDataVolume end. table[%lu] average row size[%lu], row num [%lu], entities num [%lu]",
+            table_id_, row_length, total_rows, entities.size());
+  *volume = row_length * total_rows;
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                const KwTsSpan& ts_span, timestamp64* half_ts) {
+  LOG_ERROR("GetDataVolumeHalfTS begin. table[%lu] hash[%lu - %lu], time [%ld - %ld]",
+              table_id_, begin_hash, end_hash, ts_span.begin, ts_span.end);
+  *half_ts = INVALID_TS;
+  if (begin_hash != end_hash) {
+    LOG_ERROR("can not calculate half timestmap with different hash [%lu - %lu]", begin_hash, end_hash);
+    return KStatus::FAIL;
+  }
+  // total rows of matched entities.
+  std::vector<EntityResultIndex> entity_store;
+  KStatus s = GetEntityIndex(ctx, begin_hash, end_hash, entity_store);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot get entities from table [%lu] ", table_id_);
+    return s;
+  }
+  std::unordered_map<uint64_t, std::unordered_map<SubGroupID, std::vector<EntityID>>> entities;
+  for (auto& et : entity_store) {
+    entities[et.entityGroupId][et.subGroupId].push_back(et.entityId);
+  }
+
+  std::vector<AttributeInfo> data_schema;
+  s = GetDataSchemaIncludeDropped(ctx, &data_schema);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot get GetDataSchemaIncludeDropped.");
+    return s;
+  }
+  // caclulate all partitions matched entities rows. partitions based on news configure.
+  std::map<int64_t, size_t> partitions_rows;
+  std::map<int64_t, timestamp64> partitions_mid_ts;
+  size_t total_rows = 0;
+  std::shared_ptr<TsEntityGroup> cur_entity_group{nullptr};
+  TsSubEntityGroup* cur_sub_group = nullptr;
+  ErrorInfo err_info;
+  std::vector<TsTimePartition*> partitions;
+  for (auto entity_grp : entities) {
+    s = GetEntityGroup(ctx, entity_grp.first, &cur_entity_group);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("cannot get entitygroup [%lu]", entity_grp.first);
+      return s;
+    }
+    for (auto sub_grp : entity_grp.second) {
+      err_info.clear();
+      cur_sub_group = cur_entity_group->GetSubEntityGroupManager()->GetSubGroup(sub_grp.first, err_info, false);
+      if (err_info.errcode < 0) {
+        cur_sub_group = nullptr;
+        LOG_ERROR("cannot get subgroup [%u] in entitygroup [%lu]", sub_grp.first, entity_grp.first);
+        return KStatus::FAIL;
+      }
+      partitions = cur_sub_group->GetPartitionTables({ts_span.begin / 1000, ts_span.end / 1000}, err_info);
+      if (err_info.errcode < 0) {
+          LOG_ERROR("cannot get partitions [%lu - %u]", entity_grp.first, sub_grp.first);
+          return KStatus::FAIL;
+      }
+      std::deque<BlockItem*> block_item_queue;
+      timestamp64 min_ts, max_ts, max_pt_time;
+      for (auto& partition : partitions) {
+        uint64_t partition_time = cur_sub_group->PartitionTime(partition->minTimestamp(), max_pt_time);
+        TsPartitonIteratorParams param{entity_grp.first, sub_grp.first, sub_grp.second, {ts_span}, {0}, {0}, data_schema};
+        TsPartitonIterator pt_iter(partition, param);
+        uint32_t partition_row_count = 0;
+        while (true) {
+          ResultSet res(1);
+          uint32_t count = 0;
+          if (KStatus::SUCCESS != pt_iter.Next(&res, &count, false, nullptr)) {
+            LOG_ERROR("TsPartitonIterator next failed.");
+            return KStatus::FAIL;
+          }
+          if (count == 0) {
+            break;
+          }
+          partition_row_count += count;
+        }
+        if (partition_row_count > 0) {
+          partitions_rows[partition_time] += partition_row_count;
+          total_rows += partition_row_count;
+          timestamp64 p_min_ts{INT64_MAX}, p_max_ts{INT64_MIN};
+          for (auto cur_entity_id : sub_grp.second) {
+            auto en_item = partition->getEntityItem(cur_entity_id);
+            if (en_item->block_count == 0) {
+              continue;
+            }
+            p_min_ts = std::max(en_item->min_ts, ts_span.begin);
+            p_max_ts = std::min(en_item->max_ts, ts_span.end);
+            LOG_ERROR("p_min_ts:%ld, p_max_ts: %ld, partition[%ld-%ld], entity ts[%ld-%ld]", p_min_ts, p_max_ts,
+                        partition->minTimestamp(), partition->maxTimestamp(), en_item->min_ts, en_item->max_ts);
+            if (p_min_ts >= p_max_ts) {
+              continue;
+            }
+            if (p_min_ts < partition->minTimestamp() * 1000 || p_max_ts > partition->maxTimestamp() * 1000) {
+              continue;
+            }
+            if (partitions_mid_ts.find(partition_time) != partitions_mid_ts.end()) {
+              partitions_mid_ts[partition_time] = (partitions_mid_ts[partition_time] + (p_min_ts + p_max_ts) / 2) / 2;
+            } else {
+              partitions_mid_ts[partition_time] = (p_min_ts + p_max_ts) / 2;
+            }
+          }
+        }
+        ReleaseTable(partition);
+      }
+    }
+  }
+  if (total_rows == 0) {
+    LOG_ERROR("no row left, cannot split. table [%lu]", table_id_);
+    return KStatus::FAIL;
+  }
+  // todo(liangbo01): temp code for debug. will delete later.
+  auto it_tmp = partitions_rows.begin();
+  for (; it_tmp != partitions_rows.end(); it_tmp++) {
+    LOG_ERROR("partition [%ld] has rows [%lu], midts:%ld.",
+              it_tmp->first, it_tmp->second, partitions_mid_ts[it_tmp->first]);
+  }
+  // caclulte half ts, ts must multiple of partition_interval
+  size_t scan_pt_rows = 0;
+  int64_t find_min_ts = 0;
+  for (auto &iter : partitions_rows) {
+    find_min_ts = iter.first;
+    if (scan_pt_rows + iter.second > total_rows / 2) {
+      *half_ts = iter.first * 1000;
+      break;
+    } else {
+      scan_pt_rows += iter.second;
+    }
+  }
+  // The distribution is severely uneven, using middle ts of partition.
+  if (scan_pt_rows * 3 < total_rows || *half_ts < ts_span.begin) {
+    *half_ts = partitions_mid_ts[find_min_ts];
+  }
+  if (!isTimestampInSpans({ts_span}, *half_ts, *half_ts)) {
+    LOG_ERROR("GetDataVolumeHalfTS faild. range{%lu/%ld - %lu/%ld}, half ts [%ld]",
+              begin_hash, ts_span.begin, end_hash, ts_span.end, *half_ts);
+    return KStatus::FAIL;
+  }
+  LOG_DEBUG("GetDataVolumeHalfTS end. range{%lu/%ld - %lu/%ld}, total_rows:%lu, half ts [%ld]",
+            begin_hash, ts_span.begin, end_hash, ts_span.end, total_rows, *half_ts);
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetRangeRowCount(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+                                  KwTsSpan ts_span, uint64_t* count) {
+  *count = 0;
+  std::vector<EntityResultIndex> entity_store;
+  KStatus s = GetEntityIndex(ctx, begin_hash, end_hash, entity_store);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot get entities from table [%lu] ", table_id_);
+    return s;
+  }
+  std::unordered_map<uint64_t, std::unordered_map<SubGroupID, std::vector<EntityID>>> entities;
+  for (auto& et : entity_store) {
+    entities[et.entityGroupId][et.subGroupId].push_back(et.entityId);
+  }
+  std::shared_ptr<TsEntityGroup> cur_entity_group{nullptr};
+  TsSubEntityGroup* cur_sub_group = nullptr;
+  ErrorInfo err_info;
+  std::vector<TsTimePartition*> partitions;
+
+  std::vector<AttributeInfo> data_schema;
+  s = GetDataSchemaIncludeDropped(ctx, &data_schema);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot get GetDataSchemaIncludeDropped.");
+    return s;
+  }
+  for (auto entity_grp : entities) {
+    s = GetEntityGroup(ctx, entity_grp.first, &cur_entity_group);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("cannot get entitygroup [%lu]", entity_grp.first);
+      return s;
+    }
+    for (auto sub_grp : entity_grp.second) {
+      err_info.clear();
+      cur_sub_group = cur_entity_group->GetSubEntityGroupManager()->GetSubGroup(sub_grp.first, err_info, false);
+      if (err_info.errcode < 0) {
+        cur_sub_group = nullptr;
+        LOG_ERROR("cannot get subgroup [%u] in entitygroup [%lu]", sub_grp.first, entity_grp.first);
+        return KStatus::FAIL;
+      }
+      TsPartitonIteratorParams params{entity_grp.first, sub_grp.first, {},
+                                      {ts_span}, {0}, {0}, data_schema};
+      for (auto& item : sub_grp.second) {
+        params.entity_ids.push_back(item);
+      }
+      auto cur_entity_iter_ = new TsSubGroupIterator(cur_sub_group, params);
+      while (true) {
+        ResultSet res(1);
+        uint32_t count1;
+        cur_entity_iter_->Next(&res, &count1, false, nullptr);
+        if (count1 == 0) {
+          break;
+        }
+        *count += count1;
+      }
+      delete cur_entity_iter_;
+    }
+  }
+  LOG_DEBUG("GetRangeRowCount range{hash[%lu - %lu] ts[%ld - %ld]} row count: %lu.",
+            begin_hash, end_hash, ts_span.begin, ts_span.end, *count);
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::DeleteTotalRange(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
+               KwTsSpan ts_span, uint64_t mtr_id) {
+  uint64_t row_num_bef = 0;
+  uint64_t row_num_aft = 0;
+#ifdef K_DEBUG
+  GetRangeRowCount(ctx, begin_hash, end_hash, ts_span, &row_num_bef);
+#endif
+  // get matched entities.
+  std::vector<EntityResultIndex> entity_store;
+  KStatus s = GetEntityIndex(ctx, begin_hash, end_hash, entity_store);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("cannot get entities from table [%lu] ", table_id_);
+    return s;
+  }
+  std::unordered_map<uint64_t, std::unordered_map<SubGroupID, std::vector<EntityID>>> group_ids;
+  for (auto& entity : entity_store) {
+    group_ids[entity.entityGroupId][entity.subGroupId].push_back(entity.entityId);
+  }
+  ErrorInfo err_info;
+  uint64_t total_del_rows = 0;
+  for (auto& egrp : group_ids) {
+    std::shared_ptr<TsEntityGroup> cur_entity_group{nullptr};
+    s = GetEntityGroup(ctx, egrp.first, &cur_entity_group);
+    if (s != KStatus::SUCCESS) {
+      cur_entity_group.reset();
+      LOG_ERROR("cannot get entitygroup [%lu]", egrp.first);
+      return s;
+    }
+    for (auto& sub_grp : egrp.second) {
+      err_info.clear();
+      auto cur_sub_group = cur_entity_group->GetSubEntityGroupManager()->GetSubGroup(sub_grp.first, err_info, false);
+      if (err_info.errcode < 0) {
+        cur_sub_group = nullptr;
+        LOG_ERROR("cannot get subgroup [%u] in entitygroup [%lu]", sub_grp.first, egrp.first);
+        return KStatus::FAIL;
+      }
+      std::vector<TsTimePartition*> partitions;
+      partitions = cur_sub_group->GetPartitionTables({ts_span.begin / 1000, ts_span.end / 1000}, err_info);
+      if (err_info.errcode < 0) {
+          LOG_ERROR("cannot get partitions [%u]", sub_grp.first);
+          return KStatus::FAIL;
+      }
+      for (auto& partition : partitions) {
+        for (auto& entity_id : sub_grp.second) {
+          uint64_t del_rows = 0;
+          int ret = partition->DeleteData(entity_id, 0, {ts_span}, nullptr, &del_rows, err_info);
+          if (err_info.errcode < 0) {
+              LOG_ERROR("partition DeleteData failed. egrp [%lu], partition [%ld]",
+                          egrp.first, partition->minTimestamp());
+              break;
+          }
+          total_del_rows += del_rows;
+        }
+        ReleaseTable(partition);
+      }
+    }
+  }
+#ifdef K_DEBUG
+  GetRangeRowCount(ctx, begin_hash, end_hash, ts_span, &row_num_aft);
+#endif
+  if (row_num_bef != total_del_rows) {
+    LOG_ERROR("DeleteTotalRange failed. rows: %lu, deleted:%lu", row_num_bef, total_del_rows);
+  }
+  LOG_DEBUG("DeleteTotalRange range{hash[%lu - %lu] ts[%ld - %ld]} delete rows [%lu], del before:%lu, del after: %lu.",
+            begin_hash, end_hash, ts_span.begin, ts_span.end,
+            total_del_rows, row_num_bef, row_num_aft);
+  // todo(liangbo01): check if entity data is all deleted. if so, we can delete entity tag.
+  //  we cannot know deleted data is (1) delted by user. (2)range migrate. so we cannot drop tag info.
+  // so we cannot mark entity deleted.
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::ConvertRowTypePayload(kwdbContext_p ctx,  TSSlice payload_row, TSSlice* payload) {
+  uint32_t pl_version = Payload::GetTsVsersionFromPayload(&payload_row);
+  MMapMetricsTable* root_table = entity_bt_manager_->GetRootTable(pl_version);
+  if (root_table == nullptr) {
+    LOG_ERROR("table[%lu] cannot found version[%u].", table_id_, pl_version);
+    return KStatus::FAIL;
+  }
+  const std::vector<AttributeInfo>& data_schema = root_table->getSchemaInfoExcludeDropped();
+  PayloadStTypeConvert pl(payload_row, data_schema);
+  auto s = pl.build(entity_bt_manager_, payload);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("can not parse current row-based payload.");
+    return s;
+  }
+
+  return KStatus::SUCCESS;
+}
+
 KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                              std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                              std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
@@ -1505,7 +2114,7 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
     }
   }};
 
-  auto actual_cols = entity_bt_manager_->GetColsIdx(table_version);
+  auto actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
   std::vector<k_uint32> ts_scan_cols;
   for (auto col : scan_cols) {
     if (col >= actual_cols.size()) {
@@ -1517,49 +2126,32 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
     ts_scan_cols.emplace_back(actual_cols[col]);
   }
 
-  uint64_t entity_group_id = 0;
-  uint32_t subgroup_id = 0;
-  std::shared_ptr<TsEntityGroup> entity_group;
-  std::vector<uint32_t> entities;
+  std::map<uint64_t, std::map<SubGroupID, std::vector<EntityID>>> group_ids;
   for (auto& entity : entity_ids) {
-    if (entity_group_id == 0 && subgroup_id == 0) {
-      entity_group_id = entity.entityGroupId;
-      subgroup_id = entity.subGroupId;
-      s = GetEntityGroup(ctx, entity.entityGroupId, &entity_group);
-      if (s == FAIL) return s;
+    group_ids[entity.entityGroupId][entity.subGroupId].push_back(entity.entityId);
+  }
+  std::shared_ptr<TsEntityGroup> entity_group;
+  for (auto& group_iter : group_ids) {
+    s = GetEntityGroup(ctx, group_iter.first, &entity_group);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("can not found entitygroup [%lu].", group_iter.first);
+      return s;
     }
-    if (entity.entityGroupId != entity_group_id || entity.subGroupId != subgroup_id) {
+    for (auto& sub_group_iter : group_iter.second) {
       TsIterator* ts_iter;
-      s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
-                                    scan_cols, ts_scan_cols, scan_agg_types,
-                                    table_version, &ts_iter, entity_group,
-                                    ts_points, reverse, sorted, false);
-      if (s == FAIL) return s;
+      s = entity_group->GetIterator(ctx, sub_group_iter.first, sub_group_iter.second, ts_spans,
+                                    scan_cols, ts_scan_cols, scan_agg_types, table_version,
+                                    &ts_iter, entity_group, ts_points, reverse, sorted, false);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("cannot create iterator for entitygroup[%lu], subgroup[%u]", group_iter.first, sub_group_iter.first);
+        return s;
+      }
       ts_table_iterator->AddEntityIterator(ts_iter);
-
-      subgroup_id = entity.subGroupId;
-      entities.clear();
     }
-    if (entity.entityGroupId != entity_group_id) {
-      entity_group_id = entity.entityGroupId;
-      entity_group.reset();
-      s = GetEntityGroup(ctx, entity.entityGroupId, &entity_group);
-      if (s == FAIL) return s;
-    }
-    entities.emplace_back(entity.entityId);
   }
-  if (!entities.empty()) {
-    TsIterator* ts_iter;
-    s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
-                                  scan_cols, ts_scan_cols, scan_agg_types,
-                                  table_version, &ts_iter, entity_group,
-                                  ts_points, reverse, sorted, false);
-    if (s == FAIL) return s;
-    ts_table_iterator->AddEntityIterator(ts_iter);
-  }
-
+  LOG_DEBUG("TsTable::GetIterator success.agg: %lu, iter num: %lu",
+              scan_agg_types.size(), ts_table_iterator->GetIterNumber());
   (*iter) = ts_table_iterator;
-
   return KStatus::SUCCESS;
 }
 
@@ -1885,24 +2477,25 @@ KStatus TsTable::GetEntityIdList(kwdbContext_p ctx, const std::vector<void*>& pr
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (const auto tbl_range : entity_groups_) {
-    if (tbl_range.second->HashRange().typ == EntityGroupType::UNINITIALIZED) {
-      string err_msg = "table[" + std::to_string(table_id_) +
-                       "] range group[" + std::to_string(tbl_range.first) +
-                       "] is uninitialized";
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
-      LOG_ERROR("%s", err_msg.c_str());
-      return KStatus::FAIL;
-    }
-    if (tbl_range.second->HashRange().typ != EntityGroupType::LEADER) {
-      // not leader
-      continue;
-    }
+    // if (tbl_range.second->hashRange().typ == EntityGroupType::UNINITIALIZED) {
+    //   string err_msg = "table[" + std::to_string(table_id_) +
+    //                    "] range group[" + std::to_string(tbl_range.first) +
+    //                    "] is uninitialized";
+    //   EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
+    //   LOG_ERROR("%s", err_msg.c_str());
+    //   return KStatus::FAIL;
+    // }
+    // if (tbl_range.second->hashRange().typ != EntityGroupType::LEADER) {
+    //   // not leader
+    //   continue;
+    // }
     tbl_range.second->GetEntityIdList(ctx, primary_tags, scan_tags, entity_id_list, res, count);
   }
   return KStatus::SUCCESS;
 }
 
 KStatus TsTable::GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t> scan_tags,
+                                const std::vector<uint32_t> hps,
                                 TagIterator** iter, k_uint32 table_version) {
   std::vector<EntityGroupTagIterator*> eg_tag_iters;
   EntityGroupTagIterator* eg_tag_iter = nullptr;
@@ -1910,19 +2503,24 @@ KStatus TsTable::GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t> scan_ta
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (const auto tbl_range : entity_groups_) {
-    if (tbl_range.second->HashRange().typ == EntityGroupType::UNINITIALIZED) {
-      string err_msg = "table[" + std::to_string(table_id_) +
-                        "] range group[" + std::to_string(tbl_range.first) +
-                        "] is uninitialized";
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
-      LOG_ERROR("%s", err_msg.c_str());
-      return KStatus::FAIL;
+    // if (tbl_range.second->hashRange().typ == EntityGroupType::UNINITIALIZED) {
+    //   string err_msg = "table[" + std::to_string(table_id_) +
+    //                     "] range group[" + std::to_string(tbl_range.first) +
+    //                     "] is uninitialized";
+    //   EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
+    //   LOG_ERROR("%s", err_msg.c_str());
+    //   return KStatus::FAIL;
+    // }
+    // if (tbl_range.second->hashRange().typ != EntityGroupType::LEADER) {
+    //   // not leader
+    //   continue;
+    // }
+    if (!ctx->is_single_node) {
+      tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter, hps);
+    } else {
+      tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter);
     }
-    if (tbl_range.second->HashRange().typ != EntityGroupType::LEADER) {
-      // not leader
-      continue;
-    }
-    tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter);
+
     if (!eg_tag_iter) {
       return KStatus::FAIL;
     }
@@ -1945,18 +2543,18 @@ KStatus TsTable::GetMetaIterator(kwdbContext_p ctx, MetaIterator** iter, k_uint3
   std::vector<EntityGroupMetaIterator*> iters;
   EntityGroupMetaIterator* eg_meta_iter = nullptr;
   for (const auto tbl_range : entity_groups_) {
-    if (tbl_range.second->HashRange().typ == EntityGroupType::UNINITIALIZED) {
-      string err_msg = "table[" + std::to_string(table_id_) +
-                       "] range group[" + std::to_string(tbl_range.first) +
-                       "] is uninitialized";
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
-      LOG_ERROR("%s", err_msg.c_str());
-      return KStatus::FAIL;
-    }
-    if (tbl_range.second->HashRange().typ != EntityGroupType::LEADER) {
-      // not leader
-      continue;
-    }
+    // if (tbl_range.second->hashRange().typ == EntityGroupType::UNINITIALIZED) {
+    //   string err_msg = "table[" + std::to_string(table_id_) +
+    //                    "] range group[" + std::to_string(tbl_range.first) +
+    //                    "] is uninitialized";
+    //   EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
+    //   LOG_ERROR("%s", err_msg.c_str());
+    //   return KStatus::FAIL;
+    // }
+    // if (tbl_range.second->hashRange().typ != EntityGroupType::LEADER) {
+    //   // not leader
+    //   continue;
+    // }
     if (KStatus::SUCCESS != tbl_range.second->GetMetaIterator(ctx, &eg_meta_iter)) {
       continue;
     }
@@ -2064,11 +2662,15 @@ KStatus TsTable::AlterTableTag(kwdbContext_p ctx, AlterType alter_type, const At
 
 KStatus TsTable::AlterTableCol(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
                                uint32_t cur_version, uint32_t new_version, string& msg) {
-  KStatus s;
   ErrorInfo err_info;
   auto col_idx = entity_bt_manager_->GetColumnIndex(attr_info);
   auto latest_version = entity_bt_manager_->GetCurrentTableVersion();
-  vector<AttributeInfo> schema = entity_bt_manager_->GetSchemaInfoWithHidden(cur_version);
+  vector<AttributeInfo> schema;
+  KStatus s = entity_bt_manager_->GetSchemaInfoIncludeDropped(&schema, cur_version);
+  if (s != KStatus::SUCCESS) {
+    msg = "schema version " + to_string(cur_version) + " does not exists";
+    return s;
+  }
   switch (alter_type) {
     case ADD_COLUMN:
       if ((col_idx >= 0) && (latest_version == new_version)) {
@@ -2107,6 +2709,57 @@ KStatus TsTable::AlterTableCol(kwdbContext_p ctx, AlterType alter_type, const At
     return s;
   }
   UpdateTagTsVersion(new_version);
+  return SUCCESS;
+}
+
+KStatus TsTable::AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* meta, MMapMetricsTable ** version_schema) {
+  *version_schema = nullptr;
+  KStatus s;
+  ErrorInfo err_info;
+  auto latest_version = entity_bt_manager_->GetCurrentTableVersion();
+  auto upper_version = meta->ts_table().ts_version();
+  // skip in case current table has that schema version
+  LOG_DEBUG("uppper version[%u], latest schema version [%u]", upper_version, latest_version);
+  if (upper_version <= latest_version) {
+    auto root_table = entity_bt_manager_->GetRootTable(upper_version, true);
+    if (root_table != nullptr) {
+      *version_schema = root_table;
+      return KStatus::SUCCESS;
+    }
+    LOG_DEBUG("uppper version[%u] no exists, need create.", upper_version);
+  }
+
+  std::vector<TagInfo> tag_schema;
+  std::vector<AttributeInfo> metric_schema;
+  for (int i = 0; i < meta->k_column_size(); i++) {
+    const auto& col = meta->k_column(i);
+    struct AttributeInfo col_var;
+    s = TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i == 0);
+    if (s != KStatus::SUCCESS) {
+      return s;
+    }
+    if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
+      tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
+                                             static_cast<uint32_t>(col_var.length), 0,
+                                             static_cast<uint32_t>(col_var.size),
+                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG}));
+    } else {
+      metric_schema.push_back(std::move(col_var));
+    }
+  }
+  if (upper_version > latest_version) {
+    s = entity_bt_manager_->CreateRootTable(metric_schema, upper_version, err_info);
+  } else {
+    s = entity_bt_manager_->AddRootTable(metric_schema, upper_version, err_info);
+  }
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("add new version schema failed for alter table: table id = %lu, new_version = %u, err_msg: %s",
+              table_id_, upper_version, err_info.errmsg.c_str());
+    return s;
+  }
+  *version_schema = entity_bt_manager_->GetRootTable(upper_version, true);
+  // todo(liangbo01)  tag version change, also need upper tag schema.
+  UpdateTagTsVersion(upper_version);
   return SUCCESS;
 }
 
@@ -2443,7 +3096,7 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
           timestamp64 max_ts = segment_table->getBlockMaxTs(block_item->block_id);
           timestamp64 min_ts = segment_table->getBlockMinTs(block_item->block_id);
           timestamp64 intersect_ts = intersectLength(ts_span.begin, ts_span.end, min_ts, max_ts + 1);
-          uint32_t count = static_cast<double>(intersect_ts) / (max_ts - min_ts + 1) * block_item->publish_row_count;
+          uint32_t count = 1.0L * intersect_ts / (max_ts - min_ts + 1) * block_item->publish_row_count;
           if (intersect_ts > 0 && block_item->publish_row_count > 0 && count == 0) {
             // The estimated data volume is 0, but in cases where there is a very small amount of data,
             // it is considered as one piece of data by default
@@ -2479,7 +3132,7 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
   // If the queried data falls within the ts_stpan range (such as in a scenario where data has just been written),
   // it is necessary to estimate the daily data write volume
   if (block_min_ts != INT64_MAX && block_min_ts > ts_span.begin) {
-    double ratio = static_cast<double>(ts_span.end - block_min_ts) / (ts_span.end - ts_span.begin);
+    double ratio = 1.0L * (ts_span.end - block_min_ts) / (ts_span.end - ts_span.begin);
     *row_num = (*row_num) / ratio;
   }
 

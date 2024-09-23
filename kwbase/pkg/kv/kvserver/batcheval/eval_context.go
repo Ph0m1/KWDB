@@ -37,6 +37,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/cloud"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/limit"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
@@ -64,6 +65,7 @@ type EvalContext interface {
 	EvalKnobs() storagebase.BatchEvalTestingKnobs
 
 	Engine() storage.Engine
+	TsEngine() *tse.TsEngine
 	Clock() *hlc.Clock
 	DB() *kv.DB
 	AbortSpan() *abortspan.AbortSpan
@@ -149,6 +151,9 @@ func (m *mockEvalCtxImpl) EvalKnobs() storagebase.BatchEvalTestingKnobs {
 	return storagebase.BatchEvalTestingKnobs{}
 }
 func (m *mockEvalCtxImpl) Engine() storage.Engine {
+	panic("unimplemented")
+}
+func (m *mockEvalCtxImpl) TsEngine() *tse.TsEngine {
 	panic("unimplemented")
 }
 func (m *mockEvalCtxImpl) Clock() *hlc.Clock {

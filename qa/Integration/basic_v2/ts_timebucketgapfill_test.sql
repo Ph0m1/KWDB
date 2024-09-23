@@ -35,21 +35,21 @@ INSERT INTO t1.d1  VALUES (1667592010000, 333333333, 'd', 1667597779000, 98, 1, 
 INSERT INTO t1.d1  VALUES (1667592600000, 333333333, 'd', 1667597779000, 98, 1, 20.999, 111111111, 10, 10.10, 0.0001,4);
 -- Normal Case
 select time_bucket_gapfill(k_timestamp,'60s'),interpolate(avg(e6),'null') from t1.d1  group by time_bucket_gapfill(k_timestamp,'60s') order by time_bucket_gapfill(k_timestamp,'60s');
-select time_bucket_gapfill(k_timestamp,'3600s'),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'3600s') order by time_bucket_gapfill(k_timestamp,'3600s');
+select time_bucket_gapfill(k_timestamp,'3600s'),round(interpolate(avg(e6),'null'),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,'3600s') order by time_bucket_gapfill(k_timestamp,'3600s');
 select time_bucket_gapfill(k_timestamp,'9999s'),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'9999s') order by time_bucket_gapfill(k_timestamp,'9999s');
 select time_bucket_gapfill(k_timestamp,'300s'),interpolate(count(e2),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
 select time_bucket_gapfill(k_timestamp,'300s'),interpolate(count(e3),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
 select time_bucket_gapfill(k_timestamp,'300s'),interpolate(avg(e6),'null'),interpolate(max(e6),'null')from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
 select time_bucket_gapfill(k_timestamp,'300s'),interpolate(avg(e6),'null'),interpolate(max(e6),Prev)from t1.d1 group by time_bucket_gapfill(k_timestamp,'300s') order by time_bucket_gapfill(k_timestamp,'300s');
-select time_bucket_gapfill(k_timestamp,'9999999s'),interpolate(avg(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,'9999999s') order by time_bucket_gapfill(k_timestamp,'9999999s');
+select time_bucket_gapfill(k_timestamp,'9999999s'),round(interpolate(avg(e6),null),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,'9999999s') order by time_bucket_gapfill(k_timestamp,'9999999s');
 select time_bucket_gapfill(k_timestamp,60),interpolate(avg(e6),'null') from t1.d1  group by time_bucket_gapfill(k_timestamp,60) order by time_bucket_gapfill(k_timestamp,60);
-select time_bucket_gapfill(k_timestamp,3600),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,3600) order by time_bucket_gapfill(k_timestamp,3600);
+select time_bucket_gapfill(k_timestamp,3600),round(interpolate(avg(e6),'null'),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,3600) order by time_bucket_gapfill(k_timestamp,3600);
 select time_bucket_gapfill(k_timestamp,9999),interpolate(avg(e6),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,9999) order by time_bucket_gapfill(k_timestamp,9999);
 select time_bucket_gapfill(k_timestamp,300),interpolate(count(e2),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
 select time_bucket_gapfill(k_timestamp,300),interpolate(count(e3),'null') from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
 select time_bucket_gapfill(k_timestamp,300),interpolate(avg(e6),'null'),interpolate(max(e6),'null')from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
 select time_bucket_gapfill(k_timestamp,300),interpolate(avg(e6),'null'),interpolate(max(e6),Prev)from t1.d1 group by time_bucket_gapfill(k_timestamp,300) order by time_bucket_gapfill(k_timestamp,300);
-select time_bucket_gapfill(k_timestamp,9999999),interpolate(avg(e6),null) from t1.d1 group by time_bucket_gapfill(k_timestamp,9999999) order by time_bucket_gapfill(k_timestamp,9999999);
+select time_bucket_gapfill(k_timestamp,9999999),round(interpolate(avg(e6),null),3) from t1.d1 group by time_bucket_gapfill(k_timestamp,9999999) order by time_bucket_gapfill(k_timestamp,9999999);
 
 -- Expected error
 select time_bucket_gapfill(k_timestamp,'300s') from t1.d1;

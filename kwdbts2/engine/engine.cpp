@@ -108,7 +108,7 @@ void EngineOptions::init() {
   if (env_var) {
     home_ = string(env_var);
   } else {
-    home_ =  getenv(ENV_CLUSTER_CONFIG_HOME);;
+    home_ =  getenv(ENV_CLUSTER_CONFIG_HOME);
   }
 
   env_var = getenv(ENV_KW_IOT_INTERVAL);
@@ -140,7 +140,6 @@ TSEngineImpl::~TSEngineImpl() {
 
 KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id, roachpb::CreateTsTable* meta,
                                     std::vector<RangeGroup> ranges) {
-  EnterFunc()
   LOG_INFO("Create TsTable %lu begin.", table_id);
   KStatus s;
 
@@ -150,7 +149,7 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   });
   if (IsExists(options_.db_path + '/' + std::to_string(table_id))) {
     LOG_WARN("CreateTsTable failed, TsTable[%lu] is exists", table_id);
-    Return(FAIL);
+    return FAIL;
   }
 
   std::shared_ptr<TsTable> table = nullptr;
@@ -158,7 +157,7 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   if (options_.wal_level > 0) {
     s = wal_sys_->WriteDDLCreateWAL(ctx, 0, table_id, meta, &ranges);
     if (s == FAIL) {
-      Return(s);
+      return s;
     }
     table = std::make_shared<LoggedTsTable>(ctx, options_.db_path, table_id, &options_);
   } else {
@@ -169,7 +168,7 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   std::vector<AttributeInfo> metric_schema;
   s = parseMetaSchema(ctx, meta, metric_schema, tag_schema);
   if (s != KStatus::SUCCESS) {
-    Return(s);
+    return s;
   }
   uint32_t ts_version = 1;
   if (meta->ts_table().has_ts_version()) {
@@ -181,13 +180,13 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   }
   s = table->Create(ctx, metric_schema, ts_version, partition_interval);
   if (s != KStatus::SUCCESS) {
-    Return(s);
+    return s;
   }
   for (int i = 0; i < ranges.size(); i++) {
     std::shared_ptr<TsEntityGroup> table_range;
     s = table->CreateEntityGroup(ctx, ranges[i], tag_schema, &table_range);
     if (s != KStatus::SUCCESS) {
-      Return(s);
+      return s;
     }
   }
 #ifndef KWBASE_OSS
@@ -204,11 +203,10 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
   }
   tables_range_groups_.insert({table_id, range_groups});
   LOG_INFO("Create TsTable %lu success.", table_id);
-  Return(s);
+  return s;
 }
 
 KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) {
-  EnterFunc()
   LOG_INFO("start drop table %ld", table_id);
   // Create TsTable in the database root directory
   {
@@ -222,14 +220,14 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
       } else {
         LOG_INFO("drop table %ld succeeded", table_id);
       }
-      Return(s);
+      return s;
     }
 
     if (options_.wal_level > 0) {
       s = wal_sys_->WriteDDLDropWAL(ctx, 0, table_id);
       if (s == FAIL) {
         LOG_INFO("drop table %ld failed", table_id);
-        Return(s);
+        return s;
       }
     }
 
@@ -249,37 +247,35 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
   TsConfigAutonomy::RemoveTableStatisticInfo(table_id);
 #endif
   LOG_INFO("drop table %ld succeeded", table_id);
-  Return(SUCCESS);
+  return SUCCESS;
 }
 
 KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) {
-  EnterFunc()
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == FAIL) {
     LOG_ERROR("GetTsTable failed")
-    Return(s);
+    return s;
   }
 
   s = table->Compress(ctx, ts);
   if (s == KStatus::FAIL) {
     LOG_ERROR("table[%lu] compress failed", table_id);
   }
-  Return(s);
+  return s;
 }
 
 KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& tags_table,
                                  ErrorInfo& err_info) {
-  EnterFunc()
   tags_table = nullptr;
   // 0. First, query the cache based on table_id and pt_time
   std::shared_ptr<TsTable> table = tables_cache_->Get(table_id);
   if (table && !table->IsDropped()) {
     tags_table = table;
-    Return(SUCCESS);
+    return SUCCESS;
   } else if (table && table->IsDropped()) {
     LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
-    Return(FAIL);
+    return FAIL;
   }
 
   MUTEX_LOCK(tables_lock_);
@@ -289,10 +285,10 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
   table = tables_cache_->Get(table_id);
   if (table && !table->IsDropped()) {
     tags_table = table;
-    Return(SUCCESS);
+    return SUCCESS;
   } else if (table && table->IsDropped()) {
     LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
-    Return(FAIL);
+    return FAIL;
   }
 
   UpdateSetting(ctx);
@@ -306,13 +302,11 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
   auto it = tables_range_groups_.find(table_id);
   if (it != tables_range_groups_.end()) {
     range_groups = it->second;
-  } else {
-    LOG_INFO("GetTsTable failed: RangeGroups is not exists in table [%lu], need initial.", table_id);
   }
   KStatus s = table->Init(ctx, range_groups, err_info);
   if (s == KStatus::FAIL) {
-    LOG_ERROR("GetTsTable failed: table Init failed, table id [%lu]", table_id)
-    Return(FAIL);
+    LOG_ERROR("can not found table [%lu].", table_id)
+    return FAIL;
   }
 
   if (!table->IsDropped()) {
@@ -322,23 +316,22 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
     tables_cache_->Put(table_id, table);
     // Load into cache
     tags_table = table;
-    Return(SUCCESS);
+    return SUCCESS;
   }
 
   LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
-  Return(FAIL);
+  return FAIL;
 }
 
 KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id,  RangeGroup range,
                                   roachpb::CreateTsTable* meta) {
-  EnterFunc();
   LOG_INFO("TSEngineImpl::GetMetaData Begin!");
   std::shared_ptr<TsTable> table;
   ErrorInfo err_info;
   KStatus s = GetTsTable(ctx, table_id, table, err_info);
   if (s == FAIL) {
     s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
-    Return(s);
+    return s;
   }
 
   // Construct roachpb::CreateTsTable.
@@ -350,17 +343,17 @@ KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id, 
 
   // Get table data schema.
   std::vector<AttributeInfo> data_schema;
-  s = table->GetDataSchema(ctx, &data_schema);
+  s = table->GetDataSchemaIncludeDropped(ctx, &data_schema);
   if (s == KStatus::FAIL) {
-    LOG_ERROR("GetDataSchema failed during GetMetaData, table id is %ld.", table_id)
-    Return(s);
+    LOG_ERROR("GetDataSchemaIncludeDropped failed during GetMetaData, table id is %ld.", table_id)
+    return s;
   }
   // Get table tag schema.
   std::vector<TagColumn*> tag_schema;
   s = table->GetTagSchema(ctx, range, &tag_schema);
   if (s == KStatus::FAIL) {
     LOG_ERROR("GetTagSchema failed during GetMetaData, table id is %ld.", table_id)
-    Return(s);
+    return s;
   }
   // Convert TagColumn to TagInfo.
   std::vector<TagInfo> tag_schema_info;
@@ -368,128 +361,148 @@ KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id, 
     tag_schema_info.push_back(tag_schema[i]->attributeInfo());
   }
   // Use data schema and tag schema to construct meta.
-  s = generateMetaSchema(ctx, meta, data_schema, tag_schema_info);
+  s = table->GenerateMetaSchema(ctx, meta, data_schema, tag_schema_info);
   if (s == KStatus::FAIL) {
     LOG_ERROR("generateMetaSchema failed during GetMetaData, table id is %ld.", table_id)
-    Return(s);
+    return s;
   }
-  Return(s);
+  return s;
 }
 
 KStatus TSEngineImpl::PutEntity(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                                 TSSlice* payload, int payload_num, uint64_t mtr_id) {
   std::shared_ptr<TsTable> table;
   KStatus s;
-  EnterFunc()
   s = GetTsTable(ctx, table_id, table);
   if (s == FAIL) {
     LOG_ERROR("GetTsTable failed, table id: %lu", table_id);
-    Return(s);
+    return s;
   }
 
   std::shared_ptr<TsEntityGroup> table_range;
-  s = table->GetEntityGroup(ctx, range_group_id, &table_range);
-  if (s == FAIL) {
-    LOG_ERROR("GetEntityGroup failed table_id: %lu entity_group_id: %lu", table_id, range_group_id);
-    Return(s);
-  }
-  if (table_range) {
-    for (int idx = 0; idx < payload_num; ++idx) {
-      s = table_range->PutEntity(ctx, payload[idx], mtr_id);
-      if (s == KStatus::FAIL) {
-        LOG_ERROR("PutEntity failed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id)
-        Return(s)
-      }
+  for (size_t i = 0; i < payload_num; i++) {
+    auto pl_schema_version = Payload::GetTsVsersionFromPayload(&(payload[i]));
+    auto cur_schema_version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
+    if (cur_schema_version < pl_schema_version) {
+      LOG_ERROR("table[%lu] current version[%u] less than payload version[%u].",
+                table_id, cur_schema_version, pl_schema_version);
+      return KStatus::FAIL;
+    }
+    if (nullptr == table->GetMetricsTableMgr()->GetRootTable(pl_schema_version, true)) {
+      LOG_ERROR("table[%lu] cannot found version[%u].", table_id, pl_schema_version);
+      return KStatus::FAIL;
+    }
+    // Get EntityGroup and call PutData to write data
+    TSSlice primary_key = Payload::GetPrimaryKeyFromPayload(&(payload[i]));
+    s = table->GetEntityGroupByPrimaryKey(ctx, primary_key, &table_range);
+    if (s == FAIL) {
+      LOG_ERROR("PutEntity failed, GetEntityGroup failed %lu", range_group_id)
+      return s;
+    }
+    s = table_range->PutEntity(ctx, payload[i], mtr_id);
+    if (s == KStatus::FAIL) {
+      LOG_ERROR("PutEntity failed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id)
+      return s;
     }
   }
   LOG_INFO("PutEntity succeed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id);
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::PutData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                               TSSlice* payload, int payload_num, uint64_t mtr_id, DedupResult* dedup_result) {
-  EnterFunc()
   std::shared_ptr<TsTable> table;
   KStatus s;
   s = GetTsTable(ctx, table_id, table);
   if (s == FAIL) {
     LOG_ERROR("PutData failed, GetTsTable failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   std::shared_ptr<TsEntityGroup> table_range;
-  // Get EntityGroup and call PutData to write data
-  s = table->GetEntityGroup(ctx, range_group_id, &table_range);
-  if (s == FAIL) {
-    LOG_ERROR("PutData failed, GetEntityGroup failed %lu", range_group_id)
-    Return(s)
+  for (size_t i = 0; i < payload_num; i++) {
+    auto pl_schema_version = Payload::GetTsVsersionFromPayload(&(payload[i]));
+    auto cur_schema_version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
+    if (cur_schema_version < pl_schema_version) {
+      LOG_ERROR("table[%lu] current version[%u] less than payload version[%u].",
+                table_id, cur_schema_version, pl_schema_version);
+      return KStatus::FAIL;
+    }
+    if (nullptr == table->GetMetricsTableMgr()->GetRootTable(pl_schema_version, true)) {
+      LOG_ERROR("table[%lu] cannot found version[%u].", table_id, pl_schema_version);
+      return KStatus::FAIL;
+    }
+    // Get EntityGroup and call PutData to write data
+    TSSlice primary_key = Payload::GetPrimaryKeyFromPayload(&(payload[i]));
+    s = table->GetEntityGroupByPrimaryKey(ctx, primary_key, &table_range);
+    if (s == FAIL) {
+      LOG_ERROR("PutData failed, GetEntityGroup failed %lu", range_group_id)
+      return s;
+    }
+    dedup_result->payload_num = payload_num;
+    dedup_result->dedup_rule = static_cast<int>(g_dedup_rule);
+    s = table_range->PutData(ctx, &(payload[i]), 1, mtr_id, dedup_result, g_dedup_rule);
+    if (s == FAIL) {
+      LOG_ERROR("PutData failed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id)
+      return s;
+    }
   }
-  dedup_result->payload_num = payload_num;
-  dedup_result->dedup_rule = static_cast<int>(g_dedup_rule);
-  s = table_range->PutData(ctx, payload, payload_num, mtr_id, dedup_result, g_dedup_rule);
-  if (s == FAIL) {
-    LOG_ERROR("PutData failed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id)
-    Return(s)
-  }
-  Return(s)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::DeleteRangeData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                                       HashIdSpan& hash_span, const std::vector<KwTsSpan>& ts_spans, uint64_t* count,
                                       uint64_t mtr_id) {
-  EnterFunc()
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("DeleteRangeData failed: GetTsTable failed, table id [%lu]", table_id)
-    Return(s)
+    return s;
   }
   s = table->DeleteRangeData(ctx, range_group_id, hash_span, ts_spans, count, mtr_id);
-  Return(s)
+  return s;
 }
 
 KStatus TSEngineImpl::DeleteData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                                  std::string& primary_tag, const std::vector<KwTsSpan>& ts_spans, uint64_t* count,
                                  uint64_t mtr_id) {
-  EnterFunc()
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("DeleteData failed: GetTsTable failed, table id [%lu]", table_id)
-    Return(s)
+    return s;
   }
   s = table->DeleteData(ctx, range_group_id, primary_tag, ts_spans, count, mtr_id);
-  Return(s)
+  return s;
 }
 
 KStatus TSEngineImpl::DeleteEntities(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                                      std::vector<std::string> primary_tags, uint64_t* count, uint64_t mtr_id) {
-  EnterFunc()
   std::shared_ptr<TsTable> table;
   KStatus s;
 
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("DeleteEntities failed: GetTsTable failed, table id [%lu]", table_id)
-    Return(s)
+    return s;
   }
 
   std::shared_ptr<TsEntityGroup> table_range;
   s = table->GetEntityGroup(ctx, range_group_id, &table_range);
   if (s == KStatus::FAIL) {
     LOG_ERROR("DeleteEntities failed: GetEntityGroup failed, range group id [%lu]", range_group_id)
-    Return(s)
+    return s;
   }
 
   if (table_range) {
     s = table_range->DeleteEntities(ctx, primary_tags, count, mtr_id);
     if (s == KStatus::FAIL) {
-      Return(s)
+      return s;
     } else {
-      Return(KStatus::SUCCESS)
+      return KStatus::SUCCESS;
     }
   }
-  Return(KStatus::FAIL)
+  return KStatus::FAIL;
 }
 
 KStatus TSEngineImpl::GetBatchRepr(kwdbContext_p ctx, TSSlice* batch) {
@@ -502,6 +515,7 @@ KStatus TSEngineImpl::ApplyBatchRepr(kwdbContext_p ctx, TSSlice* batch) {
 
 KStatus TSEngineImpl::Execute(kwdbContext_p ctx, QueryInfo* req, RespInfo* resp) {
   ctx->ts_engine = this;
+  ctx->is_single_node = this->IsSingleNode();
   KStatus ret = DmlExec::ExecQuery(ctx, req, resp);
   return ret;
 }
@@ -603,10 +617,8 @@ KStatus TSEngineImpl::checkpoint(kwdbts::kwdbContext_p ctx) {
 }
 
 KStatus TSEngineImpl::CreateCheckpoint(kwdbts::kwdbContext_p ctx) {
-  EnterFunc()
-
   if (options_.wal_level == 0) {
-    Return(KStatus::SUCCESS)
+    return KStatus::SUCCESS;
   }
   LOG_DEBUG("creating checkpoint ...");
 
@@ -622,7 +634,7 @@ KStatus TSEngineImpl::CreateCheckpoint(kwdbts::kwdbContext_p ctx) {
     return true;
   });
 
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
@@ -639,7 +651,6 @@ KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
   * 4 logs include begin alter. It is uncertain whether the storage alter has been completed. If the copy fails to receive a commit, it crashes and calls undo alter,
   *    If an alter has already been executed, it is necessary to clean up the new ones and keep the old ones. The restored schema is old.
    */
-  EnterFunc()
   KStatus s;
 
   TS_LSN checkpoint_lsn = wal_sys_->FetchCheckpointLSN();
@@ -656,7 +667,7 @@ KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
   if (s == KStatus::FAIL && !redo_logs.empty()) {
     LOG_ERROR("Failed to read the TS Engine WAL logs.")
 #ifdef WITH_TESTS
-    Return(s)
+    return s;
 #endif
   }
 
@@ -688,7 +699,7 @@ KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
         if (s == KStatus::FAIL) {
           LOG_ERROR("Failed to init table %ld.", table_id)
 #ifdef WITH_TESTS
-          Return(s)
+          return s;
 #endif
         }
 
@@ -696,7 +707,7 @@ KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
         if (s == KStatus::FAIL) {
           LOG_ERROR("Failed to recover alter table %ld.", table_id)
 #ifdef WITH_TESTS
-          Return(s)
+          return s;
 #endif
         } else {
           table.TSxClean(ctx);
@@ -716,22 +727,21 @@ KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
   }
   incomplete.clear();
 
-  Return(SUCCESS)
+  return SUCCESS;
 }
 
 KStatus TSEngineImpl::Recover(kwdbts::kwdbContext_p ctx) {
-  EnterFunc()
   LOG_INFO("recover Start.");
   KStatus s = recover(ctx);
   if (s == KStatus::FAIL) {
     LOG_ERROR("Failed to recover DDL")
 #ifdef WITH_TESTS
-    Return(s)
+    return s;
 #endif
   }
 
   if (options_.wal_level == 0) {
-    Return(KStatus::SUCCESS);
+    return KStatus::SUCCESS;
   }
 
   // Traverse all EntityGroups in each timeline of the current node
@@ -747,7 +757,7 @@ KStatus TSEngineImpl::Recover(kwdbts::kwdbContext_p ctx) {
     if (s == KStatus::FAIL) {
       LOG_ERROR("Failed to init table %ld.", table_id)
 #ifdef WITH_TESTS
-        Return(s)
+        return s;
 #else
         continue;
 #endif
@@ -758,14 +768,14 @@ KStatus TSEngineImpl::Recover(kwdbts::kwdbContext_p ctx) {
     if (s == KStatus::FAIL) {
       LOG_ERROR("Failed to recover table %ld.", table_id)
 #ifdef WITH_TESTS
-      Return(s)
+      return s;
 #endif
     } else {
       s = table.CreateCheckpoint(ctx);
       if (s == KStatus::FAIL) {
         LOG_ERROR("Failed to CreateCheckpoint table %ld.", table_id)
 #ifdef WITH_TESTS
-        Return(s)
+        return s;
 #endif
       }
     }
@@ -773,7 +783,7 @@ KStatus TSEngineImpl::Recover(kwdbts::kwdbContext_p ctx) {
 
   LOG_INFO("Recover success.");
   range_indexes_map_.clear();
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::FlushBuffer(kwdbContext_p ctx) {
@@ -802,10 +812,9 @@ KStatus TSEngineImpl::FlushBuffer(kwdbContext_p ctx) {
 
 KStatus TSEngineImpl::TSMtrBegin(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                                  uint64_t range_id, uint64_t index, uint64_t& mtr_id) {
-  EnterFunc()
   if (options_.wal_level == 0) {
     mtr_id = 0;
-    Return(KStatus::SUCCESS)
+    return KStatus::SUCCESS;
   }
 
   std::shared_ptr<TsTable> table;
@@ -814,14 +823,15 @@ KStatus TSEngineImpl::TSMtrBegin(kwdbContext_p ctx, const KTableKey& table_id, u
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSMtrBegin failed, GetTsTable failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   std::shared_ptr<TsEntityGroup> table_range;
-  s = table->GetEntityGroup(ctx, range_group_id, &table_range);
+  // TODO(liangbo01) need open all entitygroup mtr. not one.
+  s = table->GetEntityGroup(ctx, default_entitygroup_id_in_dist_v2, &table_range);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSMtrBegin failed, GetEntityGroup failed, range group id: %lu", range_group_id)
-    Return(s)
+    return s;
   }
 
   if (table_range) {
@@ -830,28 +840,27 @@ KStatus TSEngineImpl::TSMtrBegin(kwdbContext_p ctx, const KTableKey& table_id, u
     if (entity_group == nullptr) {
       LOG_ERROR("The TS mini-transaction support is disabled, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id)
-      Return(FAIL)
+      return FAIL;
     }
 
     s = entity_group->MtrBegin(ctx, range_id, index, mtr_id);
     if (s == KStatus::FAIL) {
       LOG_ERROR("Failed to begin the TS mini-transaction, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id)
-      Return(s)
+      return s;
     } else {
       LOG_DEBUG("Succeed to begin the TS mini-transaction, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id);
-      Return(KStatus::SUCCESS)
+      return KStatus::SUCCESS;
     }
   }
-  Return(KStatus::FAIL)
+  return KStatus::FAIL;
 }
 
 KStatus TSEngineImpl::TSMtrCommit(kwdbContext_p ctx, const KTableKey& table_id,
                                   uint64_t range_group_id, uint64_t mtr_id) {
-  EnterFunc()
   if (options_.wal_level == 0) {
-    Return(KStatus::SUCCESS)
+    return KStatus::SUCCESS;
   }
 
   std::shared_ptr<TsTable> table;
@@ -860,14 +869,14 @@ KStatus TSEngineImpl::TSMtrCommit(kwdbContext_p ctx, const KTableKey& table_id,
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSMtrCommit failed, GetTsTable failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   std::shared_ptr<TsEntityGroup> table_range;
-  s = table->GetEntityGroup(ctx, range_group_id, &table_range);
+  s = table->GetEntityGroup(ctx, 1, &table_range);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSMtrCommit failed, GetEntityGroup failed, range group id: %lu", range_group_id)
-    Return(s)
+    return s;
   }
 
   if (table_range) {
@@ -876,28 +885,27 @@ KStatus TSEngineImpl::TSMtrCommit(kwdbContext_p ctx, const KTableKey& table_id,
     if (entity_group == nullptr) {
       LOG_ERROR("The TS mini-transaction support is disabled, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id)
-      Return(FAIL)
+      return FAIL;
     }
 
     s = entity_group->MtrCommit(ctx, mtr_id);
     if (s == KStatus::FAIL) {
       LOG_ERROR("Failed to commit the TS mini-transaction, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id)
-      Return(s)
+      return s;
     } else {
       LOG_DEBUG("Succeed to commit the TS mini-transaction, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id);
-      Return(KStatus::SUCCESS)
+      return KStatus::SUCCESS;
     }
   }
-  Return(KStatus::FAIL)
+  return KStatus::FAIL;
 }
 
 KStatus TSEngineImpl::TSMtrRollback(kwdbContext_p ctx, const KTableKey& table_id,
                                     uint64_t range_group_id, uint64_t mtr_id) {
-  EnterFunc()
   if (options_.wal_level == 0 || mtr_id == 0) {
-    Return(KStatus::SUCCESS)
+    return KStatus::SUCCESS;
   }
 
   std::shared_ptr<TsTable> table;
@@ -906,14 +914,14 @@ KStatus TSEngineImpl::TSMtrRollback(kwdbContext_p ctx, const KTableKey& table_id
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSMtrRollback failed, GetTsTable failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   std::shared_ptr<TsEntityGroup> table_range;
   s = table->GetEntityGroup(ctx, range_group_id, &table_range);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSMtrCommit failed, GetEntityGroup failed, range group id: %lu", range_group_id)
-    Return(s)
+    return s;
   }
 
   if (table_range) {
@@ -922,26 +930,24 @@ KStatus TSEngineImpl::TSMtrRollback(kwdbContext_p ctx, const KTableKey& table_id
     if (entity_group == nullptr) {
       LOG_ERROR("The TS mini-transaction support is disabled, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id)
-      Return(FAIL);
+      return FAIL;
     }
 
     s = entity_group->MtrRollback(ctx, mtr_id);
     if (s == KStatus::FAIL) {
       LOG_ERROR("Failed to rollback the TS mini-transaction, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id)
-      Return(s)
+      return s;
     } else {
       LOG_DEBUG("Succeed to rollback the TS mini-transaction, table id: %lu, range group id: %lu",
                 table->GetTableId(), range_group_id);
-      Return(KStatus::SUCCESS)
+      return KStatus::SUCCESS;
     }
   }
-  Return(KStatus::FAIL)
+  return KStatus::FAIL;
 }
 
 KStatus TSEngineImpl::TSxBegin(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id) {
-  EnterFunc()
-
   std::shared_ptr<TsTable> table;
   KStatus s;
 
@@ -950,23 +956,21 @@ KStatus TSEngineImpl::TSxBegin(kwdbContext_p ctx, const KTableKey& table_id, cha
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSxBegin failed, The target table is not available, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   s = table->CreateCheckpoint(ctx);
   if (s == KStatus::FAIL) {
     LOG_ERROR("Failed to CreateCheckpoint table %ld.", table_id)
 #ifdef WITH_TESTS
-    Return(s)
+    return s;
 #endif
   }
 
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::TSxCommit(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id) {
-  EnterFunc()
-
   std::shared_ptr<TsTable> table;
   KStatus s;
 
@@ -974,33 +978,31 @@ KStatus TSEngineImpl::TSxCommit(kwdbContext_p ctx, const KTableKey& table_id, ch
   if (mtr_id != 0) {
     if (tsx_manager_sys_->TSxCommit(ctx, transaction_id) == KStatus::FAIL) {
       LOG_ERROR("TSxCommit failed, system wal failed, table id: %lu", table_id)
-      Return(s)
+      return s;
     }
   }
 
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSxCommit failed, The target table is not available, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   s = table->TSxClean(ctx);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSxCommit failed, Failed to clean the TS transaction, table id: %lu", table->GetTableId())
-    Return(s)
+    return s;
   }
 
   if (checkpoint(ctx) == KStatus::FAIL) {
     LOG_ERROR("TSxCommit failed, system wal checkpoint failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::TSxRollback(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id) {
-  EnterFunc()
-
   std::shared_ptr<TsTable> table;
   KStatus s;
 
@@ -1008,22 +1010,22 @@ KStatus TSEngineImpl::TSxRollback(kwdbContext_p ctx, const KTableKey& table_id, 
   if (mtr_id == 0) {
     if (checkpoint(ctx) == KStatus::FAIL) {
       LOG_ERROR("TSxCommit failed, system wal checkpoint failed, table id: %lu", table_id)
-      Return(s)
+      return s;
     }
 
-    Return(KStatus::SUCCESS)
+    return KStatus::SUCCESS;
   }
 
   s = tsx_manager_sys_->TSxRollback(ctx, transaction_id);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSxRollback failed, TSxRollback failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSxRollback failed, The target table is not available, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
   std::vector<LogEntry*> logs;
@@ -1032,7 +1034,7 @@ KStatus TSEngineImpl::TSxRollback(kwdbContext_p ctx, const KTableKey& table_id, 
     for (auto log : logs) {
       delete log;
     }
-    Return(s)
+    return s;
   }
 
   std::reverse(logs.begin(), logs.end());
@@ -1049,15 +1051,15 @@ KStatus TSEngineImpl::TSxRollback(kwdbContext_p ctx, const KTableKey& table_id, 
   if (s == KStatus::FAIL) {
     LOG_ERROR("TSxRollback failed, Failed to ROLLBACK the TS transaction, table id: %lu", table_id)
     tables_cache_->EraseAndCheckRef(table_id);
-    Return(s)
+    return s;
   }
 
   if (checkpoint(ctx) == KStatus::FAIL) {
     LOG_ERROR("TSxRollback failed, system wal checkpoint failed, table id: %lu", table_id)
-    Return(s)
+    return s;
   }
 
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 void TSEngineImpl::GetTableIDList(kwdbContext_p ctx, std::vector<KTableKey>& table_id_list) {
@@ -1088,13 +1090,12 @@ void TSEngineImpl::GetTableIDList(kwdbContext_p ctx, std::vector<KTableKey>& tab
 KStatus TSEngineImpl::parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta,
                                       std::vector<AttributeInfo>& metric_schema,
                                       std::vector<TagInfo>& tag_schema) {
-  EnterFunc()
   for (int i = 0; i < meta->k_column_size(); i++) {
     const auto& col = meta->k_column(i);
     struct AttributeInfo col_var;
     KStatus s = TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i == 0);
     if (s != KStatus::SUCCESS) {
-      Return(s);
+      return s;
     }
 
     if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
@@ -1106,7 +1107,7 @@ KStatus TSEngineImpl::parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable*
       metric_schema.push_back(std::move(col_var));
     }
   }
-  Return(KStatus::SUCCESS);
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::CloseTSEngine(kwdbContext_p ctx, TSEngine* engine) {
@@ -1116,7 +1117,6 @@ KStatus TSEngineImpl::CloseTSEngine(kwdbContext_p ctx, TSEngine* engine) {
 }
 
 KStatus TSEngineImpl::UpdateSetting(kwdbContext_p ctx) {
-  EnterFunc()
   // After changing the WAL configuration parameters, the already opened table will not change,
   // and the newly opened table will follow the new configuration.
   string value;
@@ -1141,18 +1141,17 @@ KStatus TSEngineImpl::UpdateSetting(kwdbContext_p ctx) {
     LOG_INFO("update wal file num in group to %d", options_.wal_file_in_group)
   }
 
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::GetClusterSetting(kwdbContext_p ctx, const std::string& key, std::string* value) {
-  EnterFunc()
   std::shared_lock<std::shared_mutex> lock(g_settings_mutex);
   std::map<std::string, std::string>::iterator iter = g_cluster_settings.find(key);
   if (iter != g_cluster_settings.end()) {
     *value = iter->second;
-    Return(KStatus::SUCCESS)
+    return KStatus::SUCCESS;
   } else {
-    Return(KStatus::FAIL)
+    return KStatus::FAIL;
   }
 }
 
@@ -1173,7 +1172,7 @@ KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id, ch
   if (!column_meta.ParseFromArray(column.data, column.len)) {
     LOG_ERROR("ParseFromArray Internal Error");
     err_msg = "Parse protobuf error";
-    Return(KStatus::FAIL);
+    return KStatus::FAIL;
   }
   // Write Alter DDL into WAL, which type is ADD_COLUMN.
   s = wal_sys_->WriteDDLAlterWAL(ctx, x_id, table_id, AlterType::ADD_COLUMN, cur_version, new_version, column);
@@ -1205,7 +1204,7 @@ KStatus TSEngineImpl::DropColumn(kwdbContext_p ctx, const KTableKey& table_id, c
   roachpb::KWDBKTSColumn column_meta;
   if (!column_meta.ParseFromArray(column.data, column.len)) {
     LOG_ERROR("ParseFromArray Internal Error");
-    Return(KStatus::FAIL);
+    return KStatus::FAIL;
   }
 
   // Write Alter DDL into WAL, which type is DROP_COLUMN.
@@ -1223,22 +1222,19 @@ KStatus TSEngineImpl::DropColumn(kwdbContext_p ctx, const KTableKey& table_id, c
 }
 
 KStatus TSEngineImpl::AlterPartitionInterval(kwdbContext_p ctx, const KTableKey& table_id, uint64_t partition_interval) {
-  EnterFunc();
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == KStatus::FAIL) {
-    Return(s);
+    return s;
   }
 
   // Table alters partition interval.
   s = table->AlterPartitionInterval(ctx, partition_interval);
-  Return(s);
+  return s;
 }
 
 // Gets the number of remaining threads from the thread pool
 KStatus TSEngineImpl::GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) {
-  EnterFunc()
-
   // Get wait thread num
   k_uint32 wait_threads = ExecPool::GetInstance().GetWaitThreadNum();
 
@@ -1246,11 +1242,11 @@ KStatus TSEngineImpl::GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) {
   auto *return_info = static_cast<ThreadInfo *>(resp);
   if (return_info == nullptr) {
     LOG_ERROR("invalid resp pointer")
-    Return(KStatus::FAIL)
+    return KStatus::FAIL;
   }
 
   return_info->wait_threads = wait_threads;
-  Return(KStatus::SUCCESS)
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::AlterColumnType(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
@@ -1275,7 +1271,7 @@ KStatus TSEngineImpl::AlterColumnType(kwdbContext_p ctx, const KTableKey& table_
   roachpb::KWDBKTSColumn new_col_meta;
   if (!new_col_meta.ParseFromArray(new_column.data, new_column.len)) {
     LOG_ERROR("ParseFromArray Internal Error");
-    Return(KStatus::FAIL);
+    return KStatus::FAIL;
   }
   s = table->AlterTable(ctx, AlterType::ALTER_COLUMN_TYPE, &new_col_meta, cur_version, new_version, err_msg);
   if (s != KStatus::SUCCESS) {
@@ -1283,40 +1279,6 @@ KStatus TSEngineImpl::AlterColumnType(kwdbContext_p ctx, const KTableKey& table_
   }
 
   return KStatus::SUCCESS;
-}
-
-KStatus TSEngineImpl::generateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta,
-                                         std::vector<AttributeInfo>& metric_schema,
-                                         std::vector<TagInfo>& tag_schema) {
-  EnterFunc()
-  // Traverse metric schema and use attribute info to construct metric column info of meta.
-  for (auto col_var : metric_schema) {
-    // meta's column pointer.
-    roachpb::KWDBKTSColumn* col = meta->add_k_column();
-    KStatus s = TsEntityGroup::GetMetricColumnInfo(ctx, col_var, *col);
-    if (s != KStatus::SUCCESS) {
-      LOG_ERROR("GetColTypeStr failed during generate metric Schema");
-      Return(s);
-    }
-  }
-
-  // Traverse tag schema and use tag info to construct metric column info of meta
-  for (auto tag_info : tag_schema) {
-    // meta's column pointer.
-    roachpb::KWDBKTSColumn* col = meta->add_k_column();
-    // XXX Notice: tag_info don't has tag column name,
-    KStatus s = TsEntityGroup::GetTagColumnInfo(ctx, tag_info, *col);
-    if (s != KStatus::SUCCESS) {
-      LOG_ERROR("GetColTypeStr failed during generate tag Schema");
-      Return(s);
-    }
-    // Set storage length.
-    if (col->has_storage_len() && col->storage_len() == 0) {
-      col->set_storage_len(tag_info.m_size);
-    }
-  }
-
-  Return(KStatus::SUCCESS);
 }
 
 KStatus TSEngineImpl::SettingChangedSensor() {
@@ -1352,7 +1314,6 @@ KStatus TSEngineImpl::CloseSettingChangedSensor() {
 }
 
 KStatus TSEngineImpl::resetCompactTimer(kwdbContext_p ctx) {
-  EnterFunc();
   // Coming to this point indicates that engine_autovacuum_interval_ is different from the original
   if (compact_timer_running.load()) {  // stop the running timer
     compact_timer_running.store(false);
@@ -1366,11 +1327,10 @@ KStatus TSEngineImpl::resetCompactTimer(kwdbContext_p ctx) {
     compact_timer_running.store(true);
     compact_timer_thread = std::thread(compactTimer, ctx, this, engine_autovacuum_interval_);
   }
-  Return(KStatus::SUCCESS);
+  return KStatus::SUCCESS;
 }
 
 KStatus TSEngineImpl::CompactData(kwdbContext_p ctx) {
-  EnterFunc();
   KwTsSpan ts_span = KwTsSpan{INT64_MIN, INT64_MAX};
 
   std::vector<TSTableID> table_id_list;
@@ -1382,7 +1342,7 @@ KStatus TSEngineImpl::CompactData(kwdbContext_p ctx) {
     KStatus s = GetTsTable(ctx, table_id, table, err_info);
     if (s != KStatus::SUCCESS) {
       s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
-      Return(s);
+      return s;
     }
     RangeGroups groups;
     Defer defer{[&]() {
@@ -1390,16 +1350,30 @@ KStatus TSEngineImpl::CompactData(kwdbContext_p ctx) {
     }};
     s = table->GetEntityGroups(ctx, &groups);
     if (s != KStatus::SUCCESS) {
-      Return(s);
+      return s;
     }
     for (int i = 0; i < groups.len; i++) {
       s = table->CompactData(ctx, groups.ranges[i].range_group_id, ts_span);
       if (s != KStatus::SUCCESS) {
-        Return(s);
+        return s;
       }
     }
   }
-  Return(KStatus::SUCCESS);
+  return KStatus::SUCCESS;
+}
+
+KStatus TSEngineImpl::GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) {
+  std::shared_ptr<TsTable> table;
+  KStatus s = GetTsTable(ctx, table_id, table);
+  if (s == KStatus::FAIL) {
+    return s;
+  }
+  *version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
+  return KStatus::SUCCESS;
+}
+
+int TSEngineImpl::IsSingleNode() {
+  return options_.is_single_node;
 }
 
 int AggCalculator::cmp(void* l, void* r) {
@@ -1786,8 +1760,8 @@ std::shared_ptr<void> VarColAggCalculator::GetMax(std::shared_ptr<void> base) {
   }
 
   uint16_t len = *(reinterpret_cast<uint16_t*>(max));
-  void* data = std::malloc(len + MMapStringFile::kStringLenLen);
-  memcpy(data, max, len + MMapStringFile::kStringLenLen);
+  void* data = std::malloc(len + MMapStringColumn::kStringLenLen);
+  memcpy(data, max, len + MMapStringColumn::kStringLenLen);
   std::shared_ptr<void> ptr(data, free);
   return ptr;
 }
@@ -1807,8 +1781,8 @@ std::shared_ptr<void> VarColAggCalculator::GetMin(std::shared_ptr<void> base) {
     min = base.get();
   }
   uint16_t len = *(reinterpret_cast<uint16_t*>(min));
-  void* data = std::malloc(len + MMapStringFile::kStringLenLen);
-  memcpy(data, min, len + MMapStringFile::kStringLenLen);
+  void* data = std::malloc(len + MMapStringColumn::kStringLenLen);
+  memcpy(data, min, len + MMapStringColumn::kStringLenLen);
   std::shared_ptr<void> ptr(data, free);
   return ptr;
 }

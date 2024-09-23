@@ -896,7 +896,6 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <tree.Statement> show_jobs_stmt
 %type <tree.Statement> show_queries_stmt
 %type <tree.Statement> show_ranges_stmt
-%type <tree.Statement> show_ts_partitions_stmt
 %type <tree.Statement> show_range_for_row_stmt
 %type <tree.Statement> show_roles_stmt
 %type <tree.Statement> show_schemas_stmt
@@ -3722,7 +3721,6 @@ show_stmt:
 | show_jobs_stmt            // EXTEND WITH HELP: SHOW JOBS
 | show_queries_stmt         // EXTEND WITH HELP: SHOW QUERIES
 | show_ranges_stmt          // EXTEND WITH HELP: SHOW RANGES
-| show_ts_partitions_stmt   // EXTEND WITH HELP: SHOW TS PARTITIONS
 | show_range_for_row_stmt
 | show_roles_stmt           // EXTEND WITH HELP: SHOW ROLES
 | show_savepoint_stmt       // EXTEND WITH HELP: SHOW SAVEPOINT
@@ -4496,28 +4494,6 @@ show_ranges_stmt:
     $$.val = &tree.ShowRanges{DatabaseName: tree.Name($5)}
   }
 | SHOW RANGES error // SHOW HELP: SHOW RANGES
-
-// %Help: SHOW TS PARTITIONS - list the partitions of the timeseries table
-// %Category: Misc
-// %Text:
-// SHOW TS PARTITIONS
-// SHOW TS PARTITIONS FROM TABLE <table_name>
-// SHOW TS PARTITIONS FROM DATABASE <database_name>
-show_ts_partitions_stmt:
-  SHOW TS PARTITIONS FROM TABLE table_name
-  {
-    name := $6.unresolvedObjectName().ToTableName()
-    $$.val = &tree.ShowTsPartitions{TableOrIndex: tree.TableIndexName{Table: name}}
-  }
-| SHOW TS PARTITIONS FROM DATABASE database_name
-  {
-    $$.val = &tree.ShowTsPartitions{DatabaseName: tree.Name($6)}
-  }
-| SHOW TS PARTITIONS
-  {
-    $$.val = &tree.ShowTsPartitions{}
-  }
-| SHOW TS PARTITIONS error // SHOW HELP: SHOW TS PARTITIONS
 
 show_fingerprints_stmt:
   SHOW EXPERIMENTAL_FINGERPRINTS FROM TABLE table_name

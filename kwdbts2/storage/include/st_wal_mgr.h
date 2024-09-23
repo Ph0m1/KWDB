@@ -229,6 +229,26 @@ class WALMgr {
   KStatus WriteCheckpointWAL(kwdbContext_p ctx, uint64_t x_id, TS_LSN& entry_lsn);
 
   /**
+   * Construct the log entry for the snapshot.
+   * @param ctx
+   * @param x_id Mini-transaction ID, default value is 0.
+   * @param tbl_id  table id
+   * @param b_hash, e_hash, span  range info
+   * @return
+   */
+  KStatus WriteSnapshotWAL(kwdbContext_p ctx, uint64_t x_id, TSTableID tbl_id, uint64_t b_hash,
+                           uint64_t e_hash, KwTsSpan span);
+
+  /**
+   * Construct the log entry for the temp directory.
+   * @param ctx
+   * @param x_id Mini-transaction ID, default value is 0.
+   * @param path  temp directory abslutly path.
+   * @return
+   */
+  KStatus WriteTempDirectoryWAL(kwdbContext_p ctx, uint64_t x_id, std::string path);
+
+  /**
    * Read WAL log entry.
    * @param start_lsn start LSN
    * @param end_lsn end LSN

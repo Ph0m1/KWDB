@@ -14,6 +14,7 @@
 #include <iomanip>
 #include "kwdb_type.h"
 #include "mmap_segment_table.h"
+#include "bitmap_utils.h"
 
 using namespace kwdbts;
 
@@ -39,6 +40,9 @@ KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* v
 std::shared_ptr<void> ConvertToVarLen(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id,
                                       DATATYPE old_type, DATATYPE new_type, size_t row_idx, k_int32 col_idx);
 
+KStatus getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+                           AttributeInfo attr, uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap);
+
 /**
  * @brief iterator used for scan all data in segment.
  *        we will scan block by block, and return generated batch object 
@@ -58,6 +62,8 @@ class MMapSegmentTableIterator {
   KStatus GetBatch(BlockItem* cur_block_item, size_t block_start_idx, ResultSet* res, k_uint32 count);
 
   KStatus Next(BlockItem* cur_block_item, k_uint32* start_offset, ResultSet* res, k_uint32* count);
+
+  KStatus GetFullBlock(BlockItem* cur_block_item, TsBlockFullData* blk_info);
 
   // check if ts in iterator scan span.
   bool CheckIfTsInSpan(timestamp64 ts) {

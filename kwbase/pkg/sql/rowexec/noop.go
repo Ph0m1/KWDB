@@ -54,6 +54,10 @@ type noopProcessor struct {
 	// delete rows
 	DeleteRows int64
 
+	// store every node's error.
+	NodeIDMapErr map[int32]string
+	firstErr     string
+
 	TsOperatorType execinfrapb.OperatorType
 }
 
@@ -183,13 +187,21 @@ func (n *noopProcessor) handleMetaForTs(meta *execinfrapb.ProducerMetadata) (Nee
 		execinfrapb.OperatorType_TsCommit, execinfrapb.OperatorType_TsRollback:
 		if n.InputNum > 1 {
 			if meta.TsAlterColumn != nil {
-				if meta.TsAlterColumn.AlterSuccess {
-					n.recordNum++
-				} else {
-					return false
+				if !meta.TsAlterColumn.AlterSuccess {
+					if n.NodeIDMapErr == nil {
+						n.NodeIDMapErr = make(map[int32]string, 0)
+						n.firstErr = meta.TsAlterColumn.AlterErr
+					}
+					n.NodeIDMapErr[meta.TsAlterColumn.NodeID] = meta.TsAlterColumn.NodeIDMapErr[meta.TsAlterColumn.NodeID]
 				}
+				n.recordNum++
 				if n.recordNum < n.InputNum {
 					return true
+				}
+				meta.TsAlterColumn.NodeIDMapErr = n.NodeIDMapErr
+				meta.TsAlterColumn.AlterErr = n.firstErr
+				if n.firstErr != "" {
+					meta.TsAlterColumn.AlterSuccess = false
 				}
 			}
 		}

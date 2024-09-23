@@ -50,7 +50,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/server/status/statuspb"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/builtins"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -122,7 +121,6 @@ var kwdbInternal = virtualSchema{
 		sqlbase.CrdbInternalTablesTableID:               kwdbInternalTablesTable,
 		sqlbase.CrdbInternalTxnStatsTableID:             kwdbInternalTxnStatsTable,
 		sqlbase.CrdbInternalZonesTableID:                kwdbInternalZonesTable,
-		sqlbase.CrdbInternalKWDBTsPartitionsTableID:     kwdbInternalKWDBTsPartitionsTable,
 		sqlbase.CrdbInternalAuditPoliciesTableID:        kwbaseInternalAuditPoliciesTable,
 		sqlbase.CrdbInternalKWDBAttributeValueTableID:   kwdbInternalKWDBAttributeValueTable,
 		sqlbase.CrdbInternalKWDBFunctionsTableID:        kwdbInternalKWDBFunctionsTable,
@@ -2216,7 +2214,6 @@ CREATE TABLE kwdb_internal.ranges_no_leases (
   database_name        STRING NOT NULL,
   table_name           STRING NOT NULL,
   table_id             INT8 NOT NULL,
-  group_id             INT8 NOT NULL,
   index_name           STRING NOT NULL,
   replicas             INT8[] NOT NULL,
   replicas_tag        STRING[] NOT NULL,
@@ -2354,7 +2351,6 @@ CREATE TABLE kwdb_internal.ranges_no_leases (
 				tree.NewDString(dbName),
 				tree.NewDString(tableName),
 				tree.NewDInt(tree.DInt(desc.TableId)),
-				tree.NewDInt(tree.DInt(desc.GroupId)),
 				tree.NewDString(indexName),
 				votersArr,
 				replicaTagArr,
@@ -2899,7 +2895,6 @@ CREATE TABLE kwdb_internal.gossip_liveness (
   draining        BOOL NOT NULL,
   decommissioning BOOL NOT NULL,
   upgrading       BOOL NOT NULL,
-  status          STRING NOT NULL,
   updated_at      TIMESTAMP
 )
 	`,
@@ -2955,7 +2950,6 @@ CREATE TABLE kwdb_internal.gossip_liveness (
 				tree.MakeDBool(tree.DBool(l.Draining)),
 				tree.MakeDBool(tree.DBool(l.Decommissioning)),
 				tree.MakeDBool(tree.DBool(l.Upgrading)),
-				tree.NewDString(StatusToString(l.Status)),
 				tree.MakeDTimestamp(timeutil.Unix(0, n.updatedAt), time.Microsecond),
 			); err != nil {
 				return err
@@ -2963,34 +2957,6 @@ CREATE TABLE kwdb_internal.gossip_liveness (
 		}
 		return nil
 	},
-}
-
-// StatusToString return the string status.
-// this should be the same as func (nl *NodeLiveness) SetDead(ctx context.Context, nodeID roachpb.NodeID) error.
-// when change this func, update SetDead() as well.
-func StatusToString(status int32) string {
-	var str string
-	switch status {
-	case 0:
-		str = "dead"
-	case 1:
-		str = "pre-join"
-	case 2:
-		str = "joining"
-	case 3:
-		str = "rejoining"
-	case 4:
-		str = "healthy"
-	case 5:
-		str = "unhealthy"
-	case 6:
-		str = "decommissioning"
-	case 7:
-		str = "decommissioned"
-	case 8:
-		str = "upgrading"
-	}
-	return str
 }
 
 // kwdbInternalGossipAlertsTable exposes current health alerts in the cluster.
@@ -3538,82 +3504,6 @@ CREATE TABLE kwdb_internal.predefined_comments (
 			}
 		}
 
-		return nil
-	},
-}
-
-var kwdbInternalKWDBTsPartitionsTable = virtualSchemaTable{
-	comment: "kwdb partition info for users",
-	schema: `
-CREATE TABLE kwdb_internal.kwdb_ts_partitions (
-	group_id 			INT8 NOT NULL ,
-	partition_id	INT8 NOT NULL ,
-	start_key			BYTES NOT NULL ,
-	end_key				BYTES NOT NULL ,
-	start_pretty			STRING NOT NULL ,
-	end_pretty				STRING NOT NULL ,
-  database_name	STRING NOT NULL ,
-  table_name 		STRING NOT NULL ,
-  lease_holder  INT8,
-  replicas     	INT8[],
-	size					INT8,
-	status				INT
-)
-`,
-	populate: func(ctx context.Context, p *planner, _ *DatabaseDescriptor, addRow func(...tree.Datum) error) error {
-		hashRoutings, err := GetAllKWDBHashRoutings(ctx, p.Txn())
-		if err != nil {
-			return err
-		}
-		for _, v := range hashRoutings {
-			tableID := v.TableID
-			tableDesc, err := sqlbase.GetTsTableDescByTableID(ctx, p.Txn(), tableID)
-			if err != nil {
-				continue
-			}
-			dbID := tableDesc.GetParentID()
-			dbDesc, err := getDatabaseDescByID(ctx, p.Txn(), dbID)
-			if err != nil {
-				continue
-			}
-			groupID := v.EntityRangeGroupId
-			partitionSize := v.TsPartitionSize
-			entityRangeGroup := v.EntityRangeGroup
-
-			leaseHolder := entityRangeGroup.LeaseHolder.NodeID
-			replicas := tree.NewDArray(types.Int)
-			for _, replica := range entityRangeGroup.InternalReplicas {
-				if replica.Status != api.EntityRangeGroupReplicaStatus_available {
-					continue
-				}
-				err := replicas.Append(tree.NewDInt(tree.DInt(replica.NodeID)))
-				if err != nil {
-					return err
-				}
-			}
-			for partitionID, hashPartition := range entityRangeGroup.Partitions {
-				startPoint := hashPartition.StartPoint
-				endPoint := hashPartition.EndPoint
-				startKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(tableID), uint64(startPoint))
-				endKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(tableID), uint64(endPoint))
-				if err := addRow(
-					tree.NewDInt(tree.DInt(groupID)),
-					tree.NewDInt(tree.DInt(partitionID)),
-					tree.NewDBytes(tree.DBytes(startKey)),
-					tree.NewDBytes(tree.DBytes(endKey)),
-					tree.NewDString(roachpb.PrettyPrintKey(nil, startKey)),
-					tree.NewDString(roachpb.PrettyPrintKey(nil, endKey)),
-					tree.NewDString(dbDesc.Name),
-					tree.NewDString(tableDesc.Name),
-					tree.NewDInt(tree.DInt(leaseHolder)),
-					replicas,
-					tree.NewDInt(tree.DInt(partitionSize)),
-					tree.NewDInt(tree.DInt(entityRangeGroup.Status)),
-				); err != nil {
-					return err
-				}
-			}
-		}
 		return nil
 	},
 }

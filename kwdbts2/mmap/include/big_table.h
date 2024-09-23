@@ -17,7 +17,6 @@
 #include <iostream>
 #include <string>
 #include <map>
-#include "data_model.h"
 #include "ts_object.h"
 #include "data_helper.h"
 #include "kwdb_consts.h"
@@ -42,7 +41,7 @@ class KeyPair;
 
 using namespace kwdbts;
 
-class BigTable: public DataModel {
+class BigTable : public TSObject {
  private:
   KRWLatch rw_latch_;
 
@@ -51,7 +50,7 @@ protected:
 public:
   BigTable();
 
-  BigTable(const string &url);
+  BigTable(const string &path);
 
   virtual ~BigTable();
 
@@ -92,18 +91,18 @@ public:
    * @param	description	    Description string.
    * @param	alias		        Alias for the table object.
    * @param	tbl_sub_path		sub directory.
-   * @param	source_url	    Data source URL.
+   * @param	source_path	    Data source PATH.
    * @param	dimension     	Dimension Information.
-   * @param	ns_url		      Name service URL.
+   * @param	ns_path		      Name service PATH.
    * @param encoding        Name encoding scheme & deletable table.
    * @return	0 if succeed; -1 otherwise.
    */
   virtual int create(const vector<AttributeInfo> &schema,
     const vector<string> &key, const string &key_order,
     const string &description = kwdbts::s_emptyString,
-    const string &ns_url = defaultNameServiceURL(),
+    const string &ns_path = defaultNameServicePath(),
     const string &tbl_sub_path = kwdbts::s_emptyString,
-    const string &source_url = kwdbts::s_emptyString,
+    const string &source_path = kwdbts::s_emptyString,
     int encoding = DICTIONARY,
     ErrorInfo &err_info = getDummyErrorInfo());
 

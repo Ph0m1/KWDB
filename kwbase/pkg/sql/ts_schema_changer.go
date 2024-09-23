@@ -143,7 +143,7 @@ func (sw *TSSchemaChangeWorker) exec(ctx context.Context) error {
 		// Note that r.Next always returns true on first run so exec will be
 		// called at least once before there is a chance for this loop to exit.
 		// make distributed exec plan and run
-		// if failed, rollback WAL
+		// if failed and need to rollback WAL, set done = true; otherwise, return err directly.
 		// if succeeded, commit WAL
 		syncErr = sw.makeAndRunDistPlan(ctx, d)
 		switch {
@@ -160,15 +160,18 @@ func (sw *TSSchemaChangeWorker) exec(ctx context.Context) error {
 				sw.tableID, sw.mutationID,
 			)
 			done = true
-		case !isPermanentSchemaChangeError(syncErr):
+		case errors.IsAny(syncErr, errSchemaChangeNotFirstInLine):
 			// Check if the error is on a whitelist of errors we should retry on,
 			// including the schema change not having the first mutation in line.
 			log.Warningf(ctx, "error while running ts schema change, retrying: %v", syncErr)
+		case errors.Is(syncErr, sqlbase.ErrNodeUnhealthy):
+			return syncErr
 		default:
 			// All other errors lead to a failed job.
 			done = true
 		}
 		if done {
+			// Commit or Rollback WAL
 			break
 		}
 	}
@@ -185,7 +188,7 @@ func (sw *TSSchemaChangeWorker) completeTsTxn(ctx context.Context, syncErr error
 		InitialBackoff: 500 * time.Millisecond,
 		MaxBackoff:     30 * time.Second,
 		Multiplier:     2,
-		MaxRetries:     10,
+		MaxRetries:     9,
 	}
 	var event txnEvent
 	event = txnCommit
@@ -271,10 +274,10 @@ func (sw *TSSchemaChangeWorker) handleResult(
 		switch d.Type {
 		case createKwdbTsTable:
 			updateErr = p.handleCreateTSTable(ctx, d.SNTable, syncErr)
-		case dropKwdbTsTable:
-			updateErr = p.handleDropTsTable(ctx, d.SNTable, sw.jobRegistry, syncErr)
-		case dropKwdbTsDatabase:
-			updateErr = p.handleDropTsDatabase(ctx, d.Database, d.DropDBInfo, sw.jobRegistry, syncErr)
+		//case dropKwdbTsTable:
+		//	updateErr = p.handleDropTsTable(ctx, d.SNTable, sw.jobRegistry, syncErr)
+		//case dropKwdbTsDatabase:
+		//	updateErr = p.handleDropTsDatabase(ctx, d.Database, d.DropDBInfo, sw.jobRegistry, syncErr)
 		case createKwdbInsTable:
 			// prepare instance table metadata which is being created
 			insTable := sqlbase.InstNameSpace{
@@ -288,14 +291,14 @@ func (sw *TSSchemaChangeWorker) handleResult(
 				},
 			}
 			updateErr = p.handleCreateInsTable(ctx, insTable, syncErr)
-		case dropKwdbInsTable:
-			updateErr = p.handleDropInsTable(
-				ctx,
-				d.DropMEInfo[0].DatabaseName,
-				d.DropMEInfo[0].TableName,
-				d.DropMEInfo[0].TableID,
-				syncErr,
-			)
+		//case dropKwdbInsTable:
+		//	updateErr = p.handleDropInsTable(
+		//		ctx,
+		//		d.DropMEInfo[0].DatabaseName,
+		//		d.DropMEInfo[0].TableName,
+		//		d.DropMEInfo[0].TableID,
+		//		syncErr,
+		//	)
 		case alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbAlterColumnType,
 			alterKwdbAddTag, alterKwdbDropTag, alterKwdbAlterTagType:
 			updateErr = sw.handleMutationForTSTable(ctx, d, syncErr)
@@ -678,44 +681,49 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 	ctx context.Context, d jobspb.SyncMetaCacheDetails,
 ) error {
 	var newPlanNode planNode
-	var nodeID []roachpb.NodeID
+	//var nodeID []roachpb.NodeID
 	opType := getDDLOpType(d.Type)
 	switch d.Type {
-	case dropKwdbTsTable, dropKwdbTsDatabase:
-		switch d.Type {
-		case dropKwdbTsTable:
-			log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
-				opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
-		case dropKwdbTsDatabase:
-			log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
-				opType, d.Database.Name, d.Database.ID, sw.job.ID())
-		}
-		nodeList, err := api.GetHealthyNodeIDs(ctx)
-		if err != nil {
-			return err
-		}
-		for _, td := range d.DropMEInfo {
-			log.Infof(ctx, "%s, jobID: %d, waitForOneVersion start", opType, sw.job.ID())
-			// Wait for DML execution to complete on this table
-			if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(
-				ctx,
-				sqlbase.ID(td.TableID),
-				base.DefaultRetryOptions(),
-			); err != nil {
-				return err
-			}
-			log.Infof(ctx, "%s, jobID: %d, waitForOneVersion finished", opType, sw.job.ID())
-			log.Infof(ctx, "%s, jobID: %d, checkReplica start", opType, sw.job.ID())
-			if err := sw.checkReplica(ctx, sqlbase.ID(td.TableID)); err != nil {
-				return err
-			}
-			log.Infof(ctx, "%s, jobID: %d, checkReplica finished", opType, sw.job.ID())
-		}
-		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList}
+	//case dropKwdbTsTable, dropKwdbTsDatabase:
+	//	switch d.Type {
+	//	case dropKwdbTsTable:
+	//		log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
+	//			opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
+	//	case dropKwdbTsDatabase:
+	//		log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
+	//			opType, d.Database.Name, d.Database.ID, sw.job.ID())
+	//	}
+	//	nodeList, err := api.GetHealthyNodeIDs(ctx)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	for _, td := range d.DropMEInfo {
+	//		log.Infof(ctx, "%s, jobID: %d, waitForOneVersion start", opType, sw.job.ID())
+	//		// Wait for DML execution to complete on this table
+	//		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(
+	//			ctx,
+	//			sqlbase.ID(td.TableID),
+	//			base.DefaultRetryOptions(),
+	//		); err != nil {
+	//			return err
+	//		}
+	//		log.Infof(ctx, "%s, jobID: %d, waitForOneVersion finished", opType, sw.job.ID())
+	//		log.Infof(ctx, "%s, jobID: %d, checkReplica start", opType, sw.job.ID())
+	//		if err := sw.checkReplica(ctx, sqlbase.ID(td.TableID)); err != nil {
+	//			return err
+	//		}
+	//		log.Infof(ctx, "%s, jobID: %d, checkReplica finished", opType, sw.job.ID())
+	//	}
+	//	newPlanNode = &tsDDLNode{d: d, nodeID: nodeList}
 	case alterKwdbAddColumn, alterKwdbDropColumn, alterKwdbAlterColumnType,
 		alterKwdbAddTag, alterKwdbDropTag, alterKwdbAlterTagType:
+
 		log.Infof(ctx, "%s job start, name: %s, id: %d, column/tag name: %s, jobID: %d",
 			opType, d.SNTable.Name, d.SNTable.ID, d.AlterTag.Name, sw.job.ID())
+
+		needCheckReplica := d.Type == alterKwdbAddTag || d.Type == alterKwdbDropTag ||
+			d.Type == alterKwdbAlterTagType
+
 		tableDesc, notFirst, err := sw.notFirstInLine(ctx)
 		if err != nil {
 			return err
@@ -729,16 +737,25 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		}
 		d.SNTable = *tableDesc
 		// Get all healthy nodes.
-		nodeList, err := api.GetHealthyNodeIDs(ctx)
-		if err != nil {
+		var nodeList []roachpb.NodeID
+		var retErr error
+		if err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			nodeList, retErr = api.GetTableNodeIDs(ctx, txn, uint32(d.SNTable.GetID()))
+			if retErr != nil {
+				return retErr
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 		sw.healthyNodes = nodeList
 		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
 			return err
 		}
-		if err := sw.checkReplica(ctx, d.SNTable.ID); err != nil {
-			return err
+		if needCheckReplica {
+			if err := sw.checkReplica(ctx, d.SNTable.ID); err != nil {
+				return err
+			}
 		}
 		txnID := strconv.AppendInt([]byte{}, *sw.job.ID(), 10)
 		miniTxn := tsTxn{txnID: txnID, txnEvent: txnStart}
@@ -746,8 +763,15 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 	case alterKwdbAlterPartitionInterval:
 		log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d", opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
 		// Get all healthy nodes.
-		nodeList, err := api.GetHealthyNodeIDs(ctx)
-		if err != nil {
+		var nodeList []roachpb.NodeID
+		var retErr error
+		if err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			nodeList, retErr = api.GetTableNodeIDs(ctx, txn, uint32(d.SNTable.GetID()))
+			if retErr != nil {
+				return retErr
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 		log.Infof(ctx, "%s, jobID: %d, waitForOneVersion start", opType, sw.job.ID())
@@ -770,26 +794,33 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 	case createKwdbTsTable:
 		log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
 			opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
-		nodeList, err := api.GetHealthyNodeIDs(ctx)
-		if err != nil {
+		var nodeList []roachpb.NodeID
+		var retErr error
+		if err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			nodeList, retErr = api.GetTableNodeIDs(ctx, txn, uint32(d.SNTable.GetID()))
+			if retErr != nil {
+				return retErr
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList}
-	case dropKwdbInsTable:
-		log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
-			opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
-		for _, dropInfo := range d.DropMEInfo {
-			hashRouter, err := api.GetHashRouterWithTable(0, dropInfo.TemplateID, false, sw.p.txn)
-			if err != nil {
-				return err
-			}
-			nodeIDs, err := hashRouter.GetLeaseHolderNodeIDs(ctx, false)
-			if err != nil {
-				return err
-			}
-			nodeID = append(nodeID, nodeIDs...)
-		}
-		newPlanNode = &tsDDLNode{d: d, nodeID: nodeID}
+	//case dropKwdbInsTable:
+	//	log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",
+	//		opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
+	//	for _, dropInfo := range d.DropMEInfo {
+	//		hashRouter, err := api.GetHashRouterWithTable(0, dropInfo.TemplateID, false, sw.p.txn)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		nodeIDs, err := hashRouter.GetLeaseHolderNodeIDs(ctx, false)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		nodeID = append(nodeID, nodeIDs...)
+	//	}
+	//	newPlanNode = &tsDDLNode{d: d, nodeID: nodeID}
 	case createKwdbInsTable:
 		tsIns := tsInsertNodePool.Get().(*tsInsertNode)
 		payInfo := []*sqlbase.SinglePayloadInfo{{
@@ -954,6 +985,11 @@ func (sw *TSSchemaChangeWorker) checkReplica(ctx context.Context, tableID sqlbas
 		if isComplete {
 			return nil
 		}
+		for _, nodeID := range sw.healthyNodes {
+			if err := sw.distSQLPlanner.nodeHealth.check(ctx, nodeID); err != nil {
+				return sqlbase.ErrNodeUnhealthy
+			}
+		}
 	}
 	return pgerror.New(pgcode.Warning, "have tried 30 times, timed out of AdminReplicaVoterStatusConsistent")
 }
@@ -962,10 +998,10 @@ func getDDLOpType(op int32) string {
 	switch op {
 	case createKwdbTsTable:
 		return "create ts table"
-	case dropKwdbTsTable:
-		return "drop ts table"
-	case dropKwdbTsDatabase:
-		return "drop ts database"
+	//case dropKwdbTsTable:
+	//	return "drop ts table"
+	//case dropKwdbTsDatabase:
+	//	return "drop ts database"
 	case alterKwdbAddTag:
 		return "add tag"
 	case alterKwdbDropTag:

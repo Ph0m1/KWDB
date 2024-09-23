@@ -10,6 +10,7 @@
 // See the Mulan PSL v2 for more details.
 
 #include "payload_builder.h"
+#include "ts_table.h"
 
 namespace kwdbts {
 
@@ -41,7 +42,6 @@ PayloadBuilder::PayloadBuilder(const std::vector<TagColumn*>& tag_schema,
 const char* PayloadBuilder::GetTagAddr() {
   return tag_value_mem_;
 }
-
 
 bool PayloadBuilder::SetTagValue(int tag_idx, char* mem, int count) {
   if (tag_idx >= tag_schema_.size()) {
@@ -134,12 +134,12 @@ bool PayloadBuilder::SetColumnNull(int row_num, int col_idx) {
   int col_data_bitmap_offset = row_offset * count_ + col_idx * batch_bitmap_size;
   char* fix_data_col_batch = fix_data_mem_ + col_data_bitmap_offset;
   set_null_bitmap((unsigned  char*)fix_data_col_batch, row_num);
-  LOG_INFO("Set data to null at column[%d:%s] row_num[%d]", col_idx, data_schema_[col_idx].name, row_num)
+  // LOG_INFO("Set data to null at column[%d:%s] row_num[%d]", col_idx, data_schema_[col_idx].name, row_num)
   return true;
 }
 
-bool PayloadBuilder::Build(TSSlice *payload, uint32_t table_version) {
-  if (count_ <= 0 || tag_schema_.empty() || data_schema_.empty() || primary_tags_.empty()) {
+bool PayloadBuilder::Build(TSSlice *payload) {
+  if (tag_schema_.empty() || data_schema_.empty() || primary_tags_.empty()) {
     return false;
   }
   int header_size = Payload::header_size_;
@@ -151,7 +151,7 @@ bool PayloadBuilder::Build(TSSlice *payload, uint32_t table_version) {
   for (int i = 0; i < primary_tags_.size(); ++i) {
     primary_tag_len += primary_tags_[i].len_;
   }
-  char* primary_keys_mem = new char[primary_tag_len];
+  char* primary_keys_mem = reinterpret_cast<char*>(malloc(primary_tag_len));
   int begin_offset = 0;
   for (int i = 0; i < primary_tags_.size(); ++i) {
     memcpy(primary_keys_mem + begin_offset, tag_value_mem_ + primary_tags_[i].offset_, primary_tags_[i].len_);
@@ -167,12 +167,12 @@ bool PayloadBuilder::Build(TSSlice *payload, uint32_t table_version) {
   k_uint32 payload_length = header_len + primary_len_len + primary_tag_len
                             + tag_len_len + tag_value_len + data_len_len + data_len;
 
-  char* value = new char[payload_length];
+  char* value = reinterpret_cast<char*>(malloc(payload_length));
   memset(value, 0, payload_length);
   char* value_idx = value;
   // header part
   KInt32(value_idx + Payload::row_num_offset_) = count_;
-  KUint32(value_idx + Payload::ts_version_offset_) = table_version;
+  KUint32(value_idx + Payload::ts_version_offset_) = data_schema_[0].version;
   value_idx += header_len;
   // set primary tag
   KInt16(value_idx) = primary_tag_len;
@@ -180,6 +180,7 @@ bool PayloadBuilder::Build(TSSlice *payload, uint32_t table_version) {
   memcpy(value_idx, primary_keys_mem, primary_tag_len);
   primary_offset_ = value_idx - value;
   value_idx += primary_tag_len;
+
   // set tag
   KInt32(value_idx) = tag_value_len;
   value_idx += tag_len_len;
@@ -196,9 +197,97 @@ bool PayloadBuilder::Build(TSSlice *payload, uint32_t table_version) {
   value_idx += data_len;
   payload->data = value;
   payload->len = value_idx - value;
+    // set hashpoint
+  uint32_t hashpoint = TsTable::GetConsistentHashId(value + primary_offset_, primary_tag_len);
+  memcpy(&payload->data[Payload::hash_point_id_offset_], &hashpoint, sizeof(uint16_t));
 
-  delete[] primary_keys_mem;
+  free(primary_keys_mem);
   return true;
+}
+
+// build and return col-based payload.
+KStatus PayloadStTypeConvert::build(MMapRootTableManager* root_bt_manager, TSSlice* payload) {
+  Payload pl_row(root_bt_manager, row_based_mem_);
+  size_t row_count = pl_row.GetRowCount();
+  size_t data_len = pl_row.GetDataLength();
+  int data_offset = pl_row.GetDataOffset();
+
+  // parse row mem info into row_mem list.
+  std::vector<TSSlice> row_mem(row_count);
+  size_t data_scaned = 0;
+  for (size_t i = 0; i < row_count; i++) {
+    auto row_start = row_based_mem_.data + data_offset + data_scaned;
+    auto row_len = *reinterpret_cast<uint32_t*>(row_start);
+    row_mem[i] = {row_start + 4, row_len};
+    data_scaned += row_len + 4;
+  }
+  assert(data_scaned == data_len);
+
+  // calculate fixed size of row-based tuple
+  size_t fixed_row_len = 0;
+  size_t col_based_fixed_row_len = 0;
+  for (auto& col : data_schema_) {
+    if (IS_VAR_DATATYPE(col.type)) {
+      fixed_row_len += sizeof(intptr_t);
+    } else {
+      fixed_row_len += col.size;
+    }
+  }
+  col_based_fixed_row_len = fixed_row_len;
+  // add bitmap bytes.
+  fixed_row_len += (data_schema_.size() + 7) / 8;
+  // var length is total size - fixed size - rowlen(4)
+  size_t var_col_vaules_len = data_len - (fixed_row_len + 4) * row_count;
+
+  // ---------------begin build payload----------------------
+  int batch_bitmap = (row_count + 7) / 8;
+  size_t fix_data_mem_len = batch_bitmap * data_schema_.size() + col_based_fixed_row_len * row_count;
+  // new payload memory
+  char* col_based_payload = reinterpret_cast<char*>(malloc(fix_data_mem_len + var_col_vaules_len + data_offset));
+  memset(col_based_payload, 0, fix_data_mem_len + var_col_vaules_len + data_offset);
+  payload->data = col_based_payload;
+  payload->len = fix_data_mem_len + var_col_vaules_len + data_offset;
+  // copy header and tag info
+  memcpy(col_based_payload, row_based_mem_.data, data_offset);
+  KInt32(col_based_payload + data_offset - 4) = fix_data_mem_len + var_col_vaules_len;
+  // set column values
+  size_t cur_col_start_offset = data_offset;
+  int cur_col_offset_row_based = 0;
+  size_t var_mem_write_offset = 0;
+  char* var_mem_addr = col_based_payload + data_offset + fix_data_mem_len;
+  int bitmap_size_of_row_based = (data_schema_.size() + 7) / 8;
+  char* cur_col_mem_in_row_tuple = nullptr;
+  for (size_t i = 0; i < data_schema_.size(); i++) {
+    if (IS_VAR_DATATYPE(data_schema_[i].type)) {
+      for (size_t row = 0; row < row_count; row++) {
+        cur_col_mem_in_row_tuple = row_mem[row].data + bitmap_size_of_row_based + cur_col_offset_row_based;
+        if (get_null_bitmap((unsigned char*) row_mem[row].data, i) != 0) {
+          set_null_bitmap((unsigned char*) (col_based_payload + cur_col_start_offset), row);
+        } else {
+          size_t var_value_offset = KUint32(cur_col_mem_in_row_tuple);
+          size_t var_value_len = KUint16(row_mem[row].data + var_value_offset);
+          memcpy(var_mem_addr + var_mem_write_offset, row_mem[row].data + var_value_offset, var_value_len + 2);
+          KUint64(col_based_payload + cur_col_start_offset + batch_bitmap + row * sizeof(intptr_t)) =
+                        data_offset + fix_data_mem_len - cur_col_start_offset + var_mem_write_offset;
+          var_mem_write_offset += var_value_len + 2;
+        }
+      }
+    } else {
+      for (int row = 0; row < row_mem.size(); row++) {
+        cur_col_mem_in_row_tuple = row_mem[row].data + bitmap_size_of_row_based + cur_col_offset_row_based;
+        if (get_null_bitmap((unsigned char*) row_mem[row].data, i) != 0) {
+          set_null_bitmap((unsigned char*) (col_based_payload + cur_col_start_offset), row);
+        } else {
+          memcpy(col_based_payload + cur_col_start_offset + batch_bitmap + row * data_schema_[i].size,
+                 cur_col_mem_in_row_tuple, data_schema_[i].size);
+        }
+      }
+    }
+    size_t col_len_in_tuple = IS_VAR_DATATYPE(data_schema_[i].type) ? sizeof(intptr_t) : data_schema_[i].size;
+    cur_col_offset_row_based += col_len_in_tuple;
+    cur_col_start_offset += batch_bitmap + row_count * col_len_in_tuple;
+  }
+  return KStatus::SUCCESS;
 }
 
 }  //  namespace kwdbts

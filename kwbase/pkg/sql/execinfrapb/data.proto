@@ -337,6 +337,8 @@ message RemoteProducerMetadata {
   message TSAlterColumn {
     optional bool alter_success = 1 [(gogoproto.nullable) = false];
     optional string alter_err = 2 [(gogoproto.nullable) = false];
+    optional int32 nodeID = 3 [(gogoproto.nullable) = false];
+    map<int32, string> nodeIDMapErr = 4;
   }
 
   oneof value {

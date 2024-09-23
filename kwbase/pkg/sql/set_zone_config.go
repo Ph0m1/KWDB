@@ -27,8 +27,10 @@ package sql
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/config"
 	"gitee.com/kwbasedb/kwbase/pkg/config/zonepb"
@@ -90,6 +92,18 @@ var supportedZoneConfigOptions = map[tree.Name]struct {
 	"lease_preferences": {types.String, func(c *zonepb.ZoneConfig, d tree.Datum) {
 		loadYAML(&c.LeasePreferences, string(tree.MustBeDString(d)))
 		c.InheritedLeasePreferences = false
+	}},
+	"ts_merge.days": {requiredType: types.Interval, setter: func(c *zonepb.ZoneConfig, d tree.Datum) {
+		secs, ok := d.(*tree.DInterval).AsInt64()
+		if ok && secs < int64(math.MaxInt64/(1000000000)) && secs >= 0 {
+			nanos := secs * 1000000000
+			c.TimeSeriesMergeDuration = time.Duration(nanos)
+		} else if ok && secs < 0 {
+			panic(errors.Errorf("invalid value %+v, can not set ts_merge.days < 0", d))
+		} else {
+			panic(errors.Errorf("invalid value %+v", d))
+		}
+
 	}},
 }
 
@@ -202,9 +216,9 @@ func checkPrivilegeForSetZoneConfig(ctx context.Context, p *planner, zs tree.Zon
 		if err != nil {
 			return err
 		}
-		if err := TSDatabaseUnsupportedErr(dbDesc.EngineType, "set zone config "); err != nil {
-			return err
-		}
+		//if err := TSDatabaseUnsupportedErr(dbDesc.EngineType, "set zone config "); err != nil {
+		//	return err
+		//}
 		dbCreatePrivilegeErr := p.CheckPrivilege(ctx, dbDesc, privilege.CREATE)
 		dbZoneConfigPrivilegeErr := p.CheckPrivilege(ctx, dbDesc, privilege.ZONECONFIG)
 

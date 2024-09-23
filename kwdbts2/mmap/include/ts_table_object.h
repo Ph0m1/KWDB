@@ -13,7 +13,6 @@
 
 #include <mutex>
 #include <shared_mutex>
-#include "data_model.h"
 #include <pthread.h>
 #include "ts_object.h"
 #include "mmap/mmap_file.h"
@@ -60,7 +59,7 @@ struct TSTableFileMetadata {
   uint64_t insert_rows_per_day;
   uint64_t entity_num;
   char reserved_2[40];
-  col_a ns_url;             ///< offset to the name service.
+  col_a ns_path;             ///< offset to the name service.
   ///< encryption vector.
   off_t attribute_offset;   ///< offset to tree attributes.
   off_t record_size;        ///< size of record (in bytes).
@@ -105,10 +104,11 @@ class TsTableObject {
   string db_path_;  // file path
   string tbl_sub_path_;
 
-  vector<AttributeInfo> cols_info_with_hidden_;
+  vector<AttributeInfo> cols_info_include_dropped_;
 
-  vector<AttributeInfo> cols_info_without_hidden_;
-  vector<uint32_t> cols_idx_;  // The column index that isn't dropped corresponding to cols_info_with_hidden_
+  vector<AttributeInfo> cols_info_exclude_dropped_;
+  // Index for valid columns, and the index number is corresponding to cols_info_include_dropped_
+  vector<uint32_t> idx_for_valid_cols_;
 
   inline size_t& _reservedSize() const { return meta_data_->num_leaf_node; }
 
@@ -131,12 +131,12 @@ class TsTableObject {
   /**
    * @brief	open a big object.
    *
-   * @param 	url			big object URL to be opened.
+   * @param 	table_path			big object path to be opened.
    * @param 	flag		option to open a file; O_CREAT to create new file
    * @param	tbl_sub_path		sub path.
    * @return	>= 0 if succeed, otherwise -1.
    */
-  int open(const string& url, const std::string& db_path, const string& tbl_sub_path, int cc, int flags);
+  int open(const string& table_path, const std::string& db_path, const string& tbl_sub_path, int cc, int flags);
 
   int close();
 

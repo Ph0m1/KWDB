@@ -49,6 +49,9 @@ type tsTagUpdater struct {
 	isUpdateSuccess bool
 	notFirst        bool
 	err             error
+
+	startKey []byte
+	endKey   []byte
 }
 
 var _ execinfra.Processor = &tsTagUpdater{}
@@ -71,6 +74,8 @@ func newTsTagUpdater(
 		primaryTagKeys: tsTagUpdateSpec.PrimaryTagKeys,
 		primaryTags:    tsTagUpdateSpec.PrimaryTags,
 		tags:           tsTagUpdateSpec.Tags,
+		startKey:       tsTagUpdateSpec.StartKey,
+		endKey:         tsTagUpdateSpec.EndKey,
 	}
 
 	if err := tu.Init(
@@ -104,17 +109,31 @@ func (tu *tsTagUpdater) Start(ctx context.Context) context.Context {
 	ba := tu.FlowCtx.Txn.NewBatch()
 	switch tu.tsOperatorType {
 	case execinfrapb.OperatorType_TsUpdateTag:
-		r := &roachpb.TsTagUpdateRequest{
-			RequestHeader: roachpb.RequestHeader{
-				Key: tu.primaryTagKeys[0],
-			},
-			TableId:      tu.tableID,
-			PrimaryTags:  tu.primaryTags[0],
-			RangeGroupId: tu.rangeGroupID,
-			Tags:         tu.tags[0],
-		}
+		if tu.EvalCtx.StartDistributeMode {
+			r := &roachpb.TsTagUpdateRequest{
+				RequestHeader: roachpb.RequestHeader{
+					Key:    tu.startKey,
+					EndKey: tu.endKey,
+				},
+				TableId:      tu.tableID,
+				PrimaryTags:  tu.primaryTags[0],
+				RangeGroupId: tu.rangeGroupID,
+				Tags:         tu.tags[0],
+			}
+			ba.AddRawRequest(r)
+		} else {
+			r := &roachpb.TsTagUpdateRequest{
+				RequestHeader: roachpb.RequestHeader{
+					Key: tu.primaryTagKeys[0],
+				},
+				TableId:      tu.tableID,
+				PrimaryTags:  tu.primaryTags[0],
+				RangeGroupId: tu.rangeGroupID,
+				Tags:         tu.tags[0],
+			}
 
-		ba.AddRawRequest(r)
+			ba.AddRawRequest(r)
+		}
 		err = tu.FlowCtx.Cfg.TseDB.Run(ctx, ba)
 		if err == nil {
 			if v, ok := ba.RawResponse().Responses[0].Value.(*roachpb.ResponseUnion_TsTagUpdate); ok {

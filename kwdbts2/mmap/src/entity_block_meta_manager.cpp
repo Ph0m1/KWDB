@@ -31,7 +31,7 @@ EntityBlockMetaManager::~EntityBlockMetaManager() {
 
 int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_path, const string& tbl_sub_path,
                                  bool alloc_block_item) {
-  table_id_ = std::atoi(getURLObjectName(file_path).c_str());
+  table_id_ = std::atoi(getTsObjectName(file_path).c_str());
   file_path_base_ = file_path;
   db_path_ = db_path;
   tbl_sub_path_ = tbl_sub_path;

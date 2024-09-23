@@ -42,6 +42,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
@@ -787,6 +788,43 @@ func RunCommitTrigger(
 	return result.Result{}, nil
 }
 
+func getTsRangeSize(rec EvalContext, desc roachpb.RangeDescriptor) (uint64, error) {
+	if rec.TsEngine() == nil {
+		return 0, errors.Errorf("Can not find TsEngine to compute ts range size.")
+	}
+	startKey, endKey := desc.StartKey, desc.EndKey
+	startTableID, startHashPoint, startTimestamp, err := sqlbase.DecodeTsRangeKey(startKey, true)
+	if err != nil {
+		return 0, err
+	}
+	//fmt.Println(fmt.Sprintf("RangeID:%d startKey:%s endKey:%s tableID: %d, hashPoint:%d startTs:%d, endTS:%d",
+	//	desc.RangeID, desc.StartKey, desc.EndKey, startTableID, startHashPoint, startTimestamp, math.MaxInt64))
+	if endKey.Equal(roachpb.RKeyMax) {
+		rangeSize, err := rec.TsEngine().GetDataVolume(
+			startTableID,
+			startHashPoint,
+			startHashPoint,
+			startTimestamp,
+			math.MaxInt64,
+		)
+		return rangeSize, err
+	}
+	_, EndHashPoint, endTimestamp, err := sqlbase.DecodeTsRangeKey(endKey, false)
+	if err != nil {
+		return 0, err
+	}
+
+	rangeSize, err := rec.TsEngine().GetDataVolume(
+		startTableID,
+		startHashPoint,
+		EndHashPoint,
+		startTimestamp,
+		endTimestamp,
+	)
+	return rangeSize, err
+
+}
+
 // splitTrigger is called on a successful commit of a transaction
 // containing an AdminSplit operation. It copies the AbortSpan for
 // the new range and recomputes stats for both the existing, left hand
@@ -974,25 +1012,56 @@ func splitTrigger(
 
 	// Compute the absolute stats for the (post-split) LHS. No more
 	// modifications to it are allowed after this line.
+	var leftMS, rightMS enginepb.MVCCStats
+	var err error
+	if desc.GetRangeType() == roachpb.DEFAULT_RANGE {
+		leftMS, err = rditer.ComputeStatsForRange(&split.LeftDesc, batch, ts.WallTime)
+		if err != nil {
+			return enginepb.MVCCStats{}, result.Result{}, errors.Wrap(err, "unable to compute stats for LHS range after split")
+		}
+	} else {
+		if !split.IsCreateTsTable {
+			leftRangeSize, err := getTsRangeSize(rec, split.LeftDesc)
+			if err != nil {
+				log.Errorf(ctx, fmt.Sprintf("unable to compute stats for LHS TS range %d after split. err: %+v. SplitTrigger:%+v", split.LeftDesc.RangeID, err, split))
+				//return enginepb.MVCCStats{}, result.Result{}, errors.Wrap(err, fmt.Sprintf("unable to compute stats for LHS TS range %d after split", split.LeftDesc.RangeID))
+			}
+			leftMS.ValBytes = int64(leftRangeSize)
+			leftMS.LiveBytes = int64(leftRangeSize)
 
-	leftMS, err := rditer.ComputeStatsForRange(&split.LeftDesc, batch, ts.WallTime)
-	if err != nil {
-		return enginepb.MVCCStats{}, result.Result{}, errors.Wrap(err, "unable to compute stats for LHS range after split")
+			if split.RightDesc.GetRangeType() == roachpb.TS_RANGE {
+				rightRangeSize, err := getTsRangeSize(rec, split.RightDesc)
+				if err != nil {
+					log.Errorf(ctx, fmt.Sprintf("unable to compute stats for RHS TS range %d after split. err: %+v. SplitTrigger:%+v", split.LeftDesc.RangeID, err, split))
+				}
+				rightMS.ValBytes = int64(rightRangeSize)
+				rightMS.LiveBytes = int64(rightRangeSize)
+			}
+		}
 	}
 	log.Event(ctx, "computed stats for left hand side range")
 
+	absPreSplitBothEstimated := rec.GetMVCCStats()
+	if split.LeftDesc.GetRangeType() == roachpb.TS_RANGE {
+		absPreSplitBothEstimated.LiveBytes = leftMS.LiveBytes + rightMS.LiveBytes
+		absPreSplitBothEstimated.ValBytes = leftMS.ValBytes + rightMS.ValBytes
+	}
 	h := splitStatsHelperInput{
-		AbsPreSplitBothEstimated: rec.GetMVCCStats(),
+		AbsPreSplitBothEstimated: absPreSplitBothEstimated,
 		DeltaBatchEstimated:      bothDeltaMS,
 		AbsPostSplitLeft:         leftMS,
 		AbsPostSplitRightFn: func() (enginepb.MVCCStats, error) {
-			rightMS, err := rditer.ComputeStatsForRange(
-				&split.RightDesc, batch, ts.WallTime,
-			)
-			return rightMS, errors.Wrap(
-				err,
-				"unable to compute stats for RHS range after split",
-			)
+			if split.RightDesc.GetRangeType() == roachpb.DEFAULT_RANGE {
+				rightMS, err = rditer.ComputeStatsForRange(
+					&split.RightDesc, batch, ts.WallTime,
+				)
+				return rightMS, errors.Wrap(
+					err,
+					"unable to compute stats for RHS range after split",
+				)
+			}
+			return rightMS, nil
+
 		},
 	}
 	return splitTriggerHelper(ctx, rec, batch, h, split, ts)
@@ -1190,6 +1259,25 @@ func mergeTrigger(
 	if !desc.EndKey.Less(merge.LeftDesc.EndKey) {
 		return result.Result{}, errors.Errorf("original LHS end key is not less than the post merge end key: %s >= %s",
 			desc.EndKey, merge.LeftDesc.EndKey)
+	}
+	if desc.GetRangeType() == roachpb.TS_RANGE && merge.RightDesc.GetRangeType() == roachpb.TS_RANGE {
+		leftRangeSize, err := getTsRangeSize(rec, merge.LeftDesc)
+		if err != nil {
+			return result.Result{}, err
+		}
+		rightRangeSize, err := getTsRangeSize(rec, merge.RightDesc)
+		if err != nil {
+			return result.Result{}, err
+		}
+		ms.ValBytes = int64(leftRangeSize + rightRangeSize)
+		ms.LiveBytes = int64(leftRangeSize + rightRangeSize)
+		//log.VEventf(ctx, 2, fmt.Sprintf("mergeTrigger leftDesc : %d, rangeSize: %d     rightDesc: %d, rangeSize: %d",
+		//	merge.LeftDesc.RangeID, leftRangeSize, merge.RightDesc.RangeID, rightRangeSize))
+		var pd result.Result
+		pd.Replicated.Merge = &storagepb.Merge{
+			MergeTrigger: *merge,
+		}
+		return pd, nil
 	}
 
 	if err := abortspan.New(merge.RightDesc.RangeID).CopyTo(

@@ -150,7 +150,7 @@ func (d *delegator) delegateShowTagValues(n *tree.ShowTagValues) (tree.Statement
 	}
 
 	query := sqlbase.BuildTagHintQuery(name, resName.CatalogName.String(), tblName)
-	query = query + privateFilter + sortColList
+	query = "select distinct * from (" + query + privateFilter + ") " + sortColList
 	s, err := parser.ParseOne(query)
 	return s.AST, err
 }

@@ -190,7 +190,7 @@ select z2,last(z),last(z2),last(z3),last(z4),last(z5),last(z6),last(z7),last(z)<
 
 /* ****************last last_row with other agg functions***************** */
 select last(x),last(x2),last(y),last(y2),last(y3) from t;
-select avg(x),avg(x2),avg(y),avg(y2),avg(y3) from t;
+select avg(x),avg(x2),round(avg(y),2),avg(y2),avg(y3) from t;
 select sum(x),sum(x2),sum(y),sum(y2),sum(y3) from t;
 select count(k_timestamp),count(x),count(x2),count(y),count(y2),count(y3),count(z) from t;
 select max(k_timestamp),max(x),max(x2),max(y),max(y2),max(y3),max(z),max(z7) from t;
@@ -345,7 +345,7 @@ insert into test_query.d1 values (168111110011,                     null,null,nu
 insert into test_query.d1 values ('2021-04-01 15:00:00',111111110000,1000,3000000,400000000000000000,600000000000000000.606,400000000000000000.40404040404,false, 1);
 insert into test_query.d1 values ('2022-05-01 17:00:00',666666660000,5000,5000000,600000000000000000,500000000000000000.505,500000000000000000.50505050505,false, 1);
 -- ZDP-27256
-select e3*e3 from test_query.d1;
+select e3*e3 from test_query.d1 order by k_timestamp;
 -- ZDP-27255
 select max(e2) * max(e3), max(e4) - max(e3) from test_query.d1;
 create table test_query.s1 (k_timestamp timestamp not null,e1 timestamp,e2 smallint,e3 int,e4 bigint,e5 float,e6 float8,e7 bool) attributes(name varchar(10) not null, t1_p1 varchar) primary tags(name);
@@ -360,8 +360,8 @@ insert into test_query.s1 values ('2022-08-16 10:23:05.123',888888880000,8000,80
 insert into test_query.s1 values ('2021-04-01 15:00:00',    111111110000,1000,3000000,400000000000000000,600000000000000000.606,400000000000000000.40404040404,false, 's1_1', 'd1');
 insert into test_query.s1 values ('2022-05-01 17:00:00',    666666660000,5000,5000000,600000000000000000,500000000000000000.505,500000000000000000.50505050505,false, 's1_1', 'd1');
 -- ZDP-27256
-select e3 * e3 from test_query.s1;
-select e3 * e3 from test_query.s1 where name = 's1_1';
+select e3 * e3 from test_query.s1 order by k_timestamp;
+select e3 * e3 from test_query.s1 where name = 's1_1' order by k_timestamp;
 -- ZDP-27255
 select max(e2) * max(e3), max(e4) - max(e3) from test_query.s1 where name = 's1_1';
 drop database test_query CASCADE;

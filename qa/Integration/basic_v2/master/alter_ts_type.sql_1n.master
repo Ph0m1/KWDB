@@ -1,3 +1,5 @@
+> set cluster setting sql.alter_tag.enabled=false;
+SET CLUSTER SETTING
 > drop database if exists test_alter cascade;
 DROP DATABASE
 > create ts database test_alter;
@@ -940,4 +942,6 @@ ALTER TABLE
 > drop database test_alter cascade;
 DROP DATABASE
 > SET CLUSTER SETTING ts.dedup.rule = 'override';
+SET CLUSTER SETTING
+> set cluster setting sql.alter_tag.enabled=true;
 SET CLUSTER SETTING

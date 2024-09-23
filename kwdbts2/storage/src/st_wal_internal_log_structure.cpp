@@ -535,6 +535,28 @@ void CheckpointEntry::prettyPrint() {
   }
 }
 
+void SnapshotEntry::prettyPrint() {
+  std::cout << "start_lsn : " << lsn_ << "\t";
+  std::cout << "typ : ";
+  // EXPECT_EQ(type_, WALLogType::INSERT);
+  std::cout << "Snapshot\t";
+  std::cout << "x_id : " << x_id_ << "\t";
+  // EXPECT_EQ(table_type_, WALTableType::TAG);
+  // std::cout << "tbl_typ : DATA\t";
+  std::cout << "table id : " << table_id_ << "\t";
+  std::cout << "hash [" << begin_hash_ << " - " << end_hash_ << "]\t";
+  std::cout << "timestamp span ["<< start_ts_ << " - "<< end_ts_ << "]\n";
+}
+
+void TempDirectoryEntry::prettyPrint() {
+  std::cout << "start_lsn : " << lsn_ << "\t";
+  std::cout << "typ : ";
+  // EXPECT_EQ(type_, WALLogType::INSERT);
+  std::cout << "temp directory\t";
+  std::cout << "x_id : " << x_id_ << "\t";
+  std::cout << "path :" << abs_path_ << "\n";
+}
+
 void MTREntry::prettyPrint() {
   std::cout << "start_lsn : " << lsn_ << "\t";
   std::cout << "typ : ";
@@ -542,6 +564,7 @@ void MTREntry::prettyPrint() {
   std::cout << "MTR ENTRY\t";
   std::cout << "x_id : " << x_id_ << "\t";
 }
+
 
 void DDLDropEntry::prettyPrint() {
 }

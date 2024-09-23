@@ -220,28 +220,29 @@ TEST_F(TestTsTable, dropEntityGroup) {
 }
 
 // update many entity group
-TEST_F(TestTsTable, UpdateEntityGroup) {
-  roachpb::CreateTsTable meta;
-  ConstructRoachpbTable(&meta, 5, 1);
-  std::vector<RangeGroup> ranges;
-  KStatus s;
-  int range_grp_num = 5;
-  for (size_t i = 0; i < range_grp_num; i++) {
-    ranges.push_back({100 + i, 0});
-  }
-  Create(&meta, ranges);
-  std::vector<std::shared_ptr<TsEntityGroup>> leader_entity_groups;
-  s = table_->GetAllLeaderEntityGroup(ctx_, &leader_entity_groups);
-  EXPECT_EQ(s, KStatus::SUCCESS);
-  EXPECT_EQ(leader_entity_groups.size(), range_grp_num);
-  for (size_t i = 0; i < range_grp_num; i++) {
-    s = table_->UpdateEntityGroup(ctx_, {100 + i, 1});
-    EXPECT_EQ(s, KStatus::SUCCESS);
-  }
-  s = table_->GetAllLeaderEntityGroup(ctx_, &leader_entity_groups);
-  EXPECT_EQ(s, KStatus::SUCCESS);
-  EXPECT_EQ(leader_entity_groups.size(), 0);
-}
+// 2.0.4 no use leader to check
+// TEST_F(TestTsTable, UpdateEntityGroup) {
+//   roachpb::CreateTsTable meta;
+//   ConstructRoachpbTable(&meta, 5, 1);
+//   std::vector<RangeGroup> ranges;
+//   KStatus s;
+//   int range_grp_num = 5;
+//   for (size_t i = 0; i < range_grp_num; i++) {
+//     ranges.push_back({100 + i, 0});
+//   }
+//   Create(&meta, ranges);
+//   std::vector<std::shared_ptr<TsEntityGroup>> leader_entity_groups;
+//   s = table_->GetAllLeaderEntityGroup(ctx_, &leader_entity_groups);
+//   EXPECT_EQ(s, KStatus::SUCCESS);
+//   EXPECT_EQ(leader_entity_groups.size(), range_grp_num);
+//   for (size_t i = 0; i < range_grp_num; i++) {
+//     s = table_->UpdateEntityGroup(ctx_, {100 + i, 1});
+//     EXPECT_EQ(s, KStatus::SUCCESS);
+//   }
+//   s = table_->GetAllLeaderEntityGroup(ctx_, &leader_entity_groups);
+//   EXPECT_EQ(s, KStatus::SUCCESS);
+//   EXPECT_EQ(leader_entity_groups.size(), 0);
+// }
 
 // create many entity group
 TEST_F(TestTsTable, GetEntityGroup) {

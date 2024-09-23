@@ -286,6 +286,25 @@ KStatus WALMgr::WriteCheckpointWAL(kwdbContext_p ctx, uint64_t x_id, TS_LSN& ent
   return status;
 }
 
+KStatus WALMgr::WriteSnapshotWAL(kwdbContext_p ctx, uint64_t x_id, TSTableID tbl_id, uint64_t b_hash,
+                                 uint64_t e_hash, KwTsSpan span) {
+  auto* wal_log = SnapshotEntry::construct(WALLogType::RANGE_SNAPSHOT, x_id, tbl_id, b_hash, e_hash, span.begin, span.end);
+  size_t log_len = SnapshotEntry::fixed_length;
+  KStatus status = WriteWAL(ctx, wal_log, log_len);
+
+  delete[] wal_log;
+  return status;
+}
+
+KStatus WALMgr::WriteTempDirectoryWAL(kwdbContext_p ctx, uint64_t x_id, std::string path) {
+  auto* wal_log = TempDirectoryEntry::construct(WALLogType::SNAPSHOT_TMP_DIRCTORY, x_id, path);
+  size_t log_len = TempDirectoryEntry::fixed_length + path.length() + 1;
+  KStatus status = WriteWAL(ctx, wal_log, log_len);
+
+  delete[] wal_log;
+  return status;
+}
+
 KStatus WALMgr::WriteDDLCreateWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t object_id,
                                   roachpb::CreateTsTable* meta, std::vector<RangeGroup>* ranges) {
   auto* wal_log = DDLCreateEntry::construct(WALLogType::DDL_CREATE, x_id, object_id,

@@ -90,6 +90,11 @@ func ClearRange(
 	}
 	cArgs.Stats.Subtract(statsDelta)
 
+	// The tableID will be set when the range is time-series. Otherwise, it's zero.
+	if args.TableId != 0 {
+		pd.HandleTsOp = true
+	}
+
 	// If the total size of data to be cleared is less than
 	// clearRangeBytesThreshold, clear the individual values manually,
 	// instead of using a range tombstone (inefficient for small ranges).

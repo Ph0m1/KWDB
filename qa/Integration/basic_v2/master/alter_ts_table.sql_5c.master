@@ -1,3 +1,5 @@
+> set cluster setting sql.alter_tag.enabled=false;
+SET CLUSTER SETTING
 > drop database if exists test_alter cascade;
 DROP DATABASE
 > create ts database test_alter;
@@ -343,26 +345,26 @@ INSERT 1
 ) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
 CREATE TABLE
 > alter table test_alter.t2 add tag a1 timestamp;
-ERROR: unsupported tag type timestamp in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a2 timestamptz;
-ERROR: unsupported tag type timestamptz in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a3 bytea;
-ERROR: unsupported tag type bytes in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a4 blob;
-ERROR: unsupported tag type bytes in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a5 string;
-ERROR: unsupported tag type string in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a6 decimal;
-ERROR: unsupported tag type decimal in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a7 time;
-ERROR: unsupported tag type time in timeseries table
-SQLSTATE: 42809
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 add tag a8 data;
 ERROR: at or near "data": syntax error
 SQLSTATE: 42601
@@ -371,7 +373,7 @@ alter table test_alter.t2 add tag a8 data
                                      ^
 HINT: try \h ALTER TABLE
 > alter table test_alter.t2 add tag a9 serial2;
-ERROR: serial tag is not supported in timeseries table
+ERROR: alter tag is not allowed in multi-replica mode
 SQLSTATE: 0A000
 > show tags from test_alter.t2;
    tag   |     type      | is_primary | nullable
@@ -390,32 +392,32 @@ SQLSTATE: 0A000
   attr16 | VARCHAR(1023) |   false    |   true
 (12 rows)
 > alter table test_alter.t2 drop tag a1;
-ERROR: tag "a1" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a2;
-ERROR: tag "a2" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a3;
-ERROR: tag "a3" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a4;
-ERROR: tag "a4" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a5;
-ERROR: tag "a5" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a6;
-ERROR: tag "a6" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a7;
-ERROR: tag "a7" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a8;
-ERROR: tag "a8" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t2 drop tag a9;
-ERROR: tag "a9" does not exist
-SQLSTATE: 42704
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > show tags from test_alter.t2;
    tag   |     type      | is_primary | nullable
 ---------+---------------+------------+-----------
@@ -438,37 +440,40 @@ SQLSTATE: 42704
 ) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
 CREATE TABLE
 > alter table test_alter.t3 add tag attr17_a1 smallint;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select pg_sleep(1);
   pg_sleep
 ------------
     true
 (1 row)
 > alter table test_alter.t3 add tag attr17_a1 smallint;
-ERROR: duplicate tag name: "attr17_a1"
-SQLSTATE: 42701
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select pg_sleep(1);
   pg_sleep
 ------------
     true
 (1 row)
 > alter table test_alter.t3 drop tag attr17_a1;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select pg_sleep(1);
   pg_sleep
 ------------
     true
 (1 row)
 > alter table test_alter.t3 add tag attr17_a1 smallint;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select pg_sleep(1);
   pg_sleep
 ------------
     true
 (1 row)
 > alter table test_alter.t3 add tag attr17_a1 smallint;
-ERROR: duplicate tag name: "attr17_a1"
-SQLSTATE: 42701
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select pg_sleep(1);
   pg_sleep
 ------------
@@ -495,35 +500,49 @@ SQLSTATE: 42701
 ) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
 CREATE TABLE
 > alter table test_alter.t4 add tag attr17_a1 smallint;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr18_a1 int;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr19_a1 bigint;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr20_a1 float4;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr21_a1 double;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr22_a1 bool;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr25_a1 char;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr26_a1 char(254);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr27_a1 nchar;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr28_a1 nchar(10);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr29_a1 nchar(254);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr30_a1 varchar;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t4 add tag attr31_a1 varchar(1023);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > insert into test_alter.t4 (k_timestamp, e1, code1, attr17_a1, attr18_a1, attr19_a1, attr20_a1, attr21_a1, attr22_a1, attr25_a1, attr26_a1, attr27_a1, attr28_a1, attr29_a1, attr30_a1, attr31_a1) values ('2024-01-01t00:00:03+00:00',1,1, 1, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f','l');
-INSERT 1
+ERROR: column "attr17_a1" does not exist
+SQLSTATE: 42703
 > delete from test_alter.t4 where code1 = 1;
-DELETE 1
+DELETE 0
 > alter table test_alter.t4 add column if not exists c1 int8 null;
 ALTER TABLE
 > alter table test_alter.t4 add column if not exists c2 int4 null;
@@ -559,7 +578,8 @@ ALTER TABLE
 > insert into test_alter.t4(k_timestamp, code1, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16) values ('2024-01-01t00:00:00+01:00', 2, 461, 849,123, -3623.3289748095276, -9555.69188725292, true, '2024-01-23 09:53:25', 'h', 't', 'y', 'o', 'b', 'k', 'e', '4', '2024-01-23 09:53:25');
 INSERT 1
 > insert into test_alter.t4 (k_timestamp, e1, code1, attr17_a1, attr18_a1, attr19_a1, attr20_a1, attr21_a1, attr22_a1, attr25_a1, attr26_a1, attr27_a1, attr28_a1, attr29_a1, attr30_a1, attr31_a1) values ('2024-01-01t00:00:03+00:00',1,1, 1, 733, 969, 4593.82364066433, -3412.391887694972, false, 'y', 'e', 'x', 'w', 'r', 'f','l');
-INSERT 1
+ERROR: column "attr17_a1" does not exist
+SQLSTATE: 42703
 > create table test_alter.t5(
                             k_timestamp timestamptz not null,
                             e1 int8,
@@ -589,33 +609,36 @@ SQLSTATE: 42809
 ) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
 CREATE TABLE
 > alter table test_alter.t6 add tag attr27_a1 nchar;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > show tag values from test_alter.t6;
-  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16 | attr27_a1
---------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+------------
+  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
+--------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+---------
 (0 rows)
 > alter table test_alter.t6 drop tag attr27_a1;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > show tag values from test_alter.t6;
   attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
 --------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+---------
 (0 rows)
 > alter table test_alter.t6 add tag attr27_a1 nchar;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > insert into test_alter.t6 (k_timestamp, e1, attr1, attr27_a1) values ('2018-10-10 10:00:00',1,2,'1');
-INSERT 1
-> show tag values from test_alter.t6;
-  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16 | attr27_a1
---------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+------------
-      2 | NULL  |  NULL | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | 1
-(1 row)
-> alter table test_alter.t6 drop tag attr27_a1;
-ALTER TABLE
+ERROR: column "attr27_a1" does not exist
+SQLSTATE: 42703
 > show tag values from test_alter.t6;
   attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
 --------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+---------
-      2 | NULL  |  NULL | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL
-(1 row)
+(0 rows)
+> alter table test_alter.t6 drop tag attr27_a1;
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
+> show tag values from test_alter.t6;
+  attr1 | attr2 | attr3 | attr4 | attr5 | attr6 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
+--------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+---------
+(0 rows)
 > create table test_alter.t7(
                             k_timestamp timestamptz not null,
                             e1 int8,
@@ -1028,42 +1051,53 @@ INSERT 1
 > INSERT INTO test_alter.t12 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:02:00+00:00', 935, 3, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
 INSERT 1
 > alter table test_alter.t12 add tag attr17_a1 smallint;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr18_a1 int;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr19_a1 bigint;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr20_a1 float4;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr21_a1 double;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr22_a1 bool;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr23_a1 VARBYTES;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr24_a1 VARBYTES(10);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr25_a1 char;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr26_a1 char(254);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr27_a1 nchar;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr28_a1 nchar(10);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr29_a1 nchar(254);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr30_a1 varchar;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t12 add tag attr31_a1 varchar(1023);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select attr17_a1,attr18_a1,attr19_a1,attr20_a1,attr21_a1,attr22_a1,attr23_a1,attr24_a1,attr27_a1,attr28_a1,attr29_a1,attr30_a1,attr31_a1 from test_alter.t12 order by k_timestamp;
-  attr17_a1 | attr18_a1 | attr19_a1 | attr20_a1 | attr21_a1 | attr22_a1 | attr23_a1 | attr24_a1 | attr27_a1 | attr28_a1 | attr29_a1 | attr30_a1 | attr31_a1
-------------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+------------
-  NULL      | NULL      |      NULL | NULL      | NULL      |   NULL    | NULL      | NULL      | NULL      | NULL      | NULL      | NULL      | NULL
-  NULL      | NULL      |      NULL | NULL      | NULL      |   NULL    | NULL      | NULL      | NULL      | NULL      | NULL      | NULL      | NULL
-  NULL      | NULL      |      NULL | NULL      | NULL      |   NULL    | NULL      | NULL      | NULL      | NULL      | NULL      | NULL      | NULL
-(3 rows)
+ERROR: column "attr17_a1" does not exist
+SQLSTATE: 42703
 > create table test_alter.t13(
 k_timestamp timestamp not null,
 e1 int2
@@ -1093,33 +1127,35 @@ INSERT 1
 > INSERT INTO test_alter.t14 (k_timestamp, e1,attr1, attr2, attr3, attr4, attr5, attr6, attr7, attr8, attr11, attr12, attr13, attr14, attr15, attr16) VALUES ('2024-01-01T00:02:00+00:00', 935, 3, 733, 969, 4593.82364066433, -3412.391887694972, False, '9', '0', 'Y', 'e', 'x', 'W', 'r', 'F');
 INSERT 1
 > alter table test_alter.t14 add tag attr23_a1 VARBYTES;
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > alter table test_alter.t14 add tag attr24_a1 VARBYTES(10);
-ALTER TABLE
+ERROR: alter tag is not allowed in multi-replica mode
+SQLSTATE: 0A000
 > select pg_sleep(1);
   pg_sleep
 ------------
     true
 (1 row)
 > INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:03+00:00',1,6,'F','l');
-INSERT 1
+ERROR: column "attr23_a1" does not exist
+SQLSTATE: 42703
 > INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:04+00:00',1,7,'E','l');
-INSERT 1
+ERROR: column "attr23_a1" does not exist
+SQLSTATE: 42703
 > INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:05+00:00',1,8,'S','o');
-INSERT 1
+ERROR: column "attr23_a1" does not exist
+SQLSTATE: 42703
 > INSERT INTO test_alter.t14 (k_timestamp, e1,attr1,attr23_a1,attr24_a1) VALUES ('2024-01-01T00:00:06+00:00',1,9,NULL,NULL);
-INSERT 1
+ERROR: column "attr23_a1" does not exist
+SQLSTATE: 42703
 > show tag values from test_alter.t14;
-  attr1 | attr2 | attr3 |   attr4    |       attr5        | attr6 | attr7 | attr8 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16 | attr23_a1 | attr24_a1
---------+-------+-------+------------+--------------------+-------+-------+-------+--------+--------+--------+--------+--------+--------+-----------+------------
-      1 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F      | NULL      | NULL
-      2 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F      | NULL      | NULL
-      3 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F      | NULL      | NULL
-      6 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | \x46      | \x6c
-      7 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | \x45      | \x6c
-      8 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | \x53      | \x6f
-      9 | NULL  |  NULL | NULL       | NULL               | NULL  | NULL  | NULL  | NULL   | NULL   | NULL   | NULL   | NULL   | NULL   | NULL      | NULL
-(7 rows)
+  attr1 | attr2 | attr3 |   attr4    |       attr5        | attr6 | attr7 | attr8 | attr11 | attr12 | attr13 | attr14 | attr15 | attr16
+--------+-------+-------+------------+--------------------+-------+-------+-------+--------+--------+--------+--------+--------+---------
+      1 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F
+      2 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F
+      3 |   733 |   969 | 4593.82373 | -3412.391887694972 | false | \x39  | \x30  | Y      | e      | x      | W      | r      | F
+(3 rows)
 > drop database test_alter cascade;
 DROP DATABASE
 > CREATE DATABASE rdb1;
@@ -1365,3 +1401,5 @@ ALTER TABLE
 (3 rows)
 > drop database db1 cascade;
 DROP DATABASE
+> set cluster setting sql.alter_tag.enabled=true;
+SET CLUSTER SETTING

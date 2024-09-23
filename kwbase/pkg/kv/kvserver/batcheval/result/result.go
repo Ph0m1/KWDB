@@ -171,6 +171,9 @@ type Result struct {
 	Replicated   storagepb.ReplicatedEvalResult
 	WriteBatch   *storagepb.WriteBatch
 	LogicalOpLog *storagepb.LogicalOpLog
+	// HandleTsOp is set true when handle the ts ClearRangeRequest,
+	// and the request need to reach consensus.
+	HandleTsOp bool
 }
 
 // IsZero reports whether p is the zero value.
@@ -185,6 +188,9 @@ func (p *Result) IsZero() bool {
 		return false
 	}
 	if p.LogicalOpLog != nil {
+		return false
+	}
+	if p.HandleTsOp {
 		return false
 	}
 	return true
@@ -202,6 +208,10 @@ func coalesceBool(lhs *bool, rhs *bool) {
 //
 // The passed EvalResult must not be used once passed to Merge.
 func (p *Result) MergeAndDestroy(q Result) error {
+	// Pass the EvalResult.
+	p.HandleTsOp = q.HandleTsOp
+	// Destroy the old EvalResult.
+	q.HandleTsOp = false
 	if q.Replicated.State != nil {
 		if q.Replicated.State.RaftAppliedIndex != 0 {
 			return errors.New("must not specify RaftApplyIndex")

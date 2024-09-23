@@ -135,6 +135,9 @@ message SplitTrigger {
   RangeDescriptor left_desc = 1 [(gogoproto.nullable) = false];
   RangeDescriptor right_desc = 2 [(gogoproto.nullable) = false];
   reserved 3;
+  // See RangeDescriptor for details.
+  bool is_create_ts_table = 4;
+
 }
 
 // A MergeTrigger is run after a successful commit of an AdminMerge

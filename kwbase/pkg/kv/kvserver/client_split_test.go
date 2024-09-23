@@ -3132,7 +3132,7 @@ func TestSplitTriggerMeetsUnexpectedReplicaID(t *testing.T) {
 		// We avoid sending a snapshot because that snapshot would include the
 		// split trigger and we want that to be processed via the log.
 		d, err := tc.Servers[0].DB().AdminChangeReplicas(
-			ctx, descLHS.StartKey.AsRawKey(), descLHS, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(1)), false,
+			ctx, descLHS.StartKey.AsRawKey(), descLHS, roachpb.MakeReplicationChanges(roachpb.ADD_REPLICA, tc.Target(1)),
 		)
 		require.NoError(t, err)
 		descLHS = *d

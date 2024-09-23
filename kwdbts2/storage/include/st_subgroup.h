@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <memory>
 #include "lru_cache.h"
 #include "mmap/mmap_root_table_manager.h"
 #include "ts_time_partition.h"
@@ -26,6 +27,7 @@
 namespace kwdbts {
 typedef uint32_t SubGroupID;
 typedef uint32_t EntityID;
+class TsSubGroupPTIterator;
 
 class TsSubEntityGroup : public TSObject {
  public:
@@ -124,6 +126,22 @@ class TsSubEntityGroup : public TSObject {
   timestamp64 MaxPartitionTime();
 
 /**
+ * @brief Retrieve MMapPartition times
+ * @param[in] ts_span   The time span in seconds.
+ *
+ * @return partiton start time.
+ */
+  vector<timestamp64> GetPartitions(const KwTsSpan& ts_span);
+
+  /**
+   * @brief create temp MMapPartition table
+   * @param[in] ts_span   The time span in seconds.
+   *
+   * @return partiton start time.
+   */
+  TsTimePartition* CreateTmpPartitionTable(string p_name, size_t version, bool& created);
+
+/**
  * @brief Retrieve MMapPartitionTable from the time partition directory
  * @param[in] ts   The time in seconds is internally converted to the time of the partition it belongs to.
  * @param[in] create_if_not_exist  True: If the group table does not exist, call the internal createPartitionTable to create it.
@@ -142,6 +160,15 @@ class TsSubEntityGroup : public TSObject {
  * @return
  */
   vector<TsTimePartition*> GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info);
+
+  /**
+  * @brief  get iterator for partition tables in current subgroup.
+   * @param[in] ts_spans   time spans
+   *
+   * @return
+   */
+  std::shared_ptr<TsSubGroupPTIterator> GetPTIteartor(const std::vector<KwTsSpan>& ts_spans);
+
 
   /**
  * @brief Create MMapPartitionTable in the time partition directory
@@ -299,6 +326,64 @@ class TsSubEntityGroup : public TSObject {
   void mutexUnlock() override {
     MUTEX_UNLOCK(sub_entity_group_mutex_);
   }
+};
+
+class TsSubGroupPTIterator {
+ public:
+  TsSubGroupPTIterator(TsSubEntityGroup* sub_eg, const std::vector<timestamp64>& partitions) :
+                      sub_eg_(sub_eg), partitions_(partitions) {
+  }
+
+  explicit TsSubGroupPTIterator(TsSubGroupPTIterator* other) :
+    sub_eg_(other->sub_eg_), partitions_(other->partitions_) {
+    cur_p_table_ = nullptr;
+    sub_eg_ = other->sub_eg_;
+    cur_partition_idx_ = 0;
+  }
+
+  ~TsSubGroupPTIterator() {
+    if (cur_p_table_ != nullptr) {
+      ReleaseTable(cur_p_table_);
+      cur_p_table_ = nullptr;
+    }
+  }
+
+  KStatus Next(TsTimePartition** p_table);
+
+  void Reset(bool reverse_traverse = false) {
+    if (cur_p_table_ != nullptr) {
+      ReleaseTable(cur_p_table_);
+      cur_p_table_ = nullptr;
+    }
+    reverse_traverse_ = reverse_traverse;
+    if (reverse_traverse_) {
+      cur_partition_idx_ = partitions_.size() - 1;
+    } else {
+      cur_partition_idx_ = 0;
+    }
+  }
+
+  bool Valid() {
+    if (reverse_traverse_) {
+      if (cur_partition_idx_ < 0) {
+        // scan over.
+        return false;
+      }
+    } else {
+      if (cur_partition_idx_ >= partitions_.size()) {
+        // scan over.
+        return false;
+      }
+    }
+    return true;
+  }
+
+ private:
+  TsSubEntityGroup* sub_eg_{nullptr};
+  std::vector<timestamp64> partitions_;
+  bool reverse_traverse_{false};
+  int cur_partition_idx_{0};
+  TsTimePartition* cur_p_table_{nullptr};
 };
 
 }  // namespace kwdbts

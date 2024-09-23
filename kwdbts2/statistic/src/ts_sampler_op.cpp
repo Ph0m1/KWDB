@@ -64,8 +64,9 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
     tag_sketches_.reserve(tsInfo->sketches_size());
     sample_size_ = uint32_t(tsInfo->sample_size());
 
-    k_uint32 i = 0;
-    k_uint32 total_columns = 0;
+    k_uint32 i {0};
+    k_uint32 total_columns {0};
+    k_uint32 normalColCount {0};
     for (auto & sk : tsInfo->sketches()) {
       // Currently only supports one algorithm
       if (SketchMethod_HLL_PLUS_PLUS != static_cast<SketchMethods>(sk.sketch_type())) {
@@ -101,6 +102,7 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
         case NormalCol:
           tempSpec.column_type = roachpb::KWDBKTSColumn::TYPE_DATA;
           normalCol_sketches_.emplace_back(tempSpec);
+          normalColCount++;
           continue;
         case PrimaryTag:
           tempSpec.column_type = roachpb::KWDBKTSColumn::TYPE_PTAG;
@@ -117,6 +119,15 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
         default:
           return FAIL;
       }
+    }
+
+    // Scan tag table only for tag statistics, so we need to minus normalColCount for all tag col idx.
+    for (auto& ss : primary_tag_sketches_) {
+      ss.statsCol_idx[0] -= normalColCount;
+    }
+
+    for (auto& ss : tag_sketches_) {
+      ss.statsCol_idx[0] -= normalColCount;
     }
 
     rankCol_ = total_columns;
@@ -159,24 +170,20 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
           LOG_ERROR("The collection column is empty in sampling")
           Return(code)
         }
-        k_uint32 sketch_idx = normalCol_sketches_[i].sketchIdx;
-        normalCol_sketches_[i].numRows++;
-        Field* render = input_->GetRender(static_cast<int>(col_idx));
-        bool isNull = row_batch->IsNull(render->getColIdxInRs(), normalCol_sketches_[i].column_type);
-        if (isNull) {
-          normalCol_sketches_[i].numNulls++;
-        }
+
+        // Adds a row to the sketch and updates row counts.
+        sk.addRow(input_, row_batch);
+
         // TODO(zh): Optimize reservoir sampling
         if (sk.histogram) {
           SampledRow row{};
-          AssignDataToRow(&row, input_->GetRender(static_cast<int>(col_idx)),
-                          isNull, outRetrunTypes_[col_idx]);
+          Field* render = input_->GetRender(static_cast<int>(col_idx));
+          bool isNull = row_batch->IsNull(render->getColIdxInRs(), normalCol_sketches_[i].column_type);
+          AssignDataToRow(&row, render, isNull, outRetrunTypes_[col_idx]);
           // Randomly generated rankings
           row.rank = static_cast<k_uint64>(normalCol_sketches_[i].reservoir->Int63());
           normalCol_sketches_[i].reservoir->SampleRow(row);
         }
-        // TODO(zh): handle output types for distinct-count
-        EncodeBytes(i, col_idx, isNull);
         ++i;
       }
       row_batch->NextLine();
@@ -202,11 +209,6 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
 
 template<>
 EEIteratorErrCode TsSamplerOperator::mainLoop<Tag>(kwdbContext_p ctx) {
-  return EEIteratorErrCode::EE_Sample;
-}
-
-template<>
-EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   if (!current_thd) {
@@ -228,7 +230,8 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
 
   RowBatch* row_batch;
   while (true) {
-    code = tagScanOp->Next(ctx);
+    DataChunkPtr chunk = nullptr;
+    code = tagScanOp->Next(ctx, chunk);
     if (EEIteratorErrCode::EE_OK != code) {
       break;
     }
@@ -238,22 +241,32 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
     const k_uint32 lines = row_batch->Count();
     if (lines > 0) {
       for (k_uint32 line = 0; line < lines; ++line) {
-        int i = 0;
         for (auto & sk : primary_tag_sketches_) {
-          // TODO(zh): for multi-column sketches, we will need to do this for all
-          k_uint32  sketch_idx = primary_tag_sketches_[i].sketchIdx;
-          primary_tag_sketches_[i].numRows++;
-          // Currently, all PTags cannot be null, so the following parts are not judged for the moment
-          ++i;
+          if (sk.statsCol_idx.empty()) {
+            LOG_ERROR("The collection column is empty in sampling primary tag columns")
+            Return(code)
+          }
+          // Adds a row to the sketch and updates row counts.
+          sk.addRow(tagScanOp, row_batch);
         }
+        for (auto& sk : tag_sketches_) {
+          if (sk.statsCol_idx.empty()) {
+            LOG_ERROR("The collection column is empty in sampling tag columns")
+            Return(code)
+          }
+
+          // Adds a row to the sketch and updates row counts.
+          sk.addRow(tagScanOp, row_batch);
+        }
+
         row_batch->NextLine();
       }
     }
   }
 
   if (code == EE_END_OF_RECORD) {
-    total_sample_rows_ += primary_tag_sketches_.size();
-    if (!normalCol_sketches_.empty() || !tag_sketches_.empty()) {
+    total_sample_rows_ += primary_tag_sketches_.size() + tag_sketches_.size();;
+    if (!normalCol_sketches_.empty()) {
       tagScanOp->Reset(ctx);
       code = tagScanOp->Start(ctx);
       if (EEIteratorErrCode::EE_OK != code) {
@@ -261,10 +274,10 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<PrimaryTag>(kwdbContext_p ctx) {
       }
     }
   } else {
-    LOG_ERROR("scanning primary key column data fails in %u table during statistics collection",
+    LOG_ERROR("scanning tag columns data fails in %u table during statistics collection",
                 input_->table()->object_id_)
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
-                                  "scanning primary key column data fail during statistics collection");
+                                  "scanning tag columns data fail during statistics collection");
     Return(EE_ERROR);
   }
 
@@ -426,21 +439,16 @@ EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
         return mainLoop<NormalCol>(ctx);
       case Tag:
         return mainLoop<Tag>(ctx);
-      case PrimaryTag:
-        return mainLoop<PrimaryTag>(ctx);
       default:
         return EE_ERROR;
     }
   };
 
-  // Collect primary tag column's statistic
-  if (!primary_tag_sketches_.empty() && processSketches(PrimaryTag) != EE_Sample) Return(EE_ERROR);
+  // Collect tag column's statistic
+  if ((!primary_tag_sketches_.empty() || !tag_sketches_.empty()) && processSketches(Tag) != EE_Sample) Return(EE_ERROR);
 
   // Collect normal column's statistic
   if (!normalCol_sketches_.empty() && processSketches(NormalCol) != EE_Sample) Return(EE_ERROR);
-
-  // Collect tag column's statistic
-  if (!tag_sketches_.empty() && processSketches(Tag) != EE_Sample) Return(EE_ERROR);
 
   KStatus ret = GetSampleResult(ctx, chunk);
   if (ret != SUCCESS) {
@@ -471,23 +479,37 @@ KStatus TsSamplerOperator::GetSampleResult(kwdbContext_p ctx, DataChunkPtr& chun
     }
   }
 
-  // normalCol_sketches_
+  // Process different types of sketches
+  if (SUCCESS != ProcessSketches(ctx, normalCol_sketches_, chunk)) {
+    Return(FAIL)
+  }
+  if (SUCCESS != ProcessSketches(ctx, tag_sketches_, chunk)) {
+    Return(FAIL)
+  }
+  if (SUCCESS != ProcessSketches(ctx, primary_tag_sketches_, chunk)) {
+    Return(FAIL)
+  }
+
+  LOG_DEBUG("sampling result set is collected successes");
+  Return(SUCCESS);
+}
+
+KStatus TsSamplerOperator::ProcessSketches(kwdbContext_p ctx, const std::vector<SketchSpec>& sketches, DataChunkPtr& chunk) {
+  EnterFunc();
+
   std::vector<byte> sketchVal;
-  for (auto& sk : normalCol_sketches_) {
+  for (auto& sk : sketches) {
     if (sk.histogram) {
       vector<SampledRow> SampledRows = sk.reservoir->GetSamples();
       for (const auto& SampledRow : SampledRows) {
         std::vector<optional<DataVariant>> out_row;
         out_row.resize(outRetrunTypes_.size(), std::nullopt);
-        // statsCol_idx represents the index of the current column projection,
-        // Currently, only one column of statistics is supported, this column is used to store the sampled data
         out_row[sk.statsCol_idx[0]] = SampledRow.data;
         if (SampledRow.rank < kInt64Max) {
           out_row[rankCol_] = static_cast<k_int64>(SampledRow.rank);
         } else {
           out_row[rankCol_] = kInt64Max;
         }
-
         AddData(out_row, chunk);
       }
     }
@@ -498,46 +520,21 @@ KStatus TsSamplerOperator::GetSampleResult(kwdbContext_p ctx, DataChunkPtr& chun
     out_row[numNullsCol_] = static_cast<k_int64>(sk.numNulls);
     sketchVal = sk.sketch->MarshalBinary();
     if (sketchVal.size() > MAX_SKETCH_LEN) {
-       // Avoid over length
-       LOG_ERROR("sketch column over length when scanning table %d in create statistics", input_->table()->object_id_)
-       char buffer[256];
-       snprintf(buffer, sizeof(buffer), "sketch column %u over length during statistics collection. ", sk.sketchIdx);
-       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, buffer);
-       Return(FAIL)
+      // Avoid over length
+      LOG_ERROR("sketch column over length when scanning table %d", input_->table()->object_id_)
+      char buffer[256];
+      snprintf(buffer, sizeof(buffer), "sketch column %u over length during statistics collection. ", sk.sketchIdx);
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, buffer);
+      Return(FAIL)
     }
     if (!sketchVal.empty()) {
-       std::string sketchStr(sketchVal.begin(), sketchVal.end());
-       out_row[sketchCol_] = sketchStr;
+      std::string sketchStr(sketchVal.begin(), sketchVal.end());
+      out_row[sketchCol_] = sketchStr;
     }
     AddData(out_row, chunk);
   }
 
-  // normalCol_sketches_
-  for (auto& sk : primary_tag_sketches_) {
-    if (sk.histogram) {
-      vector<SampledRow> SampledRows = sk.reservoir->GetSamples();
-      for (const auto& SampledRow : SampledRows) {
-        std::vector<optional<DataVariant>> out_row;
-        out_row.resize(outRetrunTypes_.size(), std::nullopt);
-        out_row[sk.statsCol_idx[0]] = SampledRow.data;
-        if (SampledRow.rank < kInt64Max) {
-          out_row[rankCol_] = static_cast<k_int64>(SampledRow.rank);
-        } else {
-          out_row[rankCol_] = kInt64Max;
-        }
-        AddData(out_row, chunk);
-      }
-    }
-    std::vector<optional<DataVariant>> out_row;
-    out_row.resize(outRetrunTypes_.size(), std::nullopt);
-    out_row[sketchIdxCol_] = static_cast<k_int64>(sk.sketchIdx);
-    out_row[numRowsCol_] = static_cast<k_int64>(sk.numRows);
-    out_row[numNullsCol_] = static_cast<k_int64>(sk.numNulls);
-    AddData(out_row, chunk);
-  }
-
-  LOG_DEBUG("sampling result set is collected successes");
-  Return(SUCCESS);
+  Return(SUCCESS)
 }
 
 KStatus TsSamplerOperator::Close(kwdbContext_p ctx) {
@@ -574,17 +571,61 @@ EEIteratorErrCode TsSamplerOperator::Reset(kwdbContext_p ctx) {
   Return(EEIteratorErrCode::EE_OK)
 }
 
-void TsSamplerOperator::EncodeBytes(k_uint32 array_idx, k_uint32 sketch_idx, bool isNull) {
-  Field* render = input_->GetRender(static_cast<int>(sketch_idx));
-  if (render == nullptr) {
-    LOG_ERROR("scanning the %d in the fields is nullptr in create statistics", sketch_idx)
-    return;
-  }
+void SketchSpec::addRow(BaseOperator* input, RowBatch* data_handle) {
+  numRows++;
+  bool isNull {false};
+  k_uint32 colIdx {0};
   std::vector<byte> buf;
-  if (isNull) {
-    buf.push_back(ValuesEncoding::encodedNull);
-    normalCol_sketches_[array_idx].sketch->Insert(buf);
+  Field* render {nullptr};
+  bool useFastPath {false};
+
+  if (statsCol_idx.size() == 1) {
+    colIdx = statsCol_idx[0];
+
+    render = input->GetRender(static_cast<int>(colIdx));
+    isNull = data_handle->IsNull(render->getColIdxInRs(), column_type);
+    if (isNull) {
+      numNulls++;
+      buf.push_back(ValuesEncoding::encodedNull);
+      sketch->Insert(buf);
+      return;
+    }
+    useFastPath = (render->get_return_type() == KWDBTypeFamily::IntFamily ||
+        render->get_return_type() == KWDBTypeFamily::BoolFamily ||
+        render->get_return_type() == KWDBTypeFamily::TimestampTZFamily ||
+        render->get_return_type() == KWDBTypeFamily::TimestampFamily) && !isNull;
+  }
+
+  if (useFastPath) {
+    k_int64 val = render->ValInt();
+    PutUint64LittleEndian(&buf, static_cast<u_int64_t>(val));
+    sketch->Insert(buf);
     return;
+  } else {
+    isNull = true;
+    for (auto idx :  statsCol_idx) {
+      render = input->GetRender(static_cast<int>(idx));
+      if (isNull) {
+        isNull = data_handle->IsNull(render->getColIdxInRs(), column_type);
+      }
+      buf = EncodeBytes(render, isNull, buf);
+    }
+    if (isNull) {
+      numNulls++;
+    }
+    sketch->Insert(buf);
+  }
+}
+
+std::vector<byte> EncodeBytes(Field* render, bool isNull, std::vector<byte>& appendTo) {
+  if (render == nullptr) {
+    LOG_ERROR("scanning the column in the fields is nullptr in create statistics")
+    return appendTo;
+  }
+
+  if (isNull) {
+    appendTo.push_back(ValuesEncoding::encodedNull);
+    return appendTo;
   }
   switch (render->get_return_type()) {
     case KWDBTypeFamily::BoolFamily:
@@ -592,27 +633,25 @@ void TsSamplerOperator::EncodeBytes(k_uint32 array_idx, k_uint32 sketch_idx, boo
     case KWDBTypeFamily::TimestampTZFamily:
     case KWDBTypeFamily::TimestampFamily: {
       k_int64 val = render->ValInt();
-      PutUint64LittleEndian(&buf, static_cast<u_int64_t>(val));
-      normalCol_sketches_[array_idx].sketch->Insert(buf);
+      appendTo = EncodeVarintAscending(appendTo,  val);
       break;
     }
     case KWDBTypeFamily::FloatFamily: {
       k_float64 val = render->ValReal();
-      buf = EncodeFloatAscending(static_cast<k_float64>(val));
-      normalCol_sketches_[array_idx].sketch->Insert(buf);
+      appendTo = EncodeFloatAscending(appendTo, static_cast<k_float64>(val));
       break;
     }
     case KWDBTypeFamily::StringFamily:
     case KWDBTypeFamily::BytesFamily: {
       String val = render->ValStr();
       KString in_str = {val.getptr(), val.length_};
-      buf = EncodeStringAscending(in_str);
-      normalCol_sketches_[array_idx].sketch->Insert(buf);
+      appendTo = EncodeStringAscending(appendTo, in_str);
       break;
     }
     default:
       break;
   }
+  return appendTo;
 }
 
 }   // namespace kwdbts

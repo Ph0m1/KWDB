@@ -205,21 +205,12 @@ message SnapshotRequest {
 
   optional bytes ts_meta = 13 [(gogoproto.customname) = "TSMeta"];
 
-  // Send the last piece of TS data
-  optional bool last_ts_batch = 6 [(gogoproto.nullable) = false];
-
   // Init ts snapshot for write
-  optional bool init_ts_snapshot_for_write = 7 [(gogoproto.nullable) = false];
+  optional bool init_ts_snapshot_for_write = 6 [(gogoproto.nullable) = false];
 
-  optional uint64 ts_table_id = 8 [(gogoproto.nullable) = false];
+  optional uint64 ts_table_id = 7 [(gogoproto.nullable) = false];
 
-  optional uint64 ts_range_group_id = 9 [(gogoproto.nullable) = false];
-
-  optional uint64 ts_snapshot_id = 10 [(gogoproto.nullable) = false];
-
-  optional int32 ts_snapshot_size = 11 [(gogoproto.nullable) = false];
-
-  optional int32 ts_snapshot_offset = 12 [(gogoproto.nullable) = false];
+  optional uint64 ts_snapshot_id = 8 [(gogoproto.nullable) = false];
 
   // These are really raftpb.Entry, but we model them as raw bytes to avoid
   // roundtripping through memory. They are separate from the kv_batch to

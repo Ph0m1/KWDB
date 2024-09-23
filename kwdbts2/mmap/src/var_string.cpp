@@ -130,7 +130,7 @@ void StringToVARSTRING::noPushToData(char *str, void *addr) {
   *((size_t *)addr) = loc;
 }
 
-void StringToVARSTRING::setStringFile(MMapStringFile *sf) {
+void StringToVARSTRING::setStringFile(MMapStringColumn *sf) {
   strfile_ = sf;
 }
 

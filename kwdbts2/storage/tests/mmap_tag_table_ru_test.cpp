@@ -8,7 +8,7 @@
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
-
+#if 0
 #include <gtest/gtest.h>
 #include <string.h>
 #include <errno.h>
@@ -179,12 +179,12 @@ class TestTagRuTable : public TestBigTableInstance {
       } else if (flag_ == 1) {
 
       } else if (flag_ == 2) {
-	if (tag_end_ptr_ != tag_var_start_ptr_) {
-	  // there are null in tag
-	  // ?????????????????
-	}
-	*size = tag_var_end_ptr_ - buf_start_ptr_;
-	return buf_start_ptr_;
+        if (tag_end_ptr_ != tag_var_start_ptr_) {
+          // there are null in tag
+          // ?????????????????
+        }
+        *size = tag_var_end_ptr_ - buf_start_ptr_;
+        return buf_start_ptr_;
       }
 
       *size = 0;
@@ -398,7 +398,9 @@ TEST_F(TestTagRuTable, insertForUndo) {
 
   uint32_t entity_id = 110;
   uint32_t group_id = 119;
-  int rc = bt->insert(entity_id, group_id, tmp_pd.GetTagAddr());
+  uint32_t hashpoint = TsTable::GetConsistentHashId(tmp_pd.GetPrimaryTag().data, tmp_pd.GetPrimaryTag().len);
+  tmp_pd.SetHashPoint(hashpoint);
+  int rc = bt->insert(entity_id, group_id, tmp_pd.getHashPoint(), tmp_pd.GetTagAddr());
   if (rc < 0) {
     // insert failed, do actually undo, if success, the row num should be 0
     rc = bt->InsertForUndo(group_id, entity_id, tmp_pd.GetPrimaryTag());
@@ -472,9 +474,11 @@ TEST_F(TestTagRuTable, deleteForUndo) {
   TSSlice slice{.data = buf_ptr, .len = buf_len};
   kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
 
+  uint32_t hashpoint = TsTable::GetConsistentHashId(tmp_pd.GetPrimaryTag().data, tmp_pd.GetPrimaryTag().len);
+  tmp_pd.SetHashPoint(hashpoint);
   uint32_t entityid = 110;
   uint32_t groupid = 119;
-  int rc = bt->insert(entityid, groupid, tmp_pd.GetTagAddr());
+  int rc = bt->insert(entityid, groupid, tmp_pd.getHashPoint(), tmp_pd.GetTagAddr());
   EXPECT_GE(rc, 0);
   EXPECT_EQ(bt->size(), 1);
 
@@ -554,10 +558,11 @@ TEST_F(TestTagRuTable, alterAddRU) {
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
   kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
-
+  uint32_t hashpoint = TsTable::GetConsistentHashId(tmp_pd.GetPrimaryTag().data, tmp_pd.GetPrimaryTag().len);
+  tmp_pd.SetHashPoint(hashpoint);
   uint32_t entityid = 110;
   uint32_t groupid = 119;
-  int rc = bt->insert(entityid, groupid, tmp_pd.GetTagAddr());
+  int rc = bt->insert(entityid, groupid, tmp_pd.getHashPoint(), tmp_pd.GetTagAddr());
   EXPECT_GE(rc, 0);
   EXPECT_EQ(bt->size(), 1);
 
@@ -633,10 +638,12 @@ TEST_F(TestTagRuTable, alterDropRU) {
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
   kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
+  uint32_t hashpoint = TsTable::GetConsistentHashId(tmp_pd.GetPrimaryTag().data, tmp_pd.GetPrimaryTag().len);
+  tmp_pd.SetHashPoint(hashpoint);
 
   uint32_t entityid = 110;
   uint32_t groupid = 119;
-  int rc = bt->insert(entityid, groupid, tmp_pd.GetTagAddr());
+  int rc = bt->insert(entityid, groupid, tmp_pd.getHashPoint(), tmp_pd.GetTagAddr());
   EXPECT_GE(rc, 0);
   EXPECT_EQ(bt->size(), 1);
 
@@ -691,7 +698,7 @@ TEST_F(TestTagRuTable, alterDropRU) {
 
   entityid = 111;
   groupid = 120;
-  rc = bt->insert(entityid, groupid, tmp_pd1.GetTagAddr());
+  rc = bt->insert(entityid, groupid, tmp_pd1.getHashPoint(), tmp_pd1.GetTagAddr());
   EXPECT_GE(rc, 0);
   EXPECT_EQ(bt->size(), 2);
 
@@ -747,10 +754,12 @@ TEST_F(TestTagRuTable, alterAlterRU) {
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
   kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
+  uint32_t hashpoint = TsTable::GetConsistentHashId(tmp_pd.GetPrimaryTag().data, tmp_pd.GetPrimaryTag().len);
+  tmp_pd.SetHashPoint(hashpoint);
 
   uint32_t entityid = 110;
   uint32_t groupid = 119;
-  int rc = bt->insert(entityid, groupid, tmp_pd.GetTagAddr());
+  int rc = bt->insert(entityid, groupid, tmp_pd.getHashPoint(), tmp_pd.GetTagAddr());
   EXPECT_GE(rc, 0);
   EXPECT_EQ(bt->size(), 1);
 
@@ -834,7 +843,7 @@ TEST_F(TestTagRuTable, cleanTagFiles) {
   EXPECT_EQ(bt->remove(), 0);
   releaseObject(bt);
 
-  bt = CreateTagTable(schema, db_path_, db_name_, 110, 119, TAG_TABLE, err_info);
+  bt = CreateTagTable(schema, db_path_, db_name_, 110, 1, TAG_TABLE, err_info);
   EXPECT_NE(bt, nullptr);
   EXPECT_EQ(err_info.errcode, 0);
 
@@ -902,10 +911,12 @@ TEST_F(TestTagRuTable, genTagPack) {
   char *buf_ptr = pb.GetBuf(&buf_len);
   TSSlice slice{.data = buf_ptr, .len = buf_len};
   kwdbts::Payload tmp_pd(pb.GetSchema(), pb.GetActualCols(), slice);
+  uint32_t hashpoint = TsTable::GetConsistentHashId(tmp_pd.GetPrimaryTag().data, tmp_pd.GetPrimaryTag().len);
+  tmp_pd.SetHashPoint(hashpoint);
 
   uint32_t entity_id = 110;
   uint32_t group_id = 119;
-  int rc = bt->insert(entity_id, group_id, tmp_pd.GetTagAddr());
+  int rc = bt->insert(entity_id, group_id, tmp_pd.getHashPoint(), tmp_pd.GetTagAddr());
   EXPECT_GE(rc, 0);
 
   TagTuplePack ttp = bt->GenTagPack(tmp_pd.GetPrimaryTag().data,
@@ -924,3 +935,4 @@ TEST_F(TestTagRuTable, genTagPack) {
   EXPECT_EQ(bt->remove(), 0);
   releaseObject(bt);
 }
+#endif

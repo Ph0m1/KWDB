@@ -68,7 +68,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
 	"gitee.com/kwbasedb/kwbase/pkg/util/protoutil"
-	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/sysutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
 	"github.com/cockroachdb/apd"
@@ -1536,18 +1535,16 @@ func (s *adminServer) checkReadinessForHealthCheck() error {
 // getLivenessStatusMap() includes removed nodes (dead + decommissioned).
 func getLivenessStatusMap(
 	nl *kvserver.NodeLiveness, now time.Time, st *cluster.Settings,
-) (map[roachpb.NodeID]storagepb.NodeLivenessStatus, map[roachpb.NodeID]int32) {
+) map[roachpb.NodeID]storagepb.NodeLivenessStatus {
 	livenesses := nl.GetLivenesses()
 	threshold := kvserver.TimeUntilStoreDead.Get(&st.SV)
 
 	statusMap := make(map[roachpb.NodeID]storagepb.NodeLivenessStatus, len(livenesses))
-	tsStatusMap := make(map[roachpb.NodeID]int32, len(livenesses))
 	for _, liveness := range livenesses {
 		status := kvserver.LivenessStatus(liveness, now, threshold)
 		statusMap[liveness.NodeID] = status
-		tsStatusMap[liveness.NodeID] = liveness.Status
 	}
-	return statusMap, tsStatusMap
+	return statusMap
 }
 
 // Liveness returns the liveness state of all nodes on the cluster
@@ -1557,7 +1554,7 @@ func (s *adminServer) Liveness(
 	context.Context, *serverpb.LivenessRequest,
 ) (*serverpb.LivenessResponse, error) {
 	clock := s.server.clock
-	statusMap, _ := getLivenessStatusMap(
+	statusMap := getLivenessStatusMap(
 		s.server.nodeLiveness, clock.Now().GoTime(), s.server.st)
 	livenesses := s.server.nodeLiveness.GetLivenesses()
 	return &serverpb.LivenessResponse{
@@ -1911,7 +1908,6 @@ func (s *adminServer) DecommissionStatus(
 			ReplicaCount:    replicaCounts[l.NodeID],
 			Decommissioning: l.Decommissioning,
 			Draining:        l.Draining,
-			TsMigrating:     l.Status == kvserver.Decommissioned,
 		}
 		if l.IsLive(s.server.clock.Now().GoTime()) {
 			nodeResp.IsLive = true
@@ -2340,87 +2336,6 @@ func (s *adminServer) enqueueRangeLocal(
 	return response, nil
 }
 
-// removeUnusedRangeGroupsOfTable remove the unused range groups according
-// to the using range groups and the table id.
-func (s *adminServer) removeUnusedRangeGroupsOfTable(
-	ctx context.Context, usingRangeGroups []api.RangeGroup, tableID uint32,
-) {
-	rangeGroupsMayRemove, _ := s.server.tsEngine.GetRangeGroups(tableID)
-	log.Infof(ctx, "tableID: %v, local range groups: %+v, using range groups: %+v",
-		tableID, rangeGroupsMayRemove, usingRangeGroups)
-	for _, rangeGroup := range rangeGroupsMayRemove {
-		remove := true
-		for _, group := range usingRangeGroups {
-			if group.RangeGroupID == rangeGroup.RangeGroupID {
-				remove = false
-				break
-			}
-		}
-		log.Infof(ctx, "stored range group %v, remove %v", rangeGroup, remove)
-		if remove {
-			err := s.server.tsEngine.DeleteRangeGroup(uint64(tableID), rangeGroup)
-			if err != nil {
-				log.Errorf(ctx, "DeleteRangeGroup error tableID=%d", tableID)
-			}
-		}
-	}
-}
-
-// RemoveUnusedRangeGroups implement the serverpb.AdminServer interface
-func (s *adminServer) RemoveUnusedRangeGroups(
-	ctx context.Context, req *serverpb.RemoveUnusedRangeGroupsRequest,
-) (*serverpb.RemoveUnusedRangeGroupsResponse, error) {
-	var err error
-	defer func() {
-		if err != nil {
-			log.Error(ctx, err)
-		}
-	}()
-	rangeGroups := req.RangeGroups
-
-	s.removeUnusedRangeGroupsOfTable(ctx, rangeGroups, uint32(req.TableId))
-
-	return &serverpb.RemoveUnusedRangeGroupsResponse{}, err
-}
-
-// UpdateRangeGroup implement the serverpb.AdminServer interface
-func (s *adminServer) UpdateRangeGroup(
-	ctx context.Context, req *serverpb.UpdateRangeGroupRequest,
-) (*serverpb.UpdateRangeGroupResponse, error) {
-	log.Info(ctx, "adminServer UpdateRangeGroup,tableID:%v, groups:%v", req.TableId, req.RangeGroups)
-	var err error
-	for {
-		if req.RangeGroups == nil {
-			err = errors.Errorf("the table : %v , groups is nil", req.TableId)
-			break
-		}
-		// tsMeta when applying snapshots
-		var tsMeta []byte
-		if req.TsMeta != nil {
-			err = s.server.tsEngine.UpdateRangeGroup(uint32(req.TableId), req.RangeGroups, req.TsMeta)
-			break
-		}
-		err = s.server.db.Txn(context.TODO(), func(ctx context.Context, txn *kv.Txn) error {
-			var table *sqlbase.TableDescriptor
-			table, _, err = sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(req.TableId))
-			if err != nil {
-				return err
-			}
-			tsMeta, err = sql.MakeNormalTSTableMeta(table)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-		err = s.server.tsEngine.UpdateRangeGroup(uint32(req.TableId), req.RangeGroups, tsMeta)
-		break
-	}
-	if err != nil {
-		log.Error(ctx, err)
-	}
-	return &serverpb.UpdateRangeGroupResponse{}, err
-}
-
 func (s *adminServer) getLocalRangeAndStore(
 	ctx context.Context, key roachpb.RKey, evictToken *kvcoord.EvictionToken,
 ) (*roachpb.RangeDescriptor, roachpb.StoreID, error) {
@@ -2447,58 +2362,6 @@ func (s *adminServer) getLocalRangeAndStore(
 		return nil, 0, err
 	}
 	return rangeDesc, storeID, nil
-}
-
-// TsRequestLease implement the serverpb.AdminServer interface
-func (s *adminServer) TsRequestLease(
-	ctx context.Context, req *serverpb.TsRequestLeaseRequest,
-) (*serverpb.TsRequestLeaseResponse, error) {
-	log.Infof(ctx, "Admin request lease of key %v", roachpb.Key(req.Key))
-	rangeDesc, storeID, err := s.getLocalRangeAndStore(ctx, req.Key, nil)
-	if err != nil {
-		return nil, err
-	}
-	store, err := s.server.node.stores.GetStore(storeID)
-	if err != nil {
-		log.Errorf(ctx, "failed get store for %d", storeID)
-		return nil, err
-	}
-	repl, err := store.GetReplica(rangeDesc.RangeID)
-	if err != nil {
-		log.Errorf(ctx, "failed get replica range %v", rangeDesc.RangeID)
-		return nil, err
-	}
-	retryOpts := retry.Options{
-		InitialBackoff: 50 * time.Millisecond,
-		MaxBackoff:     1 * time.Second,
-		Multiplier:     2,
-		MaxRetries:     6, // between [3s, 4s]
-	}
-	for r := retry.StartWithCtx(ctx, retryOpts); r.Next(); {
-		err = repl.AdminRequestLease(ctx, storeID)
-		if err == nil {
-			break
-		}
-		if _, ok := err.(*roachpb.AmbiguousResultError); !ok {
-			log.Errorf(ctx, "failed request lease for store %v, err: %v", storeID, err)
-			return nil, err
-		}
-	}
-	log.Infof(ctx, "succeed request lease for key %v, store %v, range %v",
-		roachpb.Key(req.Key), storeID, rangeDesc.RangeID)
-	return nil, nil
-}
-
-// GetTsTableMeta return timeseries table meta get from current node.
-func (s *adminServer) GetTsTableMeta(
-	ctx context.Context, req *serverpb.GetTsTableMetaRequest,
-) (*serverpb.GetTsTableMetaResponse, error) {
-	log.Infof(ctx, "remote get %v table meta from current node", req.TableId)
-	meta, err := s.server.tsEngine.GetMetaData(req.TableId, req.RangeGroup)
-	if err != nil {
-		return nil, err
-	}
-	return &serverpb.GetTsTableMetaResponse{TsMeta: meta}, err
 }
 
 // sqlQuery allows you to incrementally build a SQL query that uses
@@ -2932,6 +2795,42 @@ func (s *adminServer) GetAlertThreshold(
 	resp.ConnectionsAlertThreshold = float32(ConnectionsAlertThreshold.Get(&s.server.st.SV))
 	resp.SqlConnectionMaxLimit = int32(pgwire.SQLConnectionMaxLimit.Get(&s.server.st.SV))
 	return &resp, nil
+}
+
+// CreateTSTable create ts table
+func (s *adminServer) CreateTSTable(
+	ctx context.Context, req *serverpb.CreateTSTableRequest,
+) (*serverpb.CreateTSTableResponse, error) {
+	exist, _ := s.server.tsEngine.TSIsTsTableExist(req.TableID)
+	if !exist {
+		err := s.createTSTable(ctx, req.TableID, req.Meta)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+// createTSTable create ts table
+func (s *adminServer) createTSTable(ctx context.Context, tableID uint64, meta []byte) error {
+	rangeGroups := []api.RangeGroup{{RangeGroupID: 1}}
+	err := s.server.tsEngine.CreateTsTable(tableID, meta, rangeGroups)
+	if err != nil {
+		log.Errorf(ctx, "CreateTSTable failed %v", tableID)
+		return err
+	}
+	return nil
+}
+
+// GetTsTableVersion get ts table version from storage.
+func (s *adminServer) GetTsTableVersion(
+	ctx context.Context, req *serverpb.GetTsTableVersionRequest,
+) (*serverpb.GetTsTableVersionResponse, error) {
+	version, err := s.server.tsEngine.GetTsVersion(req.TableId)
+	if err != nil {
+		log.Error(ctx, errors.Wrap(err, "get ts table version failed"))
+	}
+	return &serverpb.GetTsTableVersionResponse{Version: version}, err
 }
 
 var errInsufficientPrivilege = status.Error(codes.PermissionDenied, "this operation requires admin privilege")

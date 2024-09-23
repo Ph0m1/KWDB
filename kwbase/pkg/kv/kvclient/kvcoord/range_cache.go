@@ -36,6 +36,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvbase"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/util/cache"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
@@ -312,15 +313,19 @@ func (rdc *RangeDescriptorCache) lookupRangeDescriptorInternal(
 	defer doneWg()
 
 	rdc.rangeCache.RLock()
-	if desc, _, err := rdc.getCachedRangeDescriptorLocked(key, useReverseScan); err != nil {
-		rdc.rangeCache.RUnlock()
-		return nil, nil, err
-	} else if desc != nil {
-		rdc.rangeCache.RUnlock()
-		returnToken := rdc.makeEvictionToken(desc, func(ctx context.Context) error {
-			return rdc.evictCachedRangeDescriptorLocked(ctx, key, desc, useReverseScan)
-		})
-		return desc, returnToken, nil
+	if ts, ok := ctx.Value(sqlbase.SpanKey{Key: "ts_span"}).(bool); ok && ts {
+		log.VEventf(ctx, 3, "lookup range descriptor with Storage: key=%s", key)
+	} else {
+		if desc, _, err := rdc.getCachedRangeDescriptorLocked(key, useReverseScan); err != nil {
+			rdc.rangeCache.RUnlock()
+			return nil, nil, err
+		} else if desc != nil {
+			rdc.rangeCache.RUnlock()
+			returnToken := rdc.makeEvictionToken(desc, func(ctx context.Context) error {
+				return rdc.evictCachedRangeDescriptorLocked(ctx, key, desc, useReverseScan)
+			})
+			return desc, returnToken, nil
+		}
 	}
 
 	if log.V(2) {

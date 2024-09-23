@@ -328,10 +328,6 @@ func (s *Store) SplitRange(
 	// TODO(nvanbenschoten): It should be possible to only reject registrations
 	// that overlap with the new range of the split and keep registrations that
 	// are only interested in keys that are still on the original range running.
-	log.VEventf(context.Background(), 3, "xxxx registry disconnect store split 1, rangeid %d, %p, rangeid %d, span: [%s - %s], %p",
-		split.LeftDesc.RangeID, leftRepl, split.RightDesc.RangeID,
-		roachpb.KeyValue{Key: roachpb.Key(leftRepl.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(leftRepl.Desc().EndKey)},
-		rightReplOrNil)
 	leftRepl.disconnectRangefeedWithReason(
 		roachpb.RangeFeedRetryError_REASON_RANGE_SPLIT, rightReplOrNil,
 	)

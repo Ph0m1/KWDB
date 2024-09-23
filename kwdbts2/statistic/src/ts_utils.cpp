@@ -11,6 +11,7 @@
 
 #include "ts_utils.h"
 #include <cmath>
+#include "ee_encoding.h"
 
 namespace kwdbts {
 
@@ -263,55 +264,175 @@ std::pair<uint64_t, uint8_t> getPosVal(uint64_t x, uint8_t p) {
   return {i, rho};
 }
 
-std::vector<byte> EncodeFloatAscending(k_float64 val) {
-  std::vector<byte> buf;
+std::vector<byte> EncodeVarintAscending(std::vector<uint8_t>& b, int64_t v) {
+  if (v < 0) {
+    // Encoding negative values
+    if (v >= -0xFF) {
+      b.push_back(IntMin + 7);
+      b.push_back(static_cast<byte>(v));
+    } else if (v >= -0xFFFF) {
+      b.push_back(IntMin + 6);
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    } else if (v >= -0xFFFFFF) {
+      b.push_back(IntMin + 5);
+      b.push_back(static_cast<byte>(v >> 16));
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    } else if (v >= -0xFFFFFFFF) {
+      b.push_back(IntMin + 4);
+      b.push_back(static_cast<byte>(v >> 24));
+      b.push_back(static_cast<byte>(v >> 16));
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    } else if (v >= -0xFFFFFFFFFF) {
+      b.push_back(IntMin + 3);
+      b.push_back(static_cast<byte>(v >> 32));
+      b.push_back(static_cast<byte>(v >> 24));
+      b.push_back(static_cast<byte>(v >> 16));
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    } else if (v >= -0xFFFFFFFFFFFF) {
+      b.push_back(IntMin + 2);
+      b.push_back(static_cast<byte>(v >> 40));
+      b.push_back(static_cast<byte>(v >> 32));
+      b.push_back(static_cast<byte>(v >> 24));
+      b.push_back(static_cast<byte>(v >> 16));
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    } else if (v >= -0xFFFFFFFFFFFFFF) {
+      b.push_back(IntMin + 1);
+      b.push_back(static_cast<byte>(v >> 48));
+      b.push_back(static_cast<byte>(v >> 40));
+      b.push_back(static_cast<byte>(v >> 32));
+      b.push_back(static_cast<byte>(v >> 24));
+      b.push_back(static_cast<byte>(v >> 16));
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    } else {
+      b.push_back(IntMin);
+      b.push_back(static_cast<byte>(v >> 56));
+      b.push_back(static_cast<byte>(v >> 48));
+      b.push_back(static_cast<byte>(v >> 40));
+      b.push_back(static_cast<byte>(v >> 32));
+      b.push_back(static_cast<byte>(v >> 24));
+      b.push_back(static_cast<byte>(v >> 16));
+      b.push_back(static_cast<byte>(v >> 8));
+      b.push_back(static_cast<byte>(v));
+    }
+  } else {
+    // Positive values delegate to EncodeUvarintAscending
+    return EncodeUvarintAscending(b, static_cast<uint64_t>(v));
+  }
+  return b;
+}
+
+std::vector<byte> EncodeUvarintAscending(std::vector<uint8_t>& b, uint64_t v) {
+  if (v <= IntSmall) {
+    b.push_back(IntZero + static_cast<byte>(v));
+  } else if (v <= 0xFF) {
+    b.push_back(IntMax - 7);
+    b.push_back(static_cast<byte>(v));
+  } else if (v <= 0xFFFF) {
+    b.push_back(IntMax - 6);
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  } else if (v <= 0xFFFFFF) {
+    b.push_back(IntMax - 5);
+    b.push_back(static_cast<byte>(v >> 16));
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  } else if (v <= 0xFFFFFFFF) {
+    b.push_back(IntMax - 4);
+    b.push_back(static_cast<byte>(v >> 24));
+    b.push_back(static_cast<byte>(v >> 16));
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  } else if (v <= 0xFFFFFFFFFF) {
+    b.push_back(IntMax - 3);
+    b.push_back(static_cast<byte>(v >> 32));
+    b.push_back(static_cast<byte>(v >> 24));
+    b.push_back(static_cast<byte>(v >> 16));
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  } else if (v <= 0xFFFFFFFFFFFF) {
+    b.push_back(IntMax - 2);
+    b.push_back(static_cast<byte>(v >> 40));
+    b.push_back(static_cast<byte>(v >> 32));
+    b.push_back(static_cast<byte>(v >> 24));
+    b.push_back(static_cast<byte>(v >> 16));
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  } else if (v <= 0xFFFFFFFFFFFFFF) {
+    b.push_back(IntMax - 1);
+    b.push_back(static_cast<byte>(v >> 48));
+    b.push_back(static_cast<byte>(v >> 40));
+    b.push_back(static_cast<byte>(v >> 32));
+    b.push_back(static_cast<byte>(v >> 24));
+    b.push_back(static_cast<byte>(v >> 16));
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  } else {
+    b.push_back(IntMax);
+    b.push_back(static_cast<byte>(v >> 56));
+    b.push_back(static_cast<byte>(v >> 48));
+    b.push_back(static_cast<byte>(v >> 40));
+    b.push_back(static_cast<byte>(v >> 32));
+    b.push_back(static_cast<byte>(v >> 24));
+    b.push_back(static_cast<byte>(v >> 16));
+    b.push_back(static_cast<byte>(v >> 8));
+    b.push_back(static_cast<byte>(v));
+  }
+  return b;
+}
+
+std::vector<byte> EncodeFloatAscending(std::vector<uint8_t>& b, k_float64 val) {
   if (std::isnan(val)) {
     // Nan
-    buf.push_back(ValuesEncoding::encodedNotNull + 1);
+    b.push_back(ValuesEncoding::encodedNotNull + 1);
   } else if (val == 0.0) {
     // Zero
-    buf.push_back(ValuesEncoding::floatZero);
+    b.push_back(ValuesEncoding::floatZero);
   } else {
     uint64_t u;
     std::memcpy(&u, &val, sizeof(val));
     if (val < 0) {
       u = ~u;
       // Prefix negative numbers
-      buf.push_back(ValuesEncoding::floatNeg);
+      b.push_back(ValuesEncoding::floatNeg);
     } else {
       // Prefix positive numbers
-      buf.push_back(ValuesEncoding::floatPos);
+      b.push_back(ValuesEncoding::floatPos);
     }
 
     // Append u to buf in big-endian format
     for (int i = 7; i >= 0; --i) {
-      buf.push_back((u >> (i * 8)) & 0xFF);
+      b.push_back((u >> (i * 8)) & 0xFF);
     }
   }
-  return buf;
+  return b;
 }
 
-std::vector<uint8_t> EncodeStringAscending(const std::string& val) {
-  std::vector<uint8_t> buf;
+std::vector<uint8_t> EncodeStringAscending(std::vector<uint8_t>& b, const std::string& val) {
   // Add prefix
-  buf.push_back(ValuesEncoding::bytesPrefix);
+  b.push_back(ValuesEncoding::bytesPrefix);
 
   for (char c : val) {
     if (c == '\x00') {
       // Escaping '\x00'
-      buf.push_back(escape);
-      buf.push_back(escaped00);
+      b.push_back(escape);
+      b.push_back(escaped00);
     } else {
       // The ASCII value of a character
-      buf.push_back(static_cast<uint8_t>(c));
+      b.push_back(static_cast<uint8_t>(c));
     }
   }
 
   // Add termination sequence "\x00\x01"
-  buf.push_back(escape);
-  buf.push_back(escapedTerm);
+  b.push_back(escape);
+  b.push_back(escapedTerm);
 
-  return buf;
+  return b;
 }
 
 }  // namespace kwdbts

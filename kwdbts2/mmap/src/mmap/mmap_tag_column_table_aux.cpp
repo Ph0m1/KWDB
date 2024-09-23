@@ -20,6 +20,7 @@
 #include "utils/big_table_utils.h"
 #include "sys_utils.h"
 #include "mmap/mmap_tag_column_table_aux.h"
+#include "ts_table.h"
 
 /*
  * @Description: set lsn of file
@@ -79,6 +80,7 @@ void MMapTagColumnTable::setDrop() {
   m_bitmap_file_->setDrop();
   m_index_->setDrop();
   m_meta_file_->setDrop();
+  m_hps_file_->setDrop();
 }
 
 bool MMapTagColumnTable::isDroped() {
@@ -177,7 +179,7 @@ TagTuplePack MMapTagColumnTable::GenTagPack(const char* primarytag, int len) {
 
 /*
  * @Description: do undo for create table in non-downtime scenario
- * @IN: url: the url of table
+ * @IN: path: the path of table
  * @IN: tbl_sub_path: the db of table
  * @IN: attrInfos: the column infos of table
  * @IN: encoding: encoding flags
@@ -186,9 +188,9 @@ TagTuplePack MMapTagColumnTable::GenTagPack(const char* primarytag, int len) {
  * In non-downtime scenario, all file should be opened,
  * so just set drop mark and remove.
  */
-int MMapTagColumnTable::CreateTableForUndo(const string& url, string& tbl_sub_path,
+int MMapTagColumnTable::CreateTableForUndo(const string& path, string& tbl_sub_path,
                                            vector<TagInfo>& attrInfos,
-					   int encoding) {
+                                           int encoding) {
   int rc = 0;
 
   return rc;
@@ -196,7 +198,7 @@ int MMapTagColumnTable::CreateTableForUndo(const string& url, string& tbl_sub_pa
 
 /*
  * @Description: do redo for create table in downtime scenario
- * @IN: url: the url of table
+ * @IN: path: the path of table
  * @IN: tbl_sub_path: the db of table
  * @IN: attrInfos: the column infos of table
  * @IN: encoding: encoding flags
@@ -209,9 +211,9 @@ int MMapTagColumnTable::CreateTableForUndo(const string& url, string& tbl_sub_pa
  * don't do redo; otherwise, tstable will remove directory.
  * so there's no need to do anything here.
  */
-int MMapTagColumnTable::CreateTableForRedo(const string& url, string& tbl_sub_path,
+int MMapTagColumnTable::CreateTableForRedo(const string& path, string& tbl_sub_path,
                                            vector<TagInfo>& attrInfos,
-					   int encoding) {
+                                           int encoding) {
   int rc = 0;
 
   return rc;
@@ -295,14 +297,15 @@ int MMapTagColumnTable::InsertForRedo(uint32_t groupid, uint32_t entityid,
     >= 0) {
     return 0;
   }
-
+  uint32_t hashpoint;
+  hashpoint = TsTable::GetConsistentHashId(primary_tag.data, primary_tag.len);
   size_t rowNo = getRowNo(entityid, groupid, primary_tag.data);
   if (rowNo == 0) {
     // don't find in primarytag column
-    return insert(entityid, groupid, tag.data);
+    return insert(entityid, groupid, hashpoint, tag.data);
   } else {
     setDeleteMark(rowNo);
-    return insert(entityid, groupid, tag.data);
+    return insert(entityid, groupid, hashpoint, tag.data);
   }
 }
 
@@ -329,9 +332,10 @@ int MMapTagColumnTable::DeleteForUndo(uint32_t groupid, uint32_t entityid,
     for (auto col: m_cols_) {
       schema.push_back(col->attributeInfo());
     }
-
+    uint32_t hashpoint;
+    getHashpointByRowNum(rowNo, &hashpoint);
     TagTuplePack tag(schema, tag_pack.data, tag_pack.len);
-    return insert(entityid, groupid, tag.getTags().data);
+    return insert(entityid, groupid, hashpoint, tag.getTags().data);
   } else {
     unsetDeleteMark(rowNo);
     int rc = m_index_->put(reinterpret_cast<char*>(record(rowNo)),
@@ -394,7 +398,8 @@ int MMapTagColumnTable::UpdateForRedo(uint32_t groupid, uint32_t entityid,
     setDeleteMark(rowNo);
   }
 
-  return insert(entityid, groupid, tag.data);
+  uint32_t hashpoint = TsTable::GetConsistentHashId(primary_tag.data, primary_tag.len);
+  return insert(entityid, groupid, hashpoint, tag.data);
 }
 
 int MMapTagColumnTable::UpdateForUndo(uint32_t group_id, uint32_t entity_id, const TSSlice& primary_tag,
@@ -414,9 +419,9 @@ int MMapTagColumnTable::UpdateForUndo(uint32_t group_id, uint32_t entity_id, con
   for (auto col: m_cols_) {
     schema.push_back(col->attributeInfo());
   }
-
+  uint32_t hashpoint = TsTable::GetConsistentHashId(primary_tag.data, primary_tag.len);
   TagTuplePack tag(schema, old_tag.data, old_tag.len);
-  return insert(entity_id, group_id, tag.getTags().data);
+  return insert(entity_id, group_id, hashpoint, tag.getTags().data);
 }
 
 /*
@@ -619,6 +624,8 @@ static size_t lsnOffset(const TagTableFileType fileType) {
       return lsnOffsetInStr();
     case TTFT_PRIMARYTAG:
       return lsnOffsetInPrimaryTag();
+    case TTFT_HASHPOINT:
+      return 0;
     case TTFT_UNKNOWN:
     default:
       return -1;
@@ -1429,6 +1436,8 @@ void CleanTagFiles(const string dirPath, uint64_t tableId, uint64_t cutoffLsn) {
       fileType = TTFT_META;
     } else if (fileNameStem == "s") {
       fileType = TTFT_STR;
+    } else if (fileNameStem == "hps") {
+      fileType = TTFT_HASHPOINT;
     } else {
       fileType = TTFT_TAG;
     }

@@ -51,10 +51,6 @@ func (p *planner) RebalanceTsDataNode(
 	if !advance {
 		return nil, pgerror.New(pgcode.FeatureNotSupported, "rebalance ts data is not support when cluster setting server.advanced_distributed_operations.enabled is false.")
 	}
-	_, err := api.GetAvailableNodeIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if p.SessionData().SafeUpdates {
 		return nil, pgerror.DangerousStatementf(
 			"rebalance replica")
@@ -96,10 +92,6 @@ func (n *rebalanceTsDataNode) startExec(params runParams) error {
 		for _, partition := range changes {
 			log.Infof(params.ctx, "The Group %v src leaseHolder is : %v , the src replica is : %v\n", partition.GroupID, partition.SrcLeaseHolder, partition.SrcInternalReplicas)
 			log.Infof(params.ctx, "The Group %v dest leaseHolder is : %v , the dest replica is : %v\n", partition.GroupID, partition.DestLeaseHolder, partition.DestInternalReplicas)
-			err = api.RelocatePartitionReplicas(params.ctx, uint32(tableID), partition, false)
-			if err != nil {
-				return errors.Errorf("The group %v relocate partition replica err : %v", partition.GroupID, err)
-			}
 			log.Infof(params.ctx, "The group %v relocate partition success", partition.GroupID)
 			groups[partition.GroupID] = struct{}{}
 		}
@@ -108,20 +100,8 @@ func (n *rebalanceTsDataNode) startExec(params runParams) error {
 		if err != nil {
 			return errors.Errorf("rebalance ts data RefreshHashRouter err : %v", err)
 		}
-		updatedNodes := make(map[roachpb.NodeID]interface{}, 0)
 		removeNodes := make(map[roachpb.NodeID]interface{}, 0)
 		for _, part := range changes {
-			for _, partReplica := range part.DestInternalReplicas {
-				destNodeID := partReplica.NodeID
-				if _, ok := updatedNodes[destNodeID]; !ok {
-					updatedNodes[destNodeID] = struct{}{}
-					rangeGroups := info.GetGroupIDAndRoleOnNode(params.ctx, destNodeID)
-					err = api.RefreshTSRangeGroup(params.ctx, uint32(tableID), destNodeID, rangeGroups, nil)
-					if err != nil {
-						return errors.Errorf("failed to update ts range group: %v", err)
-					}
-				}
-			}
 			for _, partReplica := range part.SrcInternalReplicas {
 				srcNodeID := partReplica.NodeID
 				if _, ok := removeNodes[srcNodeID]; !ok {
@@ -164,11 +144,6 @@ func (n *rebalanceTsDataNode) startExec(params runParams) error {
 				log.Infof(params.ctx, "The group : %v\n", partition.GroupID)
 				log.Infof(params.ctx, "The src leaseHolder is : %+v , the src replica is : %+v\n", partition.SrcLeaseHolder, partition.SrcInternalReplicas)
 				log.Infof(params.ctx, "The dest leaseHolder is : %+v , the dest replica is : %+v\n", partition.DestLeaseHolder, partition.DestInternalReplicas)
-				err = api.RelocatePartitionReplicas(params.ctx, tableID, partition, false)
-				if err != nil {
-					params.p.Tables().releaseLeases(params.ctx)
-					return errors.Errorf("The group %v relocate partition replica err : %v", partition.GroupID, err)
-				}
 				groups[partition.GroupID] = struct{}{}
 			}
 			message := fmt.Sprintf("rebalance ts data table : %v", tableID)
@@ -177,21 +152,8 @@ func (n *rebalanceTsDataNode) startExec(params runParams) error {
 				params.p.Tables().releaseLeases(params.ctx)
 				return errors.Errorf("rebalance ts data RefreshHashRouter err : %v", err)
 			}
-			updatedNodes := make(map[roachpb.NodeID]interface{}, 0)
 			removeNodes := make(map[roachpb.NodeID]interface{}, 0)
 			for _, part := range changes {
-				for _, partReplica := range part.DestInternalReplicas {
-					destNodeID := partReplica.NodeID
-					if _, ok := updatedNodes[destNodeID]; !ok {
-						updatedNodes[destNodeID] = struct{}{}
-						rangeGroups := info.GetGroupIDAndRoleOnNode(params.ctx, destNodeID)
-						err = api.RefreshTSRangeGroup(params.ctx, tableID, destNodeID, rangeGroups, nil)
-						if err != nil {
-							params.p.Tables().releaseLeases(params.ctx)
-							return errors.Errorf("failed to update ts range group: %v", err)
-						}
-					}
-				}
 				for _, partReplica := range part.SrcInternalReplicas {
 					srcNodeID := partReplica.NodeID
 					if _, ok := removeNodes[srcNodeID]; !ok {

@@ -121,20 +121,6 @@ func (ds *DistSender) divideAndSendRangeFeedToRanges(
 			return err
 		}
 
-		if rangeInfo != nil {
-			log.Infof(ctx, "xxxx dist_sender_rangefeed divideAndSendRangeFeedToRanges register2, %d, %d, rs %s -- %s , right:%s - %s, nextRs: %s - %s, partialRS: %s - %s ",
-				rangeInfo.desc.RangeID, desc.RangeID, rangeInfo.rs.Key.AsRawKey(), rangeInfo.rs.EndKey.AsRawKey(),
-				desc.StartKey.AsRawKey(), desc.EndKey.AsRawKey(),
-				nextRS.Key.AsRawKey(), nextRS.EndKey.AsRawKey(),
-				partialRS.Key.AsRawKey(), partialRS.EndKey.AsRawKey())
-
-			log.VEventf(ctx, 3, "xxxx dist_sender_rangefeed divideAndSendRangeFeedToRanges register2, %d, %d, rs %s -- %s , right:%s - %s, nextRs: %s - %s, partialRS: %s - %s ",
-				rangeInfo.desc.RangeID, desc.RangeID, rangeInfo.rs.Key.AsRawKey(), rangeInfo.rs.EndKey.AsRawKey(),
-				desc.StartKey.AsRawKey(), desc.EndKey.AsRawKey(),
-				nextRS.Key.AsRawKey(), nextRS.EndKey.AsRawKey(),
-				partialRS.Key.AsRawKey(), partialRS.EndKey.AsRawKey())
-		}
-
 		nextRS.Key = partialRS.EndKey
 		select {
 		case rangeCh <- singleRangeInfo{

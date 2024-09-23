@@ -36,7 +36,7 @@ class TSEntityGroupWorker : public Worker {
     ctx = &context;
     kwdbts::InitKWDBContext(ctx);
     tag_schema_ = st_inst_->GetEntityGroup()->GetSchema();
-    KStatus s = st_inst_->GetTable()->GetDataSchema(ctx, &data_schema_);
+    KStatus s = st_inst_->GetTable()->GetDataSchemaExcludeDropped(ctx, &data_schema_);
     assert(s == KStatus::SUCCESS);
     entity_group_ = st_inst_->GetEntityGroup();
   }

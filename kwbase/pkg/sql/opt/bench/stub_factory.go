@@ -315,6 +315,7 @@ func (f *stubFactory) ConstructTSTagUpdate(
 	tblID, groupID uint64,
 	primaryTagKey, TagValues [][]byte,
 	pTagValueNotExist bool,
+	startKey, endKey roachpb.Key,
 ) (exec.Node, error) {
 	return struct{}{}, nil
 }

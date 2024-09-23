@@ -116,6 +116,8 @@ function start_single_node() {
     fi
     sleep 1
   done
+  ${KWBIN} sql --insecure --host=${host_ip}:${listenport} -e \
+  "ALTER RANGE default CONFIGURE ZONE USING gc.ttlseconds = 60;"
 }
 
 function check_kwbase_available() {
@@ -126,7 +128,7 @@ function check_kwbase_available() {
   fi
   listenaddr=$(get_listen_addr ${store})
   echo $(${KWBIN} node status --insecure --format csv --host=${listenaddr} | \
-      grep "${listenaddr}" | tail -n1 | grep -cP ",true,true,(healthy|\"\")$" )
+      grep "${listenaddr}" | tail -n1 | grep -cP ",true,true$" )
 }
 
 function check_kwbase_alive() {
@@ -137,7 +139,7 @@ function check_kwbase_alive() {
   fi
   listenaddr=$(get_listen_addr ${store})
   echo $(${KWBIN} node status --insecure --format csv --host=${listenaddr} | \
-      grep "${listenaddr}" | grep -cP ",(true|false),true,(healthy|\"\")$" )
+      grep "${listenaddr}" | grep -cP ",(true|false),true$" )
 }
 
 function nice_stop_node_v2() {
@@ -178,6 +180,9 @@ function _cluster_start_() {
   local host_ip=${6:-127.0.102.145}
 
   local address=""
+
+  rm -fr ${DEPLOY_ROOT}/extern
+  mkdir -p ${DEPLOY_ROOT}/extern
   for idx in $(seq 1 ${node_count});do
     rm -fr ${DEPLOY_ROOT}/${name_prefix}${idx}
     echo_info "starting cluster node: ${name_prefix}${idx}"
@@ -191,6 +196,7 @@ function _cluster_start_() {
     --locality=region=CN-100000-0$(printf "%02d" ${idx}) \
     --join=${host_ip}:${tcp_port_start} \
     --pid-file=${DEPLOY_ROOT}/${name_prefix}${idx}/kwbase.pid \
+    --external-io-dir=${DEPLOY_ROOT}/extern \
     --background
     address+="|${laddr}"
   done
@@ -202,9 +208,11 @@ function _cluster_start_() {
   while [ ${node_count} -ne \
     $(${KWBIN} node \
       status --insecure --format csv --host=${address##*|} | \
-      grep -P "${address#*|}" | grep -cP ",true,true,(healthy|\"\")$") ];do
+      grep -P "${address#*|}" | grep -cP ",true,true$") ];do
     echo_info "cluster node uninitialized, wating..." && sleep 1
   done
+  ${KWBIN} sql --insecure --host=${host_ip}:${tcp_port_start}  -e \
+  "ALTER RANGE default CONFIGURE ZONE USING gc.ttlseconds = 60;"
 }
 
 function start_cluster() {

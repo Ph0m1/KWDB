@@ -20,8 +20,7 @@ const string TestBigTableInstance::kw_home_ = kDbPath;  // NOLINT database path
 const string TestBigTableInstance::db_name_ = "tsdb";  // NOLINT database name
 const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 
-RangeGroup kTestRange{101, 0};
-
+RangeGroup kTestRange{1, 0};
 class TestEngine : public TestBigTableInstance {
  public:
   kwdbContext_t context_;
@@ -145,8 +144,10 @@ TEST_F(TestEngine, tagiterator) {
   // tag iterator
   std::vector<EntityResultIndex> entity_id_list;
   std::vector<k_uint32> scan_tags = {1, 2};
+  std::vector<k_uint32> hps;
+  make_hashpoint(&hps);
   TagIterator *iter;
-  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags, &iter, 1), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags,hps, &iter, 1), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_tags.size()};
   k_uint32 fetch_total_count = 0;
@@ -225,8 +226,12 @@ TEST_F(TestEngine, updatetag) {
   // tag iterator
   std::vector<EntityResultIndex> entity_id_list;
   std::vector<k_uint32> scan_tags = {1, 2};
+  std::vector<k_uint32> hps;
+  for (uint32_t i =0; i< HASHPOINT_RANGE; i++) {
+    hps.push_back(i);
+  }
   TagIterator *iter;
-  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags, &iter, 1), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags,hps, &iter, 1), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_tags.size()};
   k_uint32 fetch_total_count = 0;

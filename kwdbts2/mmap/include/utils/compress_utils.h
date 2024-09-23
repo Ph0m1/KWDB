@@ -110,6 +110,11 @@ extern MountOption g_mount_option;
 
 bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info);
 
+bool compressToPath(const string& db_path, const string& tbl_sub_path, const string& dir_name,
+                    const string& desc_path, ErrorInfo& err_info);
+
+void initSudo();
+
 bool mount(const string& sqfs_file_path, const string& dir_name, ErrorInfo& err_info);
 
 bool umount(const string& sqfs_file_path, const string& dir_name, ErrorInfo& err_info);

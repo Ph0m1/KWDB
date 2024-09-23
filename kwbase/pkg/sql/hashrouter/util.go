@@ -26,10 +26,12 @@ package hashrouter
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"github.com/cockroachdb/errors"
@@ -53,31 +55,6 @@ func GenerateUniqueEntityRangeReplicaID(ctx context.Context, db *kv.DB) (uint64,
 		return 0, err
 	}
 	return uint64(newVal), nil
-}
-
-func maxPartitionEntityRangeGroup(
-	partitionSize map[api.EntityRangeGroupID]int,
-) (groupID api.EntityRangeGroupID, size int) {
-	for k, v := range partitionSize {
-		if v > size {
-			size = v
-			groupID = k
-		}
-	}
-	return groupID, size
-}
-
-func minPartitionEntityRangeGroup(
-	partitionSize map[api.EntityRangeGroupID]int,
-) (groupID api.EntityRangeGroupID, size int) {
-	size = int(^uint(0) >> 1)
-	for key, v := range partitionSize {
-		if v < size {
-			size = v
-			groupID = key
-		}
-	}
-	return groupID, size
 }
 
 func maxLeaseHolderRangeGroupNode(nodes map[roachpb.NodeID]int) roachpb.NodeID {
@@ -406,228 +383,6 @@ func getStoreIDByNodeID(
 	return id
 }
 
-func groupChangesOnAddNode(
-	nodeID roachpb.NodeID,
-	groupsMap map[api.EntityRangeGroupID]*api.EntityRangeGroup,
-	stores map[roachpb.StoreID]roachpb.StoreDescriptor,
-) {
-	nodeReplicas := make(map[roachpb.NodeID]int)
-	nodeLeasHolders := make(map[roachpb.NodeID]int)
-	nodeAllLeaseHolders := make(map[roachpb.NodeID]int)
-	for _, hashInfo := range hrMgr.routerCaches {
-		for _, group := range hashInfo.groupsMap {
-			for _, replica := range group.InternalReplicas {
-				if replica.NodeID == group.LeaseHolder.NodeID {
-					nodeAllLeaseHolders[replica.NodeID]++
-				}
-			}
-		}
-	}
-	for _, group := range groupsMap {
-		for _, replica := range group.InternalReplicas {
-			if replica.NodeID == group.LeaseHolder.NodeID {
-				nodeLeasHolders[replica.NodeID]++
-			}
-			nodeReplicas[replica.NodeID]++
-		}
-	}
-	var relocated bool
-	nodeGroupIDs := make(map[api.EntityRangeGroupID]struct{})
-	nodeReplicaSize := 0
-	nodeLeaseHolderSize := 0
-	maxLeasaHolderNode := maxLeaseHolderRangeGroupNode(nodeLeasHolders)
-	for nodeLeasHolders[maxLeasaHolderNode]-nodeLeaseHolderSize > 1 ||
-		(nodeAllLeaseHolders[maxLeasaHolderNode]-nodeAllLeaseHolders[nodeID] > 1 && !relocated) {
-		fmt.Printf("The maxLeasaHolderNode is : %v", maxLeasaHolderNode)
-		for id, group := range groupsMap {
-			if group.LeaseHolder.NodeID == maxLeasaHolderNode {
-				groupsMap[id].Status = api.EntityRangeGroupStatus_relocating
-				groupsMap[id].GroupChanges = append(groupsMap[id].GroupChanges, api.EntityRangeGroupReplica{
-					ReplicaID: group.LeaseHolder.ReplicaID,
-					NodeID:    nodeID,
-					StoreID:   getStoreIDByNodeID(nodeID, stores),
-				})
-				relocated = true
-				nodeGroupIDs[id] = struct{}{}
-				nodeReplicas[maxLeasaHolderNode]--
-				nodeLeasHolders[maxLeasaHolderNode]--
-				nodeLeaseHolderSize++
-				nodeReplicaSize++
-				break
-			}
-		}
-		maxLeasaHolderNode = maxLeaseHolderRangeGroupNode(nodeLeasHolders)
-	}
-	maxReplicaNode := maxRangeGroupNode(nodeReplicas)
-	for nodeReplicas[maxReplicaNode]-nodeReplicaSize > 1 {
-		for id, group := range groupsMap {
-			if group.LeaseHolder.NodeID != maxReplicaNode {
-				_, ok := nodeGroupIDs[id]
-				if ok {
-					continue
-				}
-				var changed bool
-				for _, replica := range group.InternalReplicas {
-					if replica.NodeID == maxReplicaNode {
-						groupsMap[id].Status = api.EntityRangeGroupStatus_relocating
-						groupsMap[id].GroupChanges = append(groupsMap[id].GroupChanges, api.EntityRangeGroupReplica{
-							ReplicaID: replica.ReplicaID,
-							NodeID:    nodeID,
-							StoreID:   getStoreIDByNodeID(nodeID, stores),
-						})
-						changed = true
-						nodeGroupIDs[id] = struct{}{}
-						nodeReplicaSize++
-						nodeReplicas[maxReplicaNode]--
-					}
-				}
-				if changed {
-					break
-				}
-			}
-		}
-		maxReplicaNode = maxRangeGroupNode(nodeReplicas)
-	}
-}
-
-func addMessageFromGroupChange(
-	groupsMap map[api.EntityRangeGroupID]*api.EntityRangeGroup,
-	nodeID roachpb.NodeID,
-	stores map[roachpb.StoreID]roachpb.StoreDescriptor,
-	hashPartitionSize int,
-) []api.EntityRangeGroupChange {
-	var message []api.EntityRangePartitionMessage
-	var groupChanges []api.EntityRangeGroupChange
-	// Construct a Partition and return the final changes to the upper layer
-	for _, group := range groupsMap {
-		// Get all partitions
-		partitions := make(map[uint32]struct{})
-		for key := range group.Partitions {
-			partitions[key] = struct{}{}
-		}
-		var destInternalReplicas []api.EntityRangeGroupReplica
-		for _, replica := range group.InternalReplicas {
-			destInternalReplicas = append(destInternalReplicas, replica)
-		}
-		if group.LeaseHolderChange.ReplicaID != 0 {
-			for id := range partitions {
-				message = append(message, api.EntityRangePartitionMessage{
-					GroupID:              group.GroupID,
-					Partition:            group.Partitions[id],
-					SrcLeaseHolder:       group.LeaseHolder,
-					SrcInternalReplicas:  group.InternalReplicas,
-					DestLeaseHolder:      group.LeaseHolderChange,
-					DestInternalReplicas: group.InternalReplicas,
-				})
-			}
-		}
-		// Describe the changes in the Partition based on the Group's Change
-		var isChange bool
-		var leaseHolderNode roachpb.NodeID
-		for _, change := range group.GroupChanges {
-			for i, replica := range destInternalReplicas {
-				if replica.ReplicaID == change.ReplicaID {
-					destInternalReplicas[i].NodeID = change.NodeID
-					destInternalReplicas[i].StoreID = change.StoreID
-					isChange = true
-					if replica.ReplicaID == group.LeaseHolder.ReplicaID {
-						leaseHolderNode = change.NodeID
-					}
-					break
-				}
-			}
-		}
-		var destLeaseHolder api.EntityRangeGroupReplica
-		if leaseHolderNode != 0 {
-			destLeaseHolder = api.EntityRangeGroupReplica{
-				ReplicaID: group.LeaseHolder.ReplicaID,
-				NodeID:    leaseHolderNode,
-				StoreID:   getStoreIDByNodeID(leaseHolderNode, stores),
-			}
-		} else {
-			destLeaseHolder = group.LeaseHolder
-		}
-		if isChange {
-			var gc api.EntityRangeGroupChange
-			for id := range partitions {
-				partitionMsg := api.EntityRangePartitionMessage{
-					GroupID:              group.GroupID,
-					Partition:            group.Partitions[id],
-					SrcLeaseHolder:       group.LeaseHolder,
-					SrcInternalReplicas:  group.InternalReplicas,
-					DestLeaseHolder:      destLeaseHolder,
-					DestInternalReplicas: destInternalReplicas,
-				}
-				message = append(message, partitionMsg)
-				gc.Messages = append(gc.Messages, partitionMsg)
-			}
-			routing := api.KWDBHashRouting{
-				EntityRangeGroupId: group.GroupID,
-				TableID:            group.TableID,
-				EntityRangeGroup:   *group,
-				TsPartitionSize:    int32(hashPartitionSize),
-			}
-			gc.Routing = routing
-			groupChanges = append(groupChanges, gc)
-		}
-	}
-	return groupChanges
-}
-
-// TransferPartitionLease to control all ranges lease for partition by hrMgr.
-func TransferPartitionLease(
-	ctx context.Context, tableID uint32, change api.EntityRangePartitionMessage,
-) error {
-	return hrMgr.tseDB.TransferPartitionLease(ctx, sqlbase.ID(tableID), change)
-}
-
-// AddPartitionReplicas adding a set of replicas to all ranges for partition by hrNgr.
-func AddPartitionReplicas(
-	ctx context.Context, tableID uint32, change api.EntityRangePartitionMessage,
-) error {
-	return hrMgr.tseDB.AddPartitionReplicas(ctx, sqlbase.ID(tableID), change)
-}
-
-// RemovePartitionReplicas adding a set of replicas to all ranges for partition by hrNgr.
-func RemovePartitionReplicas(
-	ctx context.Context, tableID uint32, change api.EntityRangePartitionMessage,
-) error {
-	return hrMgr.tseDB.RemovePartitionReplicas(ctx, sqlbase.ID(tableID), change)
-}
-
-// RefreshTSRangeGroup updates PartitionRangeGroup
-func RefreshTSRangeGroup(
-	ctx context.Context,
-	tableID uint32,
-	nodeID roachpb.NodeID,
-	rangeGroups []api.RangeGroup,
-	tsMeta []byte,
-) error {
-	return hrMgr.tseDB.UpdateTSRangeGroup(ctx, sqlbase.ID(tableID), nodeID, rangeGroups, tsMeta)
-}
-
-// RemoveUnusedTSRangeGroups comment .
-func RemoveUnusedTSRangeGroups(
-	ctx context.Context, tableID uint32, nodeID roachpb.NodeID, rangeGroups []api.RangeGroup,
-) error {
-	return hrMgr.tseDB.RemoveUnusedTSRangeGroup(ctx, sqlbase.ID(tableID), nodeID, rangeGroups)
-}
-
-// TSRequestLease request lease for the target store
-func TSRequestLease(
-	ctx context.Context, tableID uint32, startPoint api.HashPoint, nodeID roachpb.NodeID,
-) error {
-	startKey := sqlbase.MakeTsHashPointKey(sqlbase.ID(tableID), uint64(startPoint))
-	return hrMgr.tseDB.TsRequestLease(ctx, startKey, nodeID)
-}
-
-// RelocatePartitionReplicas adding a set of replicas to all ranges for partition by hrNgr.
-func RelocatePartitionReplicas(
-	ctx context.Context, tableID uint32, change api.EntityRangePartitionMessage, uselessRange bool,
-) error {
-	return hrMgr.tseDB.RelocatePartition(ctx, sqlbase.ID(tableID), change, uselessRange)
-}
-
 // HRManagerWLock is used to lock
 func HRManagerWLock() {
 	hrMgr.mu.Lock()
@@ -638,36 +393,6 @@ func HRManagerWLock() {
 func HRManagerWUnLock() {
 	hrMgr.mu.Unlock()
 	return
-}
-
-// HRManagerRLock is used to lock
-func HRManagerRLock() {
-	hrMgr.mu.RLock()
-	return
-}
-
-// HRManagerRUnLock is used to unlock
-func HRManagerRUnLock() {
-	hrMgr.mu.RUnlock()
-	return
-}
-
-// GetHashInfoByID query kwdb_hash_routing by specific table id
-func GetHashInfoByID(
-	ctx context.Context, txn *kv.Txn, entityGroupID uint64,
-) (*api.KWDBHashRouting, error) {
-	var err error
-	var hashRouting *api.KWDBHashRouting
-	getHashRouting := func(ctx context.Context, newTxn *kv.Txn) error {
-		hashRouting, err = hrMgr.GetHashRoutingByID(ctx, newTxn, entityGroupID)
-		return err
-	}
-	if txn == nil {
-		err = hrMgr.db.Txn(ctx, getHashRouting)
-	} else {
-		err = getHashRouting(ctx, txn)
-	}
-	return hashRouting, err
 }
 
 // GetHashInfoByIDInTxn query kwdb_hash_routing by specific entity group id, in an active txn.
@@ -779,4 +504,59 @@ func makeHRMgr(routings []*api.KWDBHashRouting) (api.HashRouterManager, error) {
 		nodeLiveness: hrMgr.nodeLiveness,
 		storePool:    hrMgr.storePool,
 	}, nil
+}
+
+// GetRangesDesc get rangeDesc
+func GetRangesDesc(
+	ctx context.Context, txn *kv.Txn, startKey roachpb.Key, endKey roachpb.Key,
+) ([]roachpb.RangeDescriptor, error) {
+	var rangesDesc []roachpb.RangeDescriptor
+	ranges, err := sql.ScanMetaKVs(ctx, txn, roachpb.Span{
+		Key:    startKey,
+		EndKey: endKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range ranges {
+		var desc roachpb.RangeDescriptor
+		if err := r.ValueProto(&desc); err != nil {
+			return nil, err
+		}
+		rangesDesc = append(rangesDesc, desc)
+	}
+	return rangesDesc, nil
+}
+
+// GetTableNodeIDs gets nodeids
+func GetTableNodeIDs(ctx context.Context, txn *kv.Txn, tableID uint32) ([]roachpb.NodeID, error) {
+	var nodeIDs []roachpb.NodeID
+	nodeIDList := make(map[roachpb.NodeID]struct{})
+	ranges, err := sql.ScanMetaKVs(ctx, txn, roachpb.Span{
+		Key:    sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), 0, math.MinInt64),
+		EndKey: sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), api.HashParamV2-1, math.MaxInt64),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range ranges {
+		var desc roachpb.RangeDescriptor
+		if err := r.ValueProto(&desc); err != nil {
+			return nil, err
+		}
+		for _, replica := range desc.InternalReplicas {
+			nodeIDList[replica.NodeID] = struct{}{}
+		}
+	}
+	for nodeID := range nodeIDList {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	return nodeIDs, nil
+}
+
+// CreateTSTable create ts table
+func CreateTSTable(
+	ctx context.Context, tableID uint32, nodeID roachpb.NodeID, tsMeta []byte,
+) error {
+	return hrMgr.tseDB.CreateTSTable(ctx, sqlbase.ID(tableID), nodeID, tsMeta)
 }

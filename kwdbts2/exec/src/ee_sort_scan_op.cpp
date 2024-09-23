@@ -183,7 +183,7 @@ EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx) {
   if (data_chunk_->Initialize() != true) {
     data_chunk_ = nullptr;
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-    Return(EEIteratorErrCode::EE_ERROR);
+    return EEIteratorErrCode::EE_ERROR;
   }
   return EEIteratorErrCode::EE_OK;
 }

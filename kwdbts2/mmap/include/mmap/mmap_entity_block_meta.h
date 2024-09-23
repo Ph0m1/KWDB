@@ -24,6 +24,7 @@
 #include "utils/compress_utils.h"
 #include "libkwdbts2.h"
 #include "lt_rw_latch.h"
+#include "bitmap_utils.h"
 
 const int METRIC_VERSION = 1;                       // metric version
 const size_t BLOCK_AGG_NUM = 3;                     // Data Block has agg num.
@@ -34,6 +35,15 @@ const size_t BLOCK_ROWS_MAX = 1000;                 // max rows number in each b
 const size_t BLOCK_ROWS_MIN = 10;                   // min rows number in each block
 const uint64_t INVALID_TS = INT64_MAX;
 typedef uint32_t BLOCK_ID;
+
+/**
+ * @brief check if all rows is null for a column.
+ * @param[in] bitmap  bitmap addr.
+ * @param[in] start_row     row num of bitmap. start from 1.
+ * @param[in] rows_count    check count.
+ *
+*/
+bool isAllNull(char* bitmap, size_t start_row, size_t rows_count);
 
 // row info in current partition.
 struct MetricRowID {
@@ -157,49 +167,6 @@ struct EntityItem {
 };
 
 /**
- * @brief mark row deleted.
- * @param[in] delete_flags  bitmap addr of blockItem.
- * @param[in] row_index     row num of bitmap. start from 1.
- * 
-*/
-void setRowDeleted(char* delete_flags, size_t row_index);
-
-/**
- * @brief mark row valid.
- * @param[in] delete_flags  bitmap addr of blockItem.
- * @param[in] row_index     row num of bitmap. start from 1.
- * 
-*/
-void setRowValid(char* delete_flags, size_t row_index);
-
-/**
- * @brief mark rows that continuous deleted.
- * @param[in] delete_flags  bitmap addr of blockItem.
- * @param[in] start_row     row num of bitmap. start from 1.
- * @param[in] del_rows_count     deleted count.
- * 
-*/
-void setBatchDeleted(char* delete_flags, size_t start_row, size_t del_rows_count);
-
-/**
- * @brief mark rows that continuous valid.
- * @param[in] delete_flags  bitmap addr of blockItem.
- * @param[in] start_row     row num of bitmap. start from 1.
- * @param[in] del_rows_count     row count.
- *
-*/
-void setBatchValid(char* delete_flags, size_t start_row, size_t del_rows_count);
-
-/**
- * @brief check if all rows is null for a column.
- * @param[in] bitmap  bitmap addr.
- * @param[in] start_row     row num of bitmap. start from 1.
- * @param[in] rows_count    check count.
- * 
-*/
-bool isAllNull(char* bitmap, size_t start_row, size_t rows_count);
-
-/**
  * @brief  BlockItem managing BLock status, block has fixed row num used for store entity data.
  * 
 */
@@ -221,6 +188,16 @@ struct BlockItem {
 
   MetricRowID getRowID(uint32_t offset) {
     return std::move(MetricRowID{block_id, offset});
+  }
+
+  void CopyMetricMetaInfo(const BlockItem& blk_item) {
+    uint32_t entity_id_s = entity_id;
+    BLOCK_ID block_id_s = block_id;
+    BLOCK_ID prev_block_id_s = prev_block_id;
+    memcpy(this, &blk_item, sizeof(blk_item));
+    entity_id = entity_id_s;
+    block_id = block_id_s;
+    prev_block_id = prev_block_id_s;
   }
 
   // count deleted rows in current block.
@@ -366,9 +343,8 @@ class MMapEntityBlockMeta : public MMapFile {
   uint16_t addEntity() {
     MUTEX_LOCK(obj_mutex_);
     Defer defer{[&]() { MUTEX_UNLOCK(obj_mutex_); }};
-    if (entity_header_->cur_entity_id == entity_header_->max_entities_per_subgroup) return 0;
 
-    for (int i = 1; i <= entity_header_->max_entities_per_subgroup; i++) {
+    for (int i = entity_header_->cur_entity_id + 1; i <= entity_header_->max_entities_per_subgroup; i++) {
       EntityItem* entity_item = getEntityItem(i);
       if (entity_item->entity_id == 0) {
         entity_item->entity_id = i;

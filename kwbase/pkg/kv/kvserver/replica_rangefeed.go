@@ -27,7 +27,6 @@ package kvserver
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"sort"
 	"time"
 
@@ -273,7 +272,6 @@ func (r *Replica) getRangefeedProcessor() *rangefeed.Processor {
 
 func (r *Replica) setRangefeedProcessor(p *rangefeed.Processor) {
 	r.rangefeedMu.Lock()
-	log.VEventf(context.Background(), 3, "xxxx Rangefeed set Processor %d, %d", r.RangeID, r.mu.replicaID)
 
 	defer r.rangefeedMu.Unlock()
 	r.rangefeedMu.proc = p
@@ -281,7 +279,6 @@ func (r *Replica) setRangefeedProcessor(p *rangefeed.Processor) {
 }
 
 func (r *Replica) unsetRangefeedProcessorLocked(p *rangefeed.Processor) {
-	log.VEventf(context.Background(), 3, "xxxx Rangefeed unset Processor and filter %d, %d stack %s", r.RangeID, r.mu.replicaID, debug.Stack())
 	if r.rangefeedMu.proc != p {
 		// The processor was already unset.
 		return
@@ -345,7 +342,6 @@ func (r *Replica) registerWithRangefeedRaftMuLocked(
 	p := r.rangefeedMu.proc
 	if p != nil {
 		reg, filter := p.Register(span, startTS, catchupIter, withDiff, stream, errC)
-		log.VEventf(ctx, 3, "xxxx add spanx %s - %s, rangeid %d, %p", roachpb.KeyValue{Key: roachpb.Key(span.Key)}.Key.String(), roachpb.KeyValue{Key: roachpb.Key(span.EndKey)}.Key.String(), r.RangeID, r)
 
 		if reg {
 			// Registered successfully with an existing processor.
@@ -358,17 +354,11 @@ func (r *Replica) registerWithRangefeedRaftMuLocked(
 			if r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig == registerStateDescConnect {
 				if len(r.rangeFeedSplitOrMergeRegisterMu.preRspan) != 0 { // If preRspan is not empty, wait until the registration is complete then setting sig = 2
 					rSpan := interval.Range{Start: interval.Comparable(r.Desc().RSpan().Key), End: interval.Comparable(r.Desc().RSpan().EndKey)}
-					preRspanStr := MySPrintSpan(r.rangeFeedSplitOrMergeRegisterMu.preRspan)
-					regSpanStr := MySPrintSpan(p.GetAll())
 					if p.RegSpanEqual(r.rangeFeedSplitOrMergeRegisterMu.preRspan, p.GetAll(), rSpan) {
-						log.VEventf(ctx, 3, "xxxx set splitMergeSig %d, rangeid %d, regSpanStr %s, regSpanStr %s, %p", 2, r.RangeID, preRspanStr, regSpanStr, r)
 						r.rangeFeedSplitOrMergeRegisterMu.preRspan = r.rangeFeedSplitOrMergeRegisterMu.preRspan[:0]
 						r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = rigisterStateRigisterDone
-					} else {
-						log.VEventf(ctx, 3, "xxxx set splitMergeSig now is%d, rangeid %d, preRspanStr [%s] != regSpanStr [%s] %p", 1, r.RangeID, preRspanStr, regSpanStr, r)
 					}
 				} else {
-					log.VEventf(ctx, 3, "xxxx set splitMergeSig %d, rangeid %d, %p", 2, r.RangeID, r)
 					r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = rigisterStateRigisterDone
 				}
 			}
@@ -420,7 +410,6 @@ func (r *Replica) registerWithRangefeedRaftMuLocked(
 	// this ensures that the only time the registration fails is during
 	// server shutdown.
 	reg, filter := p.Register(span, startTS, catchupIter, withDiff, stream, errC)
-	log.VEventf(ctx, 3, "xxxx add spanx %s - %s, rangeid %d, %p", roachpb.KeyValue{Key: roachpb.Key(span.Key)}.Key.String(), roachpb.KeyValue{Key: roachpb.Key(span.EndKey)}.Key.String(), r.RangeID, r)
 
 	if !reg {
 		catchupIter.Close() // clean up
@@ -443,17 +432,11 @@ func (r *Replica) registerWithRangefeedRaftMuLocked(
 	if r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig == registerStateDescConnect {
 		if len(r.rangeFeedSplitOrMergeRegisterMu.preRspan) != 0 { // If preRspan is not empty, wait until the registration is complete then setting sig = 2
 			rSpan := interval.Range{Start: interval.Comparable(r.Desc().RSpan().Key), End: interval.Comparable(r.Desc().RSpan().EndKey)}
-			preRspanStr := MySPrintSpan(r.rangeFeedSplitOrMergeRegisterMu.preRspan)
-			regSpanStr := MySPrintSpan(p.GetAll())
 			if p.RegSpanEqual(r.rangeFeedSplitOrMergeRegisterMu.preRspan, p.GetAll(), rSpan) {
-				log.VEventf(ctx, 3, "xxxx set splitMergeSig %d, rangeid %d, regSpanStr %s, regSpanStr %s, %p", 2, r.RangeID, preRspanStr, regSpanStr, r)
 				r.rangeFeedSplitOrMergeRegisterMu.preRspan = r.rangeFeedSplitOrMergeRegisterMu.preRspan[:0]
 				r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = rigisterStateRigisterDone
-			} else {
-				log.VEventf(ctx, 3, "xxxx set splitMergeSig now is%d, rangeid %d, preRspanStr [%s] != regSpanStr [%s] %p", 1, r.RangeID, preRspanStr, regSpanStr, r)
 			}
 		} else {
-			log.VEventf(ctx, 3, "xxxx set splitMergeSig %d, rangeid %d, %p", 2, r.RangeID, r)
 			r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = rigisterStateRigisterDone
 		}
 	}
@@ -489,15 +472,6 @@ func (r *Replica) maybeDisconnectEmptyRangefeed(p *rangefeed.Processor) {
 func (r *Replica) disconnectRangefeedWithErr(p *rangefeed.Processor, pErr *roachpb.Error) {
 	p.StopWithErr(pErr)
 	r.unsetRangefeedProcessor(p)
-}
-
-// MySPrintSpan print span array
-func MySPrintSpan(inSpan []interval.Range) string {
-	retStr := ""
-	for i := 0; i < len(inSpan); i++ {
-		retStr += fmt.Sprintf(" xxxx span is %s -- %s ", roachpb.KeyValue{Key: roachpb.Key(inSpan[i].Start)}, roachpb.KeyValue{Key: roachpb.Key(inSpan[i].End)})
-	}
-	return retStr
 }
 
 // getNextRigisterSpan returns the span that needs to be registered again
@@ -572,13 +546,11 @@ func (r *Replica) disconnectRangefeedWithReason(
 			pSpanLeft, pSpanRight := splitSpan(pSpan)
 			r.rangeFeedSplitOrMergeRegisterMu.preRspan = pSpanLeft
 			//rets := p.GetAllSpanSlice() // print original registration, a range may contain multiple intervals;
-			log.VEventf(context.Background(), 3, "xxxx set splitMergeSig sl %d, rangeid %d, %s - %s, strout %s", 1, r.RangeID, roachpb.KeyValue{Key: roachpb.Key(r.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(r.Desc().EndKey)}, r)
 			r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = registerStateDescConnect
 			r.rangeFeedSplitOrMergeRegisterMu.notFirst = false // init, first time
 			r.rangeFeedSplitOrMergeRegisterMu.Unlock()
 
 			rightReplOrNil.rangeFeedSplitOrMergeRegisterMu.Lock()
-			log.VEventf(context.Background(), 3, "xxxx set splitMergeSig sr %d, rangeid %d, %s - %s, %p, %p", 1, rightReplOrNil.RangeID, roachpb.KeyValue{Key: roachpb.Key(rightReplOrNil.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(rightReplOrNil.Desc().EndKey)}, r, rightReplOrNil)
 			rightReplOrNil.rangeFeedSplitOrMergeRegisterMu.preRspan = pSpanRight // right
 			rightReplOrNil.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = registerStateDescConnect
 			rightReplOrNil.rangeFeedSplitOrMergeRegisterMu.notFirst = false //  init, first time
@@ -622,7 +594,6 @@ func (r *Replica) disconnectRangefeedWithReason(
 					}
 				}
 				r.rangeFeedSplitOrMergeRegisterMu.preRspan = pSpan // Span registered before disconnection
-				log.VEventf(context.Background(), 3, "xxxx set splitMergeSig ml %d rangeid %d, rangeid %d, %s - %s, %p", 1, r.RangeID, rightReplOrNil.RangeID, roachpb.KeyValue{Key: roachpb.Key(r.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(r.Desc().EndKey)}, r)
 				r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = registerStateDescConnect
 				r.rangeFeedSplitOrMergeRegisterMu.notFirst = false
 				r.rangeFeedSplitOrMergeRegisterMu.Unlock()
@@ -636,25 +607,9 @@ func (r *Replica) disconnectRangefeedWithReason(
 				}
 				rightReplOrNil.rangeFeedSplitOrMergeRegisterMu.Unlock()
 				r.rangeFeedSplitOrMergeRegisterMu.Lock()
-
-				for _, op := range rightBuft {
-					switch t := op.GetValue().(type) {
-					case *enginepb.MVCCWriteValueOp:
-					case *enginepb.MVCCCommitIntentOp:
-					case *enginepb.MVCCCommitTxnOp:
-						log.VEventf(context.Background(), 3, "xxxx sendRightRangeFeedEvent4--COMMIT %s, %d, %d, %s", t.TxnID, r.RangeID, r.mu.replicaID, t.Timestamp.String())
-					case *enginepb.MVCCWriteIntentOp:
-						log.VEventf(context.Background(), 3, "xxxx sendRightRangeFeedEvent4--WIOP %s, %d, %d, %s, %s", t.TxnID, r.RangeID, r.mu.replicaID, roachpb.KeyValue{Key: t.Key}.Key.String(), t.Timestamp.String())
-					case *enginepb.MVCCUpdateIntentOp:
-						log.VEventf(context.Background(), 3, "xxxx sendRightRangeFeedEvent4--UIOP %s, %d, %d, %s, %s", t.TxnID, r.RangeID, r.mu.replicaID, roachpb.KeyValue{Key: t.Key}.Key.String(), t.Timestamp.String())
-					}
-				}
-
 				r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer = append(r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer, rightBuft...)
 				r.rangeFeedSplitOrMergeRegisterMu.Unlock()
-
 			} else {
-				log.VEventf(context.Background(), 3, "xxxx set splitMergeSig mr %d, rangeid %d, %s - %s, %p", 1, r.RangeID, roachpb.KeyValue{Key: roachpb.Key(r.Desc().StartKey)}, roachpb.KeyValue{Key: roachpb.Key(r.Desc().EndKey)}, r)
 				r.rangeFeedSplitOrMergeRegisterMu.Lock()
 				r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = rigisterStateRigisterDone
 				r.rangeFeedSplitOrMergeRegisterMu.preRspan = r.rangeFeedSplitOrMergeRegisterMu.preRspan[:0]
@@ -810,7 +765,6 @@ func (r *Replica) sendRightRangeFeedEvent(ctx context.Context) {
 					unsetPorcessorF = true
 				}
 				r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer = r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer[:0]
-				log.VEventf(context.Background(), 3, "xxxx set splitMergeSig %d, rangeid %d, %p", 0, r.RangeID, r)
 				r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = registerStateInit
 				r.rangeFeedSplitOrMergeRegisterMu.Unlock()
 
@@ -829,7 +783,6 @@ func (r *Replica) sendRightRangeFeedEvent(ctx context.Context) {
 		if len(r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer) != 0 {
 			r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer = r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer[:0]
 		}
-		log.VEventf(context.Background(), 3, "xxxx set splitMergeSig %d, rangeid %d, %p", 0, r.RangeID, r)
 		r.rangeFeedSplitOrMergeRegisterMu.splitMergeSig = registerStateInit
 		r.rangeFeedSplitOrMergeRegisterMu.Unlock()
 	}
@@ -881,7 +834,6 @@ func (r *Replica) handleLogicalOpLogRaftMuLocked(
 		len(ops.Ops) != 0 {
 		WriteValue(ctx, ops, r, reader)
 		r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer = append(r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer, ops.Ops...)
-		log.Infof(ctx, "xxxx append ops len rangeFeedbuffer %d, %d", len(r.rangeFeedSplitOrMergeRegisterMu.rangeFeedbuffer), r.RangeID)
 		// first time, start the thread and detect new registrations.
 		if !r.rangeFeedSplitOrMergeRegisterMu.notFirst {
 			r.rangeFeedSplitOrMergeRegisterMu.notFirst = true

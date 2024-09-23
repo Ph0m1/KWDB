@@ -619,6 +619,117 @@ class TTREntry : public LogEntry {
   }
 };
 
+class SnapshotEntry : public LogEntry {
+ public:
+  SnapshotEntry(TS_LSN lsn, uint64_t x_id, TSTableID tbl_id, uint64_t b_hash, uint64_t e_hash, KwTsSpan span) :
+    LogEntry(lsn, WALLogType::RANGE_SNAPSHOT, x_id), table_id_(tbl_id), begin_hash_(b_hash), end_hash_(e_hash),
+    start_ts_(span.begin), end_ts_(span.end) {}
+
+  ~SnapshotEntry() override {}
+
+  char* encode() override {
+    return construct(WALLogType::RANGE_SNAPSHOT, x_id_, table_id_, begin_hash_, end_hash_, start_ts_, end_ts_);
+  }
+
+  void prettyPrint() override;
+
+ private:
+  TSTableID table_id_;
+  uint64_t begin_hash_;
+  uint64_t end_hash_;
+  timestamp64 start_ts_;
+  timestamp64 end_ts_;
+
+ public:
+  void GetRangeInfo(HashIdSpan* hash, KwTsSpan* ts) {
+    hash->begin = begin_hash_;
+    hash->end = end_hash_;
+    ts->begin = start_ts_;
+    ts->end = end_ts_;
+  }
+
+  static const size_t header_length = sizeof(x_id_) + sizeof(table_id_) + sizeof(begin_hash_) + sizeof(end_hash_) +
+                                      sizeof(start_ts_) + sizeof(end_ts_);
+
+  static const size_t fixed_length = sizeof(type_) + sizeof(x_id_) + sizeof(table_id_) + sizeof(begin_hash_) +
+                                     sizeof(end_hash_) + sizeof(start_ts_) + sizeof(end_ts_);
+
+  static char* construct(const WALLogType type, const uint64_t x_id, TSTableID tbl_id, uint64_t b_hash, uint64_t e_hash,
+                         timestamp64 b_ts, timestamp64 e_ts) {
+    uint64_t len = fixed_length;
+    char* log_ptr = KNEW char[len];
+    int location = 0;
+
+    memcpy(log_ptr, &type, sizeof(type));
+    location += sizeof(type);
+    memcpy(log_ptr + location, &x_id, sizeof(x_id_));
+    location += sizeof(x_id_);
+    memcpy(log_ptr + location, &tbl_id, sizeof(tbl_id));
+    location += sizeof(tbl_id);
+    memcpy(log_ptr + location, &b_hash, sizeof(b_hash));
+    location += sizeof(b_hash);
+    memcpy(log_ptr + location, &e_hash, sizeof(e_hash));
+    location += sizeof(e_hash);
+    memcpy(log_ptr + location, &b_ts, sizeof(b_ts));
+    location += sizeof(b_ts);
+    memcpy(log_ptr + location, &e_ts, sizeof(e_ts));
+    // location += sizeof(e_ts);
+    return log_ptr;
+  }
+};
+
+class TempDirectoryEntry : public LogEntry {
+ public:
+  TempDirectoryEntry(TS_LSN lsn, uint64_t x_id, std::string files_path) :
+                    LogEntry(lsn, WALLogType::SNAPSHOT_TMP_DIRCTORY, x_id) {
+                      string_len_ = files_path.length() + 1;
+                      abs_path_ = new char[string_len_];
+                      memset(abs_path_, 0, string_len_);
+                      memcpy(abs_path_, files_path.data(), files_path.length());
+                    }
+
+  ~TempDirectoryEntry() override {
+    if (abs_path_ != nullptr) {
+      delete[] abs_path_;
+    }
+  }
+
+  char* encode() override {
+    return construct(WALLogType::SNAPSHOT_TMP_DIRCTORY, x_id_, abs_path_);
+  }
+
+  void prettyPrint() override;
+
+ private:
+  size_t string_len_{0};
+  char* abs_path_{nullptr};
+
+ public:
+  std::string GetPath() {
+    return std::string(abs_path_);
+  }
+
+  static const size_t header_length = sizeof(x_id_) + sizeof(string_len_);
+
+  static const size_t fixed_length = sizeof(type_) + sizeof(x_id_) + sizeof(string_len_);
+
+  static char* construct(const WALLogType type, const uint64_t x_id, std::string path) {
+    uint64_t len = fixed_length;
+    size_t string_len = path.length() + 1;
+    char* log_ptr = KNEW char[len + string_len];
+    memset(log_ptr, 0, len + string_len);
+    int location = 0;
+    memcpy(log_ptr, &type, sizeof(type));
+    location += sizeof(type);
+    memcpy(log_ptr + location, &x_id, sizeof(x_id_));
+    location += sizeof(x_id_);
+    memcpy(log_ptr + location, &string_len, sizeof(string_len));
+    location += sizeof(string_len);
+    memcpy(log_ptr + location, path.data(), string_len);
+    return log_ptr;
+  }
+};
+
 class DDLEntry : public LogEntry {
  public:
   DDLEntry(TS_LSN lsn, WALLogType type, uint64_t x_id, uint64_t object_id);

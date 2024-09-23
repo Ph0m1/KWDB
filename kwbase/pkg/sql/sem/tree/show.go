@@ -667,24 +667,6 @@ func (node *ShowRanges) Format(ctx *FmtCtx) {
 	}
 }
 
-// ShowTsPartitions represents a SHOW RANGES statement.
-type ShowTsPartitions struct {
-	TableOrIndex TableIndexName
-	DatabaseName Name
-}
-
-// Format implements the NodeFormatter interface.
-func (node *ShowTsPartitions) Format(ctx *FmtCtx) {
-	ctx.WriteString("SHOW TS PARTITIONS ")
-	if node.DatabaseName != "" {
-		ctx.WriteString("FROM DATABASE ")
-		ctx.FormatNode(&node.DatabaseName)
-	} else if node.TableOrIndex.Table.TableName != "" {
-		ctx.WriteString("FROM TABLE ")
-		ctx.FormatNode(&node.TableOrIndex)
-	}
-}
-
 // ShowRangeForRow represents a SHOW RANGE FOR ROW statement.
 type ShowRangeForRow struct {
 	TableOrIndex TableIndexName

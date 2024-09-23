@@ -117,7 +117,7 @@ THIS BEHAVIOR IS DEPRECATED; consider using 'kwbase init' or
 `,
 	Example: `  kwbase start-single-replica --insecure --store=attrs=ssd,path=/mnt/ssd1 --join=host:port,[host:port]`,
 	Args:    cobra.NoArgs,
-	RunE:    maybeShoutError(MaybeDecorateGRPCError(runStartJoin)),
+	RunE:    maybeShoutError(MaybeDecorateGRPCError(runStartSingleReplica)),
 }
 
 // startSingleNodeCmd starts a node by initializing the stores.
@@ -328,6 +328,10 @@ func runStartSingleNode(cmd *cobra.Command, args []string) error {
 
 func runStartJoin(cmd *cobra.Command, args []string) error {
 	return runStart(cmd, args, false /*disableReplication*/)
+}
+
+func runStartSingleReplica(cmd *cobra.Command, args []string) error {
+	return runStart(cmd, args, true /*disableReplication*/)
 }
 
 // runStart starts the kwbase node using --store as the list of

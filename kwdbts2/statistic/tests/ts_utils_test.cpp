@@ -243,7 +243,8 @@ TEST(TestUtils, getPosVal) {
 
 TEST(TestUtils, EncodeFloatAscending) {
   k_float64 k = 0.1;
-  auto result = kwdbts::EncodeFloatAscending(k);
+  std::vector<uint8_t> b;
+  auto result = kwdbts::EncodeFloatAscending(b, k);
 
   std::vector<byte> expected = {5, 63, 185, 153, 153, 153, 153, 153, 154};
   EXPECT_EQ(result, expected);
@@ -251,7 +252,8 @@ TEST(TestUtils, EncodeFloatAscending) {
 
 TEST(TestUtils, EncodeStringAscending) {
   KString k = "abc";
-  auto result = kwdbts::EncodeStringAscending(k);
+  std::vector<uint8_t> b;
+  auto result = kwdbts::EncodeStringAscending(b, k);
 
   std::vector<byte> expected = {18, 97, 98, 99, 0, 1};
   EXPECT_EQ(result, expected);

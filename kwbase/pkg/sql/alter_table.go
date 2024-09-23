@@ -36,7 +36,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
@@ -159,12 +159,6 @@ func isAlterCmdValidWithoutPrimaryKey(cmd tree.AlterTableCmd) bool {
 func (n *alterTableNode) ReadingOwnWrites() {}
 
 func (n *alterTableNode) startExec(params runParams) error {
-	if n.tableDesc.IsTSTable() {
-		_, err := api.GetAvailableNodeIDs(params.ctx)
-		if err != nil {
-			return err
-		}
-	}
 	if n.tableDesc.IsTSTable() && len(n.n.Cmds) > 1 {
 		return pgerror.New(pgcode.FeatureNotSupported, "alter timeseries table with multiple commands is not supported")
 	}
@@ -896,6 +890,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.InstanceTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not alter tag type on instance table")
 			}
+			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
+				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
+			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 
 			tagColumn, dropped, err := n.tableDesc.FindColumnByName(t.Tag)
@@ -917,11 +914,11 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return pgerror.Newf(pgcode.WrongObjectType,
 					"tag %q is a primary tag", tagColumn.Name)
 			}
-			if tagColumn.Type.Identical(t.ToType) {
-				return nil
-			}
 			// type cast validation
 			newType := prepareAlterType(t.ToType)
+			if tagColumn.Type.Identical(newType) {
+				return nil
+			}
 			isDoNothing, err := validateAlterTSType(&tagColumn.Type, newType, sqlbase.ColumnType_TYPE_TAG)
 			if err != nil {
 				return err
@@ -935,6 +932,10 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return err
 			}
 			alteringTag.ID = tagColumn.ID
+			// Check that newType is compatible with mutationColType already present in mutation.
+			if err = checkTSMutationColumnType(n.tableDesc, alteringTag); err != nil {
+				return err
+			}
 
 			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 			n.tableDesc.AddColumnMutation(alteringTag, sqlbase.DescriptorMutation_NONE)
@@ -1080,6 +1081,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.InstanceTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not add tag on instance table")
 			}
+			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
+				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
+			}
 			if len(n.tableDesc.Columns)+1 > MaxTSDataColumns {
 				return pgerror.Newf(pgcode.TooManyColumns,
 					"the number of columns/tags exceeded the maximum value %d", MaxTSDataColumns)
@@ -1171,6 +1175,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.InstanceTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not drop tag on instance table")
 			}
+			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
+				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
+			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			tagColumn, _, err := n.tableDesc.FindColumnByName(t.TagName)
 			if err != nil {
@@ -1241,6 +1248,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.RelationalTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not rename tag on relational table")
 			}
+			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
+				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
+			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			const allowRenameOfShardColumn = false
 			descChanged, err := params.p.renameColumn(params.ctx, n.tableDesc,
@@ -1259,6 +1269,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 			if n.tableDesc.TableType == tree.TimeseriesTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not set tag on time series table")
+			}
+			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
+				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
 			}
 
 			// get instance table id
@@ -1447,6 +1460,28 @@ func (n *alterTableNode) startExec(params runParams) error {
 	return nil
 }
 
+// checkTSMutationColumnType Checks that newCol's type is compatible with mutationColType already present in mutation.
+func checkTSMutationColumnType(
+	tableDesc *MutableTableDescriptor, newCol *sqlbase.ColumnDescriptor,
+) error {
+	tagOrColumn := sqlbase.ColumnType_TYPE_DATA
+	if newCol.IsTagCol() {
+		tagOrColumn = sqlbase.ColumnType_TYPE_TAG
+	}
+	for i := range tableDesc.Mutations {
+		mutation := tableDesc.Mutations[i]
+		if muCol := mutation.GetColumn(); muCol != nil {
+			if muCol.ID == newCol.ID && mutation.Direction == sqlbase.DescriptorMutation_NONE {
+				_, err := validateAlterTSType(&muCol.Type, &newCol.Type, tagOrColumn)
+				if err != nil {
+					return errors.Wrap(err, "Blocked by existing ALTER TYPE")
+				}
+			}
+		}
+	}
+	return nil
+}
+
 /*
 func (p *planner) setAuditMode(
 	ctx context.Context, desc *sqlbase.TableDescriptor, auditMode tree.AuditMode,
@@ -1524,13 +1559,13 @@ func applyColumnMutation(
 			if col.ID == 1 {
 				return false, pgerror.New(pgcode.InvalidColumnDefinition, "cannot alter the first ts column")
 			}
-			if col.Type.Identical(typ) {
+
+			newType := prepareAlterType(t.ToType)
+			if col.Type.Identical(newType) {
 				return false, nil
 			}
-
 			// type cast validation
 			// if converting timestamp to timestamptz or reverse, we will not send this to AE.
-			newType := prepareAlterType(t.ToType)
 			isStorageDoNothing, err := validateAlterTSType(&col.Type, newType, sqlbase.ColumnType_TYPE_DATA)
 			if err != nil {
 				return false, err
@@ -1546,6 +1581,10 @@ func applyColumnMutation(
 					return false, err
 				}
 				alteringCol.ID = col.ID
+				// Check that newType is compatible with mutationColType already present in mutation.
+				if err = checkTSMutationColumnType(tableDesc, alteringCol); err != nil {
+					return false, err
+				}
 				// TODO(ZXY): Temporary use DescriptorMutation_NONE for alter type mutation
 				tableDesc.AddColumnMutation(alteringCol, sqlbase.DescriptorMutation_NONE)
 				mutationID := tableDesc.ClusterVersion.NextMutationID
