@@ -1806,7 +1806,7 @@ KStatus TsTable::GetDataVolume(kwdbContext_p ctx, uint64_t begin_hash, uint64_t 
 
 KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
                                 const KwTsSpan& ts_span, timestamp64* half_ts) {
-  LOG_ERROR("GetDataVolumeHalfTS begin. table[%lu] hash[%lu - %lu], time [%ld - %ld]",
+  LOG_DEBUG("GetDataVolumeHalfTS begin. table[%lu] hash[%lu - %lu], time [%ld - %ld]",
               table_id_, begin_hash, end_hash, ts_span.begin, ts_span.end);
   *half_ts = INVALID_TS;
   if (begin_hash != end_hash) {
@@ -1914,7 +1914,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
   // todo(liangbo01): temp code for debug. will delete later.
   auto it_tmp = partitions_rows.begin();
   for (; it_tmp != partitions_rows.end(); it_tmp++) {
-    LOG_ERROR("partition [%ld] has rows [%lu], midts:%ld.",
+    LOG_DEBUG("partition [%ld] has rows [%lu], midts:%ld.",
               it_tmp->first, it_tmp->second, partitions_mid_ts[it_tmp->first]);
   }
   // caclulte half ts, ts must multiple of partition_interval

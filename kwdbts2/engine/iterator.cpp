@@ -291,21 +291,17 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
 KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partiton_table,
                                       std::shared_ptr<MMapSegmentTable> segment_tbl,
                                       const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
-  for (auto& it : first_pairs_) {
-    auto bitmap = bitmaps.find(ts_scan_cols_[it.first]);
-    if (bitmap == bitmaps.end()) {
-      continue;
-    }
-    timestamp64 first_ts = it.second.row_ts;
+  for (int i = 0; i < first_pairs_.size(); ++i) {
+    timestamp64 first_ts = first_pairs_[i].second.row_ts;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and
     // is non-empty, update it.
-    if ((first_ts == INVALID_TS || first_ts > ts) && !bitmap->second->IsNull(row_id.offset_row - 1)) {
-      if (it.second.partion_tbl != nullptr) {
-        ReleaseTable(it.second.partion_tbl);
-        it.second.partion_tbl = nullptr;
+    if ((first_ts == INVALID_TS || first_ts > ts) && !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
+      if (first_pairs_[i].second.partion_tbl != nullptr) {
+        ReleaseTable(first_pairs_[i].second.partion_tbl);
+        first_pairs_[i].second.partion_tbl = nullptr;
       }
       partiton_table->incRefCount();
-      it.second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+      first_pairs_[i].second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
       if (first_ts == INVALID_TS)
         first_agg_valid_++;
     }
@@ -329,21 +325,17 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
                           TsTimePartition* partiton_table,
                           std::shared_ptr<MMapSegmentTable> segment_tbl,
                           const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
-  for (auto& it : last_pairs_) {
-    auto bitmap = bitmaps.find(ts_scan_cols_[it.first]);
-    if (bitmap == bitmaps.end()) {
-      continue;
-    }
-    timestamp64 last_ts = it.second.row_ts;
+  for (int i = 0; i < last_pairs_.size(); ++i) {
+    timestamp64 last_ts = last_pairs_[i].second.row_ts;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts == INVALID_TS || last_ts < ts) && !bitmap->second->IsNull(row_id.offset_row - 1)) {
-      if (it.second.partion_tbl != nullptr) {
-        ReleaseTable(it.second.partion_tbl);
-        it.second.partion_tbl = nullptr;
+    if ((last_ts == INVALID_TS || last_ts < ts) && !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
+      if (last_pairs_[i].second.partion_tbl != nullptr) {
+        ReleaseTable(last_pairs_[i].second.partion_tbl);
+        last_pairs_[i].second.partion_tbl = nullptr;
       }
       partiton_table->incRefCount();
-      it.second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+      last_pairs_[i].second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
       if (last_ts == INVALID_TS)
         last_agg_valid_++;
     }
@@ -407,12 +399,12 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
       // Read the first_pairs_ result recorded during the traversal process.
       // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
       auto& first_row_info = first_pairs_[agg_idx];
-      auto p_table = first_row_info.partion_tbl;
-      auto& seg_table = first_row_info.segment_tbl;
+      auto p_table = first_row_info.second.partion_tbl;
+      auto& seg_table = first_row_info.second.segment_tbl;
       if (p_table == nullptr) {
         *agg_batch = CreateAggBatch(nullptr, nullptr);
       } else {
-        int err_code = getActualColAggBatch(p_table, seg_table, first_row_info.row_id,
+        int err_code = getActualColAggBatch(p_table, seg_table, first_row_info.second.row_id,
                                             ts_scan_cols_[agg_idx], col_attr, agg_batch);
         if (err_code < 0) {
           LOG_ERROR("getActualColBatch failed.");
@@ -423,13 +415,13 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
     }
     case FIRSTTS: {
       auto& first_row_info = first_pairs_[agg_idx];
-      auto p_table = first_row_info.partion_tbl;
-      auto& segment_tbl = first_row_info.segment_tbl;
+      auto p_table = first_row_info.second.partion_tbl;
+      auto& segment_tbl = first_row_info.second.segment_tbl;
       if (p_table == nullptr) {
         *agg_batch = new AggBatch(nullptr, 0, nullptr);
       } else {
         // only get the first timestamp column, no need check weather type changed.
-        *agg_batch = new AggBatch(segment_tbl->columnAddr(first_row_info.row_id, 0), 1, segment_tbl);
+        *agg_batch = new AggBatch(segment_tbl->columnAddr(first_row_info.second.row_id, 0), 1, segment_tbl);
       }
       break;
     }
@@ -484,15 +476,15 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
     case Sumfunctype::LAST: {
         KWDB_DURATION(StStatistics::Get().agg_last);
         auto& last_row_info = last_pairs_[agg_idx];
-        TsTimePartition* cur_pt = last_row_info.partion_tbl;
-        auto& segment_tbl = last_row_info.segment_tbl;
+        TsTimePartition* cur_pt = last_row_info.second.partion_tbl;
+        auto& segment_tbl = last_row_info.second.segment_tbl;
         // Read the last_pairs_ result recorded during the traversal process.
         // If not found, return nullptr. Otherwise, obtain the data address based on the partition table index and row id.
         if (cur_pt == nullptr) {
           *agg_batch = CreateAggBatch(nullptr, nullptr);
         } else {
-          MetricRowID real_row = last_row_info.row_id;
-          timestamp64 last_ts = last_row_info.row_ts;
+          MetricRowID real_row = last_row_info.second.row_id;
+          timestamp64 last_ts = last_row_info.second.row_ts;
           int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, ts_scan_cols_[agg_idx], col_attr, agg_batch);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
@@ -542,12 +534,12 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
       case Sumfunctype::LASTTS: {
         KWDB_DURATION(StStatistics::Get().agg_lastts);
         auto& last_row_info = last_pairs_[agg_idx];
-        TsTimePartition* cur_pt = last_row_info.partion_tbl;
-        auto& segment_tbl = last_row_info.segment_tbl;
+        TsTimePartition* cur_pt = last_row_info.second.partion_tbl;
+        auto& segment_tbl = last_row_info.second.segment_tbl;
         if (cur_pt == nullptr) {
           *agg_batch = new AggBatch(nullptr, 0, nullptr);
         } else {
-          *agg_batch = new AggBatch(segment_tbl->columnAddr(last_row_info.row_id, 0), 1, segment_tbl);
+          *agg_batch = new AggBatch(segment_tbl->columnAddr(last_row_info.second.row_id, 0), 1, segment_tbl);
         }
         break;
       }
@@ -582,17 +574,17 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
   TsTimePartition* cur_pt = nullptr;
   partition_table_iter_->Reset();
   while (partition_table_iter_->Next(&cur_pt)) {
+    block_item_queue_.clear();
+    if (cur_pt == nullptr) {
+      // all partition scan over.
+      break;
+    }
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         break;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
         break;
       }
-    }
-    block_item_queue_.clear();
-    if (cur_pt == nullptr) {
-      // all partition scan over.
-      break;
     }
     cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
     auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
@@ -686,17 +678,17 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
   TsTimePartition* cur_pt = nullptr;
   partition_table_iter_->Reset(true);
   while (partition_table_iter_->Next(&cur_pt)) {
+    block_item_queue_.clear();
+    if (cur_pt == nullptr) {
+      // all partition scan over.
+      break;
+    }
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         break;
       } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
         break;
       }
-    }
-    block_item_queue_.clear();
-    if (cur_pt == nullptr) {
-      // all partition scan over.
-      break;
     }
     cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
     auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);

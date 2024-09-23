@@ -45,25 +45,6 @@ EEIteratorErrCode StorageHandler::Init(kwdbContext_p ctx) {
 
 void StorageHandler::SetSpans(std::vector<KwTsSpan> *ts_spans) {
   ts_spans_ = ts_spans;
-#ifdef K_DEBUG
-  // print range row count.
-  kwdbContext_t ctx;
-  InitKWDBContext(&ctx);
-  for (auto& range : table_->hash_points_spans_) {
-    for (auto& span : *ts_spans_) {
-      uint64_t row_count = 0;
-      ts_table_->GetRangeRowCount(&ctx, range.first, range.first, span, &row_count);
-      LOG_DEBUG("StorageHandler range{hashpoint[%u - %u], ts_span[%ld - %ld]} row count. %lu",
-                range.first, range.first, span.begin, span.end, row_count);
-    }
-    for (auto &span : range.second) {
-      uint64_t row_count = 0;
-      ts_table_->GetRangeRowCount(&ctx, range.first, range.first, span, &row_count);
-      LOG_DEBUG("StorageHandler range{hashpoint[%u - %u], ts_span[%ld - %ld]} row count. %lu",
-                range.first, range.first, span.begin, span.end, row_count);
-    }
-  }
-#endif
 }
 
 EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {

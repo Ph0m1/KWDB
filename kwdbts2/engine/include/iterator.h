@@ -73,16 +73,16 @@ class TsFirstLastRow {
   }
 
   void delObjects() {
-    for (auto& it : first_pairs_) {
-      if (it.second.partion_tbl != nullptr) {
-        ReleaseTable(it.second.partion_tbl);
-        it.second.partion_tbl = nullptr;
+    for (int i = 0; i < first_pairs_.size(); ++i) {
+      if (first_pairs_[i].second.partion_tbl != nullptr) {
+        ReleaseTable(first_pairs_[i].second.partion_tbl);
+        first_pairs_[i].second.partion_tbl = nullptr;
       }
     }
-    for (auto& it : last_pairs_) {
-      if (it.second.partion_tbl != nullptr) {
-        ReleaseTable(it.second.partion_tbl);
-        it.second.partion_tbl = nullptr;
+    for (int i = 0; i < last_pairs_.size(); ++i) {
+      if (last_pairs_[i].second.partion_tbl != nullptr) {
+        ReleaseTable(last_pairs_[i].second.partion_tbl);
+        last_pairs_[i].second.partion_tbl = nullptr;
       }
     }
     if (first_row_pair_.partion_tbl != nullptr) {
@@ -98,6 +98,8 @@ class TsFirstLastRow {
   void Reset() {
     delObjects();
     no_first_last_type_ = true;
+    first_pairs_.assign(scan_agg_types_.size(), {});
+    last_pairs_.assign(scan_agg_types_.size(), {});
     for (size_t i = 0; i < scan_agg_types_.size(); i++) {
       if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
         no_first_last_type_ = false;
@@ -108,8 +110,8 @@ class TsFirstLastRow {
       } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
         no_first_last_type_ = false;
       }
-      first_pairs_[i] = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
-      last_pairs_[i] = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
+      first_pairs_[i] = {i, TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}}};
+      last_pairs_[i] = {i, TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}}};
     }
     first_row_pair_ = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
     last_row_pair_ = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
@@ -156,8 +158,8 @@ class TsFirstLastRow {
   std::vector<Sumfunctype> scan_agg_types_;
   // Used to record first/last related results during a traversal process.
   // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
-  std::unordered_map<k_uint32, TsRowTableInfo> first_pairs_;
-  std::unordered_map<k_uint32, TsRowTableInfo> last_pairs_;
+  std::vector<std::pair<k_uint32, TsRowTableInfo>> first_pairs_;
+  std::vector<std::pair<k_uint32, TsRowTableInfo>> last_pairs_;
   // std::pair<index of column, std::pair<timestamp64, row id>>
   TsRowTableInfo first_row_pair_;
   TsRowTableInfo last_row_pair_;
