@@ -177,6 +177,9 @@ class TsTimePartition : public TSObject {
       if (tbl == nullptr) {
         return true;
       }
+      if (block_item->max_rows_in_block == 0) {
+        block_item->max_rows_in_block = tbl->getBlockMaxRows();
+      }
       if (!tbl->canWrite() || tbl->schemaVersion() < payload_table_version) {
         return true;
       }
@@ -184,15 +187,21 @@ class TsTimePartition : public TSObject {
           block_item->publish_row_count >= tbl->getBlockMaxRows()) {
         return true;
       }
-      if (block_item->max_rows_in_block == 0) {
-        block_item->max_rows_in_block = tbl->getBlockMaxRows();
-      }
     }
     return block_item->read_only;
   }
 
   inline void releaseSegments() {
     data_segments_.Clear();
+  }
+
+  uint32_t getMaxRowsInBlock(BlockItem* block_item) {
+    if (UNLIKELY(block_item->max_rows_in_block == 0)) {
+      // historical version(2.0.3.x) compatibility
+      // get max rows from entity header.
+      block_item->max_rows_in_block = meta_manager_.getEntityHeader()->max_rows_per_block;
+    }
+    return block_item->max_rows_in_block;
   }
 
   /**

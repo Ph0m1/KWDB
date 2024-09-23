@@ -1049,7 +1049,7 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
       pre_block_item->is_agg_res_available = false;
       block_item = pre_block_item;
       auto first_row = pre_block_row > 0 ? pre_block_row : 1;
-      auto row_count = std::min(left_count, size_t(block_item->max_rows_in_block - block_item->alloc_row_count));
+      auto row_count = std::min(left_count, size_t(getMaxRowsInBlock(block_item) - block_item->alloc_row_count));
       setBatchValid(block_item->rows_delete_flags, first_row, row_count);
     } else {
       err_code = allocateBlockItem(entity_id, &block_item, payload->GetTsVersion());
