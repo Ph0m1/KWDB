@@ -983,7 +983,6 @@ INSERT 2
                          | distributed | true
                          | vectorized  | false
   render                 |             |
-   │                     | engine type | time series
    │                     | extract     | 2024.0
    └── distinct          |             |
         │                | distinct on | e1
@@ -992,7 +991,7 @@ INSERT 2
                          | ts-table    | ts_table
                          | access mode | metaTable
                          | filter      | e1 < 3000
-(12 rows)
+(11 rows)
 > explain select extract('year', localtimestamp()) from test_ts.ts_table order by e1 desc limit 1 offset 1;
                 tree               |    field    | description
 -----------------------------------+-------------+--------------
