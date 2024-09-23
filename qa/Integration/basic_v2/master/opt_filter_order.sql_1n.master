@@ -499,50 +499,61 @@ INSERT 1
   15
 (5 rows)
 > explain select e1 from d1.t1 as t2 where    (((select last(e2) from d1.t1) > 20 and e1 > 0))    and    ((select last(e2) from d1.t1 where (e2 > 0 or e2 < -1)) > 0 and e1 != 0 and tag1 is not null or tag2 is null )   order by e1;
-                tree               |      field       |                                      description
------------------------------------+------------------+----------------------------------------------------------------------------------------
-                                   | distributed      | true
-                                   | vectorized       | false
-  root                             |                  |
-   ├── sort                        |                  |
-   │    │                          | order            | +e1
-   │    └── render                 |                  |
-   │         │                     | e1               | e1
-   │         └── filter            |                  |
-   │              │                | filter           | (@S1 > 20) AND ((((e1 != 0) AND (@S2 > 0)) AND (tag1 IS NOT NULL)) OR (tag2 IS NULL))
-   │              └── synchronizer |                  |
-   │                   └── ts scan |                  |
-   │                               | ts-table         | t1
-   │                               | access mode      | tableTableMeta
-   │                               | filter           | e1 > 0
-   ├── subquery                    |                  |
-   │    │                          | id               | @S1
-   │    │                          | original sql     | (SELECT last(e2) FROM d1.t1)
-   │    │                          | exec mode        | one row
-   │    └── group                  |                  |
-   │         │                     | engine type      | time series
-   │         │                     | aggregate 0      | last(e2, ts)
-   │         │                     | scalar           |
-   │         │                     | addSynchronizer  | true
-   │         └── ts scan           |                  |
-   │                               | ts-table         | t1
-   │                               | access mode      | metaTable
-   │                               | scan agg 0       | LAST(e2)
-   │                               | scan agg 1       | LASTTS(e2)
-   └── subquery                    |                  |
-        │                          | id               | @S2
-        │                          | original sql     | (SELECT last(e2) FROM d1.t1 WHERE ((e2 > 0) OR (e2 < -1)))
-        │                          | exec mode        | one row
-        └── group                  |                  |
-             │                     | engine type      | time series
-             │                     | aggregate 0      | last(e2, ts)
-             │                     | scalar           |
-             │                     | addSynchronizer  | true
-             └── ts scan           |                  |
-                                   | ts-table         | t1
-                                   | access mode      | metaTable
-                                   | filter           | (e2 > 0) OR (e2 < -1)
-(41 rows)
+                tree               |                  field                   |                                      description
+-----------------------------------+------------------------------------------+----------------------------------------------------------------------------------------
+                                   | distributed                              | true
+                                   | vectorized                               | false
+  root                             |                                          |
+   ├── sort                        |                                          |
+   │    │                          | order                                    | +e1
+   │    └── render                 |                                          |
+   │         │                     | e1                                       | e1
+   │         └── filter            |                                          |
+   │              │                | filter                                   | (@S1 > 20) AND ((((e1 != 0) AND (@S2 > 0)) AND (tag1 IS NOT NULL)) OR (tag2 IS NULL))
+   │              └── synchronizer |                                          |
+   │                   └── ts scan |                                          |
+   │                               | ts-table                                 | t1
+   │                               | access mode                              | tableTableMeta
+   │                               | filter                                   | e1 > 0
+   ├── subquery                    |                                          |
+   │    │                          | id                                       | @S1
+   │    │                          | original sql                             | (SELECT last(e2) FROM d1.t1)
+   │    │                          | exec mode                                | one row
+   │    └── group                  |                                          |
+   │         │                     | engine type                              | time series
+   │         │                     | aggregate 0                              | last(e2, ts, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+   │         │                     | scalar                                   |
+   │         │                     | addSynchronizer                          | true
+   │         └── render            |                                          |
+   │              │                | engine type                              | time series
+   │              │                | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+   │              │                | ts                                       | ts
+   │              │                | e2                                       | e2
+   │              └── ts scan      |                                          |
+   │                               | ts-table                                 | t1
+   │                               | access mode                              | metaTable
+   │                               | scan agg 0                               | ANY_NOT_NULL(9223372036854775807)
+   │                               | scan agg 1                               | LASTTS(e2,ts,9223372036854775807)
+   │                               | scan agg 2                               | LAST(e2,ts,9223372036854775807)
+   └── subquery                    |                                          |
+        │                          | id                                       | @S2
+        │                          | original sql                             | (SELECT last(e2) FROM d1.t1 WHERE ((e2 > 0) OR (e2 < -1)))
+        │                          | exec mode                                | one row
+        └── group                  |                                          |
+             │                     | engine type                              | time series
+             │                     | aggregate 0                              | last(e2, ts, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+             │                     | scalar                                   |
+             │                     | addSynchronizer                          | true
+             └── render            |                                          |
+                  │                | engine type                              | time series
+                  │                | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                  │                | ts                                       | ts
+                  │                | e2                                       | e2
+                  └── ts scan      |                                          |
+                                   | ts-table                                 | t1
+                                   | access mode                              | metaTable
+                                   | filter                                   | (e2 > 0) OR (e2 < -1)
+(52 rows)
 > select e1 from d1.t1 as t2 where    (((select last(e2) from d1.t1) > 20 and e1 > 0))    and    ((select last(e2) from d1.t1 where (e2 > 0 or e2 < -1)) > 0 and e1 != 0 and tag1 is not null or tag2 is null )   order by e1;
   e1
 ------

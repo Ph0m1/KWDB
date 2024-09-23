@@ -2628,7 +2628,7 @@ class LastAggregate : public AggregateFunc {
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
     }
-    
+
     for (k_uint32 row = 0; row < data_container_count; ++row) {
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket

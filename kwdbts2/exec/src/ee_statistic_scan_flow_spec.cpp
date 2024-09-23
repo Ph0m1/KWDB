@@ -129,7 +129,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
       point = params.param(0).value();
       k_int32 agg_type = spec_->aggtypes(i);
       table_->scan_agg_types_.push_back((Sumfunctype)agg_type);
-      table_->scan_last_ts_points_.push_back(point); 
+      table_->scan_last_ts_points_.push_back(point);
       continue;
     }
     k_uint32 tab = params.param(0).value();
