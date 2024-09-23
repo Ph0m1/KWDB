@@ -33,6 +33,8 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"github.com/cockroachdb/errors"
 )
@@ -538,6 +540,9 @@ func GetTableNodeIDs(ctx context.Context, txn *kv.Txn, tableID uint32) ([]roachp
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(ranges) == 0 {
+		return nil, pgerror.Newf(pgcode.Warning, "can not get table : %v ranges.", tableID)
 	}
 	for _, r := range ranges {
 		var desc roachpb.RangeDescriptor
