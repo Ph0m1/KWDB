@@ -9,10 +9,11 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
-#include "ee_parse_query.h"
-
 #include <iomanip>
 #include <chrono>
+
+#include "ee_parse_query.h"
+#include "lg_api.h"
 
 namespace kwdbts {
 k_int16 forwardToTimeStringEnd(k_char *str) {
@@ -110,6 +111,18 @@ static std::string parseHex2String(const std::string &hexStr) {
   }
   return asciiStr;
 }
+
+void ResolveTm(KString date, tm &t) {
+  // how many digits of year
+  int pos = date.find('-');
+  t.tm_year = stoi(date.substr(0, pos)) - 1900;
+  t.tm_mon = stoi(date.substr(pos+1, pos+3)) - 1;
+  t.tm_mday = stoi(date.substr(pos+4, pos+6));
+  t.tm_hour = stoi(date.substr(pos+7, pos+9));
+  t.tm_min = stoi(date.substr(pos+10, pos+12));
+  t.tm_sec = stoi(date.substr(pos+13, pos+15));
+}
+
 /*
  * rfc3339 format:
  * 2013-04-12 15:52:01+08:00
@@ -123,9 +136,14 @@ static std::string parseHex2String(const std::string &hexStr) {
  * 2013-04-12T15:52:01.123+0800
  */
 k_int64 getGMT(KString *value_) {
-  std::istringstream ss(*value_);
   tm t = {};
-  ss >> std::get_time(&t, "%Y-%m-%d %H:%M:%S");
+  // 19 means length of format 0000-00-00 00:00:00
+  if (value_->length() < 19) {
+    LOG_ERROR("date %s is not valid\n", (*value_).c_str())
+    return 0;
+  }
+
+  ResolveTm(*value_, t);
   auto mt = mktime(&t);
   // auto tp = std::chrono::system_clock::from_time_t(mt);
   //  转换为Unix毫秒时间戳
