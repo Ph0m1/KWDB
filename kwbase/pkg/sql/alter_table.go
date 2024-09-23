@@ -1472,9 +1472,12 @@ func checkTSMutationColumnType(
 		mutation := tableDesc.Mutations[i]
 		if muCol := mutation.GetColumn(); muCol != nil {
 			if muCol.ID == newCol.ID && mutation.Direction == sqlbase.DescriptorMutation_NONE {
+				if muCol.Type.Identical(&newCol.Type) {
+					continue
+				}
 				_, err := validateAlterTSType(&muCol.Type, &newCol.Type, tagOrColumn)
 				if err != nil {
-					return errors.Wrap(err, "Blocked by existing ALTER TYPE")
+					return errors.Wrapf(err, "blocked by existing ALTER TYPE on column \"%s\"", newCol.Name)
 				}
 			}
 		}
