@@ -115,7 +115,13 @@ static std::string parseHex2String(const std::string &hexStr) {
 void ResolveTm(KString date, tm &t) {
   // how many digits of year
   int pos = date.find('-');
-  t.tm_year = stoi(date.substr(0, pos)) - 1900;
+  if (pos == 0) {  // '-2000-01-01 00:00:00'
+    pos = date.find('-', 1);
+    t.tm_year = 0 - stoi(date.substr(1, pos)) - 1900;
+  } else {  // '2000-01-01 00:00:00'
+    t.tm_year = stoi(date.substr(0, pos)) - 1900;
+  }
+
   t.tm_mon = stoi(date.substr(pos+1, pos+3)) - 1;
   t.tm_mday = stoi(date.substr(pos+4, pos+6));
   t.tm_hour = stoi(date.substr(pos+7, pos+9));
