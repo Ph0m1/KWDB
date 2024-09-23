@@ -931,9 +931,15 @@ EEIteratorErrCode OrderedAggregateOperator::Init(kwdbContext_p ctx) {
 
   // construct the output column information for agg functions.
   for (int i = 0; i < param_.aggs_size_; i++) {
-    agg_output_col_info_.emplace_back(param_.aggs_[i]->get_storage_length(),
+    if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
+      agg_output_col_info_.emplace_back(param_.aggs_[i]->get_storage_length() + sizeof(k_int64),
                                       param_.aggs_[i]->get_storage_type(),
                                       param_.aggs_[i]->get_return_type());
+    } else {
+      agg_output_col_info_.emplace_back(param_.aggs_[i]->get_storage_length(),
+                                      param_.aggs_[i]->get_storage_type(),
+                                      param_.aggs_[i]->get_return_type());
+    }
   }
 
   constructAggResults();
