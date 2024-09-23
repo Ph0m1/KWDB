@@ -30,6 +30,7 @@ KStatus ParallelGroup::Init(kwdbContext_p ctx) {
   fetcher_ = ctx->fetcher;
   is_parallel_pg_ = false;
   relation_ctx_ = ctx->relation_ctx;
+  is_single_node_ = ctx->is_single_node;
   thd_ = KNEW KWThdContext();
   if (!thd_) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -45,6 +46,7 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
   ctx->ts_engine = ts_engine_;
   ctx->relation_ctx = relation_ctx_;
   ctx->fetcher = fetcher_;
+  ctx->is_single_node = is_single_node_;
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   current_thd = thd_;
   thd_->SetParallelGroup(this);

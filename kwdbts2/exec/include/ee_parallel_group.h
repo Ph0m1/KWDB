@@ -44,6 +44,7 @@ class ParallelGroup : public ExecTask {
   DataChunkPtr  chunk_;
   KWThdContext *thd_{nullptr};
   k_int32 repeat_{0};
+  bool is_single_node_{false};
 
  public:
   ParallelGroup() {}

@@ -2062,12 +2062,20 @@ func (dsp *DistSQLPlanner) createTSReaders(
 ) (PhysicalPlan, error) {
 	planCtx.IsTS = true
 	var p PhysicalPlan
+	var err error
 	ptCols, typs, descColumnIDs, columnIDSet := visitTableMeta(n)
 
-	rangeSpans, err := dsp.getSpans(planCtx, n, ptCols)
-	if err != nil {
-		return PhysicalPlan{}, err
+	rangeSpans := make(map[roachpb.NodeID][]execinfrapb.HashpointSpan)
+
+	if planCtx.ExtendedEvalCtx.ExecCfg.StartMode == StartSingleNode {
+		rangeSpans[dsp.nodeDesc.NodeID] = []execinfrapb.HashpointSpan{}
+	} else {
+		rangeSpans, err = dsp.getSpans(planCtx, n, ptCols)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
 	}
+
 	if len(rangeSpans) == 0 {
 		return PhysicalPlan{}, pgerror.New(pgcode.Warning, "get spans error, length of spans is 0")
 	}
