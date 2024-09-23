@@ -1654,7 +1654,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
 KStatus TsTable::GetEntityIndex(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
                                 std::vector<EntityResultIndex> &entity_store) {
   KStatus s;
-  RW_LATCH_X_LOCK(entity_groups_mtx_);
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto &p : entity_groups_) {
     MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
@@ -1676,7 +1676,7 @@ KStatus TsTable::GetEntityIndex(kwdbContext_p ctx, uint64_t begin_hash, uint64_t
 
 KStatus TsTable::GetEntityGrpByPriKey(kwdbContext_p ctx, const TSSlice& primary_key, uint64_t* entity_grp_idp) {
   KStatus s;
-  RW_LATCH_X_LOCK(entity_groups_mtx_);
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto &p : entity_groups_) {
     MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
@@ -1694,7 +1694,7 @@ KStatus TsTable::GetEntityGrpByPriKey(kwdbContext_p ctx, const TSSlice& primary_
 KStatus TsTable::GetEntityIndexWithRowNum(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
                                           std::vector<std::pair<int, EntityResultIndex>> &entity_tag) {
   KStatus s;
-  RW_LATCH_X_LOCK(entity_groups_mtx_);
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto &p : entity_groups_) {
     MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();

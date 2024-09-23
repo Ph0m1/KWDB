@@ -177,7 +177,7 @@ var (
 	partitionLRUCacheLimit = settings.RegisterPublicIntSetting(
 		"ts.cached_partitions_per_subgroup.max_limit",
 		"the limit on the number of partition table lru_cache",
-		10)
+		20)
 
 	subgroupEntities = settings.RegisterPublicIntSetting(
 		"ts.entities_per_subgroup.max_limit",

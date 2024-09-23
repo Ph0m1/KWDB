@@ -204,11 +204,15 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
     return false;
   }
   // mount sqfs file
-  int retry = 5;
+  int retry = 10;
   std::string cmd = sudo_cmd + "mount -o noatime,nodiratime -t squashfs " + sqfs_file_path + " " + dir_path;
   while(retry > 0 && !System(cmd)) {
+    if (isMounted(dir_path)) {
+      break;
+    }
     sleep(1);
     --retry;
+    Remove(dir_path, err_info);
     MakeDirectory(dir_path, err_info);
   }
   if (!isMounted(dir_path)) {
@@ -220,7 +224,7 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
       err_info.errmsg = sqfs_file_path + " mount failed, " + dir_path + " rm failed";
     }
     LOG_ERROR("mount failed. If it's a docker environment, check if /dev:/dev is mapped")
-    abort();
+    return false;
   }
 
   g_cur_mount_cnt_++;

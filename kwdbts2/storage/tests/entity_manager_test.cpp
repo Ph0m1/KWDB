@@ -223,7 +223,7 @@ TEST_F(TestEntityTableManager, cache) {
     }
 
     timestamp64 p_time = p1_time + iot_interval_;
-    for (int i = 0 ; i < TsSubEntityGroup::cache_capacity_ ; i++) {
+    for (int i = 0 ; i < 20 ; i++) {
       TsTimePartition* m_table = et_manager_->CreatePartitionTable(p_time, group_id, err_info);
       ASSERT_EQ(err_info.errmsg, "");
       ReleaseTable(m_table);

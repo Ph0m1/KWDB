@@ -64,6 +64,8 @@ class PartitionLRUCacheManager {
   KLatch* capacity_thread_lock_;
   // Id of the capacity thread
   kwdbts::KThreadID capacity_thread_id_;
+  // Current capacity, default is 20
+  std::atomic<size_t> current_capacity_ = 20;
 
   /**
    * @brief Asynchronously modifies capacity thread function.

@@ -147,7 +147,7 @@ int TsTimePartition::loadSegments(ErrorInfo& err_info) {
   std::shared_ptr<MMapSegmentTable> last_sta_tbl = nullptr;
   if (!segment_ids.empty()) {
     std::shared_ptr<MMapSegmentTable> segment_table = getSegmentTable(last_segment_id, true);
-    if (!segment_table->sqfsIsExists() && segment_table->reopen(false, err_info) >= 0
+    if (segment_table && !segment_table->sqfsIsExists() && segment_table->reopen(false, err_info) >= 0
         && segment_table->getSegmentStatus() == ActiveSegment) {
       last_sta_tbl = segment_table;
     }
@@ -472,6 +472,10 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     MUTEX_UNLOCK(partition_table_latch_);
     for (size_t i = 0; i < full_block_idx.size(); i++) {
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[full_block_idx[i]].block_item->block_id);
+      if (tbl == nullptr) {
+        LOG_ERROR("getSegmentTable failed, block_id:%d", (*alloc_spans)[full_block_idx[i]].block_item->block_id);
+        return;
+      }
       const BlockSpan& span = (*alloc_spans)[full_block_idx[i]];
       tbl->updateAggregateResult(span);
     }
@@ -948,6 +952,10 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     MUTEX_UNLOCK(partition_table_latch_);
     for (size_t i = 0; i < full_block_idx.size(); i++) {
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[full_block_idx[i]].block_item->block_id);
+      if (tbl == nullptr) {
+        LOG_ERROR("getSegmentTable failed, block_id:%d", (*alloc_spans)[full_block_idx[i]].block_item->block_id);
+        return;
+      }
       const BlockSpan& span = (*alloc_spans)[full_block_idx[i]];
       tbl->updateAggregateResult(span);
     }

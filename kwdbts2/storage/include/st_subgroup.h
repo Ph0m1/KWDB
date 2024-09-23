@@ -31,8 +31,6 @@ class TsSubGroupPTIterator;
 
 class TsSubEntityGroup : public TSObject {
  public:
-  static const int cache_capacity_ = 10;
-
   explicit TsSubEntityGroup(MMapRootTableManager*& root_tbl_manager);
 
   virtual ~TsSubEntityGroup();

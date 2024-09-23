@@ -746,7 +746,7 @@ TEST_F(TestEngine, LazyMount) {
   std::shared_ptr<TsEntityGroup> tbl_range;
   ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
 
-  int partition_num = 12;
+  int partition_num = 22;
   int write_count = 1;
   for (int i = 1; i <= partition_num; ++i) {
     k_uint32 p_len = 0;

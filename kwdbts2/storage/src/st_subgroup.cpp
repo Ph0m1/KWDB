@@ -31,7 +31,6 @@ TsSubEntityGroup::TsSubEntityGroup(MMapRootTableManager*& root_tbl_manager)
     : TSObject(), root_tbl_manager_(root_tbl_manager) {
   table_name_ = root_tbl_manager->GetTableName();
   // pthread_rwlock_init(&partition_lk_, NULL);
-  partition_cache_.SetCapacity(cache_capacity_);  // Each subgroup can have up to 10 active partitions
 
   sub_entity_group_mutex_ = new TsSubEntityGroupLatch(LATCH_ID_TSSUBENTITY_GROUP_MUTEX);
   sub_entity_group_rwlock_ = new TsSubEntityGroupRWLatch(RWLATCH_ID_TS_SUB_ENTITY_GROUP_RWLOCK);

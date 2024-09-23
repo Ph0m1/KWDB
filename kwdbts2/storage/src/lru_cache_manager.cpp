@@ -35,6 +35,7 @@ PartitionLRUCacheManager::~PartitionLRUCacheManager() {
 void PartitionLRUCacheManager::Push(PartitionLRUCache* partition_cache) {
   wrLock();
   Defer defer {[&]() { unLock(); }};
+  partition_cache->SetCapacity(current_capacity_);
   caches_.insert(partition_cache);
 }
 
@@ -51,7 +52,6 @@ void PartitionLRUCacheManager::routine(void* args) {
       break;
     }
     // Gets the capacity of the queue waiting for processing
-    size_t capacity = 0;
     {
       MUTEX_LOCK(capacity_queue_lock_);
       Defer defer{[&]() {
@@ -61,7 +61,7 @@ void PartitionLRUCacheManager::routine(void* args) {
         capacity_thread_id_ = 0;
         break;
       }
-      capacity = capacity_queue_.front();
+      current_capacity_ = capacity_queue_.front();
       capacity_queue_.pop();
     }
     // Modify the capacity of all PartitionLRUCache
@@ -70,7 +70,7 @@ void PartitionLRUCacheManager::routine(void* args) {
       Defer defer{[&]() { unLock(); }};
       for (auto cache : caches_) {
         if (cache) {
-          cache->SetCapacity(capacity);
+          cache->SetCapacity(current_capacity_);
           cache->Clear(0);
         }
       }
