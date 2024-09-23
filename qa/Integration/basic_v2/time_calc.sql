@@ -72,3 +72,6 @@ SELECT max(ts-TIMESTAMPTZ'1970-1-1 01:00:12.000-05:00') FROM ts_db.st GROUP BY t
 SELECT count(ts-TIMESTAMP'1970-1-1 01:00:12.000-05:00') FROM ts_db.st GROUP BY ts ORDER BY ts;
 
 DROP DATABASE ts_db;
+
+SELECT timestamp'2970-01-01 00:00:00' - timestamp'2000-01-01 00:00:00' ;
+SELECT '0000-01-01 00:00:00+00:00'::timestamptz - '2020-01-01 12:00:00+00:00'::timestamptz;

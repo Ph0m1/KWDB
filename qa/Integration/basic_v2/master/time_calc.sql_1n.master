@@ -466,3 +466,15 @@ HINT: try \hf first
 (5 rows)
 > DROP DATABASE ts_db;
 DROP DATABASE
+> SELECT timestamp'2970-01-01 00:00:00' - timestamp'2000-01-01 00:00:00' ;
+           ?column?
+-------------------------------
+  106751 days 23:47:16.854776
+(1 row)
+NOTICE: the result of time subtracting maybe overflow
+> SELECT '0000-01-01 00:00:00+00:00'::timestamptz - '2020-01-01 12:00:00+00:00'::timestamptz;
+            ?column?
+---------------------------------
+  -106751 days -23:47:16.854776
+(1 row)
+NOTICE: the result of time subtracting maybe overflow
