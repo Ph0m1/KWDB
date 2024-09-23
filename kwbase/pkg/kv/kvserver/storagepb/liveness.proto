@@ -55,7 +55,9 @@ message Liveness {
   util.hlc.LegacyTimestamp expiration = 3 [(gogoproto.nullable) = false];
   bool draining = 4;
   bool decommissioning = 5;
-  bool upgrading = 6;
+  // todo(qzy): keep status temporarily for metadata compatibility
+  int32 status = 6;
+  bool upgrading = 7;
 }
 
 // NodeLivenessStatus describes the status of a node from the perspective of the

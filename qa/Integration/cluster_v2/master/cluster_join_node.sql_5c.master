@@ -4,6 +4,11 @@ SET CLUSTER SETTING
 SET CLUSTER SETTING
 > SET cluster setting ts.blocks_per_segment.max_limit=50; 
 SET CLUSTER SETTING
+> import database csv data ("nodelocal://1/tsdb1");
+  job_id |  status   | fraction_completed |  rows  | abandon_rows | reject_rows
+---------+-----------+--------------------+--------+--------------+--------------
+  -      | succeeded |                  1 | 500000 | 0            | 0
+(1 row)
 > CREATE TS DATABASE tsdb; 
 CREATE TS DATABASE
 > ALTER DATABASE tsdb CONFIGURE ZONE USING gc.ttlseconds=10; 
@@ -314,6 +319,16 @@ INSERT 1
   2000-10-10 10:11:48+00:00 | 2024-02-06 07:53:45+00:00 |  35 |  164 |  966 |  8873.540039 |  -6295.051624778738 | false | b  | J   | \x36 | false |  550 |  641 |  801 | -1867.710571 |   2801.475585151429 | \x31 | a     | u
   2000-10-10 10:11:49+00:00 | 2024-02-06 07:53:45+00:00 | 611 |  965 |    5 |  7567.450684 | -2746.5781895453874 | true  | s  | q   | \x36 | false |  604 |  874 |  631 | -7309.183594 |  2509.7441330552138 | \x34 | L     | q
 (100 rows)
+> select count(*) from tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> select count(*) from tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
 > CREATE TABLE tsdb.t2(                          ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES  ) TAGS (  tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL  )PRIMARY TAGS(tag13); 
 CREATE TABLE
 > DROP TABLE tsdb.t2; 
@@ -541,6 +556,16 @@ DROP TABLE
 ---------
     100
 (1 row)
+> select count(*) from tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> select count(*) from tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
 > CREATE TABLE tsdb.t2(                          ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES  ) TAGS (  tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL  )PRIMARY TAGS(tag13); 
 CREATE TABLE
 > DROP TABLE tsdb.t2; 
@@ -663,6 +688,16 @@ DROP TABLE
   count
 ---------
     100
+(1 row)
+> select count(*) from tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> select count(*) from tsdb1.ts_t4; 
+  count
+----------
+  250000
 (1 row)
 > CREATE TABLE tsdb.t2(                          ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES  ) TAGS (  tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL  )PRIMARY TAGS(tag13); 
 CREATE TABLE
@@ -789,6 +824,16 @@ DROP TABLE
 ---------
     100
 (1 row)
+> select count(*) from tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> select count(*) from tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
 > CREATE TABLE tsdb.t2(                          ts TIMESTAMPTZ NOT NULL,e1 TIMESTAMP,e2 INT2,e3 INT4,e4 INT8,e5 FLOAT4,e6 FLOAT8,e7 BOOL,e8 CHAR,e10 NCHAR,e16 VARBYTES  ) TAGS (  tag1 BOOL,tag2 SMALLINT,tag3 INT,tag4 BIGINT,tag5 FLOAT4,tag6 DOUBLE,tag7 VARBYTES,tag11 CHAR,tag13 NCHAR NOT NULL  )PRIMARY TAGS(tag13); 
 CREATE TABLE
 > DROP TABLE tsdb.t2; 
@@ -914,9 +959,21 @@ DROP TABLE
 ---------
     100
 (1 row)
+> select count(*) from tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> select count(*) from tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
 > DROP TABLE tsdb.t1; 
 DROP TABLE
 > DROP DATABASE tsdb; 
+DROP DATABASE
+> DROP DATABASE tsdb1; 
 DROP DATABASE
 > SELECT node_id,decommissioning AS status FROM kwdb_internal.gossip_liveness ORDER BY node_id; 
   node_id | status
@@ -936,5 +993,13 @@ SQLSTATE: 42P01
 Failed running "sql"
 > SELECT count(*) FROM tsdb.t1; 
 ERROR: relation "tsdb.t1" does not exist
+SQLSTATE: 42P01
+Failed running "sql"
+> select count(*) from tsdb1.ts_t3; 
+ERROR: relation "tsdb1.ts_t3" does not exist
+SQLSTATE: 42P01
+Failed running "sql"
+> select count(*) from tsdb1.ts_t4; 
+ERROR: relation "tsdb1.ts_t4" does not exist
 SQLSTATE: 42P01
 Failed running "sql"

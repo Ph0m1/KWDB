@@ -120,7 +120,7 @@ var belowRaftGoldenProtos = map[reflect.Type]fixture{
 			return storagepb.NewPopulatedLiveness(r, false)
 		},
 		emptySum:     892800390935990883,
-		populatedSum: 13857122595779760171,
+		populatedSum: 451773449228717946,
 	},
 	// This is used downstream of Raft only to write it into unreplicated keyspace
 	// as part of VersionUnreplicatedRaftTruncatedState.
