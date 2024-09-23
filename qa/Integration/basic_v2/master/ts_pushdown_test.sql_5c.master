@@ -55,7 +55,7 @@ INSERT 1
    └── ts scan |                  |
                | ts-table         | cpu
                | access mode      | metaTable
-               | scan agg 0       | COUNT(ts)
+               | scan agg 0       | COUNT(*)
 (11 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where hostname = 'host_0' and ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
              tree             |     field      |                        description
@@ -296,7 +296,7 @@ INSERT 1
    └── ts scan |                  |
                | ts-table         | cpu
                | access mode      | metaTable
-               | scan agg 0       | COUNT(ts)
+               | scan agg 0       | COUNT(*)
 (11 rows)
 > explain select count(*) from cpu group by hostname;
         tree        |      field       |      description

@@ -83,6 +83,11 @@ KStatus OpFactory::NewTableScan(kwdbContext_p ctx,
         const_cast<TSReaderSpec*>(&readerSpec),
         const_cast<TSPostProcessSpec*>(&post), *table, childIterator, processor_id);
   } else {
+    if (post.outputcols_size() == 0 && post.renders_size() == 0) {
+      auto rewrite_post = const_cast<TSPostProcessSpec*>(&post);
+      rewrite_post->add_outputcols(0);
+      rewrite_post->add_outputtypes(kwdbts::KWDBTypeFamily::TimestampTZFamily);
+    }
     *iterator =
         NewIterator<TableScanOperator>(const_cast<TSReaderSpec*>(&readerSpec),
                                        const_cast<TSPostProcessSpec*>(&post),

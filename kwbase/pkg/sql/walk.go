@@ -152,10 +152,14 @@ func printScanAgg(buf *bytes.Buffer, agg *ScanAgg, resultColumns *sqlbase.Result
 			buf.WriteString(",")
 		}
 		if v.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
-			for i := range *resultColumns {
-				if sqlbase.ColumnID(v.Value) == (*resultColumns)[i].PGAttributeNum {
-					buf.WriteString((*resultColumns)[i].Name)
-					break
+			if len(*resultColumns) == 0 {
+				buf.WriteString("*")
+			} else {
+				for i := range *resultColumns {
+					if sqlbase.ColumnID(v.Value) == (*resultColumns)[i].PGAttributeNum {
+						buf.WriteString((*resultColumns)[i].Name)
+						break
+					}
 				}
 			}
 		} else {

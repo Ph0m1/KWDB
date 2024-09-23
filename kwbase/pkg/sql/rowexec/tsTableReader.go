@@ -67,6 +67,7 @@ type TsTableReader struct {
 	collected        bool
 	statsList        []tse.TsFetcherStats
 	fetMu            syncutil.Mutex
+	manualAddTsCol   bool
 }
 
 var _ execinfra.Processor = &TsTableReader{}
@@ -78,7 +79,7 @@ const tsTableReaderProcName = "ts table reader"
 func NewTsTableReader(
 	flowCtx *execinfra.FlowCtx,
 	processorID int32,
-	types []types.T,
+	typs []types.T,
 	output execinfra.RowReceiver,
 	sid execinfrapb.StreamID,
 	tsProcessorSpecs []execinfrapb.TSProcessorSpec,
@@ -88,10 +89,15 @@ func NewTsTableReader(
 		tsi.collected = true
 		tsi.FinishTrace = tsi.outputStatsToTrace
 	}
+	if len(typs) == 0 {
+		typs = make([]types.T, 1)
+		typs[0] = *types.Timestamp
+		tsi.manualAddTsCol = true
+	}
 	if err := tsi.Init(
 		tsi,
 		&execinfrapb.PostProcessSpec{},
-		types,
+		typs,
 		flowCtx,
 		processorID,
 		output,
@@ -327,6 +333,10 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 				ttr.cleanup(ttr.PbCtx())
 				return nil, &execinfrapb.ProducerMetadata{Err: err}
 			}
+		}
+		if ttr.manualAddTsCol {
+			var tmpRow sqlbase.EncDatumRow = make([]sqlbase.EncDatum, 0)
+			return tmpRow, nil
 		}
 		return row, nil
 	}
