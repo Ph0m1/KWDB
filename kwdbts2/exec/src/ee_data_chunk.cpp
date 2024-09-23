@@ -219,7 +219,7 @@ bool DataChunk::IsNull(k_uint32 row, k_uint32 col) {
     return true;
   }
 
-  return (bitmap[row / 8] & ((1 << 7) >> (row % 8))) != 0;
+  return (bitmap[row >> 3] & ((1 << 7) >> (row & 7))) != 0;  // (bitmap[row / 8] & ((1 << 7) >> (row % 8))) != 0;
 }
 
 bool DataChunk::IsNull(k_uint32 col) {
@@ -233,7 +233,7 @@ void DataChunk::SetNull(k_uint32 row, k_uint32 col) {
     return;
   }
 
-  bitmap[row / 8] |= (1 << 7) >> (row % 8);
+  bitmap[row >> 3] |= (1 << 7) >> (row & 7);  // bitmap[row / 8] |= (1 << 7) >> (row % 8);
 }
 
 void DataChunk::SetNotNull(k_uint32 row, k_uint32 col) {

@@ -295,7 +295,8 @@ void LinearProbingHashTable::CopyGroups(IChunk* chunk, k_uint64 row,
 bool LinearProbingHashTable::CompareGroups(
     IChunk* chunk, k_uint64 row,
     const std::vector<k_uint32>& group_cols, k_uint64 loc) {
-  auto null_bitmap = GetTuple(loc) + group_null_offset_;
+  auto tuple = GetTuple(loc);
+  auto null_bitmap = tuple + group_null_offset_;
   for (int i = 0; i < GroupNum(); i++) {
     k_uint32 col = group_cols[i];
     auto is_null = chunk->IsNull(row, col);
@@ -308,7 +309,7 @@ bool LinearProbingHashTable::CompareGroups(
     }
 
     DatumPtr left_ptr = chunk->GetData(row, col);
-    DatumPtr right_ptr = GetTuple(loc) + group_offsets_[i];
+    DatumPtr right_ptr = tuple + group_offsets_[i];
     if (!CompareColumn(left_ptr, right_ptr, group_types_[i])) {
       return false;
     }

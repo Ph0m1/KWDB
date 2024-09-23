@@ -12,14 +12,14 @@
 #include "ee_scan_row_batch.h"
 
 namespace kwdbts {
-void* ScanRowBatch::GetData(k_uint32 col, k_uint32 offset, roachpb::KWDBKTSColumn::ColumnType ctype,
+char* ScanRowBatch::GetData(k_uint32 col, k_uint32 offset, roachpb::KWDBKTSColumn::ColumnType ctype,
                             roachpb::DataType dt) {
   if (roachpb::KWDBKTSColumn::TYPE_PTAG == ctype || roachpb::KWDBKTSColumn::TYPE_TAG == ctype) {
     return static_cast<char*>(tagdata_[col].tag_data);
   } else {
     if (dt == roachpb::VARCHAR || dt == roachpb::NVARCHAR || dt == roachpb::VARBINARY) {
-      return res_.data[col][current_batch_no_]->getVarColData(
-          current_batch_line_);
+      return static_cast<char *>(res_.data[col][current_batch_no_]->getVarColData(
+          current_batch_line_));
     } else {
       return static_cast<char*>(res_.data[col][current_batch_no_]->mem) +
              current_batch_line_ * offset;
@@ -54,6 +54,7 @@ void ScanRowBatch::Reset() {
   current_line_ = 0;
   current_batch_line_ = 0;
   current_batch_no_ = 0;
+  current_batch_count_ = -1;
 }
 
 /**
@@ -83,12 +84,16 @@ k_int32 ScanRowBatch::NextLine() {
     if (current_line_ + 1 >= count_) {
       return -1;
     }
-    if (res_.data.size() > 0) {
-      if (current_batch_line_ < (res_.data[0][current_batch_no_]->count + 1)) {
+    if (res_.col_num_ > 0) {
+      if (current_batch_count_ == -1) {
+        current_batch_count_ = res_.data[0][current_batch_no_]->count;
+      }
+      if (current_batch_line_ < (current_batch_count_ + 1)) {
         current_batch_line_++;
       } else {
         current_batch_no_++;
         current_batch_line_ = 0;
+        current_batch_count_ = res_.data[0][current_batch_no_]->count;
       }
     }
     current_line_++;

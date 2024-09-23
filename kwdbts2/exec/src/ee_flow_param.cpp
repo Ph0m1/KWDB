@@ -502,7 +502,10 @@ Field *PostResolve::ResolveOperator(kwdbContext_p ctx, AstEleType operator_type,
     new_fields_.insert(new_fields_.end(), field);
     field->table_ = table_;
   } else {
-    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    if (!EEPgErrorInfo::IsError()) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                    "Insufficient memory");
+    }
   }
 
   Return(field);
@@ -967,7 +970,12 @@ Field *PostResolve::ResolveFuncOperator(kwdbContext_p ctx, KString &func_name,
   }
 
   if (func_name == "time_bucket") {
-    field = KNEW FieldFuncTimeBucket(args, ctx->timezone);
+    FieldFuncTimeBucket *time_field = KNEW FieldFuncTimeBucket(args, ctx->timezone);
+    if (time_field && EEPgErrorInfo::IsError()) {
+      SafeDeletePointer(time_field);
+    } else {
+      field = time_field;
+    }
   } else if (func_name == "now") {
     field = KNEW FieldFuncNow();
   } else if (func_name == "current_date") {

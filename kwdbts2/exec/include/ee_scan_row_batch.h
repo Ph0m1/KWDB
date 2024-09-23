@@ -40,6 +40,7 @@ class ScanRowBatch : public RowBatch {
   k_uint32 effect_count_{0};
   k_uint32 tag_col_offset_{0};
   TABLE *table_{nullptr};
+  k_int32 current_batch_count_{-1};
 
  public:
   TagData tagdata_;
@@ -69,7 +70,7 @@ class ScanRowBatch : public RowBatch {
     res_.setColumnNum(table_->scan_cols_.size());
   }
 
-  void *GetData(k_uint32 col, k_uint32 offset,
+  char *GetData(k_uint32 col, k_uint32 offset,
                 roachpb::KWDBKTSColumn::ColumnType ctype,
                 roachpb::DataType dt) override;
   k_uint16 GetDataLen(k_uint32 col, k_uint32 offset,

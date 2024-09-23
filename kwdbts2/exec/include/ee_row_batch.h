@@ -61,7 +61,7 @@ class RowBatch{
   RowBatchType typ_;
   Stage stage_{
       Stage::STAGE_SCAN};  // It is used to distinguish where to read the data
-  virtual void *GetData(k_uint32 col, k_uint32 offset,
+  virtual char *GetData(k_uint32 col, k_uint32 offset,
                         roachpb::KWDBKTSColumn::ColumnType ctype,
                         roachpb::DataType dt) = 0;
   virtual k_uint16 GetDataLen(k_uint32 col, k_uint32 offset,

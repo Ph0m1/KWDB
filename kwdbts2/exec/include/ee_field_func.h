@@ -240,14 +240,14 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
   // Replace keywords in the timestring
   std::string replaceKeywords(const std::string& timestring);
 
-  k_uint64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info_);
+  k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info_);
 
   KTimestampTz getOriginalTimestamp() {
     auto val_ptr = args_[0]->get_ptr();
     return *reinterpret_cast<KTimestampTz *>(val_ptr);
   }
   k_int8 time_zone_{0};
-  k_uint64 interval_seconds_{0};
+  k_int64 interval_seconds_{0};
   k_bool var_interval_{false};
   k_bool year_bucket_{false};
   std::string error_info_{""};

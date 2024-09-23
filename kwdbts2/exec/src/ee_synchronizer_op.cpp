@@ -108,9 +108,9 @@ EEIteratorErrCode SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
     parallelGroup->SetParent(this);
     parallelGroup->SetParallel(EE_ENABLE_PARALLEL);
     parallelGroup->SetDegree(degree_);
-    group_num_++;
     parallel_groups_[i] = parallelGroup;
   }
+  group_num_ = degree_;
   for (k_uint32 i = 0; i < degree_; ++i) {
     ExecPool::GetInstance().PushTask(parallel_groups_[i]);
   }

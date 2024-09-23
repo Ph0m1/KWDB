@@ -116,7 +116,7 @@ class LinearProbingHashTable {
    * in the hash table is not used, it is caller's responsibility to intialize
    * aggregation result columns (InitFirstLastTimeStamp).
    */
-  bool IsUsed(k_uint64 loc) {
+  inline bool IsUsed(k_uint64 loc) {
     char* ptr = GetTuple(loc);
     return *reinterpret_cast<bool*>(ptr);
   }
@@ -133,7 +133,7 @@ class LinearProbingHashTable {
   /**
    * @brief get tuple pointer in the hash table
    */
-  DatumPtr GetTuple(k_uint64 loc) const { return data_ + tuple_size_ * loc; }
+  inline DatumPtr GetTuple(k_uint64 loc) const { return data_ + tuple_size_ * loc; }
 
   /**
    * @brief get aggregation result pointer in the hash table

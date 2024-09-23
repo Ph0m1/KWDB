@@ -28,6 +28,8 @@
 
 namespace kwdbts {
 
+const k_int64 BASE_CONSTANT = 62135596800000;
+
 void FieldFuncOp::CalcStorageType() {
   for (k_int32 i = 0; i < arg_count_; ++i) {
     if (roachpb::DataType::FLOAT == args_[i]->get_storage_type() ||
@@ -685,63 +687,42 @@ Field *FieldFuncRightShift::field_to_copy() {
 }
 
 k_int64 FieldFuncTimeBucket::ValInt() {
-  char *ptr = get_ptr();
-  if (nullptr != ptr) {
-    return FieldFuncOp::ValInt(ptr);
+  if (args_[0]->isNullable() && args_[0]->is_nullable()) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                  "time_bucket(): first arg can not be null.");
+    return 0;
+  }
+  if (!var_interval_) {
+    // use 0000-01-01 00:00:00 as start
+    // -62135596800000 is the timestamp of 0000-01-01 00:00:00
+    auto original_timestamp = args_[0]->ValInt();
+    KTimestampTz time_diff = time_zone_ * 3600000 + BASE_CONSTANT;
+    KTimestampTz bucket_start = (original_timestamp + time_diff) / interval_seconds_ * interval_seconds_;
+    return bucket_start - time_diff;
   } else {
-    // not sure why not break in getIntervalSeconds when interval is unvalid.
-    if (interval_seconds_ == 0) {
-      if (error_info_ == "invalid input interval time for time_bucket or time_bucket_gapfill.") {
-        EEPgErrorInfo::SetPgErrorInfo(
-          ERRCODE_INVALID_PARAMETER_VALUE,
-          error_info_.c_str());
-      } else if (error_info_ == "second arg should be a positive interval.") {
-        EEPgErrorInfo::SetPgErrorInfo(
-          ERRCODE_INVALID_PARAMETER_VALUE,
-          error_info_.c_str());
-      } else {
-        EEPgErrorInfo::SetPgErrorInfo(
-          ERRCODE_INVALID_DATETIME_FORMAT,
-          error_info_.c_str());
-      }
-      return 0;
-    }
-    // use 0000-01-01 00:00:00 as start, same as kwdbts2/exec/include/ee_agg_scan_op.h
-    if (args_[0]->isNullable() && args_[0]->is_nullable()) {
-      EEPgErrorInfo::SetPgErrorInfo(
-        ERRCODE_INVALID_PARAMETER_VALUE,
-        "time_bucket(): first arg can not be null.");
-        return 0;
-    }
-    if (!var_interval_) {
-      auto original_timestamp = args_[0]->ValInt();
-      KTimestampTz time_diff = time_zone_ * 3600000;
-      KTimestampTz bucket_start = (original_timestamp + 62135596800000 + time_diff)
-       / (k_int64)interval_seconds_ * (k_int64)interval_seconds_;
-      return bucket_start - 62135596800000 - time_diff;
+    // construct_variable calculate the start of time_bucket for year and month
+    // use 0000-01-01 00:00:00 as start
+    auto original_timestamp = args_[0]->ValInt();
+    std::time_t tt = (std::time_t)original_timestamp/1000;
+    struct std::tm tm;
+    gmtime_r(&tt, &tm);
+    tm.tm_sec = 0;
+    tm.tm_min = 0;
+    tm.tm_hour = 0;
+    tm.tm_mday = 1;
+    if (year_bucket_) {
+      tm.tm_mon = 0;
+      tm.tm_year = (int32_t)( (tm.tm_year + 1899) / static_cast<int>(interval_seconds_)
+       * static_cast<int>(interval_seconds_) - 1899);
+      tm.tm_hour -= time_zone_;
     } else {
-      auto original_timestamp = args_[0]->ValInt();
-      std::time_t tt = (std::time_t)original_timestamp/1000;
-      struct std::tm tm;
-      gmtime_r(&tt, &tm);
-      tm.tm_sec = 0;
-      tm.tm_min = 0;
-      tm.tm_hour = 0;
-      tm.tm_mday = 1;
-      if (year_bucket_) {
-        tm.tm_mon = 0;
-        tm.tm_year = (int32_t)( (tm.tm_year + 1899) / static_cast<int>(interval_seconds_)
-         * static_cast<int>(interval_seconds_) - 1899);
-        tm.tm_hour -= time_zone_;
-      } else {
-        int32_t mon = (tm.tm_year + 1899) * 12 + tm.tm_mon;
-        mon = (int32_t)(mon / static_cast<int>(interval_seconds_) * static_cast<int>(interval_seconds_));
-        tm.tm_year = (mon / 12) - 1899;
-        tm.tm_mon = mon % 12;
-        tm.tm_hour -= time_zone_;
-      }
-      return (KTimestampTz)(timegm(&tm)  * 1000);
+      int32_t mon = (tm.tm_year + 1899) * 12 + tm.tm_mon;
+      mon = (int32_t)(mon / static_cast<int>(interval_seconds_) * static_cast<int>(interval_seconds_));
+      tm.tm_year = (mon / 12) - 1899;
+      tm.tm_mon = mon % 12;
+      tm.tm_hour -= time_zone_;
     }
+    return (KTimestampTz)(timegm(&tm)  * 1000);
   }
 }
 
@@ -782,7 +763,7 @@ std::string FieldFuncTimeBucket::replaceKeywords(const std::string& timestring) 
     return result;
 }
 
-k_uint64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info) {
+k_int64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info) {
   std::string timestring = {args_[1]->ValStr().getptr(),
                             args_[1]->ValStr().length_};
   std::string raw_string = timestring;
@@ -793,37 +774,52 @@ k_uint64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& y
   // Replace time unit keywords
   timestring = replaceKeywords(timestring);
 
-  if (timestring.length() < 2) {
-    error_info = "invalid input interval time for time_bucket or time_bucket_gapfill.";
-    return 0;
-  }
-
-  char unit = timestring.back();
-  if (unit != 'y' && unit != 'n' && unit != 'w' && unit != 'd' && unit != 'h' && unit != 'm' && unit != 's') {
-    error_info = "interval: invalid input syntax: " + raw_string + ".";
-    return 0;
-  }
-
-  std::string intervalStr = timestring.substr(0, timestring.size() - 1);
-  try {
-    if (std::stol(intervalStr) <= 0) {
-    error_info = "second arg should be a positive interval.";
-    return 0;
+  k_uint32 code = ERRCODE_INVALID_DATETIME_FORMAT;
+  std::string intervalStr;
+  char unit;
+  do {
+    if (timestring.length() < 2) {
+      error_info =
+          "invalid input interval time for time_bucket or "
+          "time_bucket_gapfill.";
+      code = ERRCODE_INVALID_PARAMETER_VALUE;
+      break;
     }
-  } catch (...) {
-    error_info = "interval: invalid input syntax: " + raw_string + ".";
+
+    unit = timestring.back();
+    if (unit != 'y' && unit != 'n' && unit != 'w' && unit != 'd' &&
+        unit != 'h' && unit != 'm' && unit != 's') {
+      error_info = "interval: invalid input syntax: " + raw_string + ".";
+      break;
+    }
+
+    intervalStr = timestring.substr(0, timestring.size() - 1);
+    try {
+      if (std::stol(intervalStr) <= 0) {
+        error_info = "second arg should be a positive interval.";
+        code = ERRCODE_INVALID_PARAMETER_VALUE;
+        break;
+      }
+    } catch (...) {
+      error_info = "interval: invalid input syntax: " + raw_string + ".";
+      break;
+    }
+
+    for (char c : intervalStr) {
+      if (c > '9' || c < '0') {
+        error_info =
+            "invalid input interval time for time_bucket or "
+            "time_bucket_gapfill.";
+        code = ERRCODE_INVALID_PARAMETER_VALUE;
+        break;
+      }
+    }
+  } while (false);
+  if (error_info != "") {
+    EEPgErrorInfo::SetPgErrorInfo(code, error_info_.c_str());
     return 0;
   }
-
-
-  for (char c : intervalStr) {
-    if (c > '9' || c < '0') {
-      error_info = "invalid input interval time for time_bucket or time_bucket_gapfill.";
-      return 0;
-    }
-  }
-
-  k_uint64 interval_seconds_ = stoll(intervalStr);
+  k_int64 interval_seconds_ = stoll(intervalStr);
 
   // Convert interval to milliseconds based on unit
   switch (unit) {

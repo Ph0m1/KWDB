@@ -13,6 +13,7 @@
 
 #include "ee_field_common.h"
 #include "ee_global.h"
+#include "ee_kwthd_context.h"
 #include "ee_table.h"
 
 namespace kwdbts {
@@ -101,16 +102,11 @@ k_bool FieldNum::is_nullable() {
 
 char *FieldNum::get_ptr() {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      return static_cast<char *>(
-          table_->GetData(col_idx_in_rs_, storage_len_, column_type_, storage_type_));
-    } else {
-      return static_cast<char *>(table_->GetData(col_idx_in_rs_, offset_in_template_,
-                                                 column_type_, storage_type_));
-    }
+    auto row_batch = current_thd->GetRowBatch();
+    return static_cast<char*>(row_batch->GetData(col_idx_in_rs_, storage_len_, column_type_, storage_type_));
   } else {
-    return static_cast<char *>(table_->GetData2(num_, offset_in_template_,
-                                                column_type_, storage_type_));
+    IChunk* data_chunk = current_thd->GetDataChunk();
+    return data_chunk->GetData(num_);
   }
 }
 k_bool FieldNum::is_over_flow() {
@@ -354,17 +350,11 @@ Field *FieldLonglong::field_to_copy() {
 
 char *FieldTimestampTZ::get_ptr() {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      return static_cast<char *>(
-          table_->GetData(col_idx_in_rs_, 0 == num_ ? storage_len_ + 8 : storage_len_,
-                          column_type_, storage_type_));
-    } else {
-      return static_cast<char *>(table_->GetData(col_idx_in_rs_, offset_in_template_,
-                                                 column_type_, storage_type_));
-    }
+    RowBatch* row_batch = current_thd->GetRowBatch();
+    return row_batch->GetData(col_idx_in_rs_, 0 == num_ ? storage_len_ + 8 : storage_len_, column_type_, storage_type_);
   } else {
-    return static_cast<char *>(table_->GetData2(num_, offset_in_template_,
-                                                column_type_, storage_type_));
+    IChunk* data_chunk = current_thd->GetDataChunk();
+    return data_chunk->GetData(num_);
   }
 }
 
@@ -847,13 +837,7 @@ k_double64 FieldFunc::ValReal(char *ptr) {
 String FieldFunc::ValStr(char *ptr) { return ValTempStr(ptr); }
 
 char *FieldFunc::get_ptr() {
-  char *ptr = nullptr;
-  if (offset_in_template_ >= 0) {
-    ptr = static_cast<char *>(table_->GetData(col_idx_in_rs_, offset_in_template_,
-                                              column_type_, storage_type_));
-  }
-
-  return ptr;
+  return nullptr;
 }
 
 k_bool FieldFunc::is_nullable() {

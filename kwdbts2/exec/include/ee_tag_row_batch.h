@@ -63,7 +63,7 @@ class TagRowBatch : public RowBatch {
     typ_ = RowBatchType::RowBatchTypeTag;
   }
   ~TagRowBatch() {}
-  void *GetData(k_uint32 col, k_uint32 offset,
+  char *GetData(k_uint32 col, k_uint32 offset,
                 roachpb::KWDBKTSColumn::ColumnType ctype,
                 roachpb::DataType dt) override;
   k_uint16 GetDataLen(k_uint32 col, k_uint32 offset,

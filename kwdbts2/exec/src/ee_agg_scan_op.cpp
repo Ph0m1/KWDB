@@ -35,7 +35,27 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
       break;
     }
 
-    agg_source_target_col_map_.resize(num_);
+    for (k_int32 i = 0; i < table_reader_spec_.aggregator().aggregations_size(); ++i) {
+      aggregations_.push_back(table_reader_spec_.aggregator().aggregations(i));
+    }
+
+    group_cols_size_ = table_reader_spec_.aggregator().group_cols_size();
+    group_cols_ = static_cast<k_uint32 *>(malloc(group_cols_size_ * sizeof(k_uint32)));
+    if (!group_cols_) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      ret = EEIteratorErrCode::EE_ERROR;
+      break;
+    }
+    for (k_int32 i = 0; i < group_cols_size_; ++i) {
+      k_uint32 group_col = table_reader_spec_.aggregator().group_cols(i);
+      group_cols_[i] = group_col;
+    }
+    agg_source_target_col_map_ = static_cast<k_uint32 *>(malloc(num_ * sizeof(k_uint32)));
+    if (!agg_source_target_col_map_) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      ret = EEIteratorErrCode::EE_ERROR;
+      break;
+    }
 
     // extract from agg spec
     auto agg_param_ = AggregatorSpecParam<TSAggregatorSpec>(this,
@@ -73,12 +93,6 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
     if (interval_seconds_ == 0) {
       ret = EEIteratorErrCode::EE_ERROR;
       break;
-    }
-
-    if (!variable_interval_) {
-      construct_ = &AggTableScanOperator::construct;
-    } else {
-      construct_ = &AggTableScanOperator::construct_variable;
     }
 
     ResolveAggFuncs(ctx);
@@ -215,26 +229,27 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
   }
   k_int32 target_row = count_of_current_chunk - 1;
   k_uint32 row_batch_count = row_batch->Count();
+  auto current_chunk = current_data_chunk_.get();
+  std::vector<DataChunk*> chunks;
+  chunks.push_back(current_chunk);
+
+  GroupByColumnInfo group_by_cols[group_cols_size_] = {};
+
   if (group_by_metadata_.reset(row_batch_count) != true) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
   }
 
-  std::vector<DataChunk*> chunks;
-  chunks.push_back(current_data_chunk_.get());
   for (k_uint32 row = 0; row < row_batch_count; ++row) {
     // check all the group by column, and increase the target_row number if it finds a different group.
-    std::vector<GroupByColumnInfo> group_by_cols;
-    group_by_cols.reserve(group_cols_.size());
-
     KTimestampTz time_bucket = 0;
-    bool is_new_group = ProcessGroupCols(target_row, row_batch, group_by_cols, time_bucket);
+    bool is_new_group = ProcessGroupCols(target_row, row_batch, group_by_cols, time_bucket, current_chunk);
 
     // new group or end of rowbatch
     if (is_new_group) {
       group_by_metadata_.setNewGroup(row);
 
-      if (current_data_chunk_->isFull()) {
+      if (current_chunk->isFull()) {
         output_queue_.push(std::move(current_data_chunk_));
         // initialize a new agg result buffer.
         constructAggResults();
@@ -243,14 +258,15 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
           Return(KStatus::FAIL);
         }
         target_row = -1;
-        chunks.push_back(current_data_chunk_.get());
+        current_chunk = current_data_chunk_.get();
+        chunks.push_back(current_chunk);
       }
 
       ++target_row;
-      current_data_chunk_->AddCount();
-      for (int j = 0; j < group_cols_.size(); j++) {
+      current_chunk->AddCount();
+      for (int j = 0; j < group_cols_size_; j++) {
         auto& col = group_by_cols[j];
-        current_data_chunk_->InsertData(target_row, col.col_index, col.data_ptr, col.len);
+        current_chunk->InsertData(target_row, col.col_index, col.data_ptr, col.len);
       }
     }
 
@@ -268,20 +284,23 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
 }
 
 k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row_batch,
-                                              std::vector<GroupByColumnInfo>& group_by_cols,
-                                              KTimestampTz& time_bucket) {
+                                              GroupByColumnInfo* group_by_cols,
+                                              KTimestampTz& time_bucket, IChunk *chunk) {
   bool is_new_group = false;
   k_uint32 current_line = target_row <= 0 ? 0 : target_row;
-
-  for (k_uint32 col : group_cols_) {
+  k_int32 col_index = -1;
+  k_uint32 col = 0;
+  for (k_int32 i = 0; i < group_cols_size_; i++) {
+    col_index++;
+    col =  group_cols_[i];
     k_uint32 target_col = agg_source_target_col_map_[col];
 
     // maybe first row in group
-    bool is_dest_null = current_data_chunk_->IsNull(current_line, target_col);
-    auto target_ptr = current_data_chunk_->GetData(current_line, target_col);
+    bool is_dest_null = chunk->IsNull(current_line, target_col);
+    auto target_ptr = chunk->GetData(current_line, target_col);
 
     auto* field = GetRender(col);
-    auto* source_ptr = AggregateFunc::GetFieldDataPtr(field, row_batch);
+    auto* source_ptr = field->get_ptr(row_batch);
 
     // handle the null value in input data.
     if (field->isNullable() && field->is_nullable()) {
@@ -290,7 +309,8 @@ k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row
 
     switch (field->get_storage_type()) {
       case roachpb::DataType::BOOL: {
-        processGroupByColumn<bool>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);
+        processGroupByColumn<bool>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group,
+                                    col_index);
         break;
       }
       case roachpb::DataType::TIMESTAMP:
@@ -298,26 +318,31 @@ k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         if (col == col_idx_) {
-          time_bucket = (this->*construct_)(field);
+          time_bucket = field->ValInt();
           source_ptr = reinterpret_cast<char*>(&time_bucket);
         }
-        processGroupByColumn<k_int64>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);
+        processGroupByColumn<k_int64>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group,
+                                      col_index);
         break;
       }
       case roachpb::DataType::INT: {
-        processGroupByColumn<k_int32>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);
+        processGroupByColumn<k_int32>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group,
+                                      col_index);
         break;
       }
       case roachpb::DataType::SMALLINT: {
-        processGroupByColumn<k_int16>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);
+        processGroupByColumn<k_int16>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group,
+                                      col_index);
         break;
       }
       case roachpb::DataType::FLOAT: {
-        processGroupByColumn<k_float32>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);
+        processGroupByColumn<k_float32>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group,
+                                        col_index);
         break;
       }
       case roachpb::DataType::DOUBLE: {
-        processGroupByColumn<k_float64>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group);
+        processGroupByColumn<k_float64>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols, is_new_group,
+                                        col_index);
         break;
       }
       case roachpb::DataType::CHAR:
@@ -327,7 +352,7 @@ k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row
       case roachpb::DataType::VARCHAR:
       case roachpb::DataType::VARBINARY: {
         processGroupByColumn<std::string>(source_ptr, target_ptr, target_col, is_dest_null, group_by_cols,
-                                          is_new_group);
+                                          is_new_group, col_index);
         break;
       }
       default: {
@@ -448,11 +473,6 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
 
         // skip to construct the ANY_NOT_NULL func for time_bucket column and group by columns.
         if (col_idx_ == argIdx) {
-          break;
-        }
-
-        if (std::find(group_cols_.begin(), group_cols_.end(), argIdx)
-            != group_cols_.end()) {
           break;
         }
 

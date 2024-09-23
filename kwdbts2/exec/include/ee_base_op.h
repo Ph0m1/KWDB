@@ -175,11 +175,11 @@ class GroupByMetadata {
   }
 
   void setNewGroup(k_uint32 line) {
-    bitmap_[line / 8] |= (1 << 7) >> (line % 8);
+    bitmap_[line >> 3] |= (1 << 7) >> (line & 7);
   }
 
   bool isNewGroup(k_uint32 line) {
-    return (bitmap_[line / 8] & ((1 << 7) >> (line % 8))) != 0;
+    return (bitmap_[line >> 3] & ((1 << 7) >> (line & 7))) != 0;
   }
 
   k_bool initialize() {

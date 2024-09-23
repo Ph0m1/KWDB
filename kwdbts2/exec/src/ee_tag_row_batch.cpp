@@ -18,7 +18,7 @@ namespace kwdbts {
 
 #define PRIMARY_TAGS_EXTERN_STORAGE_LENGTH 8
 
-void *TagRowBatch::GetData(k_uint32 tagIndex, k_uint32 offset,
+char *TagRowBatch::GetData(k_uint32 tagIndex, k_uint32 offset,
                            roachpb::KWDBKTSColumn::ColumnType ctype,
                            roachpb::DataType dt) {
   if (res_.data[tagIndex].empty()) {

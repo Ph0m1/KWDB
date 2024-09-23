@@ -211,21 +211,6 @@ class AggregateFunc {
 
   virtual k_uint32 GetStorageLength() const { return 0; }
 
-  static char* GetFieldDataPtr(Field* field, RowBatch* row_batch) {
-    if (field->get_field_type() == Field::Type::FIELD_ITEM) {
-      k_uint32 col_idx_in_rs = field->getColIdxInRs();
-      k_uint32 storage_len = field->get_storage_length();
-      roachpb::DataType storage_type = field->get_storage_type();
-      roachpb::KWDBKTSColumn::ColumnType column_type = field->get_column_type();
-
-      return static_cast<char*>(
-          row_batch->GetData(col_idx_in_rs, 0 == field->get_num() ? storage_len + 8 : storage_len,
-                             column_type, storage_type));
-    }
-
-    return field->get_ptr();
-  }
-
  protected:
   LinearProbingHashTable* seen_{nullptr};
 
@@ -324,7 +309,7 @@ class AnyNotNullAggregate : public AggregateFunc {
         }
 
         auto dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
 
         if constexpr (std::is_same_v<T, std::string>) {
           k_uint16 len;
@@ -663,7 +648,7 @@ class MaxAggregate : public AggregateFunc {
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         is_dest_null = false;
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
 
         T src_val = *reinterpret_cast<T*>(src_ptr);
         if constexpr (std::is_floating_point<T>::value) {
@@ -729,7 +714,7 @@ class MaxAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
 
         if (max_val == nullptr) {
           is_dest_null = false;
@@ -804,7 +789,7 @@ class MaxAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
         std::string_view src_val;
 
         if (IsVarStringType(storage_type)) {
@@ -1161,7 +1146,7 @@ class MinAggregate : public AggregateFunc {
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         is_dest_null = false;
 
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
 
         T src_val = *reinterpret_cast<T*>(src_ptr);
         if constexpr (std::is_floating_point<T>::value) {
@@ -1227,7 +1212,7 @@ class MinAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
         if (min_val == nullptr) {
           is_dest_null = false;
           min_val = src_ptr;
@@ -1301,7 +1286,7 @@ class MinAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
         std::string_view src_val;
 
         if (IsVarStringType(storage_type)) {
@@ -1942,7 +1927,7 @@ class SumAggregate : public AggregateFunc {
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         is_dest_null = false;
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
 
         T_SRC src_val = *reinterpret_cast<T_SRC*>(src_ptr);
         sum_val += src_val;
@@ -2019,7 +2004,7 @@ class SumAggregate : public AggregateFunc {
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         is_dest_null = false;
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
         T_SRC src_val = *reinterpret_cast<T_SRC*>(src_ptr);
 
         if (dest_is_double) {
@@ -2112,7 +2097,7 @@ class SumAggregate : public AggregateFunc {
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         is_dest_null = false;
-        char* src_ptr = GetFieldDataPtr(arg_field, row_batch);
+        char* src_ptr = arg_field->get_ptr(row_batch);
         k_bool src_is_double = *reinterpret_cast<k_bool*>(src_ptr);
 
 
@@ -2710,7 +2695,7 @@ class LastAggregate : public AggregateFunc {
         if (last_line_ptr != nullptr) {
           k_int64 point_ts = INT64_MAX;
           if (point_idx_ != -1) {  // for last point
-            DatumPtr point_ptr = GetFieldDataPtr(point_field, row_batch);
+            DatumPtr point_ptr = point_field->get_ptr(row_batch);
             point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
           }
           if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
@@ -2738,19 +2723,19 @@ class LastAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+        char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
         k_int64 point_ts = INT64_MAX;
         if (point_idx_ != -1) {  // for last point
-          DatumPtr point_ptr = GetFieldDataPtr(point_field, row_batch);;
+          DatumPtr point_ptr = point_field->get_ptr(row_batch);
           point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
         }
 
         if (ts > last_ts_ && (point_ts == INT64_MAX ||
                               (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
-          last_line_ptr = GetFieldDataPtr(arg_field, row_batch);
+          last_line_ptr = arg_field->get_ptr(row_batch);
 
           if (IS_STRING_FAMILY) {
             if (IsVarStringType(storage_type)) {
@@ -2948,13 +2933,13 @@ class LastRowAggregate : public AggregateFunc {
         is_dest_null = true;
       }
 
-      char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+      char* ts_src_ptr = ts_field->get_ptr(row_batch);
       KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
       if (ts > last_ts_) {
         last_ts_ = ts;
         if (!(arg_field->isNullable() && arg_field->is_nullable())) {
           is_dest_null = false;
-          last_line_ptr = GetFieldDataPtr(arg_field, row_batch);
+          last_line_ptr = arg_field->get_ptr(row_batch);
           if (IS_STRING_FAMILY) {
             if (IsVarStringType(storage_type)) {
               str_length = arg_field->ValStrLength(last_line_ptr);
@@ -3138,7 +3123,7 @@ class LastTSAggregate : public AggregateFunc {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
           if (point_idx_ != -1) {  // for last point
-            DatumPtr point_ptr = GetFieldDataPtr(ts_field, row_batch);
+            DatumPtr point_ptr = point_field->get_ptr(row_batch);
             point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
           }
           if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
@@ -3160,9 +3145,10 @@ class LastTSAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+        char* ts_src_ptr = ts_field->get_ptr(row_batch);
+
         if (point_idx_ != -1) {  // for last point
-          DatumPtr point_ptr = GetFieldDataPtr(point_field, row_batch);
+          DatumPtr point_ptr = point_field->get_ptr(row_batch);
           point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
         }
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
@@ -3312,7 +3298,7 @@ class LastRowTSAggregate : public AggregateFunc {
         last_line_ptr = nullptr;
       }
 
-      char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+      char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
       KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
       if (last_line_ptr == nullptr || ts > last_ts_) {
@@ -3478,12 +3464,12 @@ class FirstAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+        char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
         if (ts < first_ts_) {
           first_ts_ = ts;
-          first_line_ptr = GetFieldDataPtr(arg_field, row_batch);
+          first_line_ptr = arg_field->get_ptr(row_batch);
 
           if (IS_STRING_FAMILY) {
             if (IsVarStringType(storage_type)) {
@@ -3684,14 +3670,14 @@ class FirstRowAggregate : public AggregateFunc {
         is_dest_null = true;
       }
 
-      char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+      char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
       KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
       if (ts < first_ts_) {
         first_ts_ = ts;
         if (!(arg_field->isNullable() && arg_field->is_nullable())) {
           is_dest_null = false;
-          first_line_ptr = GetFieldDataPtr(arg_field, row_batch);
+          first_line_ptr = arg_field->get_ptr(row_batch);
           if (IS_STRING_FAMILY) {
             if (IsVarStringType(storage_type)) {
               str_length = arg_field->ValStrLength(first_line_ptr);
@@ -3866,7 +3852,7 @@ class FirstTSAggregate : public AggregateFunc {
       }
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
-        char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+        char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
         if (first_line_ptr == nullptr || ts < first_ts_) {
@@ -4012,7 +3998,7 @@ class FirstRowTSAggregate : public AggregateFunc {
         first_line_ptr = nullptr;
       }
 
-      char* ts_src_ptr = GetFieldDataPtr(ts_field, row_batch);
+      char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
       KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
       if (first_line_ptr == nullptr || ts < first_ts_) {

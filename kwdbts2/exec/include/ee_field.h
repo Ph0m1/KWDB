@@ -18,6 +18,7 @@
 #include <string>
 #include "ee_pb_plan.pb.h"
 #include "ee_decimal.h"
+#include "ee_row_batch.h"
 #include "kwdb_type.h"
 #include "ts_common.h"
 #include "ee_string.h"
@@ -77,6 +78,7 @@ class Field {
   virtual Field *field_to_copy() = 0;
   virtual k_bool fill_template_field(char *ptr) = 0;
   virtual char *get_ptr() = 0;
+  virtual char *get_ptr(RowBatch *batch) { return nullptr; }
   virtual k_uint32 field_in_template_length();
   virtual k_bool is_nullable();
   virtual k_bool is_condition_met();
@@ -191,6 +193,11 @@ class FieldNum : public Field {
   virtual ~FieldNum() {}
   k_bool is_nullable() override;
   char *get_ptr() override;
+  char *get_ptr(RowBatch *batch) override {
+    return batch->GetData(col_idx_in_rs_,
+                          0 == num_ ? storage_len_ + 8 : storage_len_,
+                          column_type_, storage_type_);
+  }
   k_bool fill_template_field(char *ptr) override;
   k_bool is_over_flow() override;
 };
