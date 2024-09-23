@@ -34,7 +34,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
-	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 )
 
@@ -108,7 +107,6 @@ func newTsDeleter(
 // Start is part of the RowSource interface.
 func (td *tsDeleter) Start(ctx context.Context) context.Context {
 	ctx = td.StartInternal(ctx, tsDeleteProcName)
-	log.Infof(ctx, "tsDeleter start.")
 	var err error
 	deletedRow := uint64(0)
 
@@ -238,7 +236,6 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 	}
 	td.deleteSuccess = true
 	td.deleteRow = deletedRow
-	log.Infof(ctx, "tsDeleter success.")
 	return ctx
 }
 

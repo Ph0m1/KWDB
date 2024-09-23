@@ -91,7 +91,6 @@ func (tp *tsProcessor) Start(ctx context.Context) context.Context {
 
 	var err error
 	var errPrefix string
-	log.Infof(ctx, "tsProcessor start.")
 	switch tp.tsOperatorType {
 	case execinfrapb.OperatorType_TsDropDeleteEntities:
 		errPrefix = "drop timeseries table failed, reason:%s"
@@ -158,7 +157,6 @@ func (tp *tsProcessor) Start(ctx context.Context) context.Context {
 	}
 
 	tp.success = true
-	log.Infof(ctx, "tsProcessor success.")
 	return ctx
 }
 

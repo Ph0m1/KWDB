@@ -116,7 +116,7 @@ type Parser struct {
 	parserImpl     sqlParserImpl
 	tokBuf         [8]sqlSymType
 	stmtBuf        [1]Statement
-	Dudgetstable   func(dbName string, tableName string) bool
+	Dudgetstable   func(dbName *string, tableName string) bool
 	IsShortcircuit bool
 }
 
@@ -220,11 +220,16 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 				p.scanner.shortinsert.bracket = -1
 				p.scanner.shortinsert.RowCount = 0
 				if dot {
-					//1) insert into benchmark.host_0 values (...)   2) insert into benchmark.host_0 (...) values (...)
-					p.scanner.shortinsert.db = tokens[2].str
-					p.scanner.shortinsert.tb = tokens[4].str
+					if len(tokens) > 6 {
+						// 1) insert into database.schema.table values (...)
+						p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[6].str
+					} else {
+						// 2) insert into database.table values (...)
+						// 3) insert into schema.table values (...)  The actualDBName is provided in the Dudgetstable
+						p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[4].str
+					}
 				} else {
-					//3) insert into host_0 values (...)             4) insert into host_0 (...) values (...)
+					// 4) insert into table values (...)
 					p.scanner.shortinsert.tb = tokens[2].str
 				}
 			}
@@ -233,7 +238,7 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 			}
 			// "insert into database.table": len(tokens) == 4
 			if len(p.scanner.shortinsert.tb) != 0 {
-				if !decided && p.Dudgetstable != nil && p.Dudgetstable(p.scanner.shortinsert.db, p.scanner.shortinsert.tb) {
+				if !decided && p.Dudgetstable != nil && p.Dudgetstable(&p.scanner.shortinsert.db, p.scanner.shortinsert.tb) {
 					p.scanner.shortinsert.isTsTable = true
 					if p.scanner.shortinsert.InsertValues == nil {
 						p.scanner.shortinsert.InsertValues = make([]string, 0, tsdirectcap)

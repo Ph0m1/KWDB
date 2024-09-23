@@ -437,7 +437,7 @@ func (ex *connExecutor) execPreparedirectBind(
 	}
 	if ins, ok := ps.PrepareMetadata.Statement.AST.(*tree.Insert); ok {
 		var di DirectInsert
-		copy(ins.Columns, ps.PrepareInsertDirect.Inscols)
+		copy(ins.Columns, ps.PrepareInsertDirect.Dit.Desc)
 		ie := ex.server.GetCFG().InternalExecutor
 		cfg := ie.GetServer().GetCFG()
 		err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {

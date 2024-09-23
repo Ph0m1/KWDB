@@ -84,7 +84,6 @@ func newCreateTsTable(
 // Start is part of the RowSource interface.
 func (tct *tsCreateTable) Start(ctx context.Context) context.Context {
 	ctx = tct.StartInternal(ctx, tsCreateTableProcName)
-	log.Infof(ctx, "tsCreateTable start.")
 	//hashRouter, err := api.GetHashRouterWithTable(0, uint32(tct.tableID), true, tct.EvalCtx.Txn)
 	//if err != nil {
 	//	return ctx
@@ -109,7 +108,6 @@ func (tct *tsCreateTable) Start(ctx context.Context) context.Context {
 	}
 
 	tct.createTaTableSuccess = true
-	log.Infof(ctx, "tsCreateTable success.")
 	return ctx
 }
 

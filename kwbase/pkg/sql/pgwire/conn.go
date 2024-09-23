@@ -860,11 +860,15 @@ func (c *conn) handleSimpleQuery(
 
 	c.parser.IsShortcircuit = unqis.GetTsinsertdirect()
 	var dit sql.DirectInsertTable
-	c.parser.Dudgetstable = func(dbName string, tableName string) bool {
+	c.parser.Dudgetstable = func(dbName *string, tableName string) bool {
 		user := c.sessionArgs.User
+		actualDBName := unqis.GetTsSessionData().Database
+		if actualDBName != "" {
+			dbName = &actualDBName
+		}
 		var isTsTable bool
 		var insertErr error
-		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, dbName, tableName, user)
+		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, *dbName, tableName, user)
 		if insertErr != nil {
 			return false
 		}
@@ -1152,11 +1156,11 @@ func (c *conn) handleParse(
 
 	c.parser.IsShortcircuit = unqis.GetTsinsertdirect()
 	var dit sql.DirectInsertTable
-	c.parser.Dudgetstable = func(dbName string, tableName string) bool {
+	c.parser.Dudgetstable = func(dbName *string, tableName string) bool {
 		user := c.sessionArgs.User
 		var isTsTable bool
 		var insertErr error
-		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, dbName, tableName, user)
+		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, *dbName, tableName, user)
 		if insertErr != nil {
 			return false
 		}
