@@ -38,6 +38,7 @@ EEIteratorErrCode DistinctSpecParam::ResolveOrderColumns(kwdbContext_p ctx) {
   if (nullptr == order_field_) {
     LOG_ERROR("malloc memory failed, size %lu",
               order_field_num_ * sizeof(Field *));
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);
   }
 
@@ -168,6 +169,7 @@ EEIteratorErrCode DistinctSpecParam::HandleRender(kwdbContext_p ctx,
     if (nullptr == not_order_field_) {
       LOG_ERROR("malloc not_order_field_ failed, size : %lu",
                 not_order_field_num_ * sizeof(Field *));
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       Return(EEIteratorErrCode::EE_ERROR);
     }
 
@@ -255,6 +257,7 @@ EEIteratorErrCode DistinctSpecParam::MallocArray(kwdbContext_p ctx) {
   distinct_field_ = static_cast<Field **>(malloc(num * sizeof(Field *)));
   if (nullptr == distinct_field_) {
     LOG_ERROR("distinct_field_ malloc failed\n");
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);
   }
 

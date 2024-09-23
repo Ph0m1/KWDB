@@ -90,6 +90,7 @@ EEIteratorErrCode DistinctOperator::Init(kwdbContext_p ctx) {
 
     seen_ = KNEW LinearProbingHashTable(distinct_types, distinct_lens, 0);
     if (seen_ == nullptr || seen_->Resize() < 0) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       Return(EEIteratorErrCode::EE_ERROR);
     }
   } while (0);

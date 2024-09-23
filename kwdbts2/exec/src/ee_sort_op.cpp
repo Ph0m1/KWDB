@@ -54,6 +54,7 @@ KStatus SortOperator::ResolveSortCols(kwdbContext_p ctx) {
   EnterFunc();
   if (!spec_->has_output_ordering()) {
     LOG_ERROR("order by clause must has a order field");
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "order by clause must has a order field");
     Return(KStatus::FAIL);
   }
 
@@ -92,7 +93,8 @@ EEIteratorErrCode SortOperator::Init(kwdbContext_p ctx) {
       k_uint32 num = input_fields_.size();
       renders_ = static_cast<Field **>(malloc(num * sizeof(Field *)));
       if (!renders_) {
-        LOG_ERROR("Malloc faield, size : %lu", num * sizeof(Field *));
+        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+        LOG_ERROR("Malloc failed, size : %lu", num * sizeof(Field *));
         break;
       }
       num_ = num;

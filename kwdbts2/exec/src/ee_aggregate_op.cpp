@@ -103,7 +103,8 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
             agg_func = make_unique<MaxAggregate<k_decimal>>(i, argIdx, len + BOOL_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for max aggregation\n");
+            LOG_ERROR("unsupported data type for max aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for max aggregation");
             status = KStatus::FAIL;
             break;
         }
@@ -148,7 +149,8 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
             agg_func = make_unique<MinAggregate<k_decimal>>(i, argIdx, len + BOOL_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for min aggregation\n");
+            LOG_ERROR("unsupported data type for min aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for min aggregation");
             status = KStatus::FAIL;
             break;
         }
@@ -199,7 +201,8 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
                 make_unique<AnyNotNullAggregate<k_decimal>>(i, argIdx, len + BOOL_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for any_not_null aggregation\n");
+            LOG_ERROR("unsupported data type for any_not_null aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for not null aggregation");
             status = KStatus::FAIL;
             break;
         }
@@ -230,7 +233,8 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
             agg_func = make_unique<SumAggregate<k_decimal, k_decimal>>(i, argIdx, len + BOOL_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for sum aggregation\n");
+            LOG_ERROR("unsupported data type for sum aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for sum aggregation");
             status = KStatus::FAIL;
             break;
         }
@@ -400,14 +404,16 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
             //   agg_func = make_unique<AVGRowAggregate<k_decimal>>(i, argIdx, len);
             //   break;
           default:
-          LOG_ERROR("unsupported data type for sum aggregation\n");
+            LOG_ERROR("unsupported data type for sum aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for sum aggregation");
             status = KStatus::FAIL;
             break;
         }
         break;
       }
       default:
-      LOG_ERROR("unknonw aggregation function type %d\n", func_type);
+        LOG_ERROR("unknown aggregation function type %d\n", func_type);
+        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_FUNCTION_DEFINITION, "unknown aggregation function type");
         status = KStatus::FAIL;
         break;
     }
@@ -416,6 +422,8 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
       agg_func->SetOffset(func_offsets_[i]);
       param_.aggs_[i]->set_column_offset(func_offsets_[i]);
       funcs_.push_back(std::move(agg_func));
+    } else {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     }
   }
 
@@ -637,6 +645,7 @@ EEIteratorErrCode HashAggregateOperator::Init(kwdbContext_p ctx) {
   }
   ht_ = KNEW LinearProbingHashTable(group_types, group_lens, agg_row_size_);
   if (ht_ == nullptr || ht_->Resize() < 0) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);
   }
 

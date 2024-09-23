@@ -59,6 +59,7 @@ EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
   }
   ht_ = KNEW LinearProbingHashTable(group_types, group_lens, agg_row_size_);
   if (ht_ == nullptr || ht_->Resize() < 0) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);
   }
 

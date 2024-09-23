@@ -660,6 +660,8 @@ func (r *TsEngine) tsExecute(
 		} else {
 			err = fmt.Errorf("Error Code: %s", strconv.Itoa(tsRespInfo.Code))
 		}
+	} else if retInfo.ret < 1 {
+		err = fmt.Errorf("Unknown error")
 	}
 
 	return tsRespInfo, err

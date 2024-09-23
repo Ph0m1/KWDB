@@ -138,6 +138,7 @@ EEIteratorErrCode PostResolve::ResolveOutputFields(kwdbContext_p ctx,
           break;
         default:
           LOG_WARN("Unknown Output Field Type!\n");
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "Unknown Output Field Type");
           break;
     }
     if (new_field) {
@@ -147,6 +148,8 @@ EEIteratorErrCode PostResolve::ResolveOutputFields(kwdbContext_p ctx,
       // DataChunk columns are treated as TYPEDATA
       new_field->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
       output_fields.push_back(new_field);
+    } else {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     }
   }
 
@@ -841,6 +844,7 @@ EEIteratorErrCode ReaderPostResolve::ResolveRender(kwdbContext_p ctx,
     }
     Field *field = table_->GetFieldWithColNum(tab);
     if (nullptr == field) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "field is null");
       Return(EEIteratorErrCode::EE_ERROR);
     }
     outputcols_[i] = field;
@@ -1046,6 +1050,8 @@ Field *PostResolve::ResolveFuncOperator(kwdbContext_p ctx, KString &func_name,
   }
   if (nullptr != field) {
     field->table_ = table_;
+  } else {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
   }
 
   Return(field);

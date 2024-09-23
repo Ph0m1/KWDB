@@ -64,7 +64,7 @@ class SynchronizerOperator : public BaseOperator {
   EEIteratorErrCode Start(kwdbContext_p ctx) override;
   KStatus Close(kwdbContext_p ctx) override;
 
-  void InitParallelGroup(kwdbContext_p ctx);
+  EEIteratorErrCode InitParallelGroup(kwdbContext_p ctx);
   Field **GetRender() { return input_->GetRender(); }
   Field *GetRender(int i) { return input_->GetRender(i); }
   k_uint32 GetRenderSize() { return input_->GetRenderSize(); }

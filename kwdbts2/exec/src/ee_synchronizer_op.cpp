@@ -82,7 +82,8 @@ void SynchronizerOperator::FinishParallelGroup(EEIteratorErrCode code, const EEP
   wait_cond_.notify_one();
 }
 
-void SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
+EEIteratorErrCode SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   // Creating the number of parallelgroups based on parallelism
   max_queue_size_ = degree_ * 2 + 2;
   parallel_groups_.resize(degree_);
@@ -92,13 +93,18 @@ void SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
       parallelGroup->SetIterator(input_);
     } else {
       BaseOperator *clone_iter = input_->Clone();
-      clone_iter->Init(ctx);
+      code = clone_iter->Init(ctx);
+      if (EEIteratorErrCode::EE_OK != code) {
+        return code;
+      }
       parallelGroup->SetIterator(clone_iter);
       clone_iter_list_.push_back(clone_iter);
     }
 
     parallelGroup->SetTable(table_);
-    parallelGroup->Init(ctx);
+    if (parallelGroup->Init(ctx) != KStatus::SUCCESS) {
+      return EEIteratorErrCode::EE_ERROR;
+    }
     parallelGroup->SetParent(this);
     parallelGroup->SetParallel(EE_ENABLE_PARALLEL);
     parallelGroup->SetDegree(degree_);
@@ -108,6 +114,8 @@ void SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
   for (k_uint32 i = 0; i < degree_; ++i) {
     ExecPool::GetInstance().PushTask(parallel_groups_[i]);
   }
+
+  return EEIteratorErrCode::EE_OK;
 }
 
 EEIteratorErrCode SynchronizerOperator::Init(kwdbContext_p ctx) {
@@ -152,7 +160,7 @@ EEIteratorErrCode SynchronizerOperator::Start(kwdbContext_p ctx) {
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
   CalculateDegree();
   if (is_parallel_) {
-    InitParallelGroup(ctx);
+    code = InitParallelGroup(ctx);
   } else {
     code = input_->Start(ctx);
   }
@@ -163,7 +171,9 @@ KStatus SynchronizerOperator::Close(kwdbContext_p ctx) {
   is_tp_stop_ = true;
   if (group_done_num_ < group_num_) {
     for (auto &parallel_group : parallel_groups_) {
-      parallel_group->Stop();
+      if (parallel_group != nullptr) {
+        parallel_group->Stop();
+      }
     }
     data_queue_.clear();
     not_fill_cv_.notify_all();

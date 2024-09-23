@@ -48,6 +48,7 @@ EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
     k_uint32 order_size_ = order.columns_size();
     if (order_size_ != 1) {
       LOG_ERROR("SortScanOperator must have one order column");
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "must have one order column");
       break;
     }
 
