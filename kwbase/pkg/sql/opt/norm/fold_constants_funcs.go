@@ -521,16 +521,4 @@ var FoldFunctionWhitelist = map[string]struct{}{
 	"json_array_length":            {},
 	"jsonb_array_length":           {},
 	"kwdb_internal.locality_value": {},
-
-	"get_bit":               {},
-	"set_bit":               {},
-	"quote_literal":         {},
-	"quote_nullable":        {},
-	"experimental_strftime": {},
-	"experimental_strptime": {},
-	"extract":               {},
-	"extract_duration":      {},
-	"date_trunc":            {},
-	"timezone":              {},
-	"width_bucket":          {},
 }

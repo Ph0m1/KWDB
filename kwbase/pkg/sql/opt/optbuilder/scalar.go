@@ -309,7 +309,12 @@ func (b *Builder) buildScalar(
 		texpr := t.Expr.(tree.TypedExpr)
 		arg := b.buildScalar(texpr, inScope, nil, nil, colRefs)
 		out = b.factory.ConstructCast(arg, t.Type)
-		out.SetConstDeductionEnabled(arg.CheckConstDeductionEnabled())
+		// if CastExpr can convert ConstExpr, set flag to true, else set flag to false
+		if _, ok := out.(*memo.ConstExpr); ok {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *tree.CoalesceExpr:
 		args := make(memo.ScalarListExpr, len(t.Exprs))
@@ -607,19 +612,31 @@ func (b *Builder) buildFunction(
 var (
 	// ConstScalarWhitelist if functionExpr is in the list of builtins, then it can convert constExpr
 	ConstScalarWhitelist = map[string]struct{}{
-		"client_encoding":           {},
-		"version":                   {},
-		"current_database":          {},
-		"current_schema":            {},
-		"current_user":              {},
-		"now":                       {},
-		"current_timestamp":         {},
-		"localtimestamp":            {},
-		"statement_timestamp":       {},
-		"cluster_logical_timestamp": {},
-		"clock_timestamp":           {},
-		"timeofday":                 {},
-		"transaction_timestamp":     {},
+		"client_encoding":              {},
+		"version":                      {},
+		"current_database":             {},
+		"current_schema":               {},
+		"current_user":                 {},
+		"now":                          {},
+		"current_timestamp":            {},
+		"localtimestamp":               {},
+		"statement_timestamp":          {},
+		"cluster_logical_timestamp":    {},
+		"clock_timestamp":              {},
+		"timeofday":                    {},
+		"transaction_timestamp":        {},
+		"kwdb_internal.create_regtype": {},
+		"get_bit":                      {},
+		"set_bit":                      {},
+		"quote_literal":                {},
+		"quote_nullable":               {},
+		"experimental_strftime":        {},
+		"experimental_strptime":        {},
+		"extract":                      {},
+		"extract_duration":             {},
+		"date_trunc":                   {},
+		"timezone":                     {},
+		"width_bucket":                 {},
 	}
 )
 

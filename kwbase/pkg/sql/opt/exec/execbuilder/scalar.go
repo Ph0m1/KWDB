@@ -107,17 +107,10 @@ func (b *Builder) buildScalar(ctx *buildScalarCtx, scalar opt.ScalarExpr) (tree.
 		if err != nil {
 			return nil, err
 		}
-		if b.evalCtx != nil && b.isConst(texpr, scalar) {
+		if b.evalCtx != nil && optbuilder.CheckConstScalarWhitelist(scalar, nil) {
 			value, err := texpr.Eval(b.evalCtx)
 			if err != nil {
-				if errors.IsAssertionFailure(err) {
-					return nil, err
-				}
-				// Ignore any errors here (e.g. division by zero), so they can happen
-				// during execution where they are correctly handled. Note that in some
-				// cases we might not even get an error (if this particular expression
-				// does not get evaluated when the query runs, e.g. it's inside a CASE).
-				return texpr, nil
+				return nil, err
 			}
 			if value == tree.DNull {
 				// We don't want to return an expression that has a different type; cast

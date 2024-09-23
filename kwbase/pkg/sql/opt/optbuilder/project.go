@@ -121,17 +121,17 @@ func (b *Builder) analyzeReturningList(
 	b.analyzeSelectList(&selectList, desiredTypes, inScope, outScope)
 }
 
-func (b *Builder) findLastFunctionParam(e tree.Expr) (tree.Expr, string) {
+func (b *Builder) findLastFunctionParam(e tree.Expr) (tree.Expr, string, string) {
 	// handle CastExpr
 	switch expr := e.(type) {
 	case *tree.FuncExpr:
 		if checkLastOrFirstAgg(expr.Func.FunctionName()) && expr.Exprs[0] != tree.DNull {
-			return expr.Exprs[0], expr.Func.FunctionName()
+			return expr.Exprs[0], expr.Func.FunctionName(), expr.String()
 		}
 	case *tree.CastExpr:
 		return b.findLastFunctionParam(expr.Expr)
 	}
-	return nil, ""
+	return nil, "", ""
 }
 
 // AddLastColumn get all column expr and alias
@@ -183,7 +183,7 @@ func (b *Builder) analyzeSelectList(
 				panic(err)
 			}
 			var expr tree.Expr = e.Expr
-			v, name := b.findLastFunctionParam(expr)
+			v, name, strExpr := b.findLastFunctionParam(expr)
 			if v != nil {
 				switch vv := v.(type) {
 				case *tree.UnresolvedName:
@@ -204,7 +204,7 @@ func (b *Builder) analyzeSelectList(
 					break
 				case tree.UnqualifiedStar, *tree.AllColumnsSelector, *tree.TupleStar:
 					if e.As != "" {
-						panic(pgerror.Newf(pgcode.Syntax, "%q cannot be aliased", tree.ErrString(v)))
+						panic(pgerror.Newf(pgcode.Syntax, "%q cannot be aliased", strExpr))
 					}
 					// expand *
 					aliases, exprs := b.expandStar(v, inScope)
@@ -218,7 +218,7 @@ func (b *Builder) analyzeSelectList(
 				case *tree.ColumnItem, *tree.NumVal, *tree.StrVal: //, *tree.NumVal, *tree.dNull
 					break
 				default:
-					panic(pgerror.Newf(pgcode.Syntax, "%q should be * or column name for last/last_row function", tree.ErrString(v)))
+					panic(pgerror.Newf(pgcode.Syntax, "%q should be * or column name for last/last_row function", strExpr))
 				}
 			}
 
