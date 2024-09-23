@@ -1318,6 +1318,8 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (bool, bool, boo
 		if execInTSEngine {
 			if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
 				source.SetEngineTS()
+			} else {
+				execInTSEngine = false
 			}
 			if !hasAddSynchronizer {
 				if !ok {
