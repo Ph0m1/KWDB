@@ -152,15 +152,15 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
   }
 }
 
-bool TsIterator::getCurBlockSpan(BlockItem* cur_block, MMapSegmentTable* segment_tbl, uint32_t* first_row,
-                    uint32_t* count, uint32_t* blk_offset) {
+bool TsIterator::getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable> segment_tbl, uint32_t* first_row,
+                                 uint32_t* count) {
   bool has_data = false;
   *count = 0;
   // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
   // there is no need to determine the timestamps for each BlockItem.
-  if (cur_block->publish_row_count > 0
+  if (cur_block->is_agg_res_available && cur_block->publish_row_count > 0
       && cur_block->publish_row_count == cur_block->alloc_row_count
-      && *blk_offset == 1
+      && cur_blockdata_offset_ == 1
       && cur_block->getDeletedCount() == 0
       && isTimestampWithinSpans(ts_spans_,
                                 KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MIN)),
@@ -168,19 +168,19 @@ bool TsIterator::getCurBlockSpan(BlockItem* cur_block, MMapSegmentTable* segment
     has_data = true;
     *first_row = 1;
     *count = cur_block->publish_row_count;
-    *blk_offset = *first_row + *count;
+    cur_blockdata_offset_ = *first_row + *count;
   }
   // If it is not achieved sequential reading optimization process,
   // the data under the BlockItem will be traversed one by one,
   // and the maximum number of consecutive data that meets the query conditions will be obtained.
   // The aggregation result of this continuous data will be further obtained in the future.
-  while (*blk_offset <= cur_block->alloc_row_count) {
-    bool is_deleted = !segment_tbl->IsRowVaild(cur_block, *blk_offset);
+  while (cur_blockdata_offset_ <= cur_block->alloc_row_count) {
+    bool is_deleted = !segment_tbl->IsRowVaild(cur_block, cur_blockdata_offset_);
     // If the data in the *blk_offset row is not within the ts_span range or has been deleted,
     // continue to verify the data in the next row.
-    timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddrByBlk(cur_block->block_id, *blk_offset - 1, 0));
+    timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddrByBlk(cur_block->block_id, cur_blockdata_offset_ - 1, 0));
     if (is_deleted || !checkIfTsInSpan(cur_ts)) {
-      ++(*blk_offset);
+      ++cur_blockdata_offset_;
       if (has_data) {
         break;
       }
@@ -189,10 +189,10 @@ bool TsIterator::getCurBlockSpan(BlockItem* cur_block, MMapSegmentTable* segment
 
     if (!has_data) {
       has_data = true;
-      *first_row = *blk_offset;
+      *first_row = cur_blockdata_offset_;
     }
     ++(*count);
-    ++*blk_offset;
+    ++cur_blockdata_offset_;
   }
   return has_data;
 }
@@ -260,7 +260,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
       segment_iter_ = new MMapSegmentTableIterator(segment_tbl, ts_spans_, kw_scan_cols_, ts_scan_cols_, attrs_);
     }
 
-    bool has_data = getCurBlockSpan(cur_block_item_, segment_tbl.get(), &first_row, count, &cur_blockdata_offset_);
+    bool has_data = getCurBlockSpan(cur_block_item_, segment_tbl, &first_row, count);
     // If the data has been queried through the sequential reading optimization process, assemble Batch and return it;
     // Otherwise, traverse the data within the current BlockItem one by one,
     // and return the maximum number of consecutive data that meets the condition.
@@ -274,7 +274,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     // If the data query within the current BlockItem is completed, switch to the next block.
     if (cur_blockdata_offset_ > cur_block_item_->publish_row_count) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(entity_ids_[cur_entity_idx_]);
+      cur_block_item_ = nullptr;
     }
     if (*count > 0) {
       KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
@@ -895,7 +895,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
       return KStatus::FAIL;
     }
     uint32_t first_row = 1;
-    bool has_data = getCurBlockSpan(cur_block, segment_tbl.get(), &first_row, count, &cur_blockdata_offset_);
+    bool has_data = getCurBlockSpan(cur_block, segment_tbl, &first_row, count);
     MetricRowID first_real_row = cur_block->getRowID(first_row);
     if (first_last_row_.NeedFirstLastAgg()) {
       for (uint32_t i = 0; i < *count; i++) {
@@ -976,11 +976,11 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
                 if (!isVarLenType(attrs_[col_idx].type)) {
                   AggCalculator agg_cal(mem, bitmap, first_row,
                                         DATATYPE(attrs_[col_idx].type), attrs_[col_idx].size, *count);
-                  if (scan_agg_types_[i] == Sumfunctype::MAX) {
-                    b = CreateAggBatch(agg_cal.GetMax(), nullptr);
-                  } else {
-                    b = CreateAggBatch(agg_cal.GetMin(), nullptr);
-                  }
+                  void* min_max_res = (scan_agg_types_[i] == Sumfunctype::MAX) ? agg_cal.GetMax() : agg_cal.GetMin();
+                  void* new_min_max_res = malloc(attrs_[col_idx].size);
+                  memcpy(new_min_max_res, min_max_res, attrs_[col_idx].size);
+                  b = CreateAggBatch(new_min_max_res, nullptr);
+                  b->is_new = true;
                 } else {
                   vector<shared_ptr<void>> var_mem_data;
                   for (k_uint32 j = 0; j < *count; ++j) {
@@ -1054,8 +1054,11 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             b->is_new = is_new;
           } else {
             if (!isVarLenType(attrs_[col_idx].type) || scan_agg_types_[i] == COUNT) {
-              b = CreateAggBatch(segment_tbl->columnAggAddr(first_real_row.block_id, col_idx,
-                                                            scan_agg_types_[i]), segment_tbl);
+              void* agg_res = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
+              void* new_agg_res = malloc(attrs_[col_idx].size);
+              memcpy(new_agg_res, agg_res, attrs_[col_idx].size);
+              b = CreateAggBatch(new_agg_res, nullptr);
+              b->is_new = true;
             } else {
               std::shared_ptr<void> var_mem = segment_tbl->varColumnAggAddr(first_real_row, col_idx, scan_agg_types_[i]);
               b = CreateAggBatch(var_mem, segment_tbl);
@@ -1066,13 +1069,13 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
       }
       if (cur_blockdata_offset_ > cur_block->alloc_row_count) {
         cur_blockdata_offset_ = 1;
-        nextBlockItem(entity_ids_[cur_entity_idx_]);
+        cur_block_item_ = nullptr;
       }
       return SUCCESS;
     }
     if (cur_blockdata_offset_ > cur_block->alloc_row_count) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(entity_ids_[cur_entity_idx_]);
+      cur_block_item_ = nullptr;
     }
   }
   return SUCCESS;
@@ -1263,7 +1266,6 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
         auto* b = new AggBatch(malloc(sizeof(k_uint64)), 1, nullptr);
         b->is_new = true;
         *static_cast<k_uint64*>(b->mem) = total_count;
-        b->is_new = true;
         res->push_back(i, b);
         break;
       }
@@ -1487,7 +1489,7 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
       return FAIL;
     }
 
-    nextBlockSpan(entity_ids_[cur_entity_idx_]);
+    cur_block_span_ = BlockSpan{};
     GetBatch(segment_tbl, block_item, first_row, res, *count);
     res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
     KWDB_STAT_ADD(StStatistics::Get().it_num, *count);

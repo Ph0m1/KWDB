@@ -216,8 +216,8 @@ class TsIterator {
   }
   int nextBlockItem(k_uint32 entity_id);
 
-  bool getCurBlockSpan(BlockItem* cur_block, MMapSegmentTable* segment_tbl, uint32_t* first_row,
-                      uint32_t* count, uint32_t* blk_offset);
+  bool getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable> segment_tbl, uint32_t* first_row,
+                       uint32_t* count);
 
   void fetchBlockItems(k_uint32 entity_id);
 
