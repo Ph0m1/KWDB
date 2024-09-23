@@ -262,18 +262,33 @@ if __name__ == "__main__":
                   " sleep 1s;  count=$((count+1)) ;" \
                   "done\nif [ $count -ge 180 ]; then echo \"wait-running timeout after 180s\" ;fi".format(kwbin_path, url)
             cmds.append(cmd)
-        elif re.match('-- wait-zero-ranges', sql):
+        elif re.match('-- wait-nonzero-replica', sql):
             node_ids = get_nodes(sql)
             for node_id in node_ids:
                 url = get_url_from_node_id(1)
                 cmd = "count=0;" \
-                "while [ $({} node status {} --insecure --host={} --format=csv --decommission | tail -n 1 | awk -F ',' {{'print $11'}} ) -ne 0 ] && [ $count -lt 180 ]; do" \
-                "    count=$((count+1));" \
-                "    sleep 1;" \
-                "done\n" \
-                "if [ $count -ge 180 ]; then" \
-                "    echo \"wait-zero-ranges timeout after 180s\";" \
-                "fi".format(kwbin_path, node_id, url)
+                      "while [ $({} sql --insecure --host={} " \
+                      "-e \"SELECT COUNT(*) FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND {}=ANY(replicas);\" --format=raw | grep -v '#' ) -eq 0 ] && [ $count -lt 180 ]; do" \
+                      "    count=$((count+1));" \
+                      "    sleep 1;" \
+                      "done\n" \
+                      "if [ $count -ge 180 ]; then" \
+                      "    echo \"wait-nonzero-replica timeout after 180s\";" \
+                      "fi".format(kwbin_path, url, node_id)
+                cmds.append(cmd)
+        elif re.match('-- wait-zero-replica', sql):
+            node_ids = get_nodes(sql)
+            for node_id in node_ids:
+                url = get_url_from_node_id(1)
+                cmd = "count=0;" \
+                      "while [ $({} sql --insecure --host={} " \
+                      "-e \"SELECT COUNT(*) FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND {}=ANY(replicas);\" --format=raw | grep -v '#' ) -ne 0 ] && [ $count -lt 180 ]; do" \
+                      "    count=$((count+1));" \
+                      "    sleep 1;" \
+                      "done\n" \
+                      "if [ $count -ge 180 ]; then" \
+                      "    echo \"wait-zero-replica timeout after 180s\";" \
+                      "fi".format(kwbin_path, url, node_id)
                 cmds.append(cmd)
         elif re.match('-- upgrade-complete', sql):
             node_ids = get_nodes(sql)
