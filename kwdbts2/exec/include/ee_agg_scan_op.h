@@ -256,7 +256,7 @@ class AggTableScanOperator : public TableScanOperator {
   std::vector<ColumnInfo> agg_output_col_info;  // construct agg output col
 
   // used to save if the current row is a new group based on the input groupby information.
-  GroupByMetadata group_by_metadata;
+  GroupByMetadata group_by_metadata_;
   bool disorder_{false};  // it is disorder if only group by timebucket
 };
 

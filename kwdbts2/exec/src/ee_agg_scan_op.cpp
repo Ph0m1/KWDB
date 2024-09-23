@@ -95,6 +95,11 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
       Return(EEIteratorErrCode::EE_ERROR);
     }
 
+    if (group_by_metadata_.initialize() != true) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR);
+    }
+
     for (int i = 0; i < num_; ++i) {
       data_types_.push_back(renders_[i]->get_storage_type());
     }
@@ -210,11 +215,13 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
   }
   k_int32 target_row = count_of_current_chunk - 1;
   k_uint32 row_batch_count = row_batch->Count();
+  if (group_by_metadata_.reset(row_batch_count) != true) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    Return(KStatus::FAIL);
+  }
 
   std::vector<DataChunk*> chunks;
   chunks.push_back(current_data_chunk_.get());
-
-  group_by_metadata.reset(row_batch_count);
   for (k_uint32 row = 0; row < row_batch_count; ++row) {
     // check all the group by column, and increase the target_row number if it finds a different group.
     std::vector<GroupByColumnInfo> group_by_cols;
@@ -225,7 +232,7 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
 
     // new group or end of rowbatch
     if (is_new_group) {
-      group_by_metadata.setNewGroup(row);
+      group_by_metadata_.setNewGroup(row);
 
       if (current_data_chunk_->isFull()) {
         output_queue_.push(std::move(current_data_chunk_));
@@ -254,7 +261,7 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
   // need reset to the first line of row_batch before processing agg column.
   for (auto& func : funcs_) {
     row_batch->ResetLine();
-    func->addOrUpdate(chunks, start_line_in_begin_chunk, row_batch, group_by_metadata, renders_);
+    func->addOrUpdate(chunks, start_line_in_begin_chunk, row_batch, group_by_metadata_, renders_);
   }
 
   Return(KStatus::SUCCESS)

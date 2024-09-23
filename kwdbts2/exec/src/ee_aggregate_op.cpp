@@ -948,6 +948,11 @@ EEIteratorErrCode OrderedAggregateOperator::Init(kwdbContext_p ctx) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
 
+  if (group_by_metadata_.initialize() != true) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
   Return(EEIteratorErrCode::EE_OK);
 }
 
@@ -1092,10 +1097,13 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
   k_int32 target_row = count_of_current_chunk - 1;
   k_uint32 row_batch_count = chunk->Count();
 
+  if (group_by_metadata_.reset(row_batch_count) != true) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    Return(KStatus::FAIL);
+  }
+
   std::vector<DataChunk*> chunks;
   chunks.push_back(agg_data_chunk_.get());
-
-  group_by_metadata_.reset(row_batch_count);
   if (!group_cols_.empty()) {
     for (k_uint32 row = 0; row < row_batch_count; ++row) {
       bool is_new_group = last_group_key_.IsNewGroup(chunk, row, group_cols_, col_types_);

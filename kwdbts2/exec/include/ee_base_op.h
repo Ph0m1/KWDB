@@ -153,22 +153,25 @@ BaseOperator* NewIterator(Args&& ... args) {
 class GroupByMetadata {
  public:
   GroupByMetadata() : capacity_(DEFAULT_CAPACITY) {
-    initialize();
   }
 
   ~GroupByMetadata() {
     delete[] bitmap_;
+    bitmap_ = nullptr;
   }
 
-  void reset(k_uint32 capacity) {
+  k_bool reset(k_uint32 capacity) {
+    k_bool code = true;
     if (capacity_ < capacity) {
       delete[] bitmap_;
+      bitmap_ = nullptr;
       capacity_ = capacity;
-      initialize();
+      code = initialize();
     } else {
       k_uint32 len = (capacity_ + 7) / 8;
       std::memset(bitmap_, 0, len);
     }
+    return code;
   }
 
   void setNewGroup(k_uint32 line) {
@@ -179,13 +182,19 @@ class GroupByMetadata {
     return (bitmap_[line / 8] & ((1 << 7) >> (line % 8))) != 0;
   }
 
- private:
-  void initialize() {
+  k_bool initialize() {
+    k_bool code = true;
     k_uint32 len = (capacity_ + 7) / 8;
     bitmap_ = new char[len];
-    std::memset(bitmap_, 0, len);
+    if (bitmap_ != nullptr) {
+      std::memset(bitmap_, 0, len);
+    } else {
+      code = false;
+    }
+    return code;
   }
 
+ private:
   static const k_uint32 DEFAULT_CAPACITY = 1000;
   k_uint32 capacity_;
   char* bitmap_{nullptr};
