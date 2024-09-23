@@ -111,7 +111,8 @@ func RecomputeStats(
 	delta := actualMS
 	delta.Subtract(currentStats)
 
-	if desc.GetRangeType() == roachpb.TS_RANGE {
+	if desc.GetRangeType() == roachpb.TS_RANGE && cArgs.EvalCtx.TsEngine() != nil && !cArgs.EvalCtx.TsEngine().IsSingleNode() {
+
 		// call GetDataVolume to re compute rangeSize for ts range.
 		// GetDataVolume for relational range may cause err.
 		startTableID, startHashPoint, startTimestamp, err1 := sqlbase.DecodeTsRangeKey(desc.StartKey, true)

@@ -132,6 +132,11 @@ type TsEngine struct {
 	tdb     *C.TSEngine
 }
 
+// IsSingleNode Returns whether TsEngine is started in singleNode mode
+func (r *TsEngine) IsSingleNode() bool {
+	return r.cfg.IsSingleNode
+}
+
 // TsWALFlushInterval indicates the WAL flush interval of TsEngine
 var TsWALFlushInterval = settings.RegisterPublicDurationSetting(
 	"ts.wal.flush_interval",

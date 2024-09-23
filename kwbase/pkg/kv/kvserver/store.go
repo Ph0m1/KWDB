@@ -949,8 +949,8 @@ func NewStore(
 			cfg.ScanMinIdleTime, cfg.ScanMaxIdleTime, newStoreReplicaVisitor(s),
 		)
 		s.gcQueue = newGCQueue(s, s.cfg.Gossip)
-		s.mergeQueue = newMergeQueue(s, s.db, s.cfg.Gossip)
-		s.splitQueue = newSplitQueue(s, s.db, s.cfg.Gossip)
+		s.mergeQueue = newMergeQueue(s, s.db, s.cfg.Gossip, nodeDesc.StartMode == base.StartSingleNodeCmdName)
+		s.splitQueue = newSplitQueue(s, s.db, s.cfg.Gossip, nodeDesc.StartMode == base.StartSingleNodeCmdName)
 		s.replicateQueue = newReplicateQueue(s, s.cfg.Gossip, s.allocator)
 		s.replicaGCQueue = newReplicaGCQueue(s, s.db, s.cfg.Gossip)
 		s.raftLogQueue = newRaftLogQueue(s, s.db, s.cfg.Gossip)
