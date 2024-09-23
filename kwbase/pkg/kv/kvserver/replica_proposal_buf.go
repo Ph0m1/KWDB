@@ -490,7 +490,10 @@ func (b *propBuf) FlushLockedWithRaftGroup(raftGroup *raft.RawNode) (int, error)
 			if p.Request.Replica.GetTag() == roachpb.TS_REPLICA {
 				for _, ru := range p.Request.Requests {
 					req := ru.GetInner()
-					switch req.(type) {
+					switch r := req.(type) {
+					// add ClearRangeRequest case, sometimes RangeDescriptorCache is old
+					case *roachpb.ClearRangeRequest:
+						isClearTsRange = r.TableId != 0
 					case *roachpb.TsPutTagRequest,
 						*roachpb.TsRowPutRequest,
 						*roachpb.TsDeleteRequest,

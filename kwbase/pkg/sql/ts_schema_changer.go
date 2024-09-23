@@ -164,7 +164,7 @@ func (sw *TSSchemaChangeWorker) exec(ctx context.Context) error {
 			// Check if the error is on a whitelist of errors we should retry on,
 			// including the schema change not having the first mutation in line.
 			log.Warningf(ctx, "error while running ts schema change, retrying: %v", syncErr)
-		case errors.Is(syncErr, sqlbase.ErrNodeUnhealthy):
+		case strings.Contains(syncErr.Error(), "failed to connect to n"):
 			return syncErr
 		default:
 			// All other errors lead to a failed job.
@@ -987,7 +987,8 @@ func (sw *TSSchemaChangeWorker) checkReplica(ctx context.Context, tableID sqlbas
 		}
 		for _, nodeID := range sw.healthyNodes {
 			if err := sw.distSQLPlanner.nodeHealth.check(ctx, nodeID); err != nil {
-				return sqlbase.ErrNodeUnhealthy
+				log.Errorf(ctx, "alter tag failed: %s", err.Error())
+				return pgerror.Newf(pgcode.ConnectionFailure, "failed to connect to n%s", nodeID.String())
 			}
 		}
 	}

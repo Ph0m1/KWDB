@@ -265,9 +265,6 @@ func (dir IndexDescriptor_Direction) ToEncodingDirection() (encoding.Direction, 
 // descriptor could not be found with the given id.
 var ErrDescriptorNotFound = errors.New("descriptor not found")
 
-// ErrNodeUnhealthy is returned when the cluster has node is unhealthy.
-var ErrNodeUnhealthy = errors.New("the cluster has node unhealthy")
-
 // ErrIndexGCMutationsList is returned by FindIndexByID to signal that the
 // index with the given ID does not have a descriptor and is in the garbage
 // collected mutations list.
