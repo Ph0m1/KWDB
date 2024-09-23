@@ -1367,5 +1367,31 @@ ALTER TABLE
 (3 rows)
 > drop database db1 cascade;
 DROP DATABASE
+> create ts database test;
+CREATE TS DATABASE
+> CREATE TABLE test.t1(ts timestamp not null, e1 int, e2 int) tags(tag1 int not null) primary tags(tag1);
+CREATE TABLE
+> INSERT INTO test.t1 VALUES ('2024-06-01 00:00:00.000', 1, NULL, 1);
+INSERT 1
+> INSERT INTO test.t1 VALUES ('2024-06-02 00:00:00.000', 1, 1, 1);
+INSERT 1
+> INSERT INTO test.t1 VALUES ('2024-06-03 00:00:00.000', 1, 2, 1);
+INSERT 1
+> INSERT INTO test.t1 VALUES ('2024-06-04 00:00:00.000', 1, NULL, 1);
+INSERT 1
+> select first(e2), last(e2), first_row(e2), last_row(e2) from test.t1;
+  first | last | first_row | last_row
+--------+------+-----------+-----------
+      1 |    2 | NULL      | NULL
+(1 row)
+> ALTER TABLE test.t1 DROP COLUMN e1;
+ALTER TABLE
+> select first(e2), last(e2), first_row(e2), last_row(e2) from test.t1;
+  first | last | first_row | last_row
+--------+------+-----------+-----------
+      1 |    2 | NULL      | NULL
+(1 row)
+> drop database test cascade;
+DROP DATABASE
 > set cluster setting sql.alter_tag.enabled=true;
 SET CLUSTER SETTING

@@ -62,8 +62,8 @@ struct BlockBitmap {
 // partition table.
 class TsFirstLastRow {
  public:
-  TsFirstLastRow(const std::vector<uint32_t>& agg_col_ids, const std::vector<Sumfunctype>& scan_agg_types) :
-        agg_col_ids_(agg_col_ids), scan_agg_types_(scan_agg_types) {
+  TsFirstLastRow(const std::vector<uint32_t>& ts_scan_cols, const std::vector<Sumfunctype>& scan_agg_types) :
+      ts_scan_cols_(ts_scan_cols), scan_agg_types_(scan_agg_types) {
     // If the query aggregation type contains first/last correlation, the corresponding member variables need to be
     // initialized to record the results during the query process.
     Reset();
@@ -152,7 +152,7 @@ class TsFirstLastRow {
   };
 
  private:
-  std::vector<uint32_t> agg_col_ids_;
+  std::vector<uint32_t> ts_scan_cols_;
   std::vector<Sumfunctype> scan_agg_types_;
   // Used to record first/last related results during a traversal process.
   // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
@@ -311,7 +311,7 @@ class TsAggIterator : public TsIterator {
                 std::vector<Sumfunctype>& scan_agg_types, std::vector<timestamp64>& ts_points, uint32_t table_version) :
                 TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, kw_scan_cols,
                            ts_scan_cols, table_version), scan_agg_types_(scan_agg_types),
-                           first_last_row_(kw_scan_cols, scan_agg_types) {
+                           first_last_row_(ts_scan_cols, scan_agg_types) {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());

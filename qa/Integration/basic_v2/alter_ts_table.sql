@@ -643,4 +643,20 @@ select count(ac20),max(ac20),min(ac20),first(ac20),last(ac20),first_row(ac20),la
 select k_timestamp,ac21 from db1.ts_t1 where k_timestamp >= '2024-06-01 00:00:00.000' and k_timestamp <= '2024-06-01 02:00:00.000' order by k_timestamp;
 
 drop database db1 cascade;
+
+-- bug ZDP-41249
+create ts database test;
+CREATE TABLE test.t1(ts timestamp not null, e1 int, e2 int) tags(tag1 int not null) primary tags(tag1);
+
+INSERT INTO test.t1 VALUES ('2024-06-01 00:00:00.000', 1, NULL, 1);
+INSERT INTO test.t1 VALUES ('2024-06-02 00:00:00.000', 1, 1, 1);
+INSERT INTO test.t1 VALUES ('2024-06-03 00:00:00.000', 1, 2, 1);
+INSERT INTO test.t1 VALUES ('2024-06-04 00:00:00.000', 1, NULL, 1);
+select first(e2), last(e2), first_row(e2), last_row(e2) from test.t1;
+
+ALTER TABLE test.t1 DROP COLUMN e1;
+select first(e2), last(e2), first_row(e2), last_row(e2) from test.t1;
+
+drop database test cascade;
+
 set cluster setting sql.alter_tag.enabled=true;

@@ -292,7 +292,7 @@ KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTim
                                       std::shared_ptr<MMapSegmentTable> segment_tbl,
                                       const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   for (auto& it : first_pairs_) {
-    auto bitmap = bitmaps.find(agg_col_ids_[it.first]);
+    auto bitmap = bitmaps.find(ts_scan_cols_[it.first]);
     if (bitmap == bitmaps.end()) {
       continue;
     }
@@ -330,7 +330,7 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
                           std::shared_ptr<MMapSegmentTable> segment_tbl,
                           const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
   for (auto& it : last_pairs_) {
-    auto bitmap = bitmaps.find(agg_col_ids_[it.first]);
+    auto bitmap = bitmaps.find(ts_scan_cols_[it.first]);
     if (bitmap == bitmaps.end()) {
       continue;
     }
@@ -366,7 +366,7 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
 int TsFirstLastRow::getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable> segment_tbl,
                                         MetricRowID real_row, uint32_t ts_col,
                                         const AttributeInfo& attr, Batch** b) {
-  int32_t actual_col_type = segment_tbl->GetColTypeWithoutHidden(ts_col);
+  uint32_t actual_col_type = segment_tbl->GetColInfo(ts_col).type;
   bool is_var_type = actual_col_type == VARSTRING || actual_col_type == VARBINARY;
   // Encapsulation Batch Result:
   // 1. If a column type conversion occurs, it is necessary to convert the data in the real_row
@@ -413,7 +413,7 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
         *agg_batch = CreateAggBatch(nullptr, nullptr);
       } else {
         int err_code = getActualColAggBatch(p_table, seg_table, first_row_info.row_id,
-                                            agg_col_ids_[agg_idx], col_attr, agg_batch);
+                                            ts_scan_cols_[agg_idx], col_attr, agg_batch);
         if (err_code < 0) {
           LOG_ERROR("getActualColBatch failed.");
           return FAIL;
@@ -455,7 +455,7 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
             *agg_batch = new AggBatch(first_row_data, 1, nullptr);
           } else {
             // *agg_batch = CreateAggBatch(nullptr, nullptr);
-            int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, agg_col_ids_[agg_idx], col_attr, agg_batch);
+            int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, ts_scan_cols_[agg_idx], col_attr, agg_batch);
             if (err_code < 0) {
               LOG_ERROR("getActualColBatch failed.");
               return FAIL;
@@ -493,7 +493,7 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
         } else {
           MetricRowID real_row = last_row_info.row_id;
           timestamp64 last_ts = last_row_info.row_ts;
-          int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, agg_col_ids_[agg_idx], col_attr, agg_batch);
+          int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, ts_scan_cols_[agg_idx], col_attr, agg_batch);
           if (err_code < 0) {
             LOG_ERROR("getActualColBatch failed.");
             return KStatus::FAIL;
@@ -523,7 +523,8 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
               std::shared_ptr<void> last_row_data(nullptr);
               *agg_batch = new AggBatch(last_row_data, 1, nullptr);
             } else {
-              int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, agg_col_ids_[agg_idx], col_attr, agg_batch);
+              int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, ts_scan_cols_[agg_idx],
+                                                  col_attr, agg_batch);
               if (err_code < 0) {
                 LOG_ERROR("getActualColBatch failed.");
                 return FAIL;
