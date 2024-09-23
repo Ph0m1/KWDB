@@ -302,7 +302,7 @@ func timeZoneVarSet(_ context.Context, m *sessionDataMutator, s string) error {
 		timeutil.TimeZoneStringToLocationISO8601Standard,
 	)
 	if err != nil {
-		return wrapSetVarError("TimeZone", s, "%v", err)
+		return wrapSetVarError("timezone", s, "%v", err)
 	}
 
 	m.SetLocation(loc)

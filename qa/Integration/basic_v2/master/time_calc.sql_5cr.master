@@ -478,3 +478,29 @@ NOTICE: the result of time subtracting maybe overflow
   -106751 days -23:47:16.854776
 (1 row)
 NOTICE: the result of time subtracting maybe overflow
+> set time zone -15;
+ERROR: invalid value for parameter "timezone": "fixed offset:-54000 (-15)"
+SQLSTATE: 22023
+DETAIL: could not parse -15 as time zone
+> set time zone 'a';
+ERROR: invalid value for parameter "timezone": "'a'"
+SQLSTATE: 22023
+DETAIL: cannot find time zone "a": could not parse "a" as time zone
+> set time zone 15;
+ERROR: invalid value for parameter "timezone": "fixed offset:54000 (15)"
+SQLSTATE: 22023
+DETAIL: could not parse 15 as time zone
+> set time zone -13;
+ERROR: invalid value for parameter "timezone": "fixed offset:-46800 (-13)"
+SQLSTATE: 22023
+DETAIL: could not parse -13 as time zone
+> set time zone -1.5;
+ERROR: invalid value for parameter "timezone": "fixed offset:-5400 (-1.5)"
+SQLSTATE: 22023
+DETAIL: could not parse -1.5 as time zone
+> set time zone -12;
+SET
+> set time zone 14;
+SET
+> set time zone 0;
+SET

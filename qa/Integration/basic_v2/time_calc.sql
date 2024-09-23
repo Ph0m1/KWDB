@@ -75,3 +75,14 @@ DROP DATABASE ts_db;
 
 SELECT timestamp'2970-01-01 00:00:00' - timestamp'2000-01-01 00:00:00' ;
 SELECT '0000-01-01 00:00:00+00:00'::timestamptz - '2020-01-01 12:00:00+00:00'::timestamptz;
+
+--- ZDP-41183
+set time zone -15;
+set time zone 'a';
+set time zone 15;
+set time zone -13;
+set time zone -1.5;
+
+set time zone -12;
+set time zone 14;
+set time zone 0;
