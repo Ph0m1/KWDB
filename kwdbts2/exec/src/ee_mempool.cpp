@@ -37,7 +37,7 @@ EE_PoolInfoDataPtr EE_MemPoolInit(k_uint32 numOfBlock, k_uint32 blockSize) {
   pstPoolMsg->iDataIndex = 0;
 
   pstPoolMsg->data_ = nullptr;
-  k_uint64 iSumSize = blockSize * numOfBlock;
+  k_uint64 iSumSize = (k_uint64)blockSize * (k_uint64)numOfBlock;
   pstPoolMsg->data_ = KNEW char[iSumSize];
   if (pstPoolMsg->data_ == nullptr) {
     LOG_ERROR("failed to malloc memory, malloc sum size: %ld\n", iSumSize);

@@ -156,8 +156,7 @@ class GroupByMetadata {
   }
 
   ~GroupByMetadata() {
-    delete[] bitmap_;
-    bitmap_ = nullptr;
+    SafeDeleteArray(bitmap_);
   }
 
   k_bool reset(k_uint32 capacity) {
