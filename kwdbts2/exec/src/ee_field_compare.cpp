@@ -443,7 +443,8 @@ k_int64 FieldFuncRegex::ValInt() {
       }
       return result;
     } catch (std::regex_error &e) {
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_REGEXP_MISMATCH, e.what());
+      KString et = "regex_error";
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_REGEXP_MISMATCH, et.data());
       return 0;
     }
   }

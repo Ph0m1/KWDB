@@ -286,10 +286,8 @@ static String substrWithRegex(const std::string &input,
       return s;
     }
   } catch (const std::regex_error &e) {
-    KString et =
-        "missing argument to repetition operator: `" + regexStr + "`";
+    KString et = "regex_error";
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_REGEXP_MISMATCH, et.data());
-    // return ""
     return String("");
   }
   /**
