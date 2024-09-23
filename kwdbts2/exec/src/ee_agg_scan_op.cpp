@@ -377,7 +377,8 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
       argIdx = agg.col_idx(0);
     }
 
-    unique_ptr<AggregateFunc> agg_func;
+    unique_ptr<AggregateFunc> agg_func = nullptr;
+    k_bool aggfunc_new_flag = true;
     switch (func_type) {
       case Sumfunctype::MAX: {
         k_uint32 len = output_fields_[argIdx]->get_storage_length();
@@ -473,6 +474,7 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
 
         // skip to construct the ANY_NOT_NULL func for time_bucket column and group by columns.
         if (col_idx_ == argIdx) {
+          aggfunc_new_flag = false;
           break;
         }
 
@@ -676,7 +678,7 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
       }
 
       funcs_.push_back(std::move(agg_func));
-    } else {
+    } else if ((status != KStatus::FAIL) && (aggfunc_new_flag != false)) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     }
   }
