@@ -672,6 +672,10 @@ func (r *Replica) stageTsBatchRequest(
 	}
 	if tableID != 0 {
 		if tsTxnID, err = r.store.TsEngine.MtrBegin(tableID, rangeGroupID, uint64(r.RangeID), raftAppliedIndex); err != nil {
+			var exist bool
+			if exist, err = r.store.TsEngine.TSIsTsTableExist(tableID); !exist {
+				return tableID, rangeGroupID, tsTxnID, nil
+			}
 			return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to begin mini-transaction")
 		}
 	}
@@ -963,11 +967,13 @@ func (r *Replica) stageTsBatchRequest(
 				}
 			}
 		case *roachpb.ClearRangeRequest:
-			if err = r.store.TsEngine.DropTsTable(req.TableId); err != nil {
-				log.Errorf(ctx, "drop table %v failed: %v", req.TableId, err.Error())
-				err = nil
-			} else {
-				log.Infof(ctx, "drop table %v succeed", req.TableId)
+			if exist, _ := r.store.TsEngine.TSIsTsTableExist(req.TableId); exist {
+				if err = r.store.TsEngine.DropTsTable(req.TableId); err != nil {
+					log.Errorf(ctx, "drop table %v failed: %v", req.TableId, err.Error())
+					err = nil
+				} else {
+					log.Infof(ctx, "drop table %v succeed", req.TableId)
+				}
 			}
 		}
 	}

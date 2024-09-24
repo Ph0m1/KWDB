@@ -431,7 +431,7 @@ func (p *planner) initiateDropTable(
 		if err := r.ValueProto(&desc); err != nil {
 			return err
 		}
-		if (desc.GetStickyBit() != hlc.Timestamp{}) {
+		if (desc.GetStickyBit() != hlc.Timestamp{}) || desc.GetRangeType() == roachpb.TS_RANGE {
 			_, keyTableID, _ := keys.DecodeTablePrefix(roachpb.Key(desc.StartKey))
 			// TODO(replica): When dropping a relational table, avoid sending unSplit requests to the time-series range.
 			// Modify the usage of default_replica later

@@ -555,7 +555,7 @@ func (r *Replica) adminUnsplitWithDescriptor(
 	// mixed version clusters that don't support StickyBit, all range descriptor
 	// sticky bits are guaranteed to be nil, so we can skip checking the cluster
 	// version.
-	if (desc.GetStickyBit() == hlc.Timestamp{}) {
+	if (desc.GetStickyBit() == hlc.Timestamp{}) && desc.GetRangeType() != roachpb.TS_RANGE {
 		return reply, nil
 	}
 
