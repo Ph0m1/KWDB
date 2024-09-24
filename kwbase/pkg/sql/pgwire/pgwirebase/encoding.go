@@ -246,7 +246,7 @@ func DecodeOidDatum(
 				return nil, err
 			}
 			return t, nil
-		case oid.T_int2, oid.T_int4, oid.T_int8:
+		case types.T_int1, oid.T_int2, oid.T_int4, oid.T_int8:
 			i, err := strconv.ParseInt(string(b), 10, 64)
 			if err != nil {
 				return nil, err
@@ -325,7 +325,7 @@ func DecodeOidDatum(
 					"could not parse string %q as inet", b)
 			}
 			return d, nil
-		case oid.T__int2, oid.T__int4, oid.T__int8:
+		case types.T__int1, oid.T__int2, oid.T__int4, oid.T__int8:
 			var arr pgtype.Int8Array
 			if err := arr.DecodeText(nil, b); err != nil {
 				return nil, pgerror.Wrapf(err, pgcode.Syntax,
@@ -407,6 +407,12 @@ func DecodeOidDatum(
 				}
 			}
 			return nil, pgerror.Newf(pgcode.Syntax, "unsupported binary bool: %x", b)
+		case types.T_int1:
+			if len(b) < 1 {
+				return nil, pgerror.Newf(pgcode.Syntax, "int1 requires 1 bytes for binary format")
+			}
+			i := int8(b[0])
+			return tree.NewDInt(tree.DInt(i)), nil
 		case oid.T_int2:
 			if len(b) < 2 {
 				return nil, pgerror.Newf(pgcode.Syntax, "int2 requires 2 bytes for binary format")
@@ -679,7 +685,7 @@ func DecodeOidDatum(
 
 	// Types with identical text/binary handling.
 	switch id {
-	case oid.T_text, oid.T_varchar, oid.T_bpchar, types.T_nchar, types.T_nvarchar:
+	case oid.T_text, oid.T_varchar, oid.T_bpchar, types.T_nchar, types.T_nvarchar, types.T_geometry:
 		if !utf8.Valid(b) {
 			return nil, invalidUTF8Error
 		}
