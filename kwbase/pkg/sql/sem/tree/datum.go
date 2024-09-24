@@ -1388,7 +1388,7 @@ type DBytes string
 
 // DatumToExpr convert datum to expr
 func (d *DBytes) DatumToExpr() (Expr, error) {
-	return NewStrVal(string(*d)), nil
+	return NewStrVal(strings.Replace(string(*d), `\`, `\\`, -1)), nil
 }
 
 // NewDBytes is a helper routine to create a *DBytes initialized from its

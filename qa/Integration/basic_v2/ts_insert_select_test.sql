@@ -402,6 +402,21 @@ insert into test_ts.t1 values(now(), 1, 2, 5);
 
 insert into test_ts.t1 select now(), a+1, b+1, tag1+5 from test_ts.t1;
 
+-- ZDP-41454
+DROP DATABASE if EXISTS test_41454;
+CREATE ts DATABASE test_41454;
+CREATE TABLE test_41454.t1(
+   k_timestamp TIMESTAMPTZ NOT NULL,
+   id INT NOT NULL,
+   e20 VARBYTES(60))
+ATTRIBUTES (code1 INT2 not null) PRIMARY TAGS(code1);
+
+INSERT INTO test_41454.t1 VALUES(1574618710110,1, e'\\\\\\\\',0);
+INSERT INTO test_41454.t1 select * from test_41454.t1;
+INSERT INTO test_41454.t1 select * from test_41454.t1;
+INSERT INTO test_41454.t1 select * from test_41454.t1;
+
+DROP DATABASE test_41454 cascade;
 
 set cluster setting sql.query_cache.enabled=default;
 
