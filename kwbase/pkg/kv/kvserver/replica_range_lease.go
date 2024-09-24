@@ -1058,6 +1058,18 @@ func (r *Replica) redirectOnOrAcquireLease(
 				//	return nil, roachpb.NewError(
 				//		newLeaseHolderExpiredError(&status.Lease, (*roachpb.LeaseState)(&status.State), r.store.StoreID(), r.mu.state.Desc))
 				//}
+				//if status.Lease.Replica.GetTag() == roachpb.TS_REPLICA {
+				//	// Special for TS ranges.
+				//	if !status.Lease.OwnedBy(r.store.StoreID()) {
+				//		raftStatus := r.raftStatusRLocked()
+				//		if !isRaftLeader(raftStatus) {
+				//			// Only allow leader to acquire lease because it has all raft logs.
+				//			// Return NotLeaseHolderError with nil lease since it is expired.
+				//			return nil, roachpb.NewError(
+				//				newNotLeaseHolderError(nil, r.store.StoreID(), r.mu.state.Desc))
+				//		}
+				//	}
+				//}
 				return r.requestLeaseLocked(ctx, status), nil
 
 			case storagepb.LeaseState_PROSCRIBED:

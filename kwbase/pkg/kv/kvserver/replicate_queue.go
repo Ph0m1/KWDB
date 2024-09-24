@@ -950,6 +950,12 @@ type transferLeaseOptions struct {
 	dryRun                   bool
 }
 
+var leaseholderModeSettings = settings.RegisterBoolSetting(
+	"kv.kvserver.ts_leaseholder_transfer_strict.enabled",
+	"if set to true, leaseholder will be more difficult to transfer",
+	false,
+)
+
 func (rq *replicateQueue) findTargetAndTransferLease(
 	ctx context.Context,
 	repl *Replica,
@@ -974,10 +980,23 @@ func (rq *replicateQueue) findTargetAndTransferLease(
 	if target == (roachpb.ReplicaDescriptor{}) {
 		return false, nil
 	}
-
 	if opts.dryRun {
 		log.VEventf(ctx, 1, "transferring lease to s%d", target.StoreID)
 		return false, nil
+	}
+	sv := rq.store.ClusterSettings()
+	tsLeaseholderMode := splitModeSettings.Get(&sv.SV)
+	if target.GetTag() == roachpb.TS_REPLICA && tsLeaseholderMode {
+		// For TS ranges, only allow transfer lease to the replica with almost all raft logs.
+		var replStatus CollectReplicaStatusResponse
+		var err error
+		if replStatus, err = repl.collectStatusFromReplica(ctx, target); err != nil {
+			return false, nil
+		}
+		const tsMaxNewLeaseHolderLackRaftLog uint64 = 100
+		if replStatus.ReplicaStatus.ApplyIndex+tsMaxNewLeaseHolderLackRaftLog < repl.mu.state.RaftAppliedIndex {
+			return false, nil
+		}
 	}
 
 	avgQPS, qpsMeasurementDur := repl.leaseholderStats.avgQPS()
