@@ -432,27 +432,29 @@ class TsAggIterator : public TsIterator {
   }
 
   inline bool onlyHasFirstAggType() {
+    bool flag = true;
     for (auto& agg_type : scan_agg_types_) {
       if (!IsFirstAggType(agg_type)) {
-        return false;
+        flag = false;
       }
       if (agg_type == FIRST_ROW || agg_type == FIRSTROWTS) {
         no_first_row_type_ = false;
       }
     }
-    return true;
+    return flag;
   }
 
   inline bool onlyHasLastAggType() {
+    bool flag = true;
     for (auto& agg_type : scan_agg_types_) {
       if (!IsLastAggType(agg_type)) {
-        return false;
+        flag = false;
       }
       if (agg_type == LAST_ROW || agg_type == LASTROWTS) {
         no_last_row_type_ = false;
       }
     }
-    return true;
+    return flag;
   }
 
   inline bool onlyLastRowAggType() {
