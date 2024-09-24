@@ -227,6 +227,7 @@ KStatus DmlExec::InnerNext(kwdbContext_p ctx, TsScan *tsScan, bool isPG,
   resp->value = 0;
   resp->len = 0;
   resp->code = -1;
+  resp->row_num = 0;
 
   do {
     if (!tsScan) {
@@ -275,6 +276,7 @@ KStatus DmlExec::InnerNext(kwdbContext_p ctx, TsScan *tsScan, bool isPG,
       resp->value = result;
       resp->len = length;
       resp->code = 1;
+      resp->row_num = count;
     }
   } while (0);
   if (tsScan && resp->code == -1) {

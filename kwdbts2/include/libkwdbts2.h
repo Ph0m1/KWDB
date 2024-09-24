@@ -152,6 +152,7 @@ typedef struct _QueryInfo {
   EnMqType tp;
   void* value;
   uint32_t len;
+  int32_t row_num;
   int32_t code;
   int32_t id;
   int32_t unique_id;

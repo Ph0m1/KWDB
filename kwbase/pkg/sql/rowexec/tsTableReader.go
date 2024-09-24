@@ -67,7 +67,8 @@ type TsTableReader struct {
 	collected        bool
 	statsList        []tse.TsFetcherStats
 	fetMu            syncutil.Mutex
-	manualAddTsCol   bool
+	value0           bool
+	rowNum           int
 }
 
 var _ execinfra.Processor = &TsTableReader{}
@@ -90,9 +91,7 @@ func NewTsTableReader(
 		tsi.FinishTrace = tsi.outputStatsToTrace
 	}
 	if len(typs) == 0 {
-		typs = make([]types.T, 1)
-		typs[0] = *types.Timestamp
-		tsi.manualAddTsCol = true
+		tsi.value0 = true
 	}
 	if err := tsi.Init(
 		tsi,
@@ -277,7 +276,7 @@ func tsGetNameValue(this *execinfrapb.TSProcessorCoreUnion) int8 {
 // Next is part of the RowSource interface.
 func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata) {
 	for ttr.State == execinfra.StateRunning {
-		if len(ttr.Rev) == 0 {
+		if (len(ttr.Rev) == 0) || (ttr.value0 && ttr.rowNum == 0) {
 			var tsQueryInfo = tse.TsQueryInfo{
 				ID:      int(ttr.sid),
 				Handle:  ttr.tsHandle,
@@ -322,8 +321,16 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 				return nil, &execinfrapb.ProducerMetadata{Err: err}
 			}
 			ttr.Rev = respInfo.Buf
+			ttr.rowNum = respInfo.RowNum
 		}
-
+		if ttr.value0 {
+			if ttr.rowNum > 0 {
+				var tmpRow sqlbase.EncDatumRow = make([]sqlbase.EncDatum, 0)
+				ttr.rowNum--
+				return tmpRow, nil
+			}
+			return nil, ttr.DrainHelper()
+		}
 		row := make([]sqlbase.EncDatum, len(ttr.Out.OutputTypes))
 		for i := range row {
 			var err error
@@ -334,10 +341,7 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 				return nil, &execinfrapb.ProducerMetadata{Err: err}
 			}
 		}
-		if ttr.manualAddTsCol {
-			var tmpRow sqlbase.EncDatumRow = make([]sqlbase.EncDatum, 0)
-			return tmpRow, nil
-		}
+
 		return row, nil
 	}
 	return nil, ttr.DrainHelper()

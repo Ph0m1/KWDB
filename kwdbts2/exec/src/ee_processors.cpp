@@ -220,8 +220,8 @@ KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
     // into data to fetcher from chunk
     chunk->GetFvec().GetAnalyse(ctx);
 
-    *count = *count + 1;
-    if (*count == 1) {
+    *count = *count + chunk->Count();
+    if (msgBuffer == nullptr) {
       msgBuffer = ee_makeStringInfo();
       if (msgBuffer == nullptr) {
         ret = EEIteratorErrCode::EE_ERROR;

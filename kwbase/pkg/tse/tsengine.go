@@ -110,6 +110,7 @@ type TsEngineConfig struct {
 // TsQueryInfo the parameter and return value passed by the query
 type TsQueryInfo struct {
 	Buf      []byte
+	RowNum   int
 	ID       int
 	UniqueID int
 	TimeZone int
@@ -695,6 +696,7 @@ func (r *TsEngine) tsExecute(
 	tsRespInfo.UniqueID = int(retInfo.unique_id)
 	tsRespInfo.Handle = unsafe.Pointer(retInfo.handle)
 	tsRespInfo.Code = int(retInfo.code)
+	tsRespInfo.RowNum = int(retInfo.row_num)
 	if unsafe.Pointer(retInfo.value) != nil {
 		tsRespInfo.Buf = C.GoBytes(unsafe.Pointer(retInfo.value), C.int(retInfo.len))
 		C.TSFree(unsafe.Pointer(retInfo.value))
