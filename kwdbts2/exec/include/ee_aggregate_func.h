@@ -2568,6 +2568,7 @@ class LastAggregate : public AggregateFunc {
     k_bool is_dest_null = AggregateFunc::IsNull(bitmap, col_idx_);
     DatumPtr src = chunk->GetData(line, arg_idx_[0]);
     DatumPtr ts_ptr = chunk->GetData(line, ts_idx_);
+    k_bool is_ts_null = chunk->IsNull(line, ts_idx_);
     auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
     DatumPtr dest_ptr = dest + offset_;
     k_int64 point_ts = INT64_MAX;
@@ -2577,7 +2578,7 @@ class LastAggregate : public AggregateFunc {
     }
 
     if (is_dest_null) {
-      if (ts > point_ts && point_ts != INT64_MAX) {
+      if ((ts > point_ts || is_ts_null) && point_ts != INT64_MAX) {
         return;
       }
       // first assign
@@ -2591,7 +2592,8 @@ class LastAggregate : public AggregateFunc {
     if (ts > last_ts &&
         (point_ts == INT64_MAX || (ts <= point_ts && point_ts != INT64_MAX))) {
       std::memcpy(dest_ptr, src, len_ - sizeof(KTimestamp));
-      std::memcpy(dest_ptr + len_ - sizeof(KTimestamp), ts_ptr, sizeof(KTimestamp));
+      std::memcpy(dest_ptr + len_ - sizeof(KTimestamp), ts_ptr,
+                  sizeof(KTimestamp));
     }
   }
 
@@ -2650,6 +2652,12 @@ class LastAggregate : public AggregateFunc {
           DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
           point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
         }
+        if (last_line_ptr == nullptr) {
+          if ((point_ts != INT64_MAX) &&
+              (ts > point_ts || input_chunk->IsNull(row, ts_idx_))) {
+            continue;
+          }
+        }
         if (ts > last_ts_ && (point_ts == INT64_MAX ||
                               (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
@@ -2686,7 +2694,10 @@ class LastAggregate : public AggregateFunc {
 
     auto* arg_field = renders[arg_idx];
     auto* ts_field = renders[ts_idx_];
-    auto* point_field = renders[point_idx_];
+    Field* point_field = nullptr;
+    if (point_idx_ != -1) {
+      point_field = renders[point_idx_];
+    }
     auto storage_type = arg_field->get_storage_type();
 
     for (k_uint32 row = 0; row < data_container_count; ++row) {
@@ -2731,7 +2742,13 @@ class LastAggregate : public AggregateFunc {
           DatumPtr point_ptr = point_field->get_ptr(row_batch);
           point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
         }
-
+        if (last_line_ptr == nullptr) {
+          if ((point_ts != INT64_MAX) &&
+              (ts > point_ts ||
+               (ts_field->isNullable() && ts_field->is_nullable()))) {
+            continue;
+          }
+        }
         if (ts > last_ts_ && (point_ts == INT64_MAX ||
                               (ts <= point_ts && point_ts != INT64_MAX))) {
           last_ts_ = ts;
@@ -3116,7 +3133,10 @@ class LastTSAggregate : public AggregateFunc {
 
     auto* arg_field = renders[arg_idx];
     auto* ts_field = renders[ts_idx_];
-    auto* point_field = renders[point_idx_];
+    Field* point_field = nullptr;
+    if (point_idx_ != -1) {
+      point_field = renders[point_idx_];
+    }
     for (k_uint32 row = 0; row < data_container_count; ++row) {
       k_int64 point_ts = INT64_MAX;
       if (group_by_metadata.isNewGroup(row)) {

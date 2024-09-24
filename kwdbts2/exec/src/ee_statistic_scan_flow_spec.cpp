@@ -123,6 +123,8 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
   k_bool is_contain_last_point = false;  // for statistic last extend
   k_int64 add_column_invalid_point = 0;
   k_int64 point = INT64_MAX;
+  k_uint32 tag_last_size = 0;
+  std::vector<k_int64> tmp_tag_points_;
   for (k_int32 i = 0; i < col_size; ++i) {
     TSStatisticReaderSpec_Params params = spec_->paramidx(i);
     if (params.param(0).typ() == params.param(0).const_) {
@@ -145,6 +147,12 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
          (agg_type >= Sumfunctype::LAST_ROW &&
           agg_type <= Sumfunctype::FIRSTROWTS))) {
       is_contain_first_last = true;
+
+      if (agg_type == Sumfunctype::LAST) {
+        tag_last_size++;
+        is_contain_last_point = true;
+        tmp_tag_points_.push_back(point);
+      }
     }
 
     if (field->get_num() >= table_->min_tag_id_ &&
@@ -166,22 +174,33 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
             INT64_MAX);  // add invalid ts
       }
     }
+
     table_->scan_last_ts_points_.push_back(INT64_MAX);  // add invalid ts
     if (agg_type == Sumfunctype::MIN || agg_type == Sumfunctype::MAX) {
       is_contain_max_min = true;
     }
   }
 
+  if (tag_last_size) {
+    table_->scan_cols_.insert(table_->scan_cols_.begin(), tag_last_size, 0);
+    table_->scan_real_agg_types_.insert(table_->scan_real_agg_types_.begin(),
+                                        tag_last_size, Sumfunctype::LAST);
+
+    table_->scan_real_last_ts_points_.insert(
+        table_->scan_real_last_ts_points_.begin(), tmp_tag_points_.begin(),
+        tmp_tag_points_.end());
+    insert_last_tag_ts_num_ = tag_last_size;
+  }
+
   if (is_contain_sum_count) {
-    is_insert_ts_index_ = 1;
+    insert_ts_index_ = 1;
     table_->scan_cols_.insert(table_->scan_cols_.begin(), 0);
     table_->scan_real_agg_types_.insert(table_->scan_real_agg_types_.begin(),
                                         Sumfunctype::COUNT);
     add_column_invalid_point++;
   }
   if (is_contain_first_last) {
-    is_insert_ts_index_++;
-    is_insert_ts_index_++;
+    insert_ts_index_ += 2;
     table_->scan_cols_.insert(table_->scan_cols_.begin(), 0);
     table_->scan_cols_.insert(table_->scan_cols_.begin(), 0);
     table_->scan_real_agg_types_.insert(table_->scan_real_agg_types_.begin(),
@@ -192,7 +211,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
   }
 
   if (!is_contain_sum_count && !is_contain_first_last && is_contain_max_min) {
-    is_insert_ts_index_++;
+    insert_ts_index_++;
     table_->scan_cols_.insert(table_->scan_cols_.begin(), 0);
     table_->scan_real_agg_types_.insert(table_->scan_real_agg_types_.begin(),
                                         Sumfunctype::COUNT);
@@ -237,25 +256,28 @@ EEIteratorErrCode StatisticSpecResolve::ResolveReference(
           table_->scan_agg_types_[i - 1] == Sumfunctype::FIRSTROWTS) {
         column = 0;
         is_fix_idx = true;
-      } else if (table_->scan_agg_types_[i - 1] == Sumfunctype::LASTTS ||
-                 table_->scan_agg_types_[i - 1] == Sumfunctype::LASTROWTS) {
+      } else if (table_->scan_agg_types_[i - 1] == Sumfunctype::LASTROWTS) {
         column = 1;
         is_fix_idx = true;
       } else if (table_->scan_agg_types_[i - 1] == Sumfunctype::COUNT ||
                  table_->scan_agg_types_[i - 1] == Sumfunctype::COUNT_ROWS ||
                  table_->scan_agg_types_[i - 1] == Sumfunctype::SUM) {
-        column = is_insert_ts_index_ - 1;
+        column = insert_ts_index_ - 1;
+        is_fix_idx = true;
+      } else if (table_->scan_agg_types_[i - 1] == Sumfunctype::LASTTS) {
+        column = insert_ts_index_ + statistic_last_tag_index_;
+        statistic_last_tag_index_++;
         is_fix_idx = true;
       }
-      statistic_last_tag_index_++;
+      statistic_tag_index_++;
     }
 
     if (org_field->get_column_type() ==
         ::roachpb::KWDBKTSColumn_ColumnType::
             KWDBKTSColumn_ColumnType_TYPE_DATA) {
-      column = column - statistic_last_tag_index_ - statistic_last_point_index_;
-      if (is_insert_ts_index_) {
-        column += is_insert_ts_index_;
+      column = column - statistic_tag_index_ - statistic_const_index_ + insert_last_tag_ts_num_;
+      if (insert_ts_index_) {
+        column += insert_ts_index_;
       }
       is_fix_idx = true;
     }
@@ -269,7 +291,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveReference(
             ::roachpb::KWDBKTSColumn_ColumnType::
                 KWDBKTSColumn_ColumnType_TYPE_DATA &&
         (table_->scan_agg_types_[i - 1] == Sumfunctype::ANY_NOT_NULL)) {
-      statistic_last_point_index_++;
+      statistic_const_index_++;
     }
   }
   Return(code);

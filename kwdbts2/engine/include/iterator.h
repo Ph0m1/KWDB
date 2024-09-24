@@ -140,6 +140,10 @@ class TsFirstLastRow {
 
   void Reset();
 
+  void SetLastTsPoints(std::vector<timestamp64>& last_ts_points) {
+    last_ts_points_ = std::move(last_ts_points);
+  }
+
   bool NeedFirstLastAgg() {
     return !no_first_last_type_;
   }
@@ -187,6 +191,7 @@ class TsFirstLastRow {
   // std::map<index of column, std::pair<index of partition table, std::pair<timestamp64, row id>>>
   std::vector<std::pair<k_uint32, TsRowTableInfo>> first_pairs_;
   std::vector<std::pair<k_uint32, TsRowTableInfo>> last_pairs_;
+  std::vector<timestamp64> last_ts_points_;
   // std::pair<index of column, std::pair<timestamp64, row id>>
   TsRowTableInfo first_row_pair_;
   TsRowTableInfo last_row_pair_;
@@ -354,6 +359,15 @@ class TsAggIterator : public TsIterator {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
+    if (!ts_points.empty()) {
+      last_ts_points_.assign(scan_agg_types_.size(), INVALID_TS);
+      for (size_t i = 0; i < ts_scan_cols_.size(); ++i) {
+        if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
+          last_ts_points_[i] = ts_points[i];
+        }
+      }
+    }
+    first_last_row_.SetLastTsPoints(last_ts_points_);
   }
 
   ~TsAggIterator() {}
@@ -513,6 +527,7 @@ class TsAggIterator : public TsIterator {
   // The aggregation type corresponding to each column.
   // It can be empty, but if it is not empty, the size must be consistent with the size of scan.cols_
   std::vector<Sumfunctype> scan_agg_types_;
+  std::vector<timestamp64> last_ts_points_;
   bool only_first_type_ = false;
   bool no_first_row_type_ = true;
   bool only_last_type_ = false;

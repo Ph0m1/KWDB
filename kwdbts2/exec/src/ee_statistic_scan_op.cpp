@@ -60,7 +60,8 @@ TableStatisticScanOperator::TableStatisticScanOperator(
       param_(other.param_.spec_, other.post_, other.table_),
       input_{input} {
   is_clone_ = true;
-  param_.is_insert_ts_index_ = other.param_.is_insert_ts_index_;
+  param_.insert_ts_index_ = other.param_.insert_ts_index_;
+  param_.insert_last_tag_ts_num_ = other.param_.insert_last_tag_ts_num_;
 }
 
 TableStatisticScanOperator::~TableStatisticScanOperator() {

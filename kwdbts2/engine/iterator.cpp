@@ -396,7 +396,8 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
     timestamp64 last_ts = last_pairs_[i].second.row_ts;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
-    if ((last_ts == INVALID_TS || last_ts < ts) && !col_bitmap.IsColNull(i, row_id.offset_row)) {
+    if ((last_ts_points_.empty() || last_ts_points_[i] == INVALID_TS || ts <= last_ts_points_[i]) &&
+        (last_ts == INVALID_TS || last_ts < ts) && !col_bitmap.IsColNull(i, row_id.offset_row)) {
       if (last_pairs_[i].second.partion_tbl == nullptr) {
         partiton_table->incRefCount();
       } else if (last_pairs_[i].second.partion_tbl != partiton_table) {
