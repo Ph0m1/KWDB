@@ -726,6 +726,7 @@ TEST_F(TestPartitionBigTable, redoPut) {
 
   ASSERT_EQ(KInt64(segment_tbl->columnAddr(MetricRowID{1, 1}, 1)), 11);
   ASSERT_EQ(KDouble64(segment_tbl->columnAddr(MetricRowID{1, 1}, 2)), 2222.2);
+  ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(1, 0, kwdbts::Sumfunctype::COUNT)), 110);
 
   initData2(ctx_, mt_table, entity_id, ts_now + 100000, 100, &dedup_result);
   ASSERT_EQ(mt_table->size(entity_id), 210);

@@ -384,7 +384,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
    * @brief update the result of Aggregate except ts column.
    * @param span  Range of data blocks where writing occurs.
    */
-  void updateAggregateResult(const BlockSpan& span);
+  void updateAggregateResult(const BlockSpan& span, bool include_k_timestamp);
 
   /**
    * @brief update the Aggregate result of the specified colum.

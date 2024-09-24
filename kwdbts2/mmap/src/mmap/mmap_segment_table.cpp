@@ -604,9 +604,9 @@ int MMapSegmentTable::pushBackToColumn(MetricRowID start_row, size_t segment_col
   return error_code;
 }
 
-void MMapSegmentTable::updateAggregateResult(const BlockSpan& span)  {
+void MMapSegmentTable::updateAggregateResult(const BlockSpan& span, bool include_k_timestamp)  {
   MetricRowID start_row = MetricRowID{span.block_item->block_id, 1};
-  size_t segment_col_idx = span.block_item->getDeletedCount() > 0 ? 0 : 1;
+  size_t segment_col_idx = include_k_timestamp ? 0 : 1;
   for (; segment_col_idx < cols_info_exclude_dropped_.size(); ++segment_col_idx) {
     if (!hasValue(start_row, span.block_item->publish_row_count, idx_for_valid_cols_[segment_col_idx])) {
       // block has column all value null, agg no available.

@@ -503,7 +503,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
         return;
       }
       const BlockSpan& span = (*alloc_spans)[full_block_idx[i]];
-      tbl->updateAggregateResult(span);
+      tbl->updateAggregateResult(span, span.block_item->getDeletedCount() > 0);
     }
   }};
 
@@ -973,21 +973,16 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     EntityItem* entity_item = getEntityItem(entity_id);
     entity_item->row_written -= deleted_rows;
     for (size_t i = 0; i < alloc_spans->size(); i++) {
-      (*alloc_spans)[i].block_item->publish_row_count += (*alloc_spans)[i].row_num;
-      if ((*alloc_spans)[i].block_item->publish_row_count >= (*alloc_spans)[i].block_item->max_rows_in_block) {
-        full_block_idx.push_back(i);
-      }
-    }
-    MUTEX_UNLOCK(partition_table_latch_);
-    for (size_t i = 0; i < full_block_idx.size(); i++) {
-      std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[full_block_idx[i]].block_item->block_id);
+      (*alloc_spans)[i].block_item->publish_row_count = (*alloc_spans)[i].block_item->alloc_row_count;
+      std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[i].block_item->block_id);
       if (tbl == nullptr) {
-        LOG_ERROR("getSegmentTable failed, block_id:%d", (*alloc_spans)[full_block_idx[i]].block_item->block_id);
+        LOG_ERROR("getSegmentTable failed, block_id:%d", (*alloc_spans)[i].block_item->block_id);
         return;
       }
-      const BlockSpan& span = (*alloc_spans)[full_block_idx[i]];
-      tbl->updateAggregateResult(span);
+      const BlockSpan& span = (*alloc_spans)[i];
+      tbl->updateAggregateResult(span, true);
     }
+    MUTEX_UNLOCK(partition_table_latch_);
   }};
 
   // 3.Deduplication is performed and the payload is updated according
