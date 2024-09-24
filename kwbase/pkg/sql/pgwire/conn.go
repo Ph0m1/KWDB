@@ -862,9 +862,8 @@ func (c *conn) handleSimpleQuery(
 	var dit sql.DirectInsertTable
 	c.parser.Dudgetstable = func(dbName *string, tableName string) bool {
 		user := c.sessionArgs.User
-		actualDBName := unqis.GetTsSessionData().Database
-		if actualDBName != "" {
-			dbName = &actualDBName
+		if *dbName == "public" {
+			*dbName = unqis.GetTsSessionData().Database
 		}
 		var isTsTable bool
 		var insertErr error

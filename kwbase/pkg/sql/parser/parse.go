@@ -192,7 +192,7 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 	// We make the resulting token positions match the returned string.
 	lval.pos = 0
 	tokens = append(tokens, lval)
-	var dot bool
+	var dot int
 	decided := false
 	for {
 		if lval.id == ERROR {
@@ -207,7 +207,7 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 
 		if p.scanner.shortinsert.isInsert && p.IsShortcircuit {
 			if lval.id == '.' {
-				dot = true
+				dot++
 			}
 			if lval.id == VALUES {
 				if (len(tokens) > 5 && tokens[5].str == "tag") || len(tokens) < 3 || tokens[1].id != INTO {
@@ -219,18 +219,16 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 				}
 				p.scanner.shortinsert.bracket = -1
 				p.scanner.shortinsert.RowCount = 0
-				if dot {
-					if len(tokens) > 6 {
-						// 1) insert into database.schema.table values (...)
-						p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[6].str
-					} else {
-						// 2) insert into database.table values (...)
-						// 3) insert into schema.table values (...)  The actualDBName is provided in the Dudgetstable
-						p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[4].str
-					}
-				} else {
-					// 4) insert into table values (...)
+				if dot == 0 {
+					// 1) insert into table values (...)
 					p.scanner.shortinsert.tb = tokens[2].str
+				} else if dot == 1 {
+					// 2) insert into database.table values (...); insert into database.table(...) values (...)
+					// 3) insert into schema.table values (...); insert into schema.table(...) values (...)  The actualDBName is provided in the Dudgetstable
+					p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[4].str
+				} else if dot == 2 {
+					// 4) insert into database.schema.table values (...) insert into database.schema.table (...) values (...)
+					p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[6].str
 				}
 			}
 			if p.scanner.shortinsert.isTsTable {
