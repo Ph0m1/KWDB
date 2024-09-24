@@ -31,28 +31,6 @@ class TsEntityGroup;
 class SubEntityGroupManager;
 class TsAggIterator;
 
-struct BlockBitmap {
-  uint32_t col_idx;
-  BLOCK_ID block_id;
-  void* bitmap;
-  bool need_free_bitmap;
-  BlockBitmap(BLOCK_ID id, uint32_t idx, void* mem, bool need_free) : block_id(id), col_idx(idx),
-                                                                      bitmap(mem), need_free_bitmap(need_free) { }
-  ~BlockBitmap() {
-    if (need_free_bitmap) {
-      free(bitmap);
-      bitmap = nullptr;
-    }
-  }
-
-  bool IsNull(uint32_t row_idx) const {
-    if (!bitmap) {
-      return true;
-    }
-    return kwdbts::IsObjectColNull(reinterpret_cast<char*>(bitmap), row_idx);
-  }
-};
-
 class ColBlockBitmaps {
  public:
   ~ColBlockBitmaps() {
@@ -61,39 +39,83 @@ class ColBlockBitmaps {
     }
   }
 
-  bool Init(size_t col) {
+  bool Init(size_t col, bool all_agg_cols_not_null) {
+    all_agg_cols_not_null_ = all_agg_cols_not_null;
+    if (all_agg_cols_not_null_) {
+      bitmap_ = reinterpret_cast<char*>(malloc(BLOCK_ITEM_BITMAP_SIZE));
+      if (bitmap_ == nullptr) {
+        return false;
+      }
+      memset(bitmap_, 0, BLOCK_ITEM_BITMAP_SIZE);
+      return true;
+    }
     col_num_ = col;
     bitmap_ = reinterpret_cast<char*>(malloc(col_num_ * BLOCK_ITEM_BITMAP_SIZE));
     if (bitmap_ == nullptr) {
       return false;
     }
     memset(bitmap_, 0, col_num_ * BLOCK_ITEM_BITMAP_SIZE);
+    col_bitmap_addr_.resize(col_num_);
     return true;
   }
 
-  inline char* GetColBitMapAddr(size_t col_idx) const {
-    return bitmap_ + col_idx * BLOCK_ITEM_BITMAP_SIZE;
+  inline char* GetColBitMapAddr(size_t col_idx) {
+    if (all_agg_cols_not_null_) {
+      return bitmap_;
+    }
+    char* ret_addr = bitmap_ + col_idx * BLOCK_ITEM_BITMAP_SIZE;
+    if (col_bitmap_addr_[col_idx] != nullptr) {
+      memcpy(ret_addr, col_bitmap_addr_[col_idx], BLOCK_ITEM_BITMAP_SIZE);
+      col_bitmap_addr_[col_idx] = nullptr;
+    }
+    return ret_addr;
   }
 
-  inline void SetColBitMap(size_t col_idx, char* bitmap) {
+  inline void SetColBitMap(size_t col_idx, char* bitmap, bool force_cpy = false) {
     if (bitmap != nullptr) {
-      memcpy(GetColBitMapAddr(col_idx), bitmap, BLOCK_ITEM_BITMAP_SIZE);
+      if (force_cpy) {
+        memcpy(GetColBitMapAddr(col_idx), bitmap, BLOCK_ITEM_BITMAP_SIZE);
+        col_bitmap_addr_[col_idx] = nullptr;
+      } else {
+        col_bitmap_addr_[col_idx] = bitmap;
+      }
     } else {
       memset(GetColBitMapAddr(col_idx), 0xFF, BLOCK_ITEM_BITMAP_SIZE);
+      col_bitmap_addr_[col_idx] = nullptr;
     }
   }
 
-  inline bool IsColNull(size_t col_idx, size_t row_num) const {
+  inline void SetColBitMapVaild(size_t col_idx) {
+    memset(GetColBitMapAddr(col_idx), 0, BLOCK_ITEM_BITMAP_SIZE);
+    col_bitmap_addr_[col_idx] = nullptr;
+  }
+
+  inline bool IsColNull(size_t col_idx, size_t row_num) {
+    if (all_agg_cols_not_null_) {
+      return false;
+    }
     return isRowDeleted(GetColBitMapAddr(col_idx), row_num);
   }
 
-  inline bool IsColAllNull(size_t col_idx, size_t count) const {
+  inline bool IsColAllNull(size_t col_idx, size_t count) {
+    if (all_agg_cols_not_null_) {
+      return false;
+    }
     return isAllDeleted(GetColBitMapAddr(col_idx), 1, count);
+  }
+
+  inline bool IsColSpanNull(size_t col_idx, size_t start_row, size_t count) {
+    if (all_agg_cols_not_null_) {
+      return false;
+    }
+    return isAllDeleted(GetColBitMapAddr(col_idx), start_row, count);
   }
 
  private:
   char* bitmap_{nullptr};
+  bool all_agg_cols_not_null_{false};
   size_t col_num_;
+  std::vector<char*> col_bitmap_addr_;
 };
 
 // Used for first/last query optimization:
@@ -105,14 +127,18 @@ class ColBlockBitmaps {
 // partition table.
 class TsFirstLastRow {
  public:
-  TsFirstLastRow(const std::vector<uint32_t>& ts_scan_cols, const std::vector<Sumfunctype>& scan_agg_types) :
-      ts_scan_cols_(ts_scan_cols), scan_agg_types_(scan_agg_types) {
+  TsFirstLastRow() {}
+
+  ~TsFirstLastRow() {
+    delObjects();
+  }
+
+  void Init(const std::vector<uint32_t>& ts_scan_cols, const std::vector<Sumfunctype>& scan_agg_types) {
+    ts_scan_cols_ = ts_scan_cols;
+    scan_agg_types_ = scan_agg_types;
     // If the query aggregation type contains first/last correlation, the corresponding member variables need to be
     // initialized to record the results during the query process.
     Reset();
-  }
-  ~TsFirstLastRow() {
-    delObjects();
   }
 
   void delObjects() {
@@ -144,6 +170,10 @@ class TsFirstLastRow {
     last_ts_points_ = std::move(last_ts_points);
   }
 
+  inline bool HaslastTsPoint() {
+    return last_ts_points_.size() > 0;
+  }
+
   bool NeedFirstLastAgg() {
     return !no_first_last_type_;
   }
@@ -165,10 +195,10 @@ class TsFirstLastRow {
   }
 
   KStatus UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
-                        std::shared_ptr<MMapSegmentTable> segment_tbl, const ColBlockBitmaps& col_bitmap);
+                        std::shared_ptr<MMapSegmentTable> segment_tbl, ColBlockBitmaps& col_bitmap);
 
   KStatus UpdateLastRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
-                        std::shared_ptr<MMapSegmentTable> segment_tbl, const ColBlockBitmaps& col_bitmap);
+                        std::shared_ptr<MMapSegmentTable> segment_tbl, ColBlockBitmaps& col_bitmap);
 
   KStatus GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size_t col_id,
                       const AttributeInfo& col_attr, Batch** agg_batch);
@@ -200,6 +230,7 @@ class TsFirstLastRow {
   size_t last_agg_valid_{0};
   timestamp64 first_max_ts_{INVALID_TS};
   timestamp64 last_min_ts_{INVALID_TS};
+  bool all_agg_cols_not_null_{false};
 };
 
 /**
@@ -223,6 +254,10 @@ class TsIterator {
 
   static bool IsLastAggType(const Sumfunctype& agg_type) {
     return agg_type == LAST || agg_type == LASTTS || agg_type == LAST_ROW || agg_type == LASTROWTS;
+  }
+
+  static bool IsLastTsAggType(const Sumfunctype& agg_type) {
+    return agg_type == LAST || agg_type == LASTTS;
   }
 
   /**
@@ -354,8 +389,7 @@ class TsAggIterator : public TsIterator {
                 std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
                 std::vector<Sumfunctype>& scan_agg_types, std::vector<timestamp64>& ts_points, uint32_t table_version) :
                 TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, kw_scan_cols,
-                           ts_scan_cols, table_version), scan_agg_types_(scan_agg_types),
-                           first_last_row_(ts_scan_cols, scan_agg_types) {
+                           ts_scan_cols, table_version), scan_agg_types_(scan_agg_types) {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
@@ -416,6 +450,15 @@ class TsAggIterator : public TsIterator {
       }
       if (agg_type == LAST_ROW || agg_type == LASTROWTS) {
         no_last_row_type_ = false;
+      }
+    }
+    return true;
+  }
+
+  inline bool onlyLastRowAggType() {
+    for (auto& agg_type : scan_agg_types_) {
+      if (agg_type != LAST_ROW && agg_type != LASTROWTS) {
+        return false;
       }
     }
     return true;
@@ -531,11 +574,13 @@ class TsAggIterator : public TsIterator {
   bool only_first_type_ = false;
   bool no_first_row_type_ = true;
   bool only_last_type_ = false;
+  bool only_last_row_type_ = false;
   bool no_last_row_type_ = true;
   bool only_first_last_type_ = false;
   TsFirstLastRow first_last_row_;
   // store all bitmap of columns copyed from mmap file.
   ColBlockBitmaps col_blk_bitmaps_;
+  bool all_agg_cols_not_null_{false};
 };
 
 /**

@@ -178,6 +178,7 @@ void ConstructRoachpbTable(roachpb::CreateTsTable* meta, const KString& prefix_t
     } else {
       column->set_name("column" + std::to_string(i + 1));
     }
+    column->set_nullable(true);
   }
   // add tag infos
   std::vector<ZTableColumnMeta> tag_metas;
