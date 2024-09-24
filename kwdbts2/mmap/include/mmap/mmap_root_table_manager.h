@@ -16,6 +16,9 @@
 #include <atomic>
 #include <unordered_map>
 #include "mmap/mmap_metrics_table.h"
+#include "ts_hash_latch.h"
+
+#define DELETE_DATA_LATCH_BUCKET_NUM 10
 
 using namespace kwdbts;
 
@@ -49,6 +52,8 @@ protected:
   uint64_t partition_interval_;
   // Compression status.
   std::atomic<bool> is_compressing_ = false;
+  // Control delete data concurrency.
+  TsHashLatch delete_data_latch_;
   // Stores mappings of all versions of the root table.
   std::unordered_map<uint32_t, MMapMetricsTable*> root_tables_;
 
@@ -71,7 +76,8 @@ public:
    */
   MMapRootTableManager(const string& db_path, const string& tbl_sub_path, uint32_t table_id) :
       name_(to_string(table_id)), db_path_(db_path), tbl_sub_path_(tbl_sub_path), table_id_(table_id),
-      cur_table_version_(0), rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK) {}
+      cur_table_version_(0), rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK),
+      delete_data_latch_(DELETE_DATA_LATCH_BUCKET_NUM, LATCH_ID_TSTABLE_DELETE_DATA_LOCK) {}
 
   /**
    * @brief Constructor that initializes the root table manager and sets the partition interval.
@@ -84,7 +90,8 @@ public:
   MMapRootTableManager(const string& db_path, const string& tbl_sub_path, uint32_t table_id,
                        uint64_t partition_interval) :
       name_(to_string(table_id)), db_path_(db_path), tbl_sub_path_(tbl_sub_path), table_id_(table_id),
-      cur_table_version_(0), partition_interval_(partition_interval), rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK) {}
+      cur_table_version_(0), partition_interval_(partition_interval), rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK),
+      delete_data_latch_(DELETE_DATA_LATCH_BUCKET_NUM, LATCH_ID_TSTABLE_DELETE_DATA_LOCK) {}
 
   /**
    * @brief Destructor, which frees resources.
@@ -290,6 +297,13 @@ public:
    * @return table version
    */
   uint32_t GetTableVersionOfLatestData();
+
+  /**
+   * @brief Get the delete data latch.
+   *
+   * @return TsHashLatch *
+   */
+  TsHashLatch* GetDeleteDataLatch();
 
   /**
    * @brief Get the read lock.

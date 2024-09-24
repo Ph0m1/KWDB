@@ -486,3 +486,7 @@ uint32_t MMapRootTableManager::GetTableVersionOfLatestData() {
   // Version compatibility
   return version == 0 ? 1 : version;
 }
+
+TsHashLatch* MMapRootTableManager::GetDeleteDataLatch() {
+  return &delete_data_latch_;
+}

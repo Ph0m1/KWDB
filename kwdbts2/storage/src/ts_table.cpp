@@ -498,6 +498,8 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
     LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
+  TsHashLatch* delete_data_latch = root_bt_manager_->GetDeleteDataLatch();
+  delete_data_latch->Lock(entity_id);
   bool del_failed = false;
   for (TsTimePartition* p_bt : p_tables) {
     if (del_failed) {
@@ -524,6 +526,7 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
     (*count) += cnt;
     ebt_manager_->ReleasePartitionTable(p_bt);
   }
+  delete_data_latch->Unlock(entity_id);
   if (del_failed) {
     return KStatus::FAIL;
   }
@@ -2048,14 +2051,18 @@ KStatus TsTable::DeleteTotalRange(kwdbContext_p ctx, uint64_t begin_hash, uint64
       }
       for (auto& partition : partitions) {
         for (auto& entity_id : sub_grp.second) {
+          TsHashLatch* delete_data_latch = entity_bt_manager_->GetDeleteDataLatch();
+          delete_data_latch->Lock(entity_id);
           uint64_t del_rows = 0;
           int ret = partition->DeleteData(entity_id, 0, {ts_span}, nullptr, &del_rows, err_info);
           if (err_info.errcode < 0) {
-              LOG_ERROR("partition DeleteData failed. egrp [%lu], partition [%ld]",
-                          egrp.first, partition->minTimestamp());
-              break;
+            LOG_ERROR("partition DeleteData failed. egrp [%lu], partition [%ld]",
+                        egrp.first, partition->minTimestamp());
+            delete_data_latch->Unlock(entity_id);
+            break;
           }
           total_del_rows += del_rows;
+          delete_data_latch->Unlock(entity_id);
         }
         ReleaseTable(partition);
       }
