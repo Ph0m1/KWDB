@@ -68,4 +68,19 @@ cast(pg_catalog.oid(
 cast(ref_0.e3 as int8)) as oid))
 limit 83;
 
+-- ZDP-41696
+select
+    ref_0.e2 as c0,
+    ref_0.id as c1,
+    ref_0.e9 as c2
+from
+    test_vacuum.t1 as ref_0
+where ref_0.code6 IS DISTINCT FROM pg_catalog.pg_function_is_visible(
+    cast(case when ref_0.e6 != ref_0.e6 then pg_catalog.oid(
+    cast(ref_0.e3 as int8)) else pg_catalog.oid(
+    cast(ref_0.e3 as int8)) end
+    as oid))
+    limit 141;
+
+
 drop database test_vacuum cascade;

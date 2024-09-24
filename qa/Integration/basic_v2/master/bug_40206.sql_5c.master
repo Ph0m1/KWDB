@@ -74,5 +74,27 @@ limit 83;
   c0 | c1 | c2 | c3 | c4
 -----+----+----+----+-----
 (0 rows)
+> select
+    ref_0.e2 as c0,
+    ref_0.id as c1,
+    ref_0.e9 as c2
+from
+    test_vacuum.t1 as ref_0
+where ref_0.code6 IS DISTINCT FROM pg_catalog.pg_function_is_visible(
+    cast(case when ref_0.e6 != ref_0.e6 then pg_catalog.oid(
+    cast(ref_0.e3 as int8)) else pg_catalog.oid(
+    cast(ref_0.e3 as int8)) end
+    as oid))
+    limit 141;
+      c0      | c1 |                  c2
+--------------+----+----------------------------------------
+  -2147483648 | 10 | test数据库语法查询测试！！！@TEST10-9
+   2147483647 | 11 | test数据库语法查询测试！！！@TEST11-9
+     23000000 | 13 | SSSSSSDDDDDDKKKKKK
+  NULL        |  9 | NULL
+    -34000000 | 15 | 数据库语法查询测试
+     12000000 | 12 | aaaaaabbbbbbcccccc
+     34000000 | 14 | 1234567890987654321
+(7 rows)
 > drop database test_vacuum cascade;
 DROP DATABASE

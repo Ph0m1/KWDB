@@ -989,7 +989,7 @@ SELECT description
 	// CockroachDB doesn't have a concept of namespaced functions, so this is
 	// always true if the builtin exists at all, and NULL otherwise.
 	// https://www.postgresql.org/docs/9.6/static/functions-info.html
-	"pg_function_is_visible": makeBuiltin(defProps(),
+	"pg_function_is_visible": makeBuiltin(tree.FunctionProperties{DistsqlBlacklist: true},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"oid", types.Oid}},
 			ReturnType: tree.FixedReturnType(types.Bool),
