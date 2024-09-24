@@ -23,9 +23,9 @@
 // See the Mulan PSL v2 for more details.
 
 // This file generates batch_generated.go. It can be run via:
-//    go run -tags gen-batch gen_batch.go
+//    go run -tags gen_batch gen_batch.go
 
-// +build gen-batch
+// +build gen_batch
 
 package main
 
