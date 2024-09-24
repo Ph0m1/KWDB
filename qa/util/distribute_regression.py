@@ -130,6 +130,10 @@ if __name__ == "__main__":
     store_dir = args[3]
 
     output_cmd_file = args[4]
+    open_source = args[5]
+    # print('=======open_source',open_source)
+    # print('=======open_source',open_source == 'true')
+    # print('=======open_source',open_source == 'false')
     #
     # print("=============================================")
     # print("sql_path ", sql_path)
@@ -251,6 +255,8 @@ if __name__ == "__main__":
                 cmd = ' {} {}' \
                       ' decommission {} --insecure ' \
                       '--host={} --wait=none'.format(kwbin_path, 'node', node_id, url)
+                if open_source == 'true':
+                    cmd += ' 2>&1 | tee -a {} > /dev/null'.format(output_file_path)
                 cmds.append(cmd)
         elif re.match('-- wait-running', sql):
             node_ids = get_nodes(sql)

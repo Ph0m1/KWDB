@@ -18,13 +18,14 @@ sql_file=${2}
 output_file=${3}
 store_dir=${4}
 output_cmd_file=${5}
+open_source=${6}
 
 node_annotation_regex='^\s*--\s*node:\s*(.+)'
 exec_node_sed_regex='^\s*--[-[[:space:]]]*node:\s*(.+)'
 
 declare -a stmts
 
-python3 $QA_DIR/util/distribute_regression.py ${sql_file} ${KWBIN} ${output_file} ${store_dir} ${output_cmd_file}
+python3 $QA_DIR/util/distribute_regression.py ${sql_file} ${KWBIN} ${output_file} ${store_dir} ${output_cmd_file} ${open_source}
 
 while read -r line || [ -n "${line}" ];do
   stmts+=(${line})
