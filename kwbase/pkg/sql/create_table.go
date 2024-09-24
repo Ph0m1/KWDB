@@ -3283,7 +3283,7 @@ func distributeAndDuplicateOfCreateTSTable(
 		startTime := timeutil.Now()
 		for {
 			startKey := sqlbase.MakeTsHashPointKey(desc.ID, uint64(pointGroups[0].point))
-			endKey := sqlbase.MakeTsHashPointKey(desc.ID, api.HashParam)
+			endKey := sqlbase.MakeTsHashPointKey(desc.ID, api.HashParamV2)
 			isCompleted := true
 			isCompleted, _ = params.extendedEvalCtx.ExecCfg.DB.AdminReplicaVoterStatusConsistent(params.ctx, startKey, endKey)
 			if isCompleted {

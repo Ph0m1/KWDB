@@ -178,7 +178,6 @@ func (sq *splitQueue) process(ctx context.Context, r *Replica, sysCfg *config.Sy
 func (sq *splitQueue) processAttempt(
 	ctx context.Context, r *Replica, sysCfg *config.SystemConfig,
 ) error {
-
 	desc := r.Desc()
 	// First handle the case of splitting due to zone config maps.
 	if splitKey := sysCfg.ComputeSplitKey(desc.StartKey, desc.EndKey); splitKey != nil {
@@ -283,6 +282,23 @@ func (sq *splitQueue) processAttempt(
 				splitTimeStamp := halfTimestamp
 				splitKey = sqlbase.MakeTsRangeKey(sqlbase.ID(startTableID), splitHashPoint, splitTimeStamp)
 			}
+
+			startTime := timeutil.Now()
+			for {
+				isCompleted := true
+				isCompleted, _ = sq.db.AdminReplicaVoterStatusConsistent(ctx, startKey, endKey)
+				if isCompleted {
+					break
+				}
+				timeElapsed := timeutil.Since(startTime)
+				if timeElapsed.Seconds() > 30 {
+					log.Error(ctx, "have been trying 30s, timed out of AdminReplicaVoterStatusConsistent")
+					return errors.Errorf("Split failed. Verifying replica consistency failed. split range:%d, startKey:%s endKey:%s splitKey:%d",
+						desc.RangeID, desc.StartKey, desc.EndKey, splitKey)
+				}
+				time.Sleep(time.Duration(500) * time.Millisecond)
+			}
+
 			//理论上不会溢出，兼容
 			tableID := uint32(startTableID)
 			_, err = r.adminSplitWithDescriptor(
@@ -296,7 +312,7 @@ func (sq *splitQueue) processAttempt(
 					SplitKey:  splitKey,
 				},
 				desc,
-				false, /* delayable */
+				true, /* delayable */
 				fmt.Sprintf("%s above threshold size %s", humanizeutil.IBytes(size), humanizeutil.IBytes(maxBytes)),
 			)
 			if err != nil {
