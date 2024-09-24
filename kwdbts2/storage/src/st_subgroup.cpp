@@ -426,8 +426,8 @@ std::shared_ptr<TsSubGroupPTIterator> TsSubEntityGroup::GetPTIteartor(const std:
     rdLock();
     for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
       for (auto& ts_span : ts_spans) {
-        pts_begin = PartitionTime(ts_span.begin / 1000, max_ts);
-        pts_end = PartitionTime(ts_span.end / 1000, max_ts);
+        pts_begin = ts_span.begin / 1000;
+        pts_end = ts_span.end / 1000;
         if (!(it->first > pts_end || it->second <= pts_begin)) {
           p_times.emplace_back(it->first);
           break;

@@ -144,8 +144,13 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
     cur_block_item_ = block_item_queue_.front();
     block_item_queue_.pop_front();
 
-    if (!cur_block_item_) {
+    if (cur_block_item_ == nullptr) {
       LOG_WARN("BlockItem[] error: No space has been allocated");
+      continue;
+    }
+    // all rows in block is deleted.
+    if (cur_block_item_->isBlockEmpty()) {
+      cur_block_item_ = nullptr;
       continue;
     }
     return NextBlkStatus::find_one;
@@ -291,32 +296,41 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
 KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partiton_table,
                                       std::shared_ptr<MMapSegmentTable> segment_tbl,
                                       const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+  bool ts_using = false;
   for (int i = 0; i < first_pairs_.size(); ++i) {
     timestamp64 first_ts = first_pairs_[i].second.row_ts;
     // If the timestamp corresponding to the data in this row is less than the first value of the record and
     // is non-empty, update it.
     if ((first_ts == INVALID_TS || first_ts > ts) && !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
-      if (first_pairs_[i].second.partion_tbl != nullptr) {
+      if (first_pairs_[i].second.partion_tbl == nullptr) {
+        partiton_table->incRefCount();
+      } else if (first_pairs_[i].second.partion_tbl != partiton_table) {
+        partiton_table->incRefCount();
         ReleaseTable(first_pairs_[i].second.partion_tbl);
-        first_pairs_[i].second.partion_tbl = nullptr;
       }
-      partiton_table->incRefCount();
       first_pairs_[i].second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
       if (first_ts == INVALID_TS)
         first_agg_valid_++;
+      ts_using = true;
     }
   }
   timestamp64 first_row_ts = first_row_pair_.row_ts;
   // If the timestamp corresponding to the data in this row is less than the first record, update it.
   if ((first_row_ts == INVALID_TS || first_row_ts > ts)) {
-    if (first_row_pair_.partion_tbl != nullptr) {
+    if (first_row_pair_.partion_tbl == nullptr) {
+      partiton_table->incRefCount();
+    } else if (first_row_pair_.partion_tbl != partiton_table) {
+      partiton_table->incRefCount();
       ReleaseTable(first_row_pair_.partion_tbl);
-      first_row_pair_.partion_tbl = nullptr;
     }
-    partiton_table->incRefCount();
     first_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
-    if (first_row_ts == INVALID_TS)
+    if (first_row_ts == INVALID_TS) {
       first_agg_valid_++;
+    }
+    ts_using = true;
+  }
+  if (ts_using && (first_max_ts_ == INVALID_TS || first_max_ts_ < ts)) {
+    first_max_ts_ = ts;
   }
   return KStatus::SUCCESS;
 }
@@ -325,32 +339,41 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
                           TsTimePartition* partiton_table,
                           std::shared_ptr<MMapSegmentTable> segment_tbl,
                           const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
+  bool ts_using = false;
   for (int i = 0; i < last_pairs_.size(); ++i) {
     timestamp64 last_ts = last_pairs_[i].second.row_ts;
     // If the timestamp corresponding to the data in this row is greater than the last value of the record and
     // is non-empty, update it.
     if ((last_ts == INVALID_TS || last_ts < ts) && !bitmaps.at(ts_scan_cols_[i])->IsNull(row_id.offset_row - 1)) {
-      if (last_pairs_[i].second.partion_tbl != nullptr) {
+      if (last_pairs_[i].second.partion_tbl == nullptr) {
+        partiton_table->incRefCount();
+      } else if (last_pairs_[i].second.partion_tbl != partiton_table) {
+        partiton_table->incRefCount();
         ReleaseTable(last_pairs_[i].second.partion_tbl);
-        last_pairs_[i].second.partion_tbl = nullptr;
       }
-      partiton_table->incRefCount();
       last_pairs_[i].second = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
-      if (last_ts == INVALID_TS)
+      if (last_ts == INVALID_TS) {
         last_agg_valid_++;
+      }
+      ts_using = true;
     }
   }
   timestamp64 last_row_ts = last_row_pair_.row_ts;
   // If the timestamp corresponding to the data in this row is greater than the last record, update it.
   if ((last_row_ts == INVALID_TS || last_row_ts < ts)) {
-    if (last_row_pair_.partion_tbl != nullptr) {
+    if (last_row_pair_.partion_tbl == nullptr) {
+      partiton_table->incRefCount();
+    } else if (last_row_pair_.partion_tbl  != partiton_table) {
+      partiton_table->incRefCount();
       ReleaseTable(last_row_pair_.partion_tbl);
-      last_row_pair_.partion_tbl = nullptr;
     }
-    partiton_table->incRefCount();
     last_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
     if (last_row_ts == INVALID_TS)
       last_agg_valid_++;
+    ts_using = true;
+  }
+  if (ts_using && (last_min_ts_ == INVALID_TS || last_min_ts_ > ts)) {
+    last_min_ts_ = ts;
   }
   return KStatus::SUCCESS;
 }
@@ -599,7 +622,10 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
       if (!block_item || !block_item->publish_row_count) {
         continue;
       }
-
+      // all rows in block is deleted.
+      if (block_item->isBlockEmpty()) {
+        continue;
+      }
       std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
       if (segment_tbl == nullptr) {
         LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
@@ -614,6 +640,10 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
       timestamp64 max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
       // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
       if (!isTimestampInSpans(ts_spans_, min_ts, max_ts)) {
+        continue;
+      }
+      // first agg all filled. while just need ts that smaller than agg using max ts.
+      if ((hasFoundFirstAggData()) && first_last_row_.GetFirstMaxTs() <= min_ts) {
         continue;
       }
       bool has_found = false;
@@ -703,7 +733,10 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
       if (!block_item || !block_item->publish_row_count) {
         continue;
       }
-
+      // all rows in block is deleted.
+      if (block_item->isBlockEmpty()) {
+        continue;
+      }
       std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
       if (segment_tbl == nullptr) {
         LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -719,6 +752,10 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
       timestamp64 max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
       // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
       if (!isTimestampInSpans(ts_spans_, min_ts, max_ts)) {
+        continue;
+      }
+      // all agg is filled. so we just need ts that max than agg using ts.
+      if (hasFoundLastAggData() && first_last_row_.GetLastMinTs() >= max_ts) {
         continue;
       }
       bool has_found = false;
@@ -743,7 +780,7 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
         first_last_row_.UpdateLastRow(cur_ts, real_row, cur_pt, segment_tbl, bitmaps);
         // If all queried columns and their corresponding query types already have query results,
         // and the timestamp of the updated data is equal to the maximum timestamp of the entity, then the query can end.
-        if (hasFoundLastAggData() && cur_ts == max_entity_ts) {
+        if (hasFoundLastAggData() && (!entity_item->is_disordered || cur_ts == max_entity_ts)) {
           has_found = true;
           break;
         }
@@ -849,6 +886,14 @@ KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_
         return KStatus::FAIL;
       }
     }
+    // cache bitmap info, to avoid page fault.
+    if (!need_free_bitmap) {
+      void* bitmap_orig = bitmap;
+      size_t malloc_size = (segment_tbl->getBlockMaxNum() + 7) / 8;
+      bitmap = malloc(malloc_size);
+      memcpy(bitmap, bitmap_orig, malloc_size);
+      need_free_bitmap = true;
+    }
     bitmaps[col_idx] = std::make_shared<BlockBitmap>(block_item->block_id, col_idx, bitmap, need_free_bitmap);
   }
   return KStatus::SUCCESS;
@@ -888,7 +933,6 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
       nextBlockItem(entity_ids_[cur_entity_idx_]);
       continue;
     }
-
     // save bitmap for all blocks, the first map key is col index
     std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
     if (getBlockBitmap(segment_tbl, cur_block, bitmaps) != KStatus::SUCCESS) {

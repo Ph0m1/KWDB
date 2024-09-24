@@ -131,6 +131,14 @@ class TsFirstLastRow {
     return last_agg_valid_ == last_pairs_.size() + 1;
   }
 
+  inline timestamp64 GetFirstMaxTs() {
+    return first_max_ts_;
+  }
+
+  inline timestamp64 GetLastMinTs() {
+    return last_min_ts_;
+  }
+
   KStatus UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
                         std::shared_ptr<MMapSegmentTable> segment_tbl,
                         const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
@@ -166,6 +174,8 @@ class TsFirstLastRow {
   bool no_first_last_type_{true};
   size_t first_agg_valid_{0};
   size_t last_agg_valid_{0};
+  timestamp64 first_max_ts_{INVALID_TS};
+  timestamp64 last_min_ts_{INVALID_TS};
 };
 
 /**

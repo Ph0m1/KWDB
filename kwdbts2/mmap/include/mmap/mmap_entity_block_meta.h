@@ -218,6 +218,10 @@ struct BlockItem {
     return count;
   }
 
+  inline bool isBlockEmpty() {
+    return isAllDeleted(rows_delete_flags, 1, alloc_row_count);
+  }
+
   int isDeleted(size_t row_idx, bool* is_deleted) {
     if (row_idx > alloc_row_count) {
       return -1;

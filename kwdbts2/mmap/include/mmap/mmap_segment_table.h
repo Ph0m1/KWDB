@@ -566,6 +566,10 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
         continue;
       }
       char* bitmap = static_cast<char*>(getBlockHeader(block_id, col));
+      // todo(liangbo01) use at 2.1.0 version for full test.
+      // if (!isAllDeleted(bitmap, 1, count)) {
+      //   return false;
+      // }
       for (int i = 0; i < null_size; ++i) {
         if (i == null_size - 1 && count % 8) {
           for (size_t j = 0 ; j < count % 8 ; ++j) {
