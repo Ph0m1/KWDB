@@ -1891,7 +1891,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
             }
             p_min_ts = std::max(en_item->min_ts, ts_span.begin);
             p_max_ts = std::min(en_item->max_ts, ts_span.end);
-            LOG_ERROR("p_min_ts:%ld, p_max_ts: %ld, partition[%ld-%ld], entity ts[%ld-%ld]", p_min_ts, p_max_ts,
+            LOG_DEBUG("p_min_ts:%ld, p_max_ts: %ld, partition[%ld-%ld], entity ts[%ld-%ld]", p_min_ts, p_max_ts,
                         partition->minTimestamp(), partition->maxTimestamp(), en_item->min_ts, en_item->max_ts);
             if (p_min_ts >= p_max_ts) {
               continue;

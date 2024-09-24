@@ -20,6 +20,7 @@
 #include "perf_stat.h"
 #include "lru_cache_manager.h"
 #include "st_config.h"
+#include "sys_utils.h"
 
 #ifndef KWBASE_OSS
 #include "ts_config_autonomy.h"
@@ -99,14 +100,21 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
 
   // check mksquashfs & unsquashfs
   std::string cmd = "which mksquashfs > /dev/null 2>&1";
-  if (system(cmd.c_str()) != 0) {
-    cerr << "mksquashfs is not installed, please install squashfs-tools\n";
-    return ToTsStatus("mksquashfs is not installed, please install squashfs-tools");
+  int try_times = 5;
+  while (!System(cmd)) {
+    if (try_times-- < 0) {
+      cerr << "mksquashfs is not installed, please install squashfs-tools\n";
+      return ToTsStatus("mksquashfs is not installed, please install squashfs-tools");
+    }
+    sleep(1);
   }
   cmd = "which unsquashfs > /dev/null 2>&1";
-  if (system(cmd.c_str()) != 0) {
-    cerr << "unsquashfs is not installed, please install squashfs-tools\n";
-    return ToTsStatus("unsquashfs is not installed, please install squashfs-tools");
+  while (!System(cmd)) {
+    if (try_times-- < 0) {
+      cerr << "unsquashfs is not installed, please install squashfs-tools\n";
+      return ToTsStatus("unsquashfs is not installed, please install squashfs-tools");
+    }
+    sleep(1);
   }
 
   InitCompressInfo(opts.db_path);

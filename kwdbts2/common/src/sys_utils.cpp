@@ -85,11 +85,21 @@ std::time_t ModifyTime(const std::string& filePath) {
 }
 
 bool System(const string& cmd, ErrorInfo& error_info) {
-  if (system(cmd.c_str()) != 0) {
-    error_info.errcode = errnumToErrorCode(errno);
-    error_info.errmsg = strerror(errno);
-    LOG_ERROR("system(%s) failed: errno[%d], strerror[%s]", cmd.c_str(), errno, error_info.errmsg.c_str());
+  int status = system(cmd.c_str());
+  if (-1 != status && WIFEXITED(status) && 0 == WEXITSTATUS(status)) {
+    return true;
+  }
+  if (status == -1) {
+    cerr << "OS system fork error." << std::endl;
     return false;
   }
-  return true;
+  char msg[1024];
+  snprintf(msg, sizeof(msg), "exec-shell [%s] faild. errno[%d], shell exit code[%d,%d(%d),%d], cmd exit code[%d].",
+                cmd.c_str(), errno, WIFEXITED(status), WIFSIGNALED(status), WTERMSIG(status),
+                WIFSTOPPED(status), WEXITSTATUS(status));
+  cerr << msg << std::endl;
+  error_info.errcode = errnumToErrorCode(errno);
+  error_info.errmsg = strerror(errno);
+  LOG_ERROR("system(%s) failed: errno[%d], strerror[%s]", cmd.c_str(), errno, error_info.errmsg.c_str());
+  return false;
 }
