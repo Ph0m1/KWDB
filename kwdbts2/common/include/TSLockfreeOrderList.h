@@ -52,9 +52,12 @@ class TSLockfreeOrderList {
     TSListItem *cur = &tail_;
     TSListItem *prev = cur->prev_.load();
     while (true) {
-      if (prev == nullptr || prev->key < key) {
+      if (prev == nullptr || prev->key <= key) {
         new_one->prev_.store(prev);
         if (cur->prev_.compare_exchange_strong(prev, new_one)) {
+          if (prev && prev->key == key) {
+            prev->value = V{};
+          }
           return true;
         } else {
           // restart from beging.
@@ -92,7 +95,8 @@ class TSLockfreeOrderList {
       if (prev == nullptr) {
         return true;
       }
-      if (!func(prev->key, prev->value)) {
+      V v = prev->value;
+      if (v != V{} && !func(prev->key, v)) {
         return false;
       }
       cur = prev;
@@ -108,7 +112,9 @@ class TSLockfreeOrderList {
       if (prev == nullptr) {
         return;
       }
-      keys->push_back(prev->key);
+      if (cur->key != prev->key) {
+        keys->push_back(prev->key);
+      }
       cur = prev;
       prev = cur->prev_.load();
     }
@@ -121,7 +127,10 @@ class TSLockfreeOrderList {
       if (prev == nullptr) {
         return;
       }
-      values->push_back(prev->value);
+      V v = prev->value;
+      if (v != V{}) {
+        values->push_back(v);
+      }
       cur = prev;
       prev = cur->prev_.load();
     }

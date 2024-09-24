@@ -89,6 +89,7 @@ int TsTimePartition::loadSegment(BLOCK_ID segment_id, ErrorInfo& err_info) {
   string file_path = name_ + ".bt";
   if (tbl->open(&meta_manager_, segment_id, file_path, db_path_, segment_tbl_sub_path(segment_id),
                 MMAP_OPEN_NORECURSIVE, true, err_info) < 0) {
+    delete tbl;
     err_info.errmsg = "open segment table failed. " + segment_tbl_sub_path(segment_id);
     err_info.errcode = KWENFILE;
     return err_info.errcode;
@@ -96,6 +97,26 @@ int TsTimePartition::loadSegment(BLOCK_ID segment_id, ErrorInfo& err_info) {
   segment_tbl.reset(tbl);
   data_segments_.Insert(segment_id, segment_tbl);
   return 0;
+}
+
+std::shared_ptr<MMapSegmentTable> TsTimePartition::reloadSegment(std::shared_ptr<MMapSegmentTable> old_segment,
+                                                                 bool lazy_open, ErrorInfo& err_info) {
+  std::shared_ptr<MMapSegmentTable> segment_tbl;
+  MMapSegmentTable *tbl = new MMapSegmentTable();
+  string file_path = name_ + ".bt";
+  BLOCK_ID segment_id = old_segment->segment_id();
+  if (tbl->open(&meta_manager_, segment_id, file_path, db_path_, segment_tbl_sub_path(segment_id),
+                MMAP_OPEN_NORECURSIVE, lazy_open, err_info) < 0) {
+    delete tbl;
+    err_info.errmsg = "open segment table failed. " + segment_tbl_sub_path(segment_id);
+    err_info.errcode = KWENFILE;
+    old_segment->mutexUnlock();
+    return segment_tbl;
+  }
+  segment_tbl.reset(tbl);
+  data_segments_.Insert(segment_id, segment_tbl);
+  old_segment->setNotLatestOpened();
+  return segment_tbl;
 }
 
 int TsTimePartition::loadSegments(ErrorInfo& err_info) {
@@ -147,7 +168,10 @@ int TsTimePartition::loadSegments(ErrorInfo& err_info) {
   std::shared_ptr<MMapSegmentTable> last_sta_tbl = nullptr;
   if (!segment_ids.empty()) {
     std::shared_ptr<MMapSegmentTable> segment_table = getSegmentTable(last_segment_id, true);
-    if (segment_table && !segment_table->sqfsIsExists() && segment_table->reopen(false, err_info) >= 0
+    if (segment_table && !segment_table->sqfsIsExists()
+        && segment_table->open(const_cast<EntityBlockMetaManager*>(&meta_manager_), last_segment_id, name_ + ".bt",
+                               db_path_, tbl_sub_path_ + std::to_string(last_segment_id) + "/", MMAP_OPEN_NORECURSIVE,
+                               false, err_info) >= 0
         && segment_table->getSegmentStatus() == ActiveSegment) {
       last_sta_tbl = segment_table;
     }
@@ -280,8 +304,10 @@ bool TsTimePartition::JoinOtherPartitionTable(TsTimePartition* other) {
     }
     if (tbl->getObjectStatus() != OBJ_READY) {
       ErrorInfo err_info;
-      if (tbl->reopen(false, err_info) < 0) {
-        LOG_ERROR("MMapSegmentTable[%s] reopen failed", tbl->realFilePath().c_str());
+      if (tbl->open(const_cast<EntityBlockMetaManager*>(&meta_manager_), tbl->segment_id(), name_ + ".bt",
+                     db_path_, tbl_sub_path_ + std::to_string(tbl->segment_id()) + "/", MMAP_OPEN_NORECURSIVE,
+                     false, err_info) < 0) {
+        LOG_ERROR("MMapSegmentTable[%s] open failed", tbl->realFilePath().c_str());
         return true;
       }
     }
@@ -537,7 +563,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
 void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_info) {
   // Get segments that require compression processing
   vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
-  data_segments_.Traversal([&segment_tables](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+  data_segments_.Traversal([&](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
     // Compressed segment
     if (tbl->sqfsIsExists()) {
       if (tbl->getObjectStatus() == OBJ_READY && tbl->getSegmentStatus() >= ImmuWithRawSegment) {
@@ -552,8 +578,10 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
     // it needs to be reopened and subsequent compression operations should be performed
     if (tbl->getObjectStatus() != OBJ_READY) {
       ErrorInfo err_info;
-      if (tbl->reopen(false, err_info) < 0) {
-        LOG_ERROR("MMapSegmentTable[%s] reopen failed", tbl->realFilePath().c_str());
+      if (tbl->open(const_cast<EntityBlockMetaManager*>(&meta_manager_), tbl->segment_id(), name_ + ".bt",
+                    db_path_, tbl_sub_path_ + std::to_string(tbl->segment_id()) + "/", MMAP_OPEN_NORECURSIVE,
+                    false, err_info) < 0) {
+        LOG_ERROR("MMapSegmentTable[%s] open failed", tbl->realFilePath().c_str());
         return true;
       }
     }
@@ -623,8 +651,8 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
         if (!isMounted(db_path_ + segment_tbl->tbl_sub_path()) && segment_tbl.use_count() <= 2) {
-          if (segment_tbl->reopen(false, err_info) < 0) {
-            LOG_ERROR("MMapSegmentTable[%s] reopen failed", segment_tbl->realFilePath().c_str());
+          if (!reloadSegment(segment_tbl, false, err_info)) {
+            LOG_ERROR("MMapSegmentTable[%s] reload failed", segment_tbl->realFilePath().c_str());
             return;
           }
         }
@@ -636,7 +664,8 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
         if (!isMounted(db_path_ + segment_tbl->tbl_sub_path()) && segment_tbl.use_count() <= 2) {
-          if (segment_tbl->reopen(false, err_info) < 0) {
+          if (!reloadSegment(segment_tbl, false, err_info)) {
+            LOG_ERROR("MMapSegmentTable[%s] reload failed", segment_tbl->realFilePath().c_str());
             return;
           }
         }
@@ -1916,8 +1945,10 @@ int TsTimePartition::CompactingStatus(std::map<uint32_t, BLOCK_ID>& obsolete_max
     // because TsTableMMapObject::meta_data_ is nullptr
     if (tbl->getObjectStatus() != OBJ_READY) {
       ErrorInfo err_info;
-      if (tbl->reopen(false, err_info) < 0) {
-        LOG_ERROR("MMapSegmentTable[%s] reopen failed", tbl->realFilePath().c_str());
+      if (tbl->open(const_cast<EntityBlockMetaManager*>(&meta_manager_), tbl->segment_id(), name_ + ".bt",
+                     db_path_, tbl_sub_path_ + std::to_string(tbl->segment_id()) + "/", MMAP_OPEN_NORECURSIVE,
+                     false, err_info) < 0) {
+        LOG_ERROR("MMapSegmentTable[%s] open failed", tbl->realFilePath().c_str());
         return true;
       }
     }

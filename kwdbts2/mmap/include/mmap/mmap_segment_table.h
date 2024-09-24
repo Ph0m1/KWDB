@@ -64,6 +64,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   uint16_t max_rows_per_block_;
   // null bitmap size of block
   uint16_t block_null_bitmap_size_;
+  // whether this segment is the latest opened segment
+  bool is_latest_opened_ = true;
 
   virtual int addColumnFile(int col, int flags, ErrorInfo& err_info);
 
@@ -139,6 +141,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   inline void setSegmentStatus(SegmentStatus s_status) {
     TsTableObject::setStatus(s_status);
   }
+
+  inline void setNotLatestOpened() { is_latest_opened_ = false; }
 
   inline size_t getBlockMaxRows() const { return max_rows_per_block_; }
 
@@ -399,8 +403,6 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
   virtual int open(EntityBlockMetaManager* meta_manager, BLOCK_ID segment_id, const string& file_path,
                    const std::string& db_path, const string& tbl_sub_path, int flags, bool lazy_open, ErrorInfo& err_info);
-
-  virtual int reopen(bool lazy_open, ErrorInfo& err_info);
 
   virtual int close(ErrorInfo& err_info);
 

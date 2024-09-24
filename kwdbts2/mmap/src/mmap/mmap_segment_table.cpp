@@ -390,16 +390,6 @@ int MMapSegmentTable::init(EntityBlockMetaManager* meta_manager, const vector<At
   return err_info.errcode;
 }
 
-int MMapSegmentTable::reopen(bool lazy_open, ErrorInfo &err_info) {
-  if (close(err_info) < 0) {
-    LOG_ERROR("MMapSegmentTable reopen failed: MMapSegmentTable::close failed");
-    return err_info.errcode;
-  }
-
-  return open(meta_manager_, segment_id_, bt_file_.filePath(), db_path_, tbl_sub_path_,
-              MMAP_OPEN_NORECURSIVE, lazy_open, err_info);
-}
-
 int MMapSegmentTable::close(ErrorInfo& err_info) {
   mutexLock();
   Defer defer([&](){
@@ -442,7 +432,7 @@ int MMapSegmentTable::close(ErrorInfo& err_info) {
 
   if (g_engine_initialized && g_max_mount_cnt_ != 0 && g_cur_mount_cnt_ > g_max_mount_cnt_
       && s_status >= ImmuWithRawSegment) {
-    if (!umount(db_path_, tbl_sub_path_, err_info)) {
+    if (is_latest_opened_ && !umount(db_path_, tbl_sub_path_, err_info)) {
       LOG_WARN("at MMapSegmentTable::close %s", err_info.errmsg.c_str());
     }
   }

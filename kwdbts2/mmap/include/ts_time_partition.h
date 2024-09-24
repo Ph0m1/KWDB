@@ -81,6 +81,9 @@ class TsTimePartition : public TSObject {
 
   int loadSegment(BLOCK_ID segment_id, ErrorInfo& err_info);
 
+  std::shared_ptr<MMapSegmentTable> reloadSegment(std::shared_ptr<MMapSegmentTable> old_segment,
+                                                  bool lazy_open, ErrorInfo& err_info);
+
  public:
   explicit TsTimePartition(MMapRootTableManager*& root_table_manager, uint16_t config_subgroup_entities) :
     TSObject(), root_table_manager_(root_table_manager) {
