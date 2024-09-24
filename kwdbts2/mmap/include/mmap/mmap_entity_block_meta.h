@@ -34,6 +34,9 @@ const size_t BLOCK_ITEM_MAX = 1000000;              // max block item number in 
 const size_t BLOCK_ROWS_MAX = 1000;                 // max rows number in each block item, pay attention to the delete bitmap
 const size_t BLOCK_ROWS_MIN = 10;                   // min rows number in each block
 const uint64_t INVALID_TS = INT64_MAX;
+
+#define BLOCK_ITEM_BITMAP_SIZE 128
+
 typedef uint32_t BLOCK_ID;
 
 /**
@@ -182,7 +185,7 @@ struct BlockItem {
   BLOCK_ID prev_block_id;     // pre BlockItem ID
   uint32_t publish_row_count; // rows that already writen.
   uint32_t alloc_row_count;   // row space that already allocated.
-  char rows_delete_flags[128];  // Block bitmap that mark if row is deleted.
+  char rows_delete_flags[BLOCK_ITEM_BITMAP_SIZE];  // Block bitmap that mark if row is deleted.
   uint32_t max_rows_in_block;  // max rows that can be stored in a block
   char user_defined[28];      // reserved for user-defined information.
 

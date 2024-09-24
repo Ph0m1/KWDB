@@ -126,7 +126,7 @@ success_end:
   }
   tag_bt_->stopRead();
   *count = fetch_count;
-  LOG_INFO("fatch the tag table %s%s, fetch_count: %u",
+  LOG_DEBUG("fatch the tag table %s%s, fetch_count: %u",
     tag_bt_->sandbox().c_str(), tag_bt_->name().c_str(), *count);
   cur_scan_rowid_ = row_num;
   return (KStatus::SUCCESS);

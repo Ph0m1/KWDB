@@ -329,6 +329,12 @@ class TsAggIterator : public TsIterator {
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
   }
 
+  ~TsAggIterator() {
+    if (bitmaps_cpy_) {
+      free(bitmaps_cpy_);
+    }
+  }
+
   KStatus Init(bool is_reversed) override;
   /**
    * @brief The internally implemented aggregate data query interface returns the aggregate query result of an entity
@@ -492,6 +498,8 @@ class TsAggIterator : public TsIterator {
   bool no_last_row_type_ = true;
   bool only_first_last_type_ = false;
   TsFirstLastRow first_last_row_;
+  // store all bitmap of columns copyed from mmap file.
+  char* bitmaps_cpy_{nullptr};
 };
 
 /**

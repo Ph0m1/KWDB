@@ -631,11 +631,6 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
         LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
         return KStatus::FAIL;
       }
-      // If there is no first_row type query, it can be skipped directly when all data in the current block is null.
-      if (no_first_row_type_ &&
-          segment_tbl->isAllNullValue(block_item->block_id, block_item->publish_row_count, ts_scan_cols_)) {
-        continue;
-      }
       timestamp64 min_ts = segment_tbl->getBlockMinTs(block_item->block_id);
       timestamp64 max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
       // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
@@ -651,6 +646,20 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
       std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
       if (getBlockBitmap(segment_tbl, block_item, bitmaps) != KStatus::SUCCESS) {
         return KStatus::FAIL;
+      }
+      // If there is no first_row type query, it can be skipped directly when all data in the current block is null.
+      if (no_first_row_type_) {
+        bool all_deleted = true;
+        for (auto &col_bitmap : bitmaps) {
+          if (col_bitmap.second->bitmap != nullptr &&
+              !isAllDeleted(reinterpret_cast<char*>(col_bitmap.second->bitmap), 1, block_item->publish_row_count)) {
+                all_deleted = false;
+                break;
+              }
+        }
+        if (all_deleted) {
+          continue;
+        }
       }
       // Traverse all data of this BlockItem
       uint32_t cur_row_offset = 1;
@@ -743,11 +752,6 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
                   block_item->block_id, cur_pt->GetPath().c_str());
         return KStatus::FAIL;
       }
-      // If there is no last row type query, it can be skipped directly when the data in the current block is all null.
-      if (no_last_row_type_ &&
-          segment_tbl->isAllNullValue(block_item->block_id, block_item->publish_row_count, ts_scan_cols_)) {
-        continue;
-      }
       timestamp64 min_ts = segment_tbl->getBlockMinTs(block_item->block_id);
       timestamp64 max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
       // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
@@ -763,6 +767,20 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
       std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>> bitmaps;
       if (getBlockBitmap(segment_tbl, block_item, bitmaps) != KStatus::SUCCESS) {
         return KStatus::FAIL;
+      }
+      // If there is no last row type query, it can be skipped directly when the data in the current block is all null.
+      if (no_last_row_type_) {
+        bool all_deleted = true;
+        for (auto &col_bitmap : bitmaps) {
+          if (col_bitmap.second->bitmap != nullptr &&
+              !isAllDeleted(reinterpret_cast<char*>(col_bitmap.second->bitmap), 1, block_item->publish_row_count)) {
+                all_deleted = false;
+                break;
+              }
+        }
+        if (all_deleted) {
+          continue;
+        }
       }
       // Traverse all data of this BlockItem
       uint32_t cur_row_offset = block_item->publish_row_count;
@@ -867,7 +885,8 @@ KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timest
 
 KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
                                       std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps) {
-  for (auto& col_idx : ts_scan_cols_) {
+  for (int i = 0; i < ts_scan_cols_.size(); i++) {
+    auto& col_idx = ts_scan_cols_[i];
     auto it = bitmaps.find(col_idx);
     if (it != bitmaps.end()) {
       continue;
@@ -888,11 +907,9 @@ KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_
     }
     // cache bitmap info, to avoid page fault.
     if (!need_free_bitmap) {
-      void* bitmap_orig = bitmap;
-      size_t malloc_size = (segment_tbl->getBlockMaxNum() + 7) / 8;
-      bitmap = malloc(malloc_size);
-      memcpy(bitmap, bitmap_orig, malloc_size);
-      need_free_bitmap = true;
+      char* bitmap_start = bitmaps_cpy_ + i * BLOCK_ITEM_BITMAP_SIZE;
+      memcpy(bitmap_start, bitmap, BLOCK_ITEM_BITMAP_SIZE);
+      bitmap = bitmap_start;
     }
     bitmaps[col_idx] = std::make_shared<BlockBitmap>(block_item->block_id, col_idx, bitmap, need_free_bitmap);
   }
@@ -1184,6 +1201,11 @@ KStatus TsAggIterator::Init(bool is_reversed) {
   only_first_type_ = onlyHasFirstAggType();
   only_last_type_ = onlyHasLastAggType();
   only_first_last_type_ = onlyHasFirstLastAggType();
+  bitmaps_cpy_ = reinterpret_cast<char*>(malloc(BLOCK_ITEM_BITMAP_SIZE * kw_scan_cols_.size()));
+  if (bitmaps_cpy_ == nullptr) {
+    LOG_ERROR("new memory failed.");
+    return KStatus::FAIL;
+  }
   return SUCCESS;
 }
 
