@@ -50,7 +50,6 @@ struct EngineOptions {
   uint16_t thread_pool_size = 10;
   uint16_t task_queue_size = 1024;
   uint32_t buffer_pool_size = 4096;  // NEWPOOL_MAX_SIZE (4096)
-  bool is_single_node = false;
   // 1MiB / 4KiB(BLOCK_SIZE) = 256
   [[nodiscard]] uint32_t GetBlockNumPerFile() const {
     return wal_file_size * 256 - 1;
@@ -73,6 +72,7 @@ struct EngineOptions {
   static int  float_precision_;
   static int64_t max_anon_memory_size_;
   static string home_;  // NOLINT
+  static bool is_single_node_;
   static const string & dateFormat() { return s_defaultDateFormat(); }
   static const string & dateTimeFormat() { return s_defaultDateTimeFormat(); }
   static size_t pageSize() { return ps_; }
@@ -82,6 +82,7 @@ struct EngineOptions {
   static int float_precision() { return float_precision_; }
   static int64_t max_anon_memory_size() {return max_anon_memory_size_;}
   static const string & home() { return home_; }
+  static bool isSingleNode() {return is_single_node_;}
 };
 extern std::atomic<int64_t> kw_used_anon_memory_size;
 

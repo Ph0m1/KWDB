@@ -9,6 +9,7 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
+#include <engine.h>
 #include "ee_tag_row_batch.h"
 
 #include "ee_field.h"
@@ -264,9 +265,8 @@ void TagRowBatch::Init(TABLE *table) {
   res_.setColumnNum(table_->scan_tags_.size());
 }
 
-KStatus TagRowBatch::GetEntities(kwdbContext_p ctx,
-                                 std::vector<EntityResultIndex> *entities) {
-  if (ctx->is_single_node) {
+KStatus TagRowBatch::GetEntities(std::vector<EntityResultIndex> *entities) {
+  if (EngineOptions::isSingleNode()) {
     k_uint32 entities_num_per_pipe, remainder;
     if (current_pipe_no_ >= pipe_entity_num_.size()) {
       return FAIL;
@@ -307,8 +307,8 @@ KStatus TagRowBatch::GetEntities(kwdbContext_p ctx,
   }
 }
 
-bool TagRowBatch::isAllDistributed(kwdbContext_p ctx) {
-  if (ctx->is_single_node) {
+bool TagRowBatch::isAllDistributed() {
+  if (EngineOptions::isSingleNode()) {
     return current_pipe_no_ >= valid_pipe_no_;
   } else {
     return hash_entity_indexs_.empty();
@@ -319,7 +319,7 @@ void TagRowBatch::SetPipeEntityNum(kwdbContext_p ctx, k_uint32 pipe_degree) {
   current_pipe_no_ = 0;
   current_pipe_line_ = 0;
   k_int32 remainder;
-  if (ctx->is_single_node) {
+  if (EngineOptions::isSingleNode()) {
     k_int32 entities_num_per_pipe;
     if (isFilter_) {
       entities_num_per_pipe = selection_.size() / pipe_degree;

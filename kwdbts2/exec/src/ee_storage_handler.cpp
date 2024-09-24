@@ -194,7 +194,7 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
       SafeDeletePointer(ts_iterator);
     }
     std::vector<KwTsSpan> ts_spans;
-    if (ctx->is_single_node) {
+    if (EngineOptions::isSingleNode()) {
       ts_spans = *ts_spans_;
     } else {
       auto it = table_->hash_points_spans_.find(entities_[0].hash_point);
@@ -226,7 +226,7 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
 EEIteratorErrCode StorageHandler::NewTagIterator(kwdbContext_p ctx) {
   EnterFunc();
   KStatus ret = FAIL;
-  if (ctx->is_single_node) {
+  if (EngineOptions::isSingleNode()) {
       if (read_mode_ == TSTableReadMode::metaTable) {
         MetaIterator *meta = nullptr;
         ret = ts_table_->GetMetaIterator(ctx, &meta, table_->table_version_);

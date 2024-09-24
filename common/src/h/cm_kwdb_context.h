@@ -83,7 +83,6 @@ typedef struct _kwdbContext_t: public _KContext_t {
   k_int32 sql_status;
   void *ts_engine{nullptr};
   void *fetcher{nullptr};
-  bool is_single_node{false};
 } kwdbContext_t;
 // Defines the context structure pointer type
 typedef kwdbContext_t* kwdbContext_p;

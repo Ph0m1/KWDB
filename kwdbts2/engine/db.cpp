@@ -55,7 +55,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
   } else {
     opts.wal_level = options.wal_level;
   }
-  opts.is_single_node = options.is_single_node;
+  EngineOptions::is_single_node_ = options.is_single_node;
   opts.wal_buffer_size = options.wal_buffer_size;
   opts.wal_file_size = options.wal_file_size;
   opts.wal_file_in_group = options.wal_file_in_group;

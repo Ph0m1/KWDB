@@ -491,10 +491,11 @@ int MMapTagColumnTable::readTagInfo(ErrorInfo& err_info) {
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
   }
-
-  err_info.errcode = initHashPointColumn(err_info);
-  if (err_info.errcode < 0) {
-    return err_info.setError(err_info.errcode);
+  if (!EngineOptions::isSingleNode()) {
+    err_info.errcode = initHashPointColumn(err_info);
+    if (err_info.errcode < 0) {
+      return err_info.setError(err_info.errcode);
+    }
   }
   return 0;
 }
@@ -598,9 +599,11 @@ int MMapTagColumnTable::init(const vector<TagInfo>& schema, ErrorInfo& err_info)
     return err_info.setError(err_info.errcode);
   }
   // initHashPointFile
-  err_info.errcode = initHashPointColumn(err_info);
-  if (err_info.errcode < 0) {
-    return err_info.setError(err_info.errcode);
+  if (!EngineOptions::isSingleNode()) {
+    err_info.errcode = initHashPointColumn(err_info);
+    if (err_info.errcode < 0) {
+      return err_info.setError(err_info.errcode);
+    }
   }
 
   m_meta_data_->m_record_store_size += m_meta_data_->m_header_size;
@@ -791,7 +794,9 @@ int MMapTagColumnTable::reserve(size_t n, ErrorInfo& err_info) {
     return err_code;
   }
   // hashpoint file extend
-  err_code = m_hps_file_->extend(m_hps_file_->fileLen(), n*sizeof(hashPointStorage));
+  if (m_hps_file_) {
+   err_code = m_hps_file_->extend(m_hps_file_->fileLen(), n*sizeof(hashPointStorage));
+  }
   // tagcolumn extend
   for (size_t i = 0; i < m_cols_.size(); ++i) {
     err_code = m_cols_[i]->extend(m_meta_data_->m_row_count, n);
@@ -855,8 +860,10 @@ int MMapTagColumnTable::insert(uint32_t entity_id, uint32_t subgroup_id, uint32_
 
   // put entity id
   push_back_entityid(num_node, entity_id, subgroup_id);
-  LOG_DEBUG("%s/%s insert set row %ld hashpoint %d",m_db_name_.c_str(), m_name_.c_str(), num_node, hashpoint);
-  setHashPoint(num_node, {hashpoint});
+  if (!EngineOptions::isSingleNode()) {
+   LOG_DEBUG("%s/%s insert set row %ld hashpoint %d",m_db_name_.c_str(), m_name_.c_str(), num_node, hashpoint);
+   setHashPoint(num_node, {hashpoint});
+  }
   // put tag table record
   if ((push_back(num_node, rec)) < 0) {
     stopRead();
@@ -1009,9 +1016,13 @@ int MMapTagColumnTable::GetEntityIdList(const std::vector<void*>& primary_tags,
         // not found
         continue;
       }
-      uint32_t hps;
-      getHashpointByRowNum(row, &hps);
-      getHashedEntityIdByRownum(row, hps, entityIdList);
+      if (!EngineOptions::isSingleNode()) {
+        uint32_t hps;
+        getHashpointByRowNum(row, &hps);
+        getHashedEntityIdByRownum(row, hps, entityIdList);
+      }else {
+        getEntityIdByRownum(row, entityIdList);
+      }
       // tag column
       int err_code = 0;
       if ((err_code = getColumnsByRownum(row, scan_tags, res)) < 0) {

@@ -494,8 +494,6 @@ struct TSEngine {
   * @return KStatus
   */
   virtual KStatus GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) = 0;
-
-  virtual int IsSingleNode() = 0;
 };
 
 namespace kwdbts {

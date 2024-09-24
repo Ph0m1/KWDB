@@ -2515,7 +2515,7 @@ KStatus TsTable::GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t> scan_ta
     //   // not leader
     //   continue;
     // }
-    if (!ctx->is_single_node) {
+    if (!EngineOptions::isSingleNode()) {
       tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter, hps);
     } else {
       tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter);

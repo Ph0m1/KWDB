@@ -332,8 +332,10 @@ int MMapTagColumnTable::DeleteForUndo(uint32_t groupid, uint32_t entityid,
     for (auto col: m_cols_) {
       schema.push_back(col->attributeInfo());
     }
-    uint32_t hashpoint;
-    getHashpointByRowNum(rowNo, &hashpoint);
+    uint32_t hashpoint = 0;
+    if (!EngineOptions::isSingleNode()) {
+     getHashpointByRowNum(rowNo, &hashpoint);
+    }
     TagTuplePack tag(schema, tag_pack.data, tag_pack.len);
     return insert(entityid, groupid, hashpoint, tag.getTags().data);
   } else {

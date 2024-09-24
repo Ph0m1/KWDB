@@ -100,7 +100,7 @@ const char BigObjectConfig::slash_ = '\\';
 #else
 const char EngineOptions::slash_ = '/';
 #endif
-
+bool EngineOptions::is_single_node_ = false;
 std::atomic<int64_t> kw_used_anon_memory_size;
 
 void EngineOptions::init() {
@@ -515,7 +515,6 @@ KStatus TSEngineImpl::ApplyBatchRepr(kwdbContext_p ctx, TSSlice* batch) {
 
 KStatus TSEngineImpl::Execute(kwdbContext_p ctx, QueryInfo* req, RespInfo* resp) {
   ctx->ts_engine = this;
-  ctx->is_single_node = this->IsSingleNode();
   KStatus ret = DmlExec::ExecQuery(ctx, req, resp);
   return ret;
 }
@@ -1370,10 +1369,6 @@ KStatus TSEngineImpl::GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uin
   }
   *version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
   return KStatus::SUCCESS;
-}
-
-int TSEngineImpl::IsSingleNode() {
-  return options_.is_single_node;
 }
 
 int AggCalculator::cmp(void* l, void* r) {

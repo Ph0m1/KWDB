@@ -260,8 +260,8 @@ KStatus TagScanOperator::GetEntities(kwdbContext_p ctx,
     *row_batch_ptr = tag_rowbatch_;
   }
   if (is_first_entity_ || (*row_batch_ptr != nullptr &&
-                           (row_batch_ptr->get()->isAllDistributed(ctx)))) {
-    if (is_first_entity_ || *row_batch_ptr == tag_rowbatch_ || tag_rowbatch_->isAllDistributed(ctx)) {
+                           (row_batch_ptr->get()->isAllDistributed()))) {
+    if (is_first_entity_ || *row_batch_ptr == tag_rowbatch_ || tag_rowbatch_->isAllDistributed()) {
       is_first_entity_ = false;
       EEIteratorErrCode code = Next(ctx);
       if (code != EE_OK) {
@@ -274,7 +274,7 @@ KStatus TagScanOperator::GetEntities(kwdbContext_p ctx,
     // construct ts_iterator
     *row_batch_ptr = tag_rowbatch_;
   }
-  KStatus ret = row_batch_ptr->get()->GetEntities(ctx, entities);
+  KStatus ret = row_batch_ptr->get()->GetEntities(entities);
   Return(ret);
 }
 

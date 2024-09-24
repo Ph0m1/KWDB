@@ -121,9 +121,8 @@ class TagRowBatch : public RowBatch {
   void Init(TABLE *table);
   void SetLimitOffset(k_uint32 limit, k_uint32 offset) {}
   void SetPipeEntityNum(kwdbContext_p ctx, k_uint32 pipe_degree);
-  KStatus GetEntities(kwdbContext_p ctx,
-                      std::vector<EntityResultIndex> *entities);
-  bool isAllDistributed(kwdbContext_p ctx);
+  KStatus GetEntities(std::vector<EntityResultIndex> *entities);
+  bool isAllDistributed();
 };
 
 };  // namespace kwdbts

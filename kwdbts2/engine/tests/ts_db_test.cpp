@@ -34,6 +34,7 @@ class TestDB : public ::testing::Test {
     opts_.task_queue_size = 10;
     opts_.lg_opts = TsLogOptions{};
     opts_.start_vacuum = true;
+    opts_.is_single_node = true;
     ts_db_ = nullptr;
   }
 
