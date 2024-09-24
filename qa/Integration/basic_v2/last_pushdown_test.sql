@@ -190,7 +190,7 @@ select z2,last(z),last(z2),last(z3),last(z4),last(z5),last(z6),last(z7),last(z)<
 
 /* ****************last last_row with other agg functions***************** */
 select last(x),last(x2),last(y),last(y2),last(y3) from t;
-select avg(x),avg(x2),round(avg(y),2),avg(y2),avg(y3) from t;
+select avg(x),avg(x2),round(avg(y),2),round(avg(y2),2),round(avg(y3),2) from t;
 select sum(x),sum(x2),sum(y),sum(y2),sum(y3) from t;
 select count(k_timestamp),count(x),count(x2),count(y),count(y2),count(y3),count(z) from t;
 select max(k_timestamp),max(x),max(x2),max(y),max(y2),max(y3),max(z),max(z7) from t;
