@@ -29,7 +29,6 @@ import (
 	"context"
 	"fmt"
 	"go/constant"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -3233,41 +3232,38 @@ func checkPrimaryTag(tagColumn sqlbase.ColumnDescriptor) error {
 func distributeAndDuplicateOfCreateTSTable(
 	params runParams, desc sqlbase.MutableTableDescriptor,
 ) error {
-	hashRouterMgr := api.GetHashRouterManagerWithCache()
-	hashRouter, err := hashRouterMgr.InitHashRouter(context.Background(), params.p.Txn(), uint32(desc.ParentID), uint32(desc.ID))
+	partitions, err := api.GetDistributeInfo(params.ctx, uint32(desc.ID))
 	if err != nil {
-		return errors.Wrap(err, "PreDistributionError: get hashRouter failed")
+		return errors.Wrap(err, "PreDistributionError: get distribute info failed")
+	}
+	preDistReplicas, err := api.PreDistributeBySingleReplica(params.ctx, params.p.txn, uint32(desc.ID), partitions)
+	if err != nil {
+		return errors.Wrap(err, "PreDistributionError: get pre distribute info failed")
 	}
 
-	entityRangeGroups := hashRouter.GetHashPartitions(params.ctx)
 	type pointGroup struct {
 		point     int32
 		timestamp int64
-		groupID   uint32
 	}
 	var pointGroups []pointGroup
 	var splitInfo []roachpb.AdminSplitInfoForTs
-	var replicasS [][]roachpb.ReplicaDescriptor
-	for _, entityRangeGroup := range entityRangeGroups {
-		var replicas []roachpb.ReplicaDescriptor
-		for _, replica := range entityRangeGroup.InternalReplicas {
-			replicas = append(replicas, roachpb.ReplicaDescriptor{NodeID: replica.NodeID, StoreID: replica.StoreID})
-		}
-		replicasS = append(replicasS, replicas)
-	}
-	for _, entityRangeGroup := range entityRangeGroups {
-		for _, hashPartition := range entityRangeGroup.Partitions {
-			rand.Seed(timeutil.Now().UnixNano())
-			random1 := rand.Intn(len(replicasS))
-			startPoint := hashPartition.StartPoint
-			pointGroups = append(pointGroups, pointGroup{int32(startPoint), hashPartition.StartTimeStamp, uint32(entityRangeGroup.GroupID)})
-			splitKey := sqlbase.MakeTsRangeKey(desc.ID, uint64(startPoint), hashPartition.StartTimeStamp)
-			info := roachpb.AdminSplitInfoForTs{
+	for index, hashPartition := range partitions {
+		startPoint := hashPartition.StartPoint
+		var info roachpb.AdminSplitInfoForTs
+		pointGroups = append(pointGroups, pointGroup{int32(startPoint), hashPartition.StartTimeStamp})
+		splitKey := sqlbase.MakeTsRangeKey(desc.ID, uint64(startPoint), hashPartition.StartTimeStamp)
+		if params.ExecCfg().StartMode == StartSingleReplica {
+			info = roachpb.AdminSplitInfoForTs{
 				SplitKey: splitKey,
-				PreDist:  replicasS[random1],
+				PreDist:  []roachpb.ReplicaDescriptor{preDistReplicas[index]},
 			}
-			splitInfo = append(splitInfo, info)
+		} else {
+			info = roachpb.AdminSplitInfoForTs{
+				SplitKey: splitKey,
+			}
 		}
+
+		splitInfo = append(splitInfo, info)
 	}
 
 	// split ts range

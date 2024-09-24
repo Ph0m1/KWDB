@@ -23,6 +23,18 @@
 
 package api
 
+// SplitType is split by hashPoint or timestamp
+type SplitType int32
+
+const (
+	// SplitWithOneHashPoint {78/1 78/2} {78/2 78/3}
+	SplitWithOneHashPoint SplitType = 2
+	// SplitWithHashPointAndPositiveTimeStamp {78/1 78/1/1681111110000} {78/1/1681111110000 78/2}
+	SplitWithHashPointAndPositiveTimeStamp SplitType = 3
+	// SplitWithHashPointAndNegativeTimeStamp {78/1 78/1/-1681111110000} {78/1/-1681111110000 78/2}
+	SplitWithHashPointAndNegativeTimeStamp SplitType = 4
+)
+
 // EntityRangeGroupID is the id of EntityRangeGroup
 type EntityRangeGroupID uint32
 

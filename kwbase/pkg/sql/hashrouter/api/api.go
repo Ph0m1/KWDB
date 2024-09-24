@@ -49,28 +49,26 @@ type EntityRangeGroupChange struct {
 	Messages []EntityRangePartitionMessage
 }
 
+// GetDistributeInfo get the partitions on create table
+var GetDistributeInfo func(ctx context.Context, tableID uint32) ([]HashPartition, error)
+
+// PreDistributeBySingleReplica is used on StartSingleReplica to get pre distribute
+var PreDistributeBySingleReplica func(ctx context.Context, txn *kv.Txn, tableID uint32, partitions []HashPartition) ([]roachpb.ReplicaDescriptor, error)
+
 // HashRouterManager the interface of ha manager
 type HashRouterManager interface {
 	// IsNodeUpgrading the replica change when node upgrading
 	IsNodeUpgrading(ctx context.Context, nodeID roachpb.NodeID, tableID uint32) ([]EntityRangeGroupChange, error)
 	// NodeRecover the replica change when unhealthy node rejoin
 	NodeRecover(ctx context.Context, nodeID roachpb.NodeID, tableID uint32) ([]EntityRangeGroupChange, error)
-	// RefreshHashRouter calculate the new table distribute and write to disk without groupChange
-	RefreshHashRouter(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, nodeStatus storagepb.NodeLivenessStatus) error
 	// RefreshHashRouterWithSingleGroup calculate the new group distribute from groupChange and write to disk
 	RefreshHashRouterWithSingleGroup(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, groupChange EntityRangeGroupChange) error
 	// RefreshHashRouterForGroups calculate the new groups distribute and write to disk without groupChange
 	RefreshHashRouterForGroups(ctx context.Context, tableID uint32, txn *kv.Txn, msg string, nodeStatus storagepb.NodeLivenessStatus, groups map[EntityRangeGroupID]struct{}) error
-	// InitHashRouter init the table distribute when create table
-	InitHashRouter(ctx context.Context, txn *kv.Txn, databaseID uint32, tableID uint32) (HashRouter, error)
-	// GroupChange the replica change when group change distribute use to internal debug
-	GroupChange(ctx context.Context, txn *kv.Txn, tableID uint32, groupID EntityRangeGroupID, leaseHolderID roachpb.NodeID, follower1ID roachpb.NodeID, follower2ID roachpb.NodeID) ([]EntityRangePartitionMessage, error)
 	// DropTableHashInfo drop the table distribute from the disk
 	DropTableHashInfo(ctx context.Context, txn *kv.Txn, tableID uint32) error
 	// GetAllHashRouterInfo get all table distribute from disk
 	GetAllHashRouterInfo(ctx context.Context, txn *kv.Txn) (map[uint32]HashRouter, error)
-	// GetTableGroupsOnNodeForAddNode get all groups on every node when adding node
-	GetTableGroupsOnNodeForAddNode(ctx context.Context, tableID uint32, nodeID roachpb.NodeID) []RangeGroup
 	// GetHashInfoByTableID get the table groups distribute
 	GetHashInfoByTableID(ctx context.Context, tableID uint32) HashRouter
 
