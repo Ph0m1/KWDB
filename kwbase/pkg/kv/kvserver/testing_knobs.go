@@ -249,6 +249,9 @@ type StoreTestingKnobs struct {
 	// RangeFeedPushTxnsAge overrides the default value for
 	// rangefeed.Config.PushTxnsAge.
 	RangeFeedPushTxnsAge time.Duration
+	// DisableSafeReplicationChanges disable the protection in execChangeReplicasTxn
+	// to prevent moving to an unavailable configuration.
+	DisableSafeReplicationChanges bool
 }
 
 // ModuleTestingKnobs is part of the base.ModuleTestingKnobs interface.

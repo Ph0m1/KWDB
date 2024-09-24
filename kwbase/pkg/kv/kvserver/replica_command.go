@@ -1803,6 +1803,36 @@ func execChangeReplicasTxn(
 			}
 		}
 
+		for attempts, i := 10, 0; i < attempts; i++ {
+			if knobs := store.TestingKnobs(); knobs != nil && knobs.DisableSafeReplicationChanges {
+				break
+			}
+			// Run an integrity check to ensure that the configuration
+			// resulting from this change meets the quorum requirements.
+			replicas := crt.Desc.Replicas()
+			liveVoterReplicas, _ := store.allocator.storePool.liveAndDeadReplicas(replicas.All())
+			unavailable := !crt.Desc.Replicas().CanMakeProgress(func(rDesc roachpb.ReplicaDescriptor) bool {
+				for _, inner := range liveVoterReplicas {
+					if inner.ReplicaID == rDesc.ReplicaID {
+						return true
+					}
+				}
+				return false
+			})
+			if unavailable {
+				err := newQuorumError(
+					"range %s requires a replication change add=%v del=%v, "+
+						"but live replicas %v don't constitute a quorum for %v:",
+					crt.Desc, crt.Added(), crt.Removed(), liveVoterReplicas, desc.Replicas().All(),
+				)
+				if i == attempts-1 {
+					return err
+				}
+				log.Infof(ctx, "%s; retrying", err)
+				time.Sleep(time.Second)
+			}
+		}
+
 		{
 			b := txn.NewBatch()
 

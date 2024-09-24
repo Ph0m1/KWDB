@@ -442,7 +442,7 @@ func (a *Allocator) computeAction(
 		return action, priority
 	}
 
-	liveVoterReplicas, deadVoterReplicas := a.storePool.liveAndDeadReplicas(rangeID, voterReplicas)
+	liveVoterReplicas, deadVoterReplicas := a.storePool.liveAndDeadReplicas(voterReplicas)
 
 	if len(liveVoterReplicas) < quorum {
 		// Do not take any replacement/removal action if we do not have a quorum of live
@@ -908,7 +908,7 @@ func (a *Allocator) TransferLeaseTarget(
 	}
 
 	// Only consider live, non-draining replicas.
-	existing, _ = a.storePool.liveAndDeadReplicas(rangeID, existing)
+	existing, _ = a.storePool.liveAndDeadReplicas(existing)
 
 	// Short-circuit if there are no valid targets out there.
 	if len(existing) == 0 || (len(existing) == 1 && existing[0].StoreID == leaseStoreID) {
@@ -1013,7 +1013,7 @@ func (a *Allocator) ShouldTransferLease(
 	log.VEventf(ctx, 3, "ShouldTransferLease (lease-holder=%d):\n%s", leaseStoreID, sl)
 
 	// Only consider live, non-draining replicas.
-	existing, _ = a.storePool.liveAndDeadReplicas(rangeID, existing)
+	existing, _ = a.storePool.liveAndDeadReplicas(existing)
 
 	// Short-circuit if there are no valid targets out there.
 	if len(existing) == 0 || (len(existing) == 1 && existing[0].StoreID == source.StoreID) {
