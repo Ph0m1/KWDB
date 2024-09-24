@@ -53,6 +53,49 @@ struct BlockBitmap {
   }
 };
 
+class ColBlockBitmaps {
+ public:
+  ~ColBlockBitmaps() {
+    if (bitmap_) {
+      free(bitmap_);
+    }
+  }
+
+  bool Init(size_t col) {
+    col_num_ = col;
+    bitmap_ = reinterpret_cast<char*>(malloc(col_num_ * BLOCK_ITEM_BITMAP_SIZE));
+    if (bitmap_ == nullptr) {
+      return false;
+    }
+    memset(bitmap_, 0, col_num_ * BLOCK_ITEM_BITMAP_SIZE);
+    return true;
+  }
+
+  inline char* GetColBitMapAddr(size_t col_idx) const {
+    return bitmap_ + col_idx * BLOCK_ITEM_BITMAP_SIZE;
+  }
+
+  inline void SetColBitMap(size_t col_idx, char* bitmap) {
+    if (bitmap != nullptr) {
+      memcpy(GetColBitMapAddr(col_idx), bitmap, BLOCK_ITEM_BITMAP_SIZE);
+    } else {
+      memset(GetColBitMapAddr(col_idx), 0xFF, BLOCK_ITEM_BITMAP_SIZE);
+    }
+  }
+
+  inline bool IsColNull(size_t col_idx, size_t row_num) const {
+    return isRowDeleted(GetColBitMapAddr(col_idx), row_num);
+  }
+
+  inline bool IsColAllNull(size_t col_idx, size_t count) const {
+    return isAllDeleted(GetColBitMapAddr(col_idx), 1, count);
+  }
+
+ private:
+  char* bitmap_{nullptr};
+  size_t col_num_;
+};
+
 // Used for first/last query optimization:
 // If only the first/last type is included in a single aggregation query process,
 // as most temporal data is written in sequence, optimization can be carried out for this special scenario.
@@ -95,29 +138,7 @@ class TsFirstLastRow {
     }
   }
 
-  void Reset() {
-    delObjects();
-    no_first_last_type_ = true;
-    first_pairs_.assign(scan_agg_types_.size(), {});
-    last_pairs_.assign(scan_agg_types_.size(), {});
-    for (size_t i = 0; i < scan_agg_types_.size(); i++) {
-      if (scan_agg_types_[i] == Sumfunctype::FIRST || scan_agg_types_[i] == Sumfunctype::FIRSTTS) {
-        no_first_last_type_ = false;
-      } else if (scan_agg_types_[i] == Sumfunctype::FIRST_ROW || scan_agg_types_[i] == Sumfunctype::FIRSTROWTS) {
-        no_first_last_type_ = false;
-      } else if (scan_agg_types_[i] == Sumfunctype::LAST || scan_agg_types_[i] == Sumfunctype::LASTTS) {
-        no_first_last_type_ = false;
-      } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
-        no_first_last_type_ = false;
-      }
-      first_pairs_[i] = {i, TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}}};
-      last_pairs_[i] = {i, TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}}};
-    }
-    first_row_pair_ = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
-    last_row_pair_ = std::move(TsRowTableInfo{nullptr, nullptr, INVALID_TS, MetricRowID{}});
-    first_agg_valid_ = 0;
-    last_agg_valid_ = 0;
-  }
+  void Reset();
 
   bool NeedFirstLastAgg() {
     return !no_first_last_type_;
@@ -140,12 +161,10 @@ class TsFirstLastRow {
   }
 
   KStatus UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
-                        std::shared_ptr<MMapSegmentTable> segment_tbl,
-                        const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+                        std::shared_ptr<MMapSegmentTable> segment_tbl, const ColBlockBitmaps& col_bitmap);
 
   KStatus UpdateLastRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
-                        std::shared_ptr<MMapSegmentTable> segment_tbl,
-                        const std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+                        std::shared_ptr<MMapSegmentTable> segment_tbl, const ColBlockBitmaps& col_bitmap);
 
   KStatus GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size_t col_id,
                       const AttributeInfo& col_attr, Batch** agg_batch);
@@ -192,6 +211,14 @@ class TsIterator {
   virtual ~TsIterator();
 
   virtual KStatus Init(bool is_reversed);
+
+  static bool IsFirstAggType(const Sumfunctype& agg_type) {
+    return agg_type == FIRST || agg_type == FIRSTTS || agg_type == FIRST_ROW || agg_type == FIRSTROWTS;
+  }
+
+  static bool IsLastAggType(const Sumfunctype& agg_type) {
+    return agg_type == LAST || agg_type == LASTTS || agg_type == LAST_ROW || agg_type == LASTROWTS;
+  }
 
   /**
    * @brief An internally implemented iterator query interface that provides a subgroup data query result to the TsTableIterator class
@@ -329,11 +356,7 @@ class TsAggIterator : public TsIterator {
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
   }
 
-  ~TsAggIterator() {
-    if (bitmaps_cpy_) {
-      free(bitmaps_cpy_);
-    }
-  }
+  ~TsAggIterator() {}
 
   KStatus Init(bool is_reversed) override;
   /**
@@ -362,7 +385,7 @@ class TsAggIterator : public TsIterator {
 
   inline bool onlyHasFirstAggType() {
     for (auto& agg_type : scan_agg_types_) {
-      if (agg_type != FIRST && agg_type != FIRSTTS && agg_type != FIRST_ROW && agg_type != FIRSTROWTS) {
+      if (!IsFirstAggType(agg_type)) {
         return false;
       }
       if (agg_type == FIRST_ROW || agg_type == FIRSTROWTS) {
@@ -374,7 +397,7 @@ class TsAggIterator : public TsIterator {
 
   inline bool onlyHasLastAggType() {
     for (auto& agg_type : scan_agg_types_) {
-      if (agg_type != LAST && agg_type != LASTTS && agg_type != LAST_ROW && agg_type != LASTROWTS) {
+      if (!IsLastAggType(agg_type)) {
         return false;
       }
       if (agg_type == LAST_ROW || agg_type == LASTROWTS) {
@@ -386,8 +409,7 @@ class TsAggIterator : public TsIterator {
 
   inline bool onlyHasFirstLastAggType() {
     for (auto& agg_type : scan_agg_types_) {
-      if (agg_type != FIRST && agg_type != FIRSTTS && agg_type != FIRST_ROW && agg_type != FIRSTROWTS &&
-          agg_type != LAST && agg_type != LASTTS && agg_type != LAST_ROW && agg_type != LASTROWTS) {
+      if (!(IsFirstAggType(agg_type) || IsLastAggType(agg_type))) {
         return false;
       }
     }
@@ -448,8 +470,7 @@ class TsAggIterator : public TsIterator {
 
   KStatus findFirstLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
 
-  KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item,
-                         std::unordered_map<uint32_t, std::shared_ptr<BlockBitmap>>& bitmaps);
+  KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item, int type);
 
   /**
    * @brief Used internally in the Next function, which returns the aggregated result of the most consecutive data in a BlockItem
@@ -499,7 +520,7 @@ class TsAggIterator : public TsIterator {
   bool only_first_last_type_ = false;
   TsFirstLastRow first_last_row_;
   // store all bitmap of columns copyed from mmap file.
-  char* bitmaps_cpy_{nullptr};
+  ColBlockBitmaps col_blk_bitmaps_;
 };
 
 /**
