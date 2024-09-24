@@ -701,6 +701,10 @@ KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
           return s;
 #endif
         }
+        if (table.IsDropped()) {
+          LOG_INFO("table[%lu] is dropped and does not require recover", table_id);
+          continue;
+        }
 
         s = table.UndoAlterTable(ctx, incomplete[mtr_id]);
         if (s == KStatus::FAIL) {
@@ -760,6 +764,10 @@ KStatus TSEngineImpl::Recover(kwdbts::kwdbContext_p ctx) {
 #else
         continue;
 #endif
+    }
+    if (table.IsDropped()) {
+      LOG_INFO("table[%lu] is dropped and does not require recover", table_id);
+      continue;
     }
 
     LOG_DEBUG("Start recover table %ld", table_id);
