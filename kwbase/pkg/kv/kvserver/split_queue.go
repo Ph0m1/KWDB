@@ -35,6 +35,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
@@ -175,6 +176,12 @@ func (sq *splitQueue) process(ctx context.Context, r *Replica, sysCfg *config.Sy
 	return nil
 }
 
+var splitModeSettings = settings.RegisterBoolSetting(
+	"kv.kvserver.ts_split_by_timestamp.enabled",
+	"if set to false, the time series range is split according to the hashpoint. Otherwise, it is split according to the hashpoint and timestamp.",
+	false,
+)
+
 func (sq *splitQueue) processAttempt(
 	ctx context.Context, r *Replica, sysCfg *config.SystemConfig,
 ) error {
@@ -240,6 +247,12 @@ func (sq *splitQueue) processAttempt(
 				splitHashPoint := (startHashPoint + endHashPoint + 1) / 2
 				splitKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(startTableID), splitHashPoint)
 			} else {
+				sv := sq.store.ClusterSettings()
+				splitMode := splitModeSettings.Get(&sv.SV)
+				if !splitMode {
+					return nil
+				}
+
 				//        when range is like
 				//        /Table/78/9/555 - /Max
 				//        Decode /Max , get tableID = 0, hashPoint=0, timestamp = 0
