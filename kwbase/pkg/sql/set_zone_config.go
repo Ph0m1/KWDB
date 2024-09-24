@@ -315,7 +315,9 @@ func (n *setZoneConfigNode) startExec(params runParams) error {
 			if base.OpenSource {
 				switch *name {
 				case "num_replicas", "range_min_bytes", "range_max_bytes":
-					return errors.Errorf("zone config: %s feature needs enterprise license to enable.", *name)
+					if params.p.ExecCfg().StartMode == StartMultiReplica {
+						return errors.Errorf("zone config: %s feature needs enterprise license to enable.", *name)
+					}
 				}
 			}
 

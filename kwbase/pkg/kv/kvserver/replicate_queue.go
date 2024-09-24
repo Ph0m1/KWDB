@@ -985,7 +985,7 @@ func (rq *replicateQueue) findTargetAndTransferLease(
 		return false, nil
 	}
 	sv := rq.store.ClusterSettings()
-	tsLeaseholderMode := splitModeSettings.Get(&sv.SV)
+	tsLeaseholderMode := leaseholderModeSettings.Get(&sv.SV)
 	if target.GetTag() == roachpb.TS_REPLICA && tsLeaseholderMode {
 		// For TS ranges, only allow transfer lease to the replica with almost all raft logs.
 		var replStatus CollectReplicaStatusResponse
