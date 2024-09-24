@@ -2497,7 +2497,7 @@ class AVGRowAggregate : public AggregateFunc {
     for (k_uint32 row = 0; row < data_container_count; ++row) {
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
-        if (target_row >= 0) {
+        if (target_row >= 0 && count > 0) {
           current_data_chunk_->SetNotNull(target_row, col_idx_);
           std::memcpy(dest_ptr, &sum, sizeof(k_double64));
           std::memcpy(dest_ptr + sizeof(k_double64), &count, sizeof(k_int64));
@@ -2515,16 +2515,18 @@ class AVGRowAggregate : public AggregateFunc {
         count = 0;
       }
 
-      char* src_ptr = data_container->GetData(row, arg_idx);
+      if (!data_container->IsNull(row, arg_idx)) {
+        char* src_ptr = data_container->GetData(row, arg_idx);
 
-      T src_val = *reinterpret_cast<T*>(src_ptr);
-      sum += src_val;
-      ++count;
+        T src_val = *reinterpret_cast<T*>(src_ptr);
+        sum += src_val;
+        ++count;
+      }
 
       data_container->NextLine();
     }
 
-    if (target_row >= 0) {
+    if (target_row >= 0 && count > 0) {
       current_data_chunk_->SetNotNull(target_row, col_idx_);
       std::memcpy(dest_ptr, &sum, sizeof(k_double64));
       std::memcpy(dest_ptr + sizeof(k_double64), &count, sizeof(k_int64));
