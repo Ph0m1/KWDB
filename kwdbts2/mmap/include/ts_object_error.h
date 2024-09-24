@@ -42,6 +42,7 @@ using namespace std;
 #define KWENOSEGMENT      -23  // need create new segment directory
 #define KWEDUPREJECT     -24  // reject duplicate data
 #define KWERSRCBUSY      -25  // resource is busy
+#define KWEDROPPEDOBJ    -26  // object is dropped
 
 #define ERROR_LEN_LIMIT 128
 

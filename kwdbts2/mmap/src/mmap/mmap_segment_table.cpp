@@ -317,7 +317,7 @@ int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segmen
   open_(magic(), file_path, db_path, tbl_sub_path, flags, err_info);
   if (err_info.errcode < 0) {
     err_info.setError(err_info.errcode, tbl_sub_path + file_path);
-    LOG_ERROR("%s open_ failed, err_msg: %s", sqfs_path.c_str(), err_info.errmsg.c_str());
+    LOG_ERROR("%s open_ failed, err_msg: %s", tbl_sub_path.c_str(), err_info.errmsg.c_str());
     return err_info.errcode;
   }
 

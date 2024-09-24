@@ -800,6 +800,12 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
   // Then continue to call nextPayload until the traversal of the Payload data is complete.
   while (payloadNextSlice(sub_group, pd, last_p_time, batch_start, &row_id, &p_time)) {
     p_bt = ebt_manager_->GetPartitionTable(last_p_time, group_id, err_info, true);
+    if (err_info.errcode == KWEDROPPEDOBJ) {
+      ebt_manager_->ReleasePartitionTable(p_bt);
+      LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
+      err_info.clear();
+      continue;
+    }
     if (err_info.errcode < 0) {
       ebt_manager_->ReleasePartitionTable(p_bt);
       LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
@@ -874,6 +880,12 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   // Then continue to call nextPayload until the traversal of the Payload data is complete.
   while (payloadNextSlice(sub_group, pd, last_p_time, batch_start, &row_id, &p_time)) {
     p_bt = ebt_manager_->GetPartitionTable(last_p_time, group_id, err_info, true);
+    if (err_info.errcode == KWEDROPPEDOBJ) {
+      ebt_manager_->ReleasePartitionTable(p_bt);
+      LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
+      err_info.clear();
+      continue;
+    }
     if (err_info.errcode < 0) {
       LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
       all_success = false;
@@ -940,12 +952,12 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
     TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
+      LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
       ebt_manager_->ReleasePartitionTable(p_bt);
-      if (err_info.errcode == KWENOOBJ) {
+      if (err_info.errcode == KWEDROPPEDOBJ) {
         err_info.clear();
         continue;
       }
-      LOG_ERROR("GetSubGroupTable error : %s", err_info.errmsg.c_str());
       return KStatus::FAIL;
     }
     if (!p_bt->isValid()) {
@@ -986,12 +998,12 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
     TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
+      LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
       ebt_manager_->ReleasePartitionTable(p_bt);
-      if (err_info.errcode == KWENOOBJ) {
+      if (err_info.errcode == KWEDROPPEDOBJ) {
         err_info.clear();
         continue;
       }
-      LOG_ERROR("GetSubGroupTable error : %s", err_info.errmsg.c_str());
       return KStatus::FAIL;
     }
     if (!p_bt->isValid()) {

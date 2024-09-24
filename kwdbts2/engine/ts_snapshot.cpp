@@ -528,13 +528,14 @@ KStatus TsTableSnapshot::applyEntityData(uint32_t& subgroup_id, SubGroupID& snap
       string partition_dir = entry->d_name;
       timestamp64 ts = convertToTimestamp(partition_dir);
       TsTimePartition* p_bt = subgroup->GetPartitionTable(ts, err_info);
+      uint64_t partition_interval = p_bt->PartitionInterval();
       ReleaseTable(p_bt);
 
       TsTimePartition* snapshot_partition_bt = snapshot_subgroup->GetPartitionTable(ts, err_info);
       ReleaseTable(snapshot_partition_bt);
 
       // update root table's partition interval
-      entity_bt_manager_->SetPartitionInterval(p_bt->PartitionInterval());
+      entity_bt_manager_->SetPartitionInterval(partition_interval);
     }
   }
   closedir(dir_ptr);

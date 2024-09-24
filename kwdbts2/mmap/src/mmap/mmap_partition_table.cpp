@@ -77,6 +77,11 @@ int TsTimePartition::open(const string& path, const std::string& db_path, const 
     return err_info.errcode;
   }
 
+  if (DeleteFlag()) {
+    err_info.setError(KWEDROPPEDOBJ, "TsTimePartition[" + tbl_sub_path_ +  "] is deleted");
+    return err_info.errcode;
+  }
+
   loadSegments(err_info);
   setObjectReady();
 

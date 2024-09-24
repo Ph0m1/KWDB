@@ -237,15 +237,13 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
       if (strcmp(partition_dir.c_str(), std::to_string(p_ts).c_str()) == 0) {
         // Load the partition table and obtain the minimum and maximum timestamps for the partition
         TsTimePartition* p_table = getPartitionTable(p_ts, p_ts, err_info, false);
+        if (err_info.errcode == KWEDROPPEDOBJ) {
+          err_info.clear();
+          continue;
+        }
         if (err_info.errcode < 0) {
           delete p_table;
           break;
-        }
-        if (p_table->DeleteFlag()) {
-          deleted_partitions_[p_table->minTimestamp()] = p_table->maxTimestamp();
-          if (RemovePartitionTable(p_ts, err_info, true) < 0) {
-            LOG_WARN("Remove expired partition failed, path:%s", (db_path_ + tbl_sub_path_ + partition_dir).c_str());
-          }
         }
         ReleaseTable(p_table);
       }
@@ -369,7 +367,7 @@ TsTimePartition* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInfo& 
 
   if (deleted_partitions_.find(p_time) != deleted_partitions_.end()) {
     LOG_WARN("Partition is deleted.");
-    err_info.setError(KWENOOBJ, "No such partition:" + db_path_ + partitionTblSubPath(ts));
+    err_info.setError(KWEDROPPEDOBJ, "No such partition:" + db_path_ + partitionTblSubPath(ts));
     return nullptr;
   }
 
@@ -401,7 +399,7 @@ vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts
     wrLock();
     Defer defer{[&]() { unLock(); }};
     TsTimePartition* p_table = getPartitionTable(p_times[i], p_times[i], err_info, false, false);
-    if (!err_info.isOK() && err_info.errcode != KWENOOBJ) {
+    if (!err_info.isOK() && err_info.errcode != KWEDROPPEDOBJ) {
       break;
     }
     results.emplace_back(p_table);
@@ -463,15 +461,16 @@ KStatus TsSubGroupPTIterator::Next(TsTimePartition** p_table) {
     }
     ErrorInfo err_info;
     cur_p_table_ = sub_eg_->GetPartitionTable(cur_partition, err_info);
+    if (err_info.errcode == KWEDROPPEDOBJ) {
+      cur_partition_idx_++;
+      err_info.clear();
+      continue;
+    }
     if (!err_info.isOK()) {
       LOG_ERROR("can not parse partition [%lu] in subgroup [%u].", cur_partition, sub_eg_->GetID());
       return KStatus::FAIL;
     }
-    if (cur_p_table_->DeleteFlag()) {
-      cur_partition_idx_++;
-    } else {
-      break;
-    }
+    break;
   }
   *p_table = cur_p_table_;
   return KStatus::SUCCESS;
@@ -514,6 +513,12 @@ TsTimePartition* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timesta
   string pt_tbl_sub_path = partitionTblSubPath(p_time);
   mt_table = new TsTimePartition(root_tbl_manager_, entity_block_meta_->GetConfigSubgroupEntities());
   mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_OPEN_NORECURSIVE, err_info);
+  if (err_info.errcode == KWEDROPPEDOBJ) {
+    deleted_partitions_[mt_table->minTimestamp()] = mt_table->maxTimestamp();
+    delete mt_table;
+    Remove(db_path_ + pt_tbl_sub_path);
+    return nullptr;
+  }
   if (err_info.errcode < 0 && create_if_not_exist) {
     err_info.clear();
     delete mt_table;
@@ -694,7 +699,7 @@ int TsSubEntityGroup::RemoveAll(bool is_force, ErrorInfo& err_info) {
   for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
     err_info.clear();
     TsTimePartition* mt_table = getPartitionTable(it->first, it->second, err_info, false);
-    if (err_info.errcode == KWENOOBJ) {  // Ignoring non-existent partition tables (deleted or file corrupted)
+    if (err_info.errcode == KWEDROPPEDOBJ) {  // Ignoring non-existent partition tables (deleted or file corrupted)
       err_info.clear();
       continue;
     }
@@ -747,7 +752,7 @@ int TsSubEntityGroup::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint6
       p_table->DeleteEntity(entity_id, lsn, &num, err_info);
     }
     ReleaseTable(p_table);
-    if (err_info.errcode < 0) {
+    if (err_info.errcode < 0 && err_info.errcode != KWEDROPPEDOBJ) {
       break;
     }
     *count = *count + num;
@@ -767,7 +772,7 @@ int TsSubEntityGroup::UndoDeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, u
       p_table->UndoDeleteEntity(entity_id, lsn, &num, err_info);
     }
     ReleaseTable(p_table);
-    if (err_info.errcode < 0) {
+    if (err_info.errcode < 0 && err_info.errcode != KWEDROPPEDOBJ) {
       break;
     }
     *count = *count + num;
