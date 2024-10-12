@@ -19,9 +19,8 @@
 
 namespace kwdbts {
 
-#define EE_MIN_TOPIC_WINDOW_OFFSET 500
-#define EE_START_THREAD_TIMEOUT 10000
 #define DEFAULT_MAX_THREADS_NUM 10
+#define MIN_DOP_LIMIT 2
 
 ExecPool::ExecPool(k_uint32 tq_num, k_uint32 tp_size) {
   tq_num_ = tq_num;
@@ -46,6 +45,7 @@ KStatus ExecPool::Init(kwdbContext_p ctx) {
   if (EE_ENABLE_PARALLEL > 0) {
     CpuInfo::Init();
     max_threads_ = CpuInfo::Get_Num_Cores();
+    total_threads_.store(max_threads_);
   }
   is_tp_stop_ = false;
   timer_event_pool_ = KNEW TimerEventPool(EE_TIMER_EVENT_POOL_SIZE);
@@ -53,10 +53,10 @@ KStatus ExecPool::Init(kwdbContext_p ctx) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
   }
-  if (KStatus::SUCCESS != timer_event_pool_->Init()) {
-    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-    Return(KStatus::FAIL);
-  }
+  // if (KStatus::SUCCESS != timer_event_pool_->Init()) {
+  //  EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+  //  Return(KStatus::FAIL);
+  // }
   for (k_int32 i = 0; i < min_threads_; i++) {
     {
       std::unique_lock unique_lock(lock_);
@@ -64,7 +64,7 @@ KStatus ExecPool::Init(kwdbContext_p ctx) {
     }
     CreateThread();
   }
-  timer_event_pool_->Start();
+  // timer_event_pool_->Start();
   Return(KStatus::SUCCESS);
 }
 
@@ -178,6 +178,26 @@ k_bool ExecPool::IsFull() { return task_queue_.size() >= tq_num_; }
 k_uint32 ExecPool::GetWaitThreadNum() const {
   k_int32 idle = threads_num_ + threads_starting_ - active_threads_;
   return idle > 8 ? 8 : idle;
+}
+
+k_uint32 ExecPool::GetWaitThreadNum(k_uint32 dop) {
+  k_int32 availableThreads = total_threads_.fetch_sub(dop);
+  // LOG_ERROR("avai:%d, dop:%d",availableThreads, dop);
+  if (availableThreads <= 1) {
+    total_threads_.fetch_add(dop);
+    return 1;
+  }
+  if (availableThreads < dop) {
+    total_threads_.fetch_add(dop - availableThreads);
+    return availableThreads;
+  }
+  return dop;
+}
+
+k_uint32 ExecPool::ReleaseThreadNum(k_uint32 dop) {
+  // LOG_ERROR("add dop:%d", dop);
+  total_threads_.fetch_add(dop);
+  return 1;
 }
 
 }  // namespace kwdbts

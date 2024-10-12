@@ -56,7 +56,7 @@ class SynchronizerOperator : public BaseOperator {
     parallel_groups_.clear();
   }
 
-  KStatus PushData(DataChunkPtr &chunk, bool wait = false);
+  KStatus PushData(DataChunkPtr &chunk, bool &reduce_dop, bool wait = false);
   void PopData(kwdbContext_p ctx, DataChunkPtr &chunk);
   void FinishParallelGroup(EEIteratorErrCode code, const EEPgErrorInfo &pgInfo);
   void CalculateDegree();

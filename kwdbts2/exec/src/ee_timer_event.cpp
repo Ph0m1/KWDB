@@ -92,7 +92,7 @@ k_time_point TimerEvent::GetMonotonicNs() {
 }
 
 TimerEventPool::TimerEventPool(const k_uint32& max_count)
-    : max_time_event_count_(max_count), stop_(KFALSE) {}
+    : max_time_event_count_(max_count), stop_(KTRUE) {}
 
 KStatus TimerEventPool::Init() {
   KStatus ret = KStatus::FAIL;
@@ -205,6 +205,7 @@ void TimerEventPool::Start() {
   thr_ = std::thread([this]() {
     this->Run();
   });
+  stop_ = KFALSE;
 }
 
 KStatus TimerEventPool::GetReady(k_bool* stop,

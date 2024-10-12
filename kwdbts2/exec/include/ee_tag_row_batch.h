@@ -49,7 +49,7 @@ class TagRowBatch : public RowBatch {
   k_uint32 current_batch_line_{0};
   k_uint32 current_line_{0};
   k_uint32 tag_col_offset_{0};
-  std::unordered_map<k_uint32, k_uint32> tag_offsets_;
+  std::vector<k_uint32> tag_offsets_;
   k_uint32 bitmap_offset_{0};
   k_uint32 current_pipe_line_{0};
   std::vector<k_uint32> pipe_entity_num_;  // Record the number of devices

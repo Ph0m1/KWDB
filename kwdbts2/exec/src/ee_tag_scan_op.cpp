@@ -37,6 +37,7 @@ TagScanOperator::TagScanOperator(TsFetcherCollection *collection, TSTagReaderSpe
       param_(post, table) {
   if (spec) {
     table->SetAccessMode(spec->accessmode());
+    table->ptag_size_ = spec->primarytags_size();
     object_id_ = spec->tableid();
     table->SetTableVersion(spec->tableversion());
   }

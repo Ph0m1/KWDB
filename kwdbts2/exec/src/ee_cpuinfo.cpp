@@ -21,6 +21,8 @@
 #include <string>
 #include <thread>
 
+#include "lg_api.h"
+
 #if defined(__GNUC__) && (__GNUC__ < 8)
   #include <experimental/filesystem>
   namespace fs = std::experimental::filesystem;
@@ -54,6 +56,21 @@ void CpuInfo::Init() {
         period_info.close();
         k_int32 period = std::stoi(period_info_str);
         num_cores = quota / period;
+      }
+    }
+  } else {
+    std::ifstream file("/sys/fs/cgroup/cpu.max");
+    if (file.is_open()) {
+      std::string line;
+      std::getline(file, line);
+      file.close();
+      try {
+        int pos = line.find(" ");
+        int quota = stoi(line.substr(0, pos));
+        int period = stoi(line.substr(pos + 1));
+        num_cores = quota / period < 1 ? 1 : quota / period;
+      } catch (...) {
+        LOG_ERROR("Read cpu.max failed, content: %s", line.c_str());
       }
     }
   }

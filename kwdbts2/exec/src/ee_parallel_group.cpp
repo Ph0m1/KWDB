@@ -82,8 +82,12 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
       break;
     }
     ptr->ResetLine();
-    bool wait = instance.GetWaitThreadNum() > 0 ? true : false;
-    KStatus ret = sparent_->PushData(ptr, wait);
+    bool wait = (index_ < 2 || instance.GetWaitThreadNum() > 0) ? true : false;
+    bool reduce_dop = false;
+    KStatus ret = sparent_->PushData(ptr, reduce_dop, wait);
+    if (!wait && reduce_dop && index_ > 1) {
+      thd_->auto_quit_ = true;
+    }
     if (ret != KStatus::SUCCESS) {
       chunk_ = std::move(ptr);
       Pause();
@@ -106,7 +110,8 @@ void ParallelGroup::Pause() {
   k_time_point time_point = TimerEvent::GetMonotonicMs() + PAUSE_WAIT_INTERVAL;
   SetTimePoint(time_point);
   SetType(TimerEventType::TE_TIME_POINT);
-  ExecPool::GetInstance().PushTimeEvent(GetPtr());
+  // ExecPool::GetInstance().PushTimeEvent(GetPtr());
+  ExecPool::GetInstance().PushTask(GetPtr());
 }
 
 KStatus ParallelGroup::TimeRun() {

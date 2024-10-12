@@ -123,6 +123,7 @@ class TABLE {
                              // remain align
   k_uint32 table_version_{0};
   bool is_reverse_{0};
+  k_int32 ptag_size_{0};
 
  protected:
   // relational fields for multiple model processing

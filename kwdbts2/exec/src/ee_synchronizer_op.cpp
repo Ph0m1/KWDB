@@ -21,17 +21,19 @@
 
 namespace kwdbts {
 
-#define EE_MAX_DOP 1
+#define MAX_QUEUE_SIZE 128
 
-KStatus SynchronizerOperator::PushData(DataChunkPtr &chunk, bool wait) {
+KStatus SynchronizerOperator::PushData(DataChunkPtr &chunk, bool &reduce_dop, bool wait) {
   std::unique_lock unique_lock(lock_);
   // storage to task queue
   try {
-  /*
-    if (!wait && data_queue_.size() >= max_queue_size_) {
-      return KStatus::FAIL;
+    if (!wait) {
+      if (data_queue_.size() >= max_queue_size_) {
+        return KStatus::FAIL;
+      } else if (data_queue_.size() > max_queue_size_ / 16) {
+        reduce_dop = true;
+      }
     }
-  */
     not_fill_cv_.wait(unique_lock, [this]() -> bool {
       return ((data_queue_.size() < max_queue_size_) || is_tp_stop_);
     });
@@ -70,6 +72,7 @@ void SynchronizerOperator::PopData(kwdbContext_p ctx, DataChunkPtr &chunk) {
 void SynchronizerOperator::FinishParallelGroup(EEIteratorErrCode code, const EEPgErrorInfo &pg_info) {
   std::unique_lock l(lock_);
   group_done_num_++;
+
   if (code != EEIteratorErrCode::EE_OK &&
       code != EEIteratorErrCode::EE_END_OF_RECORD &&
       code != EEIteratorErrCode::EE_TIMESLICE_OUT) {
@@ -85,7 +88,7 @@ void SynchronizerOperator::FinishParallelGroup(EEIteratorErrCode code, const EEP
 EEIteratorErrCode SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   // Creating the number of parallelgroups based on parallelism
-  max_queue_size_ = degree_ * 2 + 2;
+  max_queue_size_ = MAX_QUEUE_SIZE;  // degree_ * 2 + 2;
   parallel_groups_.resize(degree_);
   for (k_uint32 i = 0; i < degree_; ++i) {
     ParallelGroupPtr parallelGroup = std::make_shared<ParallelGroup>();
@@ -108,6 +111,7 @@ EEIteratorErrCode SynchronizerOperator::InitParallelGroup(kwdbContext_p ctx) {
     parallelGroup->SetParent(this);
     parallelGroup->SetParallel(EE_ENABLE_PARALLEL);
     parallelGroup->SetDegree(degree_);
+    parallelGroup->SetIndex(i);
     parallel_groups_[i] = parallelGroup;
   }
   group_num_ = degree_;
@@ -143,16 +147,18 @@ void SynchronizerOperator::CalculateDegree() {
     dop = 1;
   }
   free(class_name);
-
-  if (ExecPool::GetInstance().GetWaitThreadNum() < dop) {
-    dop = ExecPool::GetInstance().GetWaitThreadNum();
+  if (table_->GetAccessMode() < TSTableReadMode::tableTableMeta) {
+    if (dop > table_->ptag_size_) {
+      dop = table_->ptag_size_;
+    }
   }
-
+  // dop = ExecPool::GetInstance().GetWaitThreadNum(dop);
+  if (dop > 1 && ExecPool::GetInstance().IsActive()) {
+    dop = 2;
+  }
   if (dop < 1) dop = 1;
   degree_ = dop;
-  if (degree_ > 1) {
-    is_parallel_ = true;
-  }
+  is_parallel_ = true;
 }
 
 EEIteratorErrCode SynchronizerOperator::Start(kwdbContext_p ctx) {

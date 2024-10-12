@@ -44,6 +44,7 @@ class ParallelGroup : public ExecTask {
   DataChunkPtr  chunk_;
   KWThdContext *thd_{nullptr};
   k_int32 repeat_{0};
+  k_int32 index_{0};
 
  public:
   ParallelGroup() {}
@@ -61,6 +62,7 @@ class ParallelGroup : public ExecTask {
   void *GetTsEngine() { return ts_engine_; }
   void Stop() { is_stop_ = true; }
   KStatus TimeRun() override;
+  void SetIndex(k_int32 index) { index_ = index; }
 
  private:
   inline void Close(kwdbContext_p ctx, const EEIteratorErrCode &code);

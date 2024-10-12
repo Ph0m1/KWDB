@@ -52,6 +52,7 @@ class KWThdContext {
 
  public:
   static thread_local KWThdContext *thd_;
+  bool auto_quit_{false};
 };
 
 #define current_thd KWThdContext::thd_

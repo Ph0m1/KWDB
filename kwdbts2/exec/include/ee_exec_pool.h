@@ -96,6 +96,8 @@ class ExecPool {
    */
   k_uint32 active_threads_{0};
 
+  std::atomic<k_int32> total_threads_{0};
+
  public:
   /**
    * @brief Constructor
@@ -134,7 +136,9 @@ class ExecPool {
    * @brief gets the number of idle threads
    */
   k_uint32 GetWaitThreadNum() const;
-
+  k_uint32 GetWaitThreadNum(k_uint32 dop);
+  k_uint32 ReleaseThreadNum(k_uint32 dop);
+  bool IsActive() { return active_threads_ > 0 || task_queue_.size() > 0; }
   KStatus Init(kwdbContext_p ctx);
   void Stop();
   static ExecPool &GetInstance(k_uint32 tq_num = 1024, k_uint32 tp_size = 10) {
