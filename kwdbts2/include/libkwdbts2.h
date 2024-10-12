@@ -195,6 +195,15 @@ TSStatus TSDropTsTable(TSEngine* engine, TSTableID tableId);
  */
 TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, KTimestamp ts);
 
+/**
+ * @brief Compress all segments in the time series table
+ * @param[in] table_id id of the time series table
+ * @param[in] goCtxPtr pointer points to the context object in go layer
+ *
+ * @return TSStatus
+ */
+TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id);
+
 TSStatus TSTableAutonomy(TSEngine* engine, TSTableID table_id);
 
 TSStatus TSIsTsTableExist(TSEngine* engine, TSTableID tableId, bool* find);

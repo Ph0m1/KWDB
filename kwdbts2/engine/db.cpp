@@ -11,6 +11,7 @@
 
 #include <libkwdbts2.h>
 #include <regex>
+#include <limits>
 #include <thread>
 #include "include/engine.h"
 #include "cm_exception.h"
@@ -298,10 +299,37 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts)
     LOG_INFO("The current node does not have the table[%lu], skip compress", table_id);
     return kTsSuccess;
   }
-  s = table->Compress(ctx_p, ts);
+  ErrorInfo err_info;
+  s = table->Compress(ctx_p, ts, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("CompressTsTable Error!");
+  }
+  LOG_INFO("compress table[%lu] succeeded", table_id);
+  return kTsSuccess;
+}
+
+TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  ctx_p->relation_ctx = goCtxPtr;
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+
+  LOG_INFO("compress table[%lu] start", table_id);
+  std::shared_ptr<TsTable> table;
+  s = engine->GetTsTable(ctx_p, table_id, table);
+  if (s != KStatus::SUCCESS) {
+    LOG_INFO("The current node does not have the table[%lu], skip compress", table_id);
+    return kTsSuccess;
+  }
+  ErrorInfo err_info;
+  s = table->Compress(ctx_p, INT64_MAX, err_info);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("compress table[%lu] failed", table_id);
+    return ToTsStatus("compress error, reason: " + err_info.errmsg);
   }
   LOG_INFO("compress table[%lu] succeeded", table_id);
   return kTsSuccess;
@@ -671,6 +699,8 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
       compression.second.compression_level = level;
     }
     g_compression.compression_level = level;
+    } else if ("immediate_compression.threads" == key) {
+    g_mk_squashfs_option.processors_immediate = atoi(value.c_str());
   }
 #ifndef KWBASE_OSS
   else if ("ts.storage.autonomy.mode" == key) {  // NOLINT

@@ -52,7 +52,7 @@ void getErrorInfo(string cmd, string dir_path, string log_file_name) {
   System(cmd);
 }
 
-inline string compressCmd(const string& dir_path, const string& file_path) {
+inline string compressCmd(const string& dir_path, const string& file_path, int nthreads) {
   string cmd = "nice -n 5 mksquashfs " + dir_path + " " + file_path;
   if (g_mk_squashfs_option.has_mem_option) {
     cmd += " -mem 16M";
@@ -126,18 +126,18 @@ inline string compressCmd(const string& dir_path, const string& file_path) {
       break;
   }
   if (g_mk_squashfs_option.has_processors_option) {
-    cmd += " -processors 1";
+    cmd += " -processors " + std::to_string(nthreads);
   }
   cmd += " > /dev/null 2>&1";
   return cmd;
 }
 
-bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info) {
-  return compressToPath(db_path, tbl_sub_path, dir_name, db_path + tbl_sub_path, err_info);
+bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, int nthreads, ErrorInfo& err_info) {
+  return compressToPath(db_path, tbl_sub_path, dir_name, db_path + tbl_sub_path, nthreads, err_info);
 }
 
 bool compressToPath(const string& db_path, const string& tbl_sub_path, const string& dir_name,
-                    const string& desc_path, ErrorInfo& err_info) {
+                    const string& desc_path, int nthreads, ErrorInfo& err_info) {
   string dir_path = desc_path + dir_name;
   struct stat st;
   if ((stat(dir_path.c_str(), &st) == 0) && (S_ISDIR(st.st_mode))) {
@@ -154,7 +154,7 @@ bool compressToPath(const string& db_path, const string& tbl_sub_path, const str
     if (IsExists(file_path_tmp)) {
       Remove(file_path_tmp);
     }
-    string cmd = compressCmd(dir_path, file_path_tmp);
+    string cmd = compressCmd(dir_path, file_path_tmp, nthreads);
     if (System(cmd)) {
       LOG_DEBUG("Compress succeeded, shell: %s", cmd.c_str());
       cmd = "mv " + file_path_tmp + " " + file_path_desc;

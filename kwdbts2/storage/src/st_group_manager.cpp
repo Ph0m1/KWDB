@@ -280,7 +280,7 @@ int SubEntityGroupManager::DropAll(bool is_force, ErrorInfo& err_info) {
   return 0;
 }
 
-void SubEntityGroupManager::Compress(const timestamp64& compress_ts, ErrorInfo& err_info) {
+void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info) {
   std::vector<TsTimePartition*> compress_tables;
   // Gets all the compressible partitions in the [INT64_MIN, ts] time range under subgroup
   rdLock();
@@ -296,6 +296,11 @@ void SubEntityGroupManager::Compress(const timestamp64& compress_ts, ErrorInfo& 
 
   bool compress_error = false;
   for (auto p_table : compress_tables) {
+    // detect ctrl+C first
+    if (ctx->relation_ctx != 0 && isCanceledCtx(ctx->relation_ctx)) {
+      err_info.setError(KWEOTHER, "interrupted");
+      return;
+    }
     if (p_table != nullptr && !compress_error) {
       p_table->Compress(compress_ts, err_info);
       if (err_info.errcode < 0) {

@@ -49,6 +49,13 @@ class TsTimePartition : public TSObject {
   TsTimePartitionLatch* segments_lock_;  // data_segments lock
   TsTimePartitionLatch* partition_table_latch_;  // partition table object latch
 
+  // collect all segments with status ActiveSegment and ImmuSegment
+  std::vector<std::shared_ptr<MMapSegmentTable>> GetAllSegmentsForCompressing();
+
+  void ImmediateCompress(ErrorInfo& err_info);
+
+  void ScheduledCompress(timestamp64 ts, ErrorInfo& err_info);
+
  protected:
   string name_;
   string db_path_;

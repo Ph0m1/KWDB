@@ -207,6 +207,11 @@ var (
 		"ts.compression.level",
 		"compression level for time series data",
 		"middle")
+
+	immediateCompressionThreads = settings.RegisterPublicIntSetting(
+		"immediate_compression.threads",
+		"number of threads for immediate compression for both relation and time series data",
+		3)
 )
 
 // TODO(peter): Until go1.11, ServeMux.ServeHTTP was not safe to call

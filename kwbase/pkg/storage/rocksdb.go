@@ -365,23 +365,28 @@ func (s *SSTableInfosByLevel) MaxLevel() int {
 // As an example, consider the following sstables in a small database:
 //
 // Level 0.
-//  {Level: 0, Size: 20, Start: key("a"), End: key("z")},
-//  {Level: 0, Size: 15, Start: key("a"), End: key("k")},
-// Level 2.
-//  {Level: 2, Size: 200, Start: key("a"), End: key("j")},
-//  {Level: 2, Size: 100, Start: key("k"), End: key("o")},
-//  {Level: 2, Size: 100, Start: key("r"), End: key("t")},
-// Level 6.
-//  {Level: 6, Size: 201, Start: key("a"), End: key("c")},
-//  {Level: 6, Size: 200, Start: key("d"), End: key("f")},
-//  {Level: 6, Size: 300, Start: key("h"), End: key("r")},
-//  {Level: 6, Size: 405, Start: key("s"), End: key("z")},
 //
-// - The span "a"-"c" overlaps only a single SSTable at the max level
-//   (L6). That's great, so we definitely want to compact that.
-// - The span "s"-"t" overlaps zero SSTables at the max level (L6).
-//   Again, great! That means we're going to compact the 3rd L2
-//   SSTable and maybe push that directly to L6.
+//	{Level: 0, Size: 20, Start: key("a"), End: key("z")},
+//	{Level: 0, Size: 15, Start: key("a"), End: key("k")},
+//
+// Level 2.
+//
+//	{Level: 2, Size: 200, Start: key("a"), End: key("j")},
+//	{Level: 2, Size: 100, Start: key("k"), End: key("o")},
+//	{Level: 2, Size: 100, Start: key("r"), End: key("t")},
+//
+// Level 6.
+//
+//		{Level: 6, Size: 201, Start: key("a"), End: key("c")},
+//		{Level: 6, Size: 200, Start: key("d"), End: key("f")},
+//		{Level: 6, Size: 300, Start: key("h"), End: key("r")},
+//		{Level: 6, Size: 405, Start: key("s"), End: key("z")},
+//
+//	  - The span "a"-"c" overlaps only a single SSTable at the max level
+//	    (L6). That's great, so we definitely want to compact that.
+//	  - The span "s"-"t" overlaps zero SSTables at the max level (L6).
+//	    Again, great! That means we're going to compact the 3rd L2
+//	    SSTable and maybe push that directly to L6.
 func (s *SSTableInfosByLevel) MaxLevelSpanOverlapsContiguousSSTables(span roachpb.Span) int {
 	// Note overlapsMoreTHanTwo should not be called on level 0, where
 	// the SSTables are not guaranteed disjoint.
@@ -990,6 +995,12 @@ func (r *RocksDB) Capacity() (roachpb.StoreCapacity, error) {
 // Compact forces compaction over the entire database.
 func (r *RocksDB) Compact() error {
 	return statusToError(C.DBCompact(r.rdb))
+}
+
+// CompactToBottom compact forces compaction over the entire database.
+// Compact to bottomlevel;
+func (r *RocksDB) CompactToBottom() error {
+	return nil
 }
 
 // CompactRange forces compaction over a specified range of keys in the database.

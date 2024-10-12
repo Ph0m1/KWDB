@@ -49,8 +49,10 @@ struct Compression {
 // mksquashfs options
 struct MkSquashfsOption {
   std::unordered_map<CompressionType, Compression> compressions;
-  bool has_mem_option;
-  bool has_processors_option;
+  bool has_mem_option;  // Whether the -mem option is included
+  bool has_processors_option;  // Whether the -processors option is included
+  int processors_scheduled = 1;  // The number of processors used for scheduled compression, default 1
+  int processors_immediate = 3;  // The number of processors used for immediate compression, default 3
 };
 
 // mount supports compression algorithms
@@ -108,10 +110,10 @@ extern MkSquashfsOption g_mk_squashfs_option;
 
 extern MountOption g_mount_option;
 
-bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, ErrorInfo& err_info);
+bool compress(const string& db_path, const string& tbl_sub_path, const string& dir_name, int nthreads, ErrorInfo& err_info);
 
 bool compressToPath(const string& db_path, const string& tbl_sub_path, const string& dir_name,
-                    const string& desc_path, ErrorInfo& err_info);
+                    const string& desc_path, int nthreads, ErrorInfo& err_info);
 
 void initSudo();
 

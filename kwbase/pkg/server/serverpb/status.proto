@@ -1028,6 +1028,11 @@ service Status {
       get : "/_status/stores/{node_id}"
     };
   }
+  rpc CompactStores(StoresRequest) returns (StoresResponse) {
+    option (google.api.http) = {
+      get : "/_status/stores/{node_id}"
+    };
+  }
   rpc Statements(StatementsRequest) returns (StatementsResponse) {
     option (google.api.http) = {
       get: "/_status/statements"

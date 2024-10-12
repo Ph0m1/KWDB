@@ -132,6 +132,17 @@ func (tp *tsProcessor) Start(ctx context.Context) context.Context {
 				log.Errorf(context.Background(), "Compress TS Table Failed, tableID:%d, reason:%s \n", toDrop.TableID, err.Error())
 			}
 		}
+	case execinfrapb.OperatorType_TsManualCompressTable:
+		errPrefix = "Compress data manually failed, reason:%s"
+		for _, toDrop := range tp.dropMEInfo {
+			if toDrop.IsTSTable {
+				err = tp.FlowCtx.Cfg.TsEngine.CompressImmediately(ctx, uint64(toDrop.TableID))
+				if err != nil {
+					log.Errorf(ctx, "Compress Table Failed, tableID:%d, reason:%s", toDrop.TableID, err.Error())
+				}
+			}
+		}
+
 	case execinfrapb.OperatorType_TsAutonomy:
 		errPrefix = "Autonomy TS Table Failed, reason:%s"
 		for _, table := range tp.dropMEInfo {

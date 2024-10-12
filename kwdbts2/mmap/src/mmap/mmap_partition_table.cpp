@@ -565,13 +565,13 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
   return err_code;
 }
 
-void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_info) {
-  // Get segments that require compression processing
+// Get segments that require compression processing
+std::vector<std::shared_ptr<MMapSegmentTable>> TsTimePartition::GetAllSegmentsForCompressing(){
   vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
   data_segments_.Traversal([&](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
     // Compressed segment
     if (tbl->sqfsIsExists()) {
-      if (tbl->getObjectStatus() == OBJ_READY && tbl->getSegmentStatus() >= ImmuWithRawSegment) {
+      if (tbl->getObjectStatus() == OBJ_READY && tbl->getSegmentStatus() == ImmuSegment) {
         // Segments that have been compressed but not cleaned up from the original data directory
         // need to be cleaned up from the original data directory
         segment_tables.emplace_back(tbl);
@@ -593,6 +593,65 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
     segment_tables.emplace_back(tbl);
     return true;
   });
+  return segment_tables;
+}
+
+void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
+  auto segment_tables = GetAllSegmentsForCompressing();
+
+  int num_of_active_segments = 0;
+  for (auto iSegmentTable : segment_tables) {
+    if (iSegmentTable->getSegmentStatus() == ActiveSegment) {
+      num_of_active_segments++;
+      iSegmentTable->setSegmentStatus(InActiveSegment);
+      MUTEX_LOCK(segments_lock_);
+      Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+      if (active_segment_ && active_segment_->segment_id() == iSegmentTable->segment_id()) {
+        active_segment_ = nullptr;
+      }
+    }
+  }
+
+  if (num_of_active_segments != 0) {
+    // waiting for unfinished writing threads on active thread.
+    using std::chrono_literals::operator""s;
+    std::this_thread::sleep_for(1s);
+  }
+
+  // compress all the InActiveSegments and make sure they are mounted
+  for (auto iSegmentTable : segment_tables) {
+    if (iSegmentTable->getSegmentStatus() != InActiveSegment) {
+      continue;
+    }
+    // Sync before compressing
+    iSegmentTable->sync(MS_SYNC);
+    LOG_INFO("MMapSegmentTable[%s] compress start", iSegmentTable->realFilePath().c_str());
+    iSegmentTable->setSegmentStatus(ImmuSegment);
+    bool ok = compress(db_path_, tbl_sub_path_, std::to_string(iSegmentTable->segment_id()),
+                       g_mk_squashfs_option.processors_immediate, err_info);
+    if (!ok) {
+      // If compression fails, restore segment state
+      iSegmentTable->setSegmentStatus(InActiveSegment);
+      LOG_ERROR("MMapSegmentTable[%s] compress failed", iSegmentTable->realFilePath().c_str());
+      return;
+    }
+    iSegmentTable->setSqfsIsExists();
+
+    // Mount the compressed segment
+    if (!isMounted(db_path_ + iSegmentTable->tbl_sub_path())) {
+      if (!reloadSegment(iSegmentTable, false, err_info)) {
+        LOG_ERROR("MMapSegmentTable[%s] reload failed", iSegmentTable->realFilePath().c_str());
+        return;
+      }
+    }
+    LOG_INFO("MMapSegmentTable[%s] compress succeeded", iSegmentTable->realFilePath().c_str());
+  }
+}
+
+void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_info) {
+  
+  auto segment_tables = GetAllSegmentsForCompressing();
+  
   // Traverse the segments that need to be processed
   // There are three types of processing for segments
   //   1.ActiveSegment/ActiveInWriteSegment
@@ -604,7 +663,6 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
   for (auto& segment_tbl : segment_tables) {
     switch (segment_tbl->getSegmentStatus()) {
       case ActiveSegment:
-      case ActiveInWriteSegment:
         if (maxTimestamp() >= compress_ts) {
           // For segments in partitions where the timestamp of some data is less than compress_ts,
           // if the following two conditions are met, they can be set as inactive segment.
@@ -645,7 +703,9 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // Compress segment data
         LOG_INFO("MMapSegmentTable[%s] compress start", segment_tbl->realFilePath().c_str());
         segment_tbl->setSegmentStatus(ImmuSegment);
-        if (!compress(db_path_, tbl_sub_path_, std::to_string(segment_tbl->segment_id()), err_info)) {
+        bool ok = compress(db_path_, tbl_sub_path_, std::to_string(segment_tbl->segment_id()),
+                           g_mk_squashfs_option.processors_scheduled, err_info);
+        if (!ok) {
           // If compression fails, restore segment state
           segment_tbl->setSegmentStatus(InActiveSegment);
           LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->realFilePath().c_str());
@@ -655,7 +715,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // Check if it is mounted. If it is not, try cleaning up the original data directory before compression.
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
-        if (!isMounted(db_path_ + segment_tbl->tbl_sub_path()) && segment_tbl.use_count() <= 2) {
+        if (!isMounted(db_path_ + segment_tbl->tbl_sub_path())) {
           if (!reloadSegment(segment_tbl, false, err_info)) {
             LOG_ERROR("MMapSegmentTable[%s] reload failed", segment_tbl->realFilePath().c_str());
             return;
@@ -668,7 +728,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
         // Check if it is mounted. If it is not, try cleaning up the original data directory before compression.
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
         BLOCK_ID segment_id = segment_tbl->segment_id();
-        if (!isMounted(db_path_ + segment_tbl->tbl_sub_path()) && segment_tbl.use_count() <= 2) {
+        if (!isMounted(db_path_ + segment_tbl->tbl_sub_path())) {
           if (!reloadSegment(segment_tbl, false, err_info)) {
             LOG_ERROR("MMapSegmentTable[%s] reload failed", segment_tbl->realFilePath().c_str());
             return;
@@ -679,6 +739,14 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_in
       default:
         break;
     }
+  }
+}
+
+void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_info){
+  if (compress_ts == INT64_MAX){
+    ImmediateCompress(err_info);
+  } else {
+    ScheduledCompress(compress_ts, err_info);
   }
 }
 

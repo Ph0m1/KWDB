@@ -136,7 +136,7 @@ class SubEntityGroupManager : public TSObject {
    *
    * @return void
    */
-  void Compress(const timestamp64& compress_ts, ErrorInfo& err_info);
+  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info);
 
   void ReleasePartitionTable(TsTimePartition* e_bt, bool is_force = false);
 

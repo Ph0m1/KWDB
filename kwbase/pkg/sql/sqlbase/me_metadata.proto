@@ -114,6 +114,8 @@ message  DeleteMeMsg {
   optional int64 compress_ts = 7[(gogoproto.nullable) = false];
   // TsVersion
   optional uint32 ts_version = 8 [(gogoproto.nullable) = false];
+  // IsTsTable
+  optional bool is_ts_table = 9 [(gogoproto.nullable) = false, (gogoproto.customname) = "IsTSTable"];
 }
 
 enum KWDBHAStatus {

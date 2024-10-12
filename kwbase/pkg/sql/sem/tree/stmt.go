@@ -407,6 +407,23 @@ func (*CommentOnTable) StatementTag() string { return "COMMENT ON TABLE" }
 func (*CommentOnTable) StatTargetType() string { return "TABLE" }
 
 // StatementType implements the Statement interface.
+func (*Compress) StatementType() StatementType { return Ack }
+
+// StatOp implements the StatOp interface.
+func (*Compress) StatOp() string { return "COMPRESS" }
+
+// StatementTag returns a short string identifying the type of statement.
+func (n *Compress) StatementTag() string { return "COMPRESS" }
+
+// StatTargetType implements the StatTargetType interface.
+func (n *Compress) StatTargetType() string {
+	if n.Typ != CompressTypeTable {
+		return "DATABASE"
+	}
+	return "TABLE"
+}
+
+// StatementType implements the Statement interface.
 func (*CommitTransaction) StatementType() StatementType { return Ack }
 
 // StatOp implements the StatOp interface.
@@ -1952,6 +1969,7 @@ func (n *CommentOnDatabase) String() string              { return AsString(n) }
 func (n *CommentOnIndex) String() string                 { return AsString(n) }
 func (n *CommentOnTable) String() string                 { return AsString(n) }
 func (n *CommitTransaction) String() string              { return AsString(n) }
+func (n *Compress) String() string                       { return AsString(n) }
 func (n *CopyFrom) String() string                       { return AsString(n) }
 func (n *CreateAudit) String() string                    { return AsString(n) }
 func (n *CreateChangefeed) String() string               { return AsString(n) }

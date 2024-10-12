@@ -213,6 +213,17 @@ func checkTsCompressLevel(encodedValue string) error {
 	return nil
 }
 
+func checkTsCompressThreads(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 1 || value > 1000 {
+		return errors.New("invalid value, the range of compression threads should be [1, 1000]")
+	}
+	return nil
+}
+
 // checkTsQueryOptMode checks whether the mode value set is valid
 func checkTsQueryOptMode(encodedValue string) error {
 	value, err := strconv.ParseInt(encodedValue, 2, 64)
@@ -233,6 +244,7 @@ var CheckClusterSetting = map[string]CheckOperation{
 	"ts.autovacuum.interval":                      checkTsAutovacuumInterval,
 	"ts.compression.type":                         checkTsCompressType,
 	"ts.compression.level":                        checkTsCompressLevel,
+	"immediate_compression.threads":               checkTsCompressThreads,
 	"ts.sql.query_opt_mode":                       checkTsQueryOptMode,
 }
 

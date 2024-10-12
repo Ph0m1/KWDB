@@ -1936,6 +1936,48 @@ func (s *statusServer) Stores(
 	return resp, nil
 }
 
+// CompactStores compresses data of each store.
+func (s *statusServer) CompactStores(
+	ctx context.Context, req *serverpb.StoresRequest,
+) (*serverpb.StoresResponse, error) {
+	if _, err := s.admin.requireAdminUser(ctx); err != nil {
+		return nil, err
+	}
+
+	ctx = propagateGatewayMetadata(ctx)
+	ctx = s.AnnotateCtx(ctx)
+	nodeID, local, err := s.parseNodeID(req.NodeId)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	if !local {
+		status, err := s.dialNode(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		return status.CompactStores(ctx, req)
+	}
+
+	resp := &serverpb.StoresResponse{}
+	err = s.stores.VisitStores(func(store *kvserver.Store) error {
+		storeDetails := serverpb.StoreDetails{
+			StoreID: store.Ident.StoreID,
+		}
+		if rb, ok := store.Engine().(*storage.RocksDB); ok {
+			err = rb.CompactToBottom()
+			if err != nil {
+				log.Errorf(ctx, "Compact to bottom Failed, reason:%s", err.Error())
+			}
+		}
+		resp.Stores = append(resp.Stores, storeDetails)
+
+		return nil
+	})
+
+	return resp, nil
+}
+
 // jsonWrapper provides a wrapper on any slice data type being
 // marshaled to JSON. This prevents a security vulnerability
 // where a phishing attack can trick a user's browser into

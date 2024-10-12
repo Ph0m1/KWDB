@@ -67,6 +67,9 @@ const (
 	deleteExpiredData
 	alterCompressInterval
 	autonomy
+	compressAll
+	compressDB
+	compressTable
 )
 
 // tsSchemaChangeResumer implements the jobs.Resumer interface for syncMetaCache
@@ -1011,6 +1014,12 @@ func getDDLOpType(op int32) string {
 		return "alter partition interval"
 	case compress:
 		return "compress"
+	case compressAll:
+		return "compress all"
+	case compressDB:
+		return "compress database"
+	case compressTable:
+		return "compress table"
 	case deleteExpiredData:
 		return "clean up expired data"
 	case alterCompressInterval:

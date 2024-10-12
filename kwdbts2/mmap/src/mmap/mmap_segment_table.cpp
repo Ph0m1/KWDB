@@ -322,7 +322,7 @@ int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segmen
   }
 
   // check if compressed failed last time.
-  if (!(flags & O_CREAT) && !is_compressed_ && getSegmentStatus() >= ImmuWithRawSegment) {
+  if (!(flags & O_CREAT) && !is_compressed_ && getSegmentStatus() == ImmuSegment) {
     setSegmentStatus(InActiveSegment);
   }
 
@@ -423,7 +423,7 @@ int MMapSegmentTable::close(ErrorInfo& err_info) {
   }
   TsTableObject::close();
 
-  if (s_status >= ImmuWithRawSegment) {
+  if (s_status == ImmuSegment) {
     string segment_dir = db_path_ + tbl_sub_path_;
     if (!isMounted(segment_dir)) {
       Remove(segment_dir);
@@ -431,7 +431,7 @@ int MMapSegmentTable::close(ErrorInfo& err_info) {
   }
 
   if (g_engine_initialized && g_max_mount_cnt_ != 0 && g_cur_mount_cnt_ > g_max_mount_cnt_
-      && s_status >= ImmuWithRawSegment) {
+      && s_status == ImmuSegment) {
     if (is_latest_opened_ && !umount(db_path_, tbl_sub_path_, err_info)) {
       LOG_WARN("at MMapSegmentTable::close %s", err_info.errmsg.c_str());
     }

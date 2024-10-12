@@ -2687,6 +2687,8 @@ func (dsp *DistSQLPlanner) operateTSData(
 	switch n.operateType {
 	case compress:
 		tsPro.TsOperator = execinfrapb.OperatorType_TsCompressTsTable
+	case compressAll, compressDB, compressTable:
+		tsPro.TsOperator = execinfrapb.OperatorType_TsManualCompressTable
 	case deleteExpiredData:
 		tsPro.TsOperator = execinfrapb.OperatorType_TsDeleteExpiredData
 	case autonomy:
@@ -2711,6 +2713,7 @@ func (dsp *DistSQLPlanner) operateTSData(
 			EndTs:      endTime,
 			CompressTs: comPressTime,
 			TsVersion:  uint32(table.TsTable.GetTsVersion()),
+			IsTSTable:  table.IsTSTable(),
 		}
 		clearInfos = append(clearInfos, clearInfo)
 	}

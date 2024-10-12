@@ -221,11 +221,12 @@ class TsTable {
   /**
    * @brief Compress the segment whose maximum timestamp in the time series entity group is less than ts
    * @param[in] ctx Database Context
-   * @param[in] ts A timestamp that needs to be compressed
+   * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX, 
+   *            all segments will be compressed, including the current one.
    *
    * @return KStatus
    */
-  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts);
+  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo &err_info);
 
 
   std::string GetStoreDirectory() {
@@ -638,11 +639,12 @@ class TsEntityGroup {
   /**
    * @brief Compress the segment whose maximum timestamp in the time series entity group is less than ts
    * @param[in] ctx Database Context
-   * @param[in] ts A timestamp that needs to be compressed
+   * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX, 
+   *            all segments will be compressed, including the current one.
    *
    * @return KStatus
    */
-  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts);
+  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo &err_info);
 
   /**
    * @brief Write entity tags values and support tag value modification.

@@ -889,6 +889,16 @@ func (r *TsEngine) CompressTsTable(tableID uint64, ts int64) error {
 	return nil
 }
 
+// CompressImmediately compress partitions immediately
+func (r *TsEngine) CompressImmediately(ctx context.Context, tableID uint64) error {
+	goCtxPtr := C.uint64_t(uintptr(unsafe.Pointer(&ctx)))
+	status := C.TSCompressImmediately(r.tdb, goCtxPtr, C.TSTableID(tableID))
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to compress ts table")
+	}
+	return nil
+}
+
 // DeleteExpiredData delete expired data from time partitions that fall completely within the [min_int64, end) interval
 func (r *TsEngine) DeleteExpiredData(tableID uint64, _ int64, end int64) error {
 	status := C.TSDeleteExpiredData(r.tdb, C.TSTableID(tableID), C.int64_t(end))

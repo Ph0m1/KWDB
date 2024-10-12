@@ -662,11 +662,10 @@ KStatus TsEntityGroup::Drop(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
+KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo &err_info) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  ErrorInfo err_info;
-  ebt_manager_->Compress(ts, err_info);
+  ebt_manager_->Compress(ctx, ts, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("TsEntityGroup::Compress error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
@@ -1619,15 +1618,36 @@ KStatus TsTable::DropAll(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
+KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    err_info.setError(KWENOOBJ, "table not created");
     return KStatus::FAIL;
   }
-  if (!entity_bt_manager_->SetCompressStatus(true)) {
-    // Other threads are currently being compressed, skipping this compression
-    LOG_INFO("table[%lu] is compressing, skip this compression", table_id_);
-    return KStatus::SUCCESS;
+
+  bool isScheduledCompress = (ts != INT64_MAX);
+  if (isScheduledCompress) {
+    if (!entity_bt_manager_->TrySetCompressStatus(true)) {
+      // If other threads are currently undergoing the compression process,
+      // scheduled compression will be skipped to avoid concurrency issues.
+      LOG_INFO("table[%lu] is compressing, skip this compression", table_id_);
+      return KStatus::SUCCESS;
+    }
+  } else {
+    while (true) {
+      // check client ctrl+C first
+      if (isCanceledCtx(ctx->relation_ctx)) {
+        LOG_INFO("Interrupted, skip compression");
+        err_info.setError(KWEOTHER, "interrupted");
+        return KStatus::FAIL;
+      }
+      if (entity_bt_manager_->TrySetCompressStatus(true)) {
+        // break the loop and perform compression
+        break;
+      }
+      using std::chrono_literals::operator""s;
+      std::this_thread::sleep_for(1s);
+    }
   }
   KStatus s = KStatus::SUCCESS;
   std::vector<std::shared_ptr<TsEntityGroup>> compress_entity_groups;
@@ -1643,7 +1663,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts) {
     if (!entity_group) {
       continue;
     }
-    s = entity_group->Compress(ctx, ts);
+    s = entity_group->Compress(ctx, ts, err_info);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("TsTableRange compress failed : %s", tbl_sub_path_.c_str());
       break;

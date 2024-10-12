@@ -30,11 +30,8 @@ typedef char col_a[TSCOLUMNATTR_LEN];
 */
 enum SegmentStatus {
   ActiveSegment = 0,        // can write
-  ActiveInWriteSegment = 1, // segment is writing
   InActiveSegment = 2,      // cannot write, and no compressed
-  ImmuWithRawSegment = 3,   // cannot write, compressed but not delete original dir
   ImmuSegment = 4,          // cannot write, compressed and original dir deleted.
-  ImmuWithMountSegment = 5, // cannot write, sqfs file mounted.
 };
 
 /**

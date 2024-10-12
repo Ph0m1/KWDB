@@ -255,11 +255,18 @@ public:
   bool IsDropped();
 
   /**
-   * @brief Set the table compress status.
+   * @brief Try to set the table compress status.
+   *
+   * @return Return true if compress status has changed; Otherwise return false.
+   */
+  bool TrySetCompressStatus(bool desired);
+
+  /**
+   * @brief Set the table compress status forcely 
    *
    * @return
    */
-  bool SetCompressStatus(bool desired);
+  void SetCompressStatus(bool status);
 
   /**
    * @brief Clear all data in the table.
