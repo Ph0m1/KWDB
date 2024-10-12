@@ -197,8 +197,8 @@ type TSCheckHelper struct {
 	// ts white list map
 	whiteList *sqlbase.WhiteListMap
 
-	// pushHelper check expr can be pushed to ts engine
-	pushHelper PushHelper
+	// PushHelper check expr can be pushed to ts engine
+	PushHelper PushHelper
 
 	// function to check if we run in multi node mode
 	checkMultiNode CheckMultiNode
@@ -215,7 +215,7 @@ type TSCheckHelper struct {
 // init inits the TSCheckHelper
 func (m *TSCheckHelper) init() {
 	m.flags = 0
-	m.pushHelper.MetaMap = make(MetaInfoMap, 0)
+	m.PushHelper.MetaMap = make(MetaInfoMap, 0)
 	m.GroupHint = keys.NoGroupHint
 }
 
@@ -260,40 +260,20 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 	m.tsDop = 0
 }
 
-// InitTS initializes some elements to determine if the memo exprs can be executed in the TS engine.
-// hasTSTable is true when the query contain ts table.
-// singleNode is true when the server is start single mode.
-// whiteMap is a whitelist map for check expr can exec in ts engine.
-// f is the function to check if we run in multi node mode.
-// execInTSEngine is true when the sql.all_push_down.enabled is true.
-// enableTSAutomaticCollection is true when cluster setting sql.stats.ts_automatic_collection.enabled is true.
-func (m *Memo) InitTS(
-	ctx context.Context,
-	hasTSTable, singleNode bool,
-	whiteMap *sqlbase.WhiteListMap,
-	f CheckMultiNode,
-	execInTSEngine bool,
-	enableTSAutomaticCollection bool,
-) {
-	if hasTSTable {
-		m.SetFlag(opt.IncludeTSTable)
+// InitCheckHelper init some members of CheckHelper of memo.
+// WhiteListMap is a whitelist map for check expr can exec in ts engine.
+// CheckMultiNode is the function to check if we run in multi node mode.
+func (m *Memo) InitCheckHelper(param interface{}) {
+	switch t := param.(type) {
+	case *sqlbase.WhiteListMap:
+		m.CheckHelper.whiteList = t
+	case CheckMultiNode:
+		m.CheckHelper.checkMultiNode = t
+	case context.Context:
+		m.CheckHelper.ctx = t
+	case keys.GroupHintType:
+		m.CheckHelper.GroupHint = t
 	}
-	if singleNode {
-		m.SetFlag(opt.SingleMode)
-	}
-	if execInTSEngine {
-		m.SetFlag(opt.ExecInTSEngine)
-	}
-	if !enableTSAutomaticCollection {
-		m.CheckHelper.GroupHint = keys.ForceAEGroup
-	}
-
-	m.TSWhiteListMap = whiteMap
-	m.tsDop = 0
-
-	m.CheckHelper.whiteList = whiteMap
-	m.CheckHelper.checkMultiNode = f
-	m.CheckHelper.ctx = ctx
 }
 
 // GetWhiteList return the white list from memo.
@@ -658,14 +638,14 @@ func (m *Memo) Detach() {
 func (m *Memo) AddColumn(
 	col opt.ColumnID, alias string, typ ExprType, pos ExprPos, hash uint32, isTimeBucket bool,
 ) {
-	m.CheckHelper.pushHelper.lock.Lock()
-	m.CheckHelper.pushHelper.MetaMap[col] = ExprInfo{Alias: alias, Type: typ, Pos: pos, Hash: hash, IsTimeBucket: isTimeBucket}
-	m.CheckHelper.pushHelper.lock.Unlock()
+	m.CheckHelper.PushHelper.lock.Lock()
+	m.CheckHelper.PushHelper.MetaMap[col] = ExprInfo{Alias: alias, Type: typ, Pos: pos, Hash: hash, IsTimeBucket: isTimeBucket}
+	m.CheckHelper.PushHelper.lock.Unlock()
 }
 
 // GetPushHelperAddress return the push helper address
 func (m *Memo) GetPushHelperAddress() *MetaInfoMap {
-	return &m.CheckHelper.pushHelper.MetaMap
+	return &m.CheckHelper.PushHelper.MetaMap
 }
 
 // CheckExecInTS check if the column can execute in ts engine, but
@@ -673,9 +653,9 @@ func (m *Memo) GetPushHelperAddress() *MetaInfoMap {
 // col is the column ID of the logical column.
 // pos is the position where the column appears, it can be ExprPosSelect,ExprPosProjList,ExprPosGroupBy
 func (m *Memo) CheckExecInTS(col opt.ColumnID, pos ExprPos) bool {
-	m.CheckHelper.pushHelper.lock.Lock()
-	info, ok := m.CheckHelper.pushHelper.MetaMap[col]
-	m.CheckHelper.pushHelper.lock.Unlock()
+	m.CheckHelper.PushHelper.lock.Lock()
+	info, ok := m.CheckHelper.PushHelper.MetaMap[col]
+	m.CheckHelper.PushHelper.lock.Unlock()
 	if !ok {
 		return false
 	}
@@ -832,7 +812,7 @@ func (m *Memo) dealWithGroupBy(
 
 	if optTimeBucket {
 		if private, ok := src.Private().(*GroupingPrivate); ok {
-			private.AggPushDown = true
+			private.OptTimeBucket = true
 		}
 	}
 
@@ -1479,7 +1459,7 @@ func (m *Memo) dealCanNotAddSynchronize(child *RelExpr) (bool, bool, error) {
 }
 
 // CheckTSScan deal with memo.TSScanExpr of memo tree.
-// Record the columns in pushHelper for future memo expr to
+// Record the columns in PushHelper for future memo expr to
 // determine if they can be executed in ts engine.
 // returns:
 // param1: the memo.TSScanExpr can execute in ts engine, always true.
@@ -1497,6 +1477,11 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (bool, bool, error) {
 
 	if source.HintType == keys.TagOnlyHint && hasNotTag {
 		return true, source.HintType == keys.TagOnlyHint, pgerror.New(pgcode.FeatureNotSupported, "TAG_ONLY can only query tag columns")
+	}
+	// when the tagFilter has a subquery, it needs to Walk to check whether it can execute in ts engine.
+	param := GetSubQueryExpr{m: m}
+	for _, filter := range source.TagFilter {
+		filter.Walk(&param)
 	}
 	source.SetEngineTS()
 	// only tag mode should not add synchronizer, so param2 will be true.
@@ -1550,12 +1535,12 @@ func (m *Memo) checkSelect(source *SelectExpr) (bool, bool, bool, error) {
 	selfExecInTS := childExecInTS
 	for i, filter := range source.Filters {
 		filter.Walk(&param)
-		if param.hasSub {
+		if param.hasSub && !m.CheckFlag(opt.ScalarSubQueryPush) {
 			// can not break ,  need deal with all sub query
 			selfExecInTS = false
 			optTimeBucket = false
+			continue
 		}
-
 		if childExecInTS {
 			if CheckFilterExprCanExecInTSEngine(filter.Condition, ExprPosSelect, m.CheckHelper.whiteList.CheckWhiteListParam) {
 				if optTimeBucket {
@@ -1608,7 +1593,7 @@ func (m *Memo) checkProject(source *ProjectExpr) (bool, bool, bool, error) {
 	selfExecInTS := childExecInTS
 	for _, proj := range source.Projections {
 		proj.Walk(&param)
-		if param.hasSub {
+		if param.hasSub && !m.CheckFlag(opt.ScalarSubQueryPush) {
 			selfExecInTS = false
 		}
 		if childExecInTS {
@@ -1628,7 +1613,7 @@ func (m *Memo) checkProject(source *ProjectExpr) (bool, bool, bool, error) {
 				if f.Name != tree.FuncTimeBucket {
 					optTimeBucket = false
 				} else {
-					if v, ok := m.CheckHelper.pushHelper.Find(proj.Col); ok {
+					if v, ok := m.CheckHelper.PushHelper.Find(proj.Col); ok {
 						m.AddColumn(proj.Col, v.Alias, v.Type, v.Pos, v.Hash, true)
 					}
 				}
@@ -1661,7 +1646,7 @@ func (m *Memo) checkGrouping(cols opt.ColSet, optTimeBucket *bool) bool {
 		if !m.CheckExecInTS(colID, ExprPosGroupBy) || colMeta.Type.Family() == types.BytesFamily {
 			execInTSEngine = false
 		}
-		if v, ok := m.CheckHelper.pushHelper.Find(colID); ok {
+		if v, ok := m.CheckHelper.PushHelper.Find(colID); ok {
 			if !v.IsTimeBucket && !m.metadata.ColumnMeta(colID).IsPrimaryTag() {
 				*optTimeBucket = false
 			}
@@ -1676,9 +1661,9 @@ func (m *Memo) checkGrouping(cols opt.ColSet, optTimeBucket *bool) bool {
 	return execInTSEngine
 }
 
-// checkChildExecInTS return true if the child of agg can execute in ts engine.
+// CheckChildExecInTS return true if the child of agg can execute in ts engine.
 // srcExpr is the expr of agg
-func (m *Memo) checkChildExecInTS(srcExpr opt.ScalarExpr, hashCode uint32) bool {
+func (m *Memo) CheckChildExecInTS(srcExpr opt.ScalarExpr, hashCode uint32) bool {
 	execInTSEngine := false
 	if srcExpr.ChildCount() == 0 {
 		execInTSEngine = m.CheckHelper.whiteList.CheckWhiteListAll(hashCode, ExprPosProjList, uint32(ExprTypConst))
@@ -1697,7 +1682,7 @@ func (m *Memo) checkChildExecInTS(srcExpr opt.ScalarExpr, hashCode uint32) bool 
 			// case agg(distinct column)
 			aggDistinct, ok1 := srcExpr.(*AggDistinctExpr)
 			if ok1 {
-				execInTSEngine = m.checkChildExecInTS(aggDistinct.Input, hashCode)
+				execInTSEngine = m.CheckChildExecInTS(aggDistinct.Input, hashCode)
 			}
 		}
 	}
@@ -1768,7 +1753,7 @@ func (m *Memo) checkGroupBy(
 
 				// first: check if child of agg can execute in ts engine.
 				// second: check if agg itself can execute in ts engine.
-				if !m.checkChildExecInTS(srcExpr, hashCode) ||
+				if !m.CheckChildExecInTS(srcExpr, hashCode) ||
 					!m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList) {
 					if !hasSynchronizer {
 						m.setSynchronizerForChild(input, &hasSynchronizer)
@@ -2002,7 +1987,7 @@ func (m *Memo) checkFilterOptTimeBucket(expr opt.Expr) bool {
 func (m *Memo) checkOptTimeBucketFlag(input RelExpr, optTimeBucket *bool) {
 	checkProject := func(pro *ProjectExpr) {
 		for _, v := range pro.Projections {
-			if tb, ok := m.CheckHelper.pushHelper.Find(v.Col); ok {
+			if tb, ok := m.CheckHelper.PushHelper.Find(v.Col); ok {
 				if !tb.IsTimeBucket {
 					*optTimeBucket = false
 				}
@@ -2074,4 +2059,31 @@ func (m *Memo) GetTsDop() uint32 {
 // SetTsDop is used to set degree of parallelism
 func (m *Memo) SetTsDop(num uint32) {
 	m.tsDop = num
+}
+
+// InsideOutOptHelper records agg functions and projections which can push down ts engine side.
+type InsideOutOptHelper struct {
+	Aggs     []AggregationsItem
+	Grouping opt.ColSet
+
+	// AggArgs records the mapping between agg types and parameter's columnID
+	// When agg is sum/count/avg and the parameter is the projection of the relational engine,
+	// the agg cannot be optimized by push-down
+	AggArgs []AggArgHelper
+
+	// ProEngine records the execution engine of each projection.
+	// When the projection layer is in time series,
+	// it will build the projection layer on tsScan.
+	// When the projection layer is in relation,
+	// it will build the projection layer on inner join.
+	ProEngine []tree.EngineType
+
+	Projections ProjectionsExpr
+	Passthrough opt.ColSet
+}
+
+// AggArgHelper records agg function operator and its argument's column ID
+type AggArgHelper struct {
+	AggOp    opt.Operator
+	ArgColID opt.ColumnID
 }

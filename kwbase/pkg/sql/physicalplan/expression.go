@@ -138,16 +138,22 @@ func MakeExpression(
 
 // optimizeTSExpression optimize execinfrapb.Expression for tsReader.
 // change case any as null , ts engine parse not support cast null as type
-func optimizeTSExpression(expr tree.TypedExpr) tree.TypedExpr {
+func optimizeTSExpression(expr tree.Expr) tree.Expr {
 	switch src := expr.(type) {
 	case *tree.CastExpr:
 		expr = src.ChangeToNull()
 	case *tree.OrExpr:
-		src.Left = optimizeTSExpression(src.Left.(tree.TypedExpr))
-		src.Right = optimizeTSExpression(src.Right.(tree.TypedExpr))
+		src.Left = optimizeTSExpression(src.Left)
+		src.Right = optimizeTSExpression(src.Right)
 	case *tree.AndExpr:
-		src.Left = optimizeTSExpression(src.Left.(tree.TypedExpr))
-		src.Right = optimizeTSExpression(src.Right.(tree.TypedExpr))
+		src.Left = optimizeTSExpression(src.Left)
+		src.Right = optimizeTSExpression(src.Right)
+	case *tree.ComparisonExpr:
+		src.Left = optimizeTSExpression(src.Left)
+		src.Right = optimizeTSExpression(src.Right)
+	case *tree.BinaryExpr:
+		src.Left = optimizeTSExpression(src.Left)
+		src.Right = optimizeTSExpression(src.Right)
 	}
 
 	return expr
@@ -175,8 +181,7 @@ func MakeTSExpressionForArray(expr []tree.TypedExpr, ctx ExprContext, indexVarMa
 func MakeTSExpression(
 	exprOrig tree.TypedExpr, ctx ExprContext, indexVarMap []int,
 ) (execinfrapb.Expression, error) {
-	expr := optimizeTSExpression(exprOrig)
-	if expr == nil {
+	if exprOrig == nil {
 		return execinfrapb.Expression{}, nil
 	}
 	if ctx == nil {
@@ -188,13 +193,17 @@ func MakeTSExpression(
 		evalCtx: evalCtx,
 	}
 
-	outExpr := expr.(tree.Expr)
+	outExpr := exprOrig.(tree.Expr)
 	if ctx.EvaluateSubqueries() {
-		outExpr, _ = tree.WalkExpr(subqueryVisitor, expr)
+		outExpr, _ = tree.WalkExpr(subqueryVisitor, exprOrig)
 		if subqueryVisitor.err != nil {
 			return execinfrapb.Expression{}, subqueryVisitor.err
 		}
 	}
+
+	// change cast(null) to null
+	outExpr = optimizeTSExpression(outExpr)
+
 	// We format the expression using the IndexedVar and Placeholder formatting interceptors.
 	fmtCtx := execinfrapb.ExprFmtCtxBase(evalCtx)
 	fmtCtx.ExecInTSEngine = true

@@ -682,3 +682,10 @@ func (md *Metadata) GetTableIDByObjectID(kobjectID cat.StableID) TableID {
 	}
 	return tmp
 }
+
+// IsSingleRelCol checks if the column is single relation column,
+// and return true if the column is single relation column.
+func (md *Metadata) IsSingleRelCol(colID ColumnID) bool {
+	colMeta := md.ColumnMeta(colID)
+	return colMeta.TSType == ColNormal && colMeta.Table != 0
+}

@@ -591,13 +591,13 @@ WHERE
         (tag1 != 105 OR abs(tag2 - 205) < 10)
 ORDER BY e1;
 
-set cluster setting ts.filter_order_opt.enabled=false;
+set cluster setting ts.sql.query_opt_mode=0110;
 
 explain select e1 from d1.t1 where e2 > 0 and e4 = '44' order by e1;
 
 select e1 from d1.t1 where e2 > 0 and e4 = '44' order by e1;
 
-set cluster setting ts.filter_order_opt.enabled=true;
+set cluster setting ts.sql.query_opt_mode=1110;
 
 explain select e1 from d1.t1 where e2 > 0 and e4 = '44' order by e1;
 

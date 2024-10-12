@@ -424,9 +424,10 @@ INSERT 2
                                    | distributed  | true
                                    | vectorized   | false
   root                             |              |
-   ├── render                      |              |
-   │    │                          | ?column?     | 0.0 = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
-   │    └── synchronizer           |              |
+   ├── synchronizer                |              |
+   │    └── render                 |              |
+   │         │                     | engine type  | time series
+   │         │                     | ?column?     | 0.0 = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
    │         └── ts scan           |              |
    │                               | ts-table     | ts_table
    │                               | access mode  | metaTable
@@ -444,16 +445,17 @@ INSERT 2
                        └── ts scan |              |
                                    | ts-table     | ts_table2
                                    | access mode  | metaTable
-(23 rows)
+(24 rows)
 > explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 where e2 > 1000000 group by e4) from test_ts.ts_table;
                 tree               |    field     |                                 description
 -----------------------------------+--------------+------------------------------------------------------------------------------
                                    | distributed  | true
                                    | vectorized   | false
   root                             |              |
-   ├── render                      |              |
-   │    │                          | ?column?     | 0.0 = ANY (SELECT e4 FROM test_ts.ts_table2 WHERE e2 > 1000000 GROUP BY e4)
-   │    └── synchronizer           |              |
+   ├── synchronizer                |              |
+   │    └── render                 |              |
+   │         │                     | engine type  | time series
+   │         │                     | ?column?     | 0.0 = ANY (SELECT e4 FROM test_ts.ts_table2 WHERE e2 > 1000000 GROUP BY e4)
    │         └── ts scan           |              |
    │                               | ts-table     | ts_table
    │                               | access mode  | metaTable
@@ -470,16 +472,17 @@ INSERT 2
                                    | ts-table     | ts_table2
                                    | access mode  | metaTable
                                    | filter       | e2 > 1000000
-(22 rows)
+(23 rows)
 > explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 order by e3 desc limit 10 offset 1) from test_ts.ts_table;
                      tree                    |    field     |                                   description
 ---------------------------------------------+--------------+----------------------------------------------------------------------------------
                                              | distributed  | true
                                              | vectorized   | false
   root                                       |              |
-   ├── render                                |              |
-   │    │                                    | ?column?     | 0.0 = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
-   │    └── synchronizer                     |              |
+   ├── synchronizer                          |              |
+   │    └── render                           |              |
+   │         │                               | engine type  | time series
+   │         │                               | ?column?     | 0.0 = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
    │         └── ts scan                     |              |
    │                                         | ts-table     | ts_table
    │                                         | access mode  | metaTable
@@ -501,7 +504,7 @@ INSERT 2
                                  └── ts scan |              |
                                              | ts-table     | ts_table2
                                              | access mode  | metaTable
-(27 rows)
+(28 rows)
 > explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 ) from test_ts.ts_table order by e3 desc limit 10 offset 1;
                   tree                  |    field     |                 description
 ----------------------------------------+--------------+-----------------------------------------------
@@ -1368,123 +1371,122 @@ INSERT 2
                                         | access mode        | metaTable
 (23 rows)
 > explain select extract('year', localtimestamp()) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where e3 = (select e3 from test_ts.ts_table where e6='test_ts1' limit 1)) group by e2 having e2 < 3000000 order by e2;
-                               tree                              |       field        |                           description
------------------------------------------------------------------+--------------------+------------------------------------------------------------------
-                                                                 | distributed        | true
-                                                                 | vectorized         | false
-  root                                                           |                    |
-   ├── render                                                    |                    |
-   │    │                                                        | extract            | "extract"
-   │    └── sort                                                 |                    |
-   │         │                                                   | order              | +e2
-   │         └── render                                          |                    |
-   │              │                                              | extract            | 2024.0
-   │              │                                              | e2                 | e2
-   │              └── distinct                                   |                    |
-   │                   │                                         | distinct on        | e2
-   │                   └── render                                |                    |
-   │                        │                                    | e2                 | e2
-   │                        └── hash-join                        |                    |
-   │                             │                               | type               | inner
-   │                             │                               | equality           | (e1) = (e1)
-   │                             │                               | right cols are key |
-   │                             ├── synchronizer                |                    |
-   │                             │    └── ts scan                |                    |
-   │                             │                               | ts-table           | ts_table
-   │                             │                               | access mode        | metaTable
-   │                             │                               | filter             | e2 < 3000000
-   │                             └── distinct                    |                    |
-   │                                  │                          | distinct on        | e1
-   │                                  └── render                 |                    |
-   │                                       │                     | e1                 | e1
-   │                                       └── filter            |                    |
-   │                                            │                | filter             | e3 = @S1
-   │                                            └── synchronizer |                    |
-   │                                                 └── ts scan |                    |
-   │                                                             | ts-table           | ts_table2
-   │                                                             | access mode        | metaTable
-   └── subquery                                                  |                    |
-        │                                                        | id                 | @S1
-        │                                                        | original sql       | (SELECT e3 FROM test_ts.ts_table WHERE e6 = 'test_ts1' LIMIT 1)
-        │                                                        | exec mode          | one row
-        └── render                                               |                    |
-             │                                                   | engine type        | time series
-             │                                                   | e3                 | e3
-             └── limit                                           |                    |
-                  │                                              | engine type        | time series
-                  │                                              | count              | 1
-                  └── synchronizer                               |                    |
-                       └── limit                                 |                    |
-                            │                                    | engine type        | time series
-                            │                                    | count              | 1
-                            └── ts scan                          |                    |
-                                                                 | ts-table           | ts_table
-                                                                 | access mode        | metaTable
-                                                                 | filter             | e6 = 'test_ts1'
-(51 rows)
-> explain select extract('year', localtimestamp()) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where e3 = (select e3 from test_ts.ts_table where e6='test_ts1' limit 1)) order by e3 desc limit 1 offset 1;
-                               tree                              |       field        |                           description
------------------------------------------------------------------+--------------------+------------------------------------------------------------------
-                                                                 | distributed        | true
-                                                                 | vectorized         | false
-  root                                                           |                    |
-   ├── render                                                    |                    |
-   │    │                                                        | extract            | 2024.0
-   │    └── limit                                                |                    |
-   │         │                                                   | offset             | 1
-   │         └── limit                                           |                    |
-   │              │                                              | count              | 2
-   │              └── render                                     |                    |
-   │                   │                                         | e1                 | e1
-   │                   │                                         | e3                 | e3
-   │                   └── sort                                  |                    |
-   │                        │                                    | order              | -e3
-   │                        └── hash-join                        |                    |
-   │                             │                               | type               | inner
-   │                             │                               | equality           | (e1) = (e1)
-   │                             │                               | right cols are key |
-   │                             ├── synchronizer                |                    |
-   │                             │    └── ts scan                |                    |
-   │                             │                               | ts-table           | ts_table
-   │                             │                               | access mode        | metaTable
-   │                             └── distinct                    |                    |
-   │                                  │                          | distinct on        | e1
-   │                                  └── render                 |                    |
-   │                                       │                     | e1                 | e1
-   │                                       └── filter            |                    |
-   │                                            │                | filter             | e3 = @S1
-   │                                            └── synchronizer |                    |
-   │                                                 └── ts scan |                    |
-   │                                                             | ts-table           | ts_table2
-   │                                                             | access mode        | metaTable
-   └── subquery                                                  |                    |
-        │                                                        | id                 | @S1
-        │                                                        | original sql       | (SELECT e3 FROM test_ts.ts_table WHERE e6 = 'test_ts1' LIMIT 1)
-        │                                                        | exec mode          | one row
-        └── render                                               |                    |
-             │                                                   | engine type        | time series
-             │                                                   | e3                 | e3
-             └── limit                                           |                    |
-                  │                                              | engine type        | time series
-                  │                                              | count              | 1
-                  └── synchronizer                               |                    |
-                       └── limit                                 |                    |
-                            │                                    | engine type        | time series
-                            │                                    | count              | 1
-                            └── ts scan                          |                    |
-                                                                 | ts-table           | ts_table
-                                                                 | access mode        | metaTable
-                                                                 | filter             | e6 = 'test_ts1'
+                            tree                            |       field        |                           description
+------------------------------------------------------------+--------------------+------------------------------------------------------------------
+                                                            | distributed        | true
+                                                            | vectorized         | false
+  root                                                      |                    |
+   ├── render                                               |                    |
+   │    │                                                   | extract            | "extract"
+   │    └── sort                                            |                    |
+   │         │                                              | order              | +e2
+   │         └── render                                     |                    |
+   │              │                                         | extract            | 2024.0
+   │              │                                         | e2                 | e2
+   │              └── distinct                              |                    |
+   │                   │                                    | distinct on        | e2
+   │                   └── render                           |                    |
+   │                        │                               | e2                 | e2
+   │                        └── hash-join                   |                    |
+   │                             │                          | type               | inner
+   │                             │                          | equality           | (e1) = (e1)
+   │                             │                          | right cols are key |
+   │                             ├── synchronizer           |                    |
+   │                             │    └── ts scan           |                    |
+   │                             │                          | ts-table           | ts_table
+   │                             │                          | access mode        | metaTable
+   │                             │                          | filter             | e2 < 3000000
+   │                             └── distinct               |                    |
+   │                                  │                     | distinct on        | e1
+   │                                  └── render            |                    |
+   │                                       │                | e1                 | e1
+   │                                       └── synchronizer |                    |
+   │                                            └── ts scan |                    |
+   │                                                        | ts-table           | ts_table2
+   │                                                        | access mode        | metaTable
+   │                                                        | filter             | e3 = @S1
+   └── subquery                                             |                    |
+        │                                                   | id                 | @S1
+        │                                                   | original sql       | (SELECT e3 FROM test_ts.ts_table WHERE e6 = 'test_ts1' LIMIT 1)
+        │                                                   | exec mode          | one row
+        └── render                                          |                    |
+             │                                              | engine type        | time series
+             │                                              | e3                 | e3
+             └── limit                                      |                    |
+                  │                                         | engine type        | time series
+                  │                                         | count              | 1
+                  └── synchronizer                          |                    |
+                       └── limit                            |                    |
+                            │                               | engine type        | time series
+                            │                               | count              | 1
+                            └── ts scan                     |                    |
+                                                            | ts-table           | ts_table
+                                                            | access mode        | metaTable
+                                                            | filter             | e6 = 'test_ts1'
 (50 rows)
+> explain select extract('year', localtimestamp()) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where e3 = (select e3 from test_ts.ts_table where e6='test_ts1' limit 1)) order by e3 desc limit 1 offset 1;
+                            tree                            |       field        |                           description
+------------------------------------------------------------+--------------------+------------------------------------------------------------------
+                                                            | distributed        | true
+                                                            | vectorized         | false
+  root                                                      |                    |
+   ├── render                                               |                    |
+   │    │                                                   | extract            | 2024.0
+   │    └── limit                                           |                    |
+   │         │                                              | offset             | 1
+   │         └── limit                                      |                    |
+   │              │                                         | count              | 2
+   │              └── render                                |                    |
+   │                   │                                    | e1                 | e1
+   │                   │                                    | e3                 | e3
+   │                   └── sort                             |                    |
+   │                        │                               | order              | -e3
+   │                        └── hash-join                   |                    |
+   │                             │                          | type               | inner
+   │                             │                          | equality           | (e1) = (e1)
+   │                             │                          | right cols are key |
+   │                             ├── synchronizer           |                    |
+   │                             │    └── ts scan           |                    |
+   │                             │                          | ts-table           | ts_table
+   │                             │                          | access mode        | metaTable
+   │                             └── distinct               |                    |
+   │                                  │                     | distinct on        | e1
+   │                                  └── render            |                    |
+   │                                       │                | e1                 | e1
+   │                                       └── synchronizer |                    |
+   │                                            └── ts scan |                    |
+   │                                                        | ts-table           | ts_table2
+   │                                                        | access mode        | metaTable
+   │                                                        | filter             | e3 = @S1
+   └── subquery                                             |                    |
+        │                                                   | id                 | @S1
+        │                                                   | original sql       | (SELECT e3 FROM test_ts.ts_table WHERE e6 = 'test_ts1' LIMIT 1)
+        │                                                   | exec mode          | one row
+        └── render                                          |                    |
+             │                                              | engine type        | time series
+             │                                              | e3                 | e3
+             └── limit                                      |                    |
+                  │                                         | engine type        | time series
+                  │                                         | count              | 1
+                  └── synchronizer                          |                    |
+                       └── limit                            |                    |
+                            │                               | engine type        | time series
+                            │                               | count              | 1
+                            └── ts scan                     |                    |
+                                                            | ts-table           | ts_table
+                                                            | access mode        | metaTable
+                                                            | filter             | e6 = 'test_ts1'
+(49 rows)
 > explain select extract('year', localtimestamp()) = ( select e4 from test_ts.ts_table2 limit 1 ) from test_ts.ts_table;
                 tree               |    field     |                     description
 -----------------------------------+--------------+------------------------------------------------------
                                    | distributed  | true
                                    | vectorized   | false
   root                             |              |
-   ├── render                      |              |
-   │    │                          | ?column?     | 2024.0 = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
-   │    └── synchronizer           |              |
+   ├── synchronizer                |              |
+   │    └── render                 |              |
+   │         │                     | engine type  | time series
+   │         │                     | ?column?     | 2024.0 = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
    │         └── ts scan           |              |
    │                               | ts-table     | ts_table
    │                               | access mode  | metaTable
@@ -1502,16 +1504,17 @@ INSERT 2
                        └── ts scan |              |
                                    | ts-table     | ts_table2
                                    | access mode  | metaTable
-(23 rows)
+(24 rows)
 > explain select extract('year', localtimestamp()) in ( select e4 from test_ts.ts_table2 where e2 > 1000000 group by e4) from test_ts.ts_table;
                 tree               |    field     |                                  description
 -----------------------------------+--------------+---------------------------------------------------------------------------------
                                    | distributed  | true
                                    | vectorized   | false
   root                             |              |
-   ├── render                      |              |
-   │    │                          | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2 WHERE e2 > 1000000 GROUP BY e4)
-   │    └── synchronizer           |              |
+   ├── synchronizer                |              |
+   │    └── render                 |              |
+   │         │                     | engine type  | time series
+   │         │                     | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2 WHERE e2 > 1000000 GROUP BY e4)
    │         └── ts scan           |              |
    │                               | ts-table     | ts_table
    │                               | access mode  | metaTable
@@ -1528,16 +1531,17 @@ INSERT 2
                                    | ts-table     | ts_table2
                                    | access mode  | metaTable
                                    | filter       | e2 > 1000000
-(22 rows)
+(23 rows)
 > explain select extract('year', localtimestamp()) in ( select e4 from test_ts.ts_table2 order by e3 desc limit 10 offset 1) from test_ts.ts_table;
                      tree                    |    field     |                                    description
 ---------------------------------------------+--------------+-------------------------------------------------------------------------------------
                                              | distributed  | true
                                              | vectorized   | false
   root                                       |              |
-   ├── render                                |              |
-   │    │                                    | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
-   │    └── synchronizer                     |              |
+   ├── synchronizer                          |              |
+   │    └── render                           |              |
+   │         │                               | engine type  | time series
+   │         │                               | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
    │         └── ts scan                     |              |
    │                                         | ts-table     | ts_table
    │                                         | access mode  | metaTable
@@ -1559,7 +1563,7 @@ INSERT 2
                                  └── ts scan |              |
                                              | ts-table     | ts_table2
                                              | access mode  | metaTable
-(27 rows)
+(28 rows)
 > explain select extract('year', localtimestamp()) in ( select e4 from test_ts.ts_table2 ) from test_ts.ts_table order by e3 desc limit 10 offset 1;
                   tree                  |    field     |                   description
 ----------------------------------------+--------------+--------------------------------------------------
@@ -2206,63 +2210,62 @@ INSERT 2
                                                   | access mode                                    | metaTable
 (31 rows)
 > explain select max(extract('second', '2024-01-01 00:00:00'::timestamp)) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where e3 = (select e3 from test_ts.ts_table where e6='test_ts1' limit 1)) group by e2 having e2 < 3000000 order by e2;
-                               tree                              |                     field                      |                           description
------------------------------------------------------------------+------------------------------------------------+------------------------------------------------------------------
-                                                                 | distributed                                    | true
-                                                                 | vectorized                                     | false
-  root                                                           |                                                |
-   ├── render                                                    |                                                |
-   │    │                                                        | max                                            | max
-   │    └── sort                                                 |                                                |
-   │         │                                                   | order                                          | +e2
-   │         └── group                                           |                                                |
-   │              │                                              | aggregate 0                                    | e2
-   │              │                                              | aggregate 1                                    | max(extract('second', '2024-01-01 00:00:00+00:00'))
-   │              │                                              | group by                                       | e2
-   │              └── render                                     |                                                |
-   │                   │                                         | extract('second', '2024-01-01 00:00:00+00:00') | 0.0
-   │                   │                                         | e2                                             | e2
-   │                   └── render                                |                                                |
-   │                        │                                    | e1                                             | e1
-   │                        │                                    | e2                                             | e2
-   │                        └── hash-join                        |                                                |
-   │                             │                               | type                                           | inner
-   │                             │                               | equality                                       | (e1) = (e1)
-   │                             │                               | right cols are key                             |
-   │                             ├── synchronizer                |                                                |
-   │                             │    └── ts scan                |                                                |
-   │                             │                               | ts-table                                       | ts_table
-   │                             │                               | access mode                                    | metaTable
-   │                             │                               | filter                                         | e2 < 3000000
-   │                             └── distinct                    |                                                |
-   │                                  │                          | distinct on                                    | e1
-   │                                  └── render                 |                                                |
-   │                                       │                     | e1                                             | e1
-   │                                       └── filter            |                                                |
-   │                                            │                | filter                                         | e3 = @S1
-   │                                            └── synchronizer |                                                |
-   │                                                 └── ts scan |                                                |
-   │                                                             | ts-table                                       | ts_table2
-   │                                                             | access mode                                    | metaTable
-   └── subquery                                                  |                                                |
-        │                                                        | id                                             | @S1
-        │                                                        | original sql                                   | (SELECT e3 FROM test_ts.ts_table WHERE e6 = 'test_ts1' LIMIT 1)
-        │                                                        | exec mode                                      | one row
-        └── render                                               |                                                |
-             │                                                   | engine type                                    | time series
-             │                                                   | e3                                             | e3
-             └── limit                                           |                                                |
-                  │                                              | engine type                                    | time series
-                  │                                              | count                                          | 1
-                  └── synchronizer                               |                                                |
-                       └── limit                                 |                                                |
-                            │                                    | engine type                                    | time series
-                            │                                    | count                                          | 1
-                            └── ts scan                          |                                                |
-                                                                 | ts-table                                       | ts_table
-                                                                 | access mode                                    | metaTable
-                                                                 | filter                                         | e6 = 'test_ts1'
-(54 rows)
+                            tree                            |                     field                      |                           description
+------------------------------------------------------------+------------------------------------------------+------------------------------------------------------------------
+                                                            | distributed                                    | true
+                                                            | vectorized                                     | false
+  root                                                      |                                                |
+   ├── render                                               |                                                |
+   │    │                                                   | max                                            | max
+   │    └── sort                                            |                                                |
+   │         │                                              | order                                          | +e2
+   │         └── group                                      |                                                |
+   │              │                                         | aggregate 0                                    | e2
+   │              │                                         | aggregate 1                                    | max(extract('second', '2024-01-01 00:00:00+00:00'))
+   │              │                                         | group by                                       | e2
+   │              └── render                                |                                                |
+   │                   │                                    | extract('second', '2024-01-01 00:00:00+00:00') | 0.0
+   │                   │                                    | e2                                             | e2
+   │                   └── render                           |                                                |
+   │                        │                               | e1                                             | e1
+   │                        │                               | e2                                             | e2
+   │                        └── hash-join                   |                                                |
+   │                             │                          | type                                           | inner
+   │                             │                          | equality                                       | (e1) = (e1)
+   │                             │                          | right cols are key                             |
+   │                             ├── synchronizer           |                                                |
+   │                             │    └── ts scan           |                                                |
+   │                             │                          | ts-table                                       | ts_table
+   │                             │                          | access mode                                    | metaTable
+   │                             │                          | filter                                         | e2 < 3000000
+   │                             └── distinct               |                                                |
+   │                                  │                     | distinct on                                    | e1
+   │                                  └── render            |                                                |
+   │                                       │                | e1                                             | e1
+   │                                       └── synchronizer |                                                |
+   │                                            └── ts scan |                                                |
+   │                                                        | ts-table                                       | ts_table2
+   │                                                        | access mode                                    | metaTable
+   │                                                        | filter                                         | e3 = @S1
+   └── subquery                                             |                                                |
+        │                                                   | id                                             | @S1
+        │                                                   | original sql                                   | (SELECT e3 FROM test_ts.ts_table WHERE e6 = 'test_ts1' LIMIT 1)
+        │                                                   | exec mode                                      | one row
+        └── render                                          |                                                |
+             │                                              | engine type                                    | time series
+             │                                              | e3                                             | e3
+             └── limit                                      |                                                |
+                  │                                         | engine type                                    | time series
+                  │                                         | count                                          | 1
+                  └── synchronizer                          |                                                |
+                       └── limit                            |                                                |
+                            │                               | engine type                                    | time series
+                            │                               | count                                          | 1
+                            └── ts scan                     |                                                |
+                                                            | ts-table                                       | ts_table
+                                                            | access mode                                    | metaTable
+                                                            | filter                                         | e6 = 'test_ts1'
+(53 rows)
 > explain select max(extract('second', '2024-01-01 00:00:00'::timestamp)) = ( select e4 from test_ts.ts_table2 limit 1 ) from test_ts.ts_table;
                 tree               |                     field                      |                     description
 -----------------------------------+------------------------------------------------+------------------------------------------------------
@@ -2270,6 +2273,7 @@ INSERT 2
                                    | vectorized                                     | false
   root                             |                                                |
    ├── render                      |                                                |
+   │    │                          | engine type                                    | time series
    │    │                          | ?column?                                       | max = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
    │    └── group                  |                                                |
    │         │                     | engine type                                    | time series
@@ -2296,7 +2300,7 @@ INSERT 2
                        └── ts scan |                                                |
                                    | ts-table                                       | ts_table2
                                    | access mode                                    | metaTable
-(30 rows)
+(31 rows)
 > explain select max(extract('second', '2024-01-01 00:00:00'::timestamp)) in ( select e4 from test_ts.ts_table2 order by e3 desc limit 10 offset 1) from test_ts.ts_table;
                      tree                    |                     field                      |                                   description
 ---------------------------------------------+------------------------------------------------+----------------------------------------------------------------------------------
@@ -2304,6 +2308,7 @@ INSERT 2
                                              | vectorized                                     | false
   root                                       |                                                |
    ├── render                                |                                                |
+   │    │                                    | engine type                                    | time series
    │    │                                    | ?column?                                       | max = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
    │    └── group                            |                                                |
    │         │                               | engine type                                    | time series
@@ -2334,7 +2339,7 @@ INSERT 2
                                  └── ts scan |                                                |
                                              | ts-table                                       | ts_table2
                                              | access mode                                    | metaTable
-(34 rows)
+(35 rows)
 > explain select max(extract('second', '2024-01-01 00:00:00'::timestamp)) from test_ts.ts_table as t1 join test_ts.ts_table2 as t2 on t1.e1=t2.e1 group by t1.e2 having t1.e2 > 1000000 order by t1.e2;
                   tree                  |                     field                      |                     description
 ----------------------------------------+------------------------------------------------+------------------------------------------------------

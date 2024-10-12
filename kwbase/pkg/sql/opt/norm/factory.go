@@ -29,6 +29,8 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
@@ -111,7 +113,7 @@ type Factory struct {
 	tsPushHelper memo.MetaInfoMap
 }
 
-// CheckFlag check if the flag is set.
+// CheckFlag checks if the flag is set.
 // flag: flag that need to be checked
 func (f *Factory) CheckFlag(flag int) bool {
 	return f.TSFlags&flag > 0
@@ -385,7 +387,7 @@ func (f *Factory) GetTableDescFromKObjectID(kobjectID uint64) (*sqlbase.TableDes
 	return tabDesc, nil
 }
 
-// AddColumn add column to tsPushHelper map, which is used to
+// AddColumn adds column to tsPushHelper map, which is used to
 // check whether the expr is supported on ts engine.
 func (f *Factory) AddColumn(
 	col opt.ColumnID, alias string, typ memo.ExprType, pos memo.ExprPos, hash uint32,
@@ -427,5 +429,733 @@ func (f *Factory) TSSupports(col opt.ColumnID, pos memo.ExprPos) bool {
 func copyPushFlag(source, ret memo.RelExpr) {
 	if source.IsTSEngine() {
 		ret.SetEngineTS()
+	}
+}
+
+// checkGrouping checks if group cols can execute in ts engine.
+// cols is the GroupingCols of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
+func (f *Factory) checkGrouping(cols opt.ColSet) bool {
+	allPush := true
+	cols.ForEach(func(colID opt.ColumnID) {
+		push := f.TSSupports(colID, memo.ExprPosGroupBy)
+		colMeta := f.Metadata().ColumnMeta(colID)
+		if !push || colMeta.Type.Family() == types.BytesFamily {
+			allPush = false
+		}
+	})
+
+	return allPush
+}
+
+// checkGroupByExpr checks if memo.GroupByExpr can execute in ts engine.
+// input is the child of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr) of memo tree.
+// aggs is the AggregationsExpr of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
+// gp is the GroupingPrivate of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
+func (f *Factory) checkGroupByExpr(
+	input *memo.RelExpr, aggs *memo.AggregationsExpr, gp *memo.GroupingPrivate,
+) (bool, bool, bool) {
+	canMerge := true
+	allPush := f.CheckWhiteListAndSetEngine(input)
+	aggCanPush, isDistinct := false, false
+	if allPush {
+		// group cols, all can push
+		allPush = f.checkGrouping(gp.GroupingCols)
+		if allPush {
+			for i := 0; i < len(*aggs); i++ {
+				srcExpr := (*aggs)[i].Agg
+				hashCode := memo.GetExprHash(srcExpr)
+
+				// check if child of agg can push.
+				push := f.Memo().CheckChildExecInTS(srcExpr, hashCode)
+
+				// check if agg itself can push.
+				if !push || !f.Memo().GetWhiteList().CheckWhiteListParam(hashCode, memo.ExprPosProjList) {
+					canMerge = false
+					allPush = false
+					break
+				}
+				f.AddColumn((*aggs)[i].Col, "", memo.ExprTypeAggOp, memo.ExprPosGroupBy, hashCode)
+				var isDistinctTmp bool
+				aggCanPush, isDistinctTmp = memo.CheckAggCanParallel((*aggs)[i].Agg)
+				if isDistinctTmp {
+					isDistinct = true
+				}
+				canMerge = push && aggCanPush
+			}
+		}
+
+		return allPush, canMerge, isDistinct
+	}
+
+	return false, false, isDistinct
+}
+
+// checkProjectExpr checks if memo.ProjectExpr can execute in ts engine.
+// source is the memo.ProjectExpr of memo tree.
+func (f *Factory) checkProjectExpr(source *memo.ProjectExpr) bool {
+	allPush := f.CheckWhiteListAndSetEngine(&source.Input)
+	if allPush {
+		for _, proj := range source.Projections {
+			// projection list every one is all leave or all delete
+			push, hashcode := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
+				f.TSWhiteListMap.CheckWhiteListParam, false)
+			if !push {
+				return false
+			}
+			f.AddColumn(proj.Col, "", memo.GetExprType(proj.Element), memo.ExprPosProjList, hashcode)
+		}
+
+		source.SetEngineTS()
+		return true
+	}
+
+	return false
+}
+
+// checkSelectExpr checks if memo.SelectExpr can execute in ts engine.
+// source is the memo.SelectExpr of memo tree.
+func (f *Factory) checkSelectExpr(source *memo.SelectExpr) bool {
+	childExecInTS := f.CheckWhiteListAndSetEngine(&source.Input)
+	if childExecInTS {
+		for _, filter := range source.Filters {
+			if !memo.CheckFilterExprCanExecInTSEngine(filter.Condition, memo.ExprPosSelect,
+				f.Memo().GetWhiteList().CheckWhiteListParam) {
+				return false
+			}
+		}
+
+		source.SetEngineTS()
+		return true
+	}
+
+	return false
+}
+
+// checkTSScanExpr deals with memo.TSScanExpr of memo tree.
+func (f *Factory) checkTSScanExpr(source *memo.TSScanExpr) bool {
+	source.Cols.ForEach(func(colID opt.ColumnID) {
+		colMeta := f.Metadata().ColumnMeta(colID)
+		f.AddColumn(colID, colMeta.Alias, memo.ExprTypCol, memo.ExprPosNone, 0)
+	})
+
+	source.SetEngineTS()
+
+	return true
+}
+
+// checkLookupJoinExpr checks if memo.LookupJoinExpr can execute in ts engine.
+// join can not execute in ts engine, so just check child of LookupJoinExpr and add synchronize Expr.
+// source is the memo.LookupJoinExpr of memo tree.
+func (f *Factory) checkLookupJoinExpr(source *memo.LookupJoinExpr) bool {
+	f.CheckWhiteListAndSetEngine(&source.Input)
+	return false
+}
+
+// checkJoinExpr checks if (InnerJoinExpr,SemiJoinExpr,MergeJoinExpr,LeftJoinApplyExpr,RightJoinExpr,InnerJoinApplyExpr,FullJoinExpr,LeftJoinExpr)
+// can execute in ts engine. they can not execute in ts engine, so just check their child node and add synchronize Expr.
+// source is the memo.**JoinExpr of memo tree.
+func (f *Factory) checkJoinExpr(source memo.RelExpr) (push bool) {
+	switch s := source.(type) {
+	case *memo.InnerJoinExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.SemiJoinExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.MergeJoinExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.LeftJoinApplyExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.RightJoinExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.InnerJoinApplyExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.FullJoinExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	case *memo.LeftJoinExpr:
+		push = f.checkChildOfJoinExpr(&s.Left, &s.Right)
+	}
+	return push
+}
+
+// checkChildOfJoinExpr checks if the child of the joinExpr can exec in ts engine.
+func (f *Factory) checkChildOfJoinExpr(left, right *memo.RelExpr) bool {
+	f.CheckWhiteListAndSetEngine(left)
+	f.CheckWhiteListAndSetEngine(right)
+
+	return false
+}
+
+// CheckWhiteListAndSetEngine checks if each expr of memo tree can execute in ts engine,
+// and set the engine of expr to opt.EngineTS when it can execute in ts engine.
+func (f *Factory) CheckWhiteListAndSetEngine(src *memo.RelExpr) bool {
+	switch e := (*src).(type) {
+	case *memo.TSScanExpr:
+		return f.checkTSScanExpr(e)
+	case *memo.SelectExpr:
+		return f.checkSelectExpr(e)
+	case *memo.ProjectExpr:
+		return f.checkProjectExpr(e)
+	case *memo.GroupByExpr:
+		childCanPush, canMerge, isDistinct := f.checkGroupByExpr(&e.Input, &e.Aggregations, &e.GroupingPrivate)
+		if childCanPush && canMerge {
+			// distinct should not twice agg. single node can push distinct.
+			if !isDistinct || !f.evalCtx.Planner.IsMultiNode(f.evalCtx.Context) {
+				e.SetEngineTS()
+			}
+		}
+
+		return false
+	case *memo.ScalarGroupByExpr:
+		childCanPush, canMerge, isDistinct := f.checkGroupByExpr(&e.Input, &e.Aggregations, &e.GroupingPrivate)
+		if childCanPush && canMerge {
+			// distinct should not twice agg. single node can push distinct.
+			if !isDistinct || !f.evalCtx.Planner.IsMultiNode(f.evalCtx.Context) {
+				e.SetEngineTS()
+			}
+		}
+		return false
+	case *memo.InnerJoinExpr, *memo.AntiJoinExpr, *memo.AntiJoinApplyExpr, *memo.SemiJoinExpr, *memo.SemiJoinApplyExpr, *memo.MergeJoinExpr,
+		*memo.LeftJoinApplyExpr, *memo.LeftJoinExpr, *memo.RightJoinExpr, *memo.InnerJoinApplyExpr, *memo.FullJoinExpr:
+		return f.checkJoinExpr(e)
+	case *memo.LookupJoinExpr:
+		return f.checkLookupJoinExpr(e)
+	case *memo.DistinctOnExpr:
+		f.checkGroupByExpr(&e.Input, &e.Aggregations, &e.GroupingPrivate)
+		return false
+	case *memo.LimitExpr:
+		f.CheckWhiteListAndSetEngine(&e.Input)
+		return false
+	case *memo.ScanExpr:
+		return false
+	case *memo.OffsetExpr:
+		f.CheckWhiteListAndSetEngine(&e.Input)
+		return false
+	case *memo.ValuesExpr:
+		return false
+	case *memo.Max1RowExpr:
+		f.CheckWhiteListAndSetEngine(&e.Input)
+		return false
+	case *memo.OrdinalityExpr:
+		f.CheckWhiteListAndSetEngine(&e.Input)
+		return false
+	case *memo.WithScanExpr:
+		return false
+	case *memo.UnionAllExpr, *memo.UnionExpr, *memo.IntersectExpr, *memo.IntersectAllExpr, *memo.ExceptAllExpr, *memo.ExceptExpr:
+		return false
+	case *memo.WindowExpr:
+		f.CheckWhiteListAndSetEngine(&e.Input)
+		return false
+
+	default:
+		panic(pgerror.New(pgcode.Warning, "push down is not support "+e.Op().String()))
+		return false
+	}
+}
+
+// PushAggIntoJoinTSEngineNode constructs GroupByExpr that can be push down, and then construct
+// new InnerJoinExpr, return twice AggregationsItem
+// ex:
+// GroupByExpr       change to ====>    GroupByExpr
+//
+//	|                                     |
+//
+// InnerJoinExpr                        InnerJoinExpr
+//
+//	/        \                           /        \
+//
+// scanExpr  tsscanExpr                scanExpr  GroupByExpr
+//
+//	   																							 \
+//																								tsscanExpr
+//
+// input params:
+// f: Factory constructs a normalized expression tree within the memo.
+// source: the memo tree，always is InnerJoinExpr.
+// aggs: Aggregations of GroupByExpr or ScalarGroupByExpr, record infos of agg functions
+// private: GroupingPrivate of GroupByExpr or ScalarGroupByExpr.
+// colSet: set of column IDs, including all columns in the grouping and on filters
+// optHelper: record aggItems, grouping, projectionItems to help opt inside-out
+//
+// output params:
+// finishOp: is true when successful optimization.
+// newInnerJoin: the new InnerJoinExpr constructed based on the pushed GroupByExpr.
+// newAggItems: the new AggregationsItem, always are secondary aggregation functions
+// projectItems: use to construct ProjectExpr,when AVG performs secondary aggregation, sum/count is required
+// passCols: use to construct ProjectExpr
+func PushAggIntoJoinTSEngineNode(
+	f *Factory,
+	source *memo.InnerJoinExpr,
+	aggs memo.AggregationsExpr,
+	private *memo.GroupingPrivate,
+	colSet opt.ColSet,
+	optHelper *memo.InsideOutOptHelper,
+) (
+	finishOpt bool,
+	newInnerJoin memo.RelExpr,
+	newAggItems []memo.AggregationsItem,
+	projectItems []memo.ProjectionsItem,
+	passCols opt.ColSet,
+) {
+	canOpt, tsEngineInLeft, tsEngineTable := checkInsideOutOptApplicable(f, source)
+	if !canOpt {
+		return false, newInnerJoin, newAggItems, projectItems, passCols
+	}
+
+	for _, filter := range source.On {
+		getAllCols(filter.Condition, &colSet)
+	}
+
+	// case: handle nested inner-join
+	if !tsEngineTable.IsTSEngine() {
+		return dealWithTsTable(f, tsEngineTable, aggs, &colSet, private, source, tsEngineInLeft, optHelper)
+	}
+
+	// case: child of GroupByExpr is ProjectExpr, and the ProjectExpr can push down, construct new ProjectExpr.
+	tsProjections := make([]memo.ProjectionsItem, 0)
+	relProjections := make([]memo.ProjectionsItem, 0)
+	for i, pro := range optHelper.Projections {
+		if optHelper.ProEngine[i] == tree.EngineTypeTimeseries {
+			tsProjections = append(tsProjections, pro)
+		} else {
+			relProjections = append(relProjections, pro)
+		}
+	}
+
+	if len(tsProjections) != 0 {
+		tsEngineTable = f.ConstructProject(tsEngineTable, tsProjections, tsEngineTable.Relational().OutputCols)
+	}
+	// case: ts node under InnerJoinExpr all can exec in ts engine, then construct GroupByExpr in ts node
+	passCols.UnionWith(private.GroupingCols)
+	constructNewAgg(f, tsEngineTable, aggs, &newAggItems, &projectItems, optHelper, &passCols)
+
+	tsEngineTable.Relational().OutputCols.ForEach(func(col opt.ColumnID) {
+		if colSet.Contains(col) {
+			optHelper.Grouping.Add(col)
+		}
+	})
+
+	newExpr := f.ConstructGroupBy(tsEngineTable, optHelper.Aggs, &memo.GroupingPrivate{GroupingCols: optHelper.Grouping})
+	if tsEngineInLeft {
+		newInnerJoin = f.ConstructInnerJoin(newExpr, source.Right, source.On, &source.JoinPrivate)
+	} else {
+		newInnerJoin = f.ConstructInnerJoin(source.Left, newExpr, source.On, &source.JoinPrivate)
+	}
+
+	if len(relProjections) != 0 {
+		newInnerJoin = f.ConstructProject(newInnerJoin, relProjections, newInnerJoin.Relational().OutputCols)
+	}
+	return true, newInnerJoin, newAggItems, projectItems, passCols
+}
+
+// constructNewAgg constructs the pushed AggregationsItems and record them in InsideOutOptHelper,
+// and construct the twice AggregationsItems
+// input params:
+// f: Factory constructs a normalized expression tree within the memo.
+// tsEngineTable: the ts table.
+// aggs: Aggregations of GroupByExpr or ScalarGroupByExpr, record infos of agg functions
+// NewAggregations: the twice aggItems
+// projectItems:use to construct ProjectExpr,when AVG performs secondary aggregation, sum/count is required
+// optHelper: record aggItems, grouping, projectionItems to help opt inside-out
+// passthroughCols: use to construct ProjectExpr
+func constructNewAgg(
+	f *Factory,
+	tsEngineTable memo.RelExpr,
+	aggs memo.AggregationsExpr,
+	NewAggregations *[]memo.AggregationsItem,
+	projectItems *[]memo.ProjectionsItem,
+	aggHelper *memo.InsideOutOptHelper,
+	passthroughCols *opt.ColSet,
+) {
+	aggMap := make(map[opt.ColumnID]map[string]opt.ColumnID)
+	for i, agg := range aggs {
+		var colID opt.ColumnID
+		if !(agg.Agg.ChildCount() < 1) {
+			colID = getColIDOfParamOfAgg(agg.Agg.Child(0))
+		}
+
+		// construct new agg and twice agg
+		if tsEngineTable.Relational().OutputCols.Contains(colID) {
+			switch aggs[i].Agg.(type) {
+			case *memo.AvgExpr:
+				// construct the agg that push down
+				sum := f.ConstructSum(agg.Agg.Child(0).(opt.ScalarExpr))
+				count := f.ConstructCount(agg.Agg.Child(0).(opt.ScalarExpr))
+
+				newSumID := addAggColumnAndGetNewID(f, sum, "sum"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, types.Decimal, &aggMap, aggHelper)
+				newCountID := addAggColumnAndGetNewID(f, count, "count"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, types.Int, &aggMap, aggHelper)
+
+				// construct twice agg
+				sumTwo := f.ConstructSum(f.ConstructVariable(newSumID))
+				sumIntTwo := f.ConstructSumInt(f.ConstructVariable(newCountID))
+				newSumTwoID := f.Metadata().AddColumn("sum("+f.Metadata().ColumnMeta(newSumID).Alias+")", types.Decimal)
+				newSumIntTwoID := f.Metadata().AddColumn("sum_int("+f.Metadata().ColumnMeta(newCountID).Alias+")", types.Int)
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumTwo, newSumTwoID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumIntTwo, newSumIntTwoID))
+
+				div := f.ConstructDiv(f.ConstructVariable(newSumTwoID), f.ConstructVariable(newSumIntTwoID))
+				if d, ok := div.(*memo.DivExpr); ok {
+					// the type of Div needs to be consistent with the result type of avg.
+					d.Typ = agg.Typ
+				}
+				*projectItems = append(*projectItems, f.ConstructProjectionsItem(div, agg.Col))
+			case *memo.CountExpr:
+				count := f.ConstructCount(agg.Agg.Child(0).(opt.ScalarExpr))
+				newCountID := addAggColumnAndGetNewID(f, count, "count"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, types.Int, &aggMap, aggHelper)
+
+				sumIntTwo := f.ConstructSumInt(f.ConstructVariable(newCountID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumIntTwo, agg.Col))
+				passthroughCols.Add(agg.Col)
+			case *memo.SumExpr:
+				sum := f.ConstructSum(agg.Agg.Child(0).(opt.ScalarExpr))
+				newSumID := addAggColumnAndGetNewID(f, sum, "sum"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, agg.Typ, &aggMap, aggHelper)
+
+				sumTwo := f.ConstructSum(f.ConstructVariable(newSumID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumTwo, agg.Col))
+				passthroughCols.Add(agg.Col)
+			case *memo.MaxExpr:
+				max := f.ConstructMax(agg.Agg.Child(0).(opt.ScalarExpr))
+				newMaxID := addAggColumnAndGetNewID(f, max, "max"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, agg.Typ, &aggMap, aggHelper)
+
+				maxTwo := f.ConstructMax(f.ConstructVariable(newMaxID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(maxTwo, agg.Col))
+				passthroughCols.Add(agg.Col)
+			case *memo.MinExpr:
+				min := f.ConstructMin(agg.Agg.Child(0).(opt.ScalarExpr))
+				newMinID := addAggColumnAndGetNewID(f, min, "min"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, agg.Typ, &aggMap, aggHelper)
+
+				minTwo := f.ConstructMin(f.ConstructVariable(newMinID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(minTwo, agg.Col))
+				passthroughCols.Add(agg.Col)
+			default:
+				panic(pgerror.Newf(pgcode.Warning, "could not optimize aggregation function: %s", aggs[i].Agg.Op()))
+			}
+		} else {
+			// case: count(*), count(1), without col,
+			// construct the pushed agg: count(*),
+			// the twice agg: sum_int(count(*))
+			switch aggs[i].Agg.(type) {
+			case *memo.CountRowsExpr:
+				count := f.ConstructCountRows()
+				newAggID := f.Metadata().AddColumn("count"+"("+"*"+")", types.Int)
+				aggHelper.Aggs = append(aggHelper.Aggs, f.ConstructAggregationsItem(count, newAggID))
+
+				sumIntTwo := f.ConstructSumInt(f.ConstructVariable(newAggID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumIntTwo, agg.Col))
+				passthroughCols.Add(agg.Col)
+			case *memo.MaxExpr, *memo.MinExpr:
+				*NewAggregations = append(*NewAggregations, agg)
+				passthroughCols.Add(agg.Col)
+			default:
+				panic(pgerror.Newf(pgcode.Warning, "could not optimize aggregation function: %s", aggs[i].Agg.Op()))
+			}
+		}
+	}
+}
+
+// addAggColumnAndGetNewID adds the new agg col to metadata.
+// input params:
+// f: Factory constructs a normalized expression tree within the memo.
+// pushAgg: the new agg that should be pushed
+// newAggName: the name of new agg col
+// colID: the ID of the param of new agg col
+// typ: the type of new agg col
+// aggMap: record the new aggs that already been constructed.
+// optHelper: records agg functions and projections which can push down ts engine side.
+func addAggColumnAndGetNewID(
+	f *Factory,
+	pushAgg opt.ScalarExpr,
+	newAggName string,
+	colID opt.ColumnID,
+	typ *types.T,
+	aggMap *map[opt.ColumnID]map[string]opt.ColumnID,
+	optHelper *memo.InsideOutOptHelper,
+) opt.ColumnID {
+	if v, ok := (*aggMap)[colID]; ok {
+		if id, ok := v[newAggName]; ok {
+			return id
+		}
+		newAggID := f.Metadata().AddColumn(newAggName, typ)
+		optHelper.Aggs = append(optHelper.Aggs, f.ConstructAggregationsItem(pushAgg, newAggID))
+		v[newAggName] = newAggID
+		return newAggID
+	}
+	newAggID := f.Metadata().AddColumn(newAggName, typ)
+	aggInfo := make(map[string]opt.ColumnID)
+	optHelper.Aggs = append(optHelper.Aggs, f.ConstructAggregationsItem(pushAgg, newAggID))
+	aggInfo[newAggName] = newAggID
+	(*aggMap)[colID] = aggInfo
+	return newAggID
+}
+
+// dealWithTsTable recursively processes InnerJoinExpr, such as
+// GroupByExpr
+//
+//	|
+//
+// InnerJoinExpr
+//
+//	/          \
+//
+// scanExpr  InnerJoinExpr (handle this case)
+//
+//	     /        \
+//	scanExpr  tsscanExpr
+//
+// input params:
+// f: Factory constructs a normalized expression tree within the memo.
+// tsEngineTable: the ts table.
+// aggs: Aggregations of GroupByExpr or ScalarGroupByExpr, record infos of agg functions
+// colSet:  set of column IDs, including all columns in the grouping and on filters
+// private: the GroupingPrivate of GroupByExpr
+// source:  is previous layer InnerJoinExpr.
+// tsEngineInLeft: is true when the ts table is on the left of InnerJoinExpr
+// optHelper: records agg functions and projections which can push down ts engine side.
+// output params:
+// p1: is true when successful optimization.
+// p2: the new InnerJoinExpr constructed based on the pushed GroupByExpr.
+// p3: the new AggregationsItem, always are secondary aggregation functions
+// p4: use to construct ProjectExpr,when AVG performs secondary aggregation, sum/count is required
+// p5: use to construct ProjectExpr
+func dealWithTsTable(
+	f *Factory,
+	tsEngineTable memo.RelExpr,
+	aggs memo.AggregationsExpr,
+	colSet *opt.ColSet,
+	private *memo.GroupingPrivate,
+	source *memo.InnerJoinExpr,
+	tsEngineInLeft bool,
+	optHelper *memo.InsideOutOptHelper,
+) (bool, memo.RelExpr, []memo.AggregationsItem, []memo.ProjectionsItem, opt.ColSet) {
+	var newInnerJoin memo.RelExpr
+	if Join, ok := tsEngineTable.(*memo.InnerJoinExpr); ok {
+		colSet.UnionWith(Join.Left.Relational().OuterCols)
+		colSet.UnionWith(Join.Right.Relational().OuterCols)
+		finishOpt, newInnerJoin, newAggItems, projectItems, passCols := PushAggIntoJoinTSEngineNode(f, Join, aggs, private, *colSet, optHelper)
+		if finishOpt {
+			if tsEngineInLeft {
+				newInnerJoin = f.ConstructInnerJoin(newInnerJoin, source.Right, source.On, &source.JoinPrivate)
+			} else {
+				newInnerJoin = f.ConstructInnerJoin(source.Left, newInnerJoin, source.On, &source.JoinPrivate)
+			}
+		}
+
+		return finishOpt, newInnerJoin, newAggItems, projectItems, passCols
+	}
+	return false, newInnerJoin, nil, nil, opt.ColSet{}
+}
+
+// checkAggOptApplicable checks if the agg can be optimized
+func (c *CustomFuncs) checkAggOptApplicable(
+	aggs []memo.AggregationsItem, optHelper *memo.InsideOutOptHelper,
+) bool {
+	for i := range aggs {
+		switch t := aggs[i].Agg.(type) {
+		case *memo.SumExpr:
+			if !c.checkArgsOptApplicable(t.Input, optHelper, opt.SumOp) {
+				return false
+			}
+		case *memo.AvgExpr:
+			if !c.checkArgsOptApplicable(t.Input, optHelper, opt.AvgOp) {
+				return false
+			}
+		case *memo.CountExpr:
+			if !c.checkArgsOptApplicable(t.Input, optHelper, opt.CountOp) {
+				return false
+			}
+		case *memo.CountRowsExpr:
+			c.checkArgsOptApplicable(nil, optHelper, opt.CountRowsOp)
+		case *memo.MinExpr:
+			c.checkArgsOptApplicable(t.Input, optHelper, opt.MinOp)
+		case *memo.MaxExpr:
+			c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// checkArgsOptApplicable checks if the arguments of agg can be optimized
+func (c *CustomFuncs) checkArgsOptApplicable(
+	arg opt.ScalarExpr, optHelper *memo.InsideOutOptHelper, aggOp opt.Operator,
+) bool {
+	if v, ok := arg.(*memo.VariableExpr); ok {
+		optHelper.AggArgs = append(optHelper.AggArgs, memo.AggArgHelper{AggOp: aggOp, ArgColID: v.Col})
+	} else {
+		optHelper.AggArgs = append(optHelper.AggArgs, memo.AggArgHelper{AggOp: aggOp, ArgColID: -1})
+	}
+	m := modeHelper{modes: 0}
+	c.getEngineMode(arg, &m)
+
+	if !m.checkMode(tsMode) {
+		return false
+	}
+	return true
+}
+
+// checkInsideOutOptApplicable checks if the InnerJoinExpr can be optimized
+// Optimization needs to meet the following points
+// 1. The left and right of InnerJoinExpr must be cross modules
+// 2. The left and right of InnerJoinExpr cannot both are cross modular InnerJoinExpr
+// 3. The column in the connection condition must be a tag column
+// 4. The ts engine side of InnerJoinExpr can not be GroupByExpr
+// input params:
+// f: Factory constructs a normalized expression tree within the memo.
+// join: is the InnerJoinExpr
+//
+// output params:
+// canOpt: is true when InnerJoinExpr can be optimized
+// tsEngineInLeft: is true when the ts table is on the left side of InnerJoinExpr
+// tsEngineTable: is the ts table.
+func checkInsideOutOptApplicable(f *Factory, join *memo.InnerJoinExpr) (bool, bool, memo.RelExpr) {
+	typL := getAllEngine(join.Left)
+	typR := getAllEngine(join.Right)
+
+	// typL|typR=3 when the source is the join that cross mode.
+	// typL == 3 && typR == 3 when the left and right are all cross mode join.
+	if (typL|typR) != 3 || (typL == 3 && typR == 3) {
+		return false, false, nil
+	}
+	// check on filter, must be single column or single tag column
+	for i, n := 0, join.On.ChildCount(); i < n; i++ {
+		if FiltersItem, ok := join.On.Child(i).(*memo.FiltersItem); ok {
+			if condition, ok1 := FiltersItem.Condition.(*memo.EqExpr); ok1 {
+				if !checkCondition(condition, f) {
+					return false, false, nil
+				}
+			} else {
+				return false, false, nil
+			}
+		} else {
+			return false, false, nil
+		}
+	}
+
+	// here checks if it is a single column of a relation table
+	tagCols := checkTagColInFilter(f.Metadata(), join.On)
+	if tagCols.Empty() {
+		return false, false, nil
+	}
+
+	var tsEngineTable memo.RelExpr
+	tsEngineInLeft := true
+	tagCols.ForEach(func(col opt.ColumnID) {
+		if !join.Left.Relational().OutputCols.Contains(col) {
+			tsEngineInLeft = false
+		}
+	})
+
+	if tsEngineInLeft {
+		tsEngineTable = join.Left
+	} else {
+		tsEngineTable = join.Right
+		tsEngineInLeft = false
+	}
+
+	// ts node itself has group by, do not handle
+	switch tsEngineTable.(type) {
+	case *memo.GroupByExpr, *memo.ScalarGroupByExpr, *memo.DistinctOnExpr:
+		return false, false, nil
+	}
+
+	return true, tsEngineInLeft, tsEngineTable
+}
+
+// checkCondition checks the left and right columns of the condition
+func checkCondition(condition *memo.EqExpr, f *Factory) bool {
+	return checkConditionColumn(condition.Left, f) && checkConditionColumn(condition.Right, f)
+}
+
+// checkConditionColumn checks whether the column is single column or single tag column of the source table
+func checkConditionColumn(column opt.ScalarExpr, f *Factory) bool {
+	if c, ok := column.(*memo.VariableExpr); ok {
+		colMeta := f.mem.Metadata().ColumnMeta(c.Col)
+		if colMeta.IsTag() || (colMeta.Table != 0 && colMeta.TSType == opt.ColNormal) {
+			return true
+		}
+	}
+	return false
+}
+
+// getAllEngine returns EngineType base on input,
+// Relational is 1 ,Timeseries is 2
+func getAllEngine(input memo.RelExpr) int {
+	ret := int(tree.EngineTypeRelational) + 1
+	switch input.(type) {
+	case *memo.TSScanExpr:
+		return int(tree.EngineTypeTimeseries) + 1
+	}
+
+	for i := 0; i < input.ChildCount(); i++ {
+		if v, ok := input.Child(i).(memo.RelExpr); ok {
+			ret |= getAllEngine(v)
+		}
+	}
+
+	return ret
+}
+
+// checkTagColInFilter checks on filters whether it has tag col
+func checkTagColInFilter(meta *opt.Metadata, on memo.FiltersExpr) opt.ColSet {
+	var tsCols opt.ColSet
+	for _, v := range on {
+		eq, ok1 := v.Condition.(*memo.EqExpr)
+		if !ok1 {
+			continue
+		}
+
+		lCol, ok2 := eq.Left.(*memo.VariableExpr)
+		if !ok2 {
+			continue
+		}
+
+		rCol, ok3 := eq.Right.(*memo.VariableExpr)
+		if !ok3 {
+			continue
+		}
+
+		if meta.IsSingleRelCol(lCol.Col) {
+			if meta.ColumnMeta(rCol.Col).IsTag() {
+				tsCols.Add(rCol.Col)
+			}
+		} else if meta.IsSingleRelCol(rCol.Col) {
+			if meta.ColumnMeta(lCol.Col).IsTag() {
+				tsCols.Add(lCol.Col)
+			}
+		}
+	}
+
+	return tsCols
+}
+
+// getColIDOfParamOfAgg returns the col ID base on input.
+func getColIDOfParamOfAgg(input opt.Expr) opt.ColumnID {
+	switch src := input.(type) {
+	case *memo.VariableExpr:
+		return src.Col
+	case *memo.AggDistinctExpr:
+		return getColIDOfParamOfAgg(src.Input)
+	}
+
+	return -1
+}
+
+// getAllCols records all col ID into allCols from input.
+func getAllCols(input opt.Expr, allCols *opt.ColSet) {
+	if opt.IsAggregateOp(input) {
+		for i := 0; i < input.ChildCount(); i++ {
+			getAllCols(input.Child(i), allCols)
+		}
+	}
+
+	switch src := input.(type) {
+	case *memo.VariableExpr:
+		allCols.Add(src.Col)
+	case *memo.AggDistinctExpr:
+		getAllCols(src.Input, allCols)
+	default:
+		for i := 0; i < input.ChildCount(); i++ {
+			getAllCols(input.Child(i), allCols)
+		}
 	}
 }

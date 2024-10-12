@@ -620,7 +620,7 @@ func (ef *execFactory) ConstructGroupBy(
 		engine:           engine,
 		addSynchronizer:  addSynchronizer,
 		statisticIndex:   private.AggIndex,
-		aggPushDown:      private.AggPushDown,
+		aggPushDown:      private.OptTimeBucket,
 	}
 	inputCols := planColumns(n.plan)
 	for i := range groupCols {

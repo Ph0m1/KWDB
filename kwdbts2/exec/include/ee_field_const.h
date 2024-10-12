@@ -109,7 +109,7 @@ class FieldConstString : public FieldConst {
     value_ = str;
     storage_type_ = datatype;
     if (IsStorageString(datatype)) {
-      storage_len_ = str.size();
+      storage_len_ = str.size() + 1;
     } else {
       storage_len_ = sizeof(k_int64);
     }

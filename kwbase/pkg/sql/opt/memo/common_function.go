@@ -239,17 +239,17 @@ func checkAESupportType(id oid.Oid) bool {
 func CheckExprCanExecInTSEngine(
 	src opt.Expr, pos int8, f CheckFunc, tupleCanExecInTSEngine bool,
 ) (bool, uint32) {
-	// const and column can exec in ts engine
-	if opt.IsConstValueOp(src) || src.Op() == opt.VariableOp ||
-		(src.Op() == opt.TupleOp && src.ChildCount() > 0 && src.Child(0).ChildCount() > 0 && tupleCanExecInTSEngine) {
+	switch src.Op() {
+	case opt.VariableOp, opt.ConstOp, opt.FalseOp, opt.NullOp, opt.TrueOp, opt.SubqueryOp, opt.ExistsOp, opt.AnyOp:
+		// const and column can exec in ts engine.
+		// SubqueryOp, ExistsOp, AnyOp are the scalar subquery, set to be able to exec in ts engine.
 		return true, 0
-	}
-
-	if src.Op() == opt.SubqueryOp {
-		return false, 0
-	}
-	// add the check for (not) in operator, that white list can add common, otherwise can only check (not )in any
-	if src.Op() == opt.InOp || src.Op() == opt.NotInOp {
+	case opt.TupleOp:
+		// only const tuple can exec in ts engine.
+		if src.ChildCount() > 0 && src.Child(0).ChildCount() > 0 && tupleCanExecInTSEngine {
+			return true, 0
+		}
+	case opt.InOp, opt.NotInOp:
 		for i := 0; i < src.ChildCount(); i++ {
 			can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, true)
 			if !can { // can not push down
@@ -427,7 +427,11 @@ func (m *Memo) SplitTagExpr(src opt.Expr, colMap TagColMap) (leave opt.Expr, tag
 		}
 
 		mode := checkTagExpr(src, colMap)
-		if mode == 1<<hasTag || mode == (1<<hasTag+1<<hasConst) {
+		canSplit := mode == 1<<hasTag || mode == (1<<hasTag+1<<hasConst)
+		if m.CheckFlag(opt.ScalarSubQueryPush) {
+			canSplit = canSplit || mode == (1<<hasTag+1<<hasSubQuery)
+		}
+		if canSplit {
 			return nil, []opt.Expr{source}
 		}
 
@@ -561,4 +565,22 @@ func checkTagExpr(src opt.Expr, colMap TagColMap) tagExprMode {
 		}
 		return rMode
 	}
+}
+
+// CheckAggCanParallel checks if the agg can parallel execute.
+// expr is the expr of agg function.
+// returns:
+// param1: return true when the agg can be parallel execute.
+// param2: return true when the agg with distinct.
+func CheckAggCanParallel(expr opt.Expr) (bool, bool) {
+	switch t := expr.(type) {
+	case *MaxExpr, *MinExpr, *SumExpr, *AvgExpr, *CountExpr, *CountRowsExpr,
+		*FirstExpr, *FirstRowExpr, *FirstTimeStampExpr, *FirstRowTimeStampExpr,
+		*LastExpr, *LastTimeStampExpr, *LastRowExpr, *LastRowTimeStampExpr, *ConstAggExpr:
+		return true, false
+	case *AggDistinctExpr:
+		ok, _ := CheckAggCanParallel(t.Input)
+		return ok, true
+	}
+	return false, false
 }

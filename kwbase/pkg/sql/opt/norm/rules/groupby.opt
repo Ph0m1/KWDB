@@ -230,3 +230,18 @@
     (GroupingCols $groupingPrivate)
     $aggregations
 )
+
+[PushAggIntoJoinTSEngineSide, Normalize]
+(GroupBy | ScalarGroupBy
+    $input:*
+    $aggregations:*
+    $groupingPrivate:* &
+        (IsAvailable $newExpr:(TryPushAgg
+              $input
+              $aggregations
+              $groupingPrivate
+            )
+        )
+)
+=>
+(ConstructNewGroupBy $newExpr)

@@ -224,14 +224,15 @@ func (g *exprsGen) genExprStruct(define *lang.DefineExpr) {
 	} else if define.Tags.Contains("Enforcer") {
 		fmt.Fprintf(g.w, "  Input RelExpr\n")
 		fmt.Fprintf(g.w, "  best  bestProps\n")
+		fmt.Fprintf(g.w, "  addSynchronizer bool\n")
 	} else {
 		fmt.Fprintf(g.w, "\n")
 		fmt.Fprintf(g.w, "  grp  exprGroup\n")
 		fmt.Fprintf(g.w, "  next RelExpr\n")
+		fmt.Fprintf(g.w, "  addSynchronizer bool\n")
 	}
 
 	fmt.Fprintf(g.w, "  engine tree.EngineType\n")
-	fmt.Fprintf(g.w, "  addSynchronizer bool\n")
 	fmt.Fprintf(g.w, "}\n\n")
 }
 

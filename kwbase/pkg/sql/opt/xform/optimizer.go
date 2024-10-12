@@ -544,7 +544,7 @@ func (o *Optimizer) optimizeGroupMember(
 	// If it is the filter layer of the time series scenario,
 	// we need to consider adjusting the order of filtering conditions
 	// to speed up the execution of queries.
-	if opt.TSFilterOrderOpt.Get(&o.evalCtx.Settings.SV) &&
+	if opt.CheckOptMode(opt.TSQueryOptMode.Get(&o.evalCtx.Settings.SV), opt.FilterOptOrder) &&
 		o.mem.CheckFlag(opt.ExecInTSEngine) &&
 		o.mem.CheckFlag(opt.IncludeTSTable) {
 		if selectExpr, ok := member.(*memo.SelectExpr); ok {
@@ -756,6 +756,17 @@ func (o *Optimizer) setLowestCostTree(parent opt.Expr, parentProps *physical.Req
 				mutable = parent.(opt.MutableExpr)
 			}
 			mutable.SetChild(i, after)
+		}
+	}
+
+	if parent.Op() == opt.TSScanOp {
+		// handle tsScan's children tagFilters and primaryTagFilters, set lowest cost
+		tsScan, _ := parent.(*memo.TSScanExpr)
+		for _, before := range tsScan.TagFilter {
+			o.setLowestCostTree(before, childProps)
+		}
+		for _, before := range tsScan.PrimaryTagFilter {
+			o.setLowestCostTree(before, childProps)
 		}
 	}
 

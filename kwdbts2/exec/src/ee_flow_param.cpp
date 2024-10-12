@@ -262,7 +262,8 @@ Field *PostResolve::ResolveBinaryTree(kwdbContext_p ctx, ExprPtr expr) {
         } else {
           field = left;
         }
-      } else if (!expr->args.empty()) {
+      } else if (expr->operator_type == AstEleType::ANY ||
+        expr->operator_type == AstEleType::ALL) {
         std::list<Field *> args;
         for (auto arg : expr->args) {
           auto a = ResolveBinaryTree(ctx, arg);
@@ -272,11 +273,8 @@ Field *PostResolve::ResolveBinaryTree(kwdbContext_p ctx, ExprPtr expr) {
           args.push_back(a);
         }
 
-        if (expr->operator_type == AstEleType::ANY ||
-            expr->operator_type == AstEleType::ALL) {
-          field = ResolveOperator(ctx, expr->operator_type, nullptr, nullptr,
-                                  args, expr->is_negative, "");
-        }
+        field = ResolveOperator(ctx, expr->operator_type, nullptr, nullptr,
+                                args, expr->is_negative, "");
       }
     } else {
       if (expr->reference_ptr != nullptr) {

@@ -1046,6 +1046,7 @@ func (dsp *DistSQLPlanner) planAndRunSubquery(
 	if err != nil {
 		return err
 	}
+	subqueryPlanCtx.runningSubquery = true
 	dsp.FinalizePlan(subqueryPlanCtx, &subqueryPhysPlan)
 
 	// TODO(arjun): #28264: We set up a row container, wrap it in a row

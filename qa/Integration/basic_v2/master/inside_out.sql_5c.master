@@ -1,0 +1,598 @@
+> CREATE TS DATABASE db_pipec;
+CREATE TS DATABASE
+> CREATE TABLE db_pipec.t_point (
+                                  k_timestamp timestamp NOT NULL,
+                                  measure_value double
+) ATTRIBUTES (
+    point_sn varchar(64) NOT NULL,
+    sub_com_sn varchar(32),
+    work_area_sn varchar(16),
+    station_sn varchar(16),
+    pipeline_sn varchar(16) not null,
+    measure_type smallint,
+    measure_location varchar(64))
+  PRIMARY TAGS(point_sn)
+  ACTIVETIME 3h;
+CREATE TABLE
+> insert into db_pipec.t_point values('2024-08-27 11:00:00',10.5,'a','b','c','d','e',1,'f');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-27 12:00:00',11.5,'a1','b1','c1','d1','e1',1,'f1');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-27 10:00:00',12.5,'a2','b2','c2','d2','e2',2,'f2');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-26 10:00:00',13.5,'a3','b3','c3','d3','e3',2,'f3');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-28 10:00:00',14.5,'a4','b4','c4','d4','e4',3,'f4');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-29 10:00:00',15.5,'a5','b5','c5','d5','e5',3,'f5');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-28 11:00:00',10.5,'a6','b1','c1','d1','e1',4,'f1');
+INSERT 1
+> insert into db_pipec.t_point values('2024-08-28 12:00:00',11.5,'a7','b1','c1','d1','e1',4,'f1');
+INSERT 1
+> CREATE DATABASE pipec_r;
+CREATE DATABASE
+> CREATE TABLE pipec_r.station_info (
+                                      station_sn varchar(16) PRIMARY KEY,
+                                      station_name varchar(80),
+                                      work_area_sn varchar(16),
+                                      workarea_name varchar(80),
+                                      sub_company_sn varchar(32),
+                                      sub_company_name varchar(50));
+CREATE TABLE
+> CREATE INDEX station_sn_index ON pipec_r.station_info(work_area_sn);
+CREATE INDEX
+> CREATE INDEX station_name_index ON pipec_r.station_info(workarea_name);
+CREATE INDEX
+> insert into pipec_r.station_info values('d','dd','a','aa','b','bb');
+INSERT 1
+> insert into pipec_r.station_info values('d1','dd','a1','aa','b','bb');
+INSERT 1
+> insert into pipec_r.station_info values('d2','dd','a2','aa','b','bb');
+INSERT 1
+> insert into pipec_r.station_info values('d3','dd','a3','aa','b','bb');
+INSERT 1
+> insert into pipec_r.station_info values('d4','dd','a4','aa','b','bb');
+INSERT 1
+> insert into pipec_r.station_info values('d5','dd','a5','aa','b','bb');
+INSERT 1
+> CREATE TABLE pipec_r.pipeline_info (
+                                       pipeline_sn varchar(16) PRIMARY KEY,
+                                       pipeline_name varchar(60),
+                                       pipe_start varchar(80),
+                                       pipe_end varchar(80),
+                                       pipe_properties varchar(30));
+CREATE TABLE
+> CREATE INDEX pipeline_sn_index ON pipec_r.pipeline_info (pipeline_sn);
+CREATE INDEX
+> CREATE INDEX pipeline_name_index ON pipec_r.pipeline_info (pipeline_name);
+CREATE INDEX
+> insert into pipec_r.pipeline_info values('e','ee','a','aa','b');
+INSERT 1
+> insert into pipec_r.pipeline_info values('e1','ee','a','aa','b');
+INSERT 1
+> insert into pipec_r.pipeline_info values('e2','ee','a','aa','b');
+INSERT 1
+> insert into pipec_r.pipeline_info values('e3','ee','a','aa','b');
+INSERT 1
+> insert into pipec_r.pipeline_info values('e4','ee','a','aa','b');
+INSERT 1
+> insert into pipec_r.pipeline_info values('e5','ee','a','aa','b');
+INSERT 1
+> CREATE TABLE pipec_r.point_info (
+                                    point_sn varchar(64) PRIMARY KEY,
+                                    signal_code varchar(120),
+                                    signal_description varchar(200),
+                                    signal_type varchar(50),
+                                    station_sn varchar(16),
+                                    pipeline_sn varchar(16));
+CREATE TABLE
+> insert into pipec_r.point_info values('a','ee','a','aa','d','e');
+INSERT 1
+> insert into pipec_r.point_info values('a1','ee','a','aa','d','e');
+INSERT 1
+> insert into pipec_r.point_info values('a2','ee','a','aa','d','e');
+INSERT 1
+> insert into pipec_r.point_info values('a3','ee','a','aa','d','e');
+INSERT 1
+> insert into pipec_r.point_info values('a4','ee','a','aa','d','e');
+INSERT 1
+> insert into pipec_r.point_info values('a5','ee','a','aa','d','e');
+INSERT 1
+> select max(measure_value) from db_pipec.t_point p,pipec_r.station_info s where p.station_sn=s.station_sn;
+  max
+--------
+  15.5
+(1 row)
+> explain select max(measure_value) from db_pipec.t_point p,pipec_r.station_info s where p.station_sn=s.station_sn;
+             tree             |       field        |          description
+------------------------------+--------------------+--------------------------------
+                              | distributed        | true
+                              | vectorized         | false
+  group                       |                    |
+   │                          | aggregate 0        | max(max)
+   └── render                 |                    |
+        │                     | max                | max
+        └── hash-join         |                    |
+             │                | type               | inner
+             │                | equality           | (station_sn) = (station_sn)
+             │                | left cols are key  |
+             │                | right cols are key |
+             ├── group        |                    |
+             │    │           | engine type        | time series
+             │    │           | aggregate 0        | station_sn
+             │    │           | aggregate 1        | max(measure_value)
+             │    │           | group by           | station_sn
+             │    │           | addSynchronizer    | true
+             │    └── ts scan |                    |
+             │                | ts-table           | t_point
+             │                | access mode        | tableTableMeta
+             └── scan         |                    |
+                              | table              | station_info@station_sn_index
+                              | spans              | FULL SCAN
+(23 rows)
+> select max(measure_value) from db_pipec.t_point p,pipec_r.station_info s where p.station_sn=s.station_sn group by pipeline_sn order by pipeline_sn;
+  max
+--------
+  10.5
+  11.5
+  12.5
+  13.5
+  14.5
+  15.5
+(6 rows)
+> explain select max(measure_value) from db_pipec.t_point p,pipec_r.station_info s where p.station_sn=s.station_sn group by pipeline_sn order by pipeline_sn;
+                  tree                  |       field        |          description
+----------------------------------------+--------------------+--------------------------------
+                                        | distributed        | true
+                                        | vectorized         | false
+  render                                |                    |
+   │                                    | max                | max
+   └── sort                             |                    |
+        │                               | order              | +pipeline_sn
+        └── group                       |                    |
+             │                          | aggregate 0        | pipeline_sn
+             │                          | aggregate 1        | max(max)
+             │                          | group by           | pipeline_sn
+             └── render                 |                    |
+                  │                     | pipeline_sn        | pipeline_sn
+                  │                     | max                | max
+                  └── hash-join         |                    |
+                       │                | type               | inner
+                       │                | equality           | (station_sn) = (station_sn)
+                       │                | right cols are key |
+                       ├── group        |                    |
+                       │    │           | engine type        | time series
+                       │    │           | aggregate 0        | station_sn
+                       │    │           | aggregate 1        | pipeline_sn
+                       │    │           | aggregate 2        | max(measure_value)
+                       │    │           | group by           | station_sn, pipeline_sn
+                       │    │           | addSynchronizer    | true
+                       │    └── ts scan |                    |
+                       │                | ts-table           | t_point
+                       │                | access mode        | tableTableMeta
+                       └── scan         |                    |
+                                        | table              | station_info@station_sn_index
+                                        | spans              | FULL SCAN
+(30 rows)
+> select max(measure_value) from (select * from db_pipec.t_point where station_sn='d1') p,pipec_r.station_info s where p.station_sn=s.station_sn;
+  max
+--------
+  11.5
+(1 row)
+> explain select max(measure_value) from (select * from db_pipec.t_point where station_sn='d1') p,pipec_r.station_info s where p.station_sn=s.station_sn;
+             tree             |         field         |          description
+------------------------------+-----------------------+--------------------------------
+                              | distributed           | true
+                              | vectorized            | false
+  group                       |                       |
+   │                          | aggregate 0           | max(max)
+   └── render                 |                       |
+        │                     | max                   | max
+        └── lookup-join       |                       |
+             │                | table                 | station_info@primary
+             │                | type                  | inner
+             │                | equality              | (any_not_null) = (station_sn)
+             │                | equality cols are key |
+             │                | parallel              |
+             └── group        |                       |
+                  │           | engine type           | time series
+                  │           | aggregate 0           | max(measure_value)
+                  │           | aggregate 1           | any_not_null(station_sn)
+                  │           | addSynchronizer       | true
+                  └── ts scan |                       |
+                              | ts-table              | t_point
+                              | access mode           | tableTableMeta
+                              | tag filter[0]         | station_sn = 'd1'
+(21 rows)
+> select max(measure_value) from (select * from db_pipec.t_point where station_sn='d1' limit 10) p,pipec_r.station_info s where p.station_sn=s.station_sn;
+  max
+--------
+  11.5
+(1 row)
+> explain select max(measure_value) from (select * from db_pipec.t_point where station_sn='d1' limit 10) p,pipec_r.station_info s where p.station_sn=s.station_sn;
+                  tree                  |         field         |         description
+----------------------------------------+-----------------------+------------------------------
+                                        | distributed           | true
+                                        | vectorized            | false
+  group                                 |                       |
+   │                                    | aggregate 0           | max(measure_value)
+   │                                    | scalar                |
+   └── render                           |                       |
+        │                               | measure_value         | measure_value
+        └── lookup-join                 |                       |
+             │                          | table                 | station_info@primary
+             │                          | type                  | inner
+             │                          | equality              | (station_sn) = (station_sn)
+             │                          | equality cols are key |
+             │                          | parallel              |
+             └── limit                  |                       |
+                  │                     | engine type           | time series
+                  │                     | count                 | 10
+                  └── synchronizer      |                       |
+                       └── limit        |                       |
+                            │           | engine type           | time series
+                            │           | count                 | 10
+                            └── ts scan |                       |
+                                        | ts-table              | t_point
+                                        | access mode           | tableTableMeta
+                                        | tag filter[0]         | station_sn = 'd1'
+(24 rows)
+> select max(measure_value) from (select measure_value,station_sn from db_pipec.t_point where station_sn='d1' group by sub_com_sn,measure_value,station_sn order by sub_com_sn ) p,pipec_r.station_info s where p.station_sn=s.station_sn;
+  max
+--------
+  11.5
+(1 row)
+> explain select max(measure_value) from (select measure_value,station_sn from db_pipec.t_point where station_sn='d1' group by sub_com_sn,measure_value,station_sn order by sub_com_sn ) p,pipec_r.station_info s where p.station_sn=s.station_sn;
+                tree               |         field         |         description
+-----------------------------------+-----------------------+------------------------------
+                                   | distributed           | true
+                                   | vectorized            | false
+  group                            |                       |
+   │                               | aggregate 0           | max(measure_value)
+   │                               | scalar                |
+   └── render                      |                       |
+        │                          | measure_value         | measure_value
+        └── lookup-join            |                       |
+             │                     | table                 | station_info@primary
+             │                     | type                  | inner
+             │                     | equality              | (station_sn) = (station_sn)
+             │                     | equality cols are key |
+             │                     | parallel              |
+             └── distinct          |                       |
+                  │                | distinct on           | measure_value, sub_com_sn
+                  └── synchronizer |                       |
+                       └── ts scan |                       |
+                                   | ts-table              | t_point
+                                   | access mode           | tableTableMeta
+                                   | tag filter[0]         | station_sn = 'd1'
+(20 rows)
+> select max(measure_value) from (select * from db_pipec.t_point p,pipec_r.pipeline_info pi where p.pipeline_sn=pi.pipeline_sn) p,pipec_r.station_info s where p.station_sn=s.station_sn;
+  max
+--------
+  15.5
+(1 row)
+> explain select max(measure_value) from (select * from db_pipec.t_point p,pipec_r.pipeline_info pi where p.pipeline_sn=pi.pipeline_sn) p,pipec_r.station_info s where p.station_sn=s.station_sn;
+                tree               |       field        |           description
+-----------------------------------+--------------------+----------------------------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  group                            |                    |
+   │                               | aggregate 0        | max(max)
+   └── render                      |                    |
+        │                          | max                | max
+        └── hash-join              |                    |
+             │                     | type               | inner
+             │                     | equality           | (pipeline_sn) = (pipeline_sn)
+             │                     | right cols are key |
+             ├── hash-join         |                    |
+             │    │                | type               | inner
+             │    │                | equality           | (station_sn) = (station_sn)
+             │    │                | right cols are key |
+             │    ├── group        |                    |
+             │    │    │           | engine type        | time series
+             │    │    │           | aggregate 0        | station_sn
+             │    │    │           | aggregate 1        | pipeline_sn
+             │    │    │           | aggregate 2        | max(measure_value)
+             │    │    │           | group by           | station_sn, pipeline_sn
+             │    │    │           | addSynchronizer    | true
+             │    │    └── ts scan |                    |
+             │    │                | ts-table           | t_point
+             │    │                | access mode        | tableTableMeta
+             │    └── scan         |                    |
+             │                     | table              | station_info@station_sn_index
+             │                     | spans              | FULL SCAN
+             └── scan              |                    |
+                                   | table              | pipeline_info@pipeline_sn_index
+                                   | spans              | FULL SCAN
+(30 rows)
+> select max(measure_value) from  pipec_r.pipeline_info pi,pipec_r.station_info s,db_pipec.t_point p,pipec_r.point_info pf
+where p.station_sn=s.station_sn and p.pipeline_sn=pi.pipeline_sn and p.point_sn=pf.point_sn;
+  max
+--------
+  15.5
+(1 row)
+> explain select max(measure_value) from  pipec_r.pipeline_info pi,pipec_r.station_info s,db_pipec.t_point p,pipec_r.point_info pf
+        where p.station_sn=s.station_sn and p.pipeline_sn=pi.pipeline_sn and p.point_sn=pf.point_sn;
+                     tree                    |         field         |            description
+---------------------------------------------+-----------------------+------------------------------------
+                                             | distributed           | true
+                                             | vectorized            | false
+  render                                     |                       |
+   │                                         | max                   | max
+   └── limit                                 |                       |
+        │                                    | count                 | 1
+        └── lookup-join                      |                       |
+             │                               | table                 | point_info@primary
+             │                               | type                  | inner
+             │                               | equality              | (point_sn) = (point_sn)
+             │                               | equality cols are key |
+             │                               | parallel              |
+             └── sort                        |                       |
+                  │                          | order                 | -max
+                  └── hash-join              |                       |
+                       │                     | type                  | inner
+                       │                     | equality              | (pipeline_sn) = (pipeline_sn)
+                       │                     | right cols are key    |
+                       ├── hash-join         |                       |
+                       │    │                | type                  | inner
+                       │    │                | equality              | (station_sn) = (station_sn)
+                       │    │                | right cols are key    |
+                       │    ├── group        |                       |
+                       │    │    │           | engine type           | time series
+                       │    │    │           | aggregate 0           | point_sn
+                       │    │    │           | aggregate 1           | station_sn
+                       │    │    │           | aggregate 2           | pipeline_sn
+                       │    │    │           | aggregate 3           | max(measure_value)
+                       │    │    │           | group by              | point_sn, station_sn, pipeline_sn
+                       │    │    │           | addSynchronizer       | true
+                       │    │    └── ts scan |                       |
+                       │    │                | ts-table              | t_point
+                       │    │                | access mode           | tableTableMeta
+                       │    └── scan         |                       |
+                       │                     | table                 | station_info@station_sn_index
+                       │                     | spans                 | FULL SCAN
+                       └── scan              |                       |
+                                             | table                 | pipeline_info@pipeline_sn_index
+                                             | spans                 | FULL SCAN
+(39 rows)
+> select max(p.measure_value) from  (select * from db_pipec.t_point p,pipec_r.pipeline_info pi where p.pipeline_sn=pi.pipeline_sn ) p,
+(select * from db_pipec.t_point p,pipec_r.point_info pf where p.point_sn=pf.point_sn) p1;
+  max
+--------
+  15.5
+(1 row)
+> explain select max(p.measure_value) from  (select * from db_pipec.t_point p,pipec_r.pipeline_info pi where p.pipeline_sn=pi.pipeline_sn ) p,
+                                          (select * from db_pipec.t_point p,pipec_r.point_info pf where p.point_sn=pf.point_sn) p1;
+                tree               |       field        |           description
+-----------------------------------+--------------------+----------------------------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  group                            |                    |
+   │                               | aggregate 0        | max(measure_value)
+   │                               | scalar             |
+   └── render                      |                    |
+        │                          | measure_value      | measure_value
+        └── cross-join             |                    |
+             │                     | type               | cross
+             ├── hash-join         |                    |
+             │    │                | type               | inner
+             │    │                | equality           | (pipeline_sn) = (pipeline_sn)
+             │    │                | right cols are key |
+             │    ├── synchronizer |                    |
+             │    │    └── ts scan |                    |
+             │    │                | ts-table           | t_point
+             │    │                | access mode        | tableTableMeta
+             │    └── scan         |                    |
+             │                     | table              | pipeline_info@pipeline_sn_index
+             │                     | spans              | FULL SCAN
+             └── hash-join         |                    |
+                  │                | type               | inner
+                  │                | equality           | (point_sn) = (point_sn)
+                  │                | right cols are key |
+                  ├── synchronizer |                    |
+                  │    └── ts scan |                    |
+                  │                | ts-table           | t_point
+                  │                | access mode        | tableTableMeta
+                  └── scan         |                    |
+                                   | table              | point_info@primary
+                                   | spans              | FULL SCAN
+(31 rows)
+> SELECT li.pipeline_name,
+       li.pipe_start,
+       li.pipe_end,
+       station_name,
+       COUNT(t.measure_value)
+FROM pipec_r.pipeline_info li,
+     pipec_r.station_info si,
+     db_pipec.t_point t
+WHERE t.pipeline_sn = li.pipeline_sn
+  AND t.station_sn = si.station_sn
+  AND t.measure_value > 2
+  AND t.measure_type = 5
+  AND k_timestamp >= '2023-08-01 01:00:00'
+GROUP BY pipeline_name, pipe_start, pipe_end, station_name
+HAVING COUNT(t.measure_value) > 20
+ORDER BY COUNT(t.measure_value) DESC;
+  pipeline_name | pipe_start | pipe_end | station_name | count
+----------------+------------+----------+--------------+--------
+(0 rows)
+> explain SELECT li.pipeline_name,
+              li.pipe_start,
+              li.pipe_end,
+              station_name,
+              COUNT(t.measure_value)
+       FROM pipec_r.pipeline_info li,
+            pipec_r.station_info si,
+            db_pipec.t_point t
+       WHERE t.pipeline_sn = li.pipeline_sn
+         AND t.station_sn = si.station_sn
+         AND t.measure_value > 2
+         AND t.measure_type = 5
+         AND k_timestamp >= '2023-08-01 01:00:00'
+       GROUP BY pipeline_name, pipe_start, pipe_end, station_name
+       HAVING COUNT(t.measure_value) > 20
+       ORDER BY COUNT(t.measure_value) DESC;
+                       tree                       |         field         |                    description
+--------------------------------------------------+-----------------------+----------------------------------------------------
+                                                  | distributed           | true
+                                                  | vectorized            | false
+  sort                                            |                       |
+   │                                              | order                 | -count
+   └── filter                                     |                       |
+        │                                         | filter                | sum_int > 20
+        └── group                                 |                       |
+             │                                    | aggregate 0           | pipeline_name
+             │                                    | aggregate 1           | pipe_start
+             │                                    | aggregate 2           | pipe_end
+             │                                    | aggregate 3           | station_name
+             │                                    | aggregate 4           | sum_int(count)
+             │                                    | group by              | pipeline_name, pipe_start, pipe_end, station_name
+             └── render                           |                       |
+                  │                               | pipeline_name         | pipeline_name
+                  │                               | pipe_start            | pipe_start
+                  │                               | pipe_end              | pipe_end
+                  │                               | station_name          | station_name
+                  │                               | count                 | count
+                  └── lookup-join                 |                       |
+                       │                          | table                 | pipeline_info@primary
+                       │                          | type                  | inner
+                       │                          | equality              | (pipeline_sn) = (pipeline_sn)
+                       │                          | equality cols are key |
+                       │                          | parallel              |
+                       └── lookup-join            |                       |
+                            │                     | table                 | station_info@primary
+                            │                     | type                  | inner
+                            │                     | equality              | (station_sn) = (station_sn)
+                            │                     | equality cols are key |
+                            │                     | parallel              |
+                            └── group             |                       |
+                                 │                | engine type           | time series
+                                 │                | aggregate 0           | station_sn
+                                 │                | aggregate 1           | pipeline_sn
+                                 │                | aggregate 2           | count(measure_value)
+                                 │                | group by              | station_sn, pipeline_sn
+                                 │                | addSynchronizer       | true
+                                 └── render       |                       |
+                                      │           | engine type           | time series
+                                      │           | measure_value         | measure_value
+                                      │           | station_sn            | station_sn
+                                      │           | pipeline_sn           | pipeline_sn
+                                      └── ts scan |                       |
+                                                  | ts-table              | t_point
+                                                  | access mode           | tableTableMeta
+                                                  | spans:fromTime        | 2023-08-01 01:00:00 +0000 UTC
+                                                  | spans:toTime          | 2970-01-01 00:00:00 +0000 UTC
+                                                  | filter                | measure_value > 2.0
+                                                  | tag filter[0]         | measure_type = 5
+(50 rows)
+> set cluster setting ts.sql.query_opt_mode=1111;
+SET CLUSTER SETTING
+> SELECT li.pipeline_name,
+       t.measure_type,
+       time_bucket(t.k_timestamp, '10s') as timebucket,
+       AVG(t.measure_value) AS avg_value,
+       MAX(t.measure_value) AS max_value,
+       MIN(t.measure_value) AS min_value,
+       COUNT(t.measure_value) AS number_of_values
+FROM pipec_r.pipeline_info li,
+     db_pipec.t_point t
+WHERE li.pipeline_sn = t.pipeline_sn
+GROUP BY
+    li.pipeline_name,
+    t.measure_type,
+    timebucket
+order by timebucket;
+  pipeline_name | measure_type |        timebucket         | avg_value | max_value | min_value | number_of_values
+----------------+--------------+---------------------------+-----------+-----------+-----------+-------------------
+  ee            |            2 | 2024-08-26 10:00:00+00:00 |      13.5 |      13.5 |      13.5 |                1
+  ee            |            2 | 2024-08-27 10:00:00+00:00 |      12.5 |      12.5 |      12.5 |                1
+  ee            |            1 | 2024-08-27 11:00:00+00:00 |      10.5 |      10.5 |      10.5 |                1
+  ee            |            1 | 2024-08-27 12:00:00+00:00 |      11.5 |      11.5 |      11.5 |                1
+  ee            |            3 | 2024-08-28 10:00:00+00:00 |      14.5 |      14.5 |      14.5 |                1
+  ee            |            4 | 2024-08-28 11:00:00+00:00 |      10.5 |      10.5 |      10.5 |                1
+  ee            |            4 | 2024-08-28 12:00:00+00:00 |      11.5 |      11.5 |      11.5 |                1
+  ee            |            3 | 2024-08-29 10:00:00+00:00 |      15.5 |      15.5 |      15.5 |                1
+(8 rows)
+> explain SELECT li.pipeline_name,
+               t.measure_type,
+               time_bucket(t.k_timestamp, '10s') as timebucket,
+               AVG(t.measure_value) AS avg_value,
+               MAX(t.measure_value) AS max_value,
+               MIN(t.measure_value) AS min_value,
+               COUNT(t.measure_value) AS number_of_values
+        FROM pipec_r.pipeline_info li,
+             db_pipec.t_point t
+        WHERE li.pipeline_sn = t.pipeline_sn
+        GROUP BY
+            li.pipeline_name,
+            t.measure_type,
+            timebucket
+        order by timebucket;
+                     tree                    |       field        |               description
+---------------------------------------------+--------------------+------------------------------------------
+                                             | distributed        | true
+                                             | vectorized         | false
+  render                                     |                    |
+   │                                         | pipeline_name      | pipeline_name
+   │                                         | measure_type       | measure_type
+   │                                         | timebucket         | timebucket
+   │                                         | avg_value          | sum / sum_int
+   │                                         | max_value          | max
+   │                                         | min_value          | min
+   │                                         | number_of_values   | sum_int
+   └── group                                 |                    |
+        │                                    | aggregate 0        | pipeline_name
+        │                                    | aggregate 1        | measure_type
+        │                                    | aggregate 2        | timebucket
+        │                                    | aggregate 3        | sum(sum)
+        │                                    | aggregate 4        | sum_int(count)
+        │                                    | aggregate 5        | max(max)
+        │                                    | aggregate 6        | min(min)
+        │                                    | aggregate 7        | sum_int(count)
+        │                                    | group by           | pipeline_name, measure_type, timebucket
+        │                                    | ordered            | +timebucket
+        └── render                           |                    |
+             │                               | pipeline_name      | pipeline_name
+             │                               | measure_type       | measure_type
+             │                               | timebucket         | timebucket
+             │                               | sum                | sum
+             │                               | count              | count
+             │                               | max                | max
+             │                               | min                | min
+             └── sort                        |                    |
+                  │                          | order              | +timebucket
+                  └── hash-join              |                    |
+                       │                     | type               | inner
+                       │                     | equality           | (pipeline_sn) = (pipeline_sn)
+                       │                     | right cols are key |
+                       ├── group             |                    |
+                       │    │                | engine type        | time series
+                       │    │                | aggregate 0        | pipeline_sn
+                       │    │                | aggregate 1        | measure_type
+                       │    │                | aggregate 2        | timebucket
+                       │    │                | aggregate 3        | sum(measure_value)
+                       │    │                | aggregate 4        | count(measure_value)
+                       │    │                | aggregate 5        | max(measure_value)
+                       │    │                | aggregate 6        | min(measure_value)
+                       │    │                | group by           | pipeline_sn, measure_type, timebucket
+                       │    │                | addSynchronizer    | true
+                       │    └── render       |                    |
+                       │         │           | engine type        | time series
+                       │         │           | timebucket         | time_bucket(k_timestamp, '10s')
+                       │         │           | measure_value      | measure_value
+                       │         │           | pipeline_sn        | pipeline_sn
+                       │         │           | measure_type       | measure_type
+                       │         └── ts scan |                    |
+                       │                     | ts-table           | t_point
+                       │                     | access mode        | tableTableMeta
+                       └── scan              |                    |
+                                             | table              | pipeline_info@pipeline_name_index
+                                             | spans              | FULL SCAN
+(58 rows)
+> set cluster setting ts.sql.query_opt_mode=1110;
+SET CLUSTER SETTING
+> drop database pipec_r cascade;
+DROP DATABASE
+> drop database db_pipec cascade;
+DROP DATABASE

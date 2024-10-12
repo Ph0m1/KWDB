@@ -1740,11 +1740,12 @@ CREATE TABLE
    │                        │                     | type         | anti
    │                        │                     | equality     | (c_custkey) = (o_custkey)
    │                        ├── filter            |              |
-   │                        │    │                | filter       | (substring(c_phone, 1, 2) IN ('16', '20', '21', '25', '26', '29', '32')) AND (c_acctbal > @S1)
+   │                        │    │                | filter       | substring(c_phone, 1, 2) IN ('16', '20', '21', '25', '26', '29', '32')
    │                        │    └── synchronizer |              |
    │                        │         └── ts scan |              |
    │                        │                     | ts-table     | customer
    │                        │                     | access mode  | metaTable
+   │                        │                     | filter       | c_acctbal > @S1
    │                        └── synchronizer      |              |
    │                             └── ts scan      |              |
    │                                              | ts-table     | orders
@@ -1765,7 +1766,7 @@ CREATE TABLE
                                                   | ts-table     | customer
                                                   | access mode  | metaTable
                                                   | filter       | c_acctbal > 0.0
-(44 rows)
+(45 rows)
 > INSERT INTO LINEITEM
 VALUES
     ('2000-01-01 01:00:00', 1, 156, 4, 1, 17, 17954.55, 0.04, 0.02, 'N', 'O', '1996-03-13', '1996-02-12', '1996-03-22', 'DELIVER IN PERSON', 'TRUCK', 'egular courts above the',  NULL, 1),
@@ -3550,11 +3551,12 @@ CREATE STATISTICS
    │                        │                     | type         | anti
    │                        │                     | equality     | (c_custkey) = (o_custkey)
    │                        ├── filter            |              |
-   │                        │    │                | filter       | (substring(c_phone, 1, 2) IN ('16', '20', '21', '25', '26', '29', '32')) AND (c_acctbal > @S1)
+   │                        │    │                | filter       | substring(c_phone, 1, 2) IN ('16', '20', '21', '25', '26', '29', '32')
    │                        │    └── synchronizer |              |
    │                        │         └── ts scan |              |
    │                        │                     | ts-table     | customer
    │                        │                     | access mode  | metaTable
+   │                        │                     | filter       | c_acctbal > @S1
    │                        └── synchronizer      |              |
    │                             └── ts scan      |              |
    │                                              | ts-table     | orders
@@ -3575,7 +3577,7 @@ CREATE STATISTICS
                                                   | ts-table     | customer
                                                   | access mode  | metaTable
                                                   | filter       | c_acctbal > 0.0
-(45 rows)
+(46 rows)
 > set cluster setting sql.stats.ts_automatic_collection.enabled = true;
 SET CLUSTER SETTING
 > use default;

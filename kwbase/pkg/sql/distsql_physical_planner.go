@@ -623,8 +623,11 @@ type PlanningCtx struct {
 	// stream.
 	saveDiagramShowInputTypes bool
 
-	// IsTS is set true when there has tsTableReader
-	IsTS bool
+	// existTSTable is set true when there has tsTableReader
+	existTSTable bool
+
+	// runningSubquery is set when there is running a sub-query
+	runningSubquery bool
 }
 
 var _ physicalplan.ExprContext = &PlanningCtx{}
@@ -653,12 +656,12 @@ func (p *PlanningCtx) EvaluateSubqueries() bool {
 
 // IsTs return true if there has tsTableReader.
 func (p *PlanningCtx) IsTs() bool {
-	return p.IsTS
+	return p.existTSTable
 }
 
 // GetTsDop is used to get tsParallelExecDegree num in timing scenarios
 func (p *PlanningCtx) GetTsDop() int32 {
-	if !p.IsTS || p.planner == nil {
+	if !p.existTSTable || p.planner == nil {
 		return sqlbase.DefaultDop
 	}
 
@@ -2060,7 +2063,7 @@ func buildPostSpecForTSReaders(
 func (dsp *DistSQLPlanner) createTSReaders(
 	planCtx *PlanningCtx, n *tsScanNode,
 ) (PhysicalPlan, error) {
-	planCtx.IsTS = true
+	planCtx.existTSTable = true
 	var p PhysicalPlan
 	var err error
 	ptCols, typs, descColumnIDs, columnIDSet := visitTableMeta(n)
@@ -5683,19 +5686,11 @@ func (dsp *DistSQLPlanner) FinalizePlan(planCtx *PlanningCtx, plan *PhysicalPlan
 	// Single router and can not execute on ts engine
 	// 1.Check processor is no-op and render filter all nil
 	// 2.Traverse whether all inputs under noop are execute on ts engine
-	var subdue bool
-	if planCtx.planner != nil {
-		if planCtx.planner.curPlan.subqueryPlans != nil {
-			if len(planCtx.planner.curPlan.subqueryPlans) != 0 {
-				subdue = true
-			}
-		}
-	}
 	var closes int
 	if plan.Processors[plan.ResultRouters[0]].Spec.Core.Noop != nil &&
 		plan.Processors[plan.ResultRouters[0]].Spec.Post.RenderExprs == nil &&
 		plan.Processors[plan.ResultRouters[0]].Spec.Post.Filter.Empty() &&
-		!subdue {
+		!planCtx.runningSubquery {
 		plan.AllProcessorsExecInTSEngine = true
 		for _, input := range plan.Processors[plan.ResultRouters[0]].Spec.Input {
 			for _, stream := range input.Streams {

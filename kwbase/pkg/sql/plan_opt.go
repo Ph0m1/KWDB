@@ -27,6 +27,7 @@ package sql
 import (
 	"context"
 
+	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -373,9 +374,7 @@ func (opc *optPlanningCtx) buildReusableMemo(ctx context.Context) (_ *memo.Memo,
 	opc.p.TsInScopeFlag = bld.PhysType == tree.TS
 	f.Memo().ColsUsage = bld.ColsUsage
 
-	opc.optimizer.Memo().InitTS(ctx, bld.CheckIncludeTSTable(), IsSingleNodeMode(p.execCfg.StartMode), p.ExecCfg().TSWhiteListMap,
-		p.IsMultiNode, opt.PushdownAll.Get(&p.EvalContext().Settings.SV),
-		stats.AutomaticTsStatisticsClusterMode.Get(&p.EvalContext().Settings.SV))
+	opc.InitTS(ctx)
 	f.GetPushHelperValue(opc.optimizer.Memo().GetPushHelperAddress())
 	if opt.CheckTsProperty(bld.TSInfo.TSProp, optbuilder.TSPropSTableWithoutChild) {
 		p.ShortCircuit = false
@@ -413,6 +412,35 @@ func (opc *optPlanningCtx) buildReusableMemo(ctx context.Context) (_ *memo.Memo,
 	// to the prepared statement. DetachMemo will re-initialize the optimizer
 	// to an empty memo.
 	return opc.optimizer.DetachMemo(), nil
+}
+
+// InitTS initializes some elements to determine if the memo exprs can be executed in the TS engine.
+func (opc *optPlanningCtx) InitTS(ctx context.Context) {
+	m := opc.optimizer.Memo()
+	sv := &opc.p.EvalContext().Settings.SV
+	if IsSingleNodeMode(opc.p.execCfg.StartMode) {
+		m.SetFlag(opt.SingleMode)
+	}
+	if opt.PushdownAll.Get(sv) {
+		// ExecInTSEngine is set when the sql.all_push_down.enabled is true.
+		m.SetFlag(opt.ExecInTSEngine)
+	}
+	if opt.CheckOptMode(opt.TSQueryOptMode.Get(sv), opt.PushScalarSubQuery) {
+		// ScalarSubQueryPush is set when the optimization of SubQuery is opened.
+		m.SetFlag(opt.ScalarSubQueryPush)
+	}
+	if !stats.AutomaticTsStatisticsClusterMode.Get(sv) {
+		// ForceAEGroup is set when cluster setting sql.stats.ts_automatic_collection.enabled is true.
+		m.InitCheckHelper(keys.ForceAEGroup)
+	}
+
+	// init degree of parallelism
+	m.SetTsDop(0)
+
+	// init CheckHelper
+	m.InitCheckHelper(opc.p.ExecCfg().TSWhiteListMap)
+	m.InitCheckHelper(memo.CheckMultiNode(opc.p.IsMultiNode))
+	m.InitCheckHelper(ctx)
 }
 
 // reuseMemo returns an optimized memo using a cached memo as a starting point.
@@ -532,10 +560,8 @@ func (opc *optPlanningCtx) buildExecMemo(
 		p.ShortCircuit = false
 	}
 	opc.p.TsInScopeFlag = bld.PhysType == tree.TS
-	opc.optimizer.Memo().InitTS(ctx, bld.CheckIncludeTSTable(), IsSingleNodeMode(p.execCfg.StartMode), p.ExecCfg().TSWhiteListMap,
-		p.IsMultiNode, opt.PushdownAll.Get(&p.EvalContext().Settings.SV),
-		stats.AutomaticTsStatisticsClusterMode.Get(&p.EvalContext().Settings.SV))
-	f.GetPushHelperValue(opc.optimizer.Memo().GetPushHelperAddress())
+	opc.InitTS(ctx)
+
 	if _, isCanned := opc.p.stmt.AST.(*tree.CannedOptPlan); !isCanned {
 		if _, err := opc.optimizer.Optimize(); err != nil {
 			return nil, tree.Invalid, err

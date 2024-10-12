@@ -38,6 +38,8 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -211,6 +213,15 @@ func checkTsCompressLevel(encodedValue string) error {
 	return nil
 }
 
+// checkTsQueryOptMode checks whether the mode value set is valid
+func checkTsQueryOptMode(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 2, 64)
+	if err != nil || value < 0 || value > 15 {
+		return pgerror.Newf(pgcode.InvalidParameterValue, "invalid value for ts.sql.query_opt_mode")
+	}
+	return nil
+}
+
 // CheckClusterSetting map of checking methods for saving cluster settings
 var CheckClusterSetting = map[string]CheckOperation{
 	"ts.dedup.rule":      checkTsDedupRule,
@@ -222,6 +233,7 @@ var CheckClusterSetting = map[string]CheckOperation{
 	"ts.autovacuum.interval":                      checkTsAutovacuumInterval,
 	"ts.compression.type":                         checkTsCompressType,
 	"ts.compression.level":                        checkTsCompressLevel,
+	"ts.sql.query_opt_mode":                       checkTsQueryOptMode,
 }
 
 func (n *setClusterSettingNode) startExec(params runParams) error {

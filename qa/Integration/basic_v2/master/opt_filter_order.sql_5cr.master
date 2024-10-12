@@ -496,8 +496,8 @@ INSERT 1
   15
 (5 rows)
 > explain select e1 from d1.t1 as t2 where    (((select last(e2) from d1.t1) > 20 and e1 > 0))    and    ((select last(e2) from d1.t1 where (e2 > 0 or e2 < -1)) > 0 and e1 != 0 and tag1 is not null or tag2 is null )   order by e1;
-                tree               |                  field                   |                                      description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------------------
+                tree               |                  field                   |                             description
+-----------------------------------+------------------------------------------+-----------------------------------------------------------------------
                                    | distributed                              | true
                                    | vectorized                               | false
   root                             |                                          |
@@ -506,12 +506,12 @@ INSERT 1
    │    └── render                 |                                          |
    │         │                     | e1                                       | e1
    │         └── filter            |                                          |
-   │              │                | filter                                   | (@S1 > 20) AND ((((e1 != 0) AND (@S2 > 0)) AND (tag1 IS NOT NULL)) OR (tag2 IS NULL))
+   │              │                | filter                                   | (((e1 != 0) AND (@S2 > 0)) AND (tag1 IS NOT NULL)) OR (tag2 IS NULL)
    │              └── synchronizer |                                          |
    │                   └── ts scan |                                          |
    │                               | ts-table                                 | t1
    │                               | access mode                              | tableTableMeta
-   │                               | filter                                   | e1 > 0
+   │                               | filter                                   | (e1 > 0) AND (@S1 > 20)
    ├── subquery                    |                                          |
    │    │                          | id                                       | @S1
    │    │                          | original sql                             | (SELECT last(e2) FROM d1.t1)
@@ -789,14 +789,14 @@ INSERT 1
   root                             |              |
    ├── sort                        |              |
    │    │                          | order        | +e1
-   │    └── render                 |              |
-   │         │                     | e1           | e1
-   │         └── filter            |              |
-   │              │                | filter       | @S1 OR (((abs(e1) > 3) OR (length(e4) < 2)) OR (trunc(e5) = 2.0))
-   │              └── synchronizer |              |
-   │                   └── ts scan |              |
+   │    └── synchronizer           |              |
+   │         └── render            |              |
+   │              │                | engine type  | time series
+   │              │                | e1           | e1
+   │              └── ts scan      |              |
    │                               | ts-table     | t1
    │                               | access mode  | metaTable
+   │                               | filter       | @S1 OR (((abs(e1) > 3) OR (length(e4) < 2)) OR (trunc(e5) = 2.0))
    └── subquery                    |              |
         │                          | id           | @S1
         │                          | original sql | EXISTS (SELECT abs(e2) FROM d1.t1 WHERE length(e4) > 0)
@@ -1149,45 +1149,45 @@ order by e1;
           AND
             (e5 > 50 OR tag1 = 101)
         order by e1;
-             tree             |      field       |                                             description
-------------------------------+------------------+------------------------------------------------------------------------------------------------------
+             tree             |      field       |                                                     description
+------------------------------+------------------+-----------------------------------------------------------------------------------------------------------------------
                               | distributed      | true
                               | vectorized       | false
   root                        |                  |
    ├── sort                   |                  |
    │    │                     | order            | +e1
    │    └── filter            |                  |
-   │         │                | filter           | (e1 > @S1) AND (e2 < @S2)
+   │         │                | filter           | e1 > @S2
    │         └── synchronizer |                  |
    │              └── ts scan |                  |
    │                          | ts-table         | t1
    │                          | access mode      | tableTableMeta
-   │                          | filter           | (((e4 LIKE '4%') OR (e4 LIKE '5%')) AND ((e3 > 30) OR (e3 < 20))) AND ((e5 > 50.0) OR (tag1 = 101))
+   │                          | filter           | ((((e4 LIKE '4%') OR (e4 LIKE '5%')) AND (e2 < @S1)) AND ((e3 > 30) OR (e3 < 20))) AND ((e5 > 50.0) OR (tag1 = 101))
    ├── subquery               |                  |
    │    │                     | id               | @S1
-   │    │                     | original sql     | (SELECT avg(e1) FROM t1)
+   │    │                     | original sql     | (SELECT max(e2) FROM t1)
    │    │                     | exec mode        | one row
    │    └── group             |                  |
    │         │                | engine type      | time series
-   │         │                | aggregate 0      | avg(e1)
+   │         │                | aggregate 0      | max(e2)
    │         │                | scalar           |
    │         │                | addSynchronizer  | true
    │         └── ts scan      |                  |
    │                          | ts-table         | t1
    │                          | access mode      | metaTable
+   │                          | scan agg 0       | MAX(e2)
    └── subquery               |                  |
         │                     | id               | @S2
-        │                     | original sql     | (SELECT max(e2) FROM t1)
+        │                     | original sql     | (SELECT avg(e1) FROM t1)
         │                     | exec mode        | one row
         └── group             |                  |
              │                | engine type      | time series
-             │                | aggregate 0      | max(e2)
+             │                | aggregate 0      | avg(e1)
              │                | scalar           |
              │                | addSynchronizer  | true
              └── ts scan      |                  |
                               | ts-table         | t1
                               | access mode      | metaTable
-                              | scan agg 0       | MAX(e2)
 (37 rows)
 > SELECT * FROM t1
 WHERE
@@ -2187,12 +2187,11 @@ ORDER BY e1;
   root                        |                  |
    ├── sort                   |                  |
    │    │                     | order            | +e1
-   │    └── filter            |                  |
-   │         │                | filter           | ((((e2 > 25) OR (e4 IS NULL)) AND ((e5 > @S1) OR (e5 < @S2))) AND (((tag2 >= 200) AND (tag2 <= 300)) OR (tag1 = 101))) OR ((e3 < @S3) AND (e1 > 15))
-   │         └── synchronizer |                  |
-   │              └── ts scan |                  |
+   │    └── synchronizer      |                  |
+   │         └── ts scan      |                  |
    │                          | ts-table         | t1
    │                          | access mode      | tableTableMeta
+   │                          | filter           | ((((e2 > 25) OR (e4 IS NULL)) AND ((e5 > @S1) OR (e5 < @S2))) AND (((tag2 >= 200) AND (tag2 <= 300)) OR (tag1 = 101))) OR ((e3 < @S3) AND (e1 > 15))
    ├── subquery               |                  |
    │    │                     | id               | @S1
    │    │                     | original sql     | (SELECT avg(e5) FROM t1)
@@ -2229,7 +2228,7 @@ ORDER BY e1;
                               | ts-table         | t1
                               | access mode      | metaTable
                               | scan agg 0       | MIN(e3)
-(47 rows)
+(46 rows)
 > SELECT * FROM t1
 WHERE
     (e1 > 15 AND e3 < (SELECT MIN(e3) FROM t1))
@@ -2310,7 +2309,7 @@ ORDER BY e1;
   2024-06-08 06:00:00+00:00 | 13 | 23 | 33 | 43 | 53 |  103 |  203 | 303
   2024-06-09 06:00:00+00:00 | 14 | 24 | 34 | 44 | 54 |  104 |  204 | 304
 (4 rows)
-> set cluster setting ts.filter_order_opt.enabled=false;
+> set cluster setting ts.sql.query_opt_mode=0110;
 SET CLUSTER SETTING
 > explain select e1 from d1.t1 where e2 > 0 and e4 = '44' order by e1;
            tree          |    field    |       description
@@ -2333,7 +2332,7 @@ SET CLUSTER SETTING
 ------
   14
 (1 row)
-> set cluster setting ts.filter_order_opt.enabled=true;
+> set cluster setting ts.sql.query_opt_mode=1110;
 SET CLUSTER SETTING
 > explain select e1 from d1.t1 where e2 > 0 and e4 = '44' order by e1;
            tree          |    field    |       description

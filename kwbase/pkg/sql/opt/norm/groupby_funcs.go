@@ -86,12 +86,11 @@ func (c *CustomFuncs) AppendAggCols2(
 // aggregates are written into outElems and outColList. As an example, for
 // columns (1,2) and operator ConstAggOp, makeAggCols will set the following:
 //
-//   outElems[0] = (ConstAggOp (Variable 1))
-//   outElems[1] = (ConstAggOp (Variable 2))
+//	outElems[0] = (ConstAggOp (Variable 1))
+//	outElems[1] = (ConstAggOp (Variable 2))
 //
-//   outColList[0] = 1
-//   outColList[1] = 2
-//
+//	outColList[0] = 1
+//	outColList[1] = 2
 func (c *CustomFuncs) makeAggCols(
 	aggOp opt.Operator, cols opt.ColSet, outAggs memo.AggregationsExpr,
 ) {
@@ -321,4 +320,263 @@ func (c *CustomFuncs) areRowsDistinct(
 	}
 
 	return true
+}
+
+// TryPushAgg determines whether the memo expression meets the optimization criteria.
+// If it does, push down the group by expr and construct a new group by expr to return.
+// input params:
+//
+//	input: child of GroupByExpr or ScalarGroupByExpr(only InnerJoinExpr can be optimized)
+//	aggs : Aggregations of GroupByExpr or ScalarGroupByExpr, record info of agg functions
+//	private : GroupingPrivate of GroupByExpr or ScalarGroupByExpr
+//
+// output params: the new GroupByExpr that had been optimized.
+func (c *CustomFuncs) TryPushAgg(
+	input memo.RelExpr, aggs memo.AggregationsExpr, private *memo.GroupingPrivate,
+) memo.RelExpr {
+	var optHelper = &memo.InsideOutOptHelper{}
+	canOpt, join := c.precheckInsideOutOptApplicable(input, aggs, private, optHelper)
+	if !canOpt {
+		return nil
+	}
+
+	c.f.CheckWhiteListAndSetEngine(&input)
+
+	finishOpt, newInnerJoin, newAggItems, projectItems, passCols := PushAggIntoJoinTSEngineNode(c.f, join, aggs, private, private.GroupingCols, optHelper)
+	if finishOpt {
+		c.mem.SetFlag(opt.FinishOptInsideOut)
+		newGroup := c.f.ConstructGroupBy(newInnerJoin, newAggItems, private)
+
+		if len(projectItems) > 0 {
+			newGroup = c.f.ConstructProject(newGroup, projectItems, passCols)
+		}
+		return newGroup
+	}
+
+	return nil
+}
+
+// IsAvailable returns true when input is not nil.
+func (c *CustomFuncs) IsAvailable(input memo.RelExpr) bool {
+	return input != nil
+}
+
+// ConstructNewGroupBy returns input.
+func (c *CustomFuncs) ConstructNewGroupBy(input memo.RelExpr) memo.RelExpr {
+	return input
+}
+
+// precheckInsideOutOptApplicable pre-checks whether group by can be optimized.
+// Optimization needs to meet the following four points
+// 1. The cluster parameter "sql.inside_out.enabled" needs to be set to true
+// 2. GroupByExpr has not been optimized
+// 3. The child of GroupByExp must be InnerJoinExpr or ProjectExpr. If it is a ProjectExpr,
+// it must satisfy that the child of the ProjectExpr is InnerJoinExpr and the ProjectItems cannot cross modules
+// 4. the col of grouping must be single col and the ts col must be tag col
+// input params:
+// input: child of GroupByExpr or ScalarGroupByExpr
+// aggs: Aggregations of GroupByExpr or ScalarGroupByExpr, record infos of agg functions
+// private: GroupingPrivate of GroupByExpr or ScalarGroupByExpr
+// optHelper: record aggItems, grouping, projectionItems to help opt inside-out
+//
+// output params: is true when GroupByExpr can be optimized
+func (c *CustomFuncs) precheckInsideOutOptApplicable(
+	input memo.RelExpr,
+	aggs memo.AggregationsExpr,
+	private *memo.GroupingPrivate,
+	optHelper *memo.InsideOutOptHelper,
+) (bool, *memo.InnerJoinExpr) {
+	// could not opt inside-out when sql.inside_out.enabled is false
+	if !opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.f.evalCtx.Settings.SV), opt.JoinPushAgg) {
+		return false, nil
+	}
+
+	optTimeBucket := opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.f.evalCtx.Settings.SV), opt.JoinPushTimeBucket)
+
+	// do not need to opt when there has no ts table, or it has already opted.
+	if !c.mem.CheckFlag(opt.IncludeTSTable) || c.mem.CheckFlag(opt.FinishOptInsideOut) {
+		return false, nil
+	}
+
+	// can only opt when the agg is (Sum, Count, CountRows, Avg, Min, Max)
+	if !c.checkAggOptApplicable(aggs, optHelper) {
+		return false, nil
+	}
+
+	// could opt inside-out when the child of GroupByExpr isn't InnerJoinExpr
+	join, isJoin := input.(*memo.InnerJoinExpr)
+	if !isJoin {
+		if project, isPro := input.(*memo.ProjectExpr); isPro {
+			join1, isJoin1 := project.Input.(*memo.InnerJoinExpr)
+			if !isJoin1 {
+				return false, nil
+			}
+			// check projectionItems(could not cross mode) and the project must can exec in ts engine
+			if !c.checkProjectionApplicable(project, optHelper) {
+				return false, nil
+			}
+			optHelper.Passthrough = project.Passthrough
+			join = join1
+		} else {
+			return false, nil
+		}
+	}
+
+	// check grouping is single col and tag col
+	if !private.GroupingCols.Empty() {
+		groupCols := private.GroupingCols
+		isApplicable := true
+		groupCols.ForEach(func(colID opt.ColumnID) {
+			colMeta := c.mem.Metadata().ColumnMeta(colID)
+			isRelSingleCol := colMeta.Table != 0 && colMeta.TSType == opt.ColNormal
+			isTag := colMeta.IsTag()
+			isApplicable = isTag || isRelSingleCol
+			if optTimeBucket {
+				isTimeBucket := false
+				if tb, ok := c.mem.CheckHelper.PushHelper.Find(colID); ok {
+					isTimeBucket = tb.IsTimeBucket
+				}
+				isApplicable = isApplicable || isTimeBucket
+			}
+		})
+		if !isApplicable {
+			return false, nil
+		}
+	}
+
+	return true, join
+}
+
+// checkProjectionApplicable checks if the projection is applicable for optimization.
+// It must satisfy that the ProjectItems cannot cross modules.
+func (c *CustomFuncs) checkProjectionApplicable(
+	project *memo.ProjectExpr, optHelper *memo.InsideOutOptHelper,
+) bool {
+	for _, proj := range project.Projections {
+		// check if elements of ProjectionExpr can be pushed down
+		push, _ := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
+			c.f.TSWhiteListMap.CheckWhiteListParam, false)
+		if !push {
+			return false
+		}
+		// check if elements of ProjectionExpr do not cross modules
+		m := modeHelper{modes: 0}
+		c.getEngineMode(proj.Element, &m)
+		if m.isHybridMode() {
+			return false
+		}
+		optHelper.Projections = append(optHelper.Projections, proj)
+		if m.checkMode(tsMode) {
+			optHelper.ProEngine = append(optHelper.ProEngine, tree.EngineTypeTimeseries)
+		} else {
+			optHelper.ProEngine = append(optHelper.ProEngine, tree.EngineTypeRelational)
+		}
+		// check whether count/sum/avg parameter is in relational mode
+		for _, aggArg := range optHelper.AggArgs {
+			if aggArg.ArgColID == -1 {
+				return false
+			}
+			if proj.Col == aggArg.ArgColID {
+				if aggArg.AggOp == opt.SumOp || aggArg.AggOp == opt.CountOp || aggArg.AggOp == opt.AvgOp {
+					if m.checkMode(relMode) {
+						return false
+					}
+				}
+			}
+		}
+		// check if elements of ProjectionExpr is time_bucket
+		if proj.Element.Op() == opt.FunctionOp {
+			f := proj.Element.(*memo.FunctionExpr)
+			if f.Name == tree.FuncTimeBucket && m.checkMode(tsMode) {
+				c.mem.AddColumn(proj.Col, "", memo.GetExprType(proj.Element),
+					memo.ExprPosProjList, 0, true)
+			}
+		}
+	}
+	return true
+}
+
+const (
+	relMode = 1 << 0
+	tsMode  = 1 << 1
+	anyMode = 1 << 2
+)
+
+// modeHelper is used to get the mode in which the projection was executed.
+type modeHelper struct {
+	modes int
+}
+
+// setMode sets mode is true
+func (m *modeHelper) setMode(mode int) {
+	m.modes |= mode
+}
+
+// checkMode checks if the mode is set.
+func (m *modeHelper) checkMode(mode int) bool {
+	return m.modes&mode > 0
+}
+
+// isHybridMode checks to see if there is both timeseries mode and relational mode
+func (m *modeHelper) isHybridMode() bool {
+	return m.checkMode(relMode) && m.checkMode(tsMode)
+}
+
+// getEngineMode gets the execution mode of the input expression and places it in the modeHelper.
+func (c *CustomFuncs) getEngineMode(src opt.ScalarExpr, m *modeHelper) {
+	switch t := src.(type) {
+	case *memo.VariableExpr:
+		colType := c.mem.Metadata().ColumnMeta(t.Col).TSType
+		if colType == opt.ColNormal {
+			m.setMode(relMode)
+		} else {
+			m.setMode(tsMode)
+		}
+
+	case *memo.FunctionExpr:
+		for _, param := range t.Args {
+			c.getEngineMode(param, m)
+		}
+
+	case *memo.ScalarListExpr:
+		for i := range *t {
+			c.getEngineMode((*t)[i], m)
+		}
+
+	case *memo.TrueExpr, *memo.FalseExpr, *memo.ConstExpr, *memo.IsExpr, *memo.IsNotExpr, *memo.NullExpr:
+		m.setMode(anyMode)
+
+	case *memo.TupleExpr:
+		for i := range t.Elems {
+			c.getEngineMode(t.Elems[i], m)
+		}
+
+	case *memo.ArrayExpr:
+		for i := range t.Elems {
+			c.getEngineMode(t.Elems[i], m)
+		}
+
+	case *memo.CaseExpr:
+		for i := range t.Whens {
+			c.getEngineMode(t.Whens[i], m)
+		}
+		c.getEngineMode(t.Input, m)
+		c.getEngineMode(t.OrElse, m)
+
+	case *memo.CastExpr, *memo.NotExpr, *memo.RangeExpr:
+		c.getEngineMode(t.Child(0).(opt.ScalarExpr), m)
+
+	case *memo.AndExpr, *memo.OrExpr, *memo.GeExpr, *memo.GtExpr, *memo.NeExpr, *memo.EqExpr, *memo.LeExpr, *memo.LtExpr, *memo.LikeExpr,
+		*memo.NotLikeExpr, *memo.ILikeExpr, *memo.NotILikeExpr, *memo.SimilarToExpr, *memo.NotSimilarToExpr, *memo.RegMatchExpr,
+		*memo.NotRegMatchExpr, *memo.RegIMatchExpr, *memo.NotRegIMatchExpr, *memo.ContainsExpr, *memo.JsonExistsExpr,
+		*memo.JsonAllExistsExpr, *memo.JsonSomeExistsExpr, *memo.AnyScalarExpr, *memo.BitandExpr, *memo.BitorExpr, *memo.BitxorExpr,
+		*memo.PlusExpr, *memo.MinusExpr, *memo.MultExpr, *memo.DivExpr, *memo.FloorDivExpr, *memo.ModExpr, *memo.PowExpr, *memo.ConcatExpr,
+		*memo.LShiftExpr, *memo.RShiftExpr, *memo.WhenExpr, *memo.InExpr, *memo.NotInExpr:
+		c.getEngineMode(t.Child(0).(opt.ScalarExpr), m)
+		c.getEngineMode(t.Child(1).(opt.ScalarExpr), m)
+
+	default:
+		m.setMode(relMode)
+		m.setMode(tsMode)
+	}
 }

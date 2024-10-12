@@ -24,7 +24,11 @@
 
 package opt
 
-import "gitee.com/kwbasedb/kwbase/pkg/settings"
+import (
+	"strconv"
+
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
+)
 
 // DefaultJoinOrderLimit denotes the default limit on the number of joins to
 // reorder.
@@ -63,17 +67,65 @@ var PushdownAll = settings.RegisterPublicBoolSetting(
 	"sql.all_push_down.enabled", "push down entire query", true,
 )
 
-// TSFilterOrderOpt is true when we want to adjust the order of filtering conditions
-var TSFilterOrderOpt = settings.RegisterPublicBoolSetting(
-	"ts.filter_order_opt.enabled",
-	"adjust the order of filtering conditions",
-	true)
-
 // TSParallelDegree ts engine parallel exec degree
 var TSParallelDegree = settings.RegisterPublicIntSetting(
 	"ts.parallel_degree",
 	"degree of parallelism in ts",
 	0)
+
+// TSQueryOptMode is a cluster setting that controls each optimization switch.
+// The value of cluster setting ts.sql.query_opt_mode represents
+// the level of the four optimization items, and its value is a four-digit int value,
+// each indicating the optimization switch at the corresponding position.
+// - 1 indicating on
+// - 0 indicating off
+// The four optimization items are, in order from left to right:
+// -- 1. Multi-predicate sequential optimization
+// -- 2. Scalar quantum query optimization
+// -- 3. inside-out push down aggregation optimization
+// -- 4. inside-out push down time_bucket optimization
+//
+// For example:
+// If you want to turn on
+// "multi-predicate sequential optimization" and
+// "inside-out push down aggregation optimization",
+// you need to set this cluster setting to 1010
+// such as:
+// "set cluster setting ts.sql.query_opt_mode = 1010"
+//
+// default value: 1110
+// turn on the first three optimizations.
+var TSQueryOptMode = settings.RegisterPublicIntSetting(
+	"ts.sql.query_opt_mode", "ts query optimize mode", 1110,
+)
+
+// CheckOptMode checks whether the query opt mode is enabled.
+//
+// input params:
+// csValue:  The value of cluster setting ts.sql.query_opt_mode
+// mode:     To check whether the optimization mode is turned on
+func CheckOptMode(csValue int64, mode int) bool {
+	binaryValue := strconv.Itoa(int(csValue))
+	v, err := strconv.ParseInt(binaryValue, 2, 64)
+	if err != nil {
+		return false
+	}
+	return int(v)&mode > 0
+}
+
+const (
+	// JoinPushTimeBucket indicates join push down time_bucket
+	JoinPushTimeBucket = 1 << 0
+
+	// JoinPushAgg indicates join push down agg
+	JoinPushAgg = 1 << 1
+
+	// PushScalarSubQuery indicates push down ScalarSubQuery
+	PushScalarSubQuery = 1 << 2
+
+	// FilterOptOrder indicates that the order of filtering conditions will be optimized
+	FilterOptOrder = 1 << 3
+)
 
 // memo ts flags
 const (
@@ -97,4 +149,10 @@ const (
 
 	// HasAutoLimit is set when the limit is autoLimit
 	HasAutoLimit = 1 << 6
+
+	// FinishOptInsideOut is set when the optimization of inside-out is done.
+	FinishOptInsideOut = 1 << 7
+
+	// ScalarSubQueryPush is set when the switch of push-scalar-subQuery is turned on
+	ScalarSubQueryPush = 1 << 8
 )

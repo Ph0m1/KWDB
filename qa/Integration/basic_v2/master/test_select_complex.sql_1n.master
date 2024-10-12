@@ -139,13 +139,11 @@ INSERT 1
                                 | distributed  | true
                                 | vectorized   | false
   root                          |              |
-   ├── filter                   |              |
-   │    │                       | filter       | e2 < @S1
-   │    └── synchronizer        |              |
-   │         └── ts scan        |              |
+   ├── synchronizer             |              |
+   │    └── ts scan             |              |
    │                            | ts-table     | t1
    │                            | access mode  | metaTable
-   │                            | filter       | (e3 > 0) AND (abs(e3) > 0)
+   │                            | filter       | ((e2 < @S1) AND (e3 > 0)) AND (abs(e3) > 0)
    └── subquery                 |              |
         │                       | id           | @S1
         │                       | original sql | (SELECT e2 FROM test_select_complex_rel.t1 AS tab2 ORDER BY e1 LIMIT 1)
@@ -158,7 +156,7 @@ INSERT 1
                        └── scan |              |
                                 | table        | t1@primary
                                 | spans        | FULL SCAN
-(22 rows)
+(20 rows)
 > select e2,e3 from test_SELECT_complex.t1 as tab1 where e2 < (select e2 from test_SELECT_complex_rel.t1 as tab2 order by e1 limit 1) and 0 - abs(tab1.e3) < 0 and tab1.e3 > 0;
   e2 | e3
 -----+-----

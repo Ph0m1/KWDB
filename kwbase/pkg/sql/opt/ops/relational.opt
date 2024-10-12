@@ -519,8 +519,8 @@ define GroupingPrivate {
     # for split statistic
     AggIndex StatisticIndex
 
-    # optimize flag of push agg to scan compute
-    AggPushDown bool
+    # optimize flag of push agg to scan compute, for optimizing time_bucket query
+    OptTimeBucket bool
 
     # must add sort to group when having time_bucket_gapFill.
     TimeBucketGapFillColId ColumnID
