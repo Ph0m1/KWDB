@@ -34,6 +34,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/colflow"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/flowinfra"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/rowexec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
@@ -78,6 +79,7 @@ func (p *planner) makeExplainPlanNodeWithPlan(
 	subqueryPlans []subquery,
 	postqueryPlans []postquery,
 	stmtType tree.StatementType,
+	mem *memo.Memo,
 ) (planNode, error) {
 	flags := explainFlags{
 		symbolicVars: opts.Flags[tree.ExplainFlagSymVars],
@@ -121,6 +123,15 @@ func (p *planner) makeExplainPlanNodeWithPlan(
 		ctx.FormatNode(d)
 	}
 
+	// pass multi-model flag reset reason to explain node
+	// for multiple model processing.
+	var resetReasons map[memo.MultiModelResetReason]struct{}
+
+	if mem != nil {
+		resetReasons = mem.MultimodelHelper.ResetReasons
+	}
+
+	e.ResetReasons = resetReasons
 	node := &explainPlanNode{
 		explainer:      e,
 		plan:           plan,
@@ -213,6 +224,10 @@ type explainer struct {
 
 	// explainEntry accumulates entries (nodes or attributes).
 	entries []explainEntry
+
+	// ResetReasons keep reasons for resetting multi-model flag
+	// for multiple model processing.
+	ResetReasons map[memo.MultiModelResetReason]struct{}
 }
 
 // populateExplain walks the plan and generates rows in a valuesNode.
@@ -274,10 +289,19 @@ func populateExplain(
 	) error {
 		var row tree.Datums
 		if !e.showMetadata {
-			row = tree.Datums{
-				tree.NewDString(treeStr),  // Tree
-				tree.NewDString(field),    // Field
-				tree.NewDString(fieldVal), // Description
+			// for multiple model processing
+			if level == -1 {
+				row = tree.Datums{
+					tree.NewDString(node),     // Tree
+					tree.NewDString(field),    // Field
+					tree.NewDString(fieldVal), // Description
+				}
+			} else {
+				row = tree.Datums{
+					tree.NewDString(treeStr),  // Tree
+					tree.NewDString(field),    // Field
+					tree.NewDString(fieldVal), // Description
+				}
 			}
 		} else {
 			row = tree.Datums{
@@ -315,15 +339,16 @@ func (e *explainer) populateEntries(
 ) {
 	e.entries = nil
 	observer := planObserver{
-		enterNode: e.enterNode,
-		expr:      e.expr,
-		attr:      e.attr,
-		spans:     e.spans,
-		leaveNode: e.leaveNode,
+		enterNode:         e.enterNode,
+		expr:              e.expr,
+		attr:              e.attr,
+		spans:             e.spans,
+		leaveNode:         e.leaveNode,
+		addWarningMessage: e.addWarningMessage, // for multiple model processing
 	}
 	// observePlan never returns an error when returnError is false.
 	_ = observePlan(
-		ctx, plan, subqueryPlans, postqueryPlans, observer, false /* returnError */, subqueryFmtFlags,
+		ctx, plan, subqueryPlans, postqueryPlans, observer, false /* returnError */, subqueryFmtFlags, e.ResetReasons,
 	)
 }
 
@@ -337,6 +362,7 @@ func observePlan(
 	observer planObserver,
 	returnError bool,
 	subqueryFmtFlags tree.FmtFlags,
+	resetReasons map[memo.MultiModelResetReason]struct{},
 ) error {
 	// If there are any sub- or postqueries in the plan, we enclose both the main
 	// plan and the sub- and postqueries as children of a virtual "root" node.
@@ -397,6 +423,20 @@ func observePlan(
 	if len(subqueryPlans) > 0 || len(postqueryPlans) > 0 {
 		if err := observer.leaveNode("root", plan); err != nil && returnError {
 			return err
+		}
+	}
+
+	// add multi-model flag reset reasons. for multiple model processing
+	if len(resetReasons) > 0 {
+		observer.attr("", "", "")
+		first := true
+		for reason := range resetReasons {
+			if first {
+				observer.addWarningMessage("warning messages", "multi-model fall back", reason.String())
+				first = false
+			} else {
+				observer.attr("", "", reason.String())
+			}
 		}
 	}
 
@@ -536,6 +576,18 @@ func (e *explainer) enterNode(_ context.Context, name string, plan planNode) (bo
 func (e *explainer) attr(nodeName, fieldName, attr string) {
 	e.entries = append(e.entries, explainEntry{
 		isNode:   false,
+		level:    e.level - 1,
+		field:    fieldName,
+		fieldVal: attr,
+	})
+}
+
+// addWarningMessage implements the planObserver interface.
+// for multiple model processing
+func (e *explainer) addWarningMessage(nodeName, fieldName, attr string) {
+	e.entries = append(e.entries, explainEntry{
+		isNode:   false,
+		node:     nodeName,
 		level:    e.level - 1,
 		field:    fieldName,
 		fieldVal: attr,

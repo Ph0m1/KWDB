@@ -75,9 +75,15 @@ type SessionData struct {
 	// ZigzagJoinEnabled indicates whether the optimizer should try and plan a
 	// zigzag join.
 	ZigzagJoinEnabled bool
+	// MultiModelEnabled indicates whether the optimizer should do multi-model analysis and
+	// consider the optimal plan for a multi-model query.
+	MultiModelEnabled bool
 	// ReorderJoinsLimit indicates the number of joins at which the optimizer should
 	// stop attempting to reorder.
 	ReorderJoinsLimit int
+	// MultiModelReorderJoinsLimit indicates the number of joins at which the optimizer should
+	// stop attempting to reorder in multi-model processing.
+	MultiModelReorderJoinsLimit int
 	// RequireExplicitPrimaryKeys indicates whether CREATE TABLE statements should
 	// error out if no primary key is provided.
 	RequireExplicitPrimaryKeys bool

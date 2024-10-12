@@ -75,6 +75,8 @@ type planObserver struct {
 	// attr is invoked for non-expression metadata in each node.
 	attr func(nodeName, fieldName, attr string)
 
+	addWarningMessage func(nodeName, fieldName, attr string)
+
 	// leaveNode is invoked upon leaving a tree node.
 	leaveNode func(nodeName string, plan planNode) error
 
@@ -466,6 +468,36 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 					eqCols[i].Name = fmt.Sprintf("(%s=%s)", n.pred.leftColNames[i], n.pred.rightColNames[i])
 				}
 				v.observer.attr(name, "mergeJoinOrder", formatOrdering(n.mergeJoinOrdering, eqCols))
+			}
+		}
+		if v.observer.expr != nil {
+			v.expr(name, "pred", -1, n.pred.onCond)
+		}
+		n.left.plan = v.visit(n.left.plan)
+		n.right.plan = v.visit(n.right.plan)
+
+	case *batchLookUpJoinNode:
+		if v.observer.attr != nil {
+			jType := joinTypeStr(n.joinType)
+			if n.joinType == sqlbase.InnerJoin && len(n.pred.leftColNames) == 0 && n.pred.onCond == nil {
+				jType = "cross"
+			}
+			v.observer.attr(name, "type", jType)
+
+			if len(n.pred.leftColNames) > 0 {
+				f := tree.NewFmtCtx(tree.FmtSimple)
+				f.WriteByte('(')
+				f.FormatNode(&n.pred.leftColNames)
+				f.WriteString(") = (")
+				f.FormatNode(&n.pred.rightColNames)
+				f.WriteByte(')')
+				v.observer.attr(name, "equality", f.CloseAndGetString())
+				if n.pred.leftEqKey {
+					v.observer.attr(name, "left cols are key", "")
+				}
+				if n.pred.rightEqKey {
+					v.observer.attr(name, "right cols are key", "")
+				}
 			}
 		}
 		if v.observer.expr != nil {
@@ -943,6 +975,10 @@ func nodeName(plan planNode) string {
 			return "cross-join"
 		}
 		return "hash-join"
+
+	case *batchLookUpJoinNode:
+		return "batch-lookup-join"
+
 	}
 
 	name, ok := planNodeNames[reflect.TypeOf(plan)]

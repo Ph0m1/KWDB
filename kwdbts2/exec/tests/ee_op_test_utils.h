@@ -469,6 +469,183 @@ class TSBSSchema {
 
   const static int HEADER_SIZE = Payload::header_size_;  // NOLINT
 
+  // generate tag data pay load with provided row data for multiple model processing
+  static void genPayloadTagData(Payload& payload, std::vector<AttributeInfo>& tag_schema,
+                                KTimestamp start_ts, vector<string>& row_data,
+                                k_uint32 metric_col_count, bool fix_primary_tag = true) {
+    if (fix_primary_tag) {
+      start_ts = 100;
+    }
+    char* primary_start_ptr = payload.GetPrimaryTagAddr();
+    char* tag_data_start_ptr = payload.GetTagAddr() + (tag_schema.size() + 7) / 8;
+    for (int i = 0; i < tag_schema.size(); i++) {
+      // Generate the Primaritag part
+      if (tag_schema[i].isAttrType(COL_PRIMARY_TAG)) {
+        switch (tag_schema[i].type) {
+          case DATATYPE::TIMESTAMP64:
+            KTimestamp(primary_start_ptr) = start_ts;
+            primary_start_ptr += tag_schema[i].size;
+            break;
+          case DATATYPE::INT8:
+            *(static_cast<k_int8*>(static_cast<void*>(primary_start_ptr))) = atoi(row_data[i + metric_col_count].c_str());
+            primary_start_ptr += tag_schema[i].size;
+            break;
+          case DATATYPE::INT32:
+            KInt32(primary_start_ptr) = start_ts;
+            primary_start_ptr += tag_schema[i].size;
+            break;
+          case DATATYPE::CHAR:
+            strcpy(primary_start_ptr, row_data[i + metric_col_count].c_str());
+            primary_start_ptr += tag_schema[i].size;
+            break;
+          case DATATYPE::VARSTRING:
+            strncpy(primary_start_ptr, row_data[i + metric_col_count].c_str(), row_data[i + metric_col_count].length());
+            primary_start_ptr += tag_schema[i].size;
+            break;
+          default:
+            break;
+        }
+      }
+      // Generate the tag part
+      switch (tag_schema[i].type) {
+        case DATATYPE::TIMESTAMP64:
+          KTimestamp(tag_data_start_ptr) = start_ts;
+          tag_data_start_ptr += tag_schema[i].size;
+          break;
+        case DATATYPE::INT8:
+          *(static_cast<k_int8*>(static_cast<void*>(tag_data_start_ptr))) = atoi(row_data[i + metric_col_count].c_str());
+          tag_data_start_ptr += tag_schema[i].size;
+          break;
+        case DATATYPE::INT32:
+          KInt32(tag_data_start_ptr) = start_ts;
+          tag_data_start_ptr += tag_schema[i].size;
+          break;
+        case DATATYPE::CHAR:
+          strcpy(tag_data_start_ptr, row_data[i + metric_col_count].c_str());
+          tag_data_start_ptr += tag_schema[i].size;
+          break;
+        case DATATYPE::VARSTRING: {
+          *reinterpret_cast<int16_t*>(tag_data_start_ptr) = ((int16_t) row_data[i + metric_col_count].length());
+          tag_data_start_ptr += sizeof(int16_t);
+          strncpy(tag_data_start_ptr, row_data[i + metric_col_count].c_str(), row_data[i + metric_col_count].length());
+          tag_data_start_ptr += row_data[i + metric_col_count].length();
+        }
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  // generate data pay load with provided row data for multiple model processing
+  static unique_ptr<char[]> genPayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_length,
+                                           KTimestamp start_ts,
+                                           roachpb::CreateTsTable& meta,
+                                           vector<string>& row_data,
+                                           k_uint32 ms_interval = 10, int test_value = 0,
+                                           bool fix_entityid = true) {
+    vector<AttributeInfo> schema;
+    vector<uint32_t> actual_cols;
+    vector<AttributeInfo> tag_schema;
+    k_int32 tag_value_len = 0;
+    payload_length = 0;
+    for (int i = 0; i < meta.k_column_size(); i++) {
+      const auto& col = meta.k_column(i);
+      struct AttributeInfo col_var;
+      if (i == 0) {
+        TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, true);
+      } else {
+        TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, false);
+      }
+      if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
+        tag_value_len += col_var.size;
+        tag_schema.emplace_back(std::move(col_var));
+      } else {
+        payload_length += col_var.size;
+        if (col_var.type == DATATYPE::VARSTRING || col_var.type == DATATYPE::VARBINARY) {
+          payload_length += (row_data[i].size() + 2);
+        }
+        actual_cols.push_back(schema.size());
+        schema.push_back(std::move(col_var));
+      }
+    }
+
+    k_uint32 header_len = HEADER_SIZE;
+    k_int32 primary_tag_len = 30;
+    k_int16 primary_len_len = 2;
+    k_int32 tag_len_len = 4;
+    k_int32 data_len_len = 4;
+    k_int32 bitmap_len = (count + 7) / 8;
+    tag_value_len += (tag_schema.size() + 7) / 8;  // tag bitmap
+    k_int32 data_len = payload_length * count + bitmap_len * schema.size();
+    k_uint32 data_length =
+        header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len + data_len_len + data_len;
+    payload_length = data_length;
+    auto value = make_unique<char[]>(data_length);
+    memset(value.get(), 0, data_length);
+    KInt32(value.get() + Payload::row_num_offset_) = count;
+    KUint32(value.get() + Payload::ts_version_offset_) = 1;
+    // set primary_len_len
+    KInt16(value.get() + HEADER_SIZE) = primary_tag_len;
+    // set tag_len_len
+    KInt32(value.get() + header_len + primary_len_len + primary_tag_len) = tag_value_len;
+    // set data_len_len
+    KInt32(value.get() + header_len + primary_len_len + primary_tag_len + tag_len_len + tag_value_len) = data_len;
+    Payload p(schema, actual_cols, {value.get(), data_length});
+    int16_t len = 0;
+    genPayloadTagData(p, tag_schema, start_ts, row_data, schema.size(), fix_entityid);
+    uint64_t var_exist_len = 0;
+    for (int i = 0; i < schema.size(); i++) {
+      switch (schema[i].type) {
+        case DATATYPE::TIMESTAMP64:
+          for (int j = 0; j < count; j++) {
+            KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
+            start_ts += ms_interval;
+          }
+          break;
+        case DATATYPE::INT16:
+          for (int j = 0; j < count; j++) {
+            KInt16(p.GetColumnAddr(j, i)) = atoi(row_data[i].c_str());
+          }
+          break;
+        case DATATYPE::INT32:
+          for (int j = 0; j < count; j++) {
+            KInt32(p.GetColumnAddr(j, i)) = atoi(row_data[i].c_str());
+          }
+          break;
+        case DATATYPE::INT64:
+          for (int j = 0; j < count; j++) {
+            KInt32(p.GetColumnAddr(j, i)) = atol(row_data[i].c_str());
+          }
+          break;
+        case DATATYPE::CHAR:
+          for (int j = 0; j < count; j++) {
+            strncpy(p.GetColumnAddr(j, i), row_data[i].c_str(), schema[i].size);
+          }
+          break;
+        case DATATYPE::VARSTRING:
+        case DATATYPE::VARBINARY: {
+          len = row_data[i].length();
+          uint64_t var_type_offset = 0;
+          for (int k = i; k < schema.size(); k++) {
+            var_type_offset += (schema[k].size * count + bitmap_len);
+          }
+          for (int j = 0; j < count; j++) {
+            KInt64(p.GetColumnAddr(j, i)) = var_type_offset + var_exist_len;
+            // len + value
+            memcpy(p.GetVarColumnAddr(j, i), &len, 2);
+            strncpy(p.GetVarColumnAddr(j, i) + 2, row_data[i].c_str(), row_data[i].size());
+            var_exist_len += (row_data[i].size() + 2);
+          }
+        }
+          break;
+        default:
+          break;
+      }
+    }
+     return value;
+  }
+
   static void genPayloadTagData(Payload& payload, std::vector<AttributeInfo>& tag_schema,
                                 KTimestamp start_ts, bool fix_primary_tag = true) {
     string test_str = "abcdefghijklmnopqrstuvwxyz";

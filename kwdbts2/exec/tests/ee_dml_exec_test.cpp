@@ -82,6 +82,9 @@ TEST_F(TestDmlExec, TestDmlExecInit) {
   info->unique_id = 0;
   info->handle = nullptr;
   info->value = message;
+  info->relBatchData = nullptr;
+  info->relRowCount = 0;
+
   // DmlExec exec;
   ASSERT_EQ(DmlExec::ExecQuery(ctx_, info, info2), KStatus::SUCCESS);
   // next

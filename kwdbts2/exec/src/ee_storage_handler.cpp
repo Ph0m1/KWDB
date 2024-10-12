@@ -113,6 +113,41 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
   Return(code);
 }
 
+EEIteratorErrCode StorageHandler::SingletonTagNext(kwdbContext_p ctx, Field *tag_filter) {
+  EnterFunc();
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  KWThdContext *thd = current_thd;
+  RowBatch* ptr = thd->GetRowBatch();
+  thd->SetRowBatch(tag_rowbatch_.get());
+  while (true) {
+    tag_rowbatch_->Reset();
+    KStatus ret = tag_iterator->Next(&(tag_rowbatch_->entity_indexs_),
+                                     &(tag_rowbatch_->res_),
+                                     &(tag_rowbatch_->count_));
+    if (KStatus::FAIL == ret) {
+      break;
+    }
+
+    code = EEIteratorErrCode::EE_OK;
+    // LOG_DEBUG("Handler::TagNext count:%d", tag_rowbatch_->count_);
+    if (0 == tag_rowbatch_->count_) {
+      code = EEIteratorErrCode::EE_END_OF_RECORD;
+      break;
+    }
+
+    if (nullptr == tag_filter) {
+      break;
+    }
+    tagFilter(ctx, tag_filter);
+    if (tag_rowbatch_->effect_count_ > 0) {
+      break;
+    }
+  }
+  tag_rowbatch_->SetPipeEntityNum(ctx, 1);
+  thd->SetRowBatch(ptr);
+  Return(code);
+}
+
 EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
@@ -211,9 +246,15 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
     // LOG_DEBUG("TSTable::GetIterator() entity_size %ld", sizeof(entities_));
 
     // LOG_DEBUG("TSTable::GetIterator() ts_span_size:%ld", sizeof(ts_spans));
-    ret = ts_table_->GetIterator(ctx, entities_, ts_spans, table_->scan_cols_,
+    if (this->table_->GetRelTagJoinColumnIndexes().size() > 0) {
+      ret = ts_table_->GetIteratorInOrder(ctx, entities_, ts_spans, table_->scan_cols_,
+                                   table_->scan_real_agg_types_, table_->table_version_,
+                                   &ts_iterator, table_->scan_real_last_ts_points_, table_->is_reverse_, false);
+    } else {
+      ret = ts_table_->GetIterator(ctx, entities_, ts_spans, table_->scan_cols_,
                                  table_->scan_real_agg_types_, table_->table_version_,
                                  &ts_iterator, table_->scan_real_last_ts_points_, table_->is_reverse_, false);
+    }
     if (KStatus::FAIL == ret) {
       code = EEIteratorErrCode::EE_ERROR;
       LOG_ERROR("TsTable::GetIterator() error\n");
@@ -266,7 +307,7 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
       k_uint32 tag_id = spec->mutable_primarytags(i)->colid();
       malloc_size += table_->fields_[tag_id]->get_storage_length();
     }
-    KStatus ret = GeneratePrimaryTags(spec, malloc_size, sz, &primary_tags);
+    KStatus ret = GeneratePrimaryTags(spec, table_, malloc_size, sz, &primary_tags);
     if (ret != SUCCESS) {
       break;
     }
@@ -296,9 +337,49 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
   Return(code);
 }
 
-KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc_size,
-                                     kwdbts::k_int32 sz,
-                                     std::vector<void *> *primary_tags) {
+EEIteratorErrCode StorageHandler::GetRelEntityIdList(kwdbContext_p ctx,
+                                           TSTagReaderSpec *spec,
+                                           Field *tag_filter,
+                                           std::vector<void *>& primary_tags,
+                                           std::vector<void *>& secondary_tags,
+                                           const vector<k_uint32> tag_other_join_cols) {
+  EnterFunc();
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  KWThdContext *thd = current_thd;
+  RowBatch* old_ptr = thd->GetRowBatch();
+  tag_rowbatch_->Reset();
+  thd->SetRowBatch(tag_rowbatch_.get());
+  do {
+    KStatus ret = ts_table_->GetEntityIdList(
+        ctx, primary_tags, table_->scan_tags_, &tag_rowbatch_->entity_indexs_,
+        &tag_rowbatch_->res_, &tag_rowbatch_->count_);
+    if (ret != SUCCESS) {
+      break;
+    }
+    if (tag_filter) {
+      tagFilter(ctx, tag_filter);
+      if (0 == tag_rowbatch_->effect_count_) {
+        code = EEIteratorErrCode::EE_END_OF_RECORD;
+        break;
+      }
+    } else if (0 == tag_rowbatch_->count_) {
+      code = EEIteratorErrCode::EE_END_OF_RECORD;
+      break;
+    }
+    if (secondary_tags.size() > 0) {
+      tagRelFilter(ctx, secondary_tags, tag_other_join_cols);
+    }
+    code = EEIteratorErrCode::EE_OK;
+  } while (0);
+  tag_rowbatch_->SetPipeEntityNum(ctx, 1);
+  thd->SetRowBatch(old_ptr);
+  Return(code);
+}
+
+KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
+                                      size_t malloc_size,
+                                      kwdbts::k_int32 sz,
+                                      std::vector<void *> *primary_tags) {
   char *ptr = nullptr;
   k_int32 ns = spec->mutable_primarytags(0)->tagvalues_size();
   for (k_int32 i = 0; i < ns; ++i) {
@@ -313,8 +394,8 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc
       TSTagReaderSpec_TagValueArray *tagInfo = spec->mutable_primarytags(j);
       k_uint32 tag_id = tagInfo->colid();
       const std::string &str = tagInfo->tagvalues(i);
-      roachpb::DataType d_type = table_->fields_[tag_id]->get_storage_type();
-      k_int32 len = table_->fields_[tag_id]->get_storage_length();
+      roachpb::DataType d_type = table->fields_[tag_id]->get_storage_type();
+      k_int32 len = table->fields_[tag_id]->get_storage_length();
       switch (d_type) {
         case roachpb::DataType::BOOL: {
           k_bool val = 0;
@@ -400,7 +481,7 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, size_t malloc
           return FAIL;
         }
       }
-      ptr += table_->fields_[tag_id]->get_storage_length();
+      ptr += table->fields_[tag_id]->get_storage_length();
     }
     primary_tags->push_back(buffer);
   }
@@ -418,6 +499,94 @@ void StorageHandler::tagFilter(kwdbContext_p ctx, Field *tag_filter) {
 
     tag_rowbatch_->AddSelection();
     tag_rowbatch_->NextLine();
+  }
+  tag_rowbatch_->isFilter_ = true;
+  tag_rowbatch_->ResetLine();
+
+  ReturnVoid();
+}
+
+void StorageHandler::tagRelFilter(kwdbContext_p ctx,
+                                  std::vector<void *> secondary_tags,
+                                  const vector<k_uint32> tag_other_join_cols) {
+  EnterFunc();
+  bool isAlreadyFilter = tag_rowbatch_->isFilter_;
+  // Check if the sizes of secondary_tags and tag_other_join_indexes are equal; log an error and return if not
+  // secondary_tags shoudl be the same as tag_other_join_indexes since they are prepared by InitRelJointIndexes()
+  if (secondary_tags.size() != tag_other_join_cols.size()) {
+    LOG_ERROR("tagRelFilter() Failed. The size of secondary tags and rel columns are not equal \n");
+    ReturnVoid();
+  }
+  k_uint32 count = isAlreadyFilter ? tag_rowbatch_->effect_count_ : tag_rowbatch_->count_;
+  // Iterate over each row in tag_rowbatch_
+  for (k_uint32 i = 0; i < count; ++i) {
+    TagData cur_data;
+    void *bmp = nullptr;
+    // Retrieve the tag data and bitmap for the current row
+    // cur_data should return all tag columns
+    tag_rowbatch_->GetTagData(&cur_data, &bmp, tag_rowbatch_->GetCurrentEntity());
+
+    bool isEqual = true;  // Flag to check if the current row matches the criteria
+    k_uint32 tag_col_offset = table_->GetMinTagId();
+    for (int i = 0; i < secondary_tags.size(); i++) {
+      char* other_data = static_cast<char*>(secondary_tags[i]);
+      // Get the join index for the current column
+      k_uint32 cur_join_index = tag_other_join_cols[i];
+      // Check if the values are equal, no match if not
+      if (cur_data[cur_join_index].is_null) {
+        if (other_data != nullptr) {
+          // nullptr means value is null
+          isEqual = false;
+          break;
+        }
+      } else {
+        k_uint32 index = table_->scan_tags_[cur_join_index] + tag_col_offset;
+        switch (table_->fields_[index]->get_storage_type()) {
+          case roachpb::DataType::CHAR:
+          case roachpb::DataType::VARCHAR:
+            if (std::strcmp(cur_data[cur_join_index].tag_data, other_data) != 0) {
+              isEqual = false;
+            }
+            break;
+          case roachpb::DataType::NCHAR:
+          case roachpb::DataType::NVARCHAR:
+          case roachpb::DataType::VARBINARY:
+          case roachpb::DataType::BINARY:
+            if (std::memcmp(cur_data[cur_join_index].tag_data, other_data,
+                    tag_rowbatch_->GetDataLen(i, cur_join_index, table_->fields_[index]->get_column_type())) != 0) {
+              isEqual = false;
+            }
+            break;
+          default:
+            if (std::memcmp(cur_data[cur_join_index].tag_data, other_data,
+                    table_->fields_[index]->get_storage_length()) != 0) {
+              isEqual = false;
+            }
+            break;
+        }
+        if (!isEqual) {
+          break;
+        }
+      }
+    }
+    if (isAlreadyFilter) {
+      // If the row does not match, move to the next row
+      if (!isEqual) {
+        // remove current selected
+        tag_rowbatch_->RemoveSelection();
+      } else {
+        tag_rowbatch_->NextLine();
+      }
+      continue;
+    } else {
+      if (!isEqual) {
+        tag_rowbatch_->NextLine();
+        continue;
+      } else {
+        tag_rowbatch_->AddSelection();
+        tag_rowbatch_->NextLine();
+      }
+    }
   }
   tag_rowbatch_->isFilter_ = true;
   tag_rowbatch_->ResetLine();

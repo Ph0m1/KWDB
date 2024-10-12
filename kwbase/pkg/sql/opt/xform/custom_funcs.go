@@ -2222,7 +2222,69 @@ func (c *CustomFuncs) ShouldReorderJoins(left, right memo.RelExpr) bool {
 	// we'd want to be able to reference the logical properties of the
 	// expression being explored in this CustomFunc.
 	size := c.deriveJoinSize(left) + c.deriveJoinSize(right)
+	if c.e.evalCtx.SessionData.MultiModelEnabled &&
+		(left.Memo().QueryType == memo.MultiModel ||
+			right.Memo().QueryType == memo.MultiModel) {
+		return size <= c.e.evalCtx.SessionData.MultiModelReorderJoinsLimit
+	}
 	return size <= c.e.evalCtx.SessionData.ReorderJoinsLimit
+}
+
+// NoJoinManipulation returns whether the join has alternatives.
+// In multiple model query processing, when the join happens between a
+// relational table and a timeseries table, force the join sequence and
+// method to favor outside-in and BLJ at the moment. Later on, will update to support
+// inside-out and hybrid scenario.
+func (c *CustomFuncs) NoJoinManipulation(left, right memo.RelExpr) bool {
+	// Check if the left or right expression is a relational table, when multiple model
+	// query processing is enabled and the current query is a multi-model query.
+	if c.e.evalCtx.SessionData.MultiModelEnabled &&
+		(left.Memo().QueryType == memo.MultiModel ||
+			right.Memo().QueryType == memo.MultiModel) {
+		switch lchild := left.FirstExpr().(type) {
+		case *memo.TSScanExpr:
+			return false
+		case *memo.SelectExpr:
+			//tab = left.Memo().Metadata().Table(lchild.Child(0).Private().Table)
+			switch lchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				return false
+			}
+		}
+		switch rchild := right.FirstExpr().(type) {
+		case *memo.TSScanExpr:
+			return false
+		case *memo.SelectExpr:
+			switch rchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// NoLookupJoinManipulation returns whether the join method has alternatives.
+// In multiple model query processing, when the join happens between a
+// relational table and a timeseries table, force the join sequence and
+// method to favor outside-in and BLJ at the moment. Later on, will update to support
+// inside-out and hybrid scenario.
+func (c *CustomFuncs) NoLookupJoinManipulation(left memo.RelExpr) bool {
+	// Check if the left expression is a TS table, when multiple model
+	// query processing is enabled and the current query is a multi-model query.
+	if c.e.evalCtx.SessionData.MultiModelEnabled &&
+		(left.Memo().QueryType == memo.MultiModel) {
+		switch lchild := left.FirstExpr().(type) {
+		case *memo.TSScanExpr:
+			return false
+		case *memo.SelectExpr:
+			switch lchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // IsSimpleEquality returns true if all of the filter conditions are equalities

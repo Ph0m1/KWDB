@@ -1047,6 +1047,75 @@ func (p *PhysicalPlan) AddTSProjection(columns []uint32, useStatistic bool, isTa
 	}
 }
 
+// AddHashTSProjection applies a projection to a plan. The new plan outputs the
+// columns of the old plan as listed in the slice. The Ordering is updated;
+// columns in the ordering are added to the projection as needed.
+//
+// The PostProcessSpec may not be updated if the resulting projection keeps all
+// the columns in their original order.
+//
+// Note: the columns slice is relinquished to this function, which can modify it
+// or use it directly in specs.
+// for multiple model processing
+func (p *PhysicalPlan) AddHashTSProjection(
+	columns []uint32, useStatistic bool, isTag bool, resultCols sqlbase.ResultColumns, relCount int,
+) {
+	// If the projection we are trying to apply projects every column, don't
+	// update the spec.
+	if isIdentityProjection(columns, len(p.ResultTypes)) && len(columns) != 0 {
+		return
+	}
+
+	// Update the ordering.
+	if len(p.MergeOrdering.Columns) > 0 {
+		newOrdering := make([]execinfrapb.Ordering_Column, len(p.MergeOrdering.Columns))
+		for i, c := range p.MergeOrdering.Columns {
+			// Look for the column in the new projection.
+			found := -1
+			for j, projCol := range columns {
+				if projCol == c.ColIdx {
+					found = j
+				}
+			}
+			if found == -1 {
+				// We have a column that is not in the projection but will be necessary
+				// later when the streams are merged; add it.
+				found = len(columns)
+				columns = append(columns, c.ColIdx)
+			}
+			newOrdering[i].ColIdx = uint32(found)
+			newOrdering[i].Direction = c.Direction
+		}
+		p.MergeOrdering.Columns = newOrdering
+	}
+
+	if !useStatistic {
+		newResultTypes := make([]types.T, len(columns))
+
+		for i, c := range columns {
+			if i < relCount {
+				newResultTypes[i] = *resultCols[i].Typ
+			} else {
+				newResultTypes[i] = p.ResultTypes[c]
+			}
+		}
+
+		post := p.GetLastStageTSPost()
+
+		if post.Renders != nil {
+			// Apply the projection to the existing rendering; in other words, keep
+			// only the renders needed by the new output columns, and reorder them
+			// accordingly.
+			oldRenders := post.Renders
+			post.Renders = make([]string, len(columns))
+			for i, c := range columns {
+				post.Renders[i] = oldRenders[c]
+			}
+		}
+		p.SetLastStageTSPost(post, newResultTypes)
+	}
+}
+
 // exprColumn returns the column that is referenced by the expression, if the
 // expression is just an IndexedVar.
 //
@@ -1960,6 +2029,52 @@ func (p *PhysicalPlan) AddJoinStage(
 		}
 	}
 	p.ResultRouters = p.ResultRouters[:0]
+
+	// Connect the left and right routers to the output joiners. Each joiner
+	// corresponds to a hash bucket.
+	for bucket := 0; bucket < len(nodes); bucket++ {
+		pIdx := pIdxStart + ProcessorIdx(bucket)
+
+		// Connect left routers to the processor's first input. Currently the join
+		// node doesn't care about the orderings of the left and right results.
+		p.MergeResultStreams(leftRouters, bucket, leftMergeOrd, pIdx, 0, false /* forceSerialization */)
+		// Connect right routers to the processor's second input if it has one.
+		p.MergeResultStreams(rightRouters, bucket, rightMergeOrd, pIdx, 1, false /* forceSerialization */)
+
+		p.ResultRouters = append(p.ResultRouters, pIdx)
+	}
+}
+
+// AddBLJoinStage adds join processors at each of the specified nodes, and wires
+// the left and right-side outputs to these processors.
+func (p *PhysicalPlan) AddBLJoinStage(
+	nodes []roachpb.NodeID,
+	core execinfrapb.ProcessorCoreUnion,
+	post execinfrapb.PostProcessSpec,
+	leftTypes, rightTypes []types.T,
+	leftMergeOrd, rightMergeOrd execinfrapb.Ordering,
+	leftRouters, rightRouters []ProcessorIdx,
+) {
+	pIdxStart := ProcessorIdx(len(p.Processors))
+	stageID := p.NewStageID()
+
+	for _, n := range nodes {
+		inputs := make([]execinfrapb.InputSyncSpec, 0, 2)
+		inputs = append(inputs, execinfrapb.InputSyncSpec{ColumnTypes: leftTypes})
+		inputs = append(inputs, execinfrapb.InputSyncSpec{ColumnTypes: rightTypes})
+
+		proc := Processor{
+			Node: n,
+			Spec: execinfrapb.ProcessorSpec{
+				Input:   inputs,
+				Core:    core,
+				Post:    post,
+				Output:  []execinfrapb.OutputRouterSpec{{Type: execinfrapb.OutputRouterSpec_PASS_THROUGH}},
+				StageID: stageID,
+			},
+		}
+		p.Processors = append(p.Processors, proc)
+	}
 
 	// Connect the left and right routers to the output joiners. Each joiner
 	// corresponds to a hash bucket.

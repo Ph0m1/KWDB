@@ -121,6 +121,9 @@ typedef struct {
 typedef enum _EnMqType {
   MQ_TYPE_DML,
   MQ_TYPE_DML_SETUP,
+  // MQ_TYPE_DML_PUSH only be used for sending push request to tse for multiple model processing
+  // when the switch is on and the server starts with single node mode.
+  MQ_TYPE_DML_PUSH,
   MQ_TYPE_DML_NEXT,
   MQ_TYPE_DML_CLOSE,
   MQ_TYPE_DML_PG_RESULT,
@@ -136,6 +139,9 @@ typedef struct {
   int64_t max_allocated_mem;  // maximum number of memory
   int64_t max_allocated_disk;  // Maximum number of disk
   int64_t output_row_num;  // rows of aggregation
+  // build_time only be used for showing build time in explain analyze of hash tag scan op
+  // for multiple model processing when the switch is on and the server starts with single node mode.
+  int64_t build_time;  // time of build
 } TsFetcher;
 
 typedef struct {
@@ -160,6 +166,10 @@ typedef struct _QueryInfo {
   void* handle;
   int32_t time_zone;
   uint64_t relation_ctx;
+  // only pass the rel data chunk pointer and count info to tse for multiple model processing
+  // when the switch is on and the server starts with single node mode.
+  void* relBatchData;
+  int32_t relRowCount;
 } QueryInfo;
 
 typedef QueryInfo RespInfo;

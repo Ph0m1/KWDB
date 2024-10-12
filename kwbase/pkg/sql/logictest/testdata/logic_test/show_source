@@ -40,6 +40,7 @@ default_transaction_read_only             off
 distsql                                   off
 enable_implicit_select_for_update         on
 enable_insert_fast_path                   on
+enable_multimodel                         off
 enable_zigzag_join                        on
 experimental_enable_hash_sharded_indexes  off
 experimental_enable_temp_tables           off
@@ -54,6 +55,7 @@ locality                                  region=test,dc=dc1
 lock_timeout                              0
 max_identifier_length                     128
 max_index_keys                            32
+multi_model_reorder_joins_limit           8
 node_id                                   1
 optimizer_foreign_keys                    on
 reorder_joins_limit                       4

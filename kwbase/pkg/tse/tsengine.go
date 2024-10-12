@@ -49,6 +49,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/stop"
 	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
+	"github.com/lib/pq/oid"
 	"github.com/pkg/errors"
 )
 
@@ -117,6 +118,30 @@ type TsQueryInfo struct {
 	Code     int
 	Handle   unsafe.Pointer
 	Fetcher  TsFetcher
+	// only pass the data chunk to tse for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	PushData *DataChunkGo
+	RowCount int
+}
+
+// ColumnInfo defines ColumInfo structure used for pushing batchlookup data down
+// only create the columnInfo to build data chunk in blj for multiple model processing
+// when the switch is on and the server starts with single node mode.
+type ColumnInfo struct {
+	StorageLen      uint32
+	FixedStorageLen uint32
+	StorageType     oid.Oid
+}
+
+// DataChunkGo defines DataChunk structure used for pushing batchlookup data down
+// only use for creating push data chunk for multiple model processing
+// when the switch is on and the server starts with single node mode.
+type DataChunkGo struct {
+	Data         []byte
+	ColInfo      []ColumnInfo
+	ColOffset    []uint32
+	BitmapOffset []uint32
+	RowCount     uint32
 }
 
 // DedupResult is PutData dedup result
@@ -653,6 +678,9 @@ type TsFetcherStats struct {
 	MaxAllocatedMem  int64 // maximum number of memory
 	MaxAllocatedDisk int64 // Maximum number of disk
 	OutputRowNum     int64 // row of aggregation
+	// BuildTime only be used for hash tag scan op for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	BuildTime int64 // hash tag build time
 }
 
 // sendDmlMsgToTs call the tsengine dml interface to issue a request and return the result
@@ -673,6 +701,17 @@ func (r *TsEngine) tsExecute(
 	queryInfo.unique_id = C.int(tsQueryInfo.UniqueID)
 	queryInfo.time_zone = C.int(tsQueryInfo.TimeZone)
 	queryInfo.relation_ctx = C.uint64_t(uintptr(unsafe.Pointer(ctx)))
+	// process push data for batch lookup join for multiple model processing
+	// only store the data chunk pointer into tsQueryInfo and push it down to tse
+	// when the switch is on and the server starts with single node mode.
+	dataChunk := tsQueryInfo.PushData
+	if dataChunk != nil {
+		pushDatabufC := C.CBytes(dataChunk.Data)
+		queryInfo.relRowCount = C.int(dataChunk.RowCount)
+		defer C.free(unsafe.Pointer(pushDatabufC))
+		queryInfo.relBatchData = pushDatabufC
+		dataChunk = nil // clean datachunk
+	}
 
 	// init fetcher of analyse
 	var vecFetcher C.VecTsFetcher
@@ -887,6 +926,14 @@ func (r *TsEngine) NextTsFlowPgWire(
 	ctx *context.Context, tsQueryInfo TsQueryInfo,
 ) (tsRespInfo TsQueryInfo, err error) {
 	return r.tsExecute(ctx, C.MQ_TYPE_DML_PG_RESULT, tsQueryInfo)
+}
+
+// PushTsFlow drive pushing relational data to TSEngine for join
+// only push PUSH type req and pass data chunk pointer to tse for multiple model processing
+// when the switch is on and the server starts with single node mode.
+func (r *TsEngine) PushTsFlow(ctx *context.Context, tsQueryInfo TsQueryInfo) (err error) {
+	_, err = r.tsExecute(ctx, C.MQ_TYPE_DML_PUSH, tsQueryInfo)
+	return err
 }
 
 // CloseTsFlow close the TS actuator corresponding to the current flow
@@ -1245,6 +1292,11 @@ func AddStatsList(tsFetcher TsFetcher, statss []TsFetcherStats) []TsFetcherStats
 		}
 		if fetcher.output_row_num > 0 {
 			statss[i].OutputRowNum += int64(fetcher.output_row_num)
+		}
+		// build_time only be used for hash tag scan op for multiple model processing
+		// when the switch is on and the server starts with single node mode.
+		if fetcher.build_time > 0 {
+			statss[i].BuildTime += int64(fetcher.build_time)
 		}
 	}
 	return statss

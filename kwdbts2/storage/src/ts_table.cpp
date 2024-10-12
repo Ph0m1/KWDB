@@ -2162,6 +2162,83 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
   return KStatus::SUCCESS;
 }
 
+// for multimodel processing, the entity ids have to be in the original order, hence,
+// use the following way to get the iterator instead of ordering by entity group
+KStatus TsTable::GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
+                             std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
+                             std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
+                             TsTableIterator** iter, std::vector<timestamp64> ts_points,
+                             bool reverse, bool sorted) {
+  KWDB_DURATION(StStatistics::Get().get_iterator);
+  if (scan_cols.empty()) {
+    // LOG_ERROR("TsTable::GetIterator Error : no column");
+    // return KStatus::FAIL;
+  }
+  auto ts_table_iterator = new TsTableIterator();
+  KStatus s;
+  Defer defer{[&]() {
+    if (s == FAIL) {
+      delete ts_table_iterator;
+      ts_table_iterator = nullptr;
+      *iter = nullptr;
+    }
+  }};
+
+  auto actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
+  std::vector<k_uint32> ts_scan_cols;
+  for (auto col : scan_cols) {
+    if (col >= actual_cols.size()) {
+      // In the concurrency scenario, after the storage has deleted the column,
+      // kwsql sends query again
+      LOG_ERROR("GetIterator Error : TsTable no column %d", col);
+      return KStatus::FAIL;
+    }
+    ts_scan_cols.emplace_back(actual_cols[col]);
+  }
+
+  uint64_t entity_group_id = 0;
+  uint32_t subgroup_id = 0;
+  std::shared_ptr<TsEntityGroup> entity_group;
+  std::vector<uint32_t> entities;
+  for (auto& entity : entity_ids) {
+    if (entity_group_id == 0 && subgroup_id == 0) {
+      entity_group_id = entity.entityGroupId;
+      subgroup_id = entity.subGroupId;
+      s = GetEntityGroup(ctx, entity.entityGroupId, &entity_group);
+      if (s == FAIL) return s;
+    }
+    if (entity.entityGroupId != entity_group_id || entity.subGroupId != subgroup_id) {
+       TsIterator* ts_iter;
+      s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
+                                    scan_cols, ts_scan_cols, scan_agg_types, table_version, &ts_iter, entity_group,
+                                    ts_points, reverse, sorted, false);
+      if (s == FAIL) return s;
+      ts_table_iterator->AddEntityIterator(ts_iter);
+
+      subgroup_id = entity.subGroupId;
+      entities.clear();
+    }
+    if (entity.entityGroupId != entity_group_id) {
+      entity_group_id = entity.entityGroupId;
+      entity_group.reset();
+      s = GetEntityGroup(ctx, entity.entityGroupId, &entity_group);
+      if (s == FAIL) return s;
+    }
+    entities.emplace_back(entity.entityId);
+  }
+  if (!entities.empty()) {
+    TsIterator* ts_iter;
+    s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
+                                  scan_cols, ts_scan_cols, scan_agg_types, table_version, &ts_iter, entity_group,
+                                  ts_points, reverse, sorted, false);
+    if (s == FAIL) return s;
+    ts_table_iterator->AddEntityIterator(ts_iter);
+  }
+
+  (*iter) = ts_table_iterator;
+  return KStatus::SUCCESS;
+}
+
 KStatus TsTable::CreateSnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t begin_hash, uint64_t end_hash,
                                 uint64_t* snapshot_id) {
   LOG_INFO("CreateSnapshot begin! [Snapshot ID:%lu, Ranggroup ID: %lu]", *snapshot_id, range_group_id);

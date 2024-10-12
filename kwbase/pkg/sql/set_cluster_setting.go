@@ -333,6 +333,12 @@ func (n *setClusterSettingNode) startExec(params runParams) error {
 				break
 			}
 			sqltelemetry.ReportJoinReorderLimit(int(val))
+		case MultiModelReorderJoinsLimitClusterSettingName:
+			val, err := strconv.ParseInt(expectedEncodedValue, 10, 64)
+			if err != nil {
+				break
+			}
+			sqltelemetry.ReportMultiModelJoinReorderLimit(int(val))
 		case VectorizeClusterSettingName:
 			val, err := strconv.Atoi(expectedEncodedValue)
 			if err != nil {

@@ -385,6 +385,34 @@ func (hj *HashJoinerSpec) summary() (string, []string) {
 	return name, details
 }
 
+// summary implements the diagramCellType interface.
+func (blj *BatchLookupJoinerSpec) summary() (string, []string) {
+	name := "BatchLookupJoiner"
+	if blj.Type.IsSetOpJoin() {
+		name = "BatchLookupJoinHashSetOp"
+	}
+
+	details := make([]string, 0, 4)
+
+	if blj.Type != sqlbase.InnerJoin {
+		details = append(details, joinTypeDetail(blj.Type))
+	}
+	if len(blj.LeftEqColumns) > 0 {
+		details = append(details, fmt.Sprintf(
+			"left(%s)=right(%s)",
+			colListStr(blj.LeftEqColumns), colListStr(blj.RightEqColumns),
+		))
+	}
+	if !blj.OnExpr.Empty() {
+		details = append(details, fmt.Sprintf("ON %s", blj.OnExpr))
+	}
+	if blj.MergedColumns {
+		details = append(details, fmt.Sprintf("Merged columns: %d", len(blj.LeftEqColumns)))
+	}
+
+	return name, details
+}
+
 func orderedJoinDetails(
 	joinType sqlbase.JoinType, left, right Ordering, onExpr Expression,
 ) []string {

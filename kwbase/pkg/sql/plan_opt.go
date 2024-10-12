@@ -469,6 +469,10 @@ func (opc *optPlanningCtx) reuseMemo(cachedMemo *memo.Memo) (*memo.Memo, error) 
 
 	opc.optimizer.Memo().TSWhiteListMap = cachedMemo.TSWhiteListMap
 	opc.optimizer.Memo().SetTsDop(cachedMemo.GetTsDop())
+	if opc.optimizer.Memo().QueryType == memo.MultiModel {
+		opc.optimizer.SetTsRelGroup()
+		opc.optimizer.CheckMultiModel()
+	}
 	if _, err := opc.optimizer.Optimize(); err != nil {
 		return nil, err
 	}
@@ -556,6 +560,13 @@ func (opc *optPlanningCtx) buildExecMemo(
 	if err := bld.Build(); err != nil {
 		return nil, tree.Invalid, err
 	}
+
+	// check if the query satisfies the requirements for multiple model processing.
+	if opc.optimizer.Memo().QueryType == memo.MultiModel {
+		opc.optimizer.SetTsRelGroup()
+		opc.optimizer.CheckMultiModel()
+	}
+
 	if opt.CheckTsProperty(bld.TSInfo.TSProp, optbuilder.TSPropSTableWithoutChild) {
 		p.ShortCircuit = false
 	}
@@ -571,7 +582,7 @@ func (opc *optPlanningCtx) buildExecMemo(
 	// If this statement doesn't have placeholders, add it to the cache. Note
 	// that non-prepared statements from pgwire clients cannot have
 	// placeholders.
-	if opc.useCache && !bld.HadPlaceholders && !bld.DisableMemoReuse && !opt.CheckTsProperty(bld.TSInfo.TSProp, optbuilder.TSPropSTableWithoutChild) {
+	if opc.useCache && !bld.HadPlaceholders && !bld.DisableMemoReuse && !opt.CheckTsProperty(bld.TSInfo.TSProp, optbuilder.TSPropSTableWithoutChild) && opc.optimizer.Memo().QueryType != memo.MultiModel {
 		memo := opc.optimizer.DetachMemo()
 		//memo.PhysType = bld.PhysType
 		cachedData := querycache.CachedData{

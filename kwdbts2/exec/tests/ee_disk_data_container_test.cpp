@@ -24,9 +24,16 @@ using namespace kwdbts;  // NOLINT
 
 class TestDiskDataContainer : public ::testing::Test {  // inherit testing::Test
  protected:
-  static void SetUpTestCase() {}
+  static void SetUpTestCase() {
+    g_pstBufferPoolInfo = kwdbts::EE_MemPoolInit(1024, ROW_BUFFER_SIZE);
+    EXPECT_EQ((g_pstBufferPoolInfo != nullptr), true);
+  }
 
-  static void TearDownTestCase() {}
+  static void TearDownTestCase() {
+    kwdbts::KStatus status = kwdbts::EE_MemPoolCleanUp(g_pstBufferPoolInfo);
+    EXPECT_EQ(status, kwdbts::SUCCESS);
+    g_pstBufferPoolInfo = nullptr;
+  }
   void SetUp() override {}
   void TearDown() override {}
 

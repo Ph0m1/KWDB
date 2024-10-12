@@ -88,6 +88,12 @@ class TABLE {
   k_uint32 GetMinTagId() { return min_tag_id_; }
   k_uint32 GetTagNum() { return tag_num_; }
   void SetTableVersion(k_uint32 version) { table_version_ = version; }
+  // get relational fields for multiple model processing
+  vector<Field*>& GetRelFields();
+  // get relational and tag joining columns for multiple model processing
+  std::vector<pair<k_uint32, k_uint32>>& GetRelTagJoinColumnIndexes();
+  // get scan tags for multiple model processing
+  std::vector<k_uint32>& GetScanTags();
 
  private:
   KStatus InitField(kwdbContext_p ctx, const TSCol &col, k_uint32 index,
@@ -103,6 +109,8 @@ class TABLE {
   k_uint32 tag_num_{0};
   std::vector<k_uint32> scan_cols_;
   std::vector<k_uint32> scan_tags_;
+  // relational scan cols for multiple model processing
+  std::vector<k_uint32> scan_rel_cols_;
   std::vector<Sumfunctype> scan_agg_types_;
   std::vector<Sumfunctype> scan_real_agg_types_;
   std::vector<uint32_t> hash_points_;
@@ -115,6 +123,12 @@ class TABLE {
                              // remain align
   k_uint32 table_version_{0};
   bool is_reverse_{0};
+
+ protected:
+  // relational fields for multiple model processing
+  vector<Field*> rel_fields_;
+  // join columns for multiple model processing
+  std::vector<pair<k_uint32, k_uint32>> rel_tag_join_column_indexes_;
 
  private:
   k_bool init_{KFALSE};

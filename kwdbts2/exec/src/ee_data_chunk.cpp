@@ -101,6 +101,16 @@ KStatus DataChunk::InsertDecimal(k_uint32 row, k_uint32 col, DatumPtr value, k_b
   return SUCCESS;
 }
 
+KStatus DataChunk::PutData(kwdbContext_p ctx, DatumPtr value, k_uint32 count) {
+  EnterFunc();
+  if (value == nullptr) {
+    Return(KStatus::FAIL);
+  }
+  memcpy(data_, value, bitmap_size_ * col_num_ + capacity_ * row_size_);
+  count_ = count;
+  Return(KStatus::SUCCESS);
+}
+
 KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, Field** renders) {
   EnterFunc();
 
@@ -197,6 +207,19 @@ KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, Field** renders)
   AddCount();
 
   Return(KStatus::SUCCESS);
+}
+
+DatumPtr DataChunk::GetDataPtr(k_uint32 row, k_uint32 col) {
+  if (IsNull(row, col)) {
+    return nullptr;
+  }
+  DatumPtr p = data_ + row * col_info_[col].fixed_storage_len + col_offset_[col];
+  if (IsStringType(col_info_[col].storage_type)) {
+    p += STRING_WIDE;
+  } else if (col_info_[col].storage_type == roachpb::DataType::DECIMAL) {
+    p += BOOL_WIDE;
+  }
+  return p;
 }
 
 DatumPtr DataChunk::GetData(k_uint32 row, k_uint32 col) {
@@ -1163,5 +1186,23 @@ k_uint32 DataChunk::ComputeRowSize(vector<ColumnInfo>& column_info) {
 
   return row_size;
 }
+
+KStatus DataChunk::ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data) {
+  EnterFunc();
+  DatumPtr p = data_ + row * col_info_[col].fixed_storage_len + col_offset_[col];
+  if (IsStringType(col_info_[col].storage_type)) {
+    std::memcpy(&tag_raw_data.size, p, STRING_WIDE);
+    p += STRING_WIDE;
+  } else if (col_info_[col].storage_type == roachpb::DataType::DECIMAL) {
+    std::memcpy(&tag_raw_data.size, p, BOOL_WIDE);
+    p += BOOL_WIDE;
+  } else {
+    tag_raw_data.size = GetColumnInfo()[col].storage_len;
+  }
+  tag_raw_data.tag_data = p;
+  tag_raw_data.is_null = IsNull(row, col);
+  Return(KStatus::SUCCESS);
+}
+
 
 }   // namespace kwdbts

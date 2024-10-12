@@ -28,6 +28,11 @@ TABLE::~TABLE() {
     free(fields_);
   }
 
+  // clean up relational fields for multiple model processing
+  for (k_uint32 i = 0; i < rel_fields_.size(); ++i) {
+    SafeDeletePointer(rel_fields_[i]);
+  }
+
   fields_ = nullptr;
   field_num_ = 0;
 }
@@ -37,6 +42,9 @@ Field *TABLE::GetFieldWithColNum(k_uint32 num) {
   Field *table_field = nullptr;
   if (num < field_num_) {
     table_field = fields_[num];
+  } else if (num < field_num_ + rel_fields_.size()) {
+    // handle relational fields for multiple model processing
+    table_field = rel_fields_[num - field_num_];
   }
 
   return table_field;
@@ -98,9 +106,53 @@ KStatus TABLE::Init(kwdbContext_p ctx, const TSTagReaderSpec *spec) {
     if (KStatus::FAIL == ret) {
       break;
     }
+
+    // initialize relational fields for multiple model processing
+    rel_fields_.reserve(spec->relationalcols_size());
+    if (nullptr == fields_) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      LOG_ERROR("malloc error\n");
+      break;
+    }
+    // resolve relational cols for multiple model processing
+    for (k_int32 i = 0; i < spec->relationalcols_size(); ++i) {
+      Field *rel_field = nullptr;
+      const TSCol &col = spec->relationalcols(i);
+      ret = InitField(ctx, col, i + field_num_, &rel_field);
+      if (ret != SUCCESS) break;
+      rel_fields_.push_back(rel_field);
+    }
+
+    if (KStatus::FAIL == ret) {
+      break;
+    }
+
+    // initialize join columns for multiple model processing
+    if (spec->probecolids_size() != spec->hashcolids_size()) {
+      ret = KStatus::FAIL;
+      break;
+    }
+
+    rel_tag_join_column_indexes_.reserve(spec->probecolids_size());
+    // resolve probe and hash colids for multiple model processing
+    for (k_int32 i = 0; i < spec->probecolids_size(); ++i) {
+      rel_tag_join_column_indexes_.push_back({spec->probecolids(i), spec->hashcolids(i)});
+    }
   } while (0);
 
   Return(ret);
+}
+
+vector<Field*>& TABLE::GetRelFields() {
+  return rel_fields_;
+}
+
+std::vector<pair<k_uint32, k_uint32>>& TABLE::GetRelTagJoinColumnIndexes() {
+  return rel_tag_join_column_indexes_;
+}
+
+std::vector<k_uint32>& TABLE::GetScanTags() {
+  return scan_tags_;
 }
 
 KStatus TABLE::InitField(kwdbContext_p ctx, const TSCol &col, k_uint32 index,

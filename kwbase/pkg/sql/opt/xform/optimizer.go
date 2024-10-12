@@ -37,6 +37,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -1173,4 +1174,315 @@ func walk(expr opt.Expr) bool {
 	}
 	e := expr.Child(0)
 	return walk(e)
+}
+
+// ColumnMapping defines the mapping of a column within a specific table
+// for multi-model processing.
+type ColumnMapping struct {
+	TableIndex  int
+	ColumnIndex int
+}
+
+// IndexMapping defines the mapping for indexes associated with a specific table
+// for multi-model processing.
+type IndexMapping struct {
+	TableIndex int
+	IndexID    []uint32
+}
+
+// CheckMultiModel serves as the entry point for checking all expressions
+// in the memo to ensure they comply with the requirements
+// for multi-model processing.
+func (o *Optimizer) CheckMultiModel() {
+	mem := o.mem
+	root := mem.RootExpr().(memo.RelExpr)
+	allTables := mem.Metadata().AllTables()
+	colMapping := make(map[int]ColumnMapping)
+	columnIndex := 1
+	tableIndex := 0
+	for _, table := range allTables {
+		for i := 0; i < table.Table.ColumnCount(); i++ {
+			colMapping[columnIndex] = ColumnMapping{
+				TableIndex:  tableIndex,
+				ColumnIndex: i,
+			}
+			columnIndex++
+		}
+		tableIndex++
+	}
+
+	processRootExpr(root, mem, colMapping)
+}
+
+// isTSScanOrSelectTSScan is a helper function to check if the expression is a TSScanExpr or a SelectExpr with a TSScanExpr input
+// for multiple model processing
+func isTSScanOrSelectTSScan(expr memo.RelExpr) bool {
+	switch e := expr.(type) {
+	case *memo.TSScanExpr:
+		return true
+	case *memo.SelectExpr:
+		if _, ok := e.Input.(*memo.TSScanExpr); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// processRootExpr examines the expressions within the memo structure to determine
+// if the multi-model flag needs to be reset.
+// for multiple model processing
+func processRootExpr(root memo.RelExpr, mem *memo.Memo, colMapping map[int]ColumnMapping) {
+	allTables := mem.Metadata().AllTables()
+	switch expr := root.(type) {
+	case *memo.ProjectExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.SelectExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.DistinctOnExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.UpsertDistinctOnExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.LimitExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.OffsetExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.SortExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.IndexJoinExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.LookupJoinExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.OrdinalityExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.Max1RowExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.ProjectSetExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.WindowExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.InsertExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.UpdateExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.UpsertExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.DeleteExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.CreateTableExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.ExplainExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.AlterTableSplitExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.AlterTableUnsplitExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.AlterTableRelocateExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.ControlJobsExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.CancelQueriesExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.CancelSessionsExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.ExportExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.TSInsertSelectExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.ScalarGroupByExpr:
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.GroupByExpr:
+		unsupportedMultiModal := false
+		if projectExpr, ok := expr.Input.(*memo.ProjectExpr); ok {
+			for _, proj := range projectExpr.Projections {
+				if element, ok := proj.Element.(opt.Expr); ok {
+					if execInTSEngine, _ := memo.CheckExprCanExecInTSEngine(element, memo.ExprPosProjList,
+						mem.GetWhiteList().CheckWhiteListParam, false); !execInTSEngine {
+						unsupportedMultiModal = true
+						mem.MultimodelHelper.ResetReasons[memo.UnsupportedAggFuncOrExpr] = struct{}{}
+					}
+				}
+			}
+		}
+
+		for _, agg := range expr.Aggregations {
+			for i := 0; i < agg.Child(0).ChildCount(); i++ {
+				if scalarExpr, ok := agg.Child(0).Child(i).(opt.ScalarExpr); ok {
+					if !checkDataType(scalarExpr.DataType()) {
+						unsupportedMultiModal = true
+						mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
+					}
+				}
+			}
+
+			srcExpr := agg.Agg
+			hashCode := memo.GetExprHash(srcExpr)
+			if !mem.GetWhiteList().CheckWhiteListParam(hashCode, memo.ExprPosProjList) {
+				unsupportedMultiModal = true
+				mem.MultimodelHelper.ResetReasons[memo.UnsupportedAggFuncOrExpr] = struct{}{}
+			}
+		}
+
+		if unsupportedMultiModal {
+			mem.QueryType = memo.Unset
+			if mem.MultimodelHelper.HasLastAgg {
+				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+			}
+		}
+
+		processRootExpr(expr.Input, mem, colMapping)
+	case *memo.InnerJoinExpr:
+		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
+		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
+		if leftIsTSScan && rightIsTSScan {
+			mem.QueryType = memo.Unset
+			if mem.MultimodelHelper.HasLastAgg {
+				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+			}
+		}
+
+		joinPredicates := expr.On
+
+		for _, jp := range joinPredicates {
+			if _, ok := jp.Condition.(*memo.OrExpr); ok {
+				mem.QueryType = memo.Unset
+				mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
+				if mem.MultimodelHelper.HasLastAgg {
+					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+				}
+			} else if isTsColsJoinPredicate(jp, mem) {
+				mem.QueryType = memo.Unset
+				mem.MultimodelHelper.ResetReasons[memo.JoinBetweenTimeSeriesTables] = struct{}{}
+				if mem.MultimodelHelper.HasLastAgg {
+					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+				}
+			}
+		}
+
+		indexMapping := make(map[int]IndexMapping)
+		tableIndex2 := 0
+		for _, table := range allTables {
+			for i := 0; i < table.Table.IndexCount(); i++ {
+				index := table.Table.Index(i)
+				if index.IsUnique() {
+					columnIDs := index.IndexColumnIDs(i)
+					indexMapping[tableIndex2] = IndexMapping{
+						TableIndex: tableIndex2,
+						IndexID:    columnIDs,
+					}
+				}
+			}
+		}
+
+		if _, ok := expr.Left.(*memo.TSScanExpr); ok {
+			if _, ok := expr.Right.(*memo.InnerJoinExpr); ok {
+				checkJoinexprTsCols(joinPredicates, false, colMapping, mem)
+			}
+		}
+		if _, ok := expr.Right.(*memo.TSScanExpr); ok {
+			if _, ok := expr.Left.(*memo.InnerJoinExpr); ok {
+				checkJoinexprTsCols(joinPredicates, true, colMapping, mem)
+			}
+		}
+
+		processRootExpr(expr.Left, mem, colMapping)
+		processRootExpr(expr.Right, mem, colMapping)
+
+	default:
+
+	}
+}
+
+// checkDataType determines if a given data type (typ) is supported by the time-series engine.
+// for multiple model processing
+func checkDataType(typ *types.T) bool {
+	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
+		return false
+	}
+	switch typ.Name() {
+	case "timestamp", "int2", "int4", "int", "float4", "float", "bool", "char", "nchar", "varchar", "nvarchar", "varbytes", "timestamptz":
+		return true
+	default:
+		return false
+	}
+}
+
+// isTsColsJoinPredicate checks if a single join predicate satisfies the condition
+// where both columns on the left and right sides are time series columns.
+// for multiple model processing
+func isTsColsJoinPredicate(jp memo.FiltersItem, mem *memo.Memo) bool {
+	md := mem.Metadata()
+	var tsTypeLeft, tsTypeRight int
+
+	getTsType := func(expr opt.Expr) int {
+		switch e := expr.(type) {
+		case *memo.VariableExpr:
+			colID := e.Col
+			return md.ColumnMeta(colID).TSType
+		case *memo.MultExpr:
+			for i := 0; i < 2; i++ {
+				if varExpr, ok := e.Child(i).(*memo.VariableExpr); ok {
+					colID := varExpr.Col
+					return md.ColumnMeta(colID).TSType
+				}
+			}
+		}
+		return -1
+	}
+
+	switch expr := jp.Condition.(type) {
+	case *memo.EqExpr, *memo.LtExpr, *memo.LeExpr, *memo.GtExpr, *memo.GeExpr:
+		tsTypeLeft = getTsType(expr.Child(0))
+		tsTypeRight = getTsType(expr.Child(1))
+	}
+
+	return (tsTypeLeft == 1 || tsTypeRight == 1) || (tsTypeLeft > 0 && tsTypeRight > 0)
+}
+
+// checkJoinexprTsCols evaluates the join predicates to determine if any of the join columns
+// are from a time-series table.
+func checkJoinexprTsCols(
+	joinPredicates memo.FiltersExpr, isLeft bool, colMapping map[int]ColumnMapping, mem *memo.Memo,
+) {
+	allTables := mem.Metadata().AllTables()
+	for _, jp := range joinPredicates {
+		if eqExpr, ok := jp.Condition.(*memo.EqExpr); ok {
+			var varExpr *memo.VariableExpr
+			if isLeft {
+				varExpr, ok = eqExpr.Left.(*memo.VariableExpr)
+			} else {
+				varExpr, ok = eqExpr.Right.(*memo.VariableExpr)
+			}
+
+			if ok {
+				colID := varExpr.Col
+				if mappingInfo, ok := colMapping[int(colID)]; ok {
+					table := allTables[mappingInfo.TableIndex].Table
+					if table.GetTableType() == tree.TimeseriesTable {
+						mem.MultimodelHelper.PreGroupedAggregates = memo.OutsideIn
+					}
+				}
+			}
+		}
+	}
+}
+
+// SetTsRelGroup categorizes tables into two distinct groups:
+// relational tables and time-series tables.
+// for multiple model processing.
+func (o *Optimizer) SetTsRelGroup() {
+	mem := o.mem
+	allTables := mem.Metadata().AllTables()
+	var groups [][][]opt.TableID
+	var relTable, tsTable []opt.TableID
+	for _, table := range allTables {
+		metaID := table.MetaID
+		switch table.Table.GetTableType() {
+		case tree.RelationalTable:
+			relTable = append(relTable, metaID)
+		case tree.TimeseriesTable:
+			tsTable = append(tsTable, metaID)
+		}
+	}
+	groups = append(groups, [][]opt.TableID{relTable, tsTable})
+	mem.MultimodelHelper.TableGroup = groups
 }

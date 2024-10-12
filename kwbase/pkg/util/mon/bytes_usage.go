@@ -448,6 +448,13 @@ func (mm *BytesMonitor) AllocBytes() int64 {
 	return mm.mu.curAllocated
 }
 
+// ForceRelease is only used to process batchLookUpJoinNode cleanup process for multiple model processing
+// when the switch is on and the server starts with single node mode
+// clean up the monitor recorded mem when we already manually clean up the resource.
+func (mm *BytesMonitor) ForceRelease(ctx context.Context) {
+	mm.releaseBytes(ctx, mm.mu.curAllocated)
+}
+
 // SetMetrics sets the metric objects for the monitor.
 func (mm *BytesMonitor) SetMetrics(curCount *metric.Gauge, maxHist *metric.Histogram) {
 	mm.curBytesCount = curCount

@@ -17,8 +17,6 @@
 
 namespace kwdbts {
 
-#define PRIMARY_TAGS_EXTERN_STORAGE_LENGTH 8
-
 char *TagRowBatch::GetData(k_uint32 tagIndex, k_uint32 offset,
                            roachpb::KWDBKTSColumn::ColumnType ctype,
                            roachpb::DataType dt) {
@@ -145,6 +143,64 @@ void TagRowBatch::ResetLine() {
     current_batch_line_ = 0;
     current_batch_no_ = 0;
   }
+}
+
+KStatus TagRowBatch::GetCurrentTagData(TagData *tagData, void **bitmap) {
+  tagData->clear();
+  k_uint32 tag_num = table_->scan_tags_.size();
+  tagData->resize(tag_num);
+
+  for (int idx = 0; idx < tag_num; idx++) {
+    auto it = res_.data[idx];
+    k_uint32 index = table_->scan_tags_[idx] + tag_col_offset_;  // index of column in raw table
+
+    roachpb::DataType dt = table_->fields_[index]->get_sql_type();
+    char *ptr = nullptr;
+    TagRawData rawData;
+    rawData.is_null = false;
+    rawData.size = 0;
+
+    roachpb::KWDBKTSColumn::ColumnType type =
+        table_->fields_[index]->get_column_type();
+    if (type == roachpb::KWDBKTSColumn::TYPE_PTAG) {
+      rawData.is_null = false;
+    } else {
+      char *bitmap = static_cast<char *>(it[current_batch_no_]->mem) +
+                     current_batch_line_ * tag_offsets_[index];
+
+      if (bitmap[0] != 1) {
+        rawData.is_null = true;
+      }
+    }
+
+    if (rawData.is_null) {
+      rawData.size = 0;
+      rawData.tag_data = nullptr;
+      (*tagData)[idx] = rawData;
+      continue;
+    }
+
+    if ((type != roachpb::KWDBKTSColumn::TYPE_PTAG) &&
+        ((dt == roachpb::DataType::VARCHAR) ||
+         (dt == roachpb::DataType::NVARCHAR) ||
+         (dt == roachpb::DataType::VARBINARY))) {
+      if (dt != roachpb::DataType::VARCHAR) {
+        rawData.size = it[current_batch_no_]->getVarColDataLen(current_batch_line_);
+      }
+      rawData.tag_data =
+          static_cast<char *>(it[current_batch_no_]->getVarColData(current_batch_line_));
+    } else {
+      if (type != roachpb::KWDBKTSColumn::TYPE_PTAG) {
+        rawData.tag_data = static_cast<char *>(it[current_batch_no_]->mem) +
+                           current_batch_line_ * tag_offsets_[index] + 1;
+      } else {
+        rawData.tag_data = static_cast<char *>(it[current_batch_no_]->mem) +
+                           current_batch_line_ * tag_offsets_[index];
+      }
+    }
+    (*tagData)[idx] = rawData;
+  }
+  return SUCCESS;
 }
 
 KStatus TagRowBatch::GetTagData(TagData *tagData, void **bitmap,

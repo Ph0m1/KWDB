@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <list>
+#include <utility>
 
 #include "cm_kwdb_context.h"
 #include "ee_global.h"
@@ -32,6 +33,7 @@
 #include "ee_tag_scan_op.h"
 #include "kwdb_type.h"
 #include "ts_common.h"
+#include "mmap/mmap_tag_column_table.h"
 
 namespace kwdbts {
 
@@ -106,6 +108,16 @@ class StorageHandler {
   virtual EEIteratorErrCode TagNext(kwdbContext_p ctx, Field *tag_filter);
 
   /**
+   * @brief           singleton read data without pipe parallelism for multiple model processing
+   *
+   * @param ctx
+   * @param data
+   * @param count
+   * @return EEIteratorErrCode
+   */
+  virtual EEIteratorErrCode SingletonTagNext(kwdbContext_p ctx, Field *tag_filter);
+
+  /**
    * @brief               Close the query
    *
    * @param ctx
@@ -128,13 +140,22 @@ class StorageHandler {
   virtual EEIteratorErrCode GetNextTagData(kwdbContext_p ctx, ScanRowBatch *row_batch);
 
   EEIteratorErrCode GetEntityIdList(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter);
+  // get entity id list in HashTagScan to scan tag data for multiple model processing
+  EEIteratorErrCode GetRelEntityIdList(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter,
+          std::vector<void *>& primary_tags, std::vector<void *>& secondary_tags,
+          const vector<k_uint32> tag_other_join_cols);
 
-  KStatus GeneratePrimaryTags(TSTagReaderSpec *spec,
+  // genearate primary tags, which can also be used in HashTagScan for multiple model processing
+  static KStatus GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
                            size_t malloc_size, kwdbts::k_int32 sz,
                            std::vector<void *> *primary_tags);
 
   void tagFilter(kwdbContext_p ctx, Field* tag_filter);
-  void SetTagScan(TagScanOperator* tag_scan) { tag_scan_ = tag_scan; }
+  // filter tag data inside HashTagScan with relational joining data for multiple model processing
+  void tagRelFilter(kwdbContext_p ctx,
+                    std::vector<void *> secondary_tags,
+                    const vector<k_uint32> tag_other_join_cols);
+  void SetTagScan(TagScanBaseOperator* tag_scan) { tag_scan_ = tag_scan; }
 
   bool isDisorderedMetrics();
 
@@ -148,7 +169,7 @@ class StorageHandler {
   TagRowBatchPtr tag_rowbatch_;
   TSTableReadMode read_mode_{
       TSTableReadMode::tableTableMeta};
-  TagScanOperator* tag_scan_{nullptr};
+  TagScanBaseOperator* tag_scan_{nullptr};
   k_uint32 current_line_{0};
   std::vector<EntityResultIndex> entities_;
   uint64_t total_read_rows_{0};

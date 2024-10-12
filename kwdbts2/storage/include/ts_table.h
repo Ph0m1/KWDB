@@ -434,6 +434,20 @@ class TsTable {
                               bool reverse, bool sorted);
 
   /**
+    * @brief Create the iterator TsIterator in the order of entity_ids for the timeline and query the data of all entities within the Leader EntityGroup for multiple model processing
+    * @param[in] ts_span
+    * @param[in] scan_cols  column to read
+    * @param[in] scan_agg_types Read column agg type array for filtering block statistics information
+    * @param[in] table_version The maximum table version that needs to be queried
+    * @param[out] TsIterator*
+    */
+  virtual KStatus GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
+                              std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
+                              std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
+                              TsTableIterator** iter, std::vector<timestamp64> ts_points,
+                              bool reverse, bool sorted);
+
+  /**
    * @brief get entityId List
    * @param[in] primary_tags primaryTag
    * @param[in] scan_tags    scan tag

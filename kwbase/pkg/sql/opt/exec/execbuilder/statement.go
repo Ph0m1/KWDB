@@ -175,7 +175,7 @@ func (b *Builder) buildExplain(explain *memo.ExplainExpr) (execPlan, error) {
 			return execPlan{}, err
 		}
 
-		node, err = b.factory.ConstructExplain(&explain.Options, explain.StmtType, plan)
+		node, err = b.factory.ConstructExplain(&explain.Options, explain.StmtType, plan, b.mem)
 		if err != nil {
 			return execPlan{}, err
 		}

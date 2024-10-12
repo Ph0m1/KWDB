@@ -30,6 +30,9 @@ struct TagSelection {
   k_uint32 batch_{0};
   k_uint32 line_{0};
 };
+
+#define PRIMARY_TAGS_EXTERN_STORAGE_LENGTH 8
+
 class TagRowBatch : public RowBatch {
  public:
   ResultSet res_;
@@ -40,7 +43,7 @@ class TagRowBatch : public RowBatch {
   k_uint32 current_pipe_no_{0};  // Record the device index ID,-1 means that you
                                  // need to take it again from storage next time
 
- private:
+ protected:
   k_uint32 current_entity_{0};
   k_uint32 current_batch_no_{0};
   k_uint32 current_batch_line_{0};
@@ -66,11 +69,15 @@ class TagRowBatch : public RowBatch {
   char *GetData(k_uint32 col, k_uint32 offset,
                 roachpb::KWDBKTSColumn::ColumnType ctype,
                 roachpb::DataType dt) override;
+  // get current_entity_ for multiple model processing
+  k_uint32 GetCurrentEntity() {
+    return current_entity_;
+  }
   k_uint16 GetDataLen(k_uint32 col, k_uint32 offset,
                       roachpb::KWDBKTSColumn::ColumnType ctype) override;
   void Reset();
 
-  bool IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype);
+  virtual bool IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype);
   /**
    * read count
    */
@@ -105,20 +112,41 @@ class TagRowBatch : public RowBatch {
     // }
   }
 
+  /**
+   *  get entityid by current line for multiple model processing
+   */
+  EntityResultIndex& GetCurrentEntityIndex() {
+    return entity_indexs_[current_entity_];
+  }
+
   void AddSelection() {
     // entity_indexs_per_pipe_.emplace_back(entity_indexs_[current_entity_]);
     selection_.push_back(
         {current_entity_, current_batch_no_, current_batch_line_});
     effect_count_++;
   }
+
+  // remove selection for multiple model processing
+  void RemoveSelection() {
+    selection_.erase(selection_.begin() + current_line_);
+    effect_count_--;
+    if (current_line_ < selection_.size()) {
+      current_entity_ = selection_[current_line_].entity_;
+      current_batch_no_ = selection_[current_line_].batch_;
+      current_batch_line_ = selection_[current_line_].line_;
+    }
+  }
+
   KStatus Sort(Field **renders, const std::vector<k_uint32> &cols,
                const std::vector<k_int32> &order_type) {
     return FAIL;
   }
   void SetTagToColOffset(k_uint32 offset) { tag_col_offset_ = offset; }
   void SetBitmapOffset(k_uint32 offset) { bitmap_offset_ = offset; }
-  KStatus GetTagData(TagData *tagData, void **bitmap, k_uint32 line);
-  void Init(TABLE *table);
+  virtual KStatus GetTagData(TagData *tagData, void **bitmap, k_uint32 line);
+  // get current tag data for multiple model processing
+  virtual KStatus GetCurrentTagData(TagData *tagData, void **bitmap);
+  virtual void Init(TABLE *table);
   void SetLimitOffset(k_uint32 limit, k_uint32 offset) {}
   void SetPipeEntityNum(kwdbContext_p ctx, k_uint32 pipe_degree);
   KStatus GetEntities(std::vector<EntityResultIndex> *entities);

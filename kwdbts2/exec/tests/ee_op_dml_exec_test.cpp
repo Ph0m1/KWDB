@@ -83,6 +83,8 @@ TEST_F(TestDmlExec, TestDmlExecSelectAndSort) {
   info->value = message.get();
   info->ret = 0;
   info->time_zone = 0;
+  info->relBatchData = nullptr;
+  info->relRowCount = 0;
 
   KStatus status = DmlExec::ExecQuery(ctx_, info, reinterpret_cast<QueryInfo*>(resp.get()));
   ASSERT_EQ(status, KStatus::SUCCESS);

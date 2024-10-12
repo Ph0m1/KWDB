@@ -97,6 +97,9 @@ class DataChunk : public IChunk {
 
   DatumPtr GetData(k_uint32 col) override;
 
+  // get data pointer of a column for a specific row for multiple model processing
+  DatumPtr GetDataPtr(k_uint32 row, k_uint32 col);
+
   k_int32 NextLine() override;
 
   k_uint32 Count() override;
@@ -122,7 +125,7 @@ class DataChunk : public IChunk {
   /**
    * @brief increase the count
    */
-  void AddCount() { ++count_; }
+  void AddCount(k_uint32 count = 1) { count_ += count; }
 
   /**
    * @brief reset current read line
@@ -167,6 +170,14 @@ class DataChunk : public IChunk {
    * @param[in] len data length
    */
   KStatus InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len);
+
+  /**
+   * @brief Put data into the data chunk, and the existing data will be overwritten.
+   * @param[in] ctx   kwdb context
+   * @param[in] value data to be put into data chunk
+   * @param[in] count number of rows
+   */
+  KStatus PutData(kwdbContext_p ctx, DatumPtr value, k_uint32 count);
 
   /**
    * @brief Insert one row from value or renders
@@ -345,6 +356,8 @@ class DataChunk : public IChunk {
   static k_uint32 EstimateCapacity(vector<ColumnInfo>& column_info);
 
   static k_uint32 ComputeRowSize(vector<ColumnInfo>& column_info);
+
+  KStatus ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data);
 
  protected:
   bool is_data_owner_{true};

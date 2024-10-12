@@ -849,6 +849,19 @@ type InstanceTabName struct {
 	CName  string
 }
 
+// lookupDataSource returns the data source in the catalog with the given name.
+// If the name does not resolve to a table, then resolveDataSource raises an error.
+func (b *Builder) lookupDataSource(tn *tree.TableName) (cat.DataSource, cat.DataSourceName) {
+	var flags cat.Flags
+	if b.insideViewDef {
+		// Avoid taking table leases when we're creating a view.
+		flags.AvoidDescriptorCaches = true
+	}
+	ds, resName, _ := b.catalog.ResolveDataSource(b.ctx, flags, tn)
+
+	return ds, resName
+}
+
 // resolveDataSource returns the data source in the catalog with the given name.
 // If the name does not resolve to a table, or if the current user does not have
 // the given privilege, then resolveDataSource raises an error.
@@ -953,10 +966,11 @@ func checkLastAgg(name string) bool {
 // add the timestamp column:
 // last(a)-> last(a,timestamp),when out of order,the latest time data can be retrieved based on the timestamp column.
 func handleLastAgg(s *scope, e tree.Expr, funcName string) {
-	if s.TableType == nil || s.TableType.HasRtable() || s.TableType.HasMultiTSTable() ||
-		opt.CheckTsProperty(s.ScopeTSProp, ScopeLastError) || s.HasMultiTable {
+	if s.TableType == nil || ((s.TableType.HasRtable() || s.HasMultiTable) && !(s.builder.factory.Memo().QueryType == memo.MultiModel)) ||
+		s.TableType.HasMultiTSTable() || opt.CheckTsProperty(s.ScopeTSProp, ScopeLastError) {
 		panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", funcName))
 	}
+	s.builder.factory.Memo().MultimodelHelper.HasLastAgg = true
 
 	// add timestamp column.
 	if f, ok1 := e.(*tree.FuncExpr); ok1 {

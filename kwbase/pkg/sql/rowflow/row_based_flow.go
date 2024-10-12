@@ -369,7 +369,6 @@ func (f *rowBasedFlow) setupInboundStream(
 		if log.V(2) {
 			log.Infof(ctx, "set up inbound stream %d", sid)
 		}
-
 		tsTableReader, err := rowexec.NewTsTableReader(
 			&f.FlowCtx, -1, receiver.Types(), receiver, sid, tsProcessorSpecs)
 		if err != nil {

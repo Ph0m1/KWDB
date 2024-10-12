@@ -914,6 +914,11 @@ func (ti *Index) PartitionByListPrefixes() []tree.Datums {
 	return res
 }
 
+// IndexColumnIDs is part of the cat.Index interface.
+func (ti *Index) IndexColumnIDs(i int) []uint32 {
+	panic("not implemented")
+}
+
 // Column implements the cat.Column interface for testing purposes.
 type Column struct {
 	Ordinal      int

@@ -74,6 +74,23 @@ type tsScanNode struct {
 
 	// HintType is Hint type of scan table
 	HintType keys.ScanMethodHintType
+
+	// RelInfo for hash tagscan
+	RelInfo RelationalInfo
+}
+
+// RelationalInfo contains relational information from the other side of
+// BatchLookupJoin needed for hash tag scan
+type RelationalInfo struct {
+
+	// columns meta for pushed down data
+	RelationalCols *[]sqlbase.TSCol
+
+	// probe side column ids
+	ProbeColIds *[]uint32
+
+	// hashtag side column ids
+	HashColIds *[]uint32
 }
 
 // ScanAgg records scan agg col and agg type

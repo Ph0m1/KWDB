@@ -367,6 +367,25 @@ var varGen = map[string]sessionVar{
 		},
 	},
 
+	// KaiwuDB extension.
+	`enable_multimodel`: {
+		GetStringVal: makePostgresBoolGetStringValFn(`enable_multimodel`),
+		Set: func(_ context.Context, m *sessionDataMutator, s string) error {
+			b, err := parsePostgresBool(s)
+			if err != nil {
+				return err
+			}
+			m.SetMultiModelEnabled(b)
+			return nil
+		},
+		Get: func(evalCtx *extendedEvalContext) string {
+			return formatBoolAsPostgresSetting(evalCtx.SessionData.MultiModelEnabled)
+		},
+		GlobalDefault: func(sv *settings.Values) string {
+			return formatBoolAsPostgresSetting(multiModelClusterMode.Get(sv))
+		},
+	},
+
 	// CockroachDB extension.
 	`enable_zigzag_join`: {
 		GetStringVal: makePostgresBoolGetStringValFn(`enable_zigzag_join`),
@@ -406,6 +425,29 @@ var varGen = map[string]sessionVar{
 		},
 		GlobalDefault: func(sv *settings.Values) string {
 			return strconv.FormatInt(ReorderJoinsLimitClusterValue.Get(sv), 10)
+		},
+	},
+
+	// KaiwuDB extension.
+	`multi_model_reorder_joins_limit`: {
+		GetStringVal: makeIntGetStringValFn(`multi_model_reorder_joins_limit`),
+		Set: func(_ context.Context, m *sessionDataMutator, s string) error {
+			b, err := strconv.ParseInt(s, 10, 64)
+			if err != nil {
+				return err
+			}
+			if b < 0 {
+				return pgerror.Newf(pgcode.InvalidParameterValue,
+					"cannot set multi_model_reorder_joins_limit to a negative value: %d", b)
+			}
+			m.SetMultiModelReorderJoinsLimit(int(b))
+			return nil
+		},
+		Get: func(evalCtx *extendedEvalContext) string {
+			return strconv.FormatInt(int64(evalCtx.SessionData.MultiModelReorderJoinsLimit), 10)
+		},
+		GlobalDefault: func(sv *settings.Values) string {
+			return strconv.FormatInt(MultiModelReorderJoinsLimitClusterValue.Get(sv), 10)
 		},
 	},
 

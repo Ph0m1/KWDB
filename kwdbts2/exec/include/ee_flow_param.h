@@ -61,6 +61,8 @@ class PostResolve {
                                   k_uint32 num, std::vector<Field*> &output_fields);
   EEIteratorErrCode ResolveScanTags(kwdbContext_p ctx);
   EEIteratorErrCode ResolveScanCols(kwdbContext_p ctx);
+  // resolve relational cols for multiple model processing
+  EEIteratorErrCode ResolveScanRelCols(kwdbContext_p ctx);
 
  protected:
   EEIteratorErrCode BuildBinaryTree(kwdbContext_p ctx, const KString &str,

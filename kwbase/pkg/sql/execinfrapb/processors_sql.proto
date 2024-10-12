@@ -588,6 +588,75 @@ message HashJoinerSpec {
   optional bool merged_columns = 7 [(gogoproto.nullable) = false];
 }
 
+// BatchLookupJoinerSpec is only used to create batchLookUpJoin Spec for multiple model processing
+// when the switch is on and the server starts with single node mode.
+// BatchLookupJoinerSpec is the specification for a batch lookup join processor. The processor
+// has two inputs and one output.
+//
+// The processor works by reading the entire right input and putting it in a hash
+// table. Thus, there is no guarantee on the ordering of results that stem only
+// from the right input (in the case of RIGHT_OUTER, FULL_OUTER). However, it is
+// guaranteed that results that involve the left stream preserve the ordering;
+// i.e. all results that stem from left row (i) precede results that stem from
+// left row (i+1).
+//
+// The "internal columns" of a BatchLookupJoiner (see ProcessorSpec) are the
+// concatenation of merged columns (if present), left input columns and right
+// input columns. Each merged column corresponds to a left and a right equality
+// column; its value is the value on the left if it is not NULL, otherwise it is
+// the value on the right. There are either zero or
+// E=len(left_eq_columns)=len(right_eq_columns) merged columns.
+//
+// If the left input has N columns and the right input has M columns, the
+// first N columns contain values from the left side and the following M columns
+// contain values from the right side. If merged columns are present, they
+// occupy first E positions followed by N values from the left side and M values
+// from the right side.
+//
+// In the case of semi-join and anti-join, the processor core outputs only the
+// left columns.
+message BatchLookupJoinerSpec {
+  // The join constraints certain columns from the left stream to equal
+  // corresponding columns on the right stream. These must have the same length.
+  repeated uint32 left_eq_columns = 1 [packed = true];
+  repeated uint32 right_eq_columns = 2 [packed = true];
+
+  // "ON" expression (in addition to the equality constraints captured by the
+  // orderings). Assuming that the left stream has N columns and the right
+  // stream has M columns, in this expression variables @1 to @N refer to
+  // columns of the left stream and variables @N to @(N+M) refer to columns in
+  // the right stream.
+  // Having "ON" expression implies no merged columns.
+  optional Expression on_expr = 5 [(gogoproto.nullable) = false];
+
+  optional sqlbase.JoinType type = 6 [(gogoproto.nullable) = false];
+
+  // If true, it is guaranteed that the left equality columns form a key for
+  // the left input. In other words, no two rows from the left input have the
+  // same set of values on the left equality columns.
+  optional bool left_eq_columns_are_key = 8 [(gogoproto.nullable) = false];
+
+  // If true, it is guaranteed that the right equality columns form a key for
+  // the right input. In other words, no two rows from the right input have the
+  // same set of values on the right equality columns.
+  optional bool right_eq_columns_are_key = 9 [(gogoproto.nullable) = false];
+
+  // tstablereader id to identify the specific tstablereader associated with this
+  // batchlookupjoin
+  optional int32 tstablereader_id = 10 [(gogoproto.nullable) = false];
+
+  // DEPRECATED
+  //
+  // Extra merged columns that are added in case of OUTER JOINS. These
+  // columns occupy first positions in a row amd it's the left value if it's not
+  // NULL, otherwise it's the right value. In INNER JOIN case no merged columns are
+  // needed since left stream values are guaranteed to be not NULL.
+  //
+  // This has been deprecated; the distsqlrun layer still supports it for
+  // backward compatibility during upgrade.
+  optional bool merged_columns = 7 [(gogoproto.nullable) = false];
+}
+
 // AggregatorSpec is the specification for an "aggregator" (processor core
 // type, not the logical plan computation stage). An aggregator performs
 // 'aggregation' in the SQL sense in that it groups rows and computes an aggregate

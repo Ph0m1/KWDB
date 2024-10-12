@@ -30,7 +30,7 @@ namespace kwdbts {
 
 TagScanOperator::TagScanOperator(TsFetcherCollection *collection, TSTagReaderSpec* spec, TSPostProcessSpec* post,
                                  TABLE* table, int32_t processor_id)
-    : BaseOperator(collection, table, processor_id),
+    : TagScanBaseOperator(collection, table, processor_id),
       spec_(spec),
       post_(post),
       schema_id_(0),
@@ -246,7 +246,6 @@ EEIteratorErrCode TagScanOperator::Reset(kwdbContext_p ctx) {
 KStatus TagScanOperator::Close(kwdbContext_p ctx) {
   EnterFunc();
   Reset(ctx);
-
   Return(KStatus::SUCCESS);
 }
 

@@ -72,6 +72,7 @@ class SpecBase {
     table_reader_->set_usestatistic(false);
     table_reader_->set_aggpushdown(agg_push_down_);
     table_reader_->set_tableversion(1);
+    table_reader_->set_tstablereaderid(1);
 
     table_reader_core->set_allocated_tablereader(table_reader_);
     table_reader_->set_aggpushdown(agg_push_down_);
@@ -509,6 +510,146 @@ class AggScanSpec : public SpecAgg {
     post.add_outputtypes(TimestampTZFamily);
     post.add_outputtypes(IntFamily);
   }
+};
+
+// select hostname, min(usage_user) as min_usage, max(usage_system), sum(usage_idle), count(usage_nice)
+// from benchmark.cpu group by hostname;
+class HashTagScanSpec : public SpecBase {
+ public:
+  HashTagScanSpec(k_uint64 table_id, TSTableReadMode access_mode) : SpecBase(table_id), access_mode_(access_mode) {}
+
+  void PrepareFlowSpec(TSFlowSpec& flow) override {
+    //tag reader
+    PrepareTagReaderProcessor(flow, 0);
+
+    //table reader
+    PrepareTableReaderProcessor(flow, 1);
+
+    // synchronizer
+    PrepareSynchronizerProcessor(flow, 3);
+  }
+
+ private:
+  TSTableReadMode access_mode_;
+
+ protected:
+  // prepare HashTagScan with primary tags
+  void PrepareTagReaderProcessor(TSFlowSpec& flow, int processor_id) {
+    auto* tag_read_processor = flow.add_processors();
+    tag_read_processor->set_processor_id(processor_id);
+
+    auto tag_reader_core = KNEW TSProcessorCoreUnion();
+    tag_read_processor->set_allocated_core(tag_reader_core);
+
+    auto tag_reader = KNEW TSTagReaderSpec();
+    initTagReaderSpec(*tag_reader);
+    tag_reader->set_accessmode(access_mode_);
+    tag_reader_core->set_allocated_tagreader(tag_reader);
+
+    auto tag_post = KNEW TSPostProcessSpec();
+    initTagReaderPostSpec(*tag_post);
+    tag_read_processor->set_allocated_post(tag_post);
+
+    auto* tag_reader_output = tag_read_processor->add_output();
+    tag_reader_output->set_type(TSOutputRouterSpec_Type::TSOutputRouterSpec_Type_PASS_THROUGH);
+
+    auto* tag_reader_stream = tag_reader_output->add_streams();
+    tag_reader_stream->set_type(StreamEndpointType::LOCAL);
+    tag_reader_stream->set_s_type(StreamEndpointType::LOCAL);
+    tag_reader_stream->set_stream_id(processor_id);
+    tag_reader_stream->set_target_node_id(0);
+  }
+
+  // include all columns of TSBS in the Tag Reader Spec for HashTagScan with primary tags.
+  void initTagReaderSpec(TSTagReaderSpec& spec) {
+    // timestamp column
+    spec.set_tableversion(1);
+    auto ts_col = spec.add_colmetas();
+    ts_col->set_storage_type(roachpb::DataType::TIMESTAMP);
+    ts_col->set_storage_len(8);
+    ts_col->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
+
+    // metrics column
+    for (int i = 0; i < 10; i++) {
+      auto metrics_col = spec.add_colmetas();
+      metrics_col->set_storage_type(roachpb::DataType::BIGINT);
+      metrics_col->set_storage_len(8);
+      metrics_col->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
+    }
+
+    // primary tag
+    auto p_tag = spec.add_colmetas();
+    p_tag->set_storage_type(roachpb::DataType::CHAR);
+    p_tag->set_storage_len(30);
+    p_tag->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_PTAG);
+
+    // normal tags
+    for (int i = 0; i < 9; i++) {
+      auto tag_col = spec.add_colmetas();
+      tag_col->set_storage_type(roachpb::DataType::CHAR);
+      tag_col->set_storage_len(30);
+      tag_col->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_TAG);
+    }
+
+    // rel columns
+    for (int i = 0; i < 3; ++i) {
+      auto rel_col = spec.add_relationalcols();
+      rel_col->set_storage_type(roachpb::DataType::CHAR);
+      rel_col->set_storage_len(30);
+      rel_col->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
+    }
+
+    // join columns
+    spec.add_probecolids(0);
+    spec.add_hashcolids(11);  // prob的0对应bt中的11
+    spec.add_probecolids(1);
+    spec.add_hashcolids(12);  // prob的1对应bt(tag表)中的12
+
+    spec.set_tableid(table_id_);
+  }
+
+  // include hostname, secondary tag and last relational column in the Tag Reader Spec.
+  void initTagReaderPostSpec(TSPostProcessSpec& post) override {
+    // primary tag
+    post.add_outputcols(11);
+    post.add_outputtypes(KWDBTypeFamily::StringFamily);
+
+    // secondary tag
+    post.add_outputcols(12);
+    post.add_outputtypes(KWDBTypeFamily::StringFamily);
+
+    // rel column
+    post.add_outputcols(13);
+    post.add_outputtypes(KWDBTypeFamily::StringFamily);
+  }
+
+  // output columns: usage_user,usage_system,usage_idle,usage_nice,hostname
+  void initTableReaderPostSpec(TSPostProcessSpec& post) override {
+    // metrics columns
+    for (int i = 1; i <= 4; i++) {
+      post.add_outputcols(i);
+      post.add_outputtypes(KWDBTypeFamily::IntFamily);
+    }
+    // primary tag column
+    initTagReaderPostSpec(post);
+    post.set_projection(true);
+  }
+
+  // output column types: usage_user,usage_system,usage_idle,usage_nice,hostname
+  void initOutputTypes(TSPostProcessSpec& post) override {
+    // metrics columns
+    post.add_outputtypes(IntFamily);
+    post.add_outputtypes(IntFamily);
+    post.add_outputtypes(IntFamily);
+    post.add_outputtypes(IntFamily);
+    // primary tag
+    post.add_outputtypes(StringFamily);
+  }
+
+  void initAggFuncs(TSAggregatorSpec& agg) override {}
+
+  // output order: hostname, min(usage_user) as min_usage, max(usage_system), sum(usage_idle), count(usage_nice)
+  void initAggOutputTypes(TSPostProcessSpec& post) override {}
 };
 
 }  // namespace kwdbts

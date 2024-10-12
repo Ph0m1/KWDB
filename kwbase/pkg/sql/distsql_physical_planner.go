@@ -349,6 +349,9 @@ var cannotDistributeRowLevelLockingErr = newQueryNotSupportedError(
 func (dsp *DistSQLPlanner) mustWrapNode(planCtx *PlanningCtx, node planNode) bool {
 	switch n := node.(type) {
 	// Keep these cases alphabetized, please!
+	// batchLookUpJoinNode is only used in query plan for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	case *batchLookUpJoinNode:
 	case *distinctNode:
 	case *exportNode:
 	case *filterNode:
@@ -425,6 +428,28 @@ func (dsp *DistSQLPlanner) checkSupportForNode(node planNode) (distRecommendatio
 		return dsp.checkSupportForNode(n.input)
 
 	case *joinNode:
+		if err := dsp.checkExpr(n.pred.onCond); err != nil {
+			return cannotDistribute, err
+		}
+		recLeft, err := dsp.checkSupportForNode(n.left.plan)
+		if err != nil {
+			return cannotDistribute, err
+		}
+		recRight, err := dsp.checkSupportForNode(n.right.plan)
+		if err != nil {
+			return cannotDistribute, err
+		}
+		// If either the left or the right side can benefit from distribution, we
+		// should distribute.
+		rec := recLeft.compose(recRight)
+		// If we can do a hash join, we distribute if possible.
+		if len(n.pred.leftEqualityIndices) > 0 {
+			rec = rec.compose(shouldDistribute)
+		}
+		return rec, nil
+	// batchLookUpJoinNode is only used in query plan for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	case *batchLookUpJoinNode:
 		if err := dsp.checkExpr(n.pred.onCond); err != nil {
 			return cannotDistribute, err
 		}
@@ -628,6 +653,9 @@ type PlanningCtx struct {
 
 	// runningSubquery is set when there is running a sub-query
 	runningSubquery bool
+
+	// unique id to identify tsTableReader for batchlookup join
+	tsTableReaderID int32
 }
 
 var _ physicalplan.ExprContext = &PlanningCtx{}
@@ -1639,19 +1667,88 @@ func buildTSColsAndTSColMap(
 	return tsCols, tsColMap, resCols
 }
 
+// build HashtsCols and tsColMap by cols
+//
+// Parameters:
+// - n: ts scan node
+// - columnIDSet: column id set
+//
+// Returns:
+// - column meta including ts column and rel columns
+// - ts column index map, key is column id(logical id)
+// - scan output column id array
+// - err: Description of the error, if any
+// for multiple model processing
+func buildHashTSColsAndTSColMap(
+	n *tsScanNode, columnIDSet opt.ColSet,
+) ([]sqlbase.TSCol, map[sqlbase.ColumnID]tsColIndex, []int, []int) {
+	tsCols := make([]sqlbase.TSCol, 0)
+	tsColMap := make(map[sqlbase.ColumnID]tsColIndex)
+	resCols := make([]int, 0)
+	tagResCols := make([]int, 0)
+
+	// add non-tag columns, timestamp and metrics
+	for i := 0; i < n.Table.ColumnCount(); i++ {
+		if col, ok := n.Table.Column(i).(*sqlbase.ColumnDescriptor); ok {
+			col.TsCol.Nullable = n.Table.Column(i).IsNullable()
+			if !col.IsTagCol() {
+				tsCols = append(tsCols, col.TsCol)
+				tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.Type, col.TsCol.ColumnType}
+			}
+		}
+	}
+	// then add tag columns
+	for i := 0; i < n.Table.ColumnCount(); i++ {
+		if col, ok := n.Table.Column(i).(*sqlbase.ColumnDescriptor); ok {
+			col.TsCol.Nullable = n.Table.Column(i).IsNullable()
+			if col.IsTagCol() {
+				tsCols = append(tsCols, col.TsCol)
+				tsColMap[col.ID] = tsColIndex{len(tsCols) - 1, col.Type, col.TsCol.ColumnType}
+			}
+		}
+	}
+
+	// build result columns index array
+	tsLen := n.Table.ColumnCount()
+	relColumns := n.RelInfo.RelationalCols
+
+	for i, resCol := range n.resultColumns {
+		if i < len(*relColumns) {
+			resCols = append(resCols, i+tsLen)
+		} else {
+			if columnIDSet.Contains(opt.ColumnID(resCol.PGAttributeNum)) {
+				if index, ok := tsColMap[resCol.PGAttributeNum]; ok {
+					resCols = append(resCols, index.idx)
+					tagResCols = append(tagResCols, index.idx)
+				} else {
+					panic("not find result column")
+				}
+			} else {
+				panic("not find result column")
+			}
+		}
+	}
+
+	return tsCols, tsColMap, resCols, tagResCols
+}
+
 // init PhysicalPlan
 func (p *PhysicalPlan) initPhyPlanForTsReaders(
+	planCtx *PlanningCtx,
 	colMetas []sqlbase.TSCol,
 	n *tsScanNode,
 	rangeSpans *map[roachpb.NodeID][]execinfrapb.HashpointSpan,
 ) error {
-	tr := execinfrapb.TSReaderSpec{TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, TableVersion: n.Table.GetTSVersion()}
+	planCtx.tsTableReaderID++
+	tr := execinfrapb.TSReaderSpec{TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, TableVersion: n.Table.GetTSVersion(),
+		TsTablereaderId: planCtx.tsTableReaderID}
 	for i := range colMetas {
 		tr.ColMetas = append(tr.ColMetas, &colMetas[i])
 	}
 	pIdxStart := physicalplan.ProcessorIdx(len(p.Processors))
 	for _, resultProc := range p.ResultRouters {
 		nodeID := p.Processors[resultProc].Node
+
 		proc := physicalplan.Processor{
 			Node: nodeID,
 			TSSpec: execinfrapb.TSProcessorSpec{
@@ -1822,6 +1919,7 @@ func (p *PhysicalPlan) buildPhyPlanForTagReaders(
 			},
 			ExecInTSEngine: true,
 		}
+
 		pIdx := p.AddProcessor(proc)
 		p.ResultRouters[i] = pIdx
 		i++
@@ -1841,6 +1939,117 @@ func (p *PhysicalPlan) buildPhyPlanForTagReaders(
 	post.Projection = true
 	p.SetLastStageTSPost(post, typs)
 	p.AddTSProjection(outCols, false, true)
+
+	// add output types for last ts engine processor
+	p.addTSOutputType(true)
+
+	if n.HintType == keys.TagOnlyHint {
+		p.PlanToStreamColMap = getPlanToStreamColMapForReader(outCols, n.resultColumns, descColumnIDs)
+	}
+
+	return nil
+}
+
+// buildPhyPlanForHashTagReaders construct TSTagReader for hashtag scan and add to Proceccor.
+// tableID is the id of table that needs to be scanned.
+//
+// Parameters:
+// - planCtx: context
+// - n: ts scan node
+// - nodeIDs: node id array
+// - colMetas: ts column meta
+// - tsColMap: ts column index and type map, key is ts column id
+// - resCols: scan output column id array
+// - typs: column output types
+// - descColumnIDs: column physical id
+//
+// Returns:
+// - err: Description of the error, if any
+// for multiple model processing
+func (p *PhysicalPlan) buildPhyPlanForHashTagReaders(
+	planCtx *PlanningCtx,
+	n *tsScanNode,
+	rangeSpans *map[roachpb.NodeID][]execinfrapb.HashpointSpan,
+	colMetas []sqlbase.TSCol,
+	tsColMap map[sqlbase.ColumnID]tsColIndex,
+	resCols []int,
+	tagResCols []int,
+	typs []types.T,
+	descColumnIDs []sqlbase.ColumnID,
+) error {
+	p.ResultRouters = make([]physicalplan.ProcessorIdx, len(*rangeSpans))
+	p.Processors = make([]physicalplan.Processor, 0, len(*rangeSpans))
+
+	// when the tag filter not push to TagFilterArray of tsScanNode, need to deal with filter.
+	if n.HintType == keys.TagOnlyHint && n.filter != nil {
+		n.TagFilterArray = append(n.TagFilterArray, n.filter)
+	}
+
+	// deal tag filter
+	post := execinfrapb.TSPostProcessSpec{
+		Filter: physicalplan.MakeTSExpressionForArray(n.TagFilterArray, planCtx, tagResCols),
+	}
+
+	// deal primary tag filter values
+	// primary tag need to be sort.
+	ptagFilter := getPrimaryTag(n.PrimaryTagValues, tsColMap)
+
+	// adjust HashColids to colmeta index
+	var colIds = make([]uint32, len(*n.RelInfo.HashColIds))
+	for k, hashColid := range *n.RelInfo.HashColIds {
+		colIds[k] = uint32(tsColMap[sqlbase.ColumnID(hashColid)].idx)
+	}
+
+	i := 0
+	for nodeID := range *rangeSpans {
+		proc := physicalplan.Processor{
+			Node: nodeID,
+			TSSpec: execinfrapb.TSProcessorSpec{
+				Core: execinfrapb.TSProcessorCoreUnion{
+					TagReader: &execinfrapb.TSTagReaderSpec{
+						TableID:        uint64(n.Table.ID()),
+						ColMetas:       colMetas,
+						AccessMode:     n.AccessMode,
+						PrimaryTags:    ptagFilter,
+						TableVersion:   n.Table.GetTSVersion(),
+						RelationalCols: *n.RelInfo.RelationalCols,
+						ProbeColids:    *n.RelInfo.ProbeColIds,
+						HashColids:     colIds,
+					},
+				},
+				Output: []execinfrapb.OutputRouterSpec{{
+					Type: execinfrapb.OutputRouterSpec_PASS_THROUGH,
+				}},
+			},
+			ExecInTSEngine: true,
+		}
+
+		pIdx := p.AddProcessor(proc)
+		p.ResultRouters[i] = pIdx
+		i++
+	}
+
+	// tags output
+	var outCols []uint32
+	// add relational columns first if exists
+	for i := 0; i < len(*n.RelInfo.RelationalCols); i++ {
+		outCols = append(outCols, uint32(resCols[i]))
+		post.OutputColumns = append(post.OutputColumns, uint32(resCols[i]))
+	}
+
+	// add ts tag columns to the output
+	n.ScanSource.ForEach(func(i int) {
+		outCols = append(outCols, uint32(i-1))
+		if col, ok := tsColMap[sqlbase.ColumnID(n.Table.Column(i-1).ColID())]; ok {
+			if col.colType == sqlbase.ColumnType_TYPE_PTAG || col.colType == sqlbase.ColumnType_TYPE_TAG {
+				post.OutputColumns = append(post.OutputColumns, uint32(col.idx))
+			}
+		}
+	})
+
+	post.Projection = true
+	p.SetLastStageTSPost(post, typs)
+	p.AddHashTSProjection(outCols, false, true, n.resultColumns, len(*n.RelInfo.RelationalCols))
 
 	// add output types for last ts engine processor
 	p.addTSOutputType(true)
@@ -1876,6 +2085,28 @@ func getPlanToStreamColMapForReader(
 			if descColumnIDs[c] == resultColumns[i].PGAttributeNum {
 				planToStreamColMap[i] = j
 				break
+			}
+		}
+	}
+	return planToStreamColMap
+}
+
+// getPlanToStreamColMapForReaderHash add plan to stream col map
+func getPlanToStreamColMapForReaderHash(
+	outCols []uint32,
+	resultColumns sqlbase.ResultColumns,
+	descColumnIDs []sqlbase.ColumnID,
+	relCount int,
+) []int {
+	planToStreamColMap := make([]int, len(outCols))
+
+	for i := range planToStreamColMap {
+		planToStreamColMap[i] = -1
+		if i < relCount {
+			planToStreamColMap[i] = i
+		} else {
+			if descColumnIDs[outCols[i]] == resultColumns[i].PGAttributeNum {
+				planToStreamColMap[i] = i
 			}
 		}
 	}
@@ -1999,7 +2230,7 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 ) error {
 	useStatistic := len(n.ScanAggArray) > 0
 	//construct TSReaderSpec
-	err := p.initPhyPlanForTsReaders(colMetas, n, rangeSpans)
+	err := p.initPhyPlanForTsReaders(planCtx, colMetas, n, rangeSpans)
 	if err != nil {
 		return err
 	}
@@ -2008,11 +2239,65 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 	if err1 != nil {
 		return err1
 	}
+	if n.RelInfo.RelationalCols != nil {
+		outCols, planToStreamColMap, outTypes := buildPostSpecForTSReadersHash(n, typs, descColumnIDs, tsColMap, &post, true)
+		p.SetLastStageTSPost(post, outTypes)
+
+		p.AddHashTSProjection(outCols, useStatistic, false, n.resultColumns, len(*n.RelInfo.RelationalCols))
+		p.PlanToStreamColMap = planToStreamColMap
+		return nil
+	}
 
 	outCols, planToStreamColMap, outTypes := buildPostSpecForTSReaders(n, typs, descColumnIDs, tsColMap, &post)
 	p.SetLastStageTSPost(post, outTypes)
 
 	p.AddTSProjection(outCols, useStatistic, false)
+	p.PlanToStreamColMap = planToStreamColMap
+	return nil
+}
+
+// buildPhyPlanForTSReadersHash construct TSTagReadera and add to Proceccor.
+// tableID is the id of table that needs to be scanned.
+//
+// Parameters:
+// - planCtx: context
+// - n: ts scan node
+// - nodeIDs: node id array
+// - colMetas: ts column meta
+// - tsColMap: ts column index and type map, key is ts column id
+// - resCols: scan output column id array
+// - tagResCols : original tag output array
+// - typs: column output types
+// - descColumnIDs: column physical id
+//
+// Returns:
+// - err: Description of the error, if any
+// for multiple model processing
+func (p *PhysicalPlan) buildPhyPlanForTSReadersHash(
+	planCtx *PlanningCtx,
+	n *tsScanNode,
+	rangeSpans *map[roachpb.NodeID][]execinfrapb.HashpointSpan,
+	colMetas []sqlbase.TSCol,
+	tsColMap map[sqlbase.ColumnID]tsColIndex,
+	tagResCols []int,
+	typs []types.T,
+	descColumnIDs []sqlbase.ColumnID,
+) error {
+	useStatistic := len(n.ScanAggArray) > 0
+	//construct TSReaderSpec
+	err := p.initPhyPlanForTsReaders(planCtx, colMetas, n, rangeSpans)
+	if err != nil {
+		return err
+	}
+
+	post, err1 := initPostSpecForTSReaders(planCtx, n, tagResCols)
+	if err1 != nil {
+		return err1
+	}
+
+	outCols, planToStreamColMap, outTypes := buildPostSpecForTSReadersHash(n, typs, descColumnIDs, tsColMap, &post, true)
+	p.SetLastStageTSPost(post, outTypes)
+	p.AddHashTSProjection(outCols, useStatistic, false, n.resultColumns, len(*n.RelInfo.RelationalCols))
 	p.PlanToStreamColMap = planToStreamColMap
 	return nil
 }
@@ -2060,6 +2345,48 @@ func buildPostSpecForTSReaders(
 	return outCols, planToStreamColMap, typs
 }
 
+// build TSPostProcessSpec
+// // for multiple model processing
+func buildPostSpecForTSReadersHash(
+	n *tsScanNode,
+	typs []types.T,
+	descColumnIDs []sqlbase.ColumnID,
+	tsColMap map[sqlbase.ColumnID]tsColIndex,
+	post *execinfrapb.TSPostProcessSpec,
+	isHashTagScan bool,
+) ([]uint32, []int, []types.T) {
+	var outCols []uint32
+	var planToStreamColMap []int
+
+	tslen := n.Table.ColumnCount()
+	if isHashTagScan {
+		// build relational columns first
+		for i := 0; i < len(*n.RelInfo.RelationalCols); i++ {
+			outCols = append(outCols, uint32(i+tslen))
+		}
+	}
+
+	// tsCols
+	n.ScanSource.ForEach(func(i int) {
+		outCols = append(outCols, uint32(i-1))
+	})
+
+	for i := 0; i < len(n.resultColumns); i++ {
+		if i < len(*n.RelInfo.RelationalCols) {
+			post.OutputColumns = append(post.OutputColumns, uint32(i+tslen))
+		} else {
+			if col, ok := tsColMap[n.resultColumns[i].PGAttributeNum]; ok {
+				post.OutputColumns = append(post.OutputColumns, uint32(col.idx))
+			}
+		}
+	}
+
+	post.Projection = true
+	planToStreamColMap = getPlanToStreamColMapForReaderHash(outCols, n.resultColumns, descColumnIDs,
+		len(*n.RelInfo.RelationalCols))
+	return outCols, planToStreamColMap, typs
+}
+
 func (dsp *DistSQLPlanner) createTSReaders(
 	planCtx *PlanningCtx, n *tsScanNode,
 ) (PhysicalPlan, error) {
@@ -2103,21 +2430,39 @@ func (dsp *DistSQLPlanner) createTSReaders(
 		return p, nil
 	}
 
-	tsColMetas, tsColMap, resCols := buildTSColsAndTSColMap(n, columnIDSet)
+	// construct TSTagReaderSpec
+	// RelInfo is not nil only for multiple model processing
+	if n.RelInfo.RelationalCols != nil {
+		tsColMetas, tsColMap, resCols, tagResCols := buildHashTSColsAndTSColMap(n, columnIDSet)
+		err = p.buildPhyPlanForHashTagReaders(planCtx, n, &rangeSpans, tsColMetas, tsColMap, resCols, tagResCols,
+			typs, descColumnIDs)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
+		if n.HintType == keys.TagOnlyHint {
+			return p, nil
+		}
 
-	//construct TSTagReaderSpec
-	err = p.buildPhyPlanForTagReaders(planCtx, n, &rangeSpans, tsColMetas, tsColMap, resCols, typs, descColumnIDs)
-	if err != nil {
-		return PhysicalPlan{}, err
-	}
-	if n.HintType == keys.TagOnlyHint {
-		return p, nil
-	}
+		//construct TSReaderSpec
+		err = p.buildPhyPlanForTSReadersHash(planCtx, n, &rangeSpans, tsColMetas, tsColMap, tagResCols, typs, descColumnIDs)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
+	} else {
+		tsColMetas, tsColMap, resCols := buildTSColsAndTSColMap(n, columnIDSet)
+		err = p.buildPhyPlanForTagReaders(planCtx, n, &rangeSpans, tsColMetas, tsColMap, resCols, typs, descColumnIDs)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
+		if n.HintType == keys.TagOnlyHint {
+			return p, nil
+		}
 
-	//construct TSReaderSpec
-	err = p.buildPhyPlanForTSReaders(planCtx, n, &rangeSpans, tsColMetas, tsColMap, resCols, typs, descColumnIDs)
-	if err != nil {
-		return PhysicalPlan{}, err
+		//construct TSReaderSpec
+		err = p.buildPhyPlanForTSReaders(planCtx, n, &rangeSpans, tsColMetas, tsColMap, resCols, typs, descColumnIDs)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
 	}
 
 	return p, nil
@@ -4292,9 +4637,11 @@ func getTypesForPlanResult(node planNode, planToStreamColMap []int) ([]types.T, 
 			numCols = streamCol + 1
 		}
 	}
-	colTypes := make([]types.T, numCols)
+	// colTypes := make([]types.T, numCols)
+	colTypes := make([]types.T, len(nodeColumns))
+
 	for nodeCol, streamCol := range planToStreamColMap {
-		if streamCol != -1 {
+		if streamCol != -1 && nodeCol < len(nodeColumns) {
 			colTypes[streamCol] = *nodeColumns[nodeCol].Typ
 		}
 	}
@@ -4459,6 +4806,113 @@ func (dsp *DistSQLPlanner) createPlanForJoin(
 	return p, nil
 }
 
+// createPlanForBatchLookUpJoin is only used to process batchLookUpJoinNode for multiple model processing
+// when the switch is on and the server starts with single node mode.
+func (dsp *DistSQLPlanner) createPlanForBatchLookUpJoin(
+	planCtx *PlanningCtx, n *batchLookUpJoinNode,
+) (PhysicalPlan, error) {
+	// Outline of the planning process for joins:
+	//
+	//  - We create PhysicalPlans for the left and right side. Each plan has a set
+	//    of output routers with result that will serve as input for the join.
+	//
+	//  - We merge the list of processors and streams into a single plan. We keep
+	//    track of the output routers for the left and right results.
+	//
+	//  - We add a set of joiner processors (say K of them).
+	//
+	//  - We configure the left and right output routers to send results to
+	//    these joiners, distributing rows by hash (on the join equality columns).
+	//    We are thus breaking up all input rows into K buckets such that rows
+	//    that match on the equality columns end up in the same bucket. If there
+	//    are no equality columns, we cannot distribute rows so we use a single
+	//    joiner.
+	//
+	//  - The routers of the joiner processors are the result routers of the plan.
+
+	leftPlan, err := dsp.createPlanForNode(planCtx, n.left.plan)
+	if err != nil {
+		return PhysicalPlan{}, err
+	}
+
+	if leftPlan.ChildIsExecInTSEngine() {
+		leftPlan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, planCtx.IsLocal(), false)
+	}
+
+	rightPlan, err := dsp.createPlanForNode(planCtx, n.right.plan)
+	if err != nil {
+		return PhysicalPlan{}, err
+	}
+
+	if rightPlan.ChildIsExecInTSEngine() {
+		rightPlan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, planCtx.IsLocal(), false)
+	}
+
+	// Nodes where we will run the join processors.
+	var nodes []roachpb.NodeID
+
+	// We initialize these properties of the joiner. They will then be used to
+	// fill in the processor spec. See descriptions for BatchLookupJoinerSpec.
+	var leftMergeOrd, rightMergeOrd execinfrapb.Ordering
+	joinType := n.joinType
+
+	// Figure out the left and right types.
+	leftTypes := leftPlan.ResultTypes
+	rightTypes := rightPlan.ResultTypes
+
+	var p PhysicalPlan
+	var leftRouters, rightRouters []physicalplan.ProcessorIdx
+	p.PhysicalPlan, leftRouters, rightRouters = physicalplan.MergePlans(
+		&leftPlan.PhysicalPlan, &rightPlan.PhysicalPlan,
+	)
+
+	// Set up the output columns.
+	if numEq := len(n.pred.leftEqualityIndices); numEq != 0 {
+		nodes = findJoinProcessorNodes(leftRouters, rightRouters, p.Processors)
+	} else {
+		// Without column equality, we cannot distribute the join. Run a
+		// single processor.
+		nodes = []roachpb.NodeID{dsp.nodeDesc.NodeID}
+
+		// If either side has a single stream, put the processor on that node. We
+		// prefer the left side because that is processed first by the batch lookup joiner.
+		if len(leftRouters) == 1 {
+			nodes[0] = p.Processors[leftRouters[0]].Node
+		} else if len(rightRouters) == 1 {
+			nodes[0] = p.Processors[rightRouters[0]].Node
+		}
+	}
+
+	rightMap := rightPlan.PlanToStreamColMap
+	post, joinToStreamColMap := joinOutColumnsForBatchLookupJoin(n, rightMap)
+	if err != nil {
+		return PhysicalPlan{}, err
+	}
+
+	// Create the Core spec.
+	var core execinfrapb.ProcessorCoreUnion
+	// Play batchlookupJoin only
+	core.BatchLookupJoiner = &execinfrapb.BatchLookupJoinerSpec{
+		Type:                 joinType,
+		LeftEqColumnsAreKey:  n.pred.leftEqKey,
+		RightEqColumnsAreKey: n.pred.rightEqKey,
+		TstablereaderId:      planCtx.tsTableReaderID,
+	}
+
+	p.AddNoopForJoinToAgent(nodes, leftRouters, rightRouters, dsp.nodeDesc.NodeID, &leftTypes, &rightTypes)
+	p.AddBLJoinStage(
+		nodes, core, post, leftTypes, rightTypes, leftMergeOrd, rightMergeOrd, leftRouters, rightRouters,
+	)
+
+	p.PlanToStreamColMap = joinToStreamColMap
+	p.ResultTypes, err = getTypesForPlanResult(n, joinToStreamColMap)
+	if err != nil {
+		return PhysicalPlan{}, err
+	}
+
+	return p, nil
+}
+
 func (dsp *DistSQLPlanner) createPlanForNode(
 	planCtx *PlanningCtx, node planNode,
 ) (plan PhysicalPlan, err error) {
@@ -4490,6 +4944,9 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 
 	case *joinNode:
 		plan, err = dsp.createPlanForJoin(planCtx, n)
+
+	case *batchLookUpJoinNode:
+		plan, err = dsp.createPlanForBatchLookUpJoin(planCtx, n)
 
 	case *limitNode:
 		plan, err = dsp.createPlanForNode(planCtx, n.plan)

@@ -383,7 +383,7 @@ EEIteratorErrCode TableScanOperator::InitHandler(kwdbContext_p ctx) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
   handler_->Init(ctx);
-  handler_->SetTagScan(static_cast<TagScanOperator*>(input_));
+  handler_->SetTagScan(static_cast<TagScanBaseOperator*>(input_));
   handler_->SetSpans(&ts_kwspans_);
 
   Return(ret);

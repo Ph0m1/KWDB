@@ -23,7 +23,7 @@ using namespace kwdbts;  // NOLINT
 class TestDataChunk : public ::testing::Test {  // inherit testing::Test
  protected:
   static void SetUpTestCase() {
-    g_pstBufferPoolInfo = kwdbts::EE_MemPoolInit(1, 16);
+    g_pstBufferPoolInfo = kwdbts::EE_MemPoolInit(1024, ROW_BUFFER_SIZE);
     EXPECT_EQ((g_pstBufferPoolInfo != nullptr), true);
   }
 

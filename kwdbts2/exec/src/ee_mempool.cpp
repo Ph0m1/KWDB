@@ -63,15 +63,7 @@ EE_PoolInfoDataPtr EE_MemPoolInit(k_uint32 numOfBlock, k_uint32 blockSize) {
 }
 
 k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_size_t iMallocLen) {
-#ifdef WITH_TESTS
-  k_char *data = static_cast<k_char *>(malloc(iMallocLen));
-  if (data != nullptr) {
-    std::memset(data, 0, iMallocLen);
-  }
-  return data;
-#else
   k_char *data = nullptr;
-#endif
   EE_PoolInfoDataPtr pstTemPtr = pstPoolMsg;
   if (pstTemPtr == nullptr) {
     return nullptr;
@@ -87,7 +79,7 @@ k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_size_t iMalloc
 
   std::lock_guard<std::mutex> lock(pstTemPtr->lock_);
   if (pstTemPtr->iNumOfFreeBlock > 0) {
-    data = pstTemPtr->data_ + pstTemPtr->iBlockSize * (pstTemPtr->iFreeList[pstTemPtr->iDataIndex]);
+    data = pstTemPtr->data_ + (k_uint64)pstTemPtr->iBlockSize * (k_uint64)(pstTemPtr->iFreeList[pstTemPtr->iDataIndex]);
     pstTemPtr->iDataIndex++;
     pstTemPtr->iDataIndex = pstTemPtr->iDataIndex % pstPoolMsg->iNumOfSumBlock;
     pstTemPtr->iNumOfFreeBlock--;
@@ -99,10 +91,6 @@ k_char *EE_MemPoolMalloc(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_size_t iMalloc
 }
 
 kwdbts::KStatus EE_MemPoolFree(kwdbts::EE_PoolInfoDataPtr pstPoolMsg, k_char *data) {
-#ifdef WITH_TESTS
-  SafeFreePointer(data);
-  return kwdbts::SUCCESS;
-#endif
   EE_PoolInfoDataPtr pstTemPtr = pstPoolMsg;
   if (pstTemPtr == nullptr) {
     return kwdbts::FAIL;

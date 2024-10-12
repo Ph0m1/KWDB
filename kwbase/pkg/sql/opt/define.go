@@ -40,3 +40,8 @@ func GetTSParallelDegree(ctx *tree.EvalContext) int64 {
 
 	return degree
 }
+
+// GetTSHashScanMode get hash scan mode enforcement value
+func GetTSHashScanMode(ctx *tree.EvalContext) int64 {
+	return TSHashScanMode.Get(&ctx.Settings.SV)
+}

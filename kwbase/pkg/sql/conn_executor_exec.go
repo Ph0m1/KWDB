@@ -1251,6 +1251,7 @@ func (ex *connExecutor) execWithDistSQLEngine(
 	planCtx.isLocal = !distribute
 	planCtx.planner = planner
 	planCtx.stmtType = recv.stmtType
+	planCtx.tsTableReaderID = 0
 	if planner.collectBundle {
 		planCtx.saveDiagram = func(diagram execinfrapb.FlowDiagram) {
 			planner.curPlan.distSQLDiagrams = append(planner.curPlan.distSQLDiagrams, diagram)

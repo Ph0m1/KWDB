@@ -26,6 +26,21 @@
 namespace kwdbts {
 
 /**
+ * @brief   tag scan base operator for multiple model processing
+ *
+ * @author  YuYue
+ */
+class TagScanBaseOperator : public BaseOperator {
+ public:
+  TagScanBaseOperator(TsFetcherCollection *collection,
+                      TABLE* table, int32_t processor_id) : BaseOperator(collection, table, processor_id) {}
+  virtual KStatus GetEntities(kwdbContext_p ctx,
+                      std::vector<EntityResultIndex>* entities,
+                      TagRowBatchPtr* row_batch_ptr) = 0;
+};
+
+
+/**
  * @brief   scan oper
  *
  * @author  liguoliang
@@ -33,7 +48,7 @@ namespace kwdbts {
 
 class StorageHandler;
 
-class TagScanOperator : public BaseOperator {
+class TagScanOperator : public TagScanBaseOperator {
  public:
   TagScanOperator(TsFetcherCollection *collection, TSTagReaderSpec* spec,
                               TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
@@ -56,7 +71,7 @@ class TagScanOperator : public BaseOperator {
 
   KStatus GetEntities(kwdbContext_p ctx,
                       std::vector<EntityResultIndex>* entities,
-                      TagRowBatchPtr* row_batch_ptr);
+                      TagRowBatchPtr* row_batch_ptr) override;
 
  protected:
   k_bool ResolveOffset();
@@ -84,4 +99,5 @@ class TagScanOperator : public BaseOperator {
   bool tag_index_once_{true};
   bool is_first_entity_{true};
 };
+
 }  // namespace kwdbts

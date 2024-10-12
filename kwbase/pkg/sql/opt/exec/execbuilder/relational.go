@@ -45,6 +45,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil/unimplemented"
@@ -153,6 +154,43 @@ func (ep *execPlan) sqlOrdering(ordering opt.Ordering) sqlbase.ColumnOrdering {
 	}
 
 	return colOrder
+}
+
+func checkIsTsScanExpr(child opt.Expr) bool {
+	if _, ok := child.(*memo.TSScanExpr); ok {
+		return true
+	}
+	if selectExpr, ok := child.(*memo.SelectExpr); ok {
+		if _, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
+			return true
+		}
+	}
+	if projectExpr, ok := child.(*memo.ProjectExpr); ok {
+		if _, ok := projectExpr.Input.(*memo.TSScanExpr); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// shouldBuildBatchLookUpJoin checks if the join is a batch lookup join
+// for multiple model processing.
+func shouldBuildBatchLookUpJoin(e memo.RelExpr, mem *memo.Memo) bool {
+	if innerJoinExpr, ok := e.(*memo.InnerJoinExpr); ok {
+		if checkIsTsScanExpr(innerJoinExpr.Left) || checkIsTsScanExpr(innerJoinExpr.Right) {
+			joinOn := innerJoinExpr.On
+			if len(joinOn) == 0 {
+				mem.QueryType = memo.Unset
+				mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
+				if mem.MultimodelHelper.HasLastAgg {
+					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+				}
+			} else {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (b *Builder) buildRelational(e memo.RelExpr) (execPlan, error) {
@@ -338,7 +376,16 @@ func (b *Builder) buildRelational(e memo.RelExpr) (execPlan, error) {
 			ep, err = b.buildSetOp(e)
 
 		case opt.IsJoinNonApplyOp(e):
-			ep, err = b.buildHashJoin(e)
+			// check if we should build batchLookUpJoinNode for multiple model processing.
+			if b.mem.QueryType == memo.MultiModel && shouldBuildBatchLookUpJoin(e, b.mem) {
+				var continueHashJoin bool
+				ep, continueHashJoin, err = b.buildBatchLookUpJoin(e)
+				if continueHashJoin {
+					ep, err = b.buildHashJoin(e)
+				}
+			} else {
+				ep, err = b.buildHashJoin(e)
+			}
 
 		case opt.IsJoinApplyOp(e):
 			ep, err = b.buildApplyJoin(e)
@@ -599,6 +646,7 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 			scan.AccessMode = int(execinfrapb.TSTableReadMode_tableTableMeta)
 		}
 	}
+	b.mem.MultimodelHelper.OriginalAccessMode = execinfrapb.TSTableReadMode(scan.AccessMode)
 
 	ctx := res.makeBuildScalarCtx()
 	var tagFilter []tree.TypedExpr
@@ -610,6 +658,37 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 	if !b.buildArrayTypedExpr(scan.PrimaryTagFilter, &ctx, &primaryFilter) {
 		return execPlan{}, nil
 	}
+
+	// set access mode for multiple model processing.
+	primaryTagCount := md.TableMeta(scan.Table).PrimaryTagCount
+	if b.mem.MultimodelHelper.HasBljNode {
+		ptagSet := make(map[int]struct{})
+		for _, joinCol := range b.mem.MultimodelHelper.JoinCols {
+			if md.ColumnMeta(joinCol).IsPrimaryTag() {
+				ptagSet[int(joinCol)] = struct{}{}
+			}
+		}
+
+		ptagCount := len(ptagSet)
+		accessModeEnforced := opt.GetTSHashScanMode(b.evalCtx)
+		if accessModeEnforced > 0 && accessModeEnforced < 4 {
+			switch accessModeEnforced {
+			case 1:
+				scan.AccessMode = int(execinfrapb.TSTableReadMode_hashTagScan)
+			case 2:
+				scan.AccessMode = int(execinfrapb.TSTableReadMode_primaryHashTagScan)
+			case 3:
+				scan.AccessMode = int(execinfrapb.TSTableReadMode_hashRelScan)
+			}
+		} else if ptagCount == primaryTagCount || len(primaryFilter) == primaryTagCount {
+			scan.AccessMode = int(execinfrapb.TSTableReadMode_primaryHashTagScan)
+		} else if b.mem.MultimodelHelper.HashTagScan {
+			scan.AccessMode = int(execinfrapb.TSTableReadMode_hashTagScan)
+		} else {
+			scan.AccessMode = int(execinfrapb.TSTableReadMode_hashRelScan)
+		}
+	}
+
 	// build scanNode.
 	root, err := b.factory.ConstructTSScan(table, &scan.TSScanPrivate, tagFilter, primaryFilter)
 	if err != nil {
@@ -1045,6 +1124,171 @@ func (b *Builder) buildHashJoin(join memo.RelExpr) (execPlan, error) {
 	return ep, nil
 }
 
+func convertColumnOrdinalToUint32(colList []exec.ColumnOrdinal) []uint32 {
+	uint32Slice := make([]uint32, len(colList))
+	for i, v := range colList {
+		uint32Slice[i] = uint32(v)
+	}
+	return uint32Slice
+}
+
+// buildBatchLookUpJoin build the batchLookUpJoin node for multiple model processing.
+func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error) {
+	if f := join.Private().(*memo.JoinPrivate).Flags; !f.Has(memo.AllowHashJoinStoreRight) {
+		// We need to do a bit of reverse engineering here to determine what the
+		// hint was.
+		hint := tree.AstLookup
+		if f.Has(memo.AllowMergeJoin) {
+			hint = tree.AstMerge
+		}
+
+		return execPlan{}, false, errors.Errorf(
+			"could not produce a query plan conforming to the %s JOIN hint", hint,
+		)
+	}
+
+	joinType := joinOpToJoinType(join.Op())
+	leftExpr := join.Child(0).(memo.RelExpr)
+	rightExpr := join.Child(1).(memo.RelExpr)
+	filters := join.Child(2).(*memo.FiltersExpr)
+
+	if _, ok := leftExpr.(*memo.TSScanExpr); ok {
+		leftExpr, rightExpr = rightExpr, leftExpr
+	} else if selectExpr, ok := leftExpr.(*memo.SelectExpr); ok {
+		if _, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
+			leftExpr, rightExpr = rightExpr, leftExpr
+		}
+	} else if projectExpr, ok := leftExpr.(*memo.ProjectExpr); ok {
+		if _, ok := projectExpr.Input.(*memo.TSScanExpr); ok {
+			leftExpr, rightExpr = rightExpr, leftExpr
+		} else if selectExpr, ok := leftExpr.(*memo.SelectExpr); ok {
+			if _, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
+				leftExpr, rightExpr = rightExpr, leftExpr
+			}
+		}
+	}
+
+	leftEq, rightEq := memo.ExtractJoinEqualityColumns(
+		leftExpr.Relational().OutputCols,
+		rightExpr.Relational().OutputCols,
+		*filters,
+	)
+
+	for i := 0; i < len(leftEq); i++ {
+		md := b.mem.Metadata()
+		if md.ColumnMeta(leftEq[i]).Type.Family() == types.IntFamily ||
+			md.ColumnMeta(leftEq[i]).Type.Family() == types.FloatFamily {
+			leftLength := md.ColumnMeta(leftEq[i]).Type.InternalType.Width
+			rightLength := md.ColumnMeta(rightEq[i]).Type.InternalType.Width
+			if leftLength != rightLength {
+				b.mem.QueryType = memo.Unset
+				b.mem.MultimodelHelper.ResetReasons[memo.JoinColsTypeOrLengthMismatch] = struct{}{}
+				if b.mem.MultimodelHelper.HasLastAgg {
+					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+				}
+				return execPlan{}, true, nil
+			}
+		}
+	}
+
+	if !b.disableTelemetry {
+		if len(leftEq) > 0 {
+			telemetry.Inc(sqltelemetry.JoinAlgoHashUseCounter)
+		} else {
+			telemetry.Inc(sqltelemetry.JoinAlgoCrossUseCounter)
+		}
+		telemetry.Inc(opt.JoinTypeToUseCounter(join.Op()))
+	}
+
+	leftRowCount := rightExpr.Relational().Stats.RowCount
+	var rightRowCount float64
+	switch expr := rightExpr.(type) {
+	case *memo.TSScanExpr:
+		rightRowCount = expr.Relational().Stats.PTagCount
+	case *memo.SelectExpr:
+		if inputExpr, ok := expr.Input.(*memo.TSScanExpr); ok {
+			rightRowCount = inputExpr.Relational().Stats.PTagCount
+		}
+	case *memo.ProjectExpr:
+		if inputExpr, ok := expr.Input.(*memo.TSScanExpr); ok {
+			rightRowCount = inputExpr.Relational().Stats.PTagCount
+		} else if inputExpr, ok := expr.Input.(*memo.SelectExpr); ok {
+			if inputExpr, ok := inputExpr.Input.(*memo.TSScanExpr); ok {
+				rightRowCount = inputExpr.Relational().Stats.PTagCount
+			}
+		}
+	}
+	if rightRowCount > 0 && leftRowCount > rightRowCount {
+		b.mem.MultimodelHelper.HashTagScan = true
+	}
+
+	b.mem.MultimodelHelper.HasBljNode = true
+	b.mem.MultimodelHelper.JoinCols = rightEq
+
+	left, right, onExpr, outputCols, err := b.initJoinBuild(
+		leftExpr,
+		rightExpr,
+		memo.ExtractRemainingJoinFilters(*filters, leftEq, rightEq),
+		joinType,
+	)
+	if err != nil || filters.ChildCount() != len(leftEq) {
+		b.mem.QueryType = memo.Unset
+		b.mem.MultimodelHelper.ResetReasons[memo.LeftJoinColsPositionMismatch] = struct{}{}
+		OriginalAccessMode := b.mem.MultimodelHelper.OriginalAccessMode
+		b.factory.ResetTsScanAccessMode(right.root, OriginalAccessMode)
+		if b.mem.MultimodelHelper.HasLastAgg {
+			panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+		}
+		return execPlan{}, true, err
+	}
+
+	tsCols := b.factory.ProcessBljLeftColumns(left.root, b.mem)
+
+	ep := execPlan{outputCols: outputCols}
+
+	// Convert leftEq/rightEq to ordinals.
+	eqColsBuf := make([]exec.ColumnOrdinal, 2*len(leftEq))
+	leftEqOrdinals := eqColsBuf[:len(leftEq):len(leftEq)]
+	rightEqOrdinals := eqColsBuf[len(leftEq):]
+	rightEqValue := make([]uint32, len(leftEq))
+	for i := range leftEq {
+		leftEqOrdinals[i] = left.getColumnOrdinal(leftEq[i])
+		rightEqOrdinals[i] = right.getColumnOrdinal(rightEq[i])
+		rightEqValue[i] = uint32(b.mem.Metadata().GetTagIDByColumnID(rightEq[i])) + 1
+		if rightEqValue[i] == 0 {
+			b.mem.QueryType = memo.Unset
+			b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedCastOnTagColumn] = struct{}{}
+			OriginalAccessMode := b.mem.MultimodelHelper.OriginalAccessMode
+			b.factory.ResetTsScanAccessMode(right.root, OriginalAccessMode)
+			if b.mem.MultimodelHelper.HasLastAgg {
+				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+			}
+			return execPlan{}, true, err
+		}
+	}
+
+	leftEqValue := convertColumnOrdinalToUint32(leftEqOrdinals)
+	b.factory.ProcessTsScanNode(right.root, &leftEqValue, &rightEqValue, &tsCols)
+
+	leftEqColsAreKey := leftExpr.Relational().FuncDeps.ColsAreStrictKey(leftEq.ToSet())
+	rightEqColsAreKey := rightExpr.Relational().FuncDeps.ColsAreStrictKey(rightEq.ToSet())
+
+	ep.root, err = b.factory.ConstructBatchLookUpJoin(
+		joinType,
+		left.root, right.root,
+		leftEqOrdinals, rightEqOrdinals,
+		leftEqColsAreKey, rightEqColsAreKey,
+		onExpr,
+	)
+	if err != nil {
+		return execPlan{}, false, err
+	}
+
+	b.factory.UpdatePlanColumns(&ep.root)
+
+	return ep, false, nil
+}
+
 func (b *Builder) buildMergeJoin(join *memo.MergeJoinExpr) (execPlan, error) {
 	if !b.disableTelemetry {
 		telemetry.Inc(sqltelemetry.JoinAlgoMergeUseCounter)
@@ -1212,6 +1456,12 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 		return execPlan{}, err
 	}
 
+	// update the input for building groupNode for multiple model processing.
+	var blj exec.Node
+	if b.mem.QueryType == memo.MultiModel {
+		blj = b.factory.UpdateGroupInput(&input.root)
+	}
+
 	var ep execPlan
 	private := groupBy.Private().(*memo.GroupingPrivate)
 	groupingCols := private.GroupingCols
@@ -1266,6 +1516,12 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 		return execPlan{}, err
 	}
 
+	// move groupNode below blj node for multiple model processing.
+	var updateRoot exec.Node
+	if blj != nil {
+		updateRoot = b.factory.SetBljRightNode(blj, ep.root)
+		ep.root = updateRoot
+	}
 	return ep, nil
 }
 

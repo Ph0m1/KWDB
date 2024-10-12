@@ -9,7 +9,7 @@
 [CommuteJoin, Explore]
 (InnerJoin
     $left:*
-    $right:*
+    $right:* & (NoJoinManipulation $left $right)
     $on:*
     $private:* & (NoCommuteJoinHints $private)
 )
@@ -96,7 +96,7 @@
 # GenerateMergeJoins creates MergeJoin operators for the join, using the
 # interesting orderings property.
 [GenerateMergeJoins, Explore]
-(JoinNonApply $left:* $right:* $on:* $private:*)
+(JoinNonApply $left:* $right:* & (NoJoinManipulation $left $right) $on:* $private:*)
 =>
 (GenerateMergeJoins (OpName) $left $right $on $private)
 
@@ -106,7 +106,7 @@
 [GenerateLookupJoins, Explore]
 (InnerJoin | LeftJoin | SemiJoin | AntiJoin
     $left:*
-    (Scan $scanPrivate:*) & (IsCanonicalScan $scanPrivate)
+    (Scan $scanPrivate:*) & (IsCanonicalScan $scanPrivate) & (NoLookupJoinManipulation $left)
     $on:*
     $private:*
 )
@@ -162,7 +162,7 @@
 (InnerJoin | LeftJoin
     $left:*
     (Select
-        (Scan $scanPrivate:*) & (IsCanonicalScan $scanPrivate)
+        (Scan $scanPrivate:*) & (IsCanonicalScan $scanPrivate) & (NoLookupJoinManipulation $left)
         $filters:*
     )
     $on:*

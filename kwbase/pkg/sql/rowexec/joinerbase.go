@@ -126,6 +126,36 @@ func (jb *joinerBase) init(
 	return jb.onCond.Init(onExpr, condTypes, jb.EvalCtx)
 }
 
+// BLLJ init is only used to init batchlookup joiner for multiple model processing
+// when the switch is on and the server starts with single node mode.
+// BLJInit initializes the joinerBase.
+//
+// opts is passed along to the underlying ProcessorBase. The zero value is used
+// if the processor using the joinerBase is not implementing RowSource.
+func (jb *joinerBase) BLJInit(
+	self execinfra.RowSource,
+	flowCtx *execinfra.FlowCtx,
+	processorID int32,
+	leftTypes []types.T,
+	rightTypes []types.T,
+	jType sqlbase.JoinType,
+	post *execinfrapb.PostProcessSpec,
+	output execinfra.RowReceiver,
+	opts execinfra.ProcStateOpts,
+) error {
+	jb.joinType = jType
+
+	// only output right side results
+	outputTypes := rightTypes
+
+	if err := jb.ProcessorBase.Init(
+		self, post, outputTypes, flowCtx, processorID, output, nil /* memMonitor */, opts,
+	); err != nil {
+		return err
+	}
+	return nil
+}
+
 // joinSide is the utility type to distinguish between two sides of the join.
 type joinSide uint8
 

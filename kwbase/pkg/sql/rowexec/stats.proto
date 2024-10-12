@@ -36,6 +36,10 @@ message InputStats {
   // Duration in nanoseconds of the cumulative time spent stalled.
   google.protobuf.Duration stall_time = 8 [(gogoproto.nullable) = false,
                                         (gogoproto.stdduration) = true];
+  // build_time only be used for hash tag scan op for multiple model processing
+  // when the switch is on and the server starts with single node mode.
+  google.protobuf.Duration build_time = 9 [(gogoproto.nullable) = false,
+                                        (gogoproto.stdduration) = true];
 }
 
 // TableReaderStats are the stats collected during a tableReader run.
@@ -78,6 +82,15 @@ message JoinReaderStats {
 
 // HashJoinerStats are the stats collected during a hashJoiner run.
 message HashJoinerStats {
+  InputStats left_input_stats = 1 [(gogoproto.nullable) = false];
+  InputStats right_input_stats = 2 [(gogoproto.nullable) = false];
+  string stored_side = 3;
+  int64 max_allocated_mem = 4;
+  int64 max_allocated_disk = 5;
+}
+
+// BatchLookupJoinerStats are the stats collected during a batchLookupJoiner run.
+message BatchLookupJoinerStats {
   InputStats left_input_stats = 1 [(gogoproto.nullable) = false];
   InputStats right_input_stats = 2 [(gogoproto.nullable) = false];
   string stored_side = 3;

@@ -1098,6 +1098,15 @@ func (oi *optIndex) PartitionByListPrefixes() []tree.Datums {
 	return res
 }
 
+func (oi *optIndex) IndexColumnIDs(i int) []uint32 {
+	columnIDs := oi.desc.ColumnIDs
+	uint32IDs := make([]uint32, len(columnIDs))
+	for i, id := range columnIDs {
+		uint32IDs[i] = uint32(id)
+	}
+	return uint32IDs
+}
+
 type optTableStat struct {
 	stat           *stats.TableStatistic
 	columnOrdinals []int

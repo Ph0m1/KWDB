@@ -24,6 +24,7 @@
 #include "ee_sort_scan_op.h"
 #include "ee_table.h"
 #include "ee_tag_scan_op.h"
+#include "ee_hash_tag_scan_op.h"
 #include "kwdb_type.h"
 #include "lg_api.h"
 #include "ts_sampler_op.h"
@@ -50,14 +51,24 @@ KStatus OpFactory::NewTagScan(kwdbContext_p ctx, TsFetcherCollection* collection
     LOG_ERROR("Init table error when creating TableScanIterator.");
     Return(KStatus::FAIL);
   }
-  *iterator = NewIterator<TagScanOperator>(collection,
-      const_cast<TSTagReaderSpec*>(&readerSpec),
-      const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
+  // generate HashTagScan op for hashTagScan, primaryHashTagScan and hashRelScan access mode
+  // for multiple model processing
+  if (readerSpec.accessmode() == TSTableReadMode::hashTagScan
+        || readerSpec.accessmode() == TSTableReadMode::primaryHashTagScan
+        || readerSpec.accessmode() == TSTableReadMode::hashRelScan) {
+    *iterator = NewIterator<HashTagScanOperator>(collection,
+        const_cast<TSTagReaderSpec*>(&readerSpec),
+        const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
+  } else {
+    *iterator = NewIterator<TagScanOperator>(collection,
+        const_cast<TSTagReaderSpec*>(&readerSpec),
+        const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
+  }
 
   if (!(*iterator)) {
     delete *table;
     *table = nullptr;
-    LOG_ERROR("create TagScanOperator failed");
+    LOG_ERROR("create TagScanOperator/HashTagScanOperator failed");
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
   }

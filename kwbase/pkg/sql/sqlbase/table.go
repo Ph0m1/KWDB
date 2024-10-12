@@ -409,7 +409,7 @@ func MakeTSColumnDefDescs(
 		return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported %s type %s in timeseries table", errMsg, errType)
 	}
 	col.TsCol.StorageType = storageType
-	stLen := getStorageLenForFixedLenTypes(storageType)
+	stLen := GetStorageLenForFixedLenTypes(storageType)
 	if stLen != 0 {
 		// we are done for non-string data type, return now
 		col.TsCol.StorageLen = uint64(stLen)
@@ -887,8 +887,8 @@ func GetTSDataType(typ *types.T) DataType {
 	}
 }
 
-// getStorageLenForFixedLenTypes returns KColumn's storage length
-func getStorageLenForFixedLenTypes(dataType DataType) uint32 {
+// GetStorageLenForFixedLenTypes returns KColumn's storage length
+func GetStorageLenForFixedLenTypes(dataType DataType) uint32 {
 	switch dataType {
 	case DataType_TIMESTAMP, DataType_TIMESTAMPTZ:
 		return 8

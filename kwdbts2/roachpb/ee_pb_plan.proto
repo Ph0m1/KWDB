@@ -192,6 +192,9 @@ enum TSTableReadMode {
   tableTableMeta = 2;
   metaTable = 3;
   onlyTag = 4;
+  hashTagScan = 5;
+  primaryHashTagScan = 6;
+  hashRelScan = 7;
 }
 // TSReaderSpec table reader
 message TSReaderSpec {
@@ -215,6 +218,7 @@ message TSReaderSpec {
   required uint32 tableVersion = 9;
 
   optional TSOrdering   sorter = 10;
+  required int32 TsTablereaderId = 11;
 }
 
 enum SketchMethod {
@@ -791,4 +795,9 @@ message TSTagReaderSpec {
   // table version
   required uint32 tableVersion = 5;
   repeated HashpointSpan rangeSpans = 6;
+
+  //relational data
+  repeated TSCol  relationalCols = 7;
+  repeated uint32 probeColids = 8;
+  repeated uint32 hashColids = 9;
 }

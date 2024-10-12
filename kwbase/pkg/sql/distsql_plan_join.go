@@ -282,11 +282,66 @@ func joinOutColumns(
 	return post, joinToStreamColMap
 }
 
+// joinOutColumnsForBatchLookupJoin is only used to create batchlookupjoin exec plan for multiple model processing
+// when the switch is on and the server starts with single node mode.
+func joinOutColumnsForBatchLookupJoin(
+	n *batchLookUpJoinNode, rightPlanToStreamColMap []int,
+) (post execinfrapb.PostProcessSpec, joinToStreamColMap []int) {
+
+	joinToStreamColMap = makePlanToStreamColMap(len(n.columns))
+
+	post.Projection = true
+
+	// addOutCol appends to post.OutputColumns and returns the index
+	// in the slice of the added column.
+	addOutCol := func(col uint32) int {
+		idx := len(post.OutputColumns)
+		post.OutputColumns = append(post.OutputColumns, col)
+		return idx
+	}
+
+	// The join columns are totally from right side now:
+	for i := 0; i < len(n.columns); i++ {
+		joinToStreamColMap[i] = addOutCol(uint32(rightPlanToStreamColMap[i]))
+	}
+	return post, joinToStreamColMap
+}
+
 // remapOnExpr remaps ordinal references in the on condition (which refer to the
 // join columns as described above) to values that make sense in the joiner (0
 // to N-1 for the left input columns, N to N+M-1 for the right input columns).
 func remapOnExpr(
 	planCtx *PlanningCtx, n *joinNode, leftPlanToStreamColMap, rightPlanToStreamColMap []int,
+) (execinfrapb.Expression, error) {
+	if n.pred.onCond == nil {
+		return execinfrapb.Expression{}, nil
+	}
+
+	joinColMap := make([]int, n.pred.numLeftCols+n.pred.numRightCols)
+	idx := 0
+	leftCols := 0
+	for i := 0; i < n.pred.numLeftCols; i++ {
+		joinColMap[idx] = leftPlanToStreamColMap[i]
+		if leftPlanToStreamColMap[i] != -1 {
+			leftCols++
+		}
+		idx++
+	}
+	for i := 0; i < n.pred.numRightCols; i++ {
+		joinColMap[idx] = leftCols + rightPlanToStreamColMap[i]
+		idx++
+	}
+
+	return physicalplan.MakeExpression(n.pred.onCond, planCtx, joinColMap, true, false)
+}
+
+// remapOnExprForBatchLookupJoin remaps ordinal references in the on condition (which refer to the
+// join columns as described above) to values that make sense in the joiner (0
+// to N-1 for the left input columns, N to N+M-1 for the right input columns).
+func remapOnExprForBatchLookupJoin(
+	planCtx *PlanningCtx,
+	n *batchLookUpJoinNode,
+	leftPlanToStreamColMap, rightPlanToStreamColMap []int,
 ) (execinfrapb.Expression, error) {
 	if n.pred.onCond == nil {
 		return execinfrapb.Expression{}, nil

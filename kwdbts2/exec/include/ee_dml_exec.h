@@ -10,9 +10,11 @@
 // See the Mulan PSL v2 for more details.
 #pragma once
 
+#include <vector>
 #include "cm_assert.h"
 #include "kwdb_type.h"
 #include "libkwdbts2.h"
+#include "ee_rel_batch_queue.h"
 
 namespace kwdbts {
 class Messagemq;
@@ -47,6 +49,12 @@ class DmlExec {
   // dml exec query func
   static KStatus ExecQuery(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp);
 
+  // create a relational batch queue for multi-model query for multiple model processing
+  KStatus CreateRelBatchQueue(kwdbContext_p ctx, std::vector<Field*> &output_fields);
+  RelBatchQueue* GetRelBatchQueue();
+  // push relational batch data into relational batch queue for multiple model processing
+  KStatus PushRelData(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp);
+
  private:
   // create ts scan for execute
   KStatus CreateTsScan(kwdbContext_p ctx, TsScan **tsScan);
@@ -69,6 +77,8 @@ class DmlExec {
   TsScan *tsscan_end_;
   bool   first_next_{true};
   KWThdContext  *thd_{nullptr};
+  // a queue to receive relation batch data from ME for multiple model processing
+  RelBatchQueue* rel_batch_queue_{nullptr};
 };
 };  // namespace kwdbts
 

@@ -34,6 +34,10 @@ import (
 // reorder.
 const DefaultJoinOrderLimit = 4
 
+// DefaultMMJoinOrderLimit denotes the default limit on the number of joins to
+// reorder in multi-model processing.
+const DefaultMMJoinOrderLimit = 8
+
 // SaveTablesDatabase is the name of the database where tables created by
 // the saveTableNode are stored.
 const SaveTablesDatabase = "savetables"
@@ -71,6 +75,12 @@ var PushdownAll = settings.RegisterPublicBoolSetting(
 var TSParallelDegree = settings.RegisterPublicIntSetting(
 	"ts.parallel_degree",
 	"degree of parallelism in ts",
+	0)
+
+// TSHashScanMode ts engine hash tag scan mode enforcement
+var TSHashScanMode = settings.RegisterPublicIntSetting(
+	"ts.hash_scan_mode",
+	"hash scan mode enforcement in ts",
 	0)
 
 // TSQueryOptMode is a cluster setting that controls each optimization switch.

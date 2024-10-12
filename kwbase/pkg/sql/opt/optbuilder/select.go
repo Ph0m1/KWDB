@@ -1279,6 +1279,16 @@ func (b *Builder) buildWhere(where *tree.Where, inScope *scope) {
 func (b *Builder) buildFromTables(
 	tables tree.TableExprs, locking lockingSpec, inScope *scope,
 ) (outScope *scope) {
+	// Only do the analysis when the switch is on and the server starts with single node mode
+	// Also only do for the following types of SQLs for multiple model processing.
+	// In future, the restriction may be removed.
+	if b.evalCtx.SessionData.MultiModelEnabled && !b.evalCtx.StartDistributeMode &&
+		(b.stmt.StatementTag() == "SELECT" || b.stmt.StatementTag() == "EXPLAIN" ||
+			b.stmt.StatementTag() == "EXPLAIN ANALYZE (DEBUG)" || b.stmt.StatementTag() == "UNION" ||
+			b.stmt.StatementTag() == "INSERT" || b.stmt.StatementTag() == "UPDATE" ||
+			b.stmt.StatementTag() == "DELETE") {
+		tables = b.adjustTableSequenceForJoinBuild(tables, inScope)
+	}
 	// If there are any lateral data sources, we need to build the join tree
 	// left-deep instead of right-deep.
 	for i := range tables {
@@ -1288,6 +1298,80 @@ func (b *Builder) buildFromTables(
 		}
 	}
 	return b.buildFromTablesRightDeep(tables, locking, inScope)
+}
+
+// adjustTableSequenceForJoinBuild adjusts the table sequence before building
+// the right deep join tree for multiple model processing.
+//
+// The function adjust the sequence of tables involved in a multiple model query
+// to ensure the timeseries table to be joined last in the join tree. If the query
+// is not a multiple model query, the function returns the original table sequence.
+// The function also check if the query is a multiple model query and set the query type
+// in the memo accordingly.
+func (b *Builder) adjustTableSequenceForJoinBuild(
+	tables tree.TableExprs, inScope *scope,
+) (outTables tree.TableExprs) {
+	var relTables tree.TableExprs
+	var tsTables tree.TableExprs
+	mem := b.factory.Memo()
+
+	//traverse the tables to check if the query is a multiple model query and all the tables
+	//involved in the query are either relational or timeseries tables.
+	for i := range tables {
+		switch source := tables[i].(type) {
+		case *tree.AliasedTableExpr:
+			switch t := source.Expr.(type) {
+			case *tree.TableName:
+				if cte := inScope.lookupCTE(t); cte != nil {
+					relTables = append(relTables, tables[i])
+				} else {
+					ds, _ := b.lookupDataSource(t)
+					switch dstype := ds.(type) {
+					case cat.Table:
+						switch dstype.GetTableType() {
+						case tree.RelationalTable:
+							// if the table is relational table, then check if the query already has at least one timeseries
+							// table in the query. If not, then set the query type in the memo to "REL_ONLY". If the query already
+							// has a timeseries table, then set the query type in the memo to MultiModel.
+							if mem.QueryType == memo.Unset || mem.QueryType == memo.RelOnly {
+								mem.QueryType = memo.RelOnly
+							} else if mem.QueryType == memo.TSOnly {
+								mem.QueryType = memo.MultiModel
+							}
+							relTables = append(relTables, tables[i])
+						case tree.TimeseriesTable, tree.TemplateTable:
+							//if the table is timeseries table, then check if the query already has at least one relational
+							//table in the query. If not, then set the query type in the memo to "TS_ONLY". If the query already
+							//has a relational table, then set the query type in the memo to MultiModel.
+							if mem.QueryType == memo.Unset || mem.QueryType == memo.TSOnly {
+								mem.QueryType = memo.TSOnly
+							} else if mem.QueryType == memo.RelOnly {
+								mem.QueryType = memo.MultiModel
+							}
+							//adjust the table sequence to ensure the timeseries table is joined last in the join tree.
+							tsTables = append(tsTables, tables[i])
+						case tree.InstanceTable:
+							tsTables = append(tsTables, tables[i])
+						}
+					default:
+						relTables = append(relTables, tables[i])
+					}
+				}
+			default:
+				relTables = append(relTables, tables[i])
+			}
+		default:
+			relTables = append(relTables, tables[i])
+		}
+	}
+
+	//if the query is a multiple model query, then return the new table sequence;
+	//otherwise return the original table sequence.
+	if mem.QueryType == memo.MultiModel {
+		tsTables = append(tsTables, relTables...)
+		return tsTables
+	}
+	return tables
 }
 
 // buildFromTablesRightDeep recursively builds a series of InnerJoin

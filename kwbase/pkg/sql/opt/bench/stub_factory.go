@@ -117,6 +117,17 @@ func (f *stubFactory) ConstructHashJoin(
 	return struct{}{}, nil
 }
 
+// for multiple model processing.
+func (f *stubFactory) ConstructBatchLookUpJoin(
+	joinType sqlbase.JoinType,
+	left, right exec.Node,
+	leftEqCols, rightEqCols []exec.ColumnOrdinal,
+	leftEqColsAreKey, rightEqColsAreKey bool,
+	extraOnCond tree.TypedExpr,
+) (exec.Node, error) {
+	return struct{}{}, nil
+}
+
 func (f *stubFactory) ConstructApplyJoin(
 	joinType sqlbase.JoinType,
 	left exec.Node,
@@ -270,7 +281,7 @@ func (f *stubFactory) ConstructExplainOpt(
 }
 
 func (f *stubFactory) ConstructExplain(
-	options *tree.ExplainOptions, stmtType tree.StatementType, plan exec.Plan,
+	options *tree.ExplainOptions, stmtType tree.StatementType, plan exec.Plan, mem *memo.Memo,
 ) (exec.Node, error) {
 	return struct{}{}, nil
 }
@@ -499,3 +510,35 @@ func (f *stubFactory) ConstructExport(
 }
 
 func (f *stubFactory) MakeTSSpans(e opt.Expr, n exec.Node, m *memo.Memo) (tight bool) { return false }
+
+// for multiple model processing.
+func (f *stubFactory) UpdatePlanColumns(input *exec.Node) {}
+
+// for multiple model processing.
+func (f *stubFactory) UpdateGroupInput(input *exec.Node) exec.Node {
+	return struct{}{}
+}
+
+// for multiple model processing.
+func (f *stubFactory) SetBljRightNode(blj, agg exec.Node) exec.Node {
+	return struct{}{}
+}
+
+// for multiple model processing.
+func (f *stubFactory) ProcessTsScanNode(
+	node exec.Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol,
+) {
+
+}
+
+// for multiple model processing.
+func (f *stubFactory) ProcessBljLeftColumns(node exec.Node, mem *memo.Memo) []sqlbase.TSCol {
+	return nil
+}
+
+// for multiple model processing.
+func (f *stubFactory) ResetTsScanAccessMode(
+	node exec.Node, originalAccessMode execinfrapb.TSTableReadMode,
+) {
+
+}

@@ -433,6 +433,64 @@ func (ef *execFactory) RenameColumns(n exec.Node, colNames []string) (exec.Node,
 	return n, nil
 }
 
+// ConstructBatchLookUpJoin is part of the exec.Factory interface.
+// for multiple model processing.
+func (ef *execFactory) ConstructBatchLookUpJoin(
+	joinType sqlbase.JoinType,
+	left, right exec.Node,
+	leftEqCols, rightEqCols []exec.ColumnOrdinal,
+	leftEqColsAreKey, rightEqColsAreKey bool,
+	extraOnCond tree.TypedExpr,
+) (exec.Node, error) {
+	// p := ef.planner
+	leftSrc := asDataSource(left)
+	rightSrc := asDataSource(right)
+	pred, err := makePredicate(joinType, leftSrc.columns, rightSrc.columns)
+	if err != nil {
+		return nil, err
+	}
+
+	numEqCols := len(leftEqCols)
+	// Save some allocations by putting both sides in the same slice.
+	intBuf := make([]int, 2*numEqCols)
+	pred.leftEqualityIndices = intBuf[:numEqCols:numEqCols]
+	pred.rightEqualityIndices = intBuf[numEqCols:]
+	nameBuf := make(tree.NameList, 2*numEqCols)
+	pred.leftColNames = nameBuf[:numEqCols:numEqCols]
+	pred.rightColNames = nameBuf[numEqCols:]
+
+	for i := range leftEqCols {
+		pred.leftEqualityIndices[i] = int(leftEqCols[i])
+		pred.rightEqualityIndices[i] = int(rightEqCols[i])
+		pred.leftColNames[i] = tree.Name(leftSrc.columns[leftEqCols[i]].Name)
+		pred.rightColNames[i] = tree.Name(rightSrc.columns[rightEqCols[i]].Name)
+	}
+	pred.leftEqKey = leftEqColsAreKey
+	pred.rightEqKey = rightEqColsAreKey
+
+	pred.onCond = pred.iVarHelper.Rebind(
+		extraOnCond, false /* alsoReset */, false, /* normalizeToNonNil */
+	)
+	// //lookup join
+	// n := &lookupJoinNode{
+	// 	input:        input.(planNode),
+	// 	table:        tableScan,
+	// 	joinType:     joinType,
+	// 	eqColsAreKey: eqColsAreKey,
+	// 	reqOrdering:  ReqOrdering(reqOrdering),
+	// }
+	// hash join
+	n := &batchLookUpJoinNode{
+		left:     leftSrc,
+		right:    rightSrc,
+		joinType: pred.joinType,
+		pred:     pred,
+		columns:  pred.cols,
+	}
+
+	return n, nil
+}
+
 // ConstructHashJoin is part of the exec.Factory interface.
 func (ef *execFactory) ConstructHashJoin(
 	joinType sqlbase.JoinType,
@@ -1277,7 +1335,7 @@ func (ef *execFactory) ConstructExplainOpt(
 
 // ConstructExplain is part of the exec.Factory interface.
 func (ef *execFactory) ConstructExplain(
-	options *tree.ExplainOptions, stmtType tree.StatementType, plan exec.Plan,
+	options *tree.ExplainOptions, stmtType tree.StatementType, plan exec.Plan, mem *memo.Memo,
 ) (exec.Node, error) {
 	p := plan.(*planTop)
 
@@ -1317,6 +1375,7 @@ func (ef *execFactory) ConstructExplain(
 			p.subqueryPlans,
 			p.postqueryPlans,
 			stmtType,
+			mem,
 		)
 
 	default:
@@ -2565,4 +2624,212 @@ func walkSort(meta *opt.Metadata, expr memo.RelExpr) bool {
 	default:
 		return false
 	}
+}
+
+// updatePlanColumns updates the resultColumns for tsScanNode and synchronizerNode plans
+// based on the columns of a given batchLookUpJoinNode for multiple model processing.
+func (ef *execFactory) UpdatePlanColumns(blj *exec.Node) {
+	switch node := (*blj).(type) {
+	case *batchLookUpJoinNode:
+		if tsNode, ok := node.right.plan.(*tsScanNode); ok {
+			tsNode.resultColumns = node.columns
+		}
+
+		if syncNode, ok := node.right.plan.(*synchronizerNode); ok {
+			if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
+				syncNode.columns = node.columns
+				tsNode.resultColumns = node.columns
+			}
+		}
+	}
+}
+
+// UpdateGroupInput updates the input to build groupNode for multiple model processing.
+func (ef *execFactory) UpdateGroupInput(input *exec.Node) exec.Node {
+	switch node := (*input).(type) {
+	case *batchLookUpJoinNode:
+		*input = node.right
+		return node
+
+	case *renderNode:
+		node.engine = tree.EngineTypeTimeseries
+		if bljNode, ok := node.source.plan.(*batchLookUpJoinNode); ok {
+			node.source.plan = bljNode.right.plan
+			*input = node
+			return bljNode
+		} else if sortNode, ok := node.source.plan.(*sortNode); ok {
+			sortNode.engine = tree.EngineTypeTimeseries
+			if bljNode, ok := sortNode.plan.(*batchLookUpJoinNode); ok {
+				sortNode.plan = bljNode.right.plan
+				*input = node
+				return bljNode
+			}
+		}
+	case *sortNode:
+		node.engine = tree.EngineTypeTimeseries
+		if renderNode, ok := node.plan.(*renderNode); ok {
+			renderNode.engine = tree.EngineTypeTimeseries
+			if bljNode, ok := renderNode.source.plan.(*batchLookUpJoinNode); ok {
+				renderNode.source.plan = bljNode.right.plan
+				*input = node
+				return bljNode
+			}
+		}
+	}
+	return nil
+}
+
+// SetBljRightNode sets the right child of a batchLookUpJoinNode to a groupNode
+// for multiple model processing.
+func (ef *execFactory) SetBljRightNode(node1, node2 exec.Node) exec.Node {
+	if blj, ok := node1.(*batchLookUpJoinNode); ok {
+		if agg, ok := node2.(*groupNode); ok {
+			agg.engine = tree.EngineTypeTimeseries
+			blj.right.plan = agg
+			blj.columns = agg.columns
+			return blj
+		}
+	}
+	return nil
+}
+
+// ProcessTsScanNode sets relationalInfo to a tsScanNode for multiple model processing.
+func (ef *execFactory) ProcessTsScanNode(
+	node exec.Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol,
+) {
+	switch n := node.(type) {
+	case *tsScanNode:
+		n.RelInfo.RelationalCols = tsCols
+		n.RelInfo.ProbeColIds = leftEq
+		n.RelInfo.HashColIds = rightEq
+	case *synchronizerNode:
+		if tsNode, ok := n.plan.(*tsScanNode); ok {
+			tsNode.RelInfo.RelationalCols = tsCols
+			tsNode.RelInfo.ProbeColIds = leftEq
+			tsNode.RelInfo.HashColIds = rightEq
+		}
+	}
+}
+
+// ResetTsScanAccessMode resets tsScanNode's accessMode when falling back
+// to original plan for multiple model processing.
+func (ef *execFactory) ResetTsScanAccessMode(
+	node exec.Node, originalAccessMode execinfrapb.TSTableReadMode,
+) {
+	switch n := node.(type) {
+	case *tsScanNode:
+		n.AccessMode = originalAccessMode
+	case *synchronizerNode:
+		if tsNode, ok := n.plan.(*tsScanNode); ok {
+			tsNode.AccessMode = originalAccessMode
+		}
+	}
+}
+
+// ProcessBljLeftColumns helps build the tsScanNode's relaitonalInfo
+// for multiple model processing.
+func (ef *execFactory) ProcessBljLeftColumns(node exec.Node, mem *memo.Memo) []sqlbase.TSCol {
+	tsCols := make([]sqlbase.TSCol, 0)
+
+	switch n := node.(type) {
+	case *batchLookUpJoinNode, *exportNode, *groupNode,
+		*indexJoinNode, *joinNode, *lookupJoinNode,
+		*ordinalityNode, *projectSetNode, *renderNode,
+		*scanNode, *tsScanNode, *synchronizerNode,
+		*unionNode, *valuesNode, *windowNode,
+		*zeroNode, *zigzagJoinNode:
+		var columns sqlbase.ResultColumns
+		switch node := n.(type) {
+		case *batchLookUpJoinNode:
+			columns = node.columns
+		case *exportNode:
+			columns = node.columns
+		case *groupNode:
+			columns = node.columns
+		case *indexJoinNode:
+			columns = node.resultColumns
+		case *joinNode:
+			columns = node.columns
+		case *lookupJoinNode:
+			columns = node.columns
+		case *ordinalityNode:
+			columns = node.columns
+		case *projectSetNode:
+			columns = node.columns
+		case *renderNode:
+			columns = node.columns
+		case *scanNode:
+			columns = node.resultColumns
+		case *tsScanNode:
+			columns = node.resultColumns
+		case *synchronizerNode:
+			columns = node.columns
+		case *unionNode:
+			columns = node.columns
+		case *valuesNode:
+			columns = node.columns
+		case *windowNode:
+			columns = node.columns
+		case *zeroNode:
+			columns = node.columns
+		case *zigzagJoinNode:
+			columns = node.columns
+		}
+		// columns := n.columns
+		for _, col := range columns {
+			colType := col.Typ
+			storageType := sqlbase.GetTSDataType(colType)
+			if storageType == sqlbase.DataType_UNKNOWN {
+				storageType = sqlbase.DataType_VARCHAR
+			}
+
+			var storageLen uint64
+			stLen := sqlbase.GetStorageLenForFixedLenTypes(storageType)
+			if stLen != 0 {
+				storageLen = uint64(stLen)
+			}
+
+			typeWidth := colType.Width()
+			if storageType == sqlbase.DataType_CHAR || storageType == sqlbase.DataType_NVARCHAR {
+				typeWidth = colType.Width() * 4
+			}
+
+			if typeWidth == 0 {
+				switch storageType {
+				case sqlbase.DataType_CHAR:
+					storageLen = 1
+				case sqlbase.DataType_BYTES:
+					storageLen = 3
+				case sqlbase.DataType_NCHAR:
+					storageLen = 4
+				case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR, sqlbase.DataType_VARBYTES:
+					storageLen = sqlbase.TSMaxVariableTupleLen
+				}
+			} else {
+				switch storageType {
+				case sqlbase.DataType_CHAR, sqlbase.DataType_NCHAR:
+					if typeWidth < sqlbase.TSMaxFixedLen {
+						storageLen = uint64(typeWidth) + 1
+					}
+				case sqlbase.DataType_BYTES:
+					if typeWidth < sqlbase.TSMaxFixedLen {
+						storageLen = uint64(typeWidth) + 2
+					}
+				case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR:
+					if typeWidth <= sqlbase.TSMaxVariableLen {
+						storageLen = uint64(typeWidth + 1)
+					}
+				case sqlbase.DataType_VARBYTES:
+					if typeWidth <= sqlbase.TSMaxVariableLen {
+						storageLen = uint64(typeWidth)
+					}
+				}
+			}
+			tsCols = append(tsCols, sqlbase.TSCol{
+				StorageLen:  storageLen,
+				StorageType: storageType,
+			})
+		}
+	}
+	return tsCols
 }

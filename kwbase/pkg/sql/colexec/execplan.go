@@ -477,8 +477,10 @@ func (r *NewColOperatorResult) createAndWrapRowSource(
 	spec *execinfrapb.ProcessorSpec,
 	processorConstructor execinfra.ProcessorConstructor,
 ) error {
+	// spec.Core.BatchLookupJoiner only be checked for multiple model processing
+	// when the switch is on and the server starts with single node mode.
 	if flowCtx.EvalCtx.SessionData.VectorizeMode == sessiondata.VectorizeAuto &&
-		spec.Core.JoinReader == nil {
+		spec.Core.JoinReader == nil && spec.Core.BatchLookupJoiner == nil {
 		return errors.New("rowexec processor wrapping for non-JoinReader core unsupported in vectorize=auto mode")
 	}
 	c, err := wrapRowSources(

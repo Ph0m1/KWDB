@@ -108,6 +108,9 @@ func (is InputStats) Stats(prefix string) map[string]string {
 const (
 	rowsReadQueryPlanSuffix  = "rows read"
 	stallTimeQueryPlanSuffix = "stall time"
+	// buildTimeQueryPlanSuffix only do the build time print for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	buildTimeQueryPlanSuffix = "build time"
 	// MaxMemoryQueryPlanSuffix is the tag suffix for the max memory used.
 	MaxMemoryQueryPlanSuffix = "max memory used"
 	// MaxDiskQueryPlanSuffix is the tag suffix for the max disk used.
@@ -122,6 +125,15 @@ const (
 // stats to output on a query plan. The given prefix is prefixed to each element
 // in the returned list.
 func (is InputStats) StatsForQueryPlan(prefix string) []string {
+	// Only do the build print for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	if is.BuildTime != 0 {
+		return []string{
+			fmt.Sprintf("%s%s: %d", prefix, rowsReadQueryPlanSuffix, is.NumRows),
+			fmt.Sprintf("%s%s: %v", prefix, stallTimeQueryPlanSuffix, is.RoundStallTime()),
+			fmt.Sprintf("%s%s: %v", prefix, buildTimeQueryPlanSuffix, is.RoundBuildTime()),
+		}
+	}
 	return []string{
 		fmt.Sprintf("%s%s: %d", prefix, rowsReadQueryPlanSuffix, is.NumRows),
 		fmt.Sprintf("%s%s: %v", prefix, stallTimeQueryPlanSuffix, is.RoundStallTime()),
@@ -132,6 +144,14 @@ func (is InputStats) StatsForQueryPlan(prefix string) []string {
 // time.Millisecond.
 func (is InputStats) RoundStallTime() time.Duration {
 	return is.StallTime.Round(time.Microsecond)
+}
+
+// RoundBuildTime returns the InputStats' BuildTime rounded to the nearest
+// time.Millisecond.
+// RoundBuildTime only do the build time check for multiple model processing
+// when the switch is on and the server starts with single node mode
+func (is InputStats) RoundBuildTime() time.Duration {
+	return is.BuildTime.Round(time.Microsecond)
 }
 
 // rowFetcherStatCollector is a wrapper on top of a row.Fetcher that collects stats.

@@ -184,15 +184,25 @@ var CancelSessionsUseCounter = telemetry.GetCounterOnce("sql.session.cancel-sess
 // reorderJoinLimitUseCounters is a list of counters. The entry at position i
 // is the counter for SET reorder_join_limit = i.
 var reorderJoinLimitUseCounters []telemetry.Counter
+var multiModelReorderJoinLimitUseCounters []telemetry.Counter
 
 const reorderJoinsCounters = 12
 
+const multiModelReorderJoinsCounters = 12
+
 func init() {
 	reorderJoinLimitUseCounters = make([]telemetry.Counter, reorderJoinsCounters)
+	multiModelReorderJoinLimitUseCounters = make([]telemetry.Counter, multiModelReorderJoinsCounters)
 
 	for i := 0; i < reorderJoinsCounters; i++ {
 		reorderJoinLimitUseCounters[i] = telemetry.GetCounterOnce(
 			fmt.Sprintf("sql.plan.reorder-joins.set-limit-%d", i),
+		)
+	}
+
+	for i := 0; i < multiModelReorderJoinsCounters; i++ {
+		multiModelReorderJoinLimitUseCounters[i] = telemetry.GetCounterOnce(
+			fmt.Sprintf("sql.plan.multi-model-reorder-joins.set-limit-%d", i),
 		)
 	}
 }
@@ -201,6 +211,10 @@ func init() {
 // set the join reorder limit above reorderJoinsCounters.
 var reorderJoinLimitMoreCounter = telemetry.GetCounterOnce("sql.plan.reorder-joins.set-limit-more")
 
+// MultiModelReorderJoinLimitMoreCounter is the counter for the number of times someone
+// set the join reorder limit above reorderJoinsCounters.
+var multiModelReorderJoinLimitMoreCounter = telemetry.GetCounterOnce("sql.plan.multi-model-reorder-joins.set-limit-more")
+
 // ReportJoinReorderLimit is to be called whenever the reorder joins session variable
 // is set.
 func ReportJoinReorderLimit(value int) {
@@ -208,6 +222,16 @@ func ReportJoinReorderLimit(value int) {
 		telemetry.Inc(reorderJoinLimitUseCounters[value])
 	} else {
 		telemetry.Inc(reorderJoinLimitMoreCounter)
+	}
+}
+
+// ReportMultiModelJoinReorderLimit is to be called whenever the reorder joins session variable for multi-model processing
+// is set.
+func ReportMultiModelJoinReorderLimit(value int) {
+	if value < multiModelReorderJoinsCounters {
+		telemetry.Inc(multiModelReorderJoinLimitUseCounters[value])
+	} else {
+		telemetry.Inc(multiModelReorderJoinLimitMoreCounter)
 	}
 }
 

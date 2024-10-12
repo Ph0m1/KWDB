@@ -916,10 +916,12 @@ EEIteratorErrCode PostResolve::ResolveScanTags(kwdbContext_p ctx) {
   k_uint32 size = post_->outputcols_size();
   for (k_uint32 i = 0; i < size; i++) {
     k_uint32 col_id = post_->outputcols(i);
-    table_->scan_tags_.push_back(col_id - table_->min_tag_id_);
-
-    Field* field = table_->GetFieldWithColNum(col_id);
-    field->setColIdxInRs(i);
+    // skip the col_id if it exceeds table_->field_num_ which should be relational col for multiple model processing
+    if (col_id < table_->field_num_) {
+      table_->scan_tags_.push_back(col_id - table_->min_tag_id_);
+      Field* field = table_->GetFieldWithColNum(col_id);
+      field->setColIdxInRs(i);
+    }
   }
 
   Return(code);
@@ -945,6 +947,24 @@ EEIteratorErrCode PostResolve::ResolveScanCols(kwdbContext_p ctx) {
     field->setColIdxInRs(i);
   }
 
+  Return(code);
+}
+
+EEIteratorErrCode PostResolve::ResolveScanRelCols(kwdbContext_p ctx) {
+  EnterFunc();
+  EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
+  // resolve relational cols
+  table_->scan_rel_cols_.reserve(table_->GetRelFields().size());
+  k_uint32 size = post_->outputcols_size();
+  for (k_uint32 i = 0; i < size; ++i) {
+    k_uint32 col_id = post_->outputcols(i);
+    if (col_id >= table_->field_num_) {
+      table_->scan_rel_cols_.push_back(col_id - table_->field_num_);
+      Field* field = table_->GetFieldWithColNum(col_id);
+      field->setColIdxInRs(i);
+      field->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_TAG);
+    }
+  }
   Return(code);
 }
 

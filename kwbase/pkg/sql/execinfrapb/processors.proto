@@ -130,6 +130,9 @@ message ProcessorCoreUnion {
   optional TsAlterProSpec tsAlter = 39;
   optional TsTagUpdateProSpec tsTagUpdate = 40;
   optional TsInsertSelSpec tsInsertSelect = 41;
+  // BatchLookupJoinerSpec only be used for multiple model processing
+  // when the switch is on and the server starts with single node mode.
+  optional BatchLookupJoinerSpec batchLookupJoiner = 42;
 
   reserved 6, 12;
 }

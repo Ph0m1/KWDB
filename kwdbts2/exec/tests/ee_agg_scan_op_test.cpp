@@ -85,6 +85,8 @@ TEST_F(TestAggScanOp, TestDmlExecAgg) {
   info->value = message.get();
   info->ret = 0;
   info->time_zone = 0;
+  info->relBatchData = nullptr;
+  info->relRowCount = 0;
 
   KStatus status = DmlExec::ExecQuery(ctx_, info, info2);
   ASSERT_EQ(status, KStatus::SUCCESS);

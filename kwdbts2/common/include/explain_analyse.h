@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <optional>
 #include "cm_kwdb_context.h"
 #include "libkwdbts2.h"
 

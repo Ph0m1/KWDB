@@ -158,13 +158,15 @@ type Memo struct {
 
 	// The following are selected fields from SessionData which can affect
 	// planning. We need to cross-check these before reusing a cached memo.
-	dataConversion    sessiondata.DataConversionConfig
-	reorderJoinsLimit int
-	zigzagJoinEnabled bool
-	optimizerFKs      bool
-	safeUpdates       bool
-	saveTablesPrefix  string
-	insertFastPath    bool
+	dataConversion              sessiondata.DataConversionConfig
+	reorderJoinsLimit           int
+	multiModelReorderJoinsLimit int
+	MultiModelEnabled           bool
+	zigzagJoinEnabled           bool
+	optimizerFKs                bool
+	safeUpdates                 bool
+	saveTablesPrefix            string
+	insertFastPath              bool
 
 	// curID is the highest currently in-use scalar expression ID.
 	curID opt.ScalarID
@@ -187,7 +189,29 @@ type Memo struct {
 
 	// tsDop represents degree of parallelism control parallelism in time series engine
 	tsDop uint32
+
+	// QueryType represents the type of a query for multiple model processing.
+	QueryType QueryTypeEnum
+
+	// MultimodelHelper helps assist in setting configurations for multiple model processing.
+	MultimodelHelper MultimodelHelper
 }
+
+// QueryTypeEnum represents the type of a query, whether it is a multi-model query
+// or not.
+// for multiple model processing.
+type QueryTypeEnum int
+
+const (
+	// Unset represents a state where the query type is not set.
+	Unset QueryTypeEnum = iota
+	// MultiModel represents a query involving both time-series and relational data.
+	MultiModel
+	// TSOnly represents a query that involves only time-series data.
+	TSOnly
+	// RelOnly represents a query that involves only relational data.
+	RelOnly
+)
 
 // TSCheckHelper ts check helper, helper check flags, push column, white list and so on
 type TSCheckHelper struct {
@@ -227,6 +251,122 @@ func (m *TSCheckHelper) isSingleNode() bool {
 	return false
 }
 
+// MultimodelHelper is a helper struct designed to assist in setting
+// configurations for multiple model processing.
+type MultimodelHelper struct {
+	TableGroup           [][][]opt.TableID
+	PreGroupedAggregates AggregationStrategy
+	HasBljNode           bool
+	JoinCols             opt.ColList
+	HashTagScan          bool
+	OriginalAccessMode   execinfrapb.TSTableReadMode
+	ResetReasons         map[MultiModelResetReason]struct{}
+	HasLastAgg           bool
+}
+
+// init Initializes values for MultimodelHelper
+func (m *MultimodelHelper) init() {
+	m.PreGroupedAggregates = OutsideIn
+	m.TableGroup = nil
+	m.HasBljNode = false
+	m.JoinCols = nil
+	m.HashTagScan = false
+	m.OriginalAccessMode = -1
+	m.ResetReasons = make(map[MultiModelResetReason]struct{})
+	m.HasLastAgg = false
+}
+
+// AggregationStrategy defines the strategy for data aggregation in queries.
+// for multiple model processing.
+type AggregationStrategy int
+
+const (
+	// OutsideIn represents a strategy where relational data is processed first,
+	// followed by time-series data.
+	OutsideIn AggregationStrategy = iota // 0
+
+	// InsideOut represents a strategy that starts with time-series data,
+	// and then relational data is processed.
+	InsideOut // 1
+
+	// Hybrid represents a combination of both OutsideIn and InsideOut strategies.
+	Hybrid // 2
+)
+
+// String converts AggregationStrategy to string
+// for multiple model processing.
+func (a AggregationStrategy) String() string {
+	switch a {
+	case OutsideIn:
+		return "outside-in"
+	case InsideOut:
+		return "inside-out"
+	case Hybrid:
+		return "hybrid"
+	default:
+		return "unknown"
+	}
+}
+
+// MultiModelResetReason defines reasons for resetting the multi-model flag,
+// indicating scenarios where multi-model processing is not supported.
+// for multiple model processing.
+type MultiModelResetReason int
+
+const (
+	// UnsupportedAggFuncOrExpr indicates the reset reason is due to the use of an aggregation function
+	// or expression that is not supported in multi-model contexts.
+	UnsupportedAggFuncOrExpr MultiModelResetReason = iota // 0
+
+	// UnsupportedDataType indicates the reset reason is due to encountering a data type
+	// in the query that is not supported in a multi-model context.
+	UnsupportedDataType // 1
+
+	// JoinBetweenTimeSeriesTables indicates the reset reason is a join operation
+	// between two time-series tables, which is not supported in multi-model contexts.
+	JoinBetweenTimeSeriesTables // 2
+
+	// UnsupportedCrossJoin indicates the reset reason is due to a cross join operation,
+	// which is not supported in multi-model contexts.
+	UnsupportedCrossJoin // 3
+
+	// LeftJoinColsPositionMismatch indicates the reset reason is due to the inability
+	// to match left join columns with their positions in the relational information,
+	// which is necessary for processing in multi-model contexts.
+	LeftJoinColsPositionMismatch // 4
+
+	// UnsupportedCastOnTagColumn indicates the reset reason is due to a cast operation
+	// on a tag column, which is not supported in multi-model contexts.
+	UnsupportedCastOnTagColumn // 5
+
+	// JoinColsTypeOrLengthMismatch indicates the reset reason is due to a mismatch
+	// in the type or length of join columns, which is necessary for processing in multi-model contexts.
+	JoinColsTypeOrLengthMismatch // 6
+)
+
+// String converts MultiModelResetReason to string
+// for multiple model processing.
+func (r MultiModelResetReason) String() string {
+	switch r {
+	case UnsupportedAggFuncOrExpr:
+		return "unsupported aggregation function or expression"
+	case UnsupportedDataType:
+		return "unsupported data type"
+	case JoinBetweenTimeSeriesTables:
+		return "join between time-series tables"
+	case UnsupportedCrossJoin:
+		return "cross join is not supported in multi-model"
+	case LeftJoinColsPositionMismatch:
+		return "mismatch in left join columns' positions with relationalInfo"
+	case UnsupportedCastOnTagColumn:
+		return "cast on tag column is not supported in multi-model"
+	case JoinColsTypeOrLengthMismatch:
+		return "mismatch in join columns' type or length"
+	default:
+		return "unknown"
+	}
+}
+
 // CheckMultiNode check multi node function
 type CheckMultiNode func(ctx context.Context) bool
 
@@ -246,6 +386,8 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 
 	m.dataConversion = evalCtx.SessionData.DataConversion
 	m.reorderJoinsLimit = evalCtx.SessionData.ReorderJoinsLimit
+	m.multiModelReorderJoinsLimit = evalCtx.SessionData.MultiModelReorderJoinsLimit
+	m.MultiModelEnabled = evalCtx.SessionData.MultiModelEnabled
 	m.zigzagJoinEnabled = evalCtx.SessionData.ZigzagJoinEnabled
 	m.optimizerFKs = evalCtx.SessionData.OptimizerFKs
 	m.safeUpdates = evalCtx.SessionData.SafeUpdates
@@ -258,6 +400,8 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 	m.CheckHelper.init()
 
 	m.tsDop = 0
+	m.QueryType = Unset
+	m.MultimodelHelper.init()
 }
 
 // InitCheckHelper init some members of CheckHelper of memo.
@@ -383,6 +527,8 @@ func (m *Memo) IsStale(
 	// changed.
 	if !m.dataConversion.Equals(&evalCtx.SessionData.DataConversion) ||
 		m.reorderJoinsLimit != evalCtx.SessionData.ReorderJoinsLimit ||
+		m.multiModelReorderJoinsLimit != evalCtx.SessionData.MultiModelReorderJoinsLimit ||
+		m.MultiModelEnabled != evalCtx.SessionData.MultiModelEnabled ||
 		m.zigzagJoinEnabled != evalCtx.SessionData.ZigzagJoinEnabled ||
 		m.optimizerFKs != evalCtx.SessionData.OptimizerFKs ||
 		m.safeUpdates != evalCtx.SessionData.SafeUpdates ||

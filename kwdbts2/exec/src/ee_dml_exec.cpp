@@ -22,6 +22,9 @@
 namespace kwdbts {
 DmlExec::~DmlExec() {
   auto ctx = ContextManager::GetThreadContext();
+  if (rel_batch_queue_) {
+    delete rel_batch_queue_;
+  }
   ClearTsScans(ctx);
   if (thd_) {
     SafeDeletePointer(thd_);
@@ -90,6 +93,19 @@ void DmlExec::ClearTsScans(kwdbContext_p ctx) {
   tsscan_head_ = nullptr;
 }
 
+KStatus DmlExec::CreateRelBatchQueue(kwdbContext_p ctx, std::vector<Field*> &output_fields) {
+  EnterFunc();
+  rel_batch_queue_ = new RelBatchQueue(output_fields);
+  if (rel_batch_queue_ == nullptr) {
+    Return(KStatus::FAIL);
+  }
+  Return(KStatus::SUCCESS);
+}
+
+RelBatchQueue* DmlExec::GetRelBatchQueue() {
+  return rel_batch_queue_;
+}
+
 KStatus DmlExec::ExecQuery(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp) {
   EnterFunc();
   AssertNotNull(req);
@@ -113,6 +129,7 @@ KStatus DmlExec::ExecQuery(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp) {
     } else {
       handle = static_cast<DmlExec *>(static_cast<void *>(req->handle));
     }
+    ctx->dml_exec_handle = handle;
     switch (type) {
       case EnMqType::MQ_TYPE_DML_SETUP:
         ret = handle->Setup(ctx, message, len, id, uniqueID, resp);
@@ -129,6 +146,10 @@ KStatus DmlExec::ExecQuery(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp) {
         break;
       case EnMqType::MQ_TYPE_DML_PG_RESULT:
         ret = handle->Next(ctx, id, true, resp);
+        break;
+      case EnMqType::MQ_TYPE_DML_PUSH:
+        // push relational data from ME to AE for multiple model processing
+        ret = handle->PushRelData(ctx, req, resp);
         break;
       default:
         EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "Undecided datatype");
@@ -326,6 +347,24 @@ KStatus DmlExec::Next(kwdbContext_p ctx, k_int32 id, bool isPG, RespInfo *resp) 
     DestroyTsScan(tmp);
   }
   Return(ret);
+}
+
+KStatus DmlExec::PushRelData(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp) {
+  EnterFunc();
+  resp->ret = 0;
+  if (!rel_batch_queue_) {
+    // RelBatchQueue wasn't created, so relational data should not be push down
+    // and something must be wrong.
+    Return(KStatus::FAIL);
+  }
+  // Put rel batch data into RelBatchQueue.
+  if (rel_batch_queue_->Add(ctx, reinterpret_cast<char*>(req->relBatchData), req->relRowCount) == KStatus::SUCCESS) {
+    resp->code = 1;
+    resp->ret = 1;
+  } else {
+    resp->code = -1;
+  }
+  Return(KStatus::SUCCESS)
 }
 
 }  // namespace kwdbts

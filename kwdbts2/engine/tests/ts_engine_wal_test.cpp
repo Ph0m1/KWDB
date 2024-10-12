@@ -833,20 +833,25 @@ TEST_F(TestEngineWAL, ShiftWalLevel) {
 
   ASSERT_EQ(GetTableRows(cur_table_id2, ranges2, {0, start_ts + 10000}, 2), row_num_ * 2);
 
+  // we don't support multiple ts engines for now because global variable g_pstBufferPoolInfo,
+  // so we should close it before openning a new one.
+  s = TSEngineImpl::CloseTSEngine(ctx_, ts_engine_);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+  ts_engine_ = nullptr;
+
   TSEngine* ts_engine2;
   opts_.wal_level = 1;
   s = TSEngineImpl::OpenTSEngine(ctx_, kDbPath, opts_, &ts_engine2);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
+  // GetTableRows will access ts_engine_, not ts_engine2.
+  ts_engine_ = ts_engine2;
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {0, start_ts + 10000}, 3), row_num_ * 4);
-
-  s = TSEngineImpl::CloseTSEngine(ctx_, ts_engine_);
-  EXPECT_EQ(s, KStatus::SUCCESS);
-  ts_engine_ = nullptr;
 
   s = TSEngineImpl::CloseTSEngine(ctx_, ts_engine2);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ts_engine2 = nullptr;
+  ts_engine_ = nullptr;
 
   delete[] data_value;
   delete[] data_value2;

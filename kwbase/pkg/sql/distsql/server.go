@@ -28,6 +28,7 @@ import (
 	"io"
 	"sync"
 	"time"
+	"unsafe"
 
 	"gitee.com/kwbasedb/kwbase/pkg/gossip"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
@@ -342,6 +343,9 @@ func (ds *ServerImpl) setupFlow(
 		NodeID:         nodeID,
 		TraceKV:        req.TraceKV,
 		Local:          localState.IsLocal,
+		// TsHanlde Map only be used for pushing down data chunk for multiple model processing
+		// when the switch is on and the server starts with single node mode.
+		TsHandleMap: make(map[int32]unsafe.Pointer),
 	}
 	// req always contains the desired vectorize mode, regardless of whether we
 	// have non-nil localState.EvalContext. We don't want to update EvalContext

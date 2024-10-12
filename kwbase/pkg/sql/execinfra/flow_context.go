@@ -27,12 +27,16 @@
 package execinfra
 
 import (
+	"unsafe"
+
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/stop"
+	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
 )
 
 // FlowCtx encompasses the configuration parameters needed for various flow
@@ -81,6 +85,21 @@ type FlowCtx struct {
 
 	// Distributed temporal query
 	TsTableReaders []Processor
+
+	// batchlookup join input
+	// only pass the data chunk formed by batchlookupjoiner to tse for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	TsBatchLookupInput *tse.DataChunkGo
+
+	// TsHandleMap define a tsreader id vs. tshandle map
+	// only pass the tshandle to push data chunk to tse for multiple model processing
+	// when the switch is on and the server starts with single node mode.
+	TsHandleMap map[int32]unsafe.Pointer
+
+	// Mu is the Mutex to protect TsHandleMap
+	// only used to get tshandle when the switch is on and the server starts
+	// with single node mode.
+	Mu syncutil.Mutex
 }
 
 // NewEvalCtx returns a modifiable copy of the FlowCtx's EvalContext.

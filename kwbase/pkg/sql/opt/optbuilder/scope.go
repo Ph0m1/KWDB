@@ -431,6 +431,27 @@ func (s *scope) walkExprTree(expr tree.Expr) tree.Expr {
 	return expr
 }
 
+// lookupCTE only looks up a CTE name in this and the parent scopes but doesn't reference to the CTE,
+// returning nil if it's not found.
+func (s *scope) lookupCTE(name *tree.TableName) *cteSource {
+	var nameStr string
+	seenCTEs := false
+	for s != nil {
+		if s.ctes != nil {
+			// Only compute the stringified name if we see any CTEs.
+			if !seenCTEs {
+				nameStr = name.String()
+				seenCTEs = true
+			}
+			if cte, ok := s.ctes[nameStr]; ok {
+				return cte
+			}
+		}
+		s = s.parent
+	}
+	return nil
+}
+
 // resolveCTE looks up a CTE name in this and the parent scopes, returning nil
 // if it's not found.
 func (s *scope) resolveCTE(name *tree.TableName) *cteSource {

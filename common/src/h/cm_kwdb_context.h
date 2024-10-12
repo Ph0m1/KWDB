@@ -34,6 +34,8 @@ enum class ThreadLabel {
   Slave       // for pool threads in a ThreadPool
 };
 
+class DmlExec;
+
 typedef struct _kwdbContext_t: public _KContext_t {
   _kwdbContext_t(
     ContextOwner thread_owner = ContextOwner::UnClassified) :
@@ -70,7 +72,7 @@ typedef struct _kwdbContext_t: public _KContext_t {
     label = ThreadLabel::None;
   }
 
-  
+
   // for concurrency control in log file handling
   std::shared_mutex mutex;
   KThreadID thread_id;      // thread_id in threadpool
@@ -83,6 +85,7 @@ typedef struct _kwdbContext_t: public _KContext_t {
   k_int32 sql_status;
   void *ts_engine{nullptr};
   void *fetcher{nullptr};
+  DmlExec* dml_exec_handle{nullptr}; // handle in DmlExec for multiple model processing
 } kwdbContext_t;
 // Defines the context structure pointer type
 typedef kwdbContext_t* kwdbContext_p;

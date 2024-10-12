@@ -69,6 +69,8 @@ type TsTableReader struct {
 	fetMu            syncutil.Mutex
 	value0           bool
 	rowNum           int
+	manualAddTsCol   bool
+	tsTableReaderID  int32
 }
 
 var _ execinfra.Processor = &TsTableReader{}
@@ -85,6 +87,7 @@ func NewTsTableReader(
 	sid execinfrapb.StreamID,
 	tsProcessorSpecs []execinfrapb.TSProcessorSpec,
 ) (*TsTableReader, error) {
+
 	tsi := &TsTableReader{sid: sid, tsProcessorSpecs: tsProcessorSpecs, tsHandle: nil}
 	if sp := opentracing.SpanFromContext(flowCtx.EvalCtx.Ctx()); sp != nil && tracing.IsRecording(sp) {
 		tsi.collected = true
@@ -158,6 +161,9 @@ func (ttr *TsTableReader) Start(ctx context.Context) context.Context {
 		tsTopProcessorIndex := outPutMap[ttr.sid]
 		tsSpecs = append(tsSpecs, tsProcessorSpecs[tsTopProcessorIndex])
 		for tsProcessorSpecs[tsTopProcessorIndex].Input != nil {
+			if tsProcessorSpecs[tsTopProcessorIndex].Core.TableReader != nil {
+				ttr.tsTableReaderID = tsProcessorSpecs[tsTopProcessorIndex].Core.TableReader.TsTablereaderId
+			}
 			streamID := tsProcessorSpecs[tsTopProcessorIndex].Input[0].Streams[0].StreamID
 			tsTopProcessorIndex = outPutMap[streamID]
 			tsSpecs = append(tsSpecs, tsProcessorSpecs[tsTopProcessorIndex])
@@ -209,6 +215,9 @@ func (ttr *TsTableReader) Start(ctx context.Context) context.Context {
 			return ctx
 		}
 		ttr.tsHandle = respInfo.Handle
+		ttr.FlowCtx.Mu.Lock()
+		defer ttr.FlowCtx.Mu.Unlock()
+		ttr.FlowCtx.TsHandleMap[ttr.tsTableReaderID] = ttr.tsHandle
 	}
 	ctx = ttr.StartInternal(ctx, sqlbase.TsTableReaderProcName)
 	return ctx
@@ -296,7 +305,6 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 					}
 				}
 			}
-
 			respInfo, err := ttr.FlowCtx.Cfg.TsEngine.NextTsFlow(&(ttr.Ctx), tsQueryInfo)
 			if ttr.collected {
 				if sp := opentracing.SpanFromContext(ttr.PbCtx()); sp != nil {
@@ -345,6 +353,18 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 		return row, nil
 	}
 	return nil, ttr.DrainHelper()
+}
+
+func slicesEqual(a, b []types.T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !a[i].Equal(b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // NextPgWire get data for short circuit go pg encoding.
@@ -451,6 +471,7 @@ func (tsi *TsInputStats) setTsInputStats(stats tse.TsFetcherStats) {
 	is := InputStats{
 		NumRows:   stats.RowNum,
 		StallTime: time.Duration(stats.StallTime),
+		BuildTime: time.Duration(stats.BuildTime),
 	}
 	switch stats.ProcessorName {
 	case tsTableReaderName, tsTagReaderName, tsStatisticReaderName:

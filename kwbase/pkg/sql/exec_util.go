@@ -147,6 +147,25 @@ var traceSessionEventLogEnabled = settings.RegisterPublicBoolSetting(
 // the maximum number of joins to reorder.
 const ReorderJoinsLimitClusterSettingName = "sql.defaults.reorder_joins_limit"
 
+// MultiModelReorderJoinsLimitClusterSettingName is the name of the cluster setting for
+// the maximum number of joins to reorder in multi-model query processing.
+const MultiModelReorderJoinsLimitClusterSettingName = "sql.defaults.multi_model_reorder_joins_limit"
+
+// MultiModelReorderJoinsLimitClusterValue controls the cluster default for the maximum
+// number of joins reordered.
+var MultiModelReorderJoinsLimitClusterValue = settings.RegisterValidatedIntSetting(
+	MultiModelReorderJoinsLimitClusterSettingName,
+	"default number of joins to reorder for multi-model processing",
+	opt.DefaultMMJoinOrderLimit,
+	func(v int64) error {
+		if v < 0 {
+			return pgerror.Newf(pgcode.InvalidParameterValue,
+				"cannot set sql.defaults.multi_model_reorder_joins_limit to a negative value: %d", v)
+		}
+		return nil
+	},
+)
+
 // ReorderJoinsLimitClusterValue controls the cluster default for the maximum
 // number of joins reordered.
 var ReorderJoinsLimitClusterValue = settings.RegisterValidatedIntSetting(
@@ -177,6 +196,12 @@ var temporaryTablesEnabledClusterMode = settings.RegisterBoolSetting(
 var hashShardedIndexesEnabledClusterMode = settings.RegisterBoolSetting(
 	"sql.defaults.experimental_hash_sharded_indexes.enabled",
 	"default value for experimental_enable_hash_sharded_indexes; allows for creation of hash sharded indexes by default",
+	false,
+)
+
+var multiModelClusterMode = settings.RegisterBoolSetting(
+	"sql.defaults.multimodel.enabled",
+	"default value for enable_multimodel session setting; disallows analysis of multi-model processing by default",
 	false,
 )
 
@@ -2020,6 +2045,10 @@ func (m *sessionDataMutator) SetForceSavepointRestart(val bool) {
 	m.data.ForceSavepointRestart = val
 }
 
+func (m *sessionDataMutator) SetMultiModelEnabled(val bool) {
+	m.data.MultiModelEnabled = val
+}
+
 func (m *sessionDataMutator) SetZigzagJoinEnabled(val bool) {
 	m.data.ZigzagJoinEnabled = val
 }
@@ -2030,6 +2059,10 @@ func (m *sessionDataMutator) SetRequireExplicitPrimaryKeys(val bool) {
 
 func (m *sessionDataMutator) SetReorderJoinsLimit(val int) {
 	m.data.ReorderJoinsLimit = val
+}
+
+func (m *sessionDataMutator) SetMultiModelReorderJoinsLimit(val int) {
+	m.data.MultiModelReorderJoinsLimit = val
 }
 
 func (m *sessionDataMutator) SetVectorize(val sessiondata.VectorizeExecMode) {

@@ -167,6 +167,16 @@ type Factory interface {
 		onCond tree.TypedExpr,
 	) (Node, error)
 
+	// ConstructBatchLookUpJoin returns a node that runs a join between the results
+	// of two input nodes for multiple model processing.
+	ConstructBatchLookUpJoin(
+		joinType sqlbase.JoinType,
+		left, right Node,
+		leftEqCols, rightEqCols []ColumnOrdinal,
+		leftEqColsAreKey, rightEqColsAreKey bool,
+		extraOnCond tree.TypedExpr,
+	) (Node, error)
+
 	// ConstructHashJoin returns a node that runs a hash-join between the results
 	// of two input nodes.
 	//
@@ -351,7 +361,7 @@ type Factory interface {
 	// ConstructExplain returns a node that implements EXPLAIN, showing
 	// information about the given plan.
 	ConstructExplain(
-		options *tree.ExplainOptions, stmtType tree.StatementType, plan Plan,
+		options *tree.ExplainOptions, stmtType tree.StatementType, plan Plan, mem *memo.Memo,
 	) (Node, error)
 
 	// ConstructShowTrace returns a node that implements a SHOW TRACE
@@ -633,6 +643,28 @@ type Factory interface {
 		fileFormat string,
 		options []KVOption,
 	) (Node, error)
+
+	// updatePlanColumns updates the resultColumns for tsScanNode and synchronizerNode plans
+	// based on the columns of a given batchLookUpJoinNode for multiple model processing.
+	UpdatePlanColumns(blj *Node)
+
+	// UpdateGroupInput updates the input to build groupNode for multiple model processing.
+	UpdateGroupInput(input *Node) Node
+
+	// SetBljRightNode sets the right child of a batchLookUpJoinNode to a groupNode
+	// for multiple model processing.
+	SetBljRightNode(blj, agg Node) Node
+
+	// ProcessTsScanNode sets relationalInfo to a tsScanNode for multiple model processing.
+	ProcessTsScanNode(node Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol)
+
+	// ResetTsScanAccessMode resets tsScanNode's accessMode when falling back
+	// to original plan for multiple model processing.
+	ProcessBljLeftColumns(node Node, mem *memo.Memo) []sqlbase.TSCol
+
+	// ProcessBljLeftColumns helps build the tsScanNode's relaitonalInfo
+	// for multiple model processing.
+	ResetTsScanAccessMode(node Node, originalAccessMode execinfrapb.TSTableReadMode)
 }
 
 // OutputOrdering indicates the required output ordering on a Node that is being
