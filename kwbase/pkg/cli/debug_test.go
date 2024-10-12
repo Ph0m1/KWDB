@@ -228,7 +228,8 @@ func TestRemoveDeadReplicas(t *testing.T) {
 							} else {
 								sql = fmt.Sprintf("%s, num_replicas = %d", sql, testCase.replicationFactor)
 							}
-							s.Exec(t, sql)
+							str := strings.Split(sql, ",\n\tconstraints =")
+							s.Exec(t, str[0])
 						}
 					}()
 					if err := tc.WaitForFullReplication(); err != nil {

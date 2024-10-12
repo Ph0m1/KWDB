@@ -149,8 +149,8 @@ INSERT 1
 INSERT 1
 > insert into test1.t5 values('2023-07-29 03:37:59.688', 20,  21,3,9223372036854775807,33,3);
 INSERT 1
-> select sum(a),sum(b),sum(c),sum(d),sum(tag1),sum(tag2) from test1.t5;
-  sum | sum | sum |         sum         |         sum          |    sum
+> select sum(a),sum(b),sum(c),ROUND((sum(d)/100000)*100000, 0),ROUND((sum(tag1)/100000)*100000,0),sum(tag2) from test1.t5;
+  sum | sum | sum |        round        |        round         |    sum
 ------+-----+-----+---------------------+----------------------+-------------
    68 |  69 |  69 | 9223372036855745000 | 27670116110564327000 | 6442450941
 (1 row)

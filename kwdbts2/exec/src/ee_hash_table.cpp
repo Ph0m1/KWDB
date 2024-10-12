@@ -170,6 +170,8 @@ void LinearProbingHashTable::HashColumn(const DatumPtr ptr,
     }
     default:
       // Handle unsupported data types here
+      LOG_ERROR("Unsupported data type.");
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
       break;
   }
 }

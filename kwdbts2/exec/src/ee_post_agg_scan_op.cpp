@@ -334,7 +334,8 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
                 (i, argIdx, len + STRING_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for max aggregation\n");
+            LOG_ERROR("unsupported data type for max aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
             status = KStatus::FAIL;
             break;
         }
@@ -378,7 +379,8 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
                 (i, argIdx, len + STRING_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for min aggregation\n");
+            LOG_ERROR("unsupported data type for min aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
             status = KStatus::FAIL;
             break;
         }
@@ -425,15 +427,14 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
                 (i, argIdx, len + STRING_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for any_not_null aggregation\n");
+            LOG_ERROR("unsupported data type for any_not_null aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
             status = KStatus::FAIL;
             break;
         }
         break;
       }
       case Sumfunctype::SUM: {
-        LOG_DEBUG("SUM aggregations argument column : %u\n", argIdx);
-
         switch (output_fields_[argIdx]->get_storage_type()) {
           case roachpb::DataType::SMALLINT:
             agg_func = make_unique<SumAggregate<k_int16, k_decimal>>
@@ -460,7 +461,8 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
                 (i, argIdx, len + BOOL_WIDE);
             break;
           default:
-          LOG_ERROR("unsupported data type for sum aggregation\n");
+            LOG_ERROR("unsupported data type for sum aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
             status = KStatus::FAIL;
             break;
         }

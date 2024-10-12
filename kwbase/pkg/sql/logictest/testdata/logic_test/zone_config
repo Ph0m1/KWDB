@@ -69,7 +69,7 @@ SELECT zone_id, raw_config_sql FROM [SHOW ZONE CONFIGURATION FOR TABLE a]
     lease_preferences = '[]'
 
 # Check that configurations can be adjusted with USING.
-statement ok
+statement error set zone config constraints and lease_preferences is not supported
 ALTER TABLE a CONFIGURE ZONE USING
   range_min_bytes = 200000 + 1,
   range_max_bytes = 300000 + 1,
@@ -77,6 +77,13 @@ ALTER TABLE a CONFIGURE ZONE USING
   num_replicas = floor(1.2)::int,
   constraints = '[+region=test]',
   lease_preferences = '[[+region=test]]'
+
+statement ok
+ALTER TABLE a CONFIGURE ZONE USING
+  range_min_bytes = 20000000 + 1,
+  range_max_bytes = 30000000 + 1,
+  gc.ttlseconds = 3000 + 600,
+  num_replicas = floor(1.2)::int
 
 # This should reflect in the metrics.
 query T
@@ -99,27 +106,27 @@ query IT
 SELECT zone_id, raw_config_sql FROM [SHOW ZONE CONFIGURATION FOR TABLE a]
 ----
 78  ALTER TABLE a CONFIGURE ZONE USING
-    range_min_bytes = 200001,
-    range_max_bytes = 300001,
+    range_min_bytes = 20000001,
+    range_max_bytes = 30000001,
     gc.ttlseconds = 3600,
     num_replicas = 1,
-    constraints = '[+region=test]',
-    lease_preferences = '[[+region=test]]'
+    constraints = '[]',
+    lease_preferences = '[]'
 
 # Check that we can set just one value without altering the others.
 statement ok
-ALTER TABLE a CONFIGURE ZONE USING range_max_bytes = 400000
+ALTER TABLE a CONFIGURE ZONE USING range_max_bytes = 40000000
 
 query IT
 SELECT zone_id, raw_config_sql FROM [SHOW ZONE CONFIGURATION FOR TABLE a]
 ----
 78  ALTER TABLE a CONFIGURE ZONE USING
-    range_min_bytes = 200001,
-    range_max_bytes = 400000,
+    range_min_bytes = 20000001,
+    range_max_bytes = 40000000,
     gc.ttlseconds = 3600,
     num_replicas = 1,
-    constraints = '[+region=test]',
-    lease_preferences = '[[+region=test]]'
+    constraints = '[]',
+    lease_preferences = '[]'
 
 # Check that we can reset the configuration to defaults.
 

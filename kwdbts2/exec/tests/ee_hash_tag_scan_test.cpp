@@ -253,7 +253,6 @@ class TestHashTagScanOp : public OperatorTestBase {
     NextHashTagScan(request, response);
     ASSERT_EQ(response->value, nullptr);
     ASSERT_EQ(response->code, -1);
-
     CloseHashTagScan(request, response);
   }
 };

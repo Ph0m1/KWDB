@@ -152,7 +152,8 @@ KStatus TagRowBatch::GetCurrentTagData(TagData *tagData, void **bitmap) {
 
   for (int idx = 0; idx < tag_num; idx++) {
     auto it = res_.data[idx];
-    k_uint32 index = table_->scan_tags_[idx] + tag_col_offset_;  // index of column in raw table
+    k_uint32 tag_index = table_->scan_tags_[idx];
+    k_uint32 index = tag_index + tag_col_offset_;  // index of column in raw table
 
     roachpb::DataType dt = table_->fields_[index]->get_sql_type();
     char *ptr = nullptr;
@@ -166,7 +167,7 @@ KStatus TagRowBatch::GetCurrentTagData(TagData *tagData, void **bitmap) {
       rawData.is_null = false;
     } else {
       char *bitmap = static_cast<char *>(it[current_batch_no_]->mem) +
-                     current_batch_line_ * tag_offsets_[index];
+                     current_batch_line_ * tag_offsets_[tag_index];
 
       if (bitmap[0] != 1) {
         rawData.is_null = true;
@@ -192,10 +193,10 @@ KStatus TagRowBatch::GetCurrentTagData(TagData *tagData, void **bitmap) {
     } else {
       if (type != roachpb::KWDBKTSColumn::TYPE_PTAG) {
         rawData.tag_data = static_cast<char *>(it[current_batch_no_]->mem) +
-                           current_batch_line_ * tag_offsets_[index] + 1;
+                           current_batch_line_ * tag_offsets_[tag_index] + 1;
       } else {
         rawData.tag_data = static_cast<char *>(it[current_batch_no_]->mem) +
-                           current_batch_line_ * tag_offsets_[index];
+                           current_batch_line_ * tag_offsets_[tag_index];
       }
     }
     (*tagData)[idx] = rawData;

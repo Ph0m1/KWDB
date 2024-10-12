@@ -104,7 +104,7 @@ func TestGetZoneConfig(t *testing.T) {
 	defaultZoneConfig := zonepb.DefaultSystemZoneConfig()
 	defaultZoneConfig.NumReplicas = proto.Int32(1)
 	defaultZoneConfig.RangeMinBytes = proto.Int64(1 << 20)
-	defaultZoneConfig.RangeMaxBytes = proto.Int64(1 << 21)
+	defaultZoneConfig.RangeMaxBytes = proto.Int64(5 << 20)
 	defaultZoneConfig.GC = &zonepb.GCPolicy{TTLSeconds: 60}
 	require.NoError(t, defaultZoneConfig.Validate())
 	params.Knobs.Server = &server.TestingKnobs{
@@ -340,7 +340,7 @@ func TestCascadingZoneConfig(t *testing.T) {
 	defaultZoneConfig := zonepb.DefaultZoneConfig()
 	defaultZoneConfig.NumReplicas = proto.Int32(1)
 	defaultZoneConfig.RangeMinBytes = proto.Int64(1 << 20)
-	defaultZoneConfig.RangeMaxBytes = proto.Int64(1 << 21)
+	defaultZoneConfig.RangeMaxBytes = proto.Int64(5 << 20)
 	defaultZoneConfig.GC = &zonepb.GCPolicy{TTLSeconds: 60}
 	require.NoError(t, defaultZoneConfig.Validate())
 	params.Knobs.Server = &server.TestingKnobs{

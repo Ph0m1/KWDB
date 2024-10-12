@@ -165,6 +165,8 @@ struct GroupKeyHasher {
         }
         default:
           // Handle unsupported data types here
+          LOG_ERROR("unsupported data type");
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
           break;
       }
     }

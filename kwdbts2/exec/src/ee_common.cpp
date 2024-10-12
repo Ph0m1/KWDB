@@ -63,6 +63,7 @@ KStatus CreateAggField(k_int32 i, Field* input_field, BaseOperator *agg_op, Fiel
             break;
         default:
             LOG_ERROR("unsupported data type for max/min aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
             return KStatus::FAIL;
             break;
       }

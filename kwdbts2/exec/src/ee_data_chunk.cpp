@@ -499,6 +499,7 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
         }
         default: {
           LOG_ERROR("Unsupported Decimal type for encoding: %d ", col_info_[col].storage_type)
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
           break;
         }
       }
@@ -792,6 +793,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
           }
           default: {
             LOG_ERROR("Unsupported Decimal type for encoding: %d ", col_info_[col].storage_type)
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
             break;
           }
         }

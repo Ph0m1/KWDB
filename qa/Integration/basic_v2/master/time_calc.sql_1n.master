@@ -471,13 +471,11 @@ DROP DATABASE
 -------------------------------
   106751 days 23:47:16.854776
 (1 row)
-NOTICE: the result of time subtracting maybe overflow
 > SELECT '0000-01-01 00:00:00+00:00'::timestamptz - '2020-01-01 12:00:00+00:00'::timestamptz;
             ?column?
 ---------------------------------
   -106751 days -23:47:16.854776
 (1 row)
-NOTICE: the result of time subtracting maybe overflow
 > set time zone -15;
 ERROR: invalid value for parameter "timezone": "fixed offset:-54000 (-15)"
 SQLSTATE: 22023

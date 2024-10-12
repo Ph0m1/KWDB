@@ -78,7 +78,7 @@ func TestProtectedTimestamps(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = conn.Exec("ALTER TABLE foo CONFIGURE ZONE USING " +
-		"gc.ttlseconds = 1, range_max_bytes = 1<<18, range_min_bytes = 1<<10;")
+		"gc.ttlseconds = 1, range_max_bytes = 5<<20, range_min_bytes = 1<<20;")
 	require.NoError(t, err)
 
 	rRand, _ := randutil.NewPseudoRand()

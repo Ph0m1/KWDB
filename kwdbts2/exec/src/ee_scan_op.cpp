@@ -365,7 +365,6 @@ EEIteratorErrCode TableScanOperator::Reset(kwdbContext_p ctx) {
 }
 
 KStatus TableScanOperator::Close(kwdbContext_p ctx) {
-  LOG_DEBUG("TableScanOperator close. reading row count: %u", total_read_row_);
   EnterFunc();
   Reset(ctx);
   KStatus ret;
@@ -380,6 +379,7 @@ EEIteratorErrCode TableScanOperator::InitHandler(kwdbContext_p ctx) {
   EEIteratorErrCode ret = EEIteratorErrCode::EE_OK;
   handler_ = KNEW StorageHandler(table_);
   if (!handler_) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(EEIteratorErrCode::EE_ERROR);
   }
   handler_->Init(ctx);
@@ -399,6 +399,7 @@ EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRow
   }
 
   if (nullptr == (*row_batch)) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     LOG_ERROR("make scan data handle failed");
     return EEIteratorErrCode::EE_ERROR;
   }

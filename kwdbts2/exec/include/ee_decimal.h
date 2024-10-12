@@ -8,8 +8,7 @@
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
-#ifndef KWDBTS2_EXEC_INCLUDE_EE_DECIMAL_H_
-#define KWDBTS2_EXEC_INCLUDE_EE_DECIMAL_H_
+#pragma once
 
 #include <string>
 
@@ -81,5 +80,3 @@ struct CKDecimal2 {
 extern struct CKDecimal2 StringToDecimal(std::string str);
 
 }  // namespace kwdbts
-
-#endif  // KWDBTS2_EXEC_INCLUDE_EE_DECIMAL_H_

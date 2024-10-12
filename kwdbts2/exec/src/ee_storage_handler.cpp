@@ -28,7 +28,6 @@
 namespace kwdbts {
 
 StorageHandler::~StorageHandler() {
-  LOG_DEBUG("StorageHandler end. total read rows: %lu, entity num: %lu.", total_read_rows_, entities_.size());
   table_ = nullptr;
   Close();
 }
@@ -39,8 +38,13 @@ EEIteratorErrCode StorageHandler::Init(kwdbContext_p ctx) {
   TSEngine *ts_engine = static_cast<TSEngine *>(ctx->ts_engine);
   if (ts_engine)
     ret = ts_engine->GetTsTable(ctx, table_->object_id_, ts_table_);
-  Return(ret == KStatus::SUCCESS ? EEIteratorErrCode::EE_OK
-                                 : EEIteratorErrCode::EE_ERROR);
+  if (ret == KStatus::FAIL) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                  "scanning column data fail when getting ts table");
+    LOG_ERROR("GetTsTable Failed, table id: lu%.", table_->object_id_);
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+  Return(EEIteratorErrCode::EE_OK);
 }
 
 void StorageHandler::SetSpans(std::vector<KwTsSpan> *ts_spans) {
@@ -69,6 +73,8 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
     KStatus ret = ts_iterator->Next(&row_batch->res_, &row_batch->count_, row_batch->ts_);
     // LOG_DEBUG("TsTableIterator::Next() count:%d", row_batch->count_);
     if (KStatus::FAIL == ret) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                  "scanning column data fail");
       LOG_ERROR("TsTableIterator::Next() Failed\n");
       code = EEIteratorErrCode::EE_ERROR;
       break;
@@ -160,6 +166,9 @@ EEIteratorErrCode StorageHandler::TagNext(kwdbContext_p ctx, Field *tag_filter) 
                                      &(tag_rowbatch_->res_),
                                      &(tag_rowbatch_->count_));
     if (KStatus::FAIL == ret) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                  "scanning column data fail when getting tag value");
+      LOG_ERROR("scanning column data fail when getting tag value.");
       break;
     }
 
@@ -260,6 +269,8 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
     }
     if (KStatus::FAIL == ret) {
       code = EEIteratorErrCode::EE_ERROR;
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                  "scanning column data fail when getting ts iterator");
       LOG_ERROR("TsTable::GetIterator() error\n");
       break;
     }
@@ -285,9 +296,13 @@ EEIteratorErrCode StorageHandler::NewTagIterator(kwdbContext_p ctx) {
     ret = ts_table_->GetTagIterator(ctx, table_->scan_tags_, table_->hash_points_, &tag, table_->table_version_);
     tag_iterator = tag;
   }
-
-  Return(ret == KStatus::FAIL ? EEIteratorErrCode::EE_ERROR
-                              : EEIteratorErrCode::EE_OK);
+  if (ret == KStatus::FAIL) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                  "scanning column data fail when getting ts tag iterator");
+    LOG_ERROR("TsTable::GetTagIterator() error\n");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+  Return(EEIteratorErrCode::EE_OK);
 }
 
 EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
@@ -318,6 +333,9 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
         ctx, primary_tags, table_->scan_tags_, &tag_rowbatch_->entity_indexs_,
         &tag_rowbatch_->res_, &tag_rowbatch_->count_);
     if (ret != SUCCESS) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                  "scanning column data fail when getting ts entity list");
+      LOG_ERROR("TsTable::GetEntityIdList() error\n");
       break;
     }
     if (tag_filter) {
@@ -388,6 +406,7 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
   for (k_int32 i = 0; i < ns; ++i) {
     void *buffer = malloc(malloc_size);
     if (buffer == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       return FAIL;
     }
 
@@ -414,6 +433,8 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
         case roachpb::DataType::SMALLINT: {
           k_int32 val = std::stoi(str);
           if (!CHECK_VALID_SMALLINT(val)) {
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
+                                  "out of range");
             return FAIL;
           }
           memcpy(ptr, &val, len);
@@ -421,6 +442,8 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
         case roachpb::DataType::INT: {
           k_int64 val = std::stoll(str);
           if (!CHECK_VALID_INT(val)) {
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
+                                  "out of range");
             return FAIL;
           }
           memcpy(ptr, &val, sizeof(k_int32));
@@ -435,7 +458,7 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
         }
         case roachpb::DataType::DATE: {
           k_uint64 val = std::stoll(str);
-          memcpy(ptr, &val, sizeof(KDate));
+          memcpy(ptr, &val, sizeof(k_uint32));
         }
         case roachpb::DataType::BIGINT: {
           k_int64 val = std::stoll(str);
@@ -481,6 +504,7 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
         default: {
           free(buffer);
           LOG_ERROR("unsupported data type:%d", d_type);
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type");
           return FAIL;
         }
       }

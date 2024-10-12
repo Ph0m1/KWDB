@@ -47,41 +47,22 @@ typedef struct DummyDecimal{} k_decimal;
 
 typedef k_int64 KTimestamp;
 typedef k_int64 KTimestampTz;
-typedef k_uint32 KDate;
-typedef k_uint32 KTime;
-typedef k_int64 KToken;
 // Offset  in shared memory offset
 typedef k_int64 KId;
-// Type for the number of tuples
-typedef k_uint64 KTupleNum;
-// Tuple Id in shared memory
-typedef k_uint64 KTupleId;
 // Type for connection Id
 typedef k_uint64 KConnId;
-// Type for all names (portal/user/schema/tenant
-typedef char KIdentifier[127];
 // Type for string
 typedef std::string KString;
 // Type for KWDBThreadID
 typedef k_uint64 KThreadID;
-// Type for KUniqueThreadID, combine pid and tid to make a thread id unique
-typedef k_uint64 KUniqueThreadID;
 // The unique identifier of the KObjectSchema
 typedef k_uint32 KSchemaKey;
 // The unique identifier of the KObjectTable
 typedef k_uint64 KTableKey;
-// The unique identifier of the KColumn
-typedef k_uint32 KColumnKey;
 // The id of database
 typedef k_uint32 KDatabaseId;
-// The id of schema
-typedef k_uint32 KSchemaId;
 // The id of table
-typedef k_uint32 KTableId;
-// The id of column
-typedef k_uint32 KColumnId;
-// The id of topic
-typedef k_uint32 KTopicId;
+typedef k_uint64 KTableId;
 
 // the log level of log report
 typedef enum LogSeverity { DEBUG = 0, INFO, WARN, ERROR, FATAL } LogSeverity;

@@ -140,6 +140,8 @@ KStatus DmlExec::ExecQuery(kwdbContext_p ctx, QueryInfo *req, RespInfo *resp) {
       case EnMqType::MQ_TYPE_DML_CLOSE:
         handle->ClearTsScans(ctx);
         delete handle;
+        resp->ret = 1;
+        resp->tp = req->tp;
         break;
       case EnMqType::MQ_TYPE_DML_NEXT:
         ret = handle->Next(ctx, id, false, resp);
@@ -234,8 +236,8 @@ void DmlExec::DisposeError(kwdbContext_p ctx, QueryInfo *return_info) {
       }
     }
     EEPgErrorInfo::ResetPgErrorInfo();
-  } else if (SUCCESS == ERR_STACK()->GetLastError(&error)) {
-    return_info->code = error->GetCode();
+  } else {
+    return_info->code = ERRCODE_DATA_EXCEPTION;
   }
 }
 

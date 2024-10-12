@@ -59,9 +59,6 @@ namespace kwdbts {
  * future)
  *    - null bitmap at the begin of each row, length = (column_num + 7) / 8
  *
- * Notes: Originally DataChunk class is the base class. DataContainer leverages
- * on Datachunk to provide sorting capability. But the class hierarchy is
- * changed after DiskRowContainer implementation.
  */
 class DataChunk : public IChunk {
  public:

@@ -1037,7 +1037,8 @@ func TestSetZoneConfigMetric(t *testing.T) {
 	SetZoneConfigMetric = ae.GetMetric(target.ObjectTable)
 	SetZoneConfigExpect = SetZoneConfigMetric.Count(target.Alter) + 1
 	SetZoneConfigExpect = SetZoneConfigMetric.Count(target.Alter) + 1
-	if _, err := DB.Exec("ALTER TABLE t CONFIGURE ZONE USING range_min_bytes = 0, range_max_bytes = 90000, gc.ttlseconds = 89999, num_replicas = 4, constraints = '[-region=west]';"); err != nil {
+	// set zone config constraints is not support now
+	if _, err := DB.Exec("ALTER TABLE t CONFIGURE ZONE USING range_min_bytes = 1 << 20, range_max_bytes = 5 << 20, gc.ttlseconds = 89999, num_replicas = 4;"); err != nil {
 		t.Fatal(err)
 	}
 	if SetZoneConfigMetric.Count(target.Alter) != SetZoneConfigExpect {

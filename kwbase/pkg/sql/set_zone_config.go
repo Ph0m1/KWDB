@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/config"
 	"gitee.com/kwbasedb/kwbase/pkg/config/zonepb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -217,9 +216,6 @@ func checkPrivilegeForSetZoneConfig(ctx context.Context, p *planner, zs tree.Zon
 		if err != nil {
 			return err
 		}
-		//if err := TSDatabaseUnsupportedErr(dbDesc.EngineType, "set zone config "); err != nil {
-		//	return err
-		//}
 		dbCreatePrivilegeErr := p.CheckPrivilege(ctx, dbDesc, privilege.CREATE)
 		dbZoneConfigPrivilegeErr := p.CheckPrivilege(ctx, dbDesc, privilege.ZONECONFIG)
 
@@ -238,9 +234,6 @@ func checkPrivilegeForSetZoneConfig(ctx context.Context, p *planner, zs tree.Zon
 			err = errors.WithHint(err, "try specifying the index as <tablename>@<indexname>")
 		}
 		return err
-	}
-	if tableDesc.IsTSTable() {
-		return sqlbase.TSUnsupportedError("set zone config")
 	}
 	if tableDesc.ParentID == keys.SystemDatabaseID {
 		return p.RequireAdminRole(ctx, "alter system tables")
@@ -312,15 +305,32 @@ func (n *setZoneConfigNode) startExec(params runParams) error {
 			// value would apply to the zone and setting that value explicitly.
 			// Instead we add the fields to a list that we use at a later time
 			// to copy values over.
-			if base.OpenSource {
-				switch *name {
-				case "num_replicas", "range_min_bytes", "range_max_bytes":
-					if params.p.ExecCfg().StartMode == StartMultiReplica {
-						return errors.Errorf("zone config: %s feature needs enterprise license to enable.", *name)
-					}
+			if *name == "constraints" || *name == "lease_preferences" {
+				return pgerror.Newf(pgcode.FeatureNotSupported, "set zone config constraints and lease_preferences is not supported")
+			}
+			if *name == "num_replicas" {
+				row, err := params.ExecCfg().InternalExecutor.QueryRow(params.ctx, "", params.p.txn,
+					`SELECT count(*) from(
+										SELECT node_id AS id,
+														address,sql_address,
+														build_tag AS build,started_at,
+														updated_at,
+														locality,
+														start_mode,
+														CASE WHEN split_part(expiration,',',1)::decimal > now()::decimal AND not upgrading 
+															THEN true 
+															ELSE false 
+														END AS is_available,
+														ifnull(is_live, false) as is_live
+										FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id))
+								where is_available = false or is_live = false`)
+				if err != nil {
+					return err
+				}
+				if int(tree.MustBeDInt(row[0])) > 0 {
+					return pgerror.Newf(pgcode.FeatureNotSupported, "set zone config num_replicas when node unhealthy or dead is not supported")
 				}
 			}
-
 			inheritVal, expr := val.inheritValue, val.explicitValue
 			if inheritVal {
 				copyFromParentList = append(copyFromParentList, *name)

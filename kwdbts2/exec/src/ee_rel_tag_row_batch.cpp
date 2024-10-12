@@ -40,17 +40,15 @@ void RelTagRowBatch::Init(TABLE *table) {
   for (k_int32 i = tag_col_offset_; i < table->field_num_; i++) {
     if (table->fields_[i]->get_column_type() ==
         roachpb::KWDBKTSColumn::TYPE_PTAG) {
-      tag_offsets_.emplace(std::make_pair(i, primary_tags_len));
+      tag_offsets_.emplace_back(primary_tags_len);
     } else {
       roachpb::DataType dt = table_->fields_[i]->get_sql_type();
       if (((dt == roachpb::DataType::VARCHAR) ||
            (dt == roachpb::DataType::NVARCHAR) ||
            (dt == roachpb::DataType::VARBINARY))) {
-        tag_offsets_.emplace(
-            std::make_pair(i, sizeof(intptr_t) + 1));  // for varchar
+        tag_offsets_.emplace_back(sizeof(intptr_t) + 1);  // for varchar
       } else {
-        tag_offsets_.emplace(
-            std::make_pair(i, table->fields_[i]->get_storage_length() + 1));
+        tag_offsets_.emplace_back(table->fields_[i]->get_storage_length() + 1);
       }
     }
   }

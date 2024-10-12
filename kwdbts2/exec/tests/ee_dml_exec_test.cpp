@@ -93,6 +93,10 @@ TEST_F(TestDmlExec, TestDmlExecInit) {
   do {
     KStatus ret = DmlExec::ExecQuery(ctx_, info, info2);
     if (ret != KStatus::SUCCESS) {
+      if (respInfo.value) {
+        free(respInfo.value);
+        respInfo.value = nullptr;
+      }
       break;
     }
     if (respInfo.value) {

@@ -56,7 +56,7 @@ const (
 	GoroutineDumpDir = "goroutine_dump"
 
 	// MinRangeMaxBytes is the minimum value for range max bytes.
-	MinRangeMaxBytes = 64 << 10 // 64 KB
+	MinRangeMaxBytes = 5 << 20 // 5 MB
 )
 
 const (

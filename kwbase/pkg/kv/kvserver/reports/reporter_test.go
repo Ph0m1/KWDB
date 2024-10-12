@@ -51,6 +51,8 @@ import (
 // Test the constraint conformance report in a real cluster.
 func TestConstraintConformanceReportIntegration(t *testing.T) {
 	defer leaktest.AfterTest(t)()
+	// 该测试为测试set zone config constraint 的测试，但是在 V2.1 版本中禁用了constraint的设置,故暂时跳过
+	t.Skip()
 	if testing.Short() {
 		// This test takes seconds because of replication vagaries.
 		t.Skip("short flag")

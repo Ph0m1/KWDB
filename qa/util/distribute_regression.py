@@ -34,7 +34,20 @@ def get_nodes(node_str: str):
         if re.match('c\d+', node):
             ids.append(int(re.sub('c', '', node)))
     return ids
-
+def get_args(args_list: str):
+    args = args_list.split(':')
+    if len(args) < 2:
+        return None
+    args = args[1]
+    args = args.split(' ')
+    args = [re.sub(' ','',arg) for arg in args]
+    args = [re.sub('\n','',arg) for arg in args]
+    l = []
+    for i in range(len(args)):
+        arg = args[i]
+        if arg != '':
+            l.append(arg)
+    return l
 
 def get_create_table_arg(node_str: str):
     strs = node_str.split(':')
