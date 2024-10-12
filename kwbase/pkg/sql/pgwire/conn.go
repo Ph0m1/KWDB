@@ -382,24 +382,6 @@ func (c *conn) serveImpl(
 
 	var terminateSeen bool
 
-	// create a timer used to terminates sessions that idle past the specified threshold.
-	var idleInSessionTimeout time.Duration
-	var idleSessionTimer *time.Timer
-	if sqlServer != nil && sql.IdleInSessionTimeout.Get(&sqlServer.GetExecutorConfig().Settings.SV) != 0 {
-		idleInSessionTimeout = sql.IdleInSessionTimeout.Get(&sqlServer.GetExecutorConfig().Settings.SV)
-		idleSessionTimer = time.NewTimer(idleInSessionTimeout)
-		go func(ctx context.Context) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-idleSessionTimer.C:
-				idleSessionTimer.Stop()
-				c.stmtBuf.Close()
-				cancelConn()
-			}
-		}(ctx)
-	}
-
 	// We need an intSizer, which we're ultimately going to get from the
 	// authenticator once authentication succeeds (because it will actually be a
 	// ConnectionHandler). Until then, we unfortunately still need some intSizer
@@ -423,9 +405,6 @@ Loop:
 		var n int
 		var err error
 		typ, n, err = c.readBuf.ReadTypedMsg(&c.rd)
-		if idleSessionTimer != nil {
-			idleSessionTimer.Reset(idleInSessionTimeout)
-		}
 		c.metrics.BytesInCount.Inc(int64(n))
 		if err != nil {
 			break Loop

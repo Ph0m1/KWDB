@@ -268,10 +268,10 @@ var SerialNormalizationMode = settings.RegisterPublicEnumSetting(
 	},
 )
 
-// IdleInSessionTimeout is used to automatically terminates sessions that idle past the specified threshold.
+// clusterIdleInSessionTimeout is used to automatically terminates sessions that idle past the specified threshold.
 // When set to 0, the session will not timeout.
-var IdleInSessionTimeout = settings.RegisterNonNegativeDurationSetting(
-	"sql.defaults.idle_in_session.timeout",
+var clusterIdleInSessionTimeout = settings.RegisterNonNegativeDurationSetting(
+	"sql.defaults.idle_in_session_timeout",
 	"default value for the idle_in_session_timeout; "+
 		"enables automatically killing sessions that exceed the "+
 		"idle_in_session_timeout threshold",
@@ -2083,6 +2083,10 @@ func (m *sessionDataMutator) SetTsInsertShortcircuit(val bool) {
 
 func (m *sessionDataMutator) SetAllowPrepareAsOptPlan(val bool) {
 	m.data.AllowPrepareAsOptPlan = val
+}
+
+func (m *sessionDataMutator) SetIdleInSessionTimeout(timeout time.Duration) {
+	m.data.IdleInSessionTimeout = timeout
 }
 
 func (m *sessionDataMutator) SetSaveTablesPrefix(prefix string) {

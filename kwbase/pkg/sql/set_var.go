@@ -335,34 +335,81 @@ func stmtTimeoutVarGetStringVal(
 	return timeout.String(), nil
 }
 
+func makeTimeoutVarGetter(varName string) getStringValFn {
+	timeoutVarGetter := func(ctx context.Context, evalCtx *extendedEvalContext, values []tree.TypedExpr) (string, error) {
+		if len(values) != 1 {
+			return "", newSingleArgVarError(varName)
+		}
+		d, err := values[0].Eval(&evalCtx.EvalContext)
+		if err != nil {
+			return "", err
+		}
+
+		var timeout time.Duration
+		switch v := tree.UnwrapDatum(&evalCtx.EvalContext, d).(type) {
+		case *tree.DString:
+			return string(*v), nil
+		case *tree.DInterval:
+			timeout, err = intervalToDuration(v)
+			if err != nil {
+				return "", wrapSetVarError(varName, values[0].String(), "%v", err)
+			}
+		case *tree.DInt:
+			timeout = time.Duration(*v) * time.Millisecond
+		}
+		return timeout.String(), nil
+	}
+	return timeoutVarGetter
+}
+
+func validateTimeoutVar(timeString string, varName string) (time.Duration, error) {
+	interval, err := tree.ParseDIntervalWithTypeMetadata(timeString, types.IntervalTypeMetadata{
+		DurationField: types.IntervalDurationField{
+			DurationType: types.IntervalDurationType_MILLISECOND,
+		},
+	})
+	if err != nil {
+		return 0, wrapSetVarError(varName, timeString, "%v", err)
+	}
+	timeout, err := intervalToDuration(interval)
+	if err != nil {
+		return 0, wrapSetVarError(varName, timeString, "%v", err)
+	}
+
+	if timeout < 0 {
+		return 0, wrapSetVarError(varName, timeString,
+			"%v cannot have a negative duration", varName)
+	}
+
+	return timeout, nil
+}
+
+func stmtTimeoutVarSet(ctx context.Context, m *sessionDataMutator, s string) error {
+	timeout, err := validateTimeoutVar(s, "statement_timeout")
+	if err != nil {
+		return err
+	}
+
+	m.SetStmtTimeout(timeout)
+	return nil
+}
+
+func idleInSessionTimeoutVarSet(ctx context.Context, m *sessionDataMutator, s string) error {
+	timeout, err := validateTimeoutVar(s, "idle_in_session_timeout")
+	if err != nil {
+		return err
+	}
+
+	m.SetIdleInSessionTimeout(timeout)
+	return nil
+}
+
 func tsinsertshortcircuitSet(ctx context.Context, m *sessionDataMutator, s string) error {
 	b, err := parsePostgresBool(s)
 	if err != nil {
 		return err
 	}
 	m.SetTsInsertShortcircuit(b)
-	return nil
-}
-
-func stmtTimeoutVarSet(ctx context.Context, m *sessionDataMutator, s string) error {
-	interval, err := tree.ParseDIntervalWithTypeMetadata(s, types.IntervalTypeMetadata{
-		DurationField: types.IntervalDurationField{
-			DurationType: types.IntervalDurationType_MILLISECOND,
-		},
-	})
-	if err != nil {
-		return wrapSetVarError("statement_timeout", s, "%v", err)
-	}
-	timeout, err := intervalToDuration(interval)
-	if err != nil {
-		return wrapSetVarError("statement_timeout", s, "%v", err)
-	}
-
-	if timeout < 0 {
-		return wrapSetVarError("statement_timeout", s,
-			"statement_timeout cannot have a negative duration")
-	}
-	m.SetStmtTimeout(timeout)
 	return nil
 }
 
