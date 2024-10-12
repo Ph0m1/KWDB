@@ -722,15 +722,6 @@ func (m *Memo) CheckWhiteListAndAddSynchronize(src *RelExpr) error {
 	if !m.CheckFlag(opt.IncludeTSTable) {
 		return nil
 	}
-	if m.CheckFlag(opt.HasGapFill) {
-		if ok, operator := CheckGapFillMemo(src); !ok {
-			op := operator.String()
-			if strings.Contains(operator.String(), "join") {
-				op = "join"
-			}
-			return pgerror.Newf(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with %v is not supported", op)
-		}
-	}
 	// the main implementation of checking white list and setting flag for adding Synchronizer.
 	execInTSEngine, hasAddSynchronizer, _, err := m.CheckWhiteListAndAddSynchronizeImp(src)
 	if err != nil {
@@ -2083,25 +2074,4 @@ func (m *Memo) GetTsDop() uint32 {
 // SetTsDop is used to set degree of parallelism
 func (m *Memo) SetTsDop(num uint32) {
 	m.tsDop = num
-}
-
-// CheckGapFillMemo return false if the memo contains other than
-// (GroupByExpr,ProjectExpr,TSScanExpr,SortExpr,ScanExpr)
-func CheckGapFillMemo(src *RelExpr) (bool, opt.Operator) {
-	switch source := (*src).(type) {
-	case *GroupByExpr:
-		return CheckGapFillMemo(&source.Input)
-	case *ProjectExpr:
-		return CheckGapFillMemo(&source.Input)
-	case *TSScanExpr:
-		return true, opt.TSScanOp
-	case *ScanExpr:
-		return true, opt.ScanOp
-	case *SortExpr:
-		return CheckGapFillMemo(&source.Input)
-	case *SelectExpr:
-		return CheckGapFillMemo(&source.Input)
-	default:
-		return false, source.Op()
-	}
 }

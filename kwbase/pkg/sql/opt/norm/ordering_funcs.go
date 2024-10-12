@@ -54,6 +54,9 @@ func (c *CustomFuncs) SimplifyLimitOffsetOrdering(
 func (c *CustomFuncs) CanSimplifyGroupingOrdering(
 	in memo.RelExpr, private *memo.GroupingPrivate,
 ) bool {
+	if private.TimeBucketGapFillColId > 0 {
+		return false
+	}
 	return c.canSimplifyOrdering(in, private.Ordering)
 }
 

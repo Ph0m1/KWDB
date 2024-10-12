@@ -689,6 +689,9 @@ message AggregatorSpec {
   // A subset of the GROUP BY columns which are ordered in the input.
   repeated uint32 ordered_group_cols = 4 [packed = true];
   optional bool agg_push_down = 6 [(gogoproto.nullable) = false];
+  // HasTimeBucketGapFill is true if aggregations have function time_bucket_gapFill.
+  optional bool has_time_bucket_gapFill = 7 [(gogoproto.nullable) = false];
+  optional int32 time_bucket_gapFill_colId = 8 [(gogoproto.nullable) = false];
 }
 
 // InterleavedReaderJoinerSpec is the specification for a processor that performs

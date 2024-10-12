@@ -610,9 +610,10 @@ func (ef *execFactory) ConstructGroupBy(
 	n := &groupNode{
 		plan:             input.(planNode),
 		funcs:            make([]*aggregateFuncHolder, 0, len(groupCols)+len(aggregations)),
-		columns:          make(sqlbase.ResultColumns, 0, len(groupCols)+len(aggregations)),
+		columns:          make(sqlbase.ResultColumns, 0, len(groupCols)+len(aggregations)+len(*funcs)),
 		groupCols:        make([]int, len(groupCols)),
 		groupColOrdering: groupColOrdering,
+		gapFillColID:     int32(private.TimeBucketGapFillColIdOrdinal),
 		isScalar:         false,
 		reqOrdering:      ReqOrdering(reqOrdering),
 		aggFuncs:         funcs,
@@ -685,6 +686,12 @@ func (ef *execFactory) addAggregations(n *groupNode, aggregations []exec.AggInfo
 			Typ:          agg.ResultType,
 			TypeModifier: agg.ResultType.TypeModifier(),
 		})
+		// When it comes to interpolate, add a redundant output column for renderNode.ivarHelper.
+		// reason: the subsequent plan will split the func interpolate.
+		// interpolate(count(device_id), null) => interpolate($1,null), count(id)
+		if agg.FuncName == "interpolate" {
+			n.columns = append(n.columns, sqlbase.ResultColumn{})
+		}
 	}
 	return nil
 }

@@ -521,6 +521,10 @@ define GroupingPrivate {
 
     # optimize flag of push agg to scan compute
     AggPushDown bool
+
+    # must add sort to group when having time_bucket_gapFill.
+    TimeBucketGapFillColId ColumnID
+    TimeBucketGapFillColIdOrdinal ColumnID
 }
 
 # ScalarGroupBy computes aggregate functions over the complete set of input

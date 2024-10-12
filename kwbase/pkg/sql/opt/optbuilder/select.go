@@ -179,10 +179,6 @@ func (b *Builder) buildDataSource(
 		locking = locking.withoutTargets()
 
 		outScope = b.buildSelectStmt(source.Select, locking, nil /* desiredTypes */, inScope)
-		outScope.builder.factory.Memo().SetFlag(opt.HasSubquery)
-		if b.factory.Memo().CheckFlag(opt.HasGapFill) {
-			panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with subquery is not supported"))
-		}
 		// Treat the subquery result as an anonymous data source (i.e. column names
 		// are not qualified). Remove hidden columns, as they are not accessible
 		// outside the subquery.
@@ -972,13 +968,6 @@ func (b *Builder) buildSelectStmtWithoutParens(
 	}
 
 	if limit != nil {
-		if b.factory.Memo().CheckFlag(opt.HasGapFill) {
-			if limit.Count != nil {
-				panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with limit is not supported"))
-			} else {
-				panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with offset is not supported"))
-			}
-		}
 		if limit.IsAutoLimit {
 			b.factory.Memo().SetFlag(opt.HasAutoLimit)
 		}
@@ -1147,10 +1136,6 @@ func (b *Builder) buildSelectClause(
 
 	hasInterpolate := checkoutInterpolate(sel.GroupBy, fromScope)
 
-	if (hasInterpolate || fromScope.hasGapfill) && orderBy == nil {
-		orderBy = implicitOrderInInterpolate(sel.GroupBy, fromScope)
-	}
-
 	// Any aggregates in the HAVING, ORDER BY and DISTINCT ON clauses (if they
 	// exist) will be added here.
 	havingExpr := b.analyzeHaving(sel.Having, fromScope)
@@ -1169,16 +1154,12 @@ func (b *Builder) buildSelectClause(
 	}
 
 	if fromScope.hasGapfill {
-		if len(orderBy) > 1 {
-			panic(pgerror.Newf(pgcode.Warning, "only order by one column when using group by %s", Gapfill))
-		}
 		checkoutGroupByGapfill(fromScope, sel, hasInterpolate)
 	}
 	b.buildProjectionList(fromScope, projectionsScope)
 	b.buildOrderBy(fromScope, projectionsScope, orderByScope)
 	b.buildDistinctOnArgs(fromScope, projectionsScope, distinctOnScope)
 	b.buildProjectSet(fromScope)
-
 	if needsAgg {
 		// We must wait to build the aggregation until after the above block since
 		// any SRFs found in the SELECT list will change the FROM scope (they

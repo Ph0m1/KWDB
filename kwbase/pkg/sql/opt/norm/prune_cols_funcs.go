@@ -276,13 +276,26 @@ func (c *CustomFuncs) PruneCols(target memo.RelExpr, neededCols opt.ColSet) memo
 // PruneAggCols creates a new AggregationsExpr that discards columns that are
 // not referenced by the neededCols set.
 func (c *CustomFuncs) PruneAggCols(
-	target memo.AggregationsExpr, neededCols opt.ColSet,
+	target memo.AggregationsExpr, neededCols opt.ColSet, gp *memo.GroupingPrivate,
 ) memo.AggregationsExpr {
 	aggs := make(memo.AggregationsExpr, 0, len(target))
+	imputationIndex := -1
 	for i := range target {
 		item := &target[i]
+		if item.Agg.Op() == opt.ImputationOp {
+			imputationIndex++
+		}
 		if neededCols.Contains(item.Col) {
 			aggs = append(aggs, *item)
+		} else {
+			// select time_bucket_gapfill(tb,'3s') as tb1 from (
+			// select time_bucket_gapfill(k_timestamp,'10s') as tb,interpolate(count(e2),null),interpolate(count(distinct(t1)),'null') from test_timebucket_gapfill1_rel.tb group by tb,e2,t1 order by tb,e2,t1
+			// ) group by tb1 order by tb1;
+			// When ImputationOp is eliminated, the added aggregation function should be deleted together.
+			if item.Agg.Op() == opt.ImputationOp && len(gp.Func) != 0 {
+				gp.Func = append(gp.Func[:imputationIndex], gp.Func[imputationIndex+1:]...)
+				imputationIndex--
+			}
 		}
 	}
 	return aggs

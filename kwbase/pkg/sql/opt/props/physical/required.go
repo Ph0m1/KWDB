@@ -66,6 +66,8 @@ type Required struct {
 	// float64 representation, and can be converted to an integer number of rows
 	// using math.Ceil.
 	LimitHint float64
+
+	MustAddSort bool
 }
 
 // MinRequired are the default physical properties that require nothing and
@@ -127,7 +129,8 @@ func (p *Required) Equals(rhs *Required) bool {
 // While it cannot add unique columns, Presentation can rename, reorder,
 // duplicate and discard columns. If Presentation is not defined, then no
 // particular column presentation is required or provided. For example:
-//   a.y:2 a.x:1 a.y:2 column1:3
+//
+//	a.y:2 a.x:1 a.y:2 column1:3
 type Presentation []opt.AliasedColumn
 
 // Any is true if any column presentation is allowed or can be provided.

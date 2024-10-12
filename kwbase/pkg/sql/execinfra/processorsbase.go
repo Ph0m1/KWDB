@@ -102,11 +102,6 @@ type ProcOutputHelper struct {
 	Gapfill bool
 }
 
-// ReduceRowIdx rowIdx - n.
-func (h *ProcOutputHelper) ReduceRowIdx(n uint64) {
-	h.rowIdx = h.rowIdx - n
-}
-
 // Reset resets this ProcOutputHelper, retaining allocated memory in its slices.
 func (h *ProcOutputHelper) Reset() {
 	*h = ProcOutputHelper{
@@ -336,6 +331,47 @@ func (h *ProcOutputHelper) ProcessRow(
 
 	// If this row satisfies the limit, the caller is told to drain.
 	return h.outputRow, h.rowIdx < h.maxRowIdx, nil
+}
+
+// ProcessRowWithOutLimit only use filter to filter row.
+func (h *ProcOutputHelper) ProcessRowWithOutLimit(
+	ctx context.Context, row sqlbase.EncDatumRow,
+) (_ sqlbase.EncDatumRow, _ error) {
+	if h.filter != nil && !h.Gapfill {
+		// Filtering.
+		passes, err := h.filter.EvalFilter(row)
+		if err != nil {
+			return nil, err
+		}
+		if !passes {
+			if log.V(4) {
+				log.Infof(ctx, "filtered out row %s", row.String(h.filter.Types))
+			}
+			return nil, nil
+		}
+	}
+
+	if len(h.renderExprs) > 0 {
+		// Rendering.
+		for i := range h.renderExprs {
+			datum, err := h.renderExprs[i].Eval(row)
+			if err != nil {
+				return nil, err
+			}
+			h.outputRow[i] = sqlbase.DatumToEncDatum(&h.OutputTypes[i], datum)
+		}
+	} else if h.outputCols != nil {
+		// Projection.
+		for i, col := range h.outputCols {
+			h.outputRow[i] = row[col]
+		}
+	} else {
+		// No rendering or projection.
+		return row, nil
+	}
+
+	// If this row satisfies the limit, the caller is told to drain.
+	return h.outputRow, nil
 }
 
 // Output returns the output of the ProcOutputHelper.

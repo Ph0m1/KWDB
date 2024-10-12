@@ -51,6 +51,9 @@ type groupNode struct {
 	// column indices in groupCols can appear in this ordering.
 	groupColOrdering sqlbase.ColumnOrdering
 
+	// gapFillColID representing the column ID of timebucketGapFill in the group.
+	gapFillColID int32
+
 	// isScalar is set for "scalar groupby", where we want a result
 	// even if there are no input rows, e.g. SELECT MIN(x) FROM t.
 	isScalar bool

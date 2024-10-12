@@ -254,7 +254,7 @@
 (Project
     ((OpName $input)
         $innerInput
-        (PruneAggCols $aggregations $needed)
+        (PruneAggCols $aggregations $needed $groupingPrivate)
         $groupingPrivate
     )
     $projections

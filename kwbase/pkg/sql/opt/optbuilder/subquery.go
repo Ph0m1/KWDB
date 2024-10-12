@@ -233,10 +233,6 @@ func (s *subquery) buildSubquery(desiredTypes []*types.T) {
 
 	outScope := s.scope.builder.buildStmt(s.Subquery.Select, desiredTypes, s.scope)
 	ord := outScope.ordering
-	outScope.builder.factory.Memo().SetFlag(opt.HasSubquery)
-	if outScope.builder.factory.Memo().CheckFlag(opt.HasGapFill) {
-		panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with subquery is not supported"))
-	}
 	// Treat the subquery result as an anonymous data source (i.e. column names
 	// are not qualified). Remove hidden columns, as they are not accessible
 	// outside the subquery.

@@ -99,15 +99,6 @@ func checkoutInterpolate(groupBy tree.GroupBy, s *scope) bool {
 		if hasInterpolate && !s.hasGapfill {
 			panic(pgerror.New(pgcode.FeatureNotSupported, "interpolate should be used with time_bucket_gapfill"))
 		}
-		if hasInterpolate && len(groupBy) > 1 {
-			panic(pgerror.New(pgcode.FeatureNotSupported, "group by accepts only one column when using Interpolate())"))
-		}
-		if s.hasGapfill && len(groupBy) > 1 {
-			panic(pgerror.New(pgcode.FeatureNotSupported, "group by accepts only one column when using time_bucket_gapfill"))
-		}
-	}
-	if s.builder.factory.Memo().CheckFlag(opt.HasGapFill) && s.builder.factory.Memo().CheckFlag(opt.HasSubquery) {
-		panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with subquery is not supported"))
 	}
 	return hasInterpolate
 }

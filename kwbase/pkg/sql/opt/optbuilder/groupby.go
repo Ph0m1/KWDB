@@ -288,7 +288,11 @@ func (b *Builder) needsAggregation(sel *tree.SelectClause, scope *scope) bool {
 }
 
 func (b *Builder) constructGroupBy(
-	input memo.RelExpr, groupingColSet opt.ColSet, aggCols []scopeColumn, ordering opt.Ordering,
+	input memo.RelExpr,
+	groupingColSet opt.ColSet,
+	aggCols []scopeColumn,
+	ordering opt.Ordering,
+	timeBucketGapFillColID opt.ColumnID,
 ) memo.RelExpr {
 	aggs := make(memo.AggregationsExpr, 0, len(aggCols))
 
@@ -316,6 +320,16 @@ func (b *Builder) constructGroupBy(
 
 	if groupingColSet.Empty() {
 		return b.factory.ConstructScalarGroupBy(input, aggs, &private)
+	}
+	// add order asc.
+	if timeBucketGapFillColID > 0 {
+		ord := make(opt.Ordering, 0, len(groupingColSet.Ordered()))
+		for _, g := range groupingColSet.Ordered() {
+			// time_bucket_gapfill need ascending order.
+			ord = append(ord, opt.MakeOrderingColumn(opt.ColumnID(g), false))
+		}
+		private.Ordering.FromOrdering(ord)
+		private.TimeBucketGapFillColId = timeBucketGapFillColID
 	}
 	return b.factory.ConstructGroupBy(input, aggs, &private)
 }
@@ -345,8 +359,15 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 
 	// Build ColSet of grouping columns.
 	var groupingColSet opt.ColSet
+	// Representing the column ID of timebucketGapFill in the group.
+	var timeBucketGapFillColID opt.ColumnID
 	for i := range groupingCols {
 		groupingColSet.Add(groupingCols[i].id)
+		if v, ok := groupingCols[i].expr.(*tree.FuncExpr); ok {
+			if v.Func.FunctionName() == "time_bucket_gapfill" {
+				timeBucketGapFillColID = groupingCols[i].id
+			}
+		}
 	}
 
 	// If there are any aggregates that are ordering sensitive, build the
@@ -445,12 +466,7 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 	// aggregate arguments, as well as any additional order by columns.
 	b.constructProjectForScope(fromScope, g.aggInScope)
 
-	g.aggOutScope.expr = b.constructGroupBy(
-		g.aggInScope.expr.(memo.RelExpr),
-		groupingColSet,
-		aggCols,
-		g.aggInScope.ordering,
-	)
+	g.aggOutScope.expr = b.constructGroupBy(g.aggInScope.expr.(memo.RelExpr), groupingColSet, aggCols, g.aggInScope.ordering, timeBucketGapFillColID)
 	if len(aggFuncs) != 0 {
 		if g, ok := g.aggOutScope.expr.(*memo.ScalarGroupByExpr); ok {
 			g.GroupingPrivate.Func = aggFuncs
@@ -475,9 +491,6 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 func (b *Builder) analyzeHaving(having *tree.Where, fromScope *scope) tree.TypedExpr {
 	if having == nil {
 		return nil
-	}
-	if b.factory.Memo().CheckFlag(opt.HasGapFill) {
-		panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with having is not supported"))
 	}
 	// We need to save and restore the previous value of the field in semaCtx
 	// in case we are recursively called within a subquery context.

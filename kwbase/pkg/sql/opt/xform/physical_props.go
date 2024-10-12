@@ -92,6 +92,9 @@ func BuildChildPhysicalProps(
 	}
 
 	childProps.Ordering = ordering.BuildChildRequired(parent, &parentProps.Ordering, nth)
+	if groupBy, ok := parent.(*memo.GroupByExpr); ok {
+		childProps.MustAddSort = groupBy.TimeBucketGapFillColId > 0
+	}
 
 	switch parent.Op() {
 	case opt.LimitOp:

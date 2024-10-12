@@ -1224,11 +1224,23 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 
 	aggregations := *groupBy.Child(1).(*memo.AggregationsExpr)
 	aggInfos := make([]exec.AggInfo, len(aggregations))
+	outColIndex := len(groupingColIdx)
 	for i := range aggregations {
 		if err = getAggInfos(aggregations[i].Agg, i, input.getColumnOrdinal, &aggInfos); err != nil {
 			return execPlan{}, err
 		}
-		ep.outputCols.Set(int(aggregations[i].Col), len(groupingColIdx)+i)
+		ep.outputCols.Set(int(aggregations[i].Col), outColIndex)
+		outColIndex++
+		// When it comes to ImputationOp,
+		// the subsequent plan will extract the aggregation function in the Imputation as the output column,
+		// so the output column of the subsequent aggregation function should be skipped by+2.
+		// case:
+		// select time_bucket_gapfill(time,86400) as c,interpolate(count(device_id), null), interpolate(max(device_id), 1)
+		// from t1 group by c order by c;
+		// outputCols should be 1 2 4.
+		if aggregations[i].Agg.Op() == opt.ImputationOp {
+			outColIndex++
+		}
 	}
 
 	if groupBy.Op() == opt.ScalarGroupByOp {
@@ -1240,6 +1252,10 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 			groupingColOrder = input.sqlOrdering(ordering.StreamingGroupingColOrdering(
 				private, &groupBy.RequiredPhysical().Ordering,
 			))
+			if private.TimeBucketGapFillColId > 0 {
+				// get ordinal col id from TimeBucketGapFillColId.
+				private.TimeBucketGapFillColIdOrdinal = opt.ColumnID(input.getColumnOrdinal(private.TimeBucketGapFillColId))
+			}
 		}
 
 		reqOrdering := ep.reqOrdering(groupBy)

@@ -188,6 +188,17 @@ func (c *CustomFuncs) ColsAreEmpty(cols opt.ColSet) bool {
 	return cols.Empty()
 }
 
+// CanReduceGroupingCols return true if the group has time_bucket_gapfill.
+// To prevent optimizing group by, the implementation of time_bucket_gapfill during the planning phase depends on GroupByExpr,
+// If optimizing group by generates ScalarGroupBy expression.
+// example:
+// select time_bucket_gapfill(tt,86400) as c,interpolate(count(b), null)
+// from (select time_bucket_gapfill(time,86400) as tt,interpolate(first(device_id),linear) as b from t1 group by tt order by tt limit 1)
+// group by c order by c;
+func (c *CustomFuncs) CanReduceGroupingCols(groupingPrivate *memo.GroupingPrivate) bool {
+	return !(groupingPrivate.TimeBucketGapFillColId > 0)
+}
+
 // ColsAreSubset returns true if the left columns are a subset of the right
 // columns.
 func (c *CustomFuncs) ColsAreSubset(left, right opt.ColSet) bool {

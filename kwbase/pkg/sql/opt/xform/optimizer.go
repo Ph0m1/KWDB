@@ -26,7 +26,6 @@ package xform
 
 import (
 	"math/rand"
-	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -235,16 +234,6 @@ func (o *Optimizer) Optimize() (_ opt.Expr, err error) {
 	// tree by default.
 	root = o.setLowestCostTree(root, rootProps).(memo.RelExpr)
 	o.mem.SetRoot(root, rootProps)
-
-	if o.mem.CheckFlag(opt.HasGapFill) {
-		if ok, operator := memo.CheckGapFillMemo(&root); !ok {
-			op := operator.String()
-			if strings.Contains(operator.String(), "join") {
-				op = "join"
-			}
-			return root, pgerror.Newf(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with %v is not supported", op)
-		}
-	}
 	if o.mem.CheckFlag(opt.ExecInTSEngine) {
 		err = o.mem.CheckWhiteListAndAddSynchronize(&root)
 		if err != nil {
@@ -684,6 +673,9 @@ func (o *Optimizer) optimizeEnforcer(
 	// Check whether this is the new lowest cost expression with the enforcer
 	// added.
 	cost := innerState.cost + o.coster.ComputeCost(enforcer, enforcerProps)
+	if enforcerProps.MustAddSort {
+		cost = 0
+	}
 	o.ratchetCost(state, enforcer, cost)
 
 	// Enforcer expression is fully optimized if its input expression is fully

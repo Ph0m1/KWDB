@@ -100,7 +100,24 @@ type aggregatorBase struct {
 
 	// keep track of all internal ts columns for last/last_row
 	internalTsCols []uint32
+
+	// hasTimeBucketGapFill is true if aggregations have function time_bucket_gapFill.
+	hasTimeBucketGapFill   bool
+	timeBucketGapFillColID int32
 }
+
+// aggGapFillState represents gapfill's state.
+type aggGapFillState int
+
+const (
+	// gapFillInit represents that no row data that meets the requirements has appeared yet.
+	gapFillInit aggGapFillState = iota
+	// gapFillStart represents that there is already a row of data that meets the requirements.
+	gapFillStart
+	// gapFillEnd represents that the virtual rows between two actual rows have been filled,
+	// now begin processing last row.
+	gapFillEnd
+)
 
 // gapfilltype is used to store data for functions of time_bucket_gapfill and interpolate.
 // It records previous data record and keeps track of gapfilling status along the way
@@ -119,8 +136,6 @@ type gapfilltype struct {
 	gapfillingrow sqlbase.EncDatumRow
 	// gapfillingbucket records the current buckets if gapfilling is needed.
 	gapfillingbucket aggregateFuncs
-	// startgapfilling flags the start of gapfilling
-	startgapfilling bool
 	// linearPos is used for linear methods. It keeps track of the position
 	// of a linear interpolation.
 	linearPos int
@@ -129,6 +144,21 @@ type gapfilltype struct {
 	// linearGap = (int)((currTime-prevTime)/t.Timebucket + 1)
 	// The linear interpolation equation is val := ((nextval-prevval)*pos/gap + prevval)
 	linearGap int
+	// firstInterval represents the first interval.
+	// fix when the data timestamp is 0, the first interval has not been added row.
+	firstInterval bool
+	gapFillState  aggGapFillState
+	// groupTimeIndex represents tb's index in Aggregations.
+	// select time_bucket_gapfill(k_timestamp, '10W') as tb,t15 from test_select_timebucket_gapfill.tb group by tb order by tb;
+	groupTimeIndex int
+	// anyNotNUllNum represents the number of columns in group by.
+	anyNotNUllNum int
+	// gapFillGroupDatum represents the out datum in aggregations corresponding to the group by.
+	// for example:
+	// select time_bucket_gapfill(k_timestamp, '10W') as tb,t15,t16
+	// from test_select_timebucket_gapfill.tb group by tb,t15,t16 order by tb,t15 limit 10;
+	// gapFillGroupDatum is t15, t16 in group by.
+	gapFillGroupDatum []tree.Datum
 }
 
 type imputationtype struct {
@@ -190,7 +220,21 @@ func (ag *aggregatorBase) init(
 	ag.isScalar = spec.IsScalar()
 	ag.groupCols = spec.GroupCols
 	ag.orderedGroupCols = spec.OrderedGroupCols
+	ag.timeBucketGapFillColID = spec.TimeBucketGapFillColId
 	ag.aggregations = spec.Aggregations
+	groupTimeIndex := 0
+	anyNotNUllNum := 0
+	gapFillGroup := make([]int, 0)
+	for i, v := range spec.Aggregations {
+		if v.Func.String() == "ANY_NOT_NULL" {
+			anyNotNUllNum++
+			if v.ColIdx[0] == uint32(spec.TimeBucketGapFillColId) {
+				groupTimeIndex = i
+			} else {
+				gapFillGroup = append(gapFillGroup, i)
+			}
+		}
+	}
 	ag.funcs = make([]*aggregateFuncHolder, len(spec.Aggregations))
 	ag.outputTypes = make([]types.T, len(spec.Aggregations))
 	ag.row = make(sqlbase.EncDatumRow, len(spec.Aggregations))
@@ -198,14 +242,19 @@ func (ag *aggregatorBase) init(
 	ag.arena = stringarena.Make(&ag.bucketsAcc)
 	ag.aggFuncsAcc = memMonitor.MakeBoundAccount()
 	ag.gapfill = gapfilltype{
+		groupTimeIndex:   groupTimeIndex,
+		anyNotNUllNum:    anyNotNUllNum,
+		firstInterval:    true,
 		prevgaptime:      time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		endgapfilling:    false, // marks the end of gapfilling if true
 		gapfillingrow:    nil,
 		gapfillingbucket: nil,
-		startgapfilling:  false,
 		linearPos:        0,
 		linearGap:        0,
+		gapFillState:     gapFillInit,
 	}
+	ag.gapfill.gapFillGroupDatum = make([]tree.Datum, len(gapFillGroup))
+	ag.hasTimeBucketGapFill = spec.HasTimeBucketGapFill
 	ag.imputation = make([]imputationtype, len(spec.Aggregations))
 	// Loop over the select expressions and extract any aggregate functions --
 	// non-aggregation functions are replaced with parser.NewIdentAggregate,
@@ -213,6 +262,7 @@ func (ag *aggregatorBase) init(
 	// grouped-by values for each bucket.  ag.funcs is updated to contain all
 	// the functions which need to be fed values.
 	ag.inputTypes = input.OutputTypes()
+	interpolateIndex := make([]int, 0)
 	for i, aggInfo := range spec.Aggregations {
 		if aggInfo.FilterColIdx != nil {
 			col := *aggInfo.FilterColIdx
@@ -256,6 +306,9 @@ func (ag *aggregatorBase) init(
 		if err != nil {
 			return err
 		}
+		if aggInfo.Func == execinfrapb.AggregatorSpec_INTERPOLATE {
+			interpolateIndex = append(interpolateIndex, i)
+		}
 
 		ag.funcs[i] = ag.newAggregateFuncHolder(aggConstructor, arguments)
 		if aggInfo.Distinct {
@@ -267,6 +320,10 @@ func (ag *aggregatorBase) init(
 			prevValue:    tree.DNull,
 			prevValueTmp: tree.DNull,
 			nextValue:    tree.DNull}
+	}
+	// interpolate func's return type should use return type of internal aggregation function.
+	for _, ix := range interpolateIndex {
+		ag.outputTypes[ix] = ag.outputTypes[ix+1]
 	}
 
 	return ag.ProcessorBase.Init(
@@ -719,13 +776,78 @@ func (ag *aggregatorBase) getAggResults(
 		ag.outputTypes[i] = *result.ResolvedType()
 		ag.row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], result)
 	}
-	var outRow sqlbase.EncDatumRow
-	if !ag.gapfill.startgapfilling {
-		outRow = ag.ProcessRowHelper(ag.row)
-		if outRow == nil {
-			return aggEmittingRows, nil, nil
+	if !ag.hasTimeBucketGapFill {
+		if outRow := ag.ProcessRowHelper(ag.row); outRow != nil {
+			return aggEmittingRows, outRow, nil
+		}
+		// We might have switched to draining, we might not have. In case we
+		// haven't, aggEmittingRows is accurate. If we have, it will be ignored by
+		// the caller.
+		return aggEmittingRows, nil, nil
+	}
+	return ag.getAggResultsForTimeBucketGapFill(bucket)
+}
+
+// getAggResultsForTimeBucketGapFill perform gapfill and interpolation for agg result.
+func (ag *aggregatorBase) getAggResultsForTimeBucketGapFill(
+	bucket aggregateFuncs,
+) (aggregatorState, sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata) {
+	outRow, err := ag.Out.ProcessRowWithOutLimit(ag.PbCtx(), ag.row)
+	if err != nil {
+		ag.MoveToDraining(err)
+		return aggEmittingRows, nil, nil
+	}
+	if outRow == nil {
+		return aggEmittingRows, nil, nil
+	}
+	switch ag.gapfill.gapFillState {
+	case gapFillInit:
+		return ag.aggGapFillInit(bucket)
+	case gapFillStart:
+		return ag.aggGapFillStart()
+	case gapFillEnd:
+		// If this is the end of gapfilling, we need to emit the last row, which was saved in imputation struct.
+		// This row is original row/data
+		return ag.aggGapFillEnd()
+	default:
+		ag.MoveToDraining(errors.Errorf("unknown gapFill State."))
+		return aggEmittingRows, nil, nil
+	}
+}
+
+// aggGapFillEnd handle the last row in the interval.
+func (ag *aggregatorBase) aggGapFillEnd() (
+	aggregatorState,
+	sqlbase.EncDatumRow,
+	*execinfrapb.ProducerMetadata,
+) {
+	ag.Out.Gapfill = true
+	for _, b := range ag.gapfill.gapfillingbucket {
+		switch b.(type) {
+		case *(builtins.ImputationAggregate):
+			ag.gapfill.linearGap = 0
+			ag.gapfill.linearPos = 0
 		}
 	}
+	if outRow := ag.ProcessRowHelper(ag.gapfill.gapfillingrow); outRow != nil {
+		// The current interval has ended gapFill, switch the state to gapFillInit.
+		ag.gapfill.gapFillState = gapFillInit
+		ag.gapfill.gapfillingrow = nil
+		ag.gapfill.gapfillingbucket = nil
+		ag.Out.Gapfill = false
+		return aggEmittingRows, outRow, nil
+	}
+	// The current interval has ended gapFill, switch the state to gapFillInit.
+	ag.gapfill.gapFillState = gapFillInit
+	return aggEmittingRows, nil, nil
+}
+
+// aggGapFillStart start filling new rows within the interval.
+func (ag *aggregatorBase) aggGapFillStart() (
+	aggregatorState,
+	sqlbase.EncDatumRow,
+	*execinfrapb.ProducerMetadata,
+) {
 	// If this is in the middle of gapfilling, we use imputation structure to emit rows for the gaps.
 	// row is used to store the gap filling values for aggregates in bucket. We emit the row during
 	// gapfilling process. We emit ag.row for original data.
@@ -734,129 +856,151 @@ func (ag *aggregatorBase) getAggResults(
 	var haveGapFilled bool
 	haveGapFilled = false
 	errorOut := false
-	if ag.gapfill.startgapfilling {
-		for i, b := range ag.gapfill.gapfillingbucket {
-			switch t := b.(type) {
-			case *(builtins.TimeBucketAggregate):
-				// We check the gap between currTime and last filled timestamp value and update the
-				// gapfilling status accordingly.
-				newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
-				newTimeUnix := newTime.Unix()
-				currTime := t.Time.Unix()
-				if !(newTimeUnix < currTime) {
-					ag.gapfill.startgapfilling = false
-					ag.gapfill.endgapfilling = true
-					break
-				}
-				// increment prevgaptime by t.Timebucket
-				ag.gapfill.prevgaptime = newTimeUnix
-				timeTmp := newTime
-				// record data in row
-				ag.outputTypes[i] = *types.Timestamp
-				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestamp{Time: timeTmp})
-			case *(builtins.TimestamptzBucketAggregate):
-				// We check the gap between currTime and last filled timestamp value and update the
-				// gapfilling status accordingly.
-				newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
-				newTimeUnix := newTime.Unix()
-				currTime := t.Time.Unix()
-				if !(newTimeUnix < currTime) {
-					ag.gapfill.startgapfilling = false
-					ag.gapfill.endgapfilling = true
-					break
-				}
-				ag.gapfill.prevgaptime = newTimeUnix
-				timeTmp := newTime
-				ag.outputTypes[i] = *types.TimestampTZ
-				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
-				// row[0] is a group by column
-				row[0] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
-			case *(builtins.ImputationAggregate):
-				imputationMethod := t.Exp
-				switch imputationMethod {
-				case builtins.ConstantIntMethod:
-					curRowData = tree.NewDInt(tree.DInt(t.IntConstant))
-				case builtins.ConstantFloatMethod:
-					curRowData = tree.NewDFloat(tree.DFloat(t.FloatConstant))
-				case builtins.PrevMethod:
-					curRowData = ag.imputation[i].prevValue
-				case builtins.NextMethod:
-					curRowData = ag.imputation[i].nextValue
-				case builtins.LinearMethod:
-					if ag.imputation[i].nextValue == tree.DNull || ag.imputation[i].prevValue == tree.DNull {
-						curRowData = tree.DNull
-					} else {
-						nextval, _ := ag.imputation[i].GetNextValueFloat()
-						prevval, _ := ag.imputation[i].GetPrevValueFloat()
-						pos := float64(ag.gapfill.linearPos) //TODO: potential unnecessary mem alloc
-						gap := float64(ag.gapfill.linearGap)
-						val := (nextval-prevval)*pos/gap + prevval
-						switch t.OriginalType {
-						case types.Float:
-							curRowData = tree.NewDFloat(tree.DFloat(val))
-						case types.Int:
-							curRowData = tree.NewDInt(tree.DInt(math.Round(val)))
-						default:
-							errorOut = true
-						}
-						// ag.gapfill.linearPos = ag.gapfill.linearPos + 1
-						haveGapFilled = true
-					}
-				case builtins.NullMethod:
-					curRowData = tree.DNull
-				default:
-					errorOut = true
-				}
-				if !errorOut {
-					row[i] = sqlbase.DatumToEncDatum(curRowData.ResolvedType(), curRowData)
+	for i, b := range ag.gapfill.gapfillingbucket {
+		switch t := b.(type) {
+		case *(builtins.TimeBucketAggregate):
+			// We check the gap between currTime and last filled timestamp value and update the
+			// gapfilling status accordingly.
+			newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
+			newTimeUnix := newTime.Unix()
+			currTime := t.Time.Unix()
+			if !(newTimeUnix < currTime) {
+				// gapFillStart ends, switch the state to gapFillEnd.
+				ag.gapfill.gapFillState = gapFillEnd
+				break
+			}
+			// increment prevgaptime by t.Timebucket
+			ag.gapfill.prevgaptime = newTimeUnix
+			timeTmp := newTime
+			// record data in row
+			ag.outputTypes[i] = *types.Timestamp
+			row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestamp{Time: timeTmp})
+			for j := 0; j < ag.gapfill.anyNotNUllNum; j++ {
+				if ag.gapfill.groupTimeIndex == j {
+					// change to the same time as the new line.
+					row[j] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
 				} else {
-					row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], tree.DNull)
+					// when in a gapFillGroup, insert same group.
+					row[j] = ag.row[j]
 				}
-			// If we have a normal agg function, we fill it with null value.
+			}
+		case *(builtins.TimestamptzBucketAggregate):
+			// We check the gap between currTime and last filled timestamp value and update the
+			// gapfilling status accordingly.
+			newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
+			newTimeUnix := newTime.Unix()
+			currTime := t.Time.Unix()
+			if !(newTimeUnix < currTime) {
+				// gapFillStart ends, switch the state to gapFillEnd.
+				ag.gapfill.gapFillState = gapFillEnd
+				break
+			}
+			ag.gapfill.prevgaptime = newTimeUnix
+			timeTmp := newTime
+			ag.outputTypes[i] = *types.TimestampTZ
+			row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
+			for j := 0; j < ag.gapfill.anyNotNUllNum; j++ {
+				if ag.gapfill.groupTimeIndex == j {
+					row[ag.gapfill.groupTimeIndex] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
+				} else {
+					row[j] = ag.row[j]
+				}
+			}
+			// row[0] is a group by column
+			//row[0] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
+		case *(builtins.ImputationAggregate):
+			imputationMethod := t.Exp
+			switch imputationMethod {
+			case builtins.ConstantIntMethod:
+				curRowData = tree.NewDInt(tree.DInt(t.IntConstant))
+			case builtins.ConstantFloatMethod:
+				curRowData = tree.NewDFloat(tree.DFloat(t.FloatConstant))
+			case builtins.PrevMethod:
+				curRowData = ag.imputation[i].prevValue
+			case builtins.NextMethod:
+				curRowData = ag.imputation[i].nextValue
+			case builtins.LinearMethod:
+				if ag.imputation[i].nextValue == tree.DNull || ag.imputation[i].prevValue == tree.DNull {
+					curRowData = tree.DNull
+				} else {
+					nextval, _ := ag.imputation[i].GetNextValueFloat()
+					prevval, _ := ag.imputation[i].GetPrevValueFloat()
+					pos := float64(ag.gapfill.linearPos) //TODO: potential unnecessary mem alloc
+					gap := float64(ag.gapfill.linearGap)
+					val := (nextval-prevval)*pos/gap + prevval
+					switch t.OriginalType {
+					case types.Float:
+						curRowData = tree.NewDFloat(tree.DFloat(val))
+					case types.Int:
+						curRowData = tree.NewDInt(tree.DInt(math.Round(val)))
+					default:
+						errorOut = true
+					}
+					// ag.gapfill.linearPos = ag.gapfill.linearPos + 1
+					haveGapFilled = true
+				}
+			case builtins.NullMethod:
+				curRowData = tree.DNull
 			default:
+				errorOut = true
+			}
+			if !errorOut {
+				row[i] = sqlbase.DatumToEncDatum(curRowData.ResolvedType(), curRowData)
+			} else {
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], tree.DNull)
 			}
-		}
-		if haveGapFilled {
-			ag.gapfill.linearPos = ag.gapfill.linearPos + 1
-			haveGapFilled = false
-		}
-		// emit gapfilling row
-		if ag.gapfill.startgapfilling && !ag.gapfill.endgapfilling {
-			ag.Out.Gapfill = true
-			if outRow := ag.ProcessRowHelper(row); outRow != nil {
-				ag.Out.Gapfill = false
-				return aggEmittingRows, outRow, nil
-			}
+		// If we have a normal agg function, we fill it with null value.
+		default:
+			row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], tree.DNull)
 		}
 	}
-	// If this is the end of gapfilling, we need to emit the last row, which was saved in imputation struct.
-	// This row is original row/data
-	if ag.gapfill.endgapfilling {
+	if haveGapFilled {
+		ag.gapfill.linearPos = ag.gapfill.linearPos + 1
+		haveGapFilled = false
+	}
+	// emit gapfilling row
+	if ag.gapfill.gapFillState == gapFillStart {
 		ag.Out.Gapfill = true
-		for _, b := range ag.gapfill.gapfillingbucket {
-			switch b.(type) {
-			case *(builtins.ImputationAggregate):
-				ag.gapfill.linearGap = 0
-				ag.gapfill.linearPos = 0
-			}
-		}
-		if outRow := ag.ProcessRowHelper(ag.gapfill.gapfillingrow); outRow != nil {
-			ag.gapfill.endgapfilling = false
-			ag.gapfill.gapfillingrow = nil
-			ag.gapfill.gapfillingbucket = nil
+		if outRow := ag.ProcessRowHelper(row); outRow != nil {
 			ag.Out.Gapfill = false
 			return aggEmittingRows, outRow, nil
 		}
 	}
+	return aggEmittingRows, nil, nil
+}
+
+// isGapFillGroup return true when the row and pre row is in a gapFill group.
+func (ag *aggregatorBase) isGapFillGroup(bucket aggregateFuncs) bool {
+	isGapFillGroup := true
+	for i := 0; i < len(ag.gapfill.gapFillGroupDatum); i++ {
+		result, _ := bucket[i].Result()
+		if ag.gapfill.firstInterval {
+			isGapFillGroup = false
+		} else {
+			if ag.gapfill.gapFillGroupDatum[i].Compare(ag.EvalCtx, result) != 0 {
+				isGapFillGroup = false
+			}
+		}
+		ag.gapfill.gapFillGroupDatum[i] = result
+	}
+	return isGapFillGroup
+}
+
+// aggGapFillInit init ag.gapfill by first real row.
+func (ag *aggregatorBase) aggGapFillInit(
+	bucket aggregateFuncs,
+) (aggregatorState, sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata) {
+	row := make(sqlbase.EncDatumRow, len(ag.row))
 	// traverse agg in bucket
+	isGapFillGroup := ag.isGapFillGroup(bucket)
 	for i, b := range bucket {
 		result, err := b.Result()
 		switch t := b.(type) {
 		case *(builtins.TimeBucketAggregate):
-			if ag.gapfill.prevtime.IsZero() {
+			if ag.gapfill.firstInterval {
 				ag.gapfill.prevtime = t.Time.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos()))
 			}
+			ag.gapfill.firstInterval = false
 			prevTime := ag.gapfill.prevtime
 
 			newTime := prevTime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
@@ -865,7 +1009,7 @@ func (ag *aggregatorBase) getAggResults(
 			ag.gapfill.prevtime = t.Time
 			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).Unix()
 			// we check if gapfilling is needed by comparing currTime with Time in the last row
-			if newTimeUnix < currTime {
+			if newTimeUnix < currTime && isGapFillGroup {
 				if t.Timebucket.Months != 0 {
 					ag.gapfill.linearGap = ((t.Time.Year()-newTime.Year())*12+int(t.Time.Month()-newTime.Month()))/int(t.Timebucket.Months) + 1
 				} else {
@@ -876,12 +1020,14 @@ func (ag *aggregatorBase) getAggResults(
 				ag.gapfill.gapfillingbucket = bucket
 				ag.outputTypes[i] = *types.Timestamp
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestamp{Time: timeTmp})
-				ag.gapfill.startgapfilling = true
+				// gapFillInit ends, switch the state to gapFillStart.
+				ag.gapfill.gapFillState = gapFillStart
 			}
 		case *(builtins.TimestamptzBucketAggregate):
-			if ag.gapfill.prevtime.IsZero() {
+			if ag.gapfill.firstInterval {
 				ag.gapfill.prevtime = t.Time.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos()))
 			}
+			ag.gapfill.firstInterval = false
 			prevTime := ag.gapfill.prevtime
 
 			newTime := prevTime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
@@ -890,7 +1036,7 @@ func (ag *aggregatorBase) getAggResults(
 			ag.gapfill.prevtime = t.Time
 			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).Unix()
 			// we check if gapfilling is needed by comparing currTime with Time in the last row
-			if newTimeUnix < currTime {
+			if newTimeUnix < currTime && isGapFillGroup {
 				if t.Timebucket.Months != 0 {
 					ag.gapfill.linearGap = ((t.Time.Year()-newTime.Year())*12+int(t.Time.Month()-newTime.Month()))/int(t.Timebucket.Months) + 1
 				} else {
@@ -901,7 +1047,8 @@ func (ag *aggregatorBase) getAggResults(
 				ag.gapfill.gapfillingbucket = bucket
 				ag.outputTypes[i] = *types.TimestampTZ
 				row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
-				ag.gapfill.startgapfilling = true
+				// gapFillInit ends, switch the state to gapFillStart.
+				ag.gapfill.gapFillState = gapFillStart
 			}
 		case *(builtins.ImputationAggregate):
 			ag.imputation[i].nextValue = result
@@ -925,20 +1072,13 @@ func (ag *aggregatorBase) getAggResults(
 		}
 	}
 	// We record the original ag.row in imputation struct and emit row. Marks the start of gapfilling.
-	if ag.gapfill.startgapfilling {
+	if ag.gapfill.gapFillState == gapFillStart {
 		ag.gapfill.gapfillingrow = ag.row
-		// The row that triggers interpolation needs to be subtracted from rowIdx.
-		ag.Out.ReduceRowIdx(1)
-		// When starting interpolation and rowIdx equals maxRowIdx and, aggregator should continue exec.
-		ag.State = execinfra.StateRunning
 		return aggEmittingRows, nil, nil
 	}
-	if outRow != nil {
+	if outRow := ag.ProcessRowHelper(ag.row); outRow != nil {
 		return aggEmittingRows, outRow, nil
 	}
-	// We might have switched to draining, we might not have. In case we
-	// haven't, aggEmittingRows is accurate. If we have, it will be ignored by
-	// the caller.
 	return aggEmittingRows, nil, nil
 }
 
@@ -1055,9 +1195,7 @@ func (ag *orderedAggregator) emitRow() (
 	}
 
 	bucket := ag.bucket
-	if !ag.gapfill.startgapfilling {
-		ag.bucket = nil
-	}
+	ag.bucket = nil
 	return ag.getAggResults(bucket)
 }
 
@@ -1092,7 +1230,7 @@ func (ag *orderedAggregator) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerM
 		case aggAccumulating:
 			ag.runningState, row, meta = ag.accumulateRows()
 		case aggEmittingRows:
-			if ag.gapfill.endgapfilling || ag.gapfill.startgapfilling {
+			if ag.gapfill.gapFillState != gapFillInit {
 				// adding row after gapfilling
 				ag.runningState, row, meta = ag.getAggResults(nil)
 			} else {
@@ -1348,28 +1486,16 @@ func (ag *aggregatorBase) createAggregateFuncs() (aggregateFuncs, error) {
 		}
 		bucket[i] = agg
 	}
-	if !ag.interpolated {
-		for i := 0; i < len(bucket); i++ {
-			if imputationbucket, ok := bucket[i].(*builtins.ImputationAggregate); ok {
-				imputationbucket.Aggfunc = bucket[i+1]
-				bucket = append(bucket[:i+1], bucket[i+2:]...)
-				if isLastOrFirst(ag.aggregations[i+1].Func) {
-					//The time column should be added to the last or first function.
-					if len(ag.aggregations[i+1].ColIdx) > 0 {
-						ag.aggregations[i].ColIdx = append(ag.aggregations[i].ColIdx, ag.aggregations[i+1].ColIdx[1])
-					}
+	for i := 0; i < len(bucket); i++ {
+		if imputationbucket, ok := bucket[i].(*builtins.ImputationAggregate); ok {
+			imputationbucket.Aggfunc = ag.funcs[i+1].create(ag.EvalCtx, ag.funcs[i+1].arguments)
+			if isLastOrFirst(ag.aggregations[i+1].Func) {
+				//The time column should be added to the last or first function.
+				if len(ag.aggregations[i+1].ColIdx) > 0 {
+					ag.aggregations[i].ColIdx = append(ag.aggregations[i].ColIdx, ag.aggregations[i+1].ColIdx[1])
 				}
-				ag.aggregations = append(ag.aggregations[:i+1], ag.aggregations[i+2:]...)
-				ag.outputTypes = append(ag.outputTypes[:i+1], ag.outputTypes[i+2:]...)
-				ag.interpolated = true
 			}
-		}
-	} else {
-		for i := 0; i < len(bucket); i++ {
-			if imputationbucket, ok := bucket[i].(*builtins.ImputationAggregate); ok {
-				imputationbucket.Aggfunc = bucket[i+1]
-				bucket = append(bucket[:i+1], bucket[i+2:]...)
-			}
+			ag.interpolated = true
 		}
 	}
 	return bucket, nil

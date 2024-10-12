@@ -27,7 +27,6 @@ package optbuilder
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -95,13 +94,6 @@ func (b *Builder) buildScalar(
 			// grouping on the entire PK of that table.
 			g := inScope.groupby
 			if !inScope.isOuterColumn(t.id) && !b.allowImplicitGroupingColumn(t.id, g) {
-				for _, groupStr := range g.groupStrs {
-					groupString := groupStr.exprStr
-					str := Gapfill + "(@@"
-					if strings.Contains(groupString, str) {
-						panic(newTimeBucketGroupingError())
-					}
-				}
 				panic(newGroupingError(&t.name))
 			}
 

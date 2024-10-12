@@ -95,9 +95,6 @@ const (
 	// HasGapFill is set when use time_bucket_gapfill function in SQL.
 	HasGapFill = 1 << 5
 
-	// HasSubquery is set when use subquery in SQL.
-	HasSubquery = 1 << 6
-
 	// HasAutoLimit is set when the limit is autoLimit
-	HasAutoLimit = 1 << 7
+	HasAutoLimit = 1 << 6
 )

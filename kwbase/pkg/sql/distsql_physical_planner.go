@@ -3456,6 +3456,8 @@ func getFinalColumnType(
 		if foundInterpolate {
 			switch returnTyp.InternalType.Family {
 			case types.IntFamily, types.FloatFamily, types.DecimalFamily:
+				// interpolate's return type should use the return type of its internal aggregation function.
+				finalOutTypes[i-1] = *returnTyp
 				break
 			default:
 				return finalOutTypes, pgerror.New(pgcode.Warning,
@@ -3788,6 +3790,8 @@ func (dsp *DistSQLPlanner) addAggregators(
 		notNeedDist = true
 		// The interpolate function should be computed at the gateway node.
 		prevStageNode = 0
+		finalAggsSpec.HasTimeBucketGapFill = true
+		finalAggsSpec.TimeBucketGapFillColId = n.gapFillColID
 	}
 	if len(finalAggsSpec.GroupCols) == 0 || len(p.ResultRouters) == 1 || notNeedDist {
 		// No GROUP BY, or we have a single stream. Use a single final aggregator.
