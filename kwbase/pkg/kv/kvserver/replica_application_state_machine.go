@@ -1189,7 +1189,9 @@ func (b *replicaAppBatch) ApplyToStateMachine(ctx context.Context) error {
 	if b.TSTxnID != 0 {
 		err := b.r.store.TsEngine.MtrCommit(b.tableID, b.rangeGroupID, b.TSTxnID)
 		if err != nil {
-			return wrapWithNonDeterministicFailure(err, "unable to commit mini-transaction")
+			if exist, _ := r.store.TsEngine.TSIsTsTableExist(b.tableID); exist {
+				return wrapWithNonDeterministicFailure(err, "unable to commit mini-transaction")
+			}
 		}
 	}
 	b.batch.Close()
