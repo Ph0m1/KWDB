@@ -37,6 +37,8 @@ import (
 	"fmt"
 	"strings"
 
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -141,6 +143,20 @@ func (p *Parser) Parse(sql string) (Statements, error) {
 	return p.parseWithDepth(1, sql, defaultNakedIntType)
 }
 
+func addAutoLimit(stmt tree.Statement, values *settings.Values) tree.Statement {
+	switch s := stmt.(type) {
+	case *tree.Explain:
+		s.Statement = addAutoLimit(s.Statement, values)
+	case *tree.Prepare:
+		s.Statement = addAutoLimit(s.Statement, values)
+	case *tree.Select:
+		if s.Limit == nil {
+			s.Limit = &tree.Limit{Count: tree.NewDInt(tree.DInt(opt.AutoLimitQuantity.Get(values))), IsAutoLimit: true}
+		}
+	}
+	return stmt
+}
+
 // ParseWithInt parses a sql statement string and returns a list of
 // Statements. The INT token will result in the specified TInt type.
 //
@@ -148,8 +164,19 @@ func (p *Parser) Parse(sql string) (Statements, error) {
 //	nakedIntType: it's a restriction on the ConnectionHandler type;
 //	Statements: AST Trees
 //	error: error
-func (p *Parser) ParseWithInt(sql string, nakedIntType *types.T) (Statements, error) {
-	return p.parseWithDepth(1, sql, nakedIntType)
+func (p *Parser) ParseWithInt(
+	sql string, nakedIntType *types.T, values *settings.Values,
+) (Statements, error) {
+	stmts, err := p.parseWithDepth(1, sql, nakedIntType)
+	if err != nil {
+		return stmts, err
+	}
+	if values != nil && opt.AutoLimitQuantity.Get(values) > 0 {
+		for i, stmt := range stmts {
+			stmts[i].AST = addAutoLimit(stmt.AST, values)
+		}
+	}
+	return stmts, nil
 }
 
 func (p *Parser) parseOneWithDepth(depth int, sql string) (Statement, error) {

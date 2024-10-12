@@ -54,6 +54,10 @@ const (
 	HasFirst = 1 << 5
 )
 
+// AutoLimitQuantity is quantity of autolimit
+var AutoLimitQuantity = settings.RegisterPublicIntSetting(
+	"sql.auto_limit.quantity", "quantity of autolimit", 0)
+
 // PushdownAll is true when we want to push down the whole query to specific engines
 var PushdownAll = settings.RegisterPublicBoolSetting(
 	"sql.all_push_down.enabled", "push down entire query", true,
@@ -93,4 +97,7 @@ const (
 
 	// HasSubquery is set when use subquery in SQL.
 	HasSubquery = 1 << 6
+
+	// HasAutoLimit is set when the limit is autoLimit
+	HasAutoLimit = 1 << 7
 )

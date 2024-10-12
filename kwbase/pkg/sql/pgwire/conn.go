@@ -854,7 +854,7 @@ func (c *conn) handleSimpleQuery(
 	}
 
 	startParse := timeutil.Now()
-	stmts, err := c.parser.ParseWithInt(query, unqualifiedIntSize)
+	stmts, err := c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv)
 	if err != nil {
 		return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 	}
@@ -881,7 +881,7 @@ func (c *conn) handleSimpleQuery(
 				// the number of inserted values cannot be evenly divided by the number of inserted columns
 				if sql.NumofInsertDirect(ins, dit.ColsDesc, stmts, &di) != di.RowNum*di.ColNum {
 					c.parser.IsShortcircuit = false
-					actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize)
+					actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv)
 					if expectedErr != nil {
 						return c.stmtBuf.Push(ctx, sql.SendError{Err: expectedErr})
 					}
@@ -949,7 +949,7 @@ func (c *conn) handleSimpleQuery(
 			}
 		} else {
 			c.parser.IsShortcircuit = false
-			actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize)
+			actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv)
 			if expectedErr != nil {
 				return c.stmtBuf.Push(ctx, sql.SendError{Err: expectedErr})
 			}
@@ -1147,7 +1147,7 @@ func (c *conn) handleParse(
 	c.parser.SetPrepareMode(true)
 	startParse := timeutil.Now()
 Reparse:
-	stmts, err := c.parser.ParseWithInt(query, nakedIntSize)
+	stmts, err := c.parser.ParseWithInt(query, nakedIntSize, c.sv)
 	if err != nil {
 		return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 	}

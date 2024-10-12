@@ -419,7 +419,26 @@ func (m *Memo) IsStale(
 	} else if !depsUpToDate {
 		return true, nil
 	}
-	return false, nil
+
+	return !m.verifyAutoLimitConsistency(evalCtx), nil
+}
+
+// verifyAutoLimitConsistency compares the new autoLimit with autolimit of cache to check if they are the same.
+func (m *Memo) verifyAutoLimitConsistency(evalCtx *tree.EvalContext) bool {
+	flag := true
+	autoLimitQuantity := opt.AutoLimitQuantity.Get(&evalCtx.Settings.SV)
+	// compare autolimit switch status in the cache with the current autolimit switch status
+	if m.CheckFlag(opt.HasAutoLimit) != (autoLimitQuantity > 0) {
+		flag = false
+	} else {
+		// if plan contain autolimit, compare quantity of autolimit in the cache with quantity of the current autolimit
+		if limit, ok1 := m.RootExpr().(*LimitExpr); ok1 && m.CheckFlag(opt.HasAutoLimit) {
+			if c, ok2 := limit.Limit.(*ConstExpr); ok2 && int64(tree.MustBeDInt(c.Value)) != autoLimitQuantity {
+				flag = false
+			}
+		}
+	}
+	return flag
 }
 
 // InternPhysicalProps adds the given physical props to the memo if they haven't

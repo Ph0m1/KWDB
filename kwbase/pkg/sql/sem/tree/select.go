@@ -780,6 +780,8 @@ func (node *Order) Equal(other *Order) bool {
 type Limit struct {
 	Offset, Count Expr
 	LimitAll      bool
+	// Whether the limit is autoLimit
+	IsAutoLimit bool
 }
 
 // Format implements the NodeFormatter interface.

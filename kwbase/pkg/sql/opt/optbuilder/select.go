@@ -979,6 +979,9 @@ func (b *Builder) buildSelectStmtWithoutParens(
 				panic(pgerror.New(pgcode.Warning, "incorrect time_bucket_gapfill function usage: coexistence with offset is not supported"))
 			}
 		}
+		if limit.IsAutoLimit {
+			b.factory.Memo().SetFlag(opt.HasAutoLimit)
+		}
 		b.buildLimit(limit, inScope, outScope)
 	}
 
