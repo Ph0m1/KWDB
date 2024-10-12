@@ -32,7 +32,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
@@ -59,7 +58,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil/unimplemented"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
-	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/errors"
 	"github.com/lib/pq/oid"
 )
@@ -643,23 +641,12 @@ func (n *createTableNode) startExec(params runParams) error {
 	}
 
 	if desc.IsTSTable() {
-		if err = distributeAndDuplicateOfCreateTSTable(params, desc); err != nil {
-			return err
-		}
 		if err = createAndExecCreateTSTableJob(params, desc, n); err != nil {
 			return err
 		}
-		////临时广播多Range
-		//query := fmt.Sprintf(
-		//	"SELECT * FROM kwdb_internal.ranges where table_name = '%s'", desc.Name)
-		//rows, err := params.p.execCfg.InternalExecutor.QueryEx(
-		//	context.TODO(), "kwdb-internal-jobs-table", nil,
-		//	sqlbase.InternalExecutorSessionDataOverride{User: params.p.User()},
-		//	query)
-		//if err != nil {
-		//	return err
-		//}
-		//log.Errorf(context.TODO(), "xxxxxxxxxx rows:%v", rows)
+		if err = distributeAndDuplicateOfCreateTSTable(params, desc); err != nil {
+			return err
+		}
 	}
 	log.Infof(params.ctx, "create table %s 1st txn finished, type: %s, id: %d", n.n.Table.String(), tree.TableTypeName(n.n.TableType), desc.ID)
 	return nil
@@ -3239,7 +3226,7 @@ func distributeAndDuplicateOfCreateTSTable(
 	if err != nil {
 		return errors.Wrap(err, "PreDistributionError: get distribute info failed")
 	}
-	preDistReplicas, err := api.PreDistributeBySingleReplica(params.ctx, params.p.txn, uint32(desc.ID), partitions)
+	preDistReplicas, err := api.PreDistributeBySingleReplica(params.ctx, nil, uint32(desc.ID), partitions)
 	if err != nil {
 		return errors.Wrap(err, "PreDistributionError: get pre distribute info failed")
 	}
@@ -3278,22 +3265,6 @@ func distributeAndDuplicateOfCreateTSTable(
 		var timestamps = []int64{p.timestamp}
 		if err := params.extendedEvalCtx.ExecCfg.DB.AdminSplitTs(params.ctx, spanKey, uint32(desc.ID), tmp, timestamps, true); err != nil {
 			return errors.Wrap(err, "PreDistributionError: split failed")
-		}
-		startTime := timeutil.Now()
-		for {
-			startKey := sqlbase.MakeTsHashPointKey(desc.ID, uint64(pointGroups[0].point))
-			endKey := sqlbase.MakeTsHashPointKey(desc.ID, api.HashParamV2)
-			isCompleted := true
-			isCompleted, _ = params.extendedEvalCtx.ExecCfg.DB.AdminReplicaVoterStatusConsistent(params.ctx, startKey, endKey)
-			if isCompleted {
-				break
-			}
-			timeElapsed := timeutil.Since(startTime)
-			if timeElapsed.Seconds() > 30 {
-				log.Error(params.ctx, "have been trying 30s, timed out of AdminReplicaVoterStatusConsistent")
-				return pgerror.Newf(pgcode.Internal, "Create table failed. Verifying replica consistency failed.")
-			}
-			time.Sleep(time.Duration(500) * time.Millisecond)
 		}
 	}
 

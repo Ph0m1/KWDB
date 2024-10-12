@@ -78,21 +78,8 @@ func newRaftSnapshotQueue(store *Store, g *gossip.Gossip) *raftSnapshotQueue {
 func (rq *raftSnapshotQueue) shouldQueue(
 	ctx context.Context, now hlc.Timestamp, repl *Replica, _ *config.SystemConfig,
 ) (shouldQ bool, priority float64) {
-	if repl.isTs() {
-		return false, 0
-	}
 	// If a follower needs a snapshot, enqueue at the highest priority.
 	if status := repl.RaftStatus(); status != nil {
-		// For TSRange, make sure that lease and raftLeader are on the same replica.
-		if repl.isTs() {
-			if lease, _ := repl.GetLease(); repl.IsLeaseValid(lease, now) &&
-				!lease.OwnedBy(repl.StoreID()) {
-				if log.V(1) {
-					log.Infof(ctx, "The leaseHolder and raftLeader of ts range must be on the same replica: %+v", lease)
-				}
-				return
-			}
-		}
 
 		// raft.Status.Progress is only populated on the Raft group leader.
 		for _, p := range status.Progress {
@@ -113,9 +100,6 @@ func (rq *raftSnapshotQueue) shouldQueue(
 func (rq *raftSnapshotQueue) process(
 	ctx context.Context, repl *Replica, _ *config.SystemConfig,
 ) error {
-	if repl.isTs() {
-		return nil
-	}
 	// If a follower requires a Raft snapshot, perform it.
 	if status := repl.RaftStatus(); status != nil {
 		// raft.Status.Progress is only populated on the Raft group leader.
@@ -143,12 +127,6 @@ func (rq *raftSnapshotQueue) processRaftSnapshot(
 		return errors.Errorf("%s: replica %d not present in %v", repl, id, desc.Replicas())
 	}
 	snapType := SnapshotRequest_RAFT
-
-	// The target replica is not a voter yet, so sending snapshots in this way is prohibited
-	if desc.GetRangeType() == roachpb.TS_RANGE && repDesc.GetType() != roachpb.VOTER_FULL {
-		return nil
-	}
-
 	// A learner replica is either getting a snapshot of type LEARNER by the node
 	// that's adding it or it's been orphaned and it's about to be cleaned up by
 	// the replicate queue. Either way, no point in also sending it a snapshot of

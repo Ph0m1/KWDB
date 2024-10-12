@@ -196,3 +196,8 @@ SELECT count(*) FROM tsdb.t1;
 select count(*) from tsdb1.ts_t3;
 select count(*) from tsdb1.ts_t4;
 
+-- sleep: 10s
+-- kill: c6
+-- kill: c7
+-- kill: c8
+

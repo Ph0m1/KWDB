@@ -186,12 +186,6 @@ func newTruncateDecision(ctx context.Context, r *Replica) (truncateDecision, err
 		targetSize = *r.mu.zone.RangeMaxBytes
 	}
 
-	if Desc, err := r.getReplicaDescriptorRLocked(); err == nil {
-		if Desc.GetTag() == roachpb.TS_REPLICA {
-			targetSize = 1024 << 40 // 1 PB
-		}
-	}
-
 	raftStatus := r.raftStatusRLocked()
 
 	firstIndex, err := r.raftFirstIndexLocked()

@@ -611,32 +611,6 @@ func (db *DB) AdminTransferLease(
 	return getOneErr(db.Run(ctx, b), b)
 }
 
-// CreateTSSnapshot send CreateTSSnapshotRequest and return CreateTSSnapshotResponse
-func (db *DB) CreateTSSnapshot(
-	ctx context.Context,
-	desc roachpb.RangeDescriptor,
-	needTSSnapshotData bool,
-	currentRepl roachpb.ReplicationTarget,
-) (*roachpb.CreateTSSnapshotResponse, error) {
-	log.Infof(ctx, "(r%)Send CreateTSSnapshotReq", desc.RangeID)
-	b := &Batch{}
-	b.createTSSnapshot(desc, needTSSnapshotData, currentRepl)
-	if err := getOneErr(db.Run(ctx, b), b); err != nil {
-		return nil, err
-	}
-	responses := b.response.Responses
-	if len(responses) == 0 {
-		return nil, errors.Errorf("unexpected empty responses for CreateTSSnapshot")
-	}
-	resp, ok := responses[0].GetInner().(*roachpb.CreateTSSnapshotResponse)
-	if !ok {
-		return nil, errors.Errorf("unexpected response of type %T for CreateTSSnapshotResponse",
-			responses[0].GetInner())
-	}
-
-	return resp, nil
-}
-
 // AdminChangeReplicas adds or removes a set of replicas for a range.
 func (db *DB) AdminChangeReplicas(
 	ctx context.Context,

@@ -498,7 +498,6 @@ func (b *propBuf) FlushLockedWithRaftGroup(raftGroup *raft.RawNode) (int, error)
 						*roachpb.TsRowPutRequest,
 						*roachpb.TsDeleteRequest,
 						*roachpb.TsDeleteEntityRequest,
-						*roachpb.CreateTSSnapshotRequest,
 						*roachpb.TsTagUpdateRequest,
 						*roachpb.TsDeleteMultiEntitiesDataRequest:
 						IsTsDML = true

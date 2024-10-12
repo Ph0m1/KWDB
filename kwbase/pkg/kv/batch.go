@@ -265,7 +265,6 @@ func (b *Batch) fillResults(ctx context.Context) {
 			case *roachpb.AdminMergeRequest:
 			case *roachpb.AdminSplitRequest:
 			case *roachpb.AdminSplitForTsRequest:
-			case *roachpb.CreateTSSnapshotRequest:
 			case *roachpb.AdminUnsplitRequest:
 			case *roachpb.AdminTransferLeaseRequest:
 			case *roachpb.AdminChangeReplicasRequest:
@@ -746,35 +745,6 @@ func (b *Batch) adminTransferLease(key interface{}, target roachpb.StoreID) {
 		},
 		Target: target,
 	}
-	b.AppendReqs(req)
-	b.InitResult(1, 0, notRaw, nil)
-}
-
-// createTSSnapshot make CreateTSSnapshotRequest
-func (b *Batch) createTSSnapshot(
-	desc roachpb.RangeDescriptor, needTSSnapshotData bool, currentRepl roachpb.ReplicationTarget,
-) {
-	sk, err := marshalKey(desc.StartKey.AsRawKey())
-	if err != nil {
-		b.InitResult(0, 0, notRaw, err)
-		return
-	}
-	ek, err := marshalKey(desc.EndKey.AsRawKey())
-	if err != nil {
-		b.InitResult(0, 0, notRaw, err)
-		return
-	}
-
-	req := &roachpb.CreateTSSnapshotRequest{
-		RequestHeader: roachpb.RequestHeader{
-			Key:    sk,
-			EndKey: ek,
-		},
-		RangeID:            desc.RangeID,
-		NeedTsSnapshotData: needTSSnapshotData,
-		Sender:             currentRepl,
-	}
-
 	b.AppendReqs(req)
 	b.InitResult(1, 0, notRaw, nil)
 }

@@ -1023,7 +1023,7 @@ func splitTrigger(
 		if !split.IsCreateTsTable {
 			leftRangeSize, err := getTsRangeSize(rec, split.LeftDesc)
 			if err != nil {
-				log.Errorf(ctx, fmt.Sprintf("unable to compute stats for LHS TS range %d after split. err: %+v. SplitTrigger:%+v", split.LeftDesc.RangeID, err, split))
+				log.Errorf(ctx, "unable to compute stats for LHS TS range %d after split. SplitTrigger:%+v. err: %+v.", split.LeftDesc.RangeID, split, err)
 				//return enginepb.MVCCStats{}, result.Result{}, errors.Wrap(err, fmt.Sprintf("unable to compute stats for LHS TS range %d after split", split.LeftDesc.RangeID))
 			}
 			leftMS.ValBytes = int64(leftRangeSize)
@@ -1032,7 +1032,7 @@ func splitTrigger(
 			if split.RightDesc.GetRangeType() == roachpb.TS_RANGE {
 				rightRangeSize, err := getTsRangeSize(rec, split.RightDesc)
 				if err != nil {
-					log.Errorf(ctx, fmt.Sprintf("unable to compute stats for RHS TS range %d after split. err: %+v. SplitTrigger:%+v", split.LeftDesc.RangeID, err, split))
+					log.Errorf(ctx, "unable to compute stats for RHS TS range %d after split. SplitTrigger:%+v. err: %+v.", split.LeftDesc.RangeID, split, err)
 				}
 				rightMS.ValBytes = int64(rightRangeSize)
 				rightMS.LiveBytes = int64(rightRangeSize)

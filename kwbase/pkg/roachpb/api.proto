@@ -463,15 +463,6 @@ message ClearRangeResponse {
   ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
 }
 
-message CreateTSSnapshotRequest {
-  option (gogoproto.equal) = true;
-
-  RequestHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  int64 range_id = 2 [(gogoproto.customname) = "RangeID", (gogoproto.casttype) = "RangeID"];
-  bool need_ts_snapshot_data = 3;
-  ReplicationTarget sender = 4 [(gogoproto.nullable) = false];
-}
-
 message TSRaftTruncatedState {
   option (gogoproto.equal) = true;
 
@@ -521,18 +512,6 @@ message ReplicaState {
 
   reserved 8, 9, 10;
 }
-
-message CreateTSSnapshotResponse {
-  ResponseHeader header = 1 [(gogoproto.nullable) = false, (gogoproto.embed) = true];
-  uint64 ts_snapshot_id = 2;
-  ReplicaState state = 3;
-  uint64 snapshot_metadata_index = 4;
-  uint64 snapshot_metadata_term = 5;
-  repeated bytes kv_batch = 6;
-  string msg = 7;
-  ReplicationTarget sender = 8 [(gogoproto.nullable) = false];
-}
-
 
 // A RevertRangeRequest specifies a range of keys in which to clear all MVCC
 // revisions more recent than some TargetTime from the underlying engine, thus
@@ -2050,10 +2029,9 @@ message RequestUnion {
     TsDeleteRequest ts_delete = 56;
     TsDeleteEntityRequest ts_delete_entity = 57;
     GetReplicaStatusRequest get_replica_status = 58;
-    CreateTSSnapshotRequest create_ts_snapshot = 59;
-    TsTagUpdateRequest ts_tag_update = 60;
-    TsDeleteMultiEntitiesDataRequest ts_delete_multi_entities_data = 61;
-    TsPutTagRequest ts_put_tag = 62;
+    TsTagUpdateRequest ts_tag_update = 59;
+    TsDeleteMultiEntitiesDataRequest ts_delete_multi_entities_data = 60;
+    TsPutTagRequest ts_put_tag = 61;
   }
   reserved 8, 15, 23, 25, 27;
 }
@@ -2111,10 +2089,9 @@ message ResponseUnion {
     TsDeleteResponse ts_delete = 56;
     TsDeleteEntityResponse ts_delete_entity = 57;
     GetReplicaStatusResponse get_replica_status = 58;
-    CreateTSSnapshotResponse create_ts_snapshot = 59;
-    TsTagUpdateResponse ts_tag_update = 60;
-    TsDeleteMultiEntitiesDataResponse ts_delete_multi_entities_data = 61;
-    TsPutTagResponse ts_put_tag = 62;
+    TsTagUpdateResponse ts_tag_update = 59;
+    TsDeleteMultiEntitiesDataResponse ts_delete_multi_entities_data = 60;
+    TsPutTagResponse ts_put_tag = 61;
   }
   reserved 8, 15, 23, 25, 27, 28;
 }

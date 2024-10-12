@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/raftentry"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/rditer"
@@ -39,8 +38,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
@@ -391,123 +388,6 @@ func (r *Replica) raftSnapshotLocked() (raftpb.Snapshot, error) {
 	return (*replicaRaftStorage)(r).Snapshot()
 }
 
-// makeKObjectTableForTs make KObjectTable
-func makeKObjectTableForTs(d jobspb.SyncMetaCacheDetails) sqlbase.CreateTsTable {
-	var kColDescs []sqlbase.KWDBKTSColumn
-	var KColumnsID []uint32
-
-	for _, c := range d.SNTable.Columns {
-		cName := tree.Name(c.Name)
-		kColDesc := sqlbase.KWDBKTSColumn{
-			ColumnId:           uint32(c.ID),
-			Name:               cName.String(),
-			Nullable:           c.IsNullable(),
-			StorageType:        c.TsCol.StorageType,
-			StorageLen:         c.TsCol.StorageLen,
-			ColOffset:          c.TsCol.ColOffset,
-			VariableLengthType: c.TsCol.VariableLengthType,
-			ColType:            c.TsCol.ColumnType,
-		}
-		kColDescs = append(kColDescs, kColDesc)
-		KColumnsID = append(KColumnsID, uint32(c.ID))
-	}
-	tName := tree.Name(d.SNTable.Name)
-	kObjectTable := sqlbase.KWDBTsTable{
-		TsTableId:         uint64(d.SNTable.ID),
-		DatabaseId:        uint32(d.SNTable.ParentID),
-		LifeTime:          d.SNTable.TsTable.Lifetime,
-		ActiveTime:        d.SNTable.TsTable.ActiveTime,
-		KColumnsId:        KColumnsID,
-		RowSize:           d.SNTable.TsTable.RowSize,
-		BitmapOffset:      d.SNTable.TsTable.BitmapOffset,
-		TableName:         tName.String(),
-		Sde:               d.SNTable.TsTable.Sde,
-		PartitionInterval: d.SNTable.TsTable.PartitionInterval,
-		TsVersion:         uint32(d.SNTable.TsTable.GetTsVersion()),
-	}
-
-	return sqlbase.CreateTsTable{
-		TsTable: kObjectTable,
-		KColumn: kColDescs,
-	}
-}
-
-// GetTSSnapshotInfo get TS snapshot info
-func (r *Replica) GetTSSnapshotInfo(
-	ctx context.Context, rangeID roachpb.RangeID, startKey []byte,
-) (storagepb.ReplicaState, uint64, uint64, [][]byte, error) {
-	snap := r.store.engine.NewSnapshot()
-	var batchData [][]byte
-	var state storagepb.ReplicaState
-
-	var desc roachpb.RangeDescriptor
-	ok, err := storage.MVCCGetProto(ctx, snap, keys.RangeDescriptorKey(startKey),
-		hlc.MaxTimestamp, &desc, storage.MVCCGetOptions{Inconsistent: true})
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo failed to get desc: %s", err)
-	}
-	if !ok {
-		return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo couldn't find range descriptor")
-	}
-
-	// get SnapshotMetadata: Index and Term
-	rsl := stateloader.Make(rangeID)
-	appliedIndex, _, err := rsl.LoadAppliedIndex(ctx, snap)
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo get LoadAppliedIndex err: %s", err)
-	}
-
-	eCache := r.store.raftEntryCache
-	term, err := term(ctx, rsl, snap, rangeID, eCache, appliedIndex)
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo get term err: %s", err)
-	}
-
-	// get state
-	state, err = rsl.Load(ctx, snap, &desc)
-	if err != nil {
-		return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo Load state err: %s", err)
-	}
-
-	iterator := rditer.NewReplicaDataIterator(
-		&desc, snap, true /* replicatedOnly */, false /* seekEnd */)
-	defer iterator.Close()
-
-	var batch storage.Batch
-	const batchSize = 256 << 10 // 256 KB
-	for iter := iterator; ; iter.Next() {
-		if ok, err := iter.Valid(); err != nil {
-			return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo iter state err: %s", err)
-		} else if !ok {
-			break
-		}
-
-		key := iter.Key()
-		value := iter.Value()
-		if batch == nil {
-			batch = r.store.engine.NewBatch()
-		}
-		if err := batch.Put(key, value); err != nil {
-			batch.Close()
-			return state, 0, 0, batchData, errors.Errorf("Ts GetTSSnapshotInfo iter state batch Put err: %s", err)
-		}
-
-		if int64(batch.Len()) >= batchSize {
-			batchData = append(batchData, batch.Repr())
-			batch.Close()
-			batch = nil
-			iter.ResetAllocator()
-		}
-	}
-	if batch != nil {
-		batchData = append(batchData, batch.Repr())
-		batch.Close()
-	}
-
-	snap.Close()
-	return state, appliedIndex, term, batchData, nil
-}
-
 // GetTSSnapshot returns a snapshot of the replica appropriate for sending to a
 // replica. If this method returns without error, callers must eventually call
 // OutgoingSnapshot.Close.
@@ -518,7 +398,6 @@ func (r *Replica) GetTSSnapshot(
 	needTSSnapshotData bool,
 ) (_ *OutgoingSnapshot, err error) {
 	snapUUID := uuid.MakeV4()
-
 	r.raftMu.Lock()
 	snap := r.store.engine.NewSnapshot()
 	r.mu.Lock()
@@ -541,135 +420,60 @@ func (r *Replica) GetTSSnapshot(
 	}()
 
 	r.mu.RLock()
-	//defer r.mu.RUnlock()
-	//rangeID := r.RangeID
+	defer r.mu.RUnlock()
+	rangeID := r.RangeID
 
 	startKey := r.mu.state.Desc.StartKey
-	rangeID := r.mu.state.Desc.RangeID
-
-	var batchData [][]byte
-	var state storagepb.ReplicaState
-	var appliedIdx, term uint64
-	if !needTSSnapshotData {
-		state, appliedIdx, term, batchData, err = r.GetTSSnapshotInfo(ctx, rangeID, startKey)
-		if err != nil {
-			return nil, errors.Errorf("generating TS snapshot --failed to GetTSSnapshotInfo: %s", err)
-		}
-	}
-	r.mu.RUnlock()
-	ctx, sp := r.AnnotateCtxWithSpan(ctx, "TS snapshot")
+	endKey := r.mu.state.Desc.EndKey
+	ctx, sp := r.AnnotateCtxWithSpan(ctx, "snapshot")
 	defer sp.Finish()
 
-	log.Eventf(ctx, "new TS snapshot for replica %s", r)
+	log.Eventf(ctx, "new engine snapshot for replica %s", r)
 
+	// Delegate to a static function to make sure that we do not depend
+	// on any indirect calls to r.store.Engine() (or other in-memory
+	// state of the Replica). Everything must come from the snapshot.
 	withSideloaded := func(fn func(SideloadStorage) error) error {
 		r.raftMu.Lock()
 		defer r.raftMu.Unlock()
 		return fn(r.raftMu.sideloaded)
 	}
-
-	var desc roachpb.RangeDescriptor
-	ok, err := storage.MVCCGetProto(ctx, snap, keys.RangeDescriptorKey(startKey),
-		hlc.MaxTimestamp, &desc, storage.MVCCGetOptions{Inconsistent: true})
-	if err != nil {
-		return nil, errors.Errorf("error generating TS snapshot: failed to get TS desc: %s", err)
-	}
-	if !ok {
-		return nil, errors.Errorf("error generating TS snapshot: couldn't find TS range descriptor")
-	}
-
-	tableID := desc.TableId
-
 	if !needTSSnapshotData {
-		snapData := OutgoingSnapshot{
-			RaftEntryCache: r.store.raftEntryCache,
-			WithSideloaded: withSideloaded,
-			EngineSnap:     snap,
-			kvBatch:        batchData,
-			State:          state,
-			SnapUUID:       snapUUID,
-			RaftSnap: raftpb.Snapshot{
-				Data: snapUUID.GetBytes(),
-				Metadata: raftpb.SnapshotMetadata{
-					Index:     appliedIdx,
-					Term:      term,
-					ConfState: desc.Replicas().ConfState(),
-				},
-			},
-			snapType: snapType,
+		// NB: We have Replica.mu read-locked, but we need it write-locked in order
+		// to use Replica.mu.stateLoader. This call is not performance sensitive, so
+		// create a new state loader.
+		snapData, err := tsSnapshot(
+			ctx, snapUUID, 0, stateloader.Make(rangeID), snapType,
+			snap, rangeID, r.store.raftEntryCache, withSideloaded, startKey, r.store.engine,
+		)
+		if err != nil {
+			log.Errorf(ctx, "error generating snapshot: %+v", err)
+			return nil, err
 		}
-
 		snapData.onClose = release
 		return &snapData, nil
 	}
 
-	//r.mu.RUnlock()
-	// send CreateSnapshotForRead request
-	currentRepl := roachpb.ReplicationTarget{
-		NodeID:  r.NodeID(),
-		StoreID: r.StoreID(),
-	}
-	//sqlbase.WaitTableAlterOk(ctx, r.store.DB(), desc.TableId)
-	resp, err := r.store.DB().CreateTSSnapshot(ctx, desc, needTSSnapshotData, currentRepl)
+	var errMsg string
+	// The CreateTSSnapshotRequest sender and receiver must be equal, otherwise the sender cannot getTSSnapshotData
+	tsSnapshotID, err := r.CreateSnapshotForRead(ctx, startKey, endKey)
+	log.Infof(ctx, "(r%d)TSEngine.CreateSnapshotForRead(ID:%d)", r.RangeID, tsSnapshotID)
 	if err != nil {
-		return nil, errors.Errorf("error CreateTSSnapshot: %s", err)
+		errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts CreateSnapshotForRead err: %v",
+			r.store.nodeDesc.NodeID, r.store.StoreID(), r.RangeID, err)
+		return nil, errors.Errorf("error CreateTSSnapshot: %s", errMsg)
 	}
-	// TsEngine createSnapshot returned an error, corresponding
-	// to TsSnapshotId of 0, returning user error information
-	if resp.TsSnapshotId == 0 && needTSSnapshotData {
-		return nil, errors.Errorf("error CreateTSSnapshot: %s", resp.Msg)
+	if tsSnapshotID == 0 {
+		return nil, errors.Errorf("error CreateTSSnapshot: %s", errMsg)
 	}
-
-	// The CreateTSSnapshotResponse sender and receiver must be equal, otherwise the receiver cannot getTSSnapshotData
-	if currentRepl != resp.Sender {
-		errMsg := fmt.Sprintf("The sender[n%v,s%v,r%v] and receiver[n%v,s%v,r%v] are not equal",
-			resp.Sender.NodeID, resp.Sender.StoreID, desc.RangeID, currentRepl.NodeID, currentRepl.StoreID, desc.RangeID)
-		return nil, errors.Errorf("error GetTSSnapshot: %s", errMsg)
+	snapData, err := tsSnapshot(
+		ctx, snapUUID, tsSnapshotID, stateloader.Make(rangeID), snapType,
+		snap, rangeID, r.store.raftEntryCache, withSideloaded, startKey, r.store.Engine(),
+	)
+	if err != nil {
+		log.Errorf(ctx, "error generating tsSnapshot: %+v", err)
+		return nil, err
 	}
-
-	// Failed to obtain KV data when creating a replica.
-	// Failed to create a replica. Returns the upper-level
-	// err information and deletes the created TSSnapshot.
-	if resp.Msg != "" {
-		return &OutgoingSnapshot{
-			TSSnapshotID: resp.TsSnapshotId,
-		}, errors.Errorf("error CreateTSSnapshot: %s", resp.Msg)
-	}
-
-	respState := *resp.State
-	snapData := OutgoingSnapshot{
-		RaftEntryCache: r.store.raftEntryCache,
-		WithSideloaded: withSideloaded,
-		EngineSnap:     snap,
-		//Iter:           iter,
-		kvBatch: resp.KvBatch,
-		tableID: uint64(tableID),
-		State: storagepb.ReplicaState{
-			RaftAppliedIndex:  respState.RaftAppliedIndex,
-			LeaseAppliedIndex: respState.LeaseAppliedIndex,
-			Desc:              respState.Desc,
-			Lease:             respState.Lease,
-			TruncatedState: &roachpb.RaftTruncatedState{
-				Index: respState.TruncatedState.Index,
-				Term:  respState.TruncatedState.Term,
-			},
-			GCThreshold:          respState.GCThreshold,
-			Stats:                respState.Stats,
-			UsingAppliedStateKey: respState.UsingAppliedStateKey,
-		},
-		SnapUUID:     snapUUID,
-		TSSnapshotID: resp.TsSnapshotId,
-		RaftSnap: raftpb.Snapshot{
-			Data: snapUUID.GetBytes(),
-			Metadata: raftpb.SnapshotMetadata{
-				Index:     resp.SnapshotMetadataIndex,
-				Term:      resp.SnapshotMetadataTerm,
-				ConfState: desc.Replicas().ConfState(),
-			},
-		},
-		snapType: snapType,
-	}
-	log.Infof(ctx, "resp %v, respState.Desc %v,  respState.RaftApplied Index : %v, respLeaseIndex: %v", resp, respState.Desc, respState.RaftAppliedIndex, respState.LeaseAppliedIndex)
 	snapData.onClose = release
 	return &snapData, nil
 }
@@ -865,6 +669,112 @@ func snapshot(
 		Iter:           iter,
 		State:          state,
 		SnapUUID:       snapUUID,
+		RaftSnap: raftpb.Snapshot{
+			Data: snapUUID.GetBytes(),
+			Metadata: raftpb.SnapshotMetadata{
+				Index: appliedIndex,
+				Term:  term,
+				// Synthesize our raftpb.ConfState from desc.
+				ConfState: desc.Replicas().ConfState(),
+			},
+		},
+		snapType: snapType,
+	}, nil
+}
+
+// tsSnapshot creates an OutgoingSnapshot containing a rocksdb snapshot for the
+// given range. Note that snapshot() is called without Replica.raftMu held.
+func tsSnapshot(
+	ctx context.Context,
+	snapUUID uuid.UUID,
+	tsSnapshotID uint64,
+	rsl stateloader.StateLoader,
+	snapType SnapshotRequest_Type,
+	snap storage.Reader,
+	rangeID roachpb.RangeID,
+	eCache *raftentry.Cache,
+	withSideloaded func(func(SideloadStorage) error) error,
+	startKey roachpb.RKey,
+	eng storage.Engine,
+) (OutgoingSnapshot, error) {
+	var desc roachpb.RangeDescriptor
+	// We ignore intents on the range descriptor (consistent=false) because we
+	// know they cannot be committed yet; operations that modify range
+	// descriptors resolve their own intents when they commit.
+	ok, err := storage.MVCCGetProto(ctx, snap, keys.RangeDescriptorKey(startKey),
+		hlc.MaxTimestamp, &desc, storage.MVCCGetOptions{Inconsistent: true})
+	if err != nil {
+		return OutgoingSnapshot{}, errors.Errorf("failed to get desc: %s", err)
+	}
+	if !ok {
+		return OutgoingSnapshot{}, errors.Errorf("couldn't find range descriptor")
+	}
+
+	// Read the range metadata from the snapshot instead of the members
+	// of the Range struct because they might be changed concurrently.
+	appliedIndex, _, err := rsl.LoadAppliedIndex(ctx, snap)
+	if err != nil {
+		return OutgoingSnapshot{}, err
+	}
+
+	term, err := term(ctx, rsl, snap, rangeID, eCache, appliedIndex)
+	if err != nil {
+		return OutgoingSnapshot{}, errors.Errorf("failed to fetch term of %d: %s", appliedIndex, err)
+	}
+
+	state, err := rsl.Load(ctx, snap, &desc)
+	if err != nil {
+		return OutgoingSnapshot{}, err
+	}
+
+	// Intentionally let this iterator and the snapshot escape so that the
+	// streamer can send chunks from it bit by bit.
+	iterator := rditer.NewReplicaDataIterator(&desc, snap,
+		true /* replicatedOnly */, false /* seekEnd */)
+	defer iterator.Close()
+
+	var batchData [][]byte
+	var batch storage.Batch
+	const batchSize = 256 << 10 // 256 KB
+	for iter := iterator; ; iter.Next() {
+		if ok, err := iter.Valid(); err != nil {
+			return OutgoingSnapshot{}, err
+		} else if !ok {
+			break
+		}
+
+		key := iter.Key()
+		value := iter.Value()
+		if batch == nil {
+			batch = eng.NewBatch()
+		}
+		if err := batch.Put(key, value); err != nil {
+			batch.Close()
+			return OutgoingSnapshot{}, err
+		}
+
+		if int64(batch.Len()) >= batchSize {
+			batchData = append(batchData, batch.Repr())
+			batch.Close()
+			batch = nil
+			iter.ResetAllocator()
+		}
+	}
+	if batch != nil {
+		batchData = append(batchData, batch.Repr())
+		batch.Close()
+	}
+
+	return OutgoingSnapshot{
+		RaftEntryCache: eCache,
+		WithSideloaded: withSideloaded,
+		EngineSnap:     snap,
+		//Iter:           iter,
+		kvBatch:      batchData,
+		tableID:      uint64(desc.TableId),
+		State:        state,
+		SnapUUID:     snapUUID,
+		TSSnapshotID: tsSnapshotID,
 		RaftSnap: raftpb.Snapshot{
 			Data: snapUUID.GetBytes(),
 			Metadata: raftpb.SnapshotMetadata{

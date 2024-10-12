@@ -520,6 +520,16 @@ func (s *SystemConfig) ComputeSplitKey(startKey, endKey roachpb.RKey) (rr roachp
 	return findSplitKey(startID, endID)
 }
 
+// GetTsSplitType Decision is ts tsplit
+func (s *SystemConfig) GetTsSplitType(splitKey roachpb.RKey) (roachpb.SplitType, uint32) {
+	tableID, _, _ := DecodeObjectID(splitKey)
+	desc := s.GetDesc(keys.DescMetadataKey(tableID))
+	if desc != nil && sqlbase.IsTsSplit(desc) {
+		return roachpb.TS_SPLIT, tableID
+	}
+	return roachpb.DEFAULT_SPLIT, tableID
+}
+
 // NeedsSplit returns whether the range [startKey, endKey) needs a split due
 // to zone configs.
 func (s *SystemConfig) NeedsSplit(startKey, endKey roachpb.RKey) bool {

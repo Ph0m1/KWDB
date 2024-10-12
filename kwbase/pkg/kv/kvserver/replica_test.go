@@ -12704,7 +12704,7 @@ Raft Status: {"id":"0","term":0,"vote":"0","commit":0,"lead":"0","raftState":"St
 
 and a copy of https://yourhost:8080/#/reports/range/10
 
-If you are using CockroachDB Enterprise, reach out through your
+If you are using KWBaseDB Enterprise, reach out through your
 support contract. Otherwise, please open an issue at:
 
   https://gitee.com/kwbasedb/kwbase/issues/new/choose

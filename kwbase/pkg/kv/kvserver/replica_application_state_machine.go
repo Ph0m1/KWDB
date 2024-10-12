@@ -25,7 +25,6 @@
 package kvserver
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -682,109 +681,6 @@ func (r *Replica) stageTsBatchRequest(
 
 	for idx, union := range ba.Requests {
 		switch req := union.GetInner().(type) {
-		case *roachpb.CreateTSSnapshotRequest:
-			{
-				if !isLocal {
-					continue
-				}
-				startKey := req.Header().Key
-				endKey := req.Header().EndKey
-				needTSSnapshotData := req.NeedTsSnapshotData
-				log.Infof(ctx, "CreateTSSnapshot for r%d [%v, %v), needTSSnapshotData %v", r.RangeID, startKey, endKey, needTSSnapshotData)
-
-				currentRepl := roachpb.ReplicationTarget{
-					NodeID:  r.store.nodeDesc.NodeID,
-					StoreID: r.store.StoreID(),
-				}
-
-				tsSnapshotID := uint64(0)
-				var errMsg string
-				if bytes.Compare(startKey, r.Desc().StartKey) != 0 || bytes.Compare(endKey, r.Desc().EndKey) != 0 {
-					errMsg = fmt.Sprintf("mismatched range [%v, %v] to [%v, %v]", startKey, endKey, r.Desc().StartKey, r.Desc().EndKey)
-					log.Warning(ctx, errMsg)
-					if responses != nil {
-						responses[idx] = roachpb.ResponseUnion{
-							Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-								CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-									TsSnapshotId: 0,
-									Msg:          errMsg,
-									Sender:       currentRepl,
-								},
-							},
-						}
-					}
-					continue
-				}
-
-				if needTSSnapshotData {
-					// The CreateTSSnapshotRequest sender and receiver must be equal, otherwise the sender cannot getTSSnapshotData
-					if req.Sender == currentRepl {
-						tsSnapshotID, err = r.CreateSnapshotForRead(ctx, startKey, endKey)
-						log.Infof(ctx, "(r%d)TSEngine.CreateSnapshotForRead(ID:%d)", r.RangeID, tsSnapshotID)
-						if err != nil {
-							errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts CreateSnapshotForRead err: %v",
-								r.store.nodeDesc.NodeID, r.store.StoreID(), r.RangeID, err)
-						}
-					} else {
-						errMsg = fmt.Sprintf("The sender[n%v,s%v,r%v] and receiver[n%v,s%v,r%v] are not equal",
-							req.Sender.NodeID, req.Sender.StoreID, req.RangeID, r.store.nodeDesc.NodeID, r.store.StoreID(), r.RangeID)
-					}
-				}
-
-				if tsSnapshotID == 0 && needTSSnapshotData {
-					if responses != nil {
-						responses[idx] = roachpb.ResponseUnion{
-							Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-								CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-									TsSnapshotId: tsSnapshotID,
-									Msg:          errMsg,
-									Sender:       currentRepl,
-								},
-							},
-						}
-					}
-				} else {
-					state, appliedIndex, termValue, batchData, err := r.GetTSSnapshotInfo(ctx, req.RangeID, startKey)
-					if err != nil {
-						// returning err will cause the CreateTSSnapshotResponse to be stuck when
-						// creating a replica. So cannot return err.
-						// If the KV data when creating a replica fails to be obtained, the sender
-						// of CreateTsSnapshot will be notified of errMsg and the sender of tsSnapshotID
-						// will be informed so that the sender can delete the created TSSnapshot.
-						log.Warningf(ctx, "stageWriteBatch Ts GetTSSnapshotInfo err: %+v", err)
-						errMsg = fmt.Sprintf("[n%v,s%v]r%v stageWriteBatch Ts GetTSSnapshotInfo err: %v",
-							r.NodeID(), r.StoreID(), r.RangeID, err)
-						if responses != nil {
-							responses[idx] = roachpb.ResponseUnion{
-								Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-									CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-										TsSnapshotId: tsSnapshotID,
-										Msg:          errMsg,
-										Sender:       currentRepl,
-									},
-								},
-							}
-						}
-					} else {
-						if responses != nil {
-							stateOfResp := stateInfoConversion(state)
-
-							responses[idx] = roachpb.ResponseUnion{
-								Value: &roachpb.ResponseUnion_CreateTsSnapshot{
-									CreateTsSnapshot: &roachpb.CreateTSSnapshotResponse{
-										TsSnapshotId:          tsSnapshotID,
-										State:                 &stateOfResp,
-										SnapshotMetadataIndex: appliedIndex,
-										SnapshotMetadataTerm:  termValue,
-										KvBatch:               batchData,
-										Sender:                currentRepl,
-									},
-								},
-							}
-						}
-					}
-				}
-			}
 		case *roachpb.TsPutTagRequest:
 			{
 				var payload [][]byte
@@ -1477,6 +1373,9 @@ func (sm *replicaStateMachine) ApplySideEffects(
 	//
 	// Note that this must happen after committing (the engine.Batch), but
 	// before notifying a potentially waiting client.
+	if cmd.replicatedResult().Split != nil {
+		log.Errorf(ctx, "%v", cmd)
+	}
 	clearTrivialReplicatedEvalResultFields(cmd.replicatedResult())
 	if !cmd.IsTrivial() {
 		shouldAssert, isRemoved := sm.handleNonTrivialReplicatedEvalResult(ctx, *cmd.replicatedResult())

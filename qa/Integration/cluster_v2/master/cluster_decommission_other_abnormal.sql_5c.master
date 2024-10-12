@@ -49,6 +49,16 @@ SET CLUSTER SETTING
 ----------
   250000
 (1 row)
+> SELECT COUNT(1) FROM tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> SELECT COUNT(1) FROM tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
 > SELECT COUNT(*) = 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 3=ANY(replicas); 
   ?column?
 ------------
@@ -69,6 +79,16 @@ SET CLUSTER SETTING
 ----------
   250000
 (1 row)
+> SELECT COUNT(1) FROM tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> SELECT COUNT(1) FROM tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
 > SELECT COUNT(*) = 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 6=ANY(replicas); 
   ?column?
 ------------
@@ -85,6 +105,16 @@ SET CLUSTER SETTING
   250000
 (1 row)
 > select count(*) from tsdb1.ts_t4; 
+  count
+----------
+  250000
+(1 row)
+> SELECT COUNT(1) FROM tsdb1.ts_t3; 
+  count
+----------
+  250000
+(1 row)
+> SELECT COUNT(1) FROM tsdb1.ts_t4; 
   count
 ----------
   250000

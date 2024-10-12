@@ -28,6 +28,8 @@ SELECT COUNT(*) = 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 
 SELECT COUNT(*) > 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 8=ANY(replicas);
 SELECT COUNT(*) FROM tsdb1.ts_t3;
 SELECT COUNT(*) FROM tsdb1.ts_t4;
+SELECT COUNT(1) FROM tsdb1.ts_t3;
+SELECT COUNT(1) FROM tsdb1.ts_t4;
 
 -- kill: c4
 -- sleep: 80s
@@ -42,6 +44,8 @@ SELECT COUNT(*) = 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 
 SELECT COUNT(*) > 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 9=ANY(replicas);
 SELECT COUNT(*) FROM tsdb1.ts_t3;
 SELECT COUNT(*) FROM tsdb1.ts_t4;
+SELECT COUNT(1) FROM tsdb1.ts_t3;
+SELECT COUNT(1) FROM tsdb1.ts_t4;
 
 -- sleep: 10s
 -- kill: c6

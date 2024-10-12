@@ -624,9 +624,6 @@ func (*DeleteRangeRequest) Method() Method { return DeleteRange }
 func (*ClearRangeRequest) Method() Method { return ClearRange }
 
 // Method implements the Request interface.
-func (*CreateTSSnapshotRequest) Method() Method { return CreateTSSnapshot }
-
-// Method implements the Request interface.
 func (*RevertRangeRequest) Method() Method { return RevertRange }
 
 // Method implements the Request interface.
@@ -805,12 +802,6 @@ func (drr *DeleteRangeRequest) ShallowCopy() Request {
 
 // ShallowCopy implements the Request interface.
 func (crr *ClearRangeRequest) ShallowCopy() Request {
-	shallowCopy := *crr
-	return &shallowCopy
-}
-
-// ShallowCopy implements the Request interface.
-func (crr *CreateTSSnapshotRequest) ShallowCopy() Request {
 	shallowCopy := *crr
 	return &shallowCopy
 }
@@ -1316,9 +1307,6 @@ func (drr *DeleteRangeRequest) flags() int {
 // Note that ClearRange commands cannot be part of a transaction as
 // they clear all MVCC versions.
 func (*ClearRangeRequest) flags() int { return isWrite | isRange | isAlone }
-
-// Note the ability of the Create TSSnap command.
-func (*CreateTSSnapshotRequest) flags() int { return isWrite | isRange | isAlone }
 
 // Note that RevertRange commands cannot be part of a transaction as
 // they clear all MVCC versions above their target time.

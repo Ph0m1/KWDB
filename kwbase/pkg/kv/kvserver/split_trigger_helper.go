@@ -158,7 +158,7 @@ func maybeDropMsgApp(
 		// there are, the idea is that we notice this log message and improve
 		// the heuristics.
 		if isTs {
-			return true
+			return false
 		}
 		log.Warningf(
 			ctx,

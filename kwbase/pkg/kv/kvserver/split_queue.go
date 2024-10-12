@@ -188,12 +188,15 @@ func (sq *splitQueue) processAttempt(
 	desc := r.Desc()
 	// First handle the case of splitting due to zone config maps.
 	if splitKey := sysCfg.ComputeSplitKey(desc.StartKey, desc.EndKey); splitKey != nil {
+		splitType, tableID := sysCfg.GetTsSplitType(splitKey)
 		if _, err := r.adminSplitWithDescriptor(
 			ctx,
 			roachpb.AdminSplitRequest{
 				RequestHeader: roachpb.RequestHeader{
 					Key: splitKey.AsRawKey(),
 				},
+				SplitType:      splitType,
+				TableId:        tableID,
 				SplitKey:       splitKey.AsRawKey(),
 				ExpirationTime: hlc.Timestamp{},
 			},
@@ -294,22 +297,6 @@ func (sq *splitQueue) processAttempt(
 				splitHashPoint := startHashPoint
 				splitTimeStamp := halfTimestamp
 				splitKey = sqlbase.MakeTsRangeKey(sqlbase.ID(startTableID), splitHashPoint, splitTimeStamp)
-			}
-
-			startTime := timeutil.Now()
-			for {
-				isCompleted := true
-				isCompleted, _ = sq.db.AdminReplicaVoterStatusConsistent(ctx, startKey, endKey)
-				if isCompleted {
-					break
-				}
-				timeElapsed := timeutil.Since(startTime)
-				if timeElapsed.Seconds() > 30 {
-					log.Error(ctx, "have been trying 30s, timed out of AdminReplicaVoterStatusConsistent")
-					return errors.Errorf("Split failed. Verifying replica consistency failed. split range:%d, startKey:%s endKey:%s splitKey:%d",
-						desc.RangeID, desc.StartKey, desc.EndKey, splitKey)
-				}
-				time.Sleep(time.Duration(500) * time.Millisecond)
 			}
 
 			//理论上不会溢出，兼容

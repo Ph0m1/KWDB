@@ -50,7 +50,6 @@ func (r *Replica) isTsRequest(ctx context.Context, ba *roachpb.BatchRequest) boo
 			*roachpb.TsDeleteRequest,
 			*roachpb.TsDeleteEntityRequest,
 			*roachpb.TsTagUpdateRequest,
-			*roachpb.CreateTSSnapshotRequest,
 			*roachpb.TsDeleteMultiEntitiesDataRequest:
 			return true
 		}

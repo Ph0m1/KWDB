@@ -182,8 +182,6 @@ func (ru RequestUnion) GetInner() Request {
 		return t.TsDeleteEntity
 	case *RequestUnion_GetReplicaStatus:
 		return t.GetReplicaStatus
-	case *RequestUnion_CreateTsSnapshot:
-		return t.CreateTsSnapshot
 	case *RequestUnion_TsTagUpdate:
 		return t.TsTagUpdate
 	case *RequestUnion_TsDeleteMultiEntitiesData:
@@ -296,8 +294,6 @@ func (ru ResponseUnion) GetInner() Response {
 		return t.TsDeleteEntity
 	case *ResponseUnion_GetReplicaStatus:
 		return t.GetReplicaStatus
-	case *ResponseUnion_CreateTsSnapshot:
-		return t.CreateTsSnapshot
 	case *ResponseUnion_TsTagUpdate:
 		return t.TsTagUpdate
 	case *ResponseUnion_TsDeleteMultiEntitiesData:
@@ -486,8 +482,6 @@ func (ru *RequestUnion) SetInner(r Request) bool {
 		union = &RequestUnion_TsDeleteEntity{t}
 	case *GetReplicaStatusRequest:
 		union = &RequestUnion_GetReplicaStatus{t}
-	case *CreateTSSnapshotRequest:
-		union = &RequestUnion_CreateTsSnapshot{t}
 	case *TsTagUpdateRequest:
 		union = &RequestUnion_TsTagUpdate{t}
 	case *TsDeleteMultiEntitiesDataRequest:
@@ -603,8 +597,6 @@ func (ru *ResponseUnion) SetInner(r Response) bool {
 		union = &ResponseUnion_TsDeleteEntity{t}
 	case *GetReplicaStatusResponse:
 		union = &ResponseUnion_GetReplicaStatus{t}
-	case *CreateTSSnapshotResponse:
-		union = &ResponseUnion_CreateTsSnapshot{t}
 	case *TsTagUpdateResponse:
 		union = &ResponseUnion_TsTagUpdate{t}
 	case *TsDeleteMultiEntitiesDataResponse:
@@ -618,7 +610,7 @@ func (ru *ResponseUnion) SetInner(r Response) bool {
 	return true
 }
 
-type reqCounts [54]int32
+type reqCounts [53]int32
 
 // getReqCounts returns the number of times each
 // request type appears in the batch.
@@ -726,14 +718,12 @@ func (ba *BatchRequest) getReqCounts() reqCounts {
 			counts[48]++
 		case *RequestUnion_GetReplicaStatus:
 			counts[49]++
-		case *RequestUnion_CreateTsSnapshot:
-			counts[50]++
 		case *RequestUnion_TsTagUpdate:
-			counts[51]++
+			counts[50]++
 		case *RequestUnion_TsDeleteMultiEntitiesData:
-			counts[52]++
+			counts[51]++
 		case *RequestUnion_TsPutTag:
-			counts[53]++
+			counts[52]++
 		default:
 			panic(fmt.Sprintf("unsupported request: %+v", ru))
 		}
@@ -792,7 +782,6 @@ var requestNames = []string{
 	"TsDel",
 	"TsDelEntity",
 	"GetReplicaStatus",
-	"CreateTsSnapshot",
 	"TsTagUpdate",
 	"TsDelMultiEntitiesData",
 	"TsPutTag",
@@ -1027,10 +1016,6 @@ type getReplicaStatusResponseAlloc struct {
 	union ResponseUnion_GetReplicaStatus
 	resp  GetReplicaStatusResponse
 }
-type createTSSnapshotResponseAlloc struct {
-	union ResponseUnion_CreateTsSnapshot
-	resp  CreateTSSnapshotResponse
-}
 type tsTagUpdateResponseAlloc struct {
 	union ResponseUnion_TsTagUpdate
 	resp  TsTagUpdateResponse
@@ -1103,10 +1088,9 @@ func (ba *BatchRequest) CreateReply() *BatchResponse {
 	var buf47 []tsDeleteResponseAlloc
 	var buf48 []tsDeleteEntityResponseAlloc
 	var buf49 []getReplicaStatusResponseAlloc
-	var buf50 []createTSSnapshotResponseAlloc
-	var buf51 []tsTagUpdateResponseAlloc
-	var buf52 []tsDeleteMultiEntitiesDataResponseAlloc
-	var buf53 []tsPutTagResponseAlloc
+	var buf50 []tsTagUpdateResponseAlloc
+	var buf51 []tsDeleteMultiEntitiesDataResponseAlloc
+	var buf52 []tsPutTagResponseAlloc
 
 	for i, r := range ba.Requests {
 		switch r.GetValue().(type) {
@@ -1460,34 +1444,27 @@ func (ba *BatchRequest) CreateReply() *BatchResponse {
 			buf49[0].union.GetReplicaStatus = &buf49[0].resp
 			br.Responses[i].Value = &buf49[0].union
 			buf49 = buf49[1:]
-		case *RequestUnion_CreateTsSnapshot:
+		case *RequestUnion_TsTagUpdate:
 			if buf50 == nil {
-				buf50 = make([]createTSSnapshotResponseAlloc, counts[50])
+				buf50 = make([]tsTagUpdateResponseAlloc, counts[50])
 			}
-			buf50[0].union.CreateTsSnapshot = &buf50[0].resp
+			buf50[0].union.TsTagUpdate = &buf50[0].resp
 			br.Responses[i].Value = &buf50[0].union
 			buf50 = buf50[1:]
-		case *RequestUnion_TsTagUpdate:
+		case *RequestUnion_TsDeleteMultiEntitiesData:
 			if buf51 == nil {
-				buf51 = make([]tsTagUpdateResponseAlloc, counts[51])
+				buf51 = make([]tsDeleteMultiEntitiesDataResponseAlloc, counts[51])
 			}
-			buf51[0].union.TsTagUpdate = &buf51[0].resp
+			buf51[0].union.TsDeleteMultiEntitiesData = &buf51[0].resp
 			br.Responses[i].Value = &buf51[0].union
 			buf51 = buf51[1:]
-		case *RequestUnion_TsDeleteMultiEntitiesData:
+		case *RequestUnion_TsPutTag:
 			if buf52 == nil {
-				buf52 = make([]tsDeleteMultiEntitiesDataResponseAlloc, counts[52])
+				buf52 = make([]tsPutTagResponseAlloc, counts[52])
 			}
-			buf52[0].union.TsDeleteMultiEntitiesData = &buf52[0].resp
+			buf52[0].union.TsPutTag = &buf52[0].resp
 			br.Responses[i].Value = &buf52[0].union
 			buf52 = buf52[1:]
-		case *RequestUnion_TsPutTag:
-			if buf53 == nil {
-				buf53 = make([]tsPutTagResponseAlloc, counts[53])
-			}
-			buf53[0].union.TsPutTag = &buf53[0].resp
-			br.Responses[i].Value = &buf53[0].union
-			buf53 = buf53[1:]
 		default:
 			panic(fmt.Sprintf("unsupported request: %+v", r))
 		}
