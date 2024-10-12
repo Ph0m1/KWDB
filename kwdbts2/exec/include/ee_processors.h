@@ -96,5 +96,6 @@ class Processors {
   // limit, for pgwire encoding
   k_int64 command_limit_{0};
   k_int64 count_for_limit_{0};
+  TsFetcherCollection collection_;
 };
 }  // namespace kwdbts

@@ -18,11 +18,11 @@
 
 namespace kwdbts {
 
-PostAggScanOperator::PostAggScanOperator(BaseOperator* input,
+PostAggScanOperator::PostAggScanOperator(TsFetcherCollection* collection, BaseOperator* input,
                                          TSAggregatorSpec* spec,
                                          TSPostProcessSpec* post,
                                          TABLE* table, int32_t processor_id)
-    : HashAggregateOperator(input, spec, post, table, processor_id) {}
+    : HashAggregateOperator(collection, input, spec, post, table, processor_id) {}
 
 PostAggScanOperator::PostAggScanOperator(const PostAggScanOperator& other, BaseOperator* input, int32_t processor_id)
     : HashAggregateOperator(other, input, processor_id) {}
@@ -89,6 +89,7 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
 
     // read a batch of data
     code = input_->Next(ctx, chunk);
+    auto start = std::chrono::high_resolution_clock::now();
     if (code != EEIteratorErrCode::EE_OK) {
       if (code == EEIteratorErrCode::EE_END_OF_RECORD ||
           code == EEIteratorErrCode::EE_TIMESLICE_OUT) {
@@ -103,6 +104,7 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
     if (chunk->Count() == 0) {
       continue;
     }
+    fetcher_.Update(chunk->Count(), 0, 0, 0, 0, 0);
     // the chunk->isScanAgg() is always true.
     pass_agg_ &= !chunk->isDisorder();
     agg_result_counter_ += chunk->Count();
@@ -116,6 +118,8 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
     } else {
       processed_chunks_.push(std::move(chunk));
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
   }
 
 
@@ -126,6 +130,7 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
    * scalar group
    * select max(c1) from t1 => handler_->NewTagIterator
    */
+  auto start = std::chrono::high_resolution_clock::now();
   if (agg_result_counter_ == 0) {
     if (ht_->Empty() && group_cols_.empty() &&
         group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
@@ -148,6 +153,9 @@ KStatus PostAggScanOperator::accumulateRows(kwdbContext_p ctx) {
       }
     }
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
+
   Return(KStatus::SUCCESS);
 }
 

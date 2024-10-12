@@ -19,9 +19,9 @@
 
 namespace kwdbts {
 
-BaseAggregator::BaseAggregator(BaseOperator* input, TSAggregatorSpec* spec, TSPostProcessSpec* post,
-                               TABLE* table, int32_t processor_id)
-    : BaseOperator(table, processor_id),
+BaseAggregator::BaseAggregator(TsFetcherCollection* collection, BaseOperator* input, TSAggregatorSpec* spec,
+                                  TSPostProcessSpec* post, TABLE* table, int32_t processor_id)
+    : BaseOperator(collection, table, processor_id),
       spec_{spec},
       post_{post},
       param_(input, spec, post, table, this),
@@ -36,7 +36,7 @@ BaseAggregator::BaseAggregator(BaseOperator* input, TSAggregatorSpec* spec, TSPo
 }
 
 BaseAggregator::BaseAggregator(const BaseAggregator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.table_, processor_id),
+    : BaseOperator(other.collection_, other.table_, processor_id),
       spec_(other.spec_),
       post_(other.post_),
       param_(input, other.spec_, other.post_, other.table_, this),
@@ -609,12 +609,12 @@ KStatus BaseAggregator::accumulateRowIntoBucket(kwdbContext_p ctx, DatumRowPtr b
 
 ///////////////// HashAggregateOperator //////////////////////
 
-HashAggregateOperator::HashAggregateOperator(BaseOperator* input,
+HashAggregateOperator::HashAggregateOperator(TsFetcherCollection* collection, BaseOperator* input,
                                              TSAggregatorSpec* spec,
                                              TSPostProcessSpec* post,
                                              TABLE* table,
                                              int32_t processor_id)
-    : BaseAggregator(input, spec, post, table, processor_id) {}
+    : BaseAggregator(collection, input, spec, post, table, processor_id) {}
 
 HashAggregateOperator::HashAggregateOperator(const HashAggregateOperator& other,
                                              BaseOperator* input,
@@ -672,6 +672,7 @@ EEIteratorErrCode HashAggregateOperator::Start(kwdbContext_p ctx) {
   }
 
   iter_ = ht_->begin();
+
   Return(code);
 }
 
@@ -679,8 +680,10 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
                                               DataChunkPtr& chunk) {
   EnterFunc();
   if (is_done_) {
+    fetcher_.Update(0, 0, 0, ht_->Capacity() * ht_->tupleSize(), 0, 0);
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
+  auto start = std::chrono::high_resolution_clock::now();
   if (nullptr == chunk) {
     // init data chunk
     std::vector<ColumnInfo> col_info;
@@ -702,12 +705,19 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
   if (getAggResults(ctx, chunk) != KStatus::SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(0, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, chunk->Count());
+
   Return(EEIteratorErrCode::EE_OK);
 }
 
 KStatus HashAggregateOperator::accumulateBatch(kwdbContext_p ctx,
                                                IChunk* chunk) {
   EnterFunc()
+  if (chunk->Count() <= 0) {
+    Return(KStatus::SUCCESS);
+  }
+
   for (k_uint32 line = 0; line < chunk->Count(); ++line) {
     k_uint64 loc;
     if (ht_->FindOrCreateGroups(chunk, line, group_cols_, &loc) < 0) {
@@ -758,11 +768,11 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   int64_t duration = 0;
-  int64_t read_row_num = 0;
   for (;;) {
     DataChunkPtr chunk = nullptr;
     // read a batch of data
     code = input_->Next(ctx, chunk);
+    auto start = std::chrono::high_resolution_clock::now();
     if (code != EEIteratorErrCode::EE_OK) {
       if (code == EEIteratorErrCode::EE_END_OF_RECORD ||
           code == EEIteratorErrCode::EE_TIMESLICE_OUT) {
@@ -773,34 +783,13 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
       Return(KStatus::FAIL);
     }
 
-    // no data ,read??
-    if (chunk->Count() == 0) {
-      continue;
-    }
-
-    auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
-    if (fetchers != nullptr && fetchers->collected) {
-      goLock(fetchers->goMutux);
-      chunk->GetFvec().GetAnalyse(ctx);
-      goUnLock(fetchers->goMutux);
-      // analyse collection
-      read_row_num += chunk->Count();
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
     accumulateBatch(ctx, chunk.get());
     auto end = std::chrono::high_resolution_clock::now();
-
-    if (fetchers != nullptr && fetchers->collected) {
-      std::chrono::duration<int64_t, std::nano> t = end - start;
-      duration += t.count();
-    }
+    fetcher_.Update(chunk->Count(), (end - start).count(), 0, 0, 0, 0);
   }
-  analyseFetcher(ctx, this->processor_id_, duration, read_row_num, 0,
-                 sizeof(aggregations_) + sizeof(kwdbts::TSAggregatorSpec_Aggregation) * aggregations_.size(), 1, 0);
 
-  // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was
-  // aggregated.
+  // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was aggregated.
+  auto start = std::chrono::high_resolution_clock::now();
   if (ht_->Empty() && group_cols_.empty()) {
     // retrun NULL
     k_uint64 loc = ht_->CreateNullGroups();
@@ -820,6 +809,8 @@ KStatus HashAggregateOperator::accumulateRows(kwdbContext_p ctx) {
       }
     }
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
 
   Return(KStatus::SUCCESS);
 }
@@ -829,7 +820,6 @@ KStatus HashAggregateOperator::getAggResults(kwdbContext_p ctx,
   EnterFunc();
   k_uint32 BATCH_SIZE = results->Capacity();
 
-  auto start = std::chrono::high_resolution_clock::now();
   // row indicates indicates the row position inserted into the current
   // DataChunk
   k_uint32 row = 0;
@@ -872,13 +862,6 @@ KStatus HashAggregateOperator::getAggResults(kwdbContext_p ctx,
       break;
     }
   }
-  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
-  if (fetchers != nullptr && fetchers->collected) {
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<int64_t, std::nano> duration = end - start;
-    analyseFetcher(ctx, this->processor_id_, duration.count(), 0, 0,
-                   0, 0, examined_rows_);
-  }
 
   if (total_read_row_ == ht_->Size()) {
     is_done_ = true;
@@ -898,12 +881,12 @@ BaseOperator* HashAggregateOperator::Clone() {
 
 ///////////////// OrderedAggregateOperator //////////////////////
 
-OrderedAggregateOperator::OrderedAggregateOperator(BaseOperator* input,
+OrderedAggregateOperator::OrderedAggregateOperator(TsFetcherCollection* collection, BaseOperator* input,
                                                    TSAggregatorSpec* spec,
                                                    TSPostProcessSpec* post,
                                                    TABLE* table,
                                                    int32_t processor_id)
-    : BaseAggregator(input, spec, post, table, processor_id) {
+    : BaseAggregator(collection, input, spec, post, table, processor_id) {
   append_additional_timestamp_ = false;
 }
 
@@ -969,11 +952,12 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   int64_t duration = 0;
   int64_t read_row_num = 0;
-
+  std::chrono::_V2::system_clock::time_point start;
   do {
     DataChunkPtr input_chunk = nullptr;
     // read a batch of data from sub operator
     code = input_->Next(ctx, input_chunk);
+    start = std::chrono::high_resolution_clock::now();
     if (code != EEIteratorErrCode::EE_OK) {
       if (code == EEIteratorErrCode::EE_END_OF_RECORD ||
           code == EEIteratorErrCode::EE_TIMESLICE_OUT) {
@@ -1019,7 +1003,7 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
       LOG_ERROR("Failed to fetch data from child operator, return code = %d.\n", code);
       Return(EEIteratorErrCode::EE_ERROR);
     }
-
+    read_row_num += input_chunk->Count();
     // no data,continue
     if (input_chunk->Count() == 0) {
       input_chunk = nullptr;
@@ -1027,17 +1011,6 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
     }
 
     if (!is_done_) {
-      auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
-      if (fetchers != nullptr && fetchers->collected) {
-        goLock(fetchers->goMutux);
-        input_chunk->GetFvec().GetAnalyse(ctx);
-        goUnLock(fetchers->goMutux);
-        // analyse collection
-        read_row_num += input_chunk->Count();
-      }
-
-      auto start = std::chrono::high_resolution_clock::now();
-
       input_chunk->ResetLine();
       input_chunk->NextLine();
       if (input_chunk->Count() > 0) {
@@ -1046,13 +1019,6 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
         if (status != KStatus::SUCCESS) {
           Return(EEIteratorErrCode::EE_ERROR)
         }
-      }
-
-      auto end = std::chrono::high_resolution_clock::now();
-
-      if (fetchers != nullptr && fetchers->collected) {
-        std::chrono::duration<int64_t, std::nano> t = end - start;
-        duration += t.count();
       }
     } else {
       if (current_data_chunk_ != nullptr && current_data_chunk_->Count() > 0) {
@@ -1063,16 +1029,17 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
 
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
-
-    analyseFetcher(ctx, this->processor_id_, duration, read_row_num, 0, 0, 1, chunk->Count());
-
     output_queue_.pop();
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(read_row_num, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, chunk->Count());
     if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
       Return(EEIteratorErrCode::EE_OK)
     } else {
       Return(code)
     }
   } else {
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
     if (is_done_) {
       Return(EEIteratorErrCode::EE_END_OF_RECORD)
     } else {

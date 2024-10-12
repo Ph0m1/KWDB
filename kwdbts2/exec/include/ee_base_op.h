@@ -1,14 +1,13 @@
 // Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd.
 //
 // This software (KWDB) is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
+// You can use this software according to the terms and conditions of the Mulan
+// PSL v2. You may obtain a copy of Mulan PSL v2 at:
 //          http://license.coscl.org.cn/MulanPSL2
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
-// Created by liguoliang on 2022/07/18.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY
+// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+// NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. See the
+// Mulan PSL v2 for more details. Created by liguoliang on 2022/07/18.
 #pragma once
 
 #include <memory>
@@ -17,10 +16,11 @@
 #include <vector>
 
 #include "cm_kwdb_context.h"
-#include "ee_row_batch.h"
-#include "ee_global.h"
-#include "er_api.h"
 #include "ee_data_chunk.h"
+#include "ee_global.h"
+#include "ee_row_batch.h"
+#include "er_api.h"
+#include "explain_analyse.h"
 
 namespace kwdbts {
 
@@ -43,7 +43,13 @@ class BaseOperator {
  public:
   BaseOperator() {}
 
-  explicit BaseOperator(TABLE* table, int32_t processor_id) : table_(table), processor_id_(processor_id) {}
+  explicit BaseOperator(TsFetcherCollection* collection, TABLE* table,
+                        int32_t processor_id)
+      : table_(table), processor_id_(processor_id), collection_(collection) {
+    if (nullptr != collection) {
+      collection->emplace(processor_id, &fetcher_);
+    }
+  }
 
   virtual ~BaseOperator() {
     if (num_ > 0 && renders_) {
@@ -121,7 +127,8 @@ class BaseOperator {
   }
 
   inline void constructDataChunk(k_uint32 capacity) {
-    current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_, capacity);
+    current_data_chunk_ =
+        std::make_unique<DataChunk>(output_col_info_, capacity);
     if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
@@ -143,21 +150,22 @@ class BaseOperator {
   k_bool is_done_{false};
 
   bool is_clone_{false};
+
+ public:
+  OperatorFetcher fetcher_;
+  TsFetcherCollection* collection_{nullptr};
 };
 
-template<class RealNode, class... Args>
-BaseOperator* NewIterator(Args&& ... args) {
+template <class RealNode, class... Args>
+BaseOperator* NewIterator(Args&&... args) {
   return new RealNode(std::forward<Args>(args)...);
 }
 
 class GroupByMetadata {
  public:
-  GroupByMetadata() : capacity_(DEFAULT_CAPACITY) {
-  }
+  GroupByMetadata() : capacity_(DEFAULT_CAPACITY) {}
 
-  ~GroupByMetadata() {
-    SafeDeleteArray(bitmap_);
-  }
+  ~GroupByMetadata() { SafeDeleteArray(bitmap_); }
 
   k_bool reset(k_uint32 capacity) {
     k_bool code = true;

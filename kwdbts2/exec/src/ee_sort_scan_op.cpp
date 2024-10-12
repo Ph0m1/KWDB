@@ -23,10 +23,10 @@
 
 namespace kwdbts {
 
-SortScanOperator::SortScanOperator(TSReaderSpec* spec, TSPostProcessSpec* post,
+SortScanOperator::SortScanOperator(TsFetcherCollection* collection, TSReaderSpec* spec, TSPostProcessSpec* post,
                                    TABLE* table, BaseOperator* input,
                                    int32_t processor_id)
-    : TableScanOperator(spec, post, table, input, processor_id), spec_{spec} {}
+    : TableScanOperator(collection, spec, post, table, input, processor_id), spec_{spec} {}
 
 SortScanOperator::SortScanOperator(const SortScanOperator& other,
                                    BaseOperator* input, int32_t processor_id)
@@ -73,6 +73,7 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
     return code;
   }
 
+  auto start = std::chrono::high_resolution_clock::now();
   // set current offset
   cur_offset_ = offset_;
 
@@ -112,6 +113,8 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
     // sort
     PrioritySort(ctx, row_batch_, limit_ + offset_);
   }
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(data_chunk_->Count(), (end - start).count(), data_chunk_->Count() * data_chunk_->RowSize(), 0, 0, 0);
 
   Return(code);
 }

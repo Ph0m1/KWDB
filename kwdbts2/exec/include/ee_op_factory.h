@@ -22,43 +22,43 @@ namespace kwdbts {
  */
 class OpFactory {
  private:
-  static KStatus NewTableScan(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewTableScan(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                              const TSProcessorCoreUnion &core,
                              BaseOperator **iterator, TABLE **table,
                              BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewTagScan(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewTagScan(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                              const TSProcessorCoreUnion &core,
                              BaseOperator **iterator, TABLE **table, int32_t processor_id);
-  static KStatus NewAgg(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewAgg(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                           const TSProcessorCoreUnion &core,
                           BaseOperator **iterator, TABLE **table, BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewNoop(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewNoop(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                            const TSProcessorCoreUnion &core,
                            BaseOperator **iterator, TABLE **table, BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewSynchronizer(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewSynchronizer(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                             const TSProcessorCoreUnion &core,
                             BaseOperator **iterator, TABLE **table, BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewSynchronizer(kwdbContext_p ctx, BaseOperator **iterator,
+  static KStatus NewSynchronizer(kwdbContext_p ctx, TsFetcherCollection* collection, BaseOperator **iterator,
                                    TABLE **table, BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewTsSampler(kwdbContext_p ctx, const TSProcessorCoreUnion &core,
+  static KStatus NewTsSampler(kwdbContext_p ctx, TsFetcherCollection* collection, const TSProcessorCoreUnion &core,
                             BaseOperator **iterator, TABLE **table, BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewSort(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewSort(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                            const TSProcessorCoreUnion &core,
                            BaseOperator **iterator, TABLE **table,
                            BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewStatisticScan(kwdbContext_p ctx,
+  static KStatus NewStatisticScan(kwdbContext_p ctx, TsFetcherCollection* collection,
                                       const TSPostProcessSpec &post,
                                       const TSProcessorCoreUnion &core,
                                       BaseOperator **iterator, TABLE **table,
                                       BaseOperator *childIterator, int32_t processor_id);
-  static KStatus NewDistinct(kwdbContext_p ctx,
+  static KStatus NewDistinct(kwdbContext_p ctx, TsFetcherCollection* collection,
                                       const TSPostProcessSpec &post,
                                       const TSProcessorCoreUnion &core,
                                       BaseOperator **iterator, TABLE **table,
                                       BaseOperator *childIterator, int32_t processor_id);
 
  public:
-  static KStatus NewOp(kwdbContext_p ctx, const TSPostProcessSpec &post,
+  static KStatus NewOp(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,
                        const TSProcessorCoreUnion &core,
                        BaseOperator **iterator, TABLE **table,
                        BaseOperator *childIterator, int32_t processor_id);

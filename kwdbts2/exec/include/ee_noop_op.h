@@ -32,7 +32,7 @@ class NoopOperator : public BaseOperator {
    *
    * @param input
    */
-  NoopOperator(BaseOperator *input, TSNoopSpec *spec, TSPostProcessSpec *post,
+  NoopOperator(TsFetcherCollection* collection, BaseOperator *input, TSNoopSpec *spec, TSPostProcessSpec *post,
                TABLE *table, int32_t processor_id);
 
   NoopOperator(const NoopOperator& other, BaseOperator* input, int32_t processor_id);

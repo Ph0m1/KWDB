@@ -37,10 +37,10 @@ class TagScanIterator;
 
 class SynchronizerOperator : public BaseOperator {
  public:
-  SynchronizerOperator(BaseOperator *input, TSSynchronizerSpec *spec,
+  SynchronizerOperator(TsFetcherCollection* collection, BaseOperator *input, TSSynchronizerSpec *spec,
                        TSPostProcessSpec *post, TABLE *table,
                        int32_t processor_id)
-      : BaseOperator(table, processor_id),
+      : BaseOperator(collection, table, processor_id),
         input_{input},
         post_{post},
         input_fields_{input->OutputFields()} {

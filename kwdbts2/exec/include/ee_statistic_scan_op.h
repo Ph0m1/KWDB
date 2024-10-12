@@ -26,7 +26,7 @@ class TSStatisticReaderSpec;
 
 class TableStatisticScanOperator : public BaseOperator {
  public:
-  TableStatisticScanOperator(TSStatisticReaderSpec *spec,
+  TableStatisticScanOperator(TsFetcherCollection* collection, TSStatisticReaderSpec *spec,
                              TSPostProcessSpec *post, TABLE *table, BaseOperator *input, int32_t processor_id);
   TableStatisticScanOperator(const TableStatisticScanOperator&, BaseOperator* input, int32_t processor_id);
   virtual ~TableStatisticScanOperator();

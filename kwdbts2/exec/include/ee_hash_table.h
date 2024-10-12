@@ -62,6 +62,10 @@ class LinearProbingHashTable {
 
   inline k_uint64 Size() const { return entries_.size(); }
 
+  inline k_uint64 tupleSize() const { return tuple_size_; }
+
+  inline k_uint64 Capacity() const { return capacity_; }
+
   inline bool Empty() { return entries_.size() == 0; }
 
   /**

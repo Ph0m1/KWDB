@@ -50,8 +50,9 @@ void AssignDataToRow(SampledRow *row, Field *render, bool is_null, KWDBTypeFamil
   }
 }
 
-TsSamplerOperator::TsSamplerOperator(TABLE* table, BaseOperator* input,
-                                     int32_t processor_id) : BaseOperator(table, processor_id), input_(input) {}
+TsSamplerOperator::TsSamplerOperator(TsFetcherCollection* collection, TABLE* table, BaseOperator* input,
+                                     int32_t processor_id):
+  BaseOperator(collection, table, processor_id), input_(input) {}
 
 KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
   KStatus code = FAIL;

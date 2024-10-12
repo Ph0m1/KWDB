@@ -30,9 +30,9 @@ namespace kwdbts {
 // AggTableScanOperator is used by agg op
 class AggTableScanOperator : public TableScanOperator {
  public:
-  AggTableScanOperator(TSReaderSpec* spec, TSPostProcessSpec* post,
+  AggTableScanOperator(TsFetcherCollection* collection, TSReaderSpec* spec, TSPostProcessSpec* post,
                        TABLE* table, BaseOperator* input, int32_t processor_id)
-      : TableScanOperator(spec, post, table, input, processor_id),
+      : TableScanOperator(collection, spec, post, table, input, processor_id),
         table_reader_spec_(*spec),
         aggregation_spec_(spec->aggregator()),
         aggregation_post_(spec->aggregatorpost()) {}

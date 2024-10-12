@@ -38,8 +38,8 @@ class DistinctOperator : public BaseOperator {
    * @param post
    * @param table
    */
-  DistinctOperator(BaseOperator* input, DistinctSpec* spec, TSPostProcessSpec* post, TABLE* table,
-                   int32_t processor_id);
+  DistinctOperator(TsFetcherCollection* collection, BaseOperator* input, DistinctSpec* spec,
+                        TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   DistinctOperator(const DistinctOperator&, BaseOperator* input, int32_t processor_id);
 

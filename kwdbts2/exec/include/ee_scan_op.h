@@ -43,7 +43,8 @@ class StorageHandler;
  */
 class TableScanOperator : public BaseOperator {
  public:
-  TableScanOperator(TSReaderSpec* spec, TSPostProcessSpec* post, TABLE* table, BaseOperator* input, int32_t processor_id);
+  TableScanOperator(TsFetcherCollection* collection, TSReaderSpec* spec, TSPostProcessSpec* post, TABLE* table,
+                                        BaseOperator* input, int32_t processor_id);
 
   TableScanOperator(const TableScanOperator&, BaseOperator* input, int32_t processor_id);
 

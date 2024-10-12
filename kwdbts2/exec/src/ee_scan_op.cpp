@@ -31,9 +31,9 @@
 
 namespace kwdbts {
 
-TableScanOperator::TableScanOperator(TSReaderSpec* spec, TSPostProcessSpec* post,
+TableScanOperator::TableScanOperator(TsFetcherCollection* collection, TSReaderSpec* spec, TSPostProcessSpec* post,
                                      TABLE* table, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(table, processor_id),
+    : BaseOperator(collection, table, processor_id),
       post_(post),
       schema_id_(0),
       object_id_(spec->tableid()),
@@ -62,7 +62,7 @@ TableScanOperator::TableScanOperator(TSReaderSpec* spec, TSPostProcessSpec* post
 }
 
 TableScanOperator::TableScanOperator(const TableScanOperator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.table_, processor_id),
+    : BaseOperator(other.collection_, other.table_, processor_id),
       post_(other.post_),
       schema_id_(other.schema_id_),
       object_id_(other.object_id_),
@@ -336,26 +336,19 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
     }
   } while (!is_done_ && output_queue_.empty());
 
-  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
-  if (fetchers != nullptr && fetchers->collected) {
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<int64_t, std::nano> duration = end - start;
-    if (nullptr != chunk) {
-      int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
-      chunk->GetFvec().AddAnalyse(ctx, this->processor_id_, duration.count(),
-                                  int64_t(row_batch_->count_), bytes_read, 0, 0);
-    }
-  }
-
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
     output_queue_.pop();
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
     if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
       Return(EEIteratorErrCode::EE_OK)
     } else {
       Return(code)
     }
   } else {
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
     if (is_done_) {
       Return(EEIteratorErrCode::EE_END_OF_RECORD);
     } else {

@@ -59,7 +59,7 @@ KStatus Processors::InitProcessorsOptimization(kwdbContext_p ctx,
   // New root operator
   const TSPostProcessSpec& post = procSpec.post();
   const TSProcessorCoreUnion& core = procSpec.core();
-  KStatus ret = OpFactory::NewOp(ctx, post, core, iterator, table, child, procSpec.processor_id());
+  KStatus ret = OpFactory::NewOp(ctx, &collection_, post, core, iterator, table, child, procSpec.processor_id());
   if (ret != SUCCESS) {
     Return(ret);
   }
@@ -217,9 +217,6 @@ KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
       continue;
     }
 
-    // into data to fetcher from chunk
-    chunk->GetFvec().GetAnalyse(ctx);
-
     *count = *count + chunk->Count();
     if (msgBuffer == nullptr) {
       msgBuffer = ee_makeStringInfo();
@@ -244,6 +241,7 @@ KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
 
   if (ret != EEIteratorErrCode::EE_OK) {
     *is_last_record = KTRUE;
+    collection_.GetAnalyse(ctx);
     KStatus st = CloseIterator(ctx);
     if (st != KStatus::SUCCESS) {
       LOG_ERROR("Failed to close operator.");

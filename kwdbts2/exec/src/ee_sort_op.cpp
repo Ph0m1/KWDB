@@ -20,9 +20,9 @@
 
 namespace kwdbts {
 
-SortOperator::SortOperator(BaseOperator* input, TSSorterSpec* spec,
+SortOperator::SortOperator(TsFetcherCollection* collection, BaseOperator* input, TSSorterSpec* spec,
                            TSPostProcessSpec* post, TABLE* table, int32_t processor_id)
-    : BaseOperator(table, processor_id),
+    : BaseOperator(collection, table, processor_id),
       spec_{spec},
       post_{post},
       param_(input, spec, post, table),
@@ -32,7 +32,7 @@ SortOperator::SortOperator(BaseOperator* input, TSSorterSpec* spec,
       input_fields_{input->OutputFields()} {}
 
 SortOperator::SortOperator(const SortOperator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.table_, processor_id),
+    : BaseOperator(other.collection_, other.table_, processor_id),
       spec_(other.spec_),
       post_(other.post_),
       param_(input, other.spec_, other.post_, other.table_),
@@ -130,13 +130,13 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
   size_t total_count = 0;
   size_t buffer_size = 0;
   int64_t duration = 0;
-  int64_t read_row_num = 0;
   // sort all data
   for (;;) {
     DataChunkPtr chunk = nullptr;
 
     // read a batch of data
     code = input_->Next(ctx, chunk);
+    auto start = std::chrono::high_resolution_clock::now();
     if (code != EEIteratorErrCode::EE_OK) {
       if (code == EEIteratorErrCode::EE_END_OF_RECORD ||
           code == EEIteratorErrCode::EE_TIMESLICE_OUT) {
@@ -150,15 +150,6 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
     if (chunk == nullptr || chunk->Count() == 0) {
       continue;
     }
-    auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
-    if (fetchers != nullptr && fetchers->collected) {
-      goLock(fetchers->goMutux);
-      chunk->GetFvec().GetAnalyse(ctx);
-      goUnLock(fetchers->goMutux);
-      // analyse collection
-      read_row_num += chunk->Count();
-    }
-    auto start = std::chrono::high_resolution_clock::now();
 
     LOG_DEBUG("Read a batch of data %d\n", chunk->Count());
 
@@ -178,15 +169,11 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Append data failed.");
       Return(EEIteratorErrCode::EE_ERROR);
     }
-
     auto end = std::chrono::high_resolution_clock::now();
-    if (fetchers != nullptr && fetchers->collected) {
-      std::chrono::duration<int64_t, std::nano> t = end - start;
-      duration += t.count();
-    }
+    fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
   }
 
-  auto all_start = std::chrono::high_resolution_clock::now();
+  auto start = std::chrono::high_resolution_clock::now();
   if (is_mem_container) {
     KStatus ret = initContainer(total_count, buffer);
     if (ret != SUCCESS) {
@@ -196,13 +183,8 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
   }
   // Sort
   container_->Sort();
-
-  auto all_end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<int64_t, std::nano> all_t = all_end - all_start;
-  duration += all_t.count();
-  analyseFetcher(ctx, this->processor_id_, duration, read_row_num, 0,
-                 0, 1, 0);
-
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(total_count, (end - start).count(), 0, buffer_size, 0, 0);
   Return(code);
 }
 
@@ -213,7 +195,7 @@ EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   if (is_done_) {
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
-
+  auto start = std::chrono::high_resolution_clock::now();
   if (nullptr == chunk) {
     std::vector<ColumnInfo> col_info;
     col_info.reserve(output_fields_.size());
@@ -266,7 +248,8 @@ EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   if (scanned_rows_ == container_->Count()) {
     is_done_ = true;
   }
-
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(0, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
   Return(EEIteratorErrCode::EE_OK);
 }
 

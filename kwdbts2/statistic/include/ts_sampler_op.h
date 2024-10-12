@@ -63,7 +63,7 @@ struct SketchSpec {
 
 class TsSamplerOperator : public BaseOperator {
  public:
-  explicit TsSamplerOperator(TABLE* table, BaseOperator* input, int32_t processor_id);
+  explicit TsSamplerOperator(TsFetcherCollection* collection, TABLE* table, BaseOperator* input, int32_t processor_id);
 
   ~TsSamplerOperator() override = default;
 

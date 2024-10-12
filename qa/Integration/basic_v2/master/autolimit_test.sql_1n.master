@@ -373,3 +373,5 @@ SET CLUSTER SETTING
 SET CLUSTER SETTING
 > drop database test_ts cascade;
 DROP DATABASE
+> drop database test cascade;
+DROP DATABASE

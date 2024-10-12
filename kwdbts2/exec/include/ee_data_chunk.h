@@ -26,7 +26,6 @@
 #include "ee_global.h"
 #include "ee_row_batch.h"
 #include "ee_string_info.h"
-#include "explain_analyse.h"
 #include "kwdb_type.h"
 #include "me_metadata.pb.h"
 
@@ -92,8 +91,6 @@ class DataChunk : public IChunk {
   [[nodiscard]] bool isDisorder() const { return disorder_; }
 
   void setDisorder(bool disorder) { disorder_ = disorder; }
-
-  VecTsFetcherVector& GetFvec() { return fvec_; }
 
   /* override methods */
   DatumPtr GetData(k_uint32 row, k_uint32 col) override;
@@ -361,9 +358,6 @@ class DataChunk : public IChunk {
   k_uint32 bitmap_size_{0};  // length of bitmap
   k_uint32 row_size_{0};     // the total length of one row
   k_bits32 col_num_{0};      // the number of col
-
-  // record data of analyse
-  VecTsFetcherVector fvec_;
 
   k_int32 current_line_{-1};  // current row
 

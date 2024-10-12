@@ -35,7 +35,8 @@ class StorageHandler;
 
 class TagScanOperator : public BaseOperator {
  public:
-  TagScanOperator(TSTagReaderSpec* spec, TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+  TagScanOperator(TsFetcherCollection *collection, TSTagReaderSpec* spec,
+                              TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   ~TagScanOperator() override;
 

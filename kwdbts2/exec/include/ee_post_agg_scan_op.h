@@ -28,8 +28,8 @@ namespace kwdbts {
  */
 class PostAggScanOperator : public HashAggregateOperator {
  public:
-  PostAggScanOperator(BaseOperator* input, TSAggregatorSpec* spec, TSPostProcessSpec* post,
-                      TABLE* table, int32_t processor_id);
+  PostAggScanOperator(TsFetcherCollection* collection, BaseOperator* input, TSAggregatorSpec* spec,
+                                  TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   PostAggScanOperator(const PostAggScanOperator&, BaseOperator* input, int32_t processor_id);
 

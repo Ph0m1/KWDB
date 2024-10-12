@@ -46,7 +46,7 @@ class Less {
 
 class SortScanOperator : public TableScanOperator {
  public:
-  SortScanOperator(TSReaderSpec* spec, TSPostProcessSpec* post, TABLE* table,
+  SortScanOperator(TsFetcherCollection* collection, TSReaderSpec* spec, TSPostProcessSpec* post, TABLE* table,
                    BaseOperator* input, int32_t processor_id);
 
   SortScanOperator(const SortScanOperator&, BaseOperator* input,

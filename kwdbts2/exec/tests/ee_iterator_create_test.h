@@ -62,7 +62,7 @@ class CreateTagReader : public CreateIterator {
     post_ = KNEW TSPostProcessSpec();
     table_ = KNEW TABLE(1, table_id);
     table_->Init(ctx, spec_);
-    iter_ = NewIterator<TagScanOperator>(spec_, post_, table_, 0);
+    iter_ = NewIterator<TagScanOperator>(nullptr, spec_, post_, table_, 0);
   }
   void TearDown() {
     SafeDelete(spec_);
@@ -82,7 +82,7 @@ class CreateTableReader : public CreateIterator {
     CreateReaderTSPostProcessSpec(&post_);
     table_ = tag_reader_.table_;
     iter_ =
-        NewIterator<TableScanOperator>(spec_, post_, table_, tag_reader_.iter_, 0);
+        NewIterator<TableScanOperator>(nullptr, spec_, post_, table_, tag_reader_.iter_, 0);
   }
 
   void TearDown() {
@@ -100,7 +100,7 @@ class CreateDistinct : public CreateIterator {
     table_reader_.SetUp(ctx, table_id);
     CreateDistinctSpecs(&spec_, &post_);
     table_ = table_reader_.table_;
-    iter_ = NewIterator<DistinctOperator>(table_reader_.iter_, spec_,
+    iter_ = NewIterator<DistinctOperator>(nullptr, table_reader_.iter_, spec_,
                                                post_, table_, 0);
   }
 
@@ -122,7 +122,7 @@ class CreateAggregate : public CreateIterator {
     table_reader_.SetUp(ctx, table_id);
     CreateAggSpecs(&spec_, &post_);
     table_ = table_reader_.table_;
-    iter_ = NewIterator<HashAggregateOperator>(table_reader_.iter_, spec_,
+    iter_ = NewIterator<HashAggregateOperator>(nullptr, table_reader_.iter_, spec_,
                                                post_, table_, 0);
   }
 
@@ -144,7 +144,7 @@ class CreateSort : public CreateIterator {
     CreateSortSpecs(&spec_, &post_);
     table_ = table_reader_.table_;
     iter_ =
-        NewIterator<SortOperator>(table_reader_.iter_, spec_, post_, table_, 0);
+        NewIterator<SortOperator>(nullptr, table_reader_.iter_, spec_, post_, table_, 0);
   }
 
   void TearDown(kwdbContext_p ctx) {
@@ -163,7 +163,7 @@ class CreateSynchronizerIterator : public CreateIterator {
     table_reader_.SetUp(ctx, table_id);
     CreateMergeSpecs(&spec_, &post_);
     table_ = table_reader_.table_;
-    iter_ = NewIterator<SynchronizerOperator>(table_reader_.iter_, spec_, post_,
+    iter_ = NewIterator<SynchronizerOperator>(nullptr, table_reader_.iter_, spec_, post_,
                                               table_, 0);
   }
 
@@ -183,7 +183,7 @@ class CreateSortAggregate : public CreateIterator {
     sync_iter_.SetUp(ctx, table_id);
     CreateAggSpecs(&spec_, &post_);
     table_ = sync_iter_.table_;
-    iter_ = NewIterator<OrderedAggregateOperator>(sync_iter_.iter_, spec_, post_,
+    iter_ = NewIterator<OrderedAggregateOperator>(nullptr, sync_iter_.iter_, spec_, post_,
                                                table_, 0);
   }
 
@@ -205,7 +205,7 @@ class CreateNoop : public CreateIterator {
     CreateNoopSpecs(&spec_, &post_);
     table_ = table_reader_.table_;
     iter_ =
-        NewIterator<NoopOperator>(table_reader_.iter_, spec_, post_, table_, 0);
+        NewIterator<NoopOperator>(nullptr, table_reader_.iter_, spec_, post_, table_, 0);
   }
 
   void TearDown(kwdbContext_p ctx) {

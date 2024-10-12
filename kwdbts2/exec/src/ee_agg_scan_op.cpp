@@ -126,7 +126,7 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   KWThdContext* thd = current_thd;
   StorageHandler* handler = handler_;
-
+  auto start = std::chrono::high_resolution_clock::now();
   do {
     if (limit_ && examined_rows_ >= limit_) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
@@ -201,12 +201,16 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
     output_queue_.pop();
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
     if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
       Return(EEIteratorErrCode::EE_OK)
     } else {
       Return(code)
     }
   } else {
+    auto end = std::chrono::high_resolution_clock::now();
+    fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);
     if (is_done_) {
       Return(EEIteratorErrCode::EE_END_OF_RECORD)
     } else {

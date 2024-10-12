@@ -28,9 +28,9 @@
 
 namespace kwdbts {
 
-TagScanOperator::TagScanOperator(TSTagReaderSpec* spec, TSPostProcessSpec* post,
+TagScanOperator::TagScanOperator(TsFetcherCollection *collection, TSTagReaderSpec* spec, TSPostProcessSpec* post,
                                  TABLE* table, int32_t processor_id)
-    : BaseOperator(table, processor_id),
+    : BaseOperator(collection, table, processor_id),
       spec_(spec),
       post_(post),
       schema_id_(0),
@@ -126,8 +126,10 @@ EEIteratorErrCode TagScanOperator::Start(kwdbContext_p ctx) {
 
 EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx) {
   EnterFunc();
+  auto start = std::chrono::high_resolution_clock::now();
   EEIteratorErrCode code = EEIteratorErrCode::EE_END_OF_RECORD;
   k_uint32 access_mode = table_->GetAccessMode();
+
   do {
     tag_rowbatch_ = std::make_shared<TagRowBatch>();
     tag_rowbatch_->Init(table_);
@@ -149,6 +151,9 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx) {
     }
     total_read_row_ += tag_rowbatch_->count_;
   } while (0);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  fetcher_.Update(tag_rowbatch_->count_, (end - start).count(), 0, 0, 0, 0);
 
   Return(code);
 }
@@ -207,15 +212,9 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
       }
     }
   } while (0);
-  auto *fetchers = static_cast<VecTsFetcher *>(ctx->fetcher);
-  if (fetchers != nullptr && fetchers->collected) {
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<int64_t, std::nano> duration = end - start;
-    if (nullptr != chunk) {
-      int64_t bytes_read = int64_t(chunk->Capacity()) * int64_t(chunk->RowSize());
-      chunk->GetFvec().AddAnalyse(ctx, this->processor_id_,
-                        duration.count(), int64_t(tag_rowbatch_->count_), bytes_read, 0, 0);
-    }
+  auto end = std::chrono::high_resolution_clock::now();
+  if (chunk != nullptr) {
+    fetcher_.Update(chunk->Count(), (end - start).count(), 0, 0, 0, 0);
   }
 
   Return(code);

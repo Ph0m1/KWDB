@@ -30,7 +30,7 @@
 
 namespace kwdbts {
 
-KStatus OpFactory::NewTagScan(kwdbContext_p ctx, const TSPostProcessSpec& post,
+KStatus OpFactory::NewTagScan(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                               const TSProcessorCoreUnion& core,
                               BaseOperator** iterator, TABLE** table,
                               int32_t processor_id) {
@@ -50,7 +50,7 @@ KStatus OpFactory::NewTagScan(kwdbContext_p ctx, const TSPostProcessSpec& post,
     LOG_ERROR("Init table error when creating TableScanIterator.");
     Return(KStatus::FAIL);
   }
-  *iterator = NewIterator<TagScanOperator>(
+  *iterator = NewIterator<TagScanOperator>(collection,
       const_cast<TSTagReaderSpec*>(&readerSpec),
       const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
 
@@ -64,7 +64,7 @@ KStatus OpFactory::NewTagScan(kwdbContext_p ctx, const TSPostProcessSpec& post,
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewTableScan(kwdbContext_p ctx,
+KStatus OpFactory::NewTableScan(kwdbContext_p ctx, TsFetcherCollection* collection,
                                 const TSPostProcessSpec& post,
                                 const TSProcessorCoreUnion& core,
                                 BaseOperator** iterator, TABLE** table,
@@ -74,12 +74,12 @@ KStatus OpFactory::NewTableScan(kwdbContext_p ctx,
   // New table reader operator
   const TSReaderSpec& readerSpec = core.tablereader();
   if (readerSpec.has_aggregator()) {
-    *iterator = NewIterator<AggTableScanOperator>(
+    *iterator = NewIterator<AggTableScanOperator>(collection,
         const_cast<TSReaderSpec*>(&readerSpec),
         const_cast<TSPostProcessSpec*>(&post), *table, childIterator,
         processor_id);
   } else if (readerSpec.has_sorter()) {
-    *iterator = NewIterator<SortScanOperator>(
+    *iterator = NewIterator<SortScanOperator>(collection,
         const_cast<TSReaderSpec*>(&readerSpec),
         const_cast<TSPostProcessSpec*>(&post), *table, childIterator, processor_id);
   } else {
@@ -89,7 +89,7 @@ KStatus OpFactory::NewTableScan(kwdbContext_p ctx,
       rewrite_post->add_outputtypes(kwdbts::KWDBTypeFamily::TimestampTZFamily);
     }
     *iterator =
-        NewIterator<TableScanOperator>(const_cast<TSReaderSpec*>(&readerSpec),
+        NewIterator<TableScanOperator>(collection, const_cast<TSReaderSpec*>(&readerSpec),
                                        const_cast<TSPostProcessSpec*>(&post),
                                        *table, childIterator, processor_id);
   }
@@ -101,7 +101,7 @@ KStatus OpFactory::NewTableScan(kwdbContext_p ctx,
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewAgg(kwdbContext_p ctx, const TSPostProcessSpec& post,
+KStatus OpFactory::NewAgg(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                           const TSProcessorCoreUnion& core,
                           BaseOperator** iterator, TABLE** table,
                           BaseOperator* childIterator, int32_t processor_id) {
@@ -109,16 +109,16 @@ KStatus OpFactory::NewAgg(kwdbContext_p ctx, const TSPostProcessSpec& post,
   // New agg operator
   const TSAggregatorSpec& aggSpec = core.aggregator();
   if (aggSpec.agg_push_down()) {
-    *iterator = NewIterator<PostAggScanOperator>(
+    *iterator = NewIterator<PostAggScanOperator>(collection,
         childIterator, const_cast<TSAggregatorSpec*>(&aggSpec),
         const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
   } else {
     if (aggSpec.group_cols_size() == aggSpec.ordered_group_cols_size()) {
-      *iterator = NewIterator<OrderedAggregateOperator>(
+      *iterator = NewIterator<OrderedAggregateOperator>(collection,
           childIterator, const_cast<TSAggregatorSpec*>(&aggSpec),
           const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
     } else {
-      *iterator = NewIterator<HashAggregateOperator>(
+      *iterator = NewIterator<HashAggregateOperator>(collection,
           childIterator, const_cast<TSAggregatorSpec*>(&aggSpec),
           const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
     }
@@ -131,14 +131,14 @@ KStatus OpFactory::NewAgg(kwdbContext_p ctx, const TSPostProcessSpec& post,
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewNoop(kwdbContext_p ctx, const TSPostProcessSpec& post,
+KStatus OpFactory::NewNoop(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                            const TSProcessorCoreUnion& core,
                            BaseOperator** iterator, TABLE** table,
                            BaseOperator* childIterator, int32_t processor_id) {
   EnterFunc();
   const TSNoopSpec& noopSpec = core.noop();
   // New noop operator
-  *iterator = NewIterator<NoopOperator>(
+  *iterator = NewIterator<NoopOperator>(collection,
       childIterator, const_cast<TSNoopSpec*>(&noopSpec),
       const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
   if (!(*iterator)) {
@@ -169,7 +169,7 @@ KStatus OpFactory::NewNoop(kwdbContext_p ctx, const TSPostProcessSpec& post,
  *
  * @note :
  */
-KStatus OpFactory::NewTsSampler(kwdbContext_p ctx,
+KStatus OpFactory::NewTsSampler(kwdbContext_p ctx, TsFetcherCollection* collection,
                                 const TSProcessorCoreUnion& core,
                                 BaseOperator** iterator, TABLE** table,
                                 BaseOperator* childIterator,
@@ -177,7 +177,7 @@ KStatus OpFactory::NewTsSampler(kwdbContext_p ctx,
   EnterFunc();
   const TSSamplerSpec& tsInfo = core.sampler();
   *iterator =
-      NewIterator<TsSamplerOperator>(*table, childIterator, processor_id);
+      NewIterator<TsSamplerOperator>(collection, *table, childIterator, processor_id);
   if (!(*iterator)) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
@@ -194,7 +194,7 @@ KStatus OpFactory::NewTsSampler(kwdbContext_p ctx,
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewSort(kwdbContext_p ctx, const TSPostProcessSpec& post,
+KStatus OpFactory::NewSort(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                            const TSProcessorCoreUnion& core,
                            BaseOperator** iterator, TABLE** table,
                            BaseOperator* childIterator, int32_t processor_id) {
@@ -202,7 +202,7 @@ KStatus OpFactory::NewSort(kwdbContext_p ctx, const TSPostProcessSpec& post,
   // New sort operator
   const TSSorterSpec& spec = core.sorter();
 
-  *iterator = NewIterator<SortOperator>(
+  *iterator = NewIterator<SortOperator>(collection,
       childIterator, const_cast<TSSorterSpec*>(&spec),
       const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
 
@@ -214,7 +214,7 @@ KStatus OpFactory::NewSort(kwdbContext_p ctx, const TSPostProcessSpec& post,
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewSynchronizer(kwdbContext_p ctx,
+KStatus OpFactory::NewSynchronizer(kwdbContext_p ctx, TsFetcherCollection* collection,
                                    const TSPostProcessSpec& post,
                                    const TSProcessorCoreUnion& core,
                                    BaseOperator** iterator, TABLE** table,
@@ -223,7 +223,7 @@ KStatus OpFactory::NewSynchronizer(kwdbContext_p ctx,
   EnterFunc();
   // New synchronizer operator
   const TSSynchronizerSpec& mergeSpec = core.synchronizer();
-  *iterator = NewIterator<SynchronizerOperator>(
+  *iterator = NewIterator<SynchronizerOperator>(collection,
       childIterator, const_cast<TSSynchronizerSpec*>(&mergeSpec),
       const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
 
@@ -235,7 +235,7 @@ KStatus OpFactory::NewSynchronizer(kwdbContext_p ctx,
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewDistinct(kwdbContext_p ctx, const TSPostProcessSpec& post,
+KStatus OpFactory::NewDistinct(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                                const TSProcessorCoreUnion& core,
                                BaseOperator** iterator, TABLE** table,
                                BaseOperator* childIterator,
@@ -243,7 +243,7 @@ KStatus OpFactory::NewDistinct(kwdbContext_p ctx, const TSPostProcessSpec& post,
   EnterFunc();
   // New distinct operator
   const DistinctSpec& spec = core.distinct();
-  *iterator = NewIterator<DistinctOperator>(
+  *iterator = NewIterator<DistinctOperator>(collection,
       childIterator, const_cast<DistinctSpec*>(&spec),
       const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
 
@@ -256,14 +256,14 @@ KStatus OpFactory::NewDistinct(kwdbContext_p ctx, const TSPostProcessSpec& post,
 }
 
 KStatus OpFactory::NewStatisticScan(
-    kwdbContext_p ctx, const TSPostProcessSpec& post,
+    kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
     const TSProcessorCoreUnion& core, BaseOperator** iterator,
     TABLE** table, BaseOperator* childIterator, int32_t processor_id) {
   EnterFunc();
   // Create StatisticReader Operator
   const TSStatisticReaderSpec& statisticReaderSpec = core.statisticreader();
   LOG_DEBUG("NewTableScan creating TableStatisticScanOperator");
-  *iterator = NewIterator<TableStatisticScanOperator>(
+  *iterator = NewIterator<TableStatisticScanOperator>(collection,
       const_cast<TSStatisticReaderSpec*>(&statisticReaderSpec),
       const_cast<TSPostProcessSpec*>(&post), *table, childIterator, processor_id);
 
@@ -275,7 +275,7 @@ KStatus OpFactory::NewStatisticScan(
   Return(SUCCESS);
 }
 
-KStatus OpFactory::NewOp(kwdbContext_p ctx, const TSPostProcessSpec& post,
+KStatus OpFactory::NewOp(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                          const TSProcessorCoreUnion& core,
                          BaseOperator** iterator, TABLE** table,
                          BaseOperator* childIterator, int32_t processor_id) {
@@ -287,29 +287,29 @@ KStatus OpFactory::NewOp(kwdbContext_p ctx, const TSPostProcessSpec& post,
       LOG_ERROR("physical plan error");
       Return(KStatus::FAIL);
     }
-    ret = NewTagScan(ctx, post, core, iterator, table, processor_id);
+    ret = NewTagScan(ctx, collection, post, core, iterator, table, processor_id);
   } else if (core.has_tablereader()) {
-    ret = NewTableScan(ctx, post, core, iterator, table, childIterator,
+    ret = NewTableScan(ctx, collection, post, core, iterator, table, childIterator,
                        processor_id);
   } else if (core.has_statisticreader()) {
-    ret = NewStatisticScan(ctx, post, core, iterator, table, childIterator,
+    ret = NewStatisticScan(ctx, collection, post, core, iterator, table, childIterator,
                            processor_id);
   } else if (core.has_aggregator()) {
-    ret = NewAgg(ctx, post, core, iterator, table, childIterator, processor_id);
+    ret = NewAgg(ctx, collection, post, core, iterator, table, childIterator, processor_id);
   } else if (core.has_sampler()) {
     // collect statistic
-    ret = NewTsSampler(ctx, core, iterator, table, childIterator, processor_id);
+    ret = NewTsSampler(ctx, collection, core, iterator, table, childIterator, processor_id);
   } else if (core.has_noop()) {
     ret =
-        NewNoop(ctx, post, core, iterator, table, childIterator, processor_id);
+        NewNoop(ctx, collection, post, core, iterator, table, childIterator, processor_id);
   } else if (core.has_synchronizer()) {
-    ret = NewSynchronizer(ctx, post, core, iterator, table, childIterator,
+    ret = NewSynchronizer(ctx, collection, post, core, iterator, table, childIterator,
                           processor_id);
   } else if (core.has_sorter()) {
     ret =
-        NewSort(ctx, post, core, iterator, table, childIterator, processor_id);
+        NewSort(ctx, collection, post, core, iterator, table, childIterator, processor_id);
   } else if (core.has_distinct()) {
-    ret = NewDistinct(ctx, post, core, iterator, table, childIterator,
+    ret = NewDistinct(ctx, collection, post, core, iterator, table, childIterator,
                       processor_id);
   } else {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "Invalid operator type");

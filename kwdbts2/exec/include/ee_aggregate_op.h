@@ -28,8 +28,8 @@ namespace kwdbts {
 // Base Agg OP
 class BaseAggregator : public BaseOperator {
  public:
-  BaseAggregator(BaseOperator* input, TSAggregatorSpec* spec, TSPostProcessSpec* post, TABLE* table,
-                 int32_t processor_id);
+  BaseAggregator(TsFetcherCollection* collection, BaseOperator* input, TSAggregatorSpec* spec,
+                              TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   BaseAggregator(const BaseAggregator&, BaseOperator* input, int32_t processor_id);
 
@@ -125,7 +125,7 @@ class HashAggregateOperator : public BaseAggregator {
    * @param post
    * @param table
    */
-  HashAggregateOperator(BaseOperator* input, TSAggregatorSpec* spec,
+  HashAggregateOperator(TsFetcherCollection* collection, BaseOperator* input, TSAggregatorSpec* spec,
                         TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   HashAggregateOperator(const HashAggregateOperator&, BaseOperator* input, int32_t processor_id);
@@ -168,7 +168,7 @@ class HashAggregateOperator : public BaseAggregator {
  */
 class OrderedAggregateOperator : public BaseAggregator {
  public:
-  OrderedAggregateOperator(BaseOperator* input, TSAggregatorSpec* spec,
+  OrderedAggregateOperator(TsFetcherCollection* collection, BaseOperator* input, TSAggregatorSpec* spec,
                            TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   OrderedAggregateOperator(const OrderedAggregateOperator&, BaseOperator* input, int32_t processor_id);

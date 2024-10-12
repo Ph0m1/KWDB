@@ -17,19 +17,20 @@
 
 namespace kwdbts {
 
-DistinctOperator::DistinctOperator(BaseOperator* input, DistinctSpec* spec,
+DistinctOperator::DistinctOperator(TsFetcherCollection* collection, BaseOperator* input, DistinctSpec* spec,
                                    TSPostProcessSpec* post, TABLE* table, int32_t processor_id)
-    : BaseOperator(table, processor_id),
+    : BaseOperator(collection, table, processor_id),
       spec_{spec},
       post_{post},
       param_(input, spec, post, table),
       input_(input),
       offset_(post->offset()),
       limit_(post->limit()),
-      input_fields_{input->OutputFields()} {}
+      input_fields_{input->OutputFields()} {
+}
 
 DistinctOperator::DistinctOperator(const DistinctOperator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.table_, processor_id),
+    : BaseOperator(other.collection_, other.table_, processor_id),
       spec_(other.spec_),
       post_(other.post_),
       param_(input, other.spec_, other.post_, other.table_),
@@ -115,13 +116,14 @@ EEIteratorErrCode DistinctOperator::Start(kwdbContext_p ctx) {
 EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-
+  std::chrono::_V2::system_clock::time_point start;
   int64_t read_row_num = 0;
-  auto start = std::chrono::high_resolution_clock::now();
+
   do {
     // read a batch of data
     DataChunkPtr data_chunk = nullptr;
     code = input_->Next(ctx, data_chunk);
+    start = std::chrono::high_resolution_clock::now();
     if (code != EEIteratorErrCode::EE_OK) {
       break;
     }
@@ -193,19 +195,17 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
       }
     }
   } while (0);
-  auto* fetchers = static_cast<VecTsFetcher*>(ctx->fetcher);
-  if (fetchers != nullptr && fetchers->collected) {
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<int64_t, std::nano> duration = end - start;
-    if (nullptr != chunk) {
-      chunk->GetFvec().AddAnalyse(ctx, this->processor_id_,
-                                  duration.count(), read_row_num, 0, 1, 0);
-    }
-  }
+  auto end = std::chrono::high_resolution_clock::now();
 
   if (chunk != nullptr && chunk->Count() > 0) {
+    fetcher_.Update(read_row_num, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, chunk->Count());
     Return(EEIteratorErrCode::EE_OK)
   }
+
+  if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
+    fetcher_.Update(0, (end - start).count(), 0, seen_->Capacity() * seen_->tupleSize(), 0, 0);
+  }
+
   Return(code);
 }
 

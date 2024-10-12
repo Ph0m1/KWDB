@@ -68,3 +68,4 @@ use defaultdb;
 set cluster setting sql.query_cache.enabled=default;
 set cluster setting sql.auto_limit.quantity=default;
 drop database test_ts cascade;
+drop database test cascade;

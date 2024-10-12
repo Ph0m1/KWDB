@@ -28,7 +28,8 @@ namespace kwdbts {
 
 class SortOperator : public BaseOperator {
  public:
-  SortOperator(BaseOperator* input, TSSorterSpec* spec, TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
+  SortOperator(TsFetcherCollection* collection, BaseOperator* input, TSSorterSpec* spec,
+                              TSPostProcessSpec* post, TABLE* table, int32_t processor_id);
 
   SortOperator(const SortOperator&, BaseOperator* input, int32_t processor_id);
 

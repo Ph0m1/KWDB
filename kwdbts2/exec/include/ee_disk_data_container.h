@@ -65,10 +65,10 @@ class DiskDataContainer : public DataContainer {
 
   k_uint32 Count() override { return count_; }
 
+  size_t ComputeBlockSize();
+
  private:
   k_uint32 ComputeCapacity();
-
-  size_t ComputeBlockSize();
 
   KStatus GenAttributeInfo(AttributeInfo* col_var, size_t chunk_size);
 
