@@ -29,7 +29,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -161,7 +160,6 @@ type timeSeriesImportInfo struct {
 	pArgs          execbuilder.PayloadArgs
 	dbID           sqlbase.ID
 	tbID           sqlbase.ID
-	hashRouter     api.HashRouter
 	txn            *kv.Txn
 
 	// infos generate for fast import, and flags control for batch wait
@@ -307,10 +305,6 @@ func initPrettyColsAndComputeColumnSize(
 	// }
 	dbID := spec.Table.Desc.ParentID
 	tbID := spec.Table.Desc.ID
-	hashRouter, err := api.GetHashRouterWithTable(uint32(dbID), uint32(tbID), false, flowCtx.Txn)
-	if err != nil {
-		return nil, err
-	}
 	pTagToWorkerID := make(map[string]int64)
 	datumsCh := make([]chan datumsInfo, parallelNums)
 	for i := 0; i < int(parallelNums); i++ {
@@ -327,7 +321,7 @@ func initPrettyColsAndComputeColumnSize(
 	}
 	t := &timeSeriesImportInfo{prettyCols: pArgs.PrettyCols, pArgs: pArgs, columns: columns, colIndexs: colIndexs,
 		autoShrink: autoShrink, logColumnID: logColumnID, batchSize: batchSize, fileSplitInfos: fileSplitInfos,
-		parallelNums: parallelNums, dbID: dbID, tbID: tbID, hashRouter: hashRouter, flowCtx: flowCtx,
+		parallelNums: parallelNums, dbID: dbID, tbID: tbID, flowCtx: flowCtx,
 		datumsCh: datumsCh, txn: txn, primaryTagCols: primaryTagCols,
 		OptimizedDispatch: spec.OptimizedDispatch}
 	t.mu.pTagToWorkerID = pTagToWorkerID
@@ -1038,34 +1032,4 @@ func (t *timeSeriesImportInfo) BuildPayloadForTsImportStartDistributeMode(
 	})
 
 	return tsPayload.BuildRowBytesForTsImport(evalCtx, txn, InputDatums, rowNum, t.prettyCols, t.colIndexs, t.pArgs, uint32(t.dbID), uint32(t.tbID), true)
-}
-
-// WrappeToInsertReq wrap payload to req
-func (t *timeSeriesImportInfo) WrappeToInsertReq(
-	evalCtx *tree.EvalContext, rowNum int, payload []byte, primaryTagVal []byte,
-) (roachpb.NodeID, map[int]*sqlbase.PayloadForDistTSInsert, error) {
-	payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert, 1)
-	nodeID, err := t.hashRouter.GetNodeIDByPrimaryTag(evalCtx.Context, primaryTagVal)
-	if err != nil {
-		return 0, nil, err
-	}
-	hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
-	primaryTagKey := sqlbase.MakeTsPrimaryTagKey(t.tbID, hashPoints)
-	if val, ok := payloadNodeMap[int(nodeID[0])]; ok {
-		val.PerNodePayloads = append(val.PerNodePayloads, &sqlbase.SinglePayloadInfo{
-			Payload:       payload,
-			RowNum:        uint32(rowNum),
-			PrimaryTagKey: primaryTagKey,
-		})
-	} else {
-		rowVal := sqlbase.PayloadForDistTSInsert{
-			NodeID: nodeID[0],
-			PerNodePayloads: []*sqlbase.SinglePayloadInfo{{
-				Payload:       payload,
-				RowNum:        uint32(rowNum),
-				PrimaryTagKey: primaryTagKey,
-			}}}
-		payloadNodeMap[int(nodeID[0])] = &rowVal
-	}
-	return nodeID[0], payloadNodeMap, err
 }

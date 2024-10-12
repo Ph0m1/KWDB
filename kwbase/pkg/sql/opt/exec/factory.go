@@ -401,7 +401,7 @@ type Factory interface {
 	// ConstructTSDelete creates a node that implements an TIME SERIES DELETE statement.
 	ConstructTSDelete(
 		nodeIDs []roachpb.NodeID,
-		tblID, groupID uint64,
+		tblID uint64,
 		spans []execinfrapb.Span,
 		delTyp uint8,
 		primaryTagKey, primaryTagValues [][]byte,

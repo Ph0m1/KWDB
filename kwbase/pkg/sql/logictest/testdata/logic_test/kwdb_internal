@@ -240,8 +240,7 @@ range_id  range_type  start_key  start_pretty  end_key  end_pretty  database_nam
 statement ok
 INSERT INTO system.zones (id, config) VALUES
   (18, (SELECT raw_config_protobuf FROM kwdb_internal.zones WHERE zone_id = 0)),
-  (53, (SELECT raw_config_protobuf FROM kwdb_internal.zones WHERE zone_id = 0)),
-  (54, (SELECT raw_config_protobuf FROM kwdb_internal.zones WHERE zone_id = 0))
+  (53, (SELECT raw_config_protobuf FROM kwdb_internal.zones WHERE zone_id = 0))
 
 query IT
 SELECT zone_id, target FROM kwdb_internal.zones ORDER BY 1
@@ -254,7 +253,6 @@ SELECT zone_id, target FROM kwdb_internal.zones ORDER BY 1
 22  RANGE liveness
 25  TABLE system.public.replication_constraint_stats
 27  TABLE system.public.replication_stats
-54  TABLE system.public.kwdb_hash_routing
 
 query T
 SELECT quote_literal(raw_config_yaml) FROM kwdb_internal.zones WHERE zone_id = 0

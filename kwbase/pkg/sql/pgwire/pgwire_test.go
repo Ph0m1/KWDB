@@ -563,7 +563,7 @@ func TestPGPreparedQuery(t *testing.T) {
 			baseTest.Results("users", "primary", false, 1, "username", "ASC", false, false),
 		}},
 		{"SHOW TABLES FROM system", []preparedQueryTest{
-			baseTest.Results("audits", "BASE TABLE").Others(32),
+			baseTest.Results("audits", "BASE TABLE").Others(31),
 		}},
 		{"SHOW SCHEMAS FROM system", []preparedQueryTest{
 			baseTest.Results("information_schema").Others(3),

@@ -149,38 +149,6 @@ func doDrain(
 	return
 }
 
-func doDeadNoTimeout(ctx context.Context, c serverpb.AdminClient) (err error) {
-	defer func() {
-		if server.IsWaitingForInit(err) {
-			log.Infof(ctx, "%v", err)
-			err = errors.New("node cannot be drained before it has been initialized")
-		}
-	}()
-
-	// Tell the user we're starting to dead.
-	fmt.Fprintf(stderr, "setting node dead... ") // notice no final newline.
-
-	// Send a dead request
-	stream, err := c.Dead(ctx, &serverpb.DeadRequest{
-		NodeId: int32(quitCtx.deadNodeID),
-	})
-	if err != nil {
-		return err
-	}
-	resp, err := stream.Recv()
-	if err == io.EOF {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if resp.IsDead {
-		return nil
-	}
-	return errors.New(resp.ErrInfo)
-
-}
-
 func doDrainNoTimeout(
 	ctx context.Context, c serverpb.AdminClient,
 ) (hardError, remainingWork bool, err error) {

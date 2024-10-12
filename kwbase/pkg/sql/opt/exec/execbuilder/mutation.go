@@ -339,11 +339,6 @@ func BuildInputForTSInsert(
 		priTagValMap[buf.String()] = append(priTagValMap[buf.String()], i)
 		buf.Reset()
 	}
-	// Gets the Hash ring of the TS table.
-	hashRouter, err := api.GetHashRouterWithTable(dbID, tabID, false, evalCtx.Txn)
-	if err != nil {
-		return nil, err
-	}
 	// Build payload separately for groups with the same primary tag value.
 	payloadNodeMap := make(map[int]*sqlbase.PayloadForDistTSInsert, len(priTagValMap))
 	for _, priTagRowIdx := range priTagValMap {
@@ -357,7 +352,6 @@ func BuildInputForTSInsert(
 			pArgs,
 			dbID,
 			tabID,
-			hashRouter,
 		)
 		if err != nil {
 			return nil, err
@@ -1065,7 +1059,6 @@ func (ts *TsPayload) BuildRowBytesForTsImport(
 			pArgs,
 			dbID,
 			tableID,
-			nil,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -1150,7 +1143,6 @@ func BuildPrePayloadForTsImport(
 	pArgs PayloadArgs,
 	dbID uint32,
 	tableID uint32,
-	hashRouter api.HashRouter,
 ) ([]byte, []byte, error) {
 	rowNum := len(primaryTagRowIdx)
 	tsPayload := NewTsPayload()
@@ -1244,7 +1236,6 @@ func BuildPayloadForTsInsert(
 	pArgs PayloadArgs,
 	dbID uint32,
 	tableID uint32,
-	hashRouter api.HashRouter,
 ) ([]byte, []byte, error) {
 	rowNum := len(primaryTagRowIdx)
 	tsPayload := NewTsPayload()
@@ -1448,7 +1439,6 @@ func BuildRowBytesForTsInsert(
 			pArgs,
 			dbID,
 			tableID,
-			nil,
 		)
 		if err != nil {
 			return nil, err
@@ -1544,7 +1534,6 @@ func BuildPreparePayloadForTsInsert(
 	pArgs PayloadArgs,
 	dbID uint32,
 	tableID uint32,
-	hashRouter api.HashRouter,
 	qargs [][]byte,
 	colnum int,
 ) ([]byte, []byte, error) {
@@ -2704,7 +2693,6 @@ func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
 		node, err := b.factory.ConstructTSDelete(
 			[]roachpb.NodeID{b.evalCtx.NodeID},
 			uint64(tab.ID()),
-			uint64(1), //group id
 			spans,
 			uint8(tsDelete.DeleteType),
 			[][]byte{}, // primary tag key
@@ -2779,7 +2767,6 @@ func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
 	node, err := b.factory.ConstructTSDelete(
 		[]roachpb.NodeID{b.evalCtx.NodeID},
 		uint64(tab.ID()),
-		uint64(1), //groupID
 		spans,
 		uint8(tsDelete.DeleteType),
 		[][]byte{primaryTagKey},
@@ -2820,12 +2807,6 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 	md := b.mem.Metadata()
 	tab := md.Table(tsUpdate.ID)
 	dbID := tab.GetParentID()
-
-	// build table's hash hook
-	hashRouter, err := api.GetHashRouterWithTable(uint32(dbID), uint32(tab.ID()), false, b.evalCtx.Txn)
-	if err != nil {
-		return execPlan{}, err
-	}
 
 	cols := make([]*sqlbase.ColumnDescriptor, tab.ColumnCount())
 
@@ -2872,9 +2853,8 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 		}
 	}
 
-	var primaryTagVal []byte
 	// build time series table's primary tags values through expr
-	payload, primaryTagVal, err := BuildPayloadForTsInsert(
+	payload, _, err := BuildPayloadForTsInsert(
 		b.evalCtx,
 		b.evalCtx.Txn,
 		inputDatums,
@@ -2884,7 +2864,6 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 		pArgs,
 		uint32(dbID),
 		uint32(tab.ID()),
-		hashRouter,
 	)
 	if err != nil {
 		return execPlan{}, err
@@ -2900,7 +2879,6 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 	// use current NodeID
 	nodeID := b.evalCtx.NodeID
 
-	groupID, err := hashRouter.GetGroupIDByPrimaryTag(b.evalCtx.Context, primaryTagVal)
 	var startKey roachpb.Key
 	var endKey roachpb.Key
 	if b.evalCtx.StartDistributeMode {
@@ -2911,7 +2889,7 @@ func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
 	node, err := b.factory.ConstructTSTagUpdate(
 		[]roachpb.NodeID{nodeID},
 		uint64(tab.ID()),
-		uint64(groupID),
+		1,
 		[][]byte{primaryTagKey},
 		payloads,
 		tsUpdate.PTagValueNotExist,

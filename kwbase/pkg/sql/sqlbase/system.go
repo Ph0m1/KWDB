@@ -431,7 +431,6 @@ var SystemAllowedPrivileges = map[ID]privilege.List{
 	keys.MLJobsTableID:              {privilege.DROP},
 	keys.MLPrivilegesTableID:        {privilege.DROP},
 	keys.KWDBShowJobsTableID:        {privilege.DROP},
-	keys.KWDBHashRoutingTableID:     privilege.ReadData,
 	keys.DefinedFunctionTableID:     privilege.ReadWriteData,
 }
 
@@ -1793,52 +1792,6 @@ var (
 		FormatVersion:  InterleavedFormatVersion,
 		NextMutationID: 1,
 	}
-
-	KWDBHashRoutingTable = TableDescriptor{
-		Name:                    "kwdb_hash_routing",
-		ID:                      keys.KWDBHashRoutingTableID,
-		Privileges:              NewCustomSuperuserPrivilegeDescriptor(SystemAllowedPrivileges[keys.KWDBHashRoutingTableID]),
-		ParentID:                keys.SystemDatabaseID,
-		UnexposedParentSchemaID: keys.PublicSchemaID,
-		Version:                 1,
-		Columns: []ColumnDescriptor{
-			{Name: "entity_range_group_id", ID: 1, Type: *types.Int},
-			{Name: "table_id", ID: 2, Type: *types.Int},
-			{Name: "entity_range_group", ID: 3, Type: *types.Bytes},
-			{Name: "ts_partition_size", ID: 4, Type: *types.Int},
-		},
-		NextColumnID: 5,
-		Families: []ColumnFamilyDescriptor{
-			{Name: "primary", ID: 0,
-				ColumnNames: []string{"entity_range_group_id", "table_id", "entity_range_group", "ts_partition_size"},
-				ColumnIDs:   []ColumnID{1, 2, 3, 4}},
-		},
-		NextFamilyID: 1,
-		PrimaryIndex: IndexDescriptor{
-			Name:             "primary",
-			ID:               1,
-			Unique:           true,
-			ColumnNames:      []string{"entity_range_group_id"},
-			ColumnDirections: []IndexDescriptor_Direction{IndexDescriptor_ASC},
-			ColumnIDs:        singleID1,
-			Version:          SecondaryIndexFamilyFormatVersion,
-		},
-		Indexes: []IndexDescriptor{
-			{
-				Name:             "kwdb_hash_routing_table_id_idx",
-				ID:               2,
-				Unique:           false,
-				ColumnNames:      []string{"table_id"},
-				ColumnDirections: []IndexDescriptor_Direction{IndexDescriptor_ASC},
-				ColumnIDs:        []ColumnID{2},
-				ExtraColumnIDs:   []ColumnID{1},
-				Version:          SecondaryIndexFamilyFormatVersion,
-			},
-		},
-		NextIndexID:    3,
-		FormatVersion:  InterleavedFormatVersion,
-		NextMutationID: 1,
-	}
 )
 
 // Create a kv pair for the zone config for the given key and config value.
@@ -1905,7 +1858,6 @@ func addSystemDescriptorsToSchema(target *MetadataSchema) {
 	target.AddDescriptor(keys.SystemDatabaseID, &DefinedFunctionTable)
 	target.AddDescriptor(keys.SystemDatabaseID, &KWDBTsTableTable)
 	target.AddDescriptor(keys.SystemDatabaseID, &ScheduledJobsTable)
-	target.AddDescriptor(keys.SystemDatabaseID, &KWDBHashRoutingTable)
 }
 
 // addSystemDatabaseToSchema populates the supplied MetadataSchema with the

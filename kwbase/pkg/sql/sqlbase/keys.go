@@ -274,37 +274,6 @@ func GetTableHashInfo(
 	return tableID, beginHash, endHash, err
 }
 
-// GetTableIDGroupID get TableID and GroupID
-func GetTableIDGroupID(ctx context.Context, startKey []byte) (uint64, uint64, error) {
-	var tableID uint64
-	var beginHash uint64
-	var err error
-
-	tableID, beginHash, err = DecodeTsHashPointKey(startKey, true)
-	if err != nil {
-		return 0, 0, errors.Wrap(err, "GetTableIDGroupID could not DecodeTsHashPointKey: beginHash")
-	}
-
-	hashRouter, err := api.GetHashRouterWithTable(0, uint32(tableID), false, nil)
-	if err != nil {
-		return 0, 0, errors.Wrap(err, "GetTableIDGroupID could not GetHashRouterWithTable")
-	}
-	group, err := hashRouter.GetGroupByHashPoint(ctx, api.HashPoint(beginHash))
-	if err != nil {
-		return 0, 0, errors.Wrap(err, "GetTableIDGroupID could not GetGroupByHashPoint")
-	}
-
-	return tableID, uint64(group.GroupID), err
-}
-
-// GetGroup get group
-func GetGroup(ctx context.Context, groupID uint64) api.RangeGroup {
-	return api.RangeGroup{
-		RangeGroupID: api.EntityRangeGroupID(groupID),
-		Type:         api.ReplicaType_Follower,
-	}
-}
-
 // IndexKeyValDirs returns the corresponding encoding.Directions for all the
 // encoded values in index's "fullest" possible index key, including directions
 // for table/index IDs, the interleaved sentinel and the index column values.

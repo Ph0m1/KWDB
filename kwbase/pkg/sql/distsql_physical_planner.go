@@ -931,6 +931,12 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 		planCtx.NodeAddresses = make(map[roachpb.NodeID]string)
 		planCtx.NodeAddresses[dsp.nodeDesc.NodeID] = dsp.nodeDesc.Address.String()
 	}
+
+	if api.SingleNode {
+		partitions = append(partitions, SpanPartition{Node: dsp.nodeDesc.NodeID, Spans: spans})
+		return partitions, nil
+	}
+
 	for _, span := range spans {
 		//var lastNodeID roachpb.NodeID
 		// lastKey maintains the EndKey of the last piece of `span`.
@@ -938,8 +944,13 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 			log.Infof(ctx, "partitioning span %s", span)
 		}
 
+		if bytes.Compare(span.Key, span.EndKey) > 0 {
+			err := errors.Newf("invalid span[%v, %v]", span.Key, span.EndKey)
+			log.Error(ctx, err)
+			return nil, err
+		}
 		rangeKey := span.Key
-		for bytes.Compare(rangeKey, span.EndKey) < 0 {
+		for {
 			var b kv.Batch
 			liReq := &roachpb.LeaseInfoRequest{}
 			liReq.Key = rangeKey
@@ -950,6 +961,8 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 			}
 			resp := b.RawResponse().Responses[0].GetLeaseInfo()
 			nodeID := resp.Lease.Replica.NodeID
+			nextKey := resp.RangeInfos[0].Desc.EndKey.AsRawKey()
+
 			partitionIdx, inNodeMap := nodeMap[nodeID]
 
 			// TODO by fyx, 由于分布式查询无法在分发层根据Gateway节点驱动进行查询, 自动健康状态检查无效. 计划版本无效. 待优化
@@ -971,25 +984,6 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 						planCtx.NodeAddresses[nodeID] = addr
 					}
 				}
-				//compat := true
-				//if addr != "" {
-				//	// Check if the node's DistSQL version is compatible with this plan.
-				//	// If it isn't, we'll use the gateway.
-				//	var ok bool
-				//	if compat, ok = nodeVerCompatMap[nodeID]; !ok {
-				//		compat = dsp.nodeVersionIsCompatible(nodeID, dsp.planVersion)
-				//		nodeVerCompatMap[nodeID] = compat
-				//	}
-				//}
-				//// If the node is unhealthy or its DistSQL version is incompatible, use
-				//// the gateway to process this span instead of the unhealthy host.
-				//// An empty address indicates an unhealthy host.
-				//if addr == "" || !compat {
-				//	log.Eventf(ctx, "not planning on node %d. unhealthy: %t, incompatible version: %t",
-				//		nodeID, addr == "", !compat)
-				//	nodeID = dsp.nodeDesc.NodeID
-				//	partitionIdx, inNodeMap = nodeMap[nodeID]
-				//}
 
 				partitionIdx = len(partitions)
 				partitions = append(partitions, SpanPartition{Node: nodeID})
@@ -997,22 +991,20 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 			}
 			partition := &partitions[partitionIdx]
 
-			endKey := resp.RangeInfos[0].Desc.EndKey.AsRawKey()
-			if endKey.Compare(span.EndKey) > 0 {
-				endKey = span.EndKey
+			if nextKey.Compare(span.EndKey) > 0 {
+				partition.Spans = append(partition.Spans, roachpb.Span{
+					Key:    rangeKey,
+					EndKey: span.EndKey,
+				})
+				break
 			}
-			//if lastNodeID == nodeID {
-			//	// Two consecutive ranges on the same node, merge the spans.
-			//	partition.Spans[len(partition.Spans)-1].EndKey = endKey.AsRawKey()
-			//} else {
 			// TODO by fyx ts不进行merge
 			partition.Spans = append(partition.Spans, roachpb.Span{
 				Key:    rangeKey,
-				EndKey: endKey,
+				EndKey: nextKey,
 			})
-			//}
 
-			rangeKey = endKey
+			rangeKey = nextKey
 		}
 	}
 	return partitions, nil
@@ -2607,52 +2599,22 @@ func (dsp *DistSQLPlanner) createTSDelete(
 ) (PhysicalPlan, error) {
 	var p PhysicalPlan
 	stageID := p.NewStageID()
-	var nodeIDs []roachpb.NodeID
-	entityGroups := make(map[int32][]*api.EntityRangeGroup)
-	if (planCtx.ExtendedEvalCtx.ExecCfg.StartMode == StartSingleReplica || planCtx.ExtendedEvalCtx.ExecCfg.StartMode == StartSingleNode) &&
-		n.delTyp == uint8(execinfrapb.OperatorType_TsDeleteMultiEntitiesData) {
-		// build table's hash hook
-		hashRouter, err := api.GetHashRouterWithTable(0, uint32(n.tableID), false, planCtx.planner.txn)
-		if err != nil {
-			return p, err
-		}
-		entityRGs := hashRouter.GetAllGroups(planCtx.ctx)
-		for i := range entityRGs {
-			entityGroups[int32(entityRGs[i].LeaseHolder.NodeID)] = append(entityGroups[int32(entityRGs[i].LeaseHolder.NodeID)], &entityRGs[i])
-		}
-		for nodeID := range entityGroups {
-			nodeIDs = append(nodeIDs, roachpb.NodeID(nodeID))
-		}
-	} else {
-		nodeIDs = n.nodeIDs
-	}
 
-	p.ResultRouters = make([]physicalplan.ProcessorIdx, len(nodeIDs))
-	p.Processors = make([]physicalplan.Processor, 0, len(nodeIDs))
+	p.ResultRouters = make([]physicalplan.ProcessorIdx, len(n.nodeIDs))
+	p.Processors = make([]physicalplan.Processor, 0, len(n.nodeIDs))
 
 	// Construct a processor for the payload of each node
-	for i := 0; i < len(nodeIDs); i++ {
+	for i := 0; i < len(n.nodeIDs); i++ {
 		var tsDelete = &execinfrapb.TsDeleteProSpec{
 			TsOperator:     execinfrapb.OperatorType(n.delTyp),
 			TableId:        n.tableID,
-			RangeGroupId:   n.groupID,
 			PrimaryTagKeys: n.primaryTagKey,
 			PrimaryTags:    n.primaryTagValue,
 			Spans:          n.spans,
 		}
-		if len(entityGroups) != 0 {
-			nodeGroups := entityGroups[int32(nodeIDs[i])]
-			tsDelete.EntityGroups = make([]execinfrapb.DeleteEntityGroup, len(nodeGroups))
-			for i, group := range nodeGroups {
-				tsDelete.EntityGroups[i].GroupId = uint64(group.GroupID)
-				for _, par := range group.Partitions {
-					tsDelete.EntityGroups[i].Partitions = append(tsDelete.EntityGroups[i].Partitions, &par)
-				}
-			}
-		}
 
 		proc := physicalplan.Processor{
-			Node: nodeIDs[i],
+			Node: n.nodeIDs[i],
 			Spec: execinfrapb.ProcessorSpec{
 				Core:    execinfrapb.ProcessorCoreUnion{TsDelete: tsDelete},
 				Output:  []execinfrapb.OutputRouterSpec{{Type: execinfrapb.OutputRouterSpec_PASS_THROUGH}},
@@ -2663,7 +2625,7 @@ func (dsp *DistSQLPlanner) createTSDelete(
 		p.ResultRouters[i] = pIdx
 	}
 
-	p.GateNoopInput = len(nodeIDs)
+	p.GateNoopInput = len(n.nodeIDs)
 	p.TsOperator = execinfrapb.OperatorType(n.delTyp)
 
 	return p, nil

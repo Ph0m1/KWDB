@@ -197,8 +197,6 @@ type TestServerInterface interface {
 
 	// AuditServer return audit server used by log audit
 	AuditServer() *server.AuditServer
-	// GetHashRouterManger returns the hash router manager used by the TestServer.
-	GetHashRouterManger() interface{}
 }
 
 // TestServerFactory encompasses the actual implementation of the shim

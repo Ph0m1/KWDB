@@ -549,50 +549,6 @@ func runDrain(cmd *cobra.Command, args []string) (err error) {
 	return err
 }
 
-var deadNodeCmd = &cobra.Command{
-	Use:   "dead",
-	Short: "set a node from unhealthy to dead",
-	Long: `
-set a node status. Currently can only set node status from unhealthy to dead`,
-	Args: cobra.NoArgs,
-	RunE: MaybeDecorateGRPCError(runDead),
-}
-
-var setNodeStatusCmd = &cobra.Command{
-	Use:   "set-status",
-	Short: "set a node status",
-	Long: `
-set a node status. Currently can only set node status from unhealthy to 
-dead. The node is in an unhealthy state, and the node that needs to be 
-set to the dead state cannot be a leaseholder or contain any replicas.
-All partitions queried through 'show ts partitions' should be available
-and the status should be 'running'`,
-	Args: cobra.NoArgs,
-	RunE: usageAndErr,
-}
-
-func runDead(cmd *cobra.Command, args []string) (err error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// At the end, we'll report "ok" if there was no error.
-	defer func() {
-		if err == nil {
-			fmt.Println("ok")
-		}
-	}()
-
-	// Establish a RPC connection.
-	c, finish, err := getAdminClient(ctx, serverCfg)
-	if err != nil {
-		return err
-	}
-	defer finish()
-
-	err = doDeadNoTimeout(ctx, c)
-	return err
-}
-
 var upgradeNodeCmd = &cobra.Command{
 	Use:   "upgrade <node id 1> [<node id 2> ...]",
 	Short: "upgrade the node(s) without shutting it down",
@@ -690,7 +646,6 @@ var nodeCmds = []*cobra.Command{
 	decommissionNodeCmd,
 	recommissionNodeCmd,
 	drainNodeCmd,
-	setNodeStatusCmd,
 	upgradeNodeCmd,
 }
 
@@ -703,5 +658,4 @@ var nodeCmd = &cobra.Command{
 
 func init() {
 	nodeCmd.AddCommand(nodeCmds...)
-	setNodeStatusCmd.AddCommand(deadNodeCmd)
 }

@@ -1493,7 +1493,7 @@ func (ef *execFactory) ConstructTSInsert(
 
 func (ef *execFactory) ConstructTSDelete(
 	nodeIDs []roachpb.NodeID,
-	tblID, groupID uint64,
+	tblID uint64,
 	spans []execinfrapb.Span,
 	delTyp uint8,
 	primaryTagKey, primaryTagValues [][]byte,
@@ -1502,7 +1502,6 @@ func (ef *execFactory) ConstructTSDelete(
 	tsDel := tsDeleteNodePool.Get().(*tsDeleteNode)
 	tsDel.nodeIDs = nodeIDs
 	tsDel.tableID = tblID
-	tsDel.groupID = groupID
 	tsDel.delTyp = delTyp
 	tsDel.primaryTagKey = primaryTagKey
 	tsDel.primaryTagValue = primaryTagValues

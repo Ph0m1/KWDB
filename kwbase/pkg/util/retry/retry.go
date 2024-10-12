@@ -138,6 +138,11 @@ func (r *Retry) Next() bool {
 	}
 }
 
+// CurrentAttempts returns the currentAttempt
+func (r *Retry) CurrentAttempts() int {
+	return r.currentAttempt
+}
+
 // closedC is returned from Retry.NextCh whenever a retry
 // can begin immediately.
 var closedC = func() chan time.Time {

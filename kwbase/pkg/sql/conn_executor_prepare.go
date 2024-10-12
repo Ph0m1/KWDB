@@ -482,7 +482,7 @@ func (ex *connExecutor) execPreparedirectBind(
 				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
 				for _, priTagRowIdx := range priTagValMap {
 					if err = BuildPreparePayload(&EvalContext, inputValues, priTagRowIdx,
-						&di, ps.PrepareInsertDirect.Dit, nil, bindCmd.Args); err != nil {
+						&di, ps.PrepareInsertDirect.Dit, bindCmd.Args); err != nil {
 						return err
 					}
 				}

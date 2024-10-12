@@ -640,14 +640,6 @@ func (p *planner) handleCreateTSTable(
 			); txnErr != nil {
 				return txnErr
 			}
-			// remove hash info
-			mgr, err := api.GetHashRouterManagerWithTxn(ctx, nil)
-			if err != nil {
-				return errors.Errorf("get hashrouter manager failed :%v", err)
-			}
-			if txnErr := mgr.DropTableHashInfo(ctx, txn, uint32(tab.ID)); txnErr != nil {
-				return txnErr
-			}
 			// remove descriptor
 			descKey := sqlbase.MakeDescMetadataKey(tableDesc.ID)
 			b.Del(descKey)

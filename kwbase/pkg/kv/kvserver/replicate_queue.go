@@ -226,7 +226,7 @@ func newReplicateQueue(store *Store, g *gossip.Gossip, allocator Allocator) *rep
 func (rq *replicateQueue) shouldQueue(
 	ctx context.Context, now hlc.Timestamp, repl *Replica, sysCfg *config.SystemConfig,
 ) (shouldQ bool, priority float64) {
-	if api.MppMode {
+	if api.MppMode && repl.isTs() {
 		return false, 0
 	}
 	desc, zone := repl.DescAndZone()

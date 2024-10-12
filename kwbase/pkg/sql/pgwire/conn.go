@@ -927,7 +927,7 @@ func (c *conn) handleSimpleQuery(
 						priTagValMap := sql.BuildpriTagValMap(di)
 						di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
 						for _, priTagRowIdx := range priTagValMap {
-							if err = sql.BuildPayload(&EvalContext, priTagRowIdx, &di, dit, nil); err != nil {
+							if err = sql.BuildPayload(&EvalContext, priTagRowIdx, &di, dit); err != nil {
 								return err
 							}
 						}

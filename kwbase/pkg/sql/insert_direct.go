@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
@@ -394,11 +393,7 @@ func parserString2Int(
 
 // BuildPayload is used to BuildPayloadForTsInsert
 func BuildPayload(
-	EvalContext *tree.EvalContext,
-	priTagRowIdx []int,
-	di *DirectInsert,
-	dit DirectInsertTable,
-	hashRouter api.HashRouter,
+	EvalContext *tree.EvalContext, priTagRowIdx []int, di *DirectInsert, dit DirectInsertTable,
 ) error {
 	payload, _, err := execbuilder.BuildPayloadForTsInsert(
 		EvalContext,
@@ -410,7 +405,6 @@ func BuildPayload(
 		di.PArgs,
 		dit.DbID,
 		dit.TabID,
-		hashRouter,
 	)
 	if err != nil {
 		return err
@@ -428,7 +422,6 @@ func BuildPreparePayload(
 	priTagRowIdx []int,
 	di *DirectInsert,
 	dit DirectInsertTable,
-	hashRouter api.HashRouter,
 	qargs [][]byte,
 ) error {
 	payload, _, err := execbuilder.BuildPreparePayloadForTsInsert(
@@ -441,7 +434,6 @@ func BuildPreparePayload(
 		di.PArgs,
 		dit.DbID,
 		dit.TabID,
-		hashRouter,
 		qargs,
 		di.ColNum,
 	)
@@ -627,7 +619,6 @@ func BuildRowBytesForPrepareTsInsert(
 			di.PArgs,
 			Dit.DbID,
 			Dit.TabID,
-			nil,
 			Args,
 			di.ColNum,
 		)
@@ -1694,7 +1685,6 @@ func GetPayloadMapForMuiltNode(
 			di.PArgs,
 			dit.DbID,
 			uint32(table.ID),
-			nil,
 		)
 		if err != nil {
 			return err

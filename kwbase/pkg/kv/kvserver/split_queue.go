@@ -71,11 +71,11 @@ type splitQueue struct {
 
 	// loadBasedCount counts the load-based splits performed by the queue.
 	loadBasedCount telemetry.Counter
-	isSingleNode   bool
+	mode           startMode
 }
 
 // newSplitQueue returns a new instance of splitQueue.
-func newSplitQueue(store *Store, db *kv.DB, gossip *gossip.Gossip, isSingleNode bool) *splitQueue {
+func newSplitQueue(store *Store, db *kv.DB, gossip *gossip.Gossip, mode startMode) *splitQueue {
 	var purgChan <-chan time.Time
 	if c := store.TestingKnobs().SplitQueuePurgatoryChan; c != nil {
 		purgChan = c
@@ -88,7 +88,7 @@ func newSplitQueue(store *Store, db *kv.DB, gossip *gossip.Gossip, isSingleNode 
 		db:             db,
 		purgChan:       purgChan,
 		loadBasedCount: telemetry.GetCounter("kv.split.load"),
-		isSingleNode:   isSingleNode,
+		mode:           mode,
 	}
 	sq.baseQueue = newBaseQueue(
 		"split", sq, store, gossip,
@@ -135,7 +135,7 @@ func (sq *splitQueue) shouldQueue(
 	ctx context.Context, now hlc.Timestamp, repl *Replica, sysCfg *config.SystemConfig,
 ) (shouldQ bool, priority float64) {
 	desc := repl.Desc()
-	if desc.GetRangeType() == roachpb.TS_RANGE && sq.isSingleNode {
+	if desc.GetRangeType() == roachpb.TS_RANGE && (sq.mode == singleNode || sq.mode == singleReplica) {
 		return false, 0
 	}
 	shouldQ, priority = shouldSplitRange(repl.Desc(), repl.GetMVCCStats(),

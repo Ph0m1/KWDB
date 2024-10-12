@@ -456,18 +456,6 @@ message DrainResponse {
   string drain_remaining_description = 4;
 }
 
-
-message DeadRequest{
-  int32 node_id = 1;
-
-}
-
-message DeadResponse{
-  bool is_dead = 1;
-  string err_info = 2;
-
-}
-
 // DecommissionStatusRequest requests the decommissioning status for the
 // specified or, if none are specified, all nodes.
 message DecommissionStatusRequest {
@@ -1000,9 +988,6 @@ service Admin {
   // We do not expose this via HTTP unless we have a way to authenticate
   // + authorize streaming RPC connections. See #42567.
   rpc Drain(DrainRequest) returns (stream DrainResponse) {
-  }
-
-  rpc Dead(DeadRequest) returns (stream DeadResponse) {
   }
 
   // Decommission puts the node(s) into the specified decommissioning state.

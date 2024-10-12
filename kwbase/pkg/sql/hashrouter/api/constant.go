@@ -49,3 +49,6 @@ type HashPoint uint16
 
 // MppMode MppMode
 var MppMode bool
+
+// SingleNode SingleNode
+var SingleNode bool

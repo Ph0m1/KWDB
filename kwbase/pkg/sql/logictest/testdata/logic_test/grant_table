@@ -239,10 +239,6 @@ system         public       jobs                             admin      INSERT
 system         public       jobs                             admin      SELECT
 system         public       jobs                             root       DELETE
 system         public       jobs                             admin      UPDATE
-system         public       kwdb_hash_routing                root       SELECT
-system         public       kwdb_hash_routing                admin      SELECT
-system         public       kwdb_hash_routing                root       GRANT
-system         public       kwdb_hash_routing                admin      GRANT
 system         public       kwdb_replication_info            admin      DELETE
 system         public       kwdb_replication_info            admin      GRANT
 system         public       kwdb_replication_info            admin      INSERT

@@ -649,18 +649,6 @@ func init() {
 		DurationFlag(f, &quitCtx.drainWait, cliflags.DrainWait, quitCtx.drainWait)
 	}
 
-	// Set node status
-	{
-		f := setNodeStatusCmd.Flags()
-		IntFlag(f, &quitCtx.deadNodeID, cliflags.SetDeadNodeID, quitCtx.deadNodeID)
-	}
-
-	// Set node status to dead
-	{
-		f := deadNodeCmd.Flags()
-		IntFlag(f, &quitCtx.deadNodeID, cliflags.SetDeadNodeID, quitCtx.deadNodeID)
-	}
-
 	// SQL and demo commands.
 	for _, cmd := range append([]*cobra.Command{sqlShellCmd, demoCmd}, demoCmd.Commands()...) {
 		f := cmd.Flags()

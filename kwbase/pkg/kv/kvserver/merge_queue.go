@@ -99,16 +99,24 @@ var MergeQueueInterval = settings.RegisterNonNegativeDurationSetting(
 // initiated.
 type mergeQueue struct {
 	*baseQueue
-	db           *kv.DB
-	purgChan     <-chan time.Time
-	isSingleNode bool
+	db       *kv.DB
+	purgChan <-chan time.Time
+	mode     startMode
 }
 
-func newMergeQueue(store *Store, db *kv.DB, gossip *gossip.Gossip, isSingleNode bool) *mergeQueue {
+type startMode int
+
+const (
+	singleNode startMode = iota
+	singleReplica
+	normal
+)
+
+func newMergeQueue(store *Store, db *kv.DB, gossip *gossip.Gossip, mode startMode) *mergeQueue {
 	mq := &mergeQueue{
-		db:           db,
-		purgChan:     time.NewTicker(mergeQueuePurgatoryCheckInterval).C,
-		isSingleNode: isSingleNode,
+		db:       db,
+		purgChan: time.NewTicker(mergeQueuePurgatoryCheckInterval).C,
+		mode:     mode,
 	}
 	mq.baseQueue = newBaseQueue(
 		"merge", mq, store, gossip,
@@ -153,7 +161,7 @@ func (mq *mergeQueue) shouldQueue(
 	}
 	desc := repl.Desc()
 
-	if desc.GetRangeType() == roachpb.TS_RANGE && mq.isSingleNode {
+	if desc.GetRangeType() == roachpb.TS_RANGE && (mq.mode == singleNode || mq.mode == singleReplica) {
 		return false, 0
 	}
 	if desc.EndKey.Equal(roachpb.RKeyMax) {

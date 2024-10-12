@@ -209,7 +209,6 @@ statement_diagnostics            BASE TABLE
 kwdb_replication_info            BASE TABLE
 bo_black_list                    BASE TABLE
 kwdb_ts_table                    BASE TABLE
-kwdb_hash_routing                BASE TABLE
 user_defined_function            BASE TABLE
 eventlog                         BASE TABLE
 scheduled_jobs                   BASE TABLE
@@ -246,7 +245,6 @@ statement_diagnostics            BASE TABLE         ·
 kwdb_replication_info            BASE TABLE         ·
 bo_black_list                    BASE TABLE         ·
 kwdb_ts_table                    BASE TABLE         ·
-kwdb_hash_routing                BASE TABLE         ·
 user_defined_function            BASE TABLE         ·
 eventlog                         BASE TABLE         ·
 scheduled_jobs                   BASE TABLE         ·

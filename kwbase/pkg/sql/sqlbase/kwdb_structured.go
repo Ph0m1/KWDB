@@ -14,7 +14,6 @@ package sqlbase
 import (
 	"context"
 	"encoding/binary"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -344,18 +343,7 @@ func decodeExtraValue(
 		// Implicit columns are always encoded Ascending.
 		dirs[i] = IndexDescriptor_ASC
 	}
-	var extraKey []byte
-	if !index.Unique && systemTable.ID == KWDBHashRoutingTable.ID {
-		// special logic on the table
-		keyStr := keyVal.Key.String()
-		keyStrs := strings.Split(keyStr, "/")
-		groupID, err := strconv.Atoi(keyStrs[len(keyStrs)-2])
-		if err != nil {
-			return nil, err
-		}
-		return tree.Datums{tree.NewDInt(tree.DInt(groupID))}, nil
-	}
-	extraKey, err = keyVal.Value.GetBytes()
+	extraKey, err := keyVal.Value.GetBytes()
 	if err != nil {
 		return nil, err
 	}

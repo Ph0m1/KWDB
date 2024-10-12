@@ -389,14 +389,6 @@ func (ts *TestServer) TseDB() *tscoord.DB {
 	return nil
 }
 
-// GetHashRouterManger returns the hash router manager used by the TestServer.
-func (ts *TestServer) GetHashRouterManger() interface{} {
-	if ts != nil {
-		return ts.hashRouterManager
-	}
-	return nil
-}
-
 // PGServer returns the pgwire.Server used by the TestServer.
 func (ts *TestServer) PGServer() *pgwire.Server {
 	if ts != nil {

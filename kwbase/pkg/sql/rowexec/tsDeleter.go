@@ -42,15 +42,12 @@ type tsDeleter struct {
 
 	tsOperatorType execinfrapb.OperatorType
 
-	tableID        uint64
-	rangeGroupID   uint64
+	tableID uint64
+
 	primaryTagKeys [][]byte
 	primaryTags    [][]byte
 
 	spans []execinfrapb.Span
-
-	// Delete multi entities for MPP mode
-	groups []execinfrapb.DeleteEntityGroup
 
 	// Number of deleted rows
 	deleteRow     uint64
@@ -74,13 +71,10 @@ func newTsDeleter(
 	td := &tsDeleter{
 		tsOperatorType: tsDeleteSpec.TsOperator,
 		tableID:        tsDeleteSpec.TableId,
-		rangeGroupID:   tsDeleteSpec.RangeGroupId,
 		primaryTagKeys: tsDeleteSpec.PrimaryTagKeys,
 		primaryTags:    tsDeleteSpec.PrimaryTags,
 	}
 	td.spans = tsDeleteSpec.Spans
-	// groups just for single node
-	td.groups = tsDeleteSpec.EntityGroups
 
 	if err := td.Init(
 		td,
@@ -127,9 +121,8 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 				Key:    startKey,
 				EndKey: endKey,
 			},
-			TableId:      td.tableID,
-			PrimaryTags:  td.primaryTags[0],
-			RangeGroupId: td.rangeGroupID,
+			TableId:     td.tableID,
+			PrimaryTags: td.primaryTags[0],
 		}
 		req.TsSpans = make([]*roachpb.TsSpan, len(td.spans))
 		for i := range td.spans {
@@ -160,17 +153,6 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 		for _, span := range td.spans {
 			req.TsSpans = append(req.TsSpans, &roachpb.TsSpan{TsStart: span.StartTs, TsEnd: span.EndTs})
 		}
-		for _, group := range td.groups {
-			var points []*roachpb.DelEntityGroup_HashPoint
-			for _, par := range group.Partitions {
-				points = append(points, &roachpb.DelEntityGroup_HashPoint{StartPoint: uint64(par.StartPoint), EndPoint: uint64(par.EndPoint)})
-			}
-			req.DelEntityGroups = append(req.DelEntityGroups,
-				&roachpb.DelEntityGroup{
-					GroupId:    group.GroupId,
-					Partitions: points,
-				})
-		}
 		//fmt.Println("-----DeleteMultiEntities-----")
 		//fmt.Printf("startKey: %v, endKey: %v, TsSpan: %v\n", req.Key, req.EndKey, req.TsSpans)
 		ba.AddRawRequest(req)
@@ -198,10 +180,9 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 				Key:    startKey,
 				EndKey: endKey,
 			},
-			TableId:      td.tableID,
-			PrimaryTags:  td.primaryTags[0],
-			RangeGroupId: td.rangeGroupID,
-			TsSpans:      []*roachpb.TsSpan{{TsStart: math.MinInt64, TsEnd: math.MaxInt64}},
+			TableId:     td.tableID,
+			PrimaryTags: td.primaryTags[0],
+			TsSpans:     []*roachpb.TsSpan{{TsStart: math.MinInt64, TsEnd: math.MaxInt64}},
 		}
 		//fmt.Println("-----DeleteEntities-----data")
 		//fmt.Printf("startKey: %v, endKey: %v, TsSpan: %v\n", delDataReq.Key, delDataReq.EndKey, delDataReq.TsSpans)
@@ -220,9 +201,8 @@ func (td *tsDeleter) Start(ctx context.Context) context.Context {
 					Key:    startKey,
 					EndKey: endKey,
 				},
-				TableId:      td.tableID,
-				PrimaryTags:  td.primaryTags,
-				RangeGroupId: td.rangeGroupID,
+				TableId:     td.tableID,
+				PrimaryTags: td.primaryTags,
 			})
 			err = td.FlowCtx.Cfg.TseDB.Run(ctx, ba2)
 		}

@@ -33,7 +33,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
@@ -374,12 +373,6 @@ func (p *planner) dropTableImpl(
 		return droppedViews, err
 	}
 
-	// delete hash router info
-	mgr := api.GetHashRouterManagerWithCache()
-	err = mgr.DropTableHashInfo(ctx, p.txn, uint32(tableDesc.ID))
-	if err != nil {
-		return nil, err
-	}
 	err = p.initiateDropTable(ctx, tableDesc, queueJob, jobDesc, true /* drain name */)
 	return droppedViews, err
 }

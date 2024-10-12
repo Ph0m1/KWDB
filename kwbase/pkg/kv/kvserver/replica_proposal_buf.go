@@ -486,21 +486,21 @@ func (b *propBuf) FlushLockedWithRaftGroup(raftGroup *raft.RawNode) (int, error)
 			// TsRequest is encapsulated into entry.request. When it is stored on
 			// disk, the corresponding processing interface is called according to
 			// the request type.
-			var IsTsDML, isClearTsRange bool
+			var needPropose bool
 			if p.Request.Replica.GetTag() == roachpb.TS_REPLICA {
 				for _, ru := range p.Request.Requests {
 					req := ru.GetInner()
 					switch r := req.(type) {
 					// add ClearRangeRequest case, sometimes RangeDescriptorCache is old
 					case *roachpb.ClearRangeRequest:
-						isClearTsRange = r.TableId != 0
+						needPropose = r.TableId != 0
 					case *roachpb.TsPutTagRequest,
 						*roachpb.TsRowPutRequest,
 						*roachpb.TsDeleteRequest,
 						*roachpb.TsDeleteEntityRequest,
 						*roachpb.TsTagUpdateRequest,
 						*roachpb.TsDeleteMultiEntitiesDataRequest:
-						IsTsDML = true
+						needPropose = true
 					default:
 						continue
 					}
@@ -510,12 +510,12 @@ func (b *propBuf) FlushLockedWithRaftGroup(raftGroup *raft.RawNode) (int, error)
 				for _, ru := range p.Request.Requests {
 					req := ru.GetInner()
 					if r, isClearReq := req.(*roachpb.ClearRangeRequest); isClearReq && r.TableId != 0 {
-						isClearTsRange = true
+						needPropose = true
 						break
 					}
 				}
 			}
-			if IsTsDML || isClearTsRange {
+			if needPropose {
 				request, _ := protoutil.Marshal(p.Request)
 				ents = append(ents, raftpb.Entry{
 					Request: request,

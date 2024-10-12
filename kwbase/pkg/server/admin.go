@@ -1927,6 +1927,9 @@ func (s *adminServer) DecommissionStatus(
 func (s *adminServer) Decommission(
 	ctx context.Context, req *serverpb.DecommissionRequest,
 ) (*serverpb.DecommissionStatusResponse, error) {
+	if s.server.execCfg.StartMode == sql.StartSingleReplica {
+		return nil, errors.New("node cannot be decommissioned in mpp mode")
+	}
 	nodeIDs := req.NodeIDs
 	if nodeIDs == nil {
 		// If no NodeIDs are specified, decommission the current node. This is

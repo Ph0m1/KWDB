@@ -113,7 +113,6 @@ func (t *tsDeleteNode) FastPathResults() (int, bool) {
 type tsDeleteNode struct {
 	nodeIDs         []roachpb.NodeID
 	tableID         uint64
-	groupID         uint64
 	primaryTagKey   [][]byte
 	primaryTagValue [][]byte
 	delTyp          uint8

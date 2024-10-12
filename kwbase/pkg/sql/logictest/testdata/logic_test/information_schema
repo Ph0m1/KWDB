@@ -666,7 +666,6 @@ system         public              statement_diagnostics              BASE TABLE
 system         public              kwdb_replication_info              BASE TABLE         YES                 1        630200280
 system         public              bo_black_list                      BASE TABLE         YES                 1        630200280
 system         public              kwdb_ts_table                      BASE TABLE         YES                 1        630200280
-system         public              kwdb_hash_routing                  BASE TABLE         YES                 1        630200280
 system         public              user_defined_function              BASE TABLE         YES                 1        630200280
 system         public              eventlog                           BASE TABLE         YES                 1        630200280
 system         public              scheduled_jobs                     BASE TABLE         YES                 1        630200280
@@ -748,22 +747,17 @@ system              public             630200280_24_4_not_null   system         
 system              public             primary                   system         public        comments                         PRIMARY KEY      NO             NO
 system              public             630200280_3_1_not_null    system         public        descriptor                       CHECK            NO             NO
 system              public             primary                   system         public        descriptor                       PRIMARY KEY      NO             NO
-system              public             630200280_56_1_not_null   system         public        eventlog                         CHECK            NO             NO
-system              public             630200280_56_2_not_null   system         public        eventlog                         CHECK            NO             NO
-system              public             630200280_56_3_not_null   system         public        eventlog                         CHECK            NO             NO
-system              public             630200280_56_4_not_null   system         public        eventlog                         CHECK            NO             NO
-system              public             630200280_56_6_not_null   system         public        eventlog                         CHECK            NO             NO
+system              public             630200280_55_1_not_null   system         public        eventlog                         CHECK            NO             NO
+system              public             630200280_55_2_not_null   system         public        eventlog                         CHECK            NO             NO
+system              public             630200280_55_3_not_null   system         public        eventlog                         CHECK            NO             NO
+system              public             630200280_55_4_not_null   system         public        eventlog                         CHECK            NO             NO
+system              public             630200280_55_6_not_null   system         public        eventlog                         CHECK            NO             NO
 system              public             primary                   system         public        eventlog                         PRIMARY KEY      NO             NO
 system              public             630200280_15_1_not_null   system         public        jobs                             CHECK            NO             NO
 system              public             630200280_15_2_not_null   system         public        jobs                             CHECK            NO             NO
 system              public             630200280_15_3_not_null   system         public        jobs                             CHECK            NO             NO
 system              public             630200280_15_4_not_null   system         public        jobs                             CHECK            NO             NO
 system              public             primary                   system         public        jobs                             PRIMARY KEY      NO             NO
-system              public             630200280_54_1_not_null   system         public        kwdb_hash_routing                CHECK            NO             NO
-system              public             630200280_54_2_not_null   system         public        kwdb_hash_routing                CHECK            NO             NO
-system              public             630200280_54_3_not_null   system         public        kwdb_hash_routing                CHECK            NO             NO
-system              public             630200280_54_4_not_null   system         public        kwdb_hash_routing                CHECK            NO             NO
-system              public             primary                   system         public        kwdb_hash_routing                PRIMARY KEY      NO             NO
 system              public             630200280_42_10_not_null  system         public        kwdb_replication_info            CHECK            NO             NO
 system              public             630200280_42_11_not_null  system         public        kwdb_replication_info            CHECK            NO             NO
 system              public             630200280_42_1_not_null   system         public        kwdb_replication_info            CHECK            NO             NO
@@ -851,12 +845,12 @@ system              public             primary                   system         
 system              public             630200280_33_1_not_null   system         public        role_options                     CHECK            NO             NO
 system              public             630200280_33_2_not_null   system         public        role_options                     CHECK            NO             NO
 system              public             primary                   system         public        role_options                     PRIMARY KEY      NO             NO
-system              public             630200280_57_10_not_null  system         public        scheduled_jobs                   CHECK            NO             NO
-system              public             630200280_57_1_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
-system              public             630200280_57_2_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
-system              public             630200280_57_3_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
-system              public             630200280_57_4_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
-system              public             630200280_57_9_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
+system              public             630200280_56_10_not_null  system         public        scheduled_jobs                   CHECK            NO             NO
+system              public             630200280_56_1_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
+system              public             630200280_56_2_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
+system              public             630200280_56_3_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
+system              public             630200280_56_4_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
+system              public             630200280_56_9_not_null   system         public        scheduled_jobs                   CHECK            NO             NO
 system              public             primary                   system         public        scheduled_jobs                   PRIMARY KEY      NO             NO
 system              public             630200280_6_1_not_null    system         public        settings                         CHECK            NO             NO
 system              public             630200280_6_2_not_null    system         public        settings                         CHECK            NO             NO
@@ -886,18 +880,18 @@ system              public             primary                   system         
 system              public             630200280_14_1_not_null   system         public        ui                               CHECK            NO             NO
 system              public             630200280_14_3_not_null   system         public        ui                               CHECK            NO             NO
 system              public             primary                   system         public        ui                               PRIMARY KEY      NO             NO
-system              public             630200280_55_10_not_null  system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_11_not_null  system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_12_not_null  system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_1_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_2_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_3_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_4_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_5_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_6_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_7_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_8_not_null   system         public        user_defined_function            CHECK            NO             NO
-system              public             630200280_55_9_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_10_not_null  system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_11_not_null  system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_12_not_null  system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_1_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_2_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_3_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_4_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_5_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_6_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_7_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_8_not_null   system         public        user_defined_function            CHECK            NO             NO
+system              public             630200280_54_9_not_null   system         public        user_defined_function            CHECK            NO             NO
 system              public             primary                   system         public        user_defined_function            PRIMARY KEY      NO             NO
 system              public             630200280_4_1_not_null    system         public        users                            CHECK            NO             NO
 system              public             630200280_4_3_not_null    system         public        users                            CHECK            NO             NO
@@ -1036,33 +1030,29 @@ system              public             630200280_47_4_not_null   template_id IS 
 system              public             630200280_47_5_not_null   desc IS NOT NULL
 system              public             630200280_4_1_not_null    username IS NOT NULL
 system              public             630200280_4_3_not_null    isRole IS NOT NULL
-system              public             630200280_54_1_not_null   entity_range_group_id IS NOT NULL
-system              public             630200280_54_2_not_null   table_id IS NOT NULL
-system              public             630200280_54_3_not_null   entity_range_group IS NOT NULL
-system              public             630200280_54_4_not_null   ts_partition_size IS NOT NULL
-system              public             630200280_55_10_not_null  create_time IS NOT NULL
-system              public             630200280_55_11_not_null  version IS NOT NULL
-system              public             630200280_55_12_not_null  comments IS NOT NULL
-system              public             630200280_55_1_not_null   function_name IS NOT NULL
-system              public             630200280_55_2_not_null   argument_types IS NOT NULL
-system              public             630200280_55_3_not_null   return_type IS NOT NULL
-system              public             630200280_55_4_not_null   types_length IS NOT NULL
-system              public             630200280_55_5_not_null   function_body IS NOT NULL
-system              public             630200280_55_6_not_null   function_type IS NOT NULL
-system              public             630200280_55_7_not_null   language IS NOT NULL
-system              public             630200280_55_8_not_null   db_name IS NOT NULL
-system              public             630200280_55_9_not_null   creator IS NOT NULL
-system              public             630200280_56_1_not_null   timestamp IS NOT NULL
-system              public             630200280_56_2_not_null   eventType IS NOT NULL
-system              public             630200280_56_3_not_null   targetID IS NOT NULL
-system              public             630200280_56_4_not_null   reportingID IS NOT NULL
-system              public             630200280_56_6_not_null   uniqueID IS NOT NULL
-system              public             630200280_57_10_not_null  execution_args IS NOT NULL
-system              public             630200280_57_1_not_null   schedule_id IS NOT NULL
-system              public             630200280_57_2_not_null   schedule_name IS NOT NULL
-system              public             630200280_57_3_not_null   created IS NOT NULL
-system              public             630200280_57_4_not_null   owner IS NOT NULL
-system              public             630200280_57_9_not_null   executor_type IS NOT NULL
+system              public             630200280_54_10_not_null  create_time IS NOT NULL
+system              public             630200280_54_11_not_null  version IS NOT NULL
+system              public             630200280_54_12_not_null  comments IS NOT NULL
+system              public             630200280_54_1_not_null   function_name IS NOT NULL
+system              public             630200280_54_2_not_null   argument_types IS NOT NULL
+system              public             630200280_54_3_not_null   return_type IS NOT NULL
+system              public             630200280_54_4_not_null   types_length IS NOT NULL
+system              public             630200280_54_5_not_null   function_body IS NOT NULL
+system              public             630200280_54_6_not_null   function_type IS NOT NULL
+system              public             630200280_54_7_not_null   language IS NOT NULL
+system              public             630200280_54_8_not_null   db_name IS NOT NULL
+system              public             630200280_54_9_not_null   creator IS NOT NULL
+system              public             630200280_55_1_not_null   timestamp IS NOT NULL
+system              public             630200280_55_2_not_null   eventType IS NOT NULL
+system              public             630200280_55_3_not_null   targetID IS NOT NULL
+system              public             630200280_55_4_not_null   reportingID IS NOT NULL
+system              public             630200280_55_6_not_null   uniqueID IS NOT NULL
+system              public             630200280_56_10_not_null  execution_args IS NOT NULL
+system              public             630200280_56_1_not_null   schedule_id IS NOT NULL
+system              public             630200280_56_2_not_null   schedule_name IS NOT NULL
+system              public             630200280_56_3_not_null   created IS NOT NULL
+system              public             630200280_56_4_not_null   owner IS NOT NULL
+system              public             630200280_56_9_not_null   executor_type IS NOT NULL
 system              public             630200280_5_1_not_null    id IS NOT NULL
 system              public             630200280_6_1_not_null    name IS NOT NULL
 system              public             630200280_6_2_not_null    value IS NOT NULL
@@ -1083,7 +1073,6 @@ system         public        descriptor                       id                
 system         public        eventlog                         timestamp              system              public             primary
 system         public        eventlog                         uniqueID               system              public             primary
 system         public        jobs                             id                     system              public             primary
-system         public        kwdb_hash_routing                entity_range_group_id  system              public             primary
 system         public        kwdb_replication_info            agent_type             system              public             primary
 system         public        kwdb_replication_info            replica_desc           system              public             primary
 system         public        kwdb_ts_table                    db_name                system              public             unique_instance_name_idx
@@ -1251,10 +1240,6 @@ system         public        jobs                             id                
 system         public        jobs                             payload                   4
 system         public        jobs                             progress                  5
 system         public        jobs                             status                    2
-system         public        kwdb_hash_routing                entity_range_group        3
-system         public        kwdb_hash_routing                entity_range_group_id     1
-system         public        kwdb_hash_routing                table_id                  2
-system         public        kwdb_hash_routing                ts_partition_size         4
 system         public        kwdb_replication_info            agent_type                6
 system         public        kwdb_replication_info            dest_cluster_id           5
 system         public        kwdb_replication_info            replica_desc              8
@@ -1882,10 +1867,6 @@ NULL     root     system         public              jobs                       
 NULL     root     system         public              jobs                               INSERT          NULL          NO
 NULL     root     system         public              jobs                               SELECT          NULL          YES
 NULL     root     system         public              jobs                               UPDATE          NULL          NO
-NULL     admin    system         public              kwdb_hash_routing                  GRANT           NULL          NO
-NULL     admin    system         public              kwdb_hash_routing                  SELECT          NULL          YES
-NULL     root     system         public              kwdb_hash_routing                  GRANT           NULL          NO
-NULL     root     system         public              kwdb_hash_routing                  SELECT          NULL          YES
 NULL     admin    system         public              kwdb_replication_info              DELETE          NULL          NO
 NULL     admin    system         public              kwdb_replication_info              GRANT           NULL          NO
 NULL     admin    system         public              kwdb_replication_info              INSERT          NULL          NO

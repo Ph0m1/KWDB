@@ -40,8 +40,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/rpc"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/util/contextutil"
@@ -269,99 +267,6 @@ func (nl *NodeLiveness) SetDraining(ctx context.Context, drain bool, reporter fu
 	}
 }
 
-// SetDead sets node status to dead according to nodeID
-func (nl *NodeLiveness) SetDead(ctx context.Context, nodeID roachpb.NodeID) error {
-
-	allowAdvancedDistribute := settings.AllowAdvanceDistributeSetting.Get(&nl.st.SV)
-	if !allowAdvancedDistribute {
-		return errors.Errorf("Can not set node status to dead when server.allow_advanced_distributed_operations is false. ")
-	}
-
-	replicaNum := int(settings.DefaultEntityRangeReplicaNum.Get(&nl.st.SV))
-
-	livenesses := nl.GetLivenesses()
-	for _, l := range livenesses {
-		if l.NodeID == nodeID {
-			status := LivenessStatus(l, timeutil.Now(), TimeUntilStoreDead.Get(&nl.st.SV))
-			if status == storagepb.NodeLivenessStatus_UNAVAILABLE {
-
-				const tsHACheckInterval = 4 * time.Second
-				times := tsHACheckInterval / time.Second
-				var err error
-				for i := times; i >= 0; i-- {
-					err = nl.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-						routings, err := api.GetAllHashRoutings(ctx, txn)
-						if err != nil {
-							return err
-						}
-						allRunning := true
-						needReplicas := false
-						for _, r := range routings {
-							if r.EntityRangeGroup.LeaseHolder.NodeID == nodeID {
-								return errors.Errorf("EntityRangeGroup %d did not finish the leaseholder transferring",
-									r.EntityRangeGroupId)
-							}
-							for _, repl := range r.EntityRangeGroup.InternalReplicas {
-								if repl.NodeID == nodeID && repl.Status == api.EntityRangeGroupReplicaStatus_available {
-									return errors.Errorf("EntityRangeGroup %d has replica %d on node %d",
-										r.EntityRangeGroup.GroupID, repl.ReplicaID, nodeID)
-								}
-							}
-							if r.EntityRangeGroup.Status != api.EntityRangeGroupStatus_Available {
-								allRunning = false
-							}
-							availaRepCnt := r.EntityRangeGroup.AvailableReplicaCnt()
-							if availaRepCnt != replicaNum {
-								needReplicas = true
-							}
-						}
-						if allRunning && needReplicas {
-							return nil
-						}
-						if allRunning && !needReplicas {
-							hasLeaseholder := false
-							hasReplicas := false
-							for _, r := range routings {
-								if r.EntityRangeGroup.LeaseHolder.NodeID == nodeID {
-									hasLeaseholder = true
-								}
-								if r.EntityRangeGroup.HasReplicaOnNode(nodeID) {
-									hasReplicas = true
-								}
-								if hasLeaseholder || hasReplicas {
-									break
-								}
-							}
-							if !hasLeaseholder && !hasReplicas {
-								return nil
-							}
-							return errors.Errorf("The cluster is waiting to transfer")
-						}
-						return errors.Errorf("The cluster is transferring")
-					})
-
-					if err == nil {
-						//nl.SetTSNodeLiveness(context.Background(), nodeID, Dead)
-						log.Infof(ctx, " setting node %d to dead \n", nodeID)
-						return nil
-					}
-					if i > 0 {
-						time.Sleep(time.Second)
-						continue
-					}
-					return err
-
-				}
-			} else if status == storagepb.NodeLivenessStatus_DEAD {
-				return errors.Errorf("Node %d status has already been dead", nodeID)
-			} else {
-				return errors.Errorf("Can not set node %d to dead when it's %s\n", nodeID, status)
-			}
-		}
-	}
-	return errors.Errorf("Can not find node %d\n", nodeID)
-}
-
 var errNodeStatusSet = errors.New("node status is already set")
 
 // SetTSNodeLiveness attempts to update this node's liveness record to put itself
@@ -485,52 +390,6 @@ func (nl *NodeLiveness) SetUpgrading(
 		return nil
 	}
 
-	tableIds := nl.GetAllTsTableID(ctx)
-	log.Infof(ctx, "get all table id %v", tableIds)
-	api.HRManagerWLock()
-	hashRouterManager, err := api.GetHashRouterManagerWithTxn(ctx, nil)
-	// No need to check rebalance, we will just trigger the transfer
-	if err != nil {
-		log.Errorf(ctx, "getting hashrouter manager failed :%v", err)
-		return err
-	}
-	ctx = logtags.AddTags(ctx, haExecLogTags(nodeID, "setUpgrade"))
-
-	for _, tableID := range tableIds {
-
-		groupChanges, err := hashRouterManager.IsNodeUpgrading(ctx, nodeID, tableID)
-		if err != nil {
-			log.Warning(ctx, "get node table %v upgrading ha change message failed: %v", tableID, err)
-			continue
-		}
-		log.Infof(ctx, "get node upgrading ha change messages of table %v: %+v", tableID, groupChanges)
-
-		for _, groupChange := range groupChanges {
-			r := groupChange.Routing
-			err := hashRouterManager.PutSingleHashInfoWithLock(ctx, tableID, nil, r)
-			if err != nil {
-				log.Errorf(ctx, "put table %v group %v single hashInfo failed : %v. change message is %+v",
-					tableID, groupChange.Routing.EntityRangeGroupId, err, groupChange)
-			}
-
-			log.Infof(ctx, "transfer transfer lease of table %d group %d succeed.", tableID, groupChange.Routing.EntityRangeGroupId)
-			log.Infof(ctx, "start refresh table %v dist message", tableID)
-
-			err = nl.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				message := fmt.Sprintf("nodeId: %d,tableId: %v, node healthy to upgrading", nodeID, tableID)
-				return hashRouterManager.RefreshHashRouterWithSingleGroup(ctx, tableID, txn, message, groupChange)
-			})
-
-			if err != nil {
-				log.Errorf(ctx, "refresh table %v dist message failed: %+v. err ha msg: %+v ", tableID, err, groupChange)
-				panic(err)
-			}
-		}
-		log.Infof(ctx, "refresh Table %d success", tableID)
-
-	}
-
-	api.HRManagerWUnLock()
 	return nil
 }
 
@@ -541,49 +400,6 @@ func (nl *NodeLiveness) SetUpgradingComplete(
 	ctx = nl.ambientCtx.AnnotateCtx(ctx)
 	nl.SetTSNodeLiveness(ctx, nodeID, true)
 
-	tableIds := nl.GetAllTsTableID(ctx)
-	log.Infof(ctx, "get all table id %v", tableIds)
-	api.HRManagerWLock()
-	hashRouterManager, err := api.GetHashRouterManagerWithTxn(ctx, nil)
-	if err != nil {
-		log.Errorf(ctx, "getting hashrouter manager failed :%v", err)
-		return err
-	}
-	ctx = logtags.AddTags(ctx, haExecLogTags(nodeID, "upgradeComplete"))
-
-	for _, tableID := range tableIds {
-		groupChanges, recoverErr := hashRouterManager.NodeRecover(ctx, nodeID, tableID)
-		if recoverErr != nil {
-			log.Warning(ctx, "get node table %v upgrading-complete ha change message failed: %v", tableID, recoverErr)
-			continue
-		}
-		log.Infof(ctx, "get node upgrading-complete ha change messages of table %v: %+v", tableID, groupChanges)
-		for _, groupChange := range groupChanges {
-			r := groupChange.Routing
-			err := hashRouterManager.PutSingleHashInfoWithLock(ctx, tableID, nil, r)
-			if err != nil {
-				log.Errorf(ctx, "put table %v group %v single hashInfo failed : %v. change message is %+v",
-					tableID, groupChange.Routing.EntityRangeGroupId, err, groupChange)
-			}
-
-			log.Infof(ctx, "transfer transfer lease of table %d group %d succeed.", tableID, groupChange.Routing.EntityRangeGroupId)
-			log.Infof(ctx, "start refresh table %v dist message", tableID)
-			message := fmt.Sprintf("nodeId: %d, tableId: %v, node upgrading to healthy", nodeID, tableID)
-
-			if err := nl.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				refreshErr := hashRouterManager.RefreshHashRouterWithSingleGroup(ctx, tableID, txn, message, groupChange)
-				return refreshErr
-			}); err != nil {
-				log.Warningf(ctx, "refresh table %v dist message failed: %+v. err ha msg: %+v ", tableID, err, groupChange)
-				continue
-			}
-
-			log.Infof(ctx, "refresh Table %d success", tableID)
-		}
-
-	}
-
-	api.HRManagerWUnLock()
 	log.Info(ctx, "Set upgrading-complete success")
 	return nil
 }

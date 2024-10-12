@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/security/audit/event/target"
 	"gitee.com/kwbasedb/kwbase/pkg/security/audit/server"
 	"gitee.com/kwbasedb/kwbase/pkg/server/serverpb"
@@ -256,20 +255,4 @@ func (s *Server) drainClients(ctx context.Context, reporter func(int, string)) e
 func (s *Server) drainNode(ctx context.Context, reporter func(int, string)) error {
 	s.nodeLiveness.SetDraining(ctx, true /* drain */, reporter)
 	return s.node.SetDraining(true /* drain */, reporter)
-}
-
-func (s *adminServer) Dead(req *serverpb.DeadRequest, stream serverpb.Admin_DeadServer) error {
-	err := s.server.nodeLiveness.SetDead(context.TODO(), roachpb.NodeID(req.NodeId))
-	res := serverpb.DeadResponse{}
-	if err == nil {
-		res.IsDead = true
-	} else {
-		res.IsDead = false
-		res.ErrInfo = err.Error()
-	}
-	if err := stream.Send(&res); err != nil {
-		return err
-	}
-
-	return err
 }

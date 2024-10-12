@@ -381,8 +381,6 @@ var quitCtx struct {
 	// drainWait is the amount of time to wait for the server
 	// to drain. Set to 0 to disable a timeout (let the server decide).
 	drainWait time.Duration
-
-	deadNodeID int
 }
 
 // nodeCtx captures the command-line parameters of the `node` command.

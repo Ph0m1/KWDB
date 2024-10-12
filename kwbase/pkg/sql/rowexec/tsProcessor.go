@@ -29,7 +29,6 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -97,19 +96,14 @@ func (tp *tsProcessor) Start(ctx context.Context) context.Context {
 		// TODO:drop instance table
 		for _, toDrop := range tp.dropMEInfo {
 			primaryTag := []byte(toDrop.TableName)
-			// compute EntityRangeGroupID by primary tag value
-			// 			var hashRouter api.HashRouter
-			hashRouter, err := api.GetHashRouterWithTable(0, toDrop.TemplateID, false, tp.EvalCtx.Txn)
 
 			if err != nil {
 				break
 			}
-			var groupID api.EntityRangeGroupID
-			groupID, err = hashRouter.GetGroupIDByPrimaryTag(ctx, primaryTag)
 			if err != nil {
 				break
 			}
-			_, err = tp.FlowCtx.Cfg.TsEngine.DeleteEntities(uint64(toDrop.TemplateID), uint64(groupID), [][]byte{primaryTag}, true, 0)
+			_, err = tp.FlowCtx.Cfg.TsEngine.DeleteEntities(uint64(toDrop.TemplateID), 1, [][]byte{primaryTag}, true, 0)
 			if err != nil {
 				break
 			}

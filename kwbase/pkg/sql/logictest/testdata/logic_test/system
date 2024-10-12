@@ -17,7 +17,6 @@ comments                         BASE TABLE
 descriptor                       BASE TABLE
 eventlog                         BASE TABLE
 jobs                             BASE TABLE
-kwdb_hash_routing                BASE TABLE
 kwdb_replication_info            BASE TABLE
 kwdb_ts_table                    BASE TABLE
 lease                            BASE TABLE
@@ -81,7 +80,6 @@ SELECT id FROM system.descriptor
 54
 55
 56
-57
 75
 76
 77
@@ -244,10 +242,6 @@ system  public  jobs                             root    GRANT
 system  public  jobs                             root    INSERT
 system  public  jobs                             root    SELECT
 system  public  jobs                             root    UPDATE
-system  public  kwdb_hash_routing                admin   GRANT
-system  public  kwdb_hash_routing                admin   SELECT
-system  public  kwdb_hash_routing                root    GRANT
-system  public  kwdb_hash_routing                root    SELECT
 system  public  kwdb_replication_info            admin   DELETE
 system  public  kwdb_replication_info            admin   GRANT
 system  public  kwdb_replication_info            admin   INSERT

@@ -1225,9 +1225,4 @@ The default is to not exclude any node.`,
 		Name:        "upgrade-complete",
 		Description: `Node upgrade complete`,
 	}
-
-	SetDeadNodeID = FlagInfo{
-		Name:        "node-id",
-		Description: "The node id that needs to be set",
-	}
 )

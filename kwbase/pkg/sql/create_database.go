@@ -26,9 +26,11 @@ package sql
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -162,6 +164,12 @@ func (n *createDatabaseNode) startExec(params runParams) error {
 			desc.Name, desc.ID, dbCreated)
 	}
 	params.p.SetAuditTarget(uint32(desc.GetID()), desc.GetName(), nil)
+	if api.MppMode && !api.SingleNode {
+		stmt := fmt.Sprintf("alter database %s CONFIGURE ZONE USING num_replicas = 1;", desc.Name)
+		if _, err := params.ExecCfg().InternalExecutor.Exec(params.ctx, "set num_replicas", params.p.txn, stmt); err != nil {
+			log.Errorf(params.ctx, "failed alter CONFIGURE ZONE USING num_replicas = 1")
+		}
+	}
 	log.Infof(params.ctx, "create database %s finished, type: %s, id: %d", desc.Name, tree.EngineName(n.n.EngineType), desc.ID)
 	return nil
 }

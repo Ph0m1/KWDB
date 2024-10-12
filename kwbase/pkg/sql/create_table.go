@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
@@ -644,8 +645,28 @@ func (n *createTableNode) startExec(params runParams) error {
 		if err = createAndExecCreateTSTableJob(params, desc, n); err != nil {
 			return err
 		}
-		if err = distributeAndDuplicateOfCreateTSTable(params, desc); err != nil {
+		var splitInfo []roachpb.AdminSplitInfoForTs
+		if splitInfo, err = distributeAndDuplicateOfCreateTSTable(params, desc); err != nil {
 			return err
+		}
+		if splitInfo != nil {
+			var wg sync.WaitGroup
+			log.Infof(params.ctx, "will relocate for MPP mode, location: %+v", splitInfo)
+			for i := range splitInfo {
+				wg.Add(1)
+				go func(info *roachpb.AdminSplitInfoForTs) {
+					target := []roachpb.ReplicationTarget{{
+						NodeID:  info.PreDist[0].NodeID,
+						StoreID: info.PreDist[0].StoreID,
+					}}
+					if err = params.extendedEvalCtx.ExecCfg.DB.AdminRelocateRange(params.ctx, info.SplitKey, target); err != nil {
+						log.Errorf(params.ctx, "failed relocate range for key %v, target %+v, err: %v", info.SplitKey, target, err)
+					}
+					wg.Done()
+				}(&splitInfo[i])
+			}
+			wg.Wait()
+			log.Infof(params.ctx, "done relocate for MPP mode")
 		}
 	}
 	log.Infof(params.ctx, "create table %s 1st txn finished, type: %s, id: %d", n.n.Table.String(), tree.TableTypeName(n.n.TableType), desc.ID)
@@ -3221,14 +3242,18 @@ func checkPrimaryTag(tagColumn sqlbase.ColumnDescriptor) error {
 // which including getting node id, hash partitions and predistribution, relocate
 func distributeAndDuplicateOfCreateTSTable(
 	params runParams, desc sqlbase.MutableTableDescriptor,
-) error {
+) ([]roachpb.AdminSplitInfoForTs, error) {
+	var preDistReplicas []roachpb.ReplicaDescriptor
 	partitions, err := api.GetDistributeInfo(params.ctx, uint32(desc.ID))
 	if err != nil {
-		return errors.Wrap(err, "PreDistributionError: get distribute info failed")
+		return nil, errors.Wrap(err, "PreDistributionError: get distribute info failed")
 	}
-	preDistReplicas, err := api.PreDistributeBySingleReplica(params.ctx, nil, uint32(desc.ID), partitions)
-	if err != nil {
-		return errors.Wrap(err, "PreDistributionError: get pre distribute info failed")
+	if params.ExecCfg().StartMode == StartSingleReplica {
+		preDist, err := api.PreDistributeBySingleReplica(params.ctx, params.p.txn, partitions)
+		if err != nil {
+			return nil, errors.Wrap(err, "PreDistributionError: get pre distribute info failed")
+		}
+		preDistReplicas = preDist
 	}
 
 	type pointGroup struct {
@@ -3264,9 +3289,13 @@ func distributeAndDuplicateOfCreateTSTable(
 		var tmp = []int32{p.point}
 		var timestamps = []int64{p.timestamp}
 		if err := params.extendedEvalCtx.ExecCfg.DB.AdminSplitTs(params.ctx, spanKey, uint32(desc.ID), tmp, timestamps, true); err != nil {
-			return errors.Wrap(err, "PreDistributionError: split failed")
+			return nil, errors.Wrap(err, "PreDistributionError: split failed")
 		}
 	}
 
-	return nil
+	// return split info for relocation
+	if params.extendedEvalCtx.ExecCfg.StartMode == StartSingleReplica {
+		return splitInfo, nil
+	}
+	return nil, nil
 }

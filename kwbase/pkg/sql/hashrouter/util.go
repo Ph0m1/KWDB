@@ -25,7 +25,6 @@ package hashrouter
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -36,7 +35,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
-	"github.com/cockroachdb/errors"
 )
 
 // GenerateUniqueEntityRangeGroupID ...
@@ -383,151 +381,6 @@ func getStoreIDByNodeID(
 		}
 	}
 	return id
-}
-
-// HRManagerWLock is used to lock
-func HRManagerWLock() {
-	hrMgr.mu.Lock()
-	return
-}
-
-// HRManagerWUnLock is used to unlock
-func HRManagerWUnLock() {
-	hrMgr.mu.Unlock()
-	return
-}
-
-// GetHashInfoByIDInTxn query kwdb_hash_routing by specific entity group id, in an active txn.
-func GetHashInfoByIDInTxn(
-	ctx context.Context, entitiGroupID uint64, sender kv.Sender, header *roachpb.Header,
-) (*api.KWDBHashRouting, error) {
-	return hrMgr.GetHashRoutingByIDInTxn(ctx, entitiGroupID, sender, header)
-}
-
-// GetHashInfoByTableID query kwdb_hash_routing by specific table id
-func GetHashInfoByTableID(
-	ctx context.Context, txn *kv.Txn, tableID uint32,
-) ([]*api.KWDBHashRouting, error) {
-	var hashRoutings []*api.KWDBHashRouting
-	var err error
-	var table *sqlbase.TableDescriptor
-	if txn == nil {
-		err = hrMgr.db.Txn(ctx, func(ctx context.Context, newTxn *kv.Txn) error {
-			table, _, err = sqlbase.GetTsTableDescFromID(ctx, newTxn, sqlbase.ID(tableID))
-			if err != nil || table == nil || (table.State != sqlbase.TableDescriptor_ADD && table.State != sqlbase.TableDescriptor_PUBLIC) {
-				return err
-			}
-			hashRoutings, err = hrMgr.GetHashRoutingsByTableID(ctx, newTxn, tableID)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-	} else {
-		table, _, err = sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(tableID))
-		if err != nil || table == nil || (table.State != sqlbase.TableDescriptor_ADD && table.State != sqlbase.TableDescriptor_PUBLIC) {
-			return hashRoutings, err
-		}
-		hashRoutings, err = hrMgr.GetHashRoutingsByTableID(ctx, txn, tableID)
-		if err != nil {
-			return hashRoutings, err
-		}
-	}
-	return hashRoutings, err
-}
-
-// GetAllKWDBHashRoutings query kwdb_hash_routing and fetch all rows
-func GetAllKWDBHashRoutings(ctx context.Context, txn *kv.Txn) ([]*api.KWDBHashRouting, error) {
-	return hrMgr.GetAllHashRoutings(ctx, txn)
-}
-
-func allGroupAvailable(groups map[api.EntityRangeGroupID]*api.EntityRangeGroup) (bool, string) {
-	for _, group := range groups {
-		if group.Status != api.EntityRangeGroupStatus_Available && group.Status != api.EntityRangeGroupStatus_lacking {
-			str := fmt.Sprintf("The group : %v status is : %v", group.GroupID, group.Status)
-			return false, str
-		}
-	}
-	return true, ""
-}
-
-func makeHashRouter(tableID uint32, routings []*api.KWDBHashRouting) (api.HashRouter, error) {
-	if len(routings) == 0 {
-		return nil, errors.Errorf("the KWDBHashRouting is empty.")
-	}
-	var hashPartitionSize int
-	var hashPartitionNum int64
-	groups := map[api.EntityRangeGroupID]*api.EntityRangeGroup{}
-	for _, routing := range routings {
-		hashPartitionSize = int(routing.TsPartitionSize)
-		hashPartitionNum++
-		groups[routing.EntityRangeGroupId] = &routing.EntityRangeGroup
-	}
-	return &hashRouterInfo{
-		tableID:           tableID,
-		hashPartitionNum:  hashPartitionNum,
-		hashPartitionSize: hashPartitionSize,
-		groupsMap:         groups,
-	}, nil
-}
-
-func makeHRMgr(routings []*api.KWDBHashRouting) (api.HashRouterManager, error) {
-	if len(routings) == 0 {
-		return hrMgr, nil
-	}
-	caches := make(map[uint32]*hashRouterInfo)
-	hashPartitionSize := make(map[uint32]int)
-	hashPartitionNum := make(map[uint32]int64)
-	for _, routing := range routings {
-		hashPartitionSize[routing.TableID] = int(routing.TsPartitionSize)
-		hashPartitionNum[routing.TableID]++
-		// Build entityRangeGroup and store it in memory
-		_, ok := caches[routing.TableID]
-		if !ok {
-			caches[routing.TableID] = &hashRouterInfo{
-				groupsMap: make(map[api.EntityRangeGroupID]*api.EntityRangeGroup),
-			}
-		}
-		caches[routing.TableID].groupsMap[routing.EntityRangeGroupId] = &routing.EntityRangeGroup
-	}
-	for tableID, size := range hashPartitionSize {
-		caches[tableID].hashPartitionSize = size
-		caches[tableID].hashPartitionNum = hashPartitionNum[tableID]
-	}
-	return &HRManager{
-		ctx:          hrMgr.ctx,
-		cs:           hrMgr.cs,
-		routerCaches: caches,
-		execConfig:   hrMgr.execConfig,
-		db:           hrMgr.db,
-		tseDB:        hrMgr.tseDB,
-		gossip:       hrMgr.gossip,
-		leaseMgr:     hrMgr.leaseMgr,
-		nodeLiveness: hrMgr.nodeLiveness,
-		storePool:    hrMgr.storePool,
-	}, nil
-}
-
-// GetRangesDesc get rangeDesc
-func GetRangesDesc(
-	ctx context.Context, txn *kv.Txn, startKey roachpb.Key, endKey roachpb.Key,
-) ([]roachpb.RangeDescriptor, error) {
-	var rangesDesc []roachpb.RangeDescriptor
-	ranges, err := sql.ScanMetaKVs(ctx, txn, roachpb.Span{
-		Key:    startKey,
-		EndKey: endKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range ranges {
-		var desc roachpb.RangeDescriptor
-		if err := r.ValueProto(&desc); err != nil {
-			return nil, err
-		}
-		rangesDesc = append(rangesDesc, desc)
-	}
-	return rangesDesc, nil
 }
 
 // GetTableNodeIDs gets nodeids

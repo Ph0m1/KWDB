@@ -26,7 +26,6 @@ package kvserver
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -35,7 +34,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
@@ -546,7 +544,7 @@ func (r *Replica) CreateSnapshotForRead(
 		return 0, err
 	}
 	tsSnapshotID, err := r.store.TsEngine.CreateSnapshotForRead(tableID, startPoint, endPoint, startTs, endTs)
-	log.VEventf(ctx, 3, "TsEngine.CreateSnapshotForRead r%v, %v, %v, %v, %v, %v, %v, %v", r.RangeID, tableID, startPoint, endPoint, startTs, endTs, tsSnapshotID, err)
+	log.VEventf(ctx, 3, "TsEngine.CreateSnapshotForRead r%d, %d, %d, %d, %d, %d, %d, %d", r.RangeID, tableID, startPoint, endPoint, startTs, endTs, tsSnapshotID, err)
 	if err != nil {
 		return 0, errors.Wrapf(err, "Ts CreateSnapshotForRead err")
 	}
@@ -571,6 +569,8 @@ func stateInfoConversion(state storagepb.ReplicaState) roachpb.ReplicaState {
 	}
 }
 
+// matchTsSpans gets the corresponding TsSpans that are in [startTs, endTs]
+// (it includes both startTs and endTs), from the isSpans.
 func matchTsSpans(inSpans []*roachpb.TsSpan, startTs, endTs int64) []*roachpb.TsSpan {
 	var tsSpans []*roachpb.TsSpan
 	for _, span := range inSpans {
@@ -610,7 +610,7 @@ func (b *replicaAppBatch) stageWriteBatch(ctx context.Context, cmd *replicatedCm
 				responses = cmd.proposal.Local.Reply.Responses
 			}
 			if b.tableID, b.rangeGroupID, b.TSTxnID, err = b.r.stageTsBatchRequest(
-				ctx, &reqs, responses, isLocal, &b.state, &b.stats); err != nil {
+				ctx, &reqs, responses, isLocal, &b.state); err != nil {
 				return err
 			}
 		}
@@ -636,32 +636,25 @@ func (r *Replica) stageTsBatchRequest(
 	responses []roachpb.ResponseUnion,
 	isLocal bool,
 	replicaState *storagepb.ReplicaState,
-	mvccStats *enginepb.MVCCStats,
 ) (tableID, rangeGroupID, tsTxnID uint64, err error) {
+	var isTsRequest bool
 	for _, union := range ba.Requests {
-		switch req := union.GetInner().(type) {
-		case *roachpb.TsRowPutRequest:
-			// Parse table_id from payload
-			tableIDOffset := execbuilder.TableIDOffset
-			tableIDEnd := tableIDOffset + execbuilder.TableIDSize
-			tableID = binary.LittleEndian.Uint64(req.HeaderPrefix[tableIDOffset:tableIDEnd])
-		case *roachpb.TsPutTagRequest:
-			// Parse table_id from payload
-			tableIDOffset := execbuilder.TableIDOffset
-			tableIDEnd := tableIDOffset + execbuilder.TableIDSize
-			tableID = binary.LittleEndian.Uint64(req.Value.RawBytes[tableIDOffset:tableIDEnd])
-		case *roachpb.TsDeleteRequest:
-			tableID = req.TableId
-		case *roachpb.TsDeleteMultiEntitiesDataRequest:
-			tableID = req.TableId
-		case *roachpb.TsDeleteEntityRequest:
-			tableID = req.TableId
-		case *roachpb.TsTagUpdateRequest:
-			tableID = req.TableId
+		switch union.GetInner().(type) {
+		case *roachpb.TsRowPutRequest,
+			*roachpb.TsPutTagRequest,
+			*roachpb.TsDeleteRequest,
+			*roachpb.TsDeleteMultiEntitiesDataRequest,
+			*roachpb.TsDeleteEntityRequest,
+			*roachpb.TsTagUpdateRequest:
+			tableID = uint64(r.Desc().TableId)
+			isTsRequest = true
 		default:
 			continue
 		}
 		break
+	}
+	if !isTsRequest {
+		return tableID, rangeGroupID, tsTxnID, nil
 	}
 
 	rangeGroupID = 1 // storage only create RangeGroup 1
@@ -803,21 +796,18 @@ func (r *Replica) stageTsBatchRequest(
 
 		case *roachpb.TsTagUpdateRequest:
 			{
-				tableID = req.TableId
-				tsTxnID, _ = r.store.TsEngine.MtrBegin(tableID, rangeGroupID, uint64(r.RangeID), raftAppliedIndex)
 				var pld [][]byte
 				pld = append(pld, req.Tags)
-				if err := r.store.TsEngine.PutEntity(rangeGroupID, req.TableId, pld, tsTxnID); err != nil {
-					log.Errorf(ctx, "failed update tag, err: %v", err)
-				} else {
-					if isLocal && responses != nil {
-						responses[idx] = roachpb.ResponseUnion{
-							Value: &roachpb.ResponseUnion_TsTagUpdate{
-								TsTagUpdate: &roachpb.TsTagUpdateResponse{
-									ResponseHeader: roachpb.ResponseHeader{NumKeys: 1},
-								},
+				if err = r.store.TsEngine.PutEntity(rangeGroupID, req.TableId, pld, tsTxnID); err != nil {
+					return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "failed update tag")
+				}
+				if isLocal && responses != nil {
+					responses[idx] = roachpb.ResponseUnion{
+						Value: &roachpb.ResponseUnion_TsTagUpdate{
+							TsTagUpdate: &roachpb.TsTagUpdateResponse{
+								ResponseHeader: roachpb.ResponseHeader{NumKeys: 1},
 							},
-						}
+						},
 					}
 				}
 			}

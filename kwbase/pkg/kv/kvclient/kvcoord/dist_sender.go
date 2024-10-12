@@ -147,6 +147,7 @@ var rangeDescriptorCacheSize = settings.RegisterIntSetting(
 	1e6,
 )
 
+// ** Check the limit in ts scenario. **
 var senderConcurrencyLimit = settings.RegisterNonNegativeIntSetting(
 	"kv.dist_sender.concurrency_limit",
 	"maximum number of asynchronous send requests",
@@ -1135,6 +1136,7 @@ func (ds *DistSender) sendTsRowPutBatch(
 	rangeBatches map[roachpb.RangeID]*RangeBatch,
 	withCommit bool,
 	batchIdx int,
+	r *retry.Retry,
 ) (br *roachpb.BatchResponse, pErr *roachpb.Error) {
 	// Make an empty slice of responses which will be populated with responses
 	// as they come in via Combine().
@@ -1194,6 +1196,7 @@ func (ds *DistSender) sendTsRowPutBatch(
 		}
 	}()
 
+	// ** May send async directly in ts scenario. **
 	canParallelize := ba.Header.MaxSpanRequestKeys == 0 && ba.Header.TargetBytes == 0
 	cntRanges := len(rangeBatches)
 	cnt := 0
@@ -1207,10 +1210,10 @@ func (ds *DistSender) sendTsRowPutBatch(
 		// If we can reserve one of the limited goroutines available for parallel
 		// batch RPCs, send asynchronously.
 		if canParallelize && !lastRange && !ds.disableParallelBatches &&
-			ds.sendTsPartialBatchAsync(ctx, rangeBatch, withCommit, batchIdx, responseCh) {
+			ds.sendTsPartialBatchAsync(ctx, rangeBatch, withCommit, batchIdx, responseCh, r) {
 			// Sent the batch asynchronously.
 		} else {
-			resp := ds.sendTsPartialBatch(ctx, rangeBatch, withCommit, batchIdx)
+			resp := ds.sendTsPartialBatch(ctx, rangeBatch, withCommit, batchIdx, r)
 			responseCh <- resp
 			if resp.pErr != nil {
 				return
@@ -1236,8 +1239,14 @@ func (ds *DistSender) sendTsRowPutBatch(
 // payload of a TsRowPutRequest may contain many rows, and it will be
 // truncated if the rows match more than one range.
 func (ds *DistSender) divideAndSendTsRowPutBatch(
-	ctx context.Context, ba roachpb.BatchRequest, withCommit bool, batchIdx int,
+	ctx context.Context, ba roachpb.BatchRequest, withCommit bool, batchIdx int, r *retry.Retry,
 ) (br *roachpb.BatchResponse, pErr *roachpb.Error) {
+	if r == nil {
+		return nil, roachpb.NewErrorf("empty retry struct")
+	}
+	if !r.Next() {
+		return nil, roachpb.NewError(&roachpb.NodeUnavailableError{})
+	}
 	// If there's no transaction and ba spans ranges, possibly re-run as part of
 	// a transaction for consistency. The case where we don't need to re-run is
 	// if the read consistency is not required.
@@ -1251,6 +1260,7 @@ func (ds *DistSender) divideAndSendTsRowPutBatch(
 	// NB: withCommit allows us to short-circuit the check in the common case,
 	// but even when that's true, we still need to search for the EndTxn in the
 	// batch.
+	// ** May not need this check in ts scenario. **
 	if withCommit {
 		etArg, ok := ba.GetArg(roachpb.EndTxn)
 		if ok && !etArg.(*roachpb.EndTxnRequest).IsParallelCommit() {
@@ -1275,8 +1285,7 @@ func (ds *DistSender) divideAndSendTsRowPutBatch(
 		curHashpoint := hashPoint
 		curTableID := tableID
 		ri := NewRangeIterator(ds)
-		seekKey := roachpb.RKey(rowReq.Key)
-		for ri.Seek(ctx, seekKey, Ascending); ri.Valid(); ri.Next(ctx) {
+		for ri.Seek(ctx, roachpb.RKey(rowReq.Key), Ascending); ri.Valid(); ri.Next(ctx) {
 			descs = append(descs, ri.desc)
 			tokens = append(tokens, ri.token)
 			tableID, hashPoint, timestamp, err = sqlbase.DecodeTsRangeKey(ri.desc.EndKey, true)
@@ -1285,10 +1294,9 @@ func (ds *DistSender) divideAndSendTsRowPutBatch(
 				break
 			}
 			rangeTimestamps = append(rangeTimestamps, timestamp)
-			seekKey = ri.desc.EndKey
 		}
 		if len(descs) == 0 {
-			return nil, roachpb.NewError(errors.Errorf("failed seek any range descriptor, seekKey: %v", seekKey))
+			return nil, roachpb.NewError(errors.Errorf("failed seek any range descriptor, seekKey: %v", rowReq.Key))
 		}
 		if len(descs) == 1 {
 			// don't need truncate, send directly
@@ -1353,7 +1361,7 @@ func (ds *DistSender) divideAndSendTsRowPutBatch(
 			rangeBatch.positions = append(rangeBatch.positions, pos)
 		}
 	}
-	return ds.sendTsRowPutBatch(ctx, ba, rangeBatches, withCommit, batchIdx)
+	return ds.sendTsRowPutBatch(ctx, ba, rangeBatches, withCommit, batchIdx, r)
 }
 
 // divideAndSendBatchToRanges sends the supplied batch to all of the
@@ -1380,7 +1388,9 @@ func (ds *DistSender) divideAndSendBatchToRanges(
 	if _, ok := ba.Requests[0].GetInner().(*roachpb.TsRowPutRequest); ok {
 		// please make sure that no other kind of request along with
 		// TsRawPutRequest in this BatchRequest.
-		return ds.divideAndSendTsRowPutBatch(ctx, ba, withCommit, batchIdx)
+		const MaxTsPutRetries = 5
+		r := retry.StartWithCtx(ctx, retry.Options{MaxRetries: MaxTsPutRetries})
+		return ds.divideAndSendTsRowPutBatch(ctx, ba, withCommit, batchIdx, &r)
 	}
 	// Get initial seek key depending on direction of iteration.
 	var scanDir ScanDirection
@@ -1672,13 +1682,14 @@ func (ds *DistSender) sendTsPartialBatchAsync(
 	withCommit bool,
 	batchIdx int,
 	responseCh chan response,
+	r *retry.Retry,
 ) bool {
 	if err := ds.rpcContext.Stopper.RunLimitedAsyncTask(
 		ctx, "kv.DistSender: sending ts partial batch",
 		ds.asyncSenderSem, false, /* wait */
 		func(ctx context.Context) {
 			ds.metrics.AsyncSentCount.Inc(1)
-			responseCh <- ds.sendTsPartialBatch(ctx, rangeBatch, withCommit, batchIdx)
+			responseCh <- ds.sendTsPartialBatch(ctx, rangeBatch, withCommit, batchIdx, r)
 		},
 	); err != nil {
 		ds.metrics.AsyncThrottledCount.Inc(1)
@@ -1871,7 +1882,7 @@ func (ds *DistSender) sendPartialBatch(
 // sendTsPartialBatch sends the supplied batch to the range specified by
 // desc.
 func (ds *DistSender) sendTsPartialBatch(
-	ctx context.Context, rangeBatch *RangeBatch, withCommit bool, batchIdx int,
+	ctx context.Context, rangeBatch *RangeBatch, withCommit bool, batchIdx int, r *retry.Retry,
 ) response {
 	if batchIdx == 1 {
 		ds.metrics.PartialBatchCount.Inc(2) // account for first batch
@@ -1921,12 +1932,13 @@ func (ds *DistSender) sendTsPartialBatch(
 		// and try again with the new metadata. Re-sending the request is ok even
 		// though it might have succeeded the first time around because of
 		// idempotency.
-		log.VEventf(ctx, 1, "evicting range descriptor on %T and backoff for re-lookup: %+v", tErr, rangeBatch.desc)
+		log.Infof(ctx, "evicting range descriptor on %s and backoff for re-lookup: %+v, retried times %d", tErr.Message, rangeBatch.desc, r.CurrentAttempts())
 		if err = rangeBatch.evictToken.Evict(ctx); err != nil {
 			return response{pErr: roachpb.NewError(err)}
 		}
-		reply, pErr = ds.divideAndSendTsRowPutBatch(ctx, rangeBatch.ba, withCommit, batchIdx)
-		if pErr == nil {
+		var retryErr *roachpb.Error
+		reply, retryErr = ds.divideAndSendTsRowPutBatch(ctx, rangeBatch.ba, withCommit, batchIdx, r)
+		if retryErr == nil {
 			return response{reply: reply, positions: rangeBatch.positions}
 		}
 		return response{pErr: pErr}
@@ -1960,9 +1972,10 @@ func (ds *DistSender) sendTsPartialBatch(
 		// to it matches the positions into our batch (using the full
 		// batch here would give a potentially larger response slice
 		// with unknown mapping to our truncated reply).
-		log.VEventf(ctx, 1, "likely split; resending batch to span: %s", tErr)
-		reply, pErr = ds.divideAndSendTsRowPutBatch(ctx, rangeBatch.ba, withCommit, batchIdx)
-		if pErr == nil {
+		log.Infof(ctx, "likely split; resending batch to span: %s, retried times %d", tErr, r.CurrentAttempts())
+		var retryErr *roachpb.Error
+		reply, retryErr = ds.divideAndSendTsRowPutBatch(ctx, rangeBatch.ba, withCommit, batchIdx, r)
+		if retryErr == nil {
 			return response{reply: reply, positions: rangeBatch.positions}
 		}
 		return response{pErr: pErr}

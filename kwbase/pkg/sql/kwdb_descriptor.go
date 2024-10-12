@@ -24,7 +24,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/scheduledjobs"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/mutations"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/row"
@@ -2649,28 +2648,4 @@ func (p *planner) createTSSchemaChangeJob(
 		return 0, err
 	}
 	return *job.ID(), err
-}
-
-// WriteHashRoutingTableDesc writes hash routing table.
-func WriteHashRoutingTableDesc(
-	ctx context.Context, txn *kv.Txn, hashRoutings []api.KWDBHashRouting, overWrite bool,
-) error {
-	var rows []tree.Datums
-	for _, hashRouting := range hashRoutings {
-		msg, err := protoutil.Marshal(&hashRouting.EntityRangeGroup)
-		if err != nil {
-			return err
-		}
-		datums := tree.Datums{
-			tree.NewDInt(tree.DInt(hashRouting.EntityRangeGroupId)),
-			tree.NewDInt(tree.DInt(hashRouting.TableID)),
-			tree.NewDBytes(tree.DBytes(msg)),
-			tree.NewDInt(tree.DInt(hashRouting.TsPartitionSize)),
-		}
-		rows = append(rows, datums)
-	}
-	if err := WriteKWDBDesc(ctx, txn, sqlbase.KWDBHashRoutingTable, rows, overWrite); err != nil {
-		return err
-	}
-	return nil
 }
