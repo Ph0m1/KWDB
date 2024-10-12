@@ -274,7 +274,7 @@ CREATE TABLE system.comments (
 	// subsystem.
 	ProtectedTimestampsMetaTableSchema = `
 CREATE TABLE system.protected_ts_meta (
-   singleton   BOOL NOT NULL PRIMARY KEY DEFAULT (true),
+   singleton   BOOL NOT NULL PRIMARY KEY DEFAULT true,
    version     INT8 NOT NULL,
    num_records INT8 NOT NULL,
    num_spans   INT8 NOT NULL,
@@ -291,7 +291,7 @@ CREATE TABLE system.protected_ts_records (
    meta      BYTES,
    num_spans INT8 NOT NULL, -- num spans is important to know how to decode spans
    spans     BYTES NOT NULL,
-   verified  BOOL NOT NULL DEFAULT (false),
+   verified  BOOL NOT NULL DEFAULT false,
    FAMILY "primary" (id, ts, meta_type, meta, num_spans, spans, verified)
 );`
 

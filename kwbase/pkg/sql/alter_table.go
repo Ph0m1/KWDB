@@ -207,7 +207,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 						return pgerror.Newf(pgcode.DuplicateColumn, "duplicate column name: %q", d.Name)
 					}
 				}
-				TSColumn, err := sqlbase.MakeTSColumnDefDescs(string(d.Name), d.Type, true, n.tableDesc.TsTable.GetSde(), sqlbase.ColumnType_TYPE_DATA)
+				TSColumn, _, err := sqlbase.MakeTSColumnDefDescs(string(d.Name), d.Type, true, n.tableDesc.TsTable.GetSde(), sqlbase.ColumnType_TYPE_DATA, d.DefaultExpr.Expr, &params.p.semaCtx)
 				if err != nil {
 					return err
 				}
@@ -858,10 +858,11 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case tree.ColumnMutationCmd:
 			_, isTSAlterColumnType := t.(*tree.AlterTableAlterColumnType)
+			_, isTSAlterColumnDefault := t.(*tree.AlterTableSetDefault)
 			if !n.tableDesc.IsTSTable() {
 				isTSAlterColumnType = false
 			}
-			if n.tableDesc.IsTSTable() && !isTSAlterColumnType {
+			if n.tableDesc.IsTSTable() && !isTSAlterColumnType && !isTSAlterColumnDefault {
 				return pgerror.New(pgcode.WrongObjectType, "can not modify an existing column on ts table")
 			}
 			// Column mutations
@@ -927,7 +928,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return nil
 			}
 
-			alteringTag, err := sqlbase.MakeTSColumnDefDescs(tagColumn.Name, newType, tagColumn.Nullable, false, sqlbase.ColumnType_TYPE_TAG)
+			alteringTag, _, err := sqlbase.MakeTSColumnDefDescs(tagColumn.Name, newType, tagColumn.Nullable, false, sqlbase.ColumnType_TYPE_TAG, nil, &params.p.semaCtx)
 			if err != nil {
 				return err
 			}
@@ -1118,7 +1119,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return err
 			}
 			t.Tag.TagType = tagType
-			tagCol, err := sqlbase.MakeTSColumnDefDescs(string(t.Tag.TagName), t.Tag.TagType, t.Tag.Nullable, false, sqlbase.ColumnType_TYPE_TAG)
+			tagCol, _, err := sqlbase.MakeTSColumnDefDescs(string(t.Tag.TagName), t.Tag.TagType, t.Tag.Nullable, false, sqlbase.ColumnType_TYPE_TAG, nil, &params.p.semaCtx)
 			if err != nil {
 				return err
 			}
@@ -1579,7 +1580,7 @@ func applyColumnMutation(
 
 			if !isOnlyMetaChanged {
 				//var alteringTag sqlbase.ColumnDescriptor
-				alteringCol, err := sqlbase.MakeTSColumnDefDescs(col.Name, newType, col.Nullable, false, sqlbase.ColumnType_TYPE_DATA)
+				alteringCol, _, err := sqlbase.MakeTSColumnDefDescs(col.Name, newType, col.Nullable, false, sqlbase.ColumnType_TYPE_DATA, nil, &params.p.semaCtx)
 				if err != nil {
 					return false, err
 				}
@@ -1691,6 +1692,7 @@ func applyColumnMutation(
 		}
 
 	case *tree.AlterTableSetDefault:
+		isTSTable := tableDesc.IsTSTable()
 		if len(col.UsesSequenceIds) > 0 {
 			if err := params.p.removeSequenceDependencies(params.ctx, tableDesc, col); err != nil {
 				return false, err
@@ -1699,15 +1701,48 @@ func applyColumnMutation(
 		if t.Default == nil {
 			col.DefaultExpr = nil
 		} else {
+			isFuncDefault := false
 			colDatumType := &col.Type
 			expr, err := sqlbase.SanitizeVarFreeExpr(
-				t.Default, colDatumType, "DEFAULT", &params.p.semaCtx, true /* allowImpure */, false,
+				t.Default, colDatumType, "DEFAULT", &params.p.semaCtx, true /* allowImpure */, isTSTable,
 			)
 			if err != nil {
 				return false, err
 			}
-			s := tree.Serialize(t.Default)
-			col.DefaultExpr = &s
+			if expr == tree.DNull && !col.Nullable {
+				return false, pgerror.Newf(pgcode.InvalidColumnDefinition,
+					"default value NULL violates NOT NULL constraint")
+			}
+			if isTSTable {
+				if funcExpr, ok := expr.(*tree.FuncExpr); ok {
+					switch col.Type.Oid() {
+					case oid.T_timestamptz, oid.T_timestamp:
+						if strings.ToLower(funcExpr.Func.String()) != "now" {
+							return false, pgerror.Newf(pgcode.InvalidColumnDefinition,
+								"column with type %s can only be set now() as default function", col.Type.SQLString())
+						}
+					default:
+						return false, pgerror.Newf(pgcode.FeatureNotSupported,
+							"column with type %s can only be set constant as default value", col.Type.SQLString())
+					}
+				}
+			} else {
+				if _, ok := expr.(*tree.FuncExpr); ok {
+					isFuncDefault = true
+				}
+			}
+			if expr != tree.DNull {
+				if isFuncDefault {
+					t.Default = expr
+					s := tree.Serialize(t.Default)
+					col.DefaultExpr = &s
+				} else {
+					s := tree.Serialize(t.Default)
+					col.DefaultExpr = &s
+				}
+			} else {
+				col.DefaultExpr = nil
+			}
 
 			// Add references to the sequence descriptors this column is now using.
 			changedSeqDescs, err := maybeAddSequenceDependencies(

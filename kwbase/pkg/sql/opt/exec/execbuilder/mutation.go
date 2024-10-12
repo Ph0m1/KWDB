@@ -43,8 +43,10 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/transform"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
@@ -273,7 +275,7 @@ func BuildInputForTSInsert(
 	var inputDatums []tree.Datums
 
 	rowNum := len(InputRows)
-	rowLen := len(InputRows[0])
+	rowLen := len(columns)
 	inputDatums = make([]tree.Datums, rowNum)
 	// allocate memory for two nested slices, for better performance
 	preSlice := make([]tree.Datum, rowNum*rowLen)
@@ -287,24 +289,50 @@ func BuildInputForTSInsert(
 	}
 	// partition input data based on primary tag values
 	priTagValMap := make(map[string][]int)
+	// collect all columns with default value set.
+	colsWithDefaultValMap, err := CheckDefaultVals(evalCtx, pArgs)
 	// Type check for input values.
 	var buf strings.Builder
 	for i := range InputRows {
+		isLastRow := i == (len(InputRows) - 1)
+		// defaultValue's index used to locate values in inputDatums
+		defaultValIdx := len(InputRows[i])
 		for j, col := range pArgs.PrettyCols {
+			// the expr used to do typeCheck
+			var inputExpr tree.Expr
+			// value's index used to locate values in inputDatums
+			inputIdx := -1
 			valIdx := colIndexs[int(col.ID)]
-			if valIdx < 0 {
+			if col.HasDefault() && valIdx < 0 {
+				inputIdx = defaultValIdx
+				defaultValIdx++
+				if isLastRow {
+					colIndexs[int(col.ID)] = inputIdx
+				}
+				// for column that has NULL value, find default value of the column and assign it to inputExpr
+				if expr, ok := colsWithDefaultValMap[col.ID]; ok {
+					inputExpr = expr
+				} else {
+					return nil, pgerror.Newf(pgcode.CaseNotFound, "column '%s' should have default value '%s' "+
+						"but not found in internal struct", col.Name, col.DefaultExprStr())
+				}
+			} else if valIdx < 0 {
 				if !col.Nullable && valIdx == sqlbase.ColumnValIsNull {
 					return nil, sqlbase.NewNonNullViolationError(col.Name)
 				}
 				continue
+			} else {
+				// use idx and value passed in
+				inputIdx = valIdx
+				inputExpr = InputRows[i][inputIdx]
 			}
 			// checks whether the input value is valid for target column.
-			inputDatums[i][valIdx], err = TSTypeCheckForInput(evalCtx, &InputRows[i][valIdx], &col.Type, col)
+			inputDatums[i][inputIdx], err = TSTypeCheckForInput(evalCtx, &inputExpr, &col.Type, col)
 			if err != nil {
 				return nil, err
 			}
 			if j < len(primaryTagCols) {
-				buf.WriteString(sqlbase.DatumToString(inputDatums[i][valIdx]))
+				buf.WriteString(sqlbase.DatumToString(inputDatums[i][inputIdx]))
 			}
 		}
 		// Group rows with the same primary tag value.
@@ -1286,6 +1314,8 @@ func BuildRowBytesForTsInsert(
 	dbID uint32,
 	tableID uint32,
 ) (map[int]*sqlbase.PayloadForDistTSInsert, error) {
+	// collect all columns with default value set.
+	colsWithDefaultValMap, err := CheckDefaultVals(evalCtx, pArgs)
 	tp := NewTsPayload()
 	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(len(InputRows), dataCols)
 	if err != nil {
@@ -1301,20 +1331,41 @@ func BuildRowBytesForTsInsert(
 	// Type check for input values.
 	var buf strings.Builder
 	for i := range InputRows {
+		// defaultValue's index used to locate values in inputDatums
+		defaultValIdx := len(InputRows[i])
 		tp.payload = rowBytes[i]
 		offset := dataOffset
 		varDataOffset := independentOffset
 		for j, col := range pArgs.PrettyCols {
+			// the expr used to do typeCheck
+			var inputExpr tree.Expr
+			// value's index used to locate values in inputDatums
+			inputIdx := -1
 			isDataCol = !col.IsTagCol()
 			valIdx = colIndexs[int(col.ID)]
 			isLastDataCol = false
-			// Return an error if column is not null, but there have no value.
-			if valIdx < 0 {
+
+			if col.HasDefault() && valIdx < 0 {
+				inputIdx = defaultValIdx
+				defaultValIdx++
+				// for column that has NULL value, find default value of the column and assign it to inputExpr
+				if expr, ok := colsWithDefaultValMap[col.ID]; ok {
+					inputExpr = expr
+				} else {
+					return nil, pgerror.Newf(pgcode.CaseNotFound, "column '%s' should have default value '%s' "+
+						"but not found in internal struct", col.Name, col.DefaultExprStr())
+				}
+			} else if valIdx < 0 {
+				// Return an error if column is not null, but there have no value.
 				if !col.Nullable {
 					return nil, sqlbase.NewNonNullViolationError(col.Name)
 				} else if col.IsTagCol() {
 					continue
 				}
+			} else {
+				// use idx and value passed in
+				inputIdx = valIdx
+				inputExpr = InputRows[i][inputIdx]
 			}
 			if isDataCol {
 				dataColIdx = j - pArgs.PTagNum - pArgs.AllTagNum
@@ -1326,7 +1377,7 @@ func BuildRowBytesForTsInsert(
 					curColLength = VarColumnSize
 				}
 				// deal with NULL value
-				if valIdx < 0 {
+				if inputIdx < 0 {
 					tp.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
 					offset += curColLength
 					// Fill the length of rowByte
@@ -1338,15 +1389,15 @@ func BuildRowBytesForTsInsert(
 				}
 			}
 			// checks whether the input value is valid for target column.
-			inputDatums[i][valIdx], err = TSTypeCheckForInput(evalCtx, &InputRows[i][valIdx], &col.Type, col)
+			inputDatums[i][inputIdx], err = TSTypeCheckForInput(evalCtx, &inputExpr, &col.Type, col)
 			if err != nil {
 				return nil, err
 			}
 			if j < pArgs.PTagNum {
-				buf.WriteString(sqlbase.DatumToString(inputDatums[i][valIdx]))
+				buf.WriteString(sqlbase.DatumToString(inputDatums[i][inputIdx]))
 			}
 			if isDataCol {
-				if inputDatums[i][valIdx] == tree.DNull {
+				if inputDatums[i][inputIdx] == tree.DNull {
 					tp.payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
 					offset += curColLength
 					// Fill the length of rowByte
@@ -1359,11 +1410,11 @@ func BuildRowBytesForTsInsert(
 
 				// Timestamp column is always in the first column.
 				if dataColIdx == 0 {
-					rowTimestamps[i] = int64(*inputDatums[i][valIdx].(*tree.DInt))
+					rowTimestamps[i] = int64(*inputDatums[i][inputIdx].(*tree.DInt))
 				}
 				// Encode each value into rowByte in column order.
 				if varDataOffset, err = tp.FillColData(
-					inputDatums[i][valIdx],
+					inputDatums[i][inputIdx],
 					col, false, false,
 					offset, varDataOffset, bitmapOffset,
 				); err != nil {
@@ -1454,6 +1505,32 @@ func BuildRowBytesForTsInsert(
 		NodeID: evalCtx.NodeID, PerNodePayloads: allPayloads,
 	}
 	return payloadNodeMap, nil
+}
+
+// CheckDefaultVals collects the default values of all columns and organizes them into a map to improve performance.
+func CheckDefaultVals(
+	evalCtx *tree.EvalContext, pArgs PayloadArgs,
+) (map[sqlbase.ColumnID]tree.TypedExpr, error) {
+	var txCtx transform.ExprTransformContext
+	res := make(map[sqlbase.ColumnID]tree.TypedExpr, len(pArgs.PrettyCols))
+	for _, col := range pArgs.PrettyCols {
+		if col.HasDefault() {
+			defaultValStr := col.DefaultExprStr()
+			defaultExpr, err := parser.ParseExpr(defaultValStr)
+			if err != nil {
+				return nil, err
+			}
+			typedExpr, err := tree.TypeCheck(defaultExpr, nil, &col.Type)
+			if err != nil {
+				return nil, err
+			}
+			if typedExpr, err = txCtx.NormalizeExpr(evalCtx, typedExpr); err != nil {
+				return nil, err
+			}
+			res[col.ID] = typedExpr
+		}
+	}
+	return res, nil
 }
 
 // BuildPreparePayloadForTsInsert construct payload for build tsInsert.

@@ -136,8 +136,7 @@ SQLSTATE: 42809
 ERROR: can not modify an existing column on ts table
 SQLSTATE: 42809
 > ALTER TABLE db1.t1 ALTER COLUMN column1 SET DEFAULT 'a';
-ERROR: can not modify an existing column on ts table
-SQLSTATE: 42809
+ALTER TABLE
 > ALTER TABLE db1.t1 ALTER COLUMN column1 DROP STORED;
 ERROR: can not modify an existing column on ts table
 SQLSTATE: 42809

@@ -81,8 +81,8 @@ query TT
 SHOW CREATE TABLE x
 ----
 x  CREATE TABLE x (
-   a INT4 NULL DEFAULT 3:::INT8,
-   b INT4 NULL DEFAULT 7:::INT8,
+   a INT4 NULL DEFAULT 3,
+   b INT4 NULL DEFAULT 7,
    c INT4 NULL AS (a) STORED,
    d INT4 NULL AS (a + b) STORED,
    FAMILY "primary" (a, b, c, d, rowid)
@@ -92,8 +92,8 @@ query TTBTTTBB colnames
 SHOW COLUMNS FROM x
 ----
 column_name  data_type  is_nullable  column_default  generation_expression  indices    is_hidden  is_tag
-a            INT4       true         3:::INT8        ·                      {}         false      false
-b            INT4       true         7:::INT8        ·                      {}         false      false
+a            INT4       true         3               ·                      {}         false      false
+b            INT4       true         7               ·                      {}         false      false
 c            INT4       true         NULL            a                      {}         false      false
 d            INT4       true         NULL            a + b                  {}         false      false
 rowid        INT8       false        unique_rowid()  ·                      {primary}  true       false

@@ -1412,8 +1412,8 @@ FROM information_schema.columns
 WHERE table_schema = 'public' AND table_name = 'with_defaults'
 ----
 table_name     column_name  column_default
-with_defaults  a            9:::INT8
-with_defaults  b            'default':::STRING
+with_defaults  a            9
+with_defaults  b            'default'
 with_defaults  c            NULL
 with_defaults  d            NULL
 with_defaults  rowid        unique_rowid()

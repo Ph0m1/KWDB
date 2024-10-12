@@ -268,7 +268,7 @@ SHOW CREATE TABLE test.named_constraints
 test.public.named_constraints  CREATE TABLE named_constraints (
                                id INT4 NOT NULL,
                                name VARCHAR NOT NULL,
-                               title VARCHAR NULL DEFAULT 'VP of Something':::STRING,
+                               title VARCHAR NULL DEFAULT 'VP of Something',
                                nickname STRING NULL,
                                username STRING(10) NULL,
                                email VARCHAR(100) NULL,

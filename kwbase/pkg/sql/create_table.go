@@ -1421,6 +1421,7 @@ func dequalifyColumnRefs(
 // buildTSTableDesc checks if object in create table is available and build time-series table descriptor
 func buildTSTableDesc(
 	desc *sqlbase.MutableTableDescriptor,
+	semaCtx *tree.SemaContext,
 	n *tree.CreateTable,
 	allTagDesc *[]*sqlbase.ColumnDescriptor,
 	user string,
@@ -1516,7 +1517,7 @@ func buildTSTableDesc(
 		}
 		n.Tags[i].TagType = tagType
 		// Building columnDesc for tags
-		tagColumn, err := sqlbase.MakeTSColumnDefDescs(string(n.Tags[i].TagName), n.Tags[i].TagType, n.Tags[i].Nullable, false, columnType)
+		tagColumn, _, err := sqlbase.MakeTSColumnDefDescs(string(n.Tags[i].TagName), n.Tags[i].TagType, n.Tags[i].Nullable, false, columnType, nil, semaCtx)
 		if err != nil {
 			return err
 		}
@@ -1634,26 +1635,28 @@ func checkColumnDef(
 // checkAndMakeTSColDesc checks if the first column type is timestamptz and make ts column descriptor
 func checkAndMakeTSColDesc(
 	d *tree.ColumnTableDef,
+	semaCtx *tree.SemaContext,
 	col **sqlbase.ColumnDescriptor,
 	desc *sqlbase.MutableTableDescriptor,
 	isFirstTSCol bool,
-) error {
+) (tree.TypedExpr, error) {
 	var err error
+	var expr tree.TypedExpr
 	if isFirstTSCol {
 		if d.Type != types.Timestamp && d.Type != types.TimestampTZ {
-			return pgerror.New(pgcode.DatatypeMismatch, "the 1st column's type in timeseries table must be TimestampTZ")
+			return nil, pgerror.New(pgcode.DatatypeMismatch, "the 1st column's type in timeseries table must be TimestampTZ")
 		} else if d.Nullable.Nullability != tree.NotNull {
-			return pgerror.New(pgcode.NotNullViolation, "the 1st TimestampTZ column must be not null")
+			return nil, pgerror.New(pgcode.NotNullViolation, "the 1st TimestampTZ column must be not null")
 		}
 		d.Type = types.TimestampTZ
 	}
 	if err = checkTSColValidity(d); err != nil {
-		return err
+		return nil, err
 	}
 	nullable := d.Nullable.Nullability != tree.NotNull
-	*col, err = sqlbase.MakeTSColumnDefDescs(string(d.Name), d.Type, nullable, desc.TsTable.Sde, sqlbase.ColumnType_TYPE_DATA)
+	*col, expr, err = sqlbase.MakeTSColumnDefDescs(string(d.Name), d.Type, nullable, desc.TsTable.Sde, sqlbase.ColumnType_TYPE_DATA, d.DefaultExpr.Expr, semaCtx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if isFirstTSCol {
 		// The first timestamp column in the data column needs to reserve 16 bytes for LSN
@@ -1665,10 +1668,10 @@ func checkAndMakeTSColDesc(
 			ColumnDirections: []sqlbase.IndexDescriptor_Direction{sqlbase.IndexDescriptor_ASC},
 		}
 		if err := desc.AddIndex(tsPK, true); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return expr, nil
 }
 
 // buildIndexForDesc builds index descriptor for column descriptor
@@ -1805,7 +1808,7 @@ func addColToTblDesc(
 	var expr tree.TypedExpr
 	if desc.IsTSTable() {
 		isFirstTSCol := num == 0
-		if err = checkAndMakeTSColDesc(d, &col, desc, isFirstTSCol); err != nil {
+		if expr, err = checkAndMakeTSColDesc(d, semaCtx, &col, desc, isFirstTSCol); err != nil {
 			return err
 		}
 	} else {
@@ -1939,7 +1942,7 @@ func MakeTableDesc(
 	)
 	var allTagDesc []*sqlbase.ColumnDescriptor
 	if desc.IsTSTable() {
-		if err = buildTSTableDesc(&desc, n, &allTagDesc, sessionData.User); err != nil {
+		if err = buildTSTableDesc(&desc, semaCtx, n, &allTagDesc, sessionData.User); err != nil {
 			return desc, err
 		}
 	}
@@ -2764,9 +2767,9 @@ func checkTSColValidity(d *tree.ColumnTableDef) error {
 	if d.Unique {
 		return makeTsErr("unique constraint")
 	}
-	if d.HasDefaultExpr() {
-		return makeTsErr("default Expr")
-	}
+	//if d.HasDefaultExpr() {
+	//	return makeTsErr("default Expr")
+	//}
 	if len(d.CheckExprs) > 0 {
 		// Should never happen since `HoistConstraints` moves these to table level
 		return makeTsErr("check constraint")

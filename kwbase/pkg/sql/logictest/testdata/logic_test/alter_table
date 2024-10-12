@@ -462,7 +462,7 @@ a            INT4       false        NULL            ·                      {pr
 q            DECIMAL    false        NULL            ·                      {}                           false      false
 r            DECIMAL    true         NULL            ·                      {}                           false      false
 s            DECIMAL    false        NULL            ·                      {tt_s_key}                   false      false
-t            DECIMAL    true         4.0:::DECIMAL   ·                      {tt_t_key}                   false      false
+t            DECIMAL    true         4.0             ·                      {tt_t_key}                   false      false
 
 # Default values can be added and changed after table creation.
 statement ok
@@ -503,7 +503,7 @@ ALTER TABLE add_default ALTER COLUMN b DROP DEFAULT
 statement error null value in column "b" violates not-null constraint
 INSERT INTO add_default (a) VALUES (4)
 
-statement ok
+statement error pq: default value NULL violates NOT NULL constraint
 ALTER TABLE add_default ALTER COLUMN b SET DEFAULT NULL
 
 statement error null value in column "b" violates not-null constraint

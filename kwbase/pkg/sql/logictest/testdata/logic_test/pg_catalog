@@ -568,7 +568,7 @@ WHERE n.nspname = 'public'
 oid         relname  adrelid  adnum  adbin           adsrc
 2733485896  t1       80       4      12              12
 4078562911  t2       81       2      unique_rowid()  unique_rowid()
-1128672621  t3       82       3      'FOO'::STRING   'FOO'::STRING
+1128672621  t3       82       3      'FOO'           'FOO'
 1128672618  t3       82       4      unique_rowid()  unique_rowid()
 
 ## pg_catalog.pg_indexes
@@ -1944,7 +1944,7 @@ WHERE n.nspname = 'public'
 ----
 2733485896  t1  12
 4078562911  t2  unique_rowid()
-1128672621  t3  'FOO'::STRING
+1128672621  t3  'FOO'
 1128672618  t3  unique_rowid()
 
 # Verify that a set database shows tables from that database for a non-root

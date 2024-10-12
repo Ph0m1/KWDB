@@ -27,6 +27,7 @@ package sqlbase
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -3863,7 +3864,13 @@ func (desc *ColumnDescriptor) SQLString() string {
 	}
 	if desc.DefaultExpr != nil {
 		f.WriteString(" DEFAULT ")
-		f.WriteString(*desc.DefaultExpr)
+		s := *desc.DefaultExpr
+		if strings.HasPrefix(s, "e'") && strings.HasSuffix(s, "'") {
+			s = strings.TrimPrefix(s, "e'")
+			s = strings.TrimSuffix(s, "'")
+			s = convertUnicodeString(strings.ToLower(s))
+		}
+		f.WriteString(s)
 	}
 	if desc.IsComputed() {
 		f.WriteString(" AS (")
@@ -3871,6 +3878,27 @@ func (desc *ColumnDescriptor) SQLString() string {
 		f.WriteString(") STORED")
 	}
 	return f.CloseAndGetString()
+}
+
+// convert UNICODE to original string
+func convertUnicodeString(input string) string {
+	// reg match
+	re := regexp.MustCompile(`\\u([0-9a-fA-F]{4,8})`)
+
+	converted := re.ReplaceAllStringFunc(input, func(m string) string {
+		// Extract the hexadecimal part from the string.
+		hexCode := strings.TrimPrefix(m, "\\u")
+
+		// convert hex string to int
+		code, err := strconv.ParseInt(hexCode, 16, 32)
+		if err != nil {
+			return m
+		}
+		// convert int to string
+		return string(rune(code))
+	})
+
+	return "'" + converted + "'"
 }
 
 // ColumnsUsed returns the IDs of the columns used in the check constraint's

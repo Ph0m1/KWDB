@@ -294,7 +294,7 @@ SHOW CREATE TABLE b
 ----
 b  CREATE TABLE b (
    parent_id INT4 NULL,
-   d INT4 NULL DEFAULT 23:::INT8,
+   d INT4 NULL DEFAULT 23,
    CONSTRAINT fk_parent_id_ref_parent FOREIGN KEY (parent_id) REFERENCES parent(id),
    INDEX b_auto_index_fk_parent_id_ref_parent (parent_id ASC),
    INDEX foo (parent_id ASC),
@@ -994,7 +994,7 @@ SHOW COLUMNS FROM check_table
 ----
 k  INT4  false  NULL      ·  {primary}  false  false
 c  INT4  true   NULL      ·  {}         false  false
-d  INT4  true   1:::INT8  ·  {}         false  false
+d  INT4  true   1         ·  {}         false  false
 
 statement ok
 DROP TABLE check_table
