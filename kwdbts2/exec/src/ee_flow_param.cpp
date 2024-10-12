@@ -1130,12 +1130,8 @@ Field *PostResolve::ResolveCast(kwdbContext_p ctx, Field *left,
     } else {
       field = KNEW FieldTypeCastString(left, len, output_type);
     }
-  } else if (output_type == "TIMESTAMP") {
-    field = KNEW FieldTypeCastTimestampTz(left, 0);
-  } else if (output_type == "TIMESTAMPTZ") {
+  } else if (output_type == "TIMESTAMP" || output_type == "TIMESTAMPTZ" || output_type == "DATE") {
     field = KNEW FieldTypeCastTimestampTz(left, ctx->timezone);
-  } else if (output_type == "DATE") {
-    field = KNEW FieldTypeCastTimestampTz(left, 0);
   } else if (output_type == "BOOL") {
     field = KNEW FieldTypeCastBool(left);
   } else if (output_type.find("BYTES") != std::string::npos) {
