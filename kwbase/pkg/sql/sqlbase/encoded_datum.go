@@ -438,6 +438,16 @@ func (r EncDatumRow) Copy() EncDatumRow {
 	return rCopy
 }
 
+// CopyLen copies an EncDatumRow of a specified length.
+func (r EncDatumRow) CopyLen(colsNum int64) EncDatumRow {
+	if r == nil {
+		return nil
+	}
+	rCopy := make(EncDatumRow, colsNum)
+	copy(rCopy, r)
+	return rCopy
+}
+
 func (r EncDatumRow) String(types []types.T) string {
 	var b bytes.Buffer
 	r.stringToBuf(types, &DatumAlloc{}, &b)

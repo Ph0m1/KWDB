@@ -199,7 +199,7 @@ func importPlanHook(
 				}
 				p.SetAuditTargetAndType(uint32(tableDesc.GetID()), tableDesc.GetName(), nil, targetType)
 				if tableDesc.TableType == tree.RelationalTable {
-					if tableDetails, err = checkAndGetDetailsInTableInto(tableDesc); err != nil {
+					if tableDetails, err = checkAndGetDetailsInTableInto(tableDesc, intoCols); err != nil {
 						return err
 					}
 				} else {
@@ -231,16 +231,21 @@ func importPlanHook(
 						err = errors.New("expected CREATE TABLE statement in table file")
 						return err
 					}
+					var hasTableComment bool
 					if tbCreate.IsTS() {
 						timeSeriesImport = true
-						if dbName, tableDetails, err = checkAndGetTSDetailsInTableNew(ctx, p, stmts, hasComment); err != nil {
+						if dbName, tableDetails, hasTableComment, err = checkAndGetDetailsInTable(ctx, p, stmts, hasComment); err != nil {
 							return err
+						}
+						// Check if there are comments in SQL
+						if hasComment && !hasTableComment {
+							return errors.New("NO COMMENT statement in the SQL file")
 						}
 					}
 				}
 				if !timeSeriesImport {
 					// Relation table import table create using / import table tableName(table elements)
-					if dbName, tableDetails, err = checkAndGetDetailsInTableNew(ctx, p, importStmt, createFileFn); err != nil {
+					if dbName, tableDetails, err = checkAndGetDetailsInTableNew(ctx, p, importStmt, createFileFn, hasComment); err != nil {
 						return err
 					}
 					for _, t := range tableDetails {
@@ -753,6 +758,31 @@ func (r *importResumer) relationalResume(
 			log.Errorf(ctx, "failed to release protected timestamp: %v", err)
 		}
 	}
+	// Add COMMENT to the database
+	if details.DatabaseComment != "" {
+		if err := execCommentOnMeta(ctx, p, details.DatabaseComment, details.DatabaseName); err != nil {
+			return err
+		}
+	}
+	// Add COMMENT to the table
+	for _, table := range details.Tables {
+		if table.IsNew {
+			if table.TableComment != "" {
+				if err := execCommentOnMeta(ctx, p, table.TableComment, details.DatabaseName); err != nil {
+					return err
+				}
+			}
+			// Add COMMENT to the column
+			if table.ColumnComment != nil {
+				for _, colComment := range table.ColumnComment {
+					if err := execCommentOnMeta(ctx, p, colComment, details.DatabaseName); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+
 	showResult(resultsCh, *r.job.ID(), r.res.Rows, 0, 0, false)
 	return nil
 }
@@ -881,6 +911,7 @@ func (r *importResumer) prepareTableDescsForIngestion(
 				if err != nil {
 					return err
 				}
+
 				desc, err = sqlbase.GetTableDescriptorUseTxn(txn, dbName, table.SchemaName, table.TableName)
 				if err != nil {
 					return err

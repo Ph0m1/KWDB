@@ -152,9 +152,13 @@ func (ef *execFactory) ConstructExport(
 			return nil, err
 		}
 	}
-
+	var IgnoreCheckComment bool
+	if exp, ok := ef.planner.stmt.AST.(*tree.Export); ok {
+		IgnoreCheckComment = exp.IgnoreCheckComment
+	}
+	_, withComment := optVals[exportOptionComment]
 	if !onlyData {
-		if err := ef.writeCreateFile(input, string(*fileNameStr), fk); err != nil {
+		if err := ef.writeCreateFile(input, string(*fileNameStr), fk, withComment, IgnoreCheckComment); err != nil {
 			return nil, err
 		}
 	}
@@ -246,12 +250,14 @@ func (ef *execFactory) ConstructExport(
 }
 
 // writeCreateFile is used to check time series table and call the func writeRelationalMeta to write relational meta.
-func (ef *execFactory) writeCreateFile(input exec.Node, file string, foreignKey bool) error {
+func (ef *execFactory) writeCreateFile(
+	input exec.Node, file string, foreignKey bool, withComment bool, IgnoreCheckComment bool,
+) error {
 	// Get params from ef and input node.
 	p := ef.planner
 	ctx := p.EvalContext().Ctx()
 	if _, ok := input.(*scanNode); ok {
-		return writeRelationalMeta(ctx, p, input, file, foreignKey)
+		return writeRelationalMeta(ctx, p, input, file, foreignKey, withComment, IgnoreCheckComment)
 	}
 	// judge ts
 	if mergeNode, ok := input.(*synchronizerNode); ok {
@@ -271,7 +277,13 @@ func (ef *execFactory) writeCreateFile(input exec.Node, file string, foreignKey 
 // file is the path for write the meta file.
 // foreignKey is the judgement for whether include foreignKey in create statement.
 func writeRelationalMeta(
-	ctx context.Context, p *planner, input exec.Node, file string, foreignKey bool,
+	ctx context.Context,
+	p *planner,
+	input exec.Node,
+	file string,
+	foreignKey bool,
+	withComment bool,
+	IgnoreCheckComment bool,
 ) error {
 	desc := input.(*scanNode).desc.TableDesc()
 	tn := &p.tableName.TableName
@@ -283,7 +295,12 @@ func writeRelationalMeta(
 		return err
 	}
 	lCtx := newInternalLookupCtx(allDescs, nil /* want all tables */)
-	displayOptions := ShowCreateDisplayOptions{FKDisplayMode: OmitFKClausesFromCreate, IgnoreComments: true}
+	var displayOptions ShowCreateDisplayOptions
+	if withComment {
+		displayOptions = ShowCreateDisplayOptions{FKDisplayMode: OmitFKClausesFromCreate, IgnoreComments: false}
+	} else {
+		displayOptions = ShowCreateDisplayOptions{FKDisplayMode: OmitFKClausesFromCreate, IgnoreComments: true}
+	}
 	if foreignKey {
 		displayOptions.FKDisplayMode = IncludeFkClausesInCreate
 	}
@@ -291,7 +308,6 @@ func writeRelationalMeta(
 	if err != nil {
 		return err
 	}
-
 	// Write create_stmt to a file.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
@@ -304,10 +320,16 @@ func writeRelationalMeta(
 		return err
 	}
 	defer es.Close()
-	if _, err := writer.GetBufio().Write([]byte(create)); err != nil {
+
+	if withComment {
+		str := "COMMENT ON"
+		if !strings.Contains(create, str) && !IgnoreCheckComment {
+			return errors.Errorf("TABLE or COLUMN without COMMENTS cannot be used 'WITH COMMENT'")
+		}
+	}
+	if _, err := writer.GetBufio().WriteString(create + ";"); err != nil {
 		return err
 	}
-
 	writer.Flush()
 	bufBytes := buf.Bytes()
 	part := "meta"

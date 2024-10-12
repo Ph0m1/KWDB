@@ -208,7 +208,7 @@ func readAndParallelConvert(
 		ctx, span := tracing.ChildSpan(ctx, "inputconverter", int32(flowCtx.NodeID))
 		defer tracing.FinishSpan(span)
 		defer close(recordInfo.recordCh)
-		return readCSVFile(ctx, flowCtx, fileInfo, recordInfo, csvReader, tableDesc, fileSplitInfos[fileInfo.dataFileIdx][0], parallelism)
+		return readCSVFile(ctx, flowCtx, fileInfo, recordInfo, csvReader, tableDesc, fileSplitInfos[fileInfo.dataFileIdx][0], parallelism, spec.Table.IntoCols)
 	})
 	return group.Wait()
 }
@@ -226,6 +226,7 @@ func readCSVFile(
 	tableDesc *sqlbase.TableDescriptor,
 	pf partFileInfo,
 	parallelism int,
+	intoCols []string,
 ) error {
 	var count int64
 	conf, err := cloud.ExternalStorageConfFromURI(fileInfo.filename)
@@ -248,6 +249,9 @@ func readCSVFile(
 		data: make([]interface{}, 0, batchSize),
 	}
 	expectedColsLen := len(tableDesc.VisibleColumnsWithTagCol())
+	if len(intoCols) > 0 {
+		expectedColsLen = len(intoCols)
+	}
 	for {
 		record, err := csvReader.Read()
 		// file read finished
@@ -318,7 +322,7 @@ func (i *importerRecordInfo) convertRecordToRelational(
 	kvCh chan row.KVBatch,
 ) error {
 	conv, err := row.NewDatumRowConverter(
-		ctx, tableDesc, flowCtx.EvalCtx.Copy(), kvCh)
+		ctx, spec, tableDesc, flowCtx.EvalCtx.Copy(), kvCh)
 	if err != nil {
 		return err
 	}

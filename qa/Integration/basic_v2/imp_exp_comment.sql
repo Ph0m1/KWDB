@@ -1,5 +1,4 @@
 --test_case001 basic export and import database with comment;
---testmode 1n 5c
 create ts database test;
 use test;
 create table test.tb1(k_timestamp timestamptz not null, e1 int2, e2 int4, e3 int8, e4 float4, e5 float8, e6 bool, e7 char(20), e8 nchar(20), e9 varbytes(20), e10 double) tags (tag1 int2 not null, tag2 int4 not null, tag3 int8 not null, tag4 float4, tag5 float8, tag6 bool, tag7 char(20), tag8 nchar(20), tag9 varbytes(20), tag10 double) primary tags(tag1, tag2, tag3);
@@ -23,7 +22,6 @@ use test;
 show databases with comment;
 
 --test_case002 database table column with comment;
---testmode 1n 5c
 comment on table test.tb1 is 'table for comment';
 comment on column test.tb1.e1 is 'e1 column for comment';
 export into csv "nodelocal://1/dbcomment/db2" from database test with comment;
@@ -36,7 +34,6 @@ show tables with comment;
 show columns from test.tb1 with comment;
 
 --test_case003  datable table column with comment=false;
---testmode 1n 5c
 export into csv "nodelocal://1/dbcomment/db3" from database test;
 use defaultdb;
 drop database test cascade;
@@ -49,7 +46,6 @@ use defaultdb;
 drop database test cascade;
 
 --test_case004 column with comment;
---testmode 1n 5c
 create ts database def;
 use def;
 create table deftb(k_timestamp timestamptz not null, e1 int2, e2 int4, e3 int8, e4 float4, e5 float8, e6 bool, e7 char(20), e8 nchar(20), e9 varbytes(20), e10 double) tags (tag1 int2 not null, tag2 int4 not null, tag3 int8 not null, tag4 float4, tag5 float8, tag6 bool, tag7 char(20), tag8 nchar(20), tag9 varbytes(20), tag10 double) primary tags(tag1, tag2, tag3);
@@ -68,7 +64,6 @@ show tables with comment;
 show columns from deftb with comment;
 
 --test_case005 table column with comment;
---testmode 1n 5c
 comment on table deftb is 'table for comment';
 export into csv "nodelocal://1/dbcomment/db5" from table def.deftb with comment;
 drop table deftb;
@@ -78,7 +73,6 @@ show tables with comment;
 show columns from deftb with comment;
 
 --test_case006 table column with comment = false;
---testmode 1n 5c
 comment on table deftb is 'table for comment';
 export into csv "nodelocal://1/dbcomment/db6" from table def.deftb;
 drop table deftb;

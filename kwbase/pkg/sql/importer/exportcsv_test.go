@@ -72,6 +72,158 @@ func setupExportableBank(t *testing.T, nodes, rows int) (*sqlutils.SQLRunner, st
 	}
 }
 
+func TestExportImportTargetColumn(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	db, dir, cleanup := setupExportableBank(t, 3, 100)
+	defer cleanup()
+
+	db.Exec(t, "CREATE TABLE test.ds_tb(\ne1 int2 not null,\ne2 int,\ne3 int8 not null,\ne4 float4,\ne5 float8 not null,\ne6 bool,\ne8 char(1023),\ne9 nchar(255) not null,\ne10 nchar(200),\ne11 char not null,\ne12 nchar(200),\ne13 nchar not null,\ne14 nchar(200),\ne15 nchar(200) not null,\ne16 varbytes,\ne17 nchar(200) not null,\ne18 nchar(200),e19 varbytes not null,\ne20 varbytes,\ne21 varbytes not null,\ne22 varbytes,\ne23 varchar not null,\ne24 nvarchar\n);")
+	db.Exec(t, "INSERT INTO test.ds_tb values(1,1000000,1000,6000.0000,100.0,true,E'\\\"\" 转义符测试',E'\\\\ 转义符测试2',E'\\\"\"包围符测试前1 包围符测试后 \\\"\"','t',E'\\'包围符测试前2，包围符测试后\\' ','中',E'\\\"\"包围符测试前',E'包围符测试后\\\"\"',E'\\'包围符测试前',E'包围符测试后\\'','test时间精度通用查询测试！！！@TEST1',b'\\xaa','test时间精度通用查询测试',',包围符后通用查询测试','test时间精度通用查询测试', '测试test11111', '测试变长123');\n")
+	db.Exec(t, "INSERT INTO test.ds_tb values(2,1000000,1000,6000.0000,100.0,true,E'\\\" 转义符测试',E'\\\\ 转义符测试2',E'\\\"包围符测试前 包围符测试后 \\\"','t',E'\\'包围符测试前，包围符测试后\\'','中',E'\\\"包围符测试前',E'包围符测试后\\\"',E'\\'包围符测试前',E'包围符测试后\\'','test时间精度通用查询测试！！！@TEST1',b'\\xaa','test时间精度通用查询测试',',包围符后通用查询测试','test时间精度通用查询测试', '测试test11111', '测试变长123');\n")
+	db.Exec(t, "INSERT INTO test.ds_tb values(3,1000000,1000,6000.0000,100.0,true,E'\\\" 转义符测试',E'\\\\ 转义符测试2',E'\\\"包围符测试前 包围符测试后 \\\"','t',E'\\'包围符测试前，包围符测试后\\'','中',E'\\\"包围符测试前',E'包围符测试后\\\"',E'\\'包围符测试前',E'包围符测试后\\'','test时间精度通用查询测试！！！@TEST1',b'\\xaa','test时间精度通用查询测试',',包围符后通用查询测试','test时间精度通用查询测试', '测试test11111', '测试变长123');\n")
+	db.Exec(t, "INSERT INTO test.ds_tb values(4,1000000,1000,6000.0000,100.0,true,E'\\\" 转义符测试',E'\\\\ 转义符测试2',E'\\\"包围符测试前 包围符测试后 \\\"','t',E'\\'包围符测试前，包围符测试后\\'','中',E'\\\"包围符测试前',E'包围符测试后\\\"',E'\\'包围符测试前',E'包围符测试后\\'','test时间精度通用查询测试！！！@TEST1',b'\\xaa','test时间精度通用查询测试',',包围符后通用查询测试','test时间精度通用查询测试', '测试test11111', '测试变长123');\n")
+	db.Exec(t, "INSERT INTO test.ds_tb values(5,1000000,1000,6000.0000,100.0,true,E'\\\" 转义符测试',E'\\\\ 转义符测试2',E'\\\"包围符测试前 包围符测试后 \\\"','t',E'\\'包围符测试前，包围符测试后\\'','中',E'\\\"包围符测试前',E'包围符测试后\\\"',E'\\'包围符测试前',E'包围符测试后\\'','test时间精度通用查询测试！！！@TEST1',b'\\xaa','test时间精度通用查询测试',',包围符后通用查询测试','test时间精度通用查询测试', '测试test11111', '测试变长123');\n")
+
+	t.Run("all column", func(t *testing.T) {
+		var files []string
+		db.Exec(t, "CREATE TABLE test.tb1 (\ne1 int2 not null,\ne2 int,\ne3 int8 not null,\ne4 float4,\ne5 float8 not null,\ne6 bool,\ne8 char(1023),\ne9 nchar(255) not null,\ne10 nchar(200),\ne11 char not null,\ne12 nchar(200),\ne13 nchar not null,\ne14 nchar(200),\ne15 nchar(200) not null,\ne16 varbytes,\ne17 nchar(200) not null,\ne18 nchar(200),e19 varbytes not null,\ne20 varbytes,\ne21 varbytes not null,\ne22 varbytes,\ne23 varchar not null,\ne24 nvarchar\n);")
+
+		for _, row := range db.QueryStr(t,
+			fmt.Sprintf(`EXPORT INTO CSV "nodelocal://01/test1/t/" FROM SELECT * from test.ds_tb;`),
+		) {
+			nodeID, err := strconv.Atoi(row[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			fileNum, err := strconv.Atoi(row[3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < fileNum; i++ {
+				fileName := fmt.Sprintf("n%d.%d.csv", nodeID, i)
+				files = append(files, fileName)
+				f, err := ioutil.ReadFile(filepath.Join(dir, "test1", "t", fileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Log(string(f))
+			}
+		}
+
+		fileList := "'nodelocal://01/test1/t/" + strings.Join(files, "', 'nodelocal://01/test1/t/") + "'"
+		db.Exec(t, fmt.Sprintf(`IMPORT INTO test.tb1 CSV DATA (%s);`, fileList))
+
+		db.CheckQueryResults(t,
+			fmt.Sprintf(`SELECT * FROM test.tb1 ORDER BY e1;`), db.QueryStr(t, `SELECT * FROM test.ds_tb ORDER BY e1;`),
+		)
+		db.Exec(t, "DROP TABLE tb1")
+	})
+
+	t.Run("int column", func(t *testing.T) {
+		var files []string
+		db.Exec(t, "CREATE TABLE test.tb1 (e1 int2 not null, e2 int2);")
+
+		for _, row := range db.QueryStr(t,
+			fmt.Sprintf(`EXPORT INTO CSV "nodelocal://01/test2/t/" FROM SELECT e1 FROM test.ds_tb;`),
+		) {
+			nodeID, err := strconv.Atoi(row[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			fileNum, err := strconv.Atoi(row[3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < fileNum; i++ {
+				fileName := fmt.Sprintf("n%d.%d.csv", nodeID, i)
+				files = append(files, fileName)
+				f, err := ioutil.ReadFile(filepath.Join(dir, "test2", "t", fileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Log(string(f))
+			}
+		}
+
+		fileList := "'nodelocal://01/test2/t/" + strings.Join(files, "', 'nodelocal://01/test2/t/") + "'"
+		db.Exec(t, fmt.Sprintf(`IMPORT INTO test.tb1(e1) CSV DATA (%s);`, fileList))
+
+		db.CheckQueryResults(t,
+			fmt.Sprintf(`SELECT e1 FROM test.tb1 ORDER BY e1;`), db.QueryStr(t, `SELECT e1 FROM test.ds_tb ORDER BY e1;`),
+		)
+		db.Exec(t, "DROP TABLE tb1")
+	})
+
+	t.Run("char column", func(t *testing.T) {
+		var files []string
+		db.Exec(t, "CREATE TABLE test.tb1 (e1 char(1023), e2 varchar);")
+		for _, row := range db.QueryStr(t,
+			fmt.Sprintf(`EXPORT INTO CSV "nodelocal://01/test3/t/" FROM SELECT e12, e1 from test.ds_tb;`),
+		) {
+			nodeID, err := strconv.Atoi(row[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			fileNum, err := strconv.Atoi(row[3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < fileNum; i++ {
+				fileName := fmt.Sprintf("n%d.%d.csv", nodeID, i)
+				files = append(files, fileName)
+				f, err := ioutil.ReadFile(filepath.Join(dir, "test3", "t", fileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Log(string(f))
+			}
+		}
+
+		fileList := "'nodelocal://01/test3/t/" + strings.Join(files, "', 'nodelocal://01/test3/t/") + "'"
+		db.Exec(t, fmt.Sprintf(`IMPORT INTO test.tb1(e1, e2) CSV DATA (%s);`, fileList))
+
+		db.CheckQueryResults(t,
+			fmt.Sprintf(`SELECT * FROM test.tb1 ORDER BY e1;`), db.QueryStr(t, `SELECT e12, e1 FROM test.ds_tb ORDER BY e1;`),
+		)
+		db.Exec(t, "DROP TABLE tb1")
+	})
+
+	t.Run("order column", func(t *testing.T) {
+		var files []string
+		db.Exec(t, "create table test.tb1 (e1 int2 , e2 float, e3 varchar);")
+		for _, row := range db.QueryStr(t,
+			fmt.Sprintf(`EXPORT INTO CSV "nodelocal://01/test4/t/" FROM SELECT e11, e1 from test.ds_tb;`),
+		) {
+			nodeID, err := strconv.Atoi(row[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			fileNum, err := strconv.Atoi(row[3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < fileNum; i++ {
+				fileName := fmt.Sprintf("n%d.%d.csv", nodeID, i)
+				files = append(files, fileName)
+				f, err := ioutil.ReadFile(filepath.Join(dir, "test4", "t", fileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Log(string(f))
+			}
+		}
+
+		fileList := "'nodelocal://01/test4/t/" + strings.Join(files, "', 'nodelocal://01/test4/t/") + "'"
+		db.Exec(t, fmt.Sprintf(`IMPORT INTO test.tb1(e3,e1) CSV DATA (%s);`, fileList))
+
+		db.CheckQueryResults(t,
+			fmt.Sprintf(`SELECT e1, e3 FROM test.tb1 ORDER BY e1;`), db.QueryStr(t, `SELECT e1, e11 FROM test.ds_tb ORDER BY e1;`),
+		)
+		db.Exec(t, "DROP TABLE tb1")
+	})
+}
+
 func TestExportImportEncloseEscape(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
@@ -362,7 +514,7 @@ func TestExportNewOptions(t *testing.T) {
 		if _, ok := err.(*os.PathError); !ok && err != nil {
 			t.Fatal(err)
 		}
-		if expected, got := "CREATE TABLE foo (\n\ti INT8 NOT NULL,\n\tx INT8 NULL,\n\ty INT8 NULL,\n\tz INT8 NULL,\n\tCONSTRAINT \"primary\" PRIMARY KEY (i ASC),\n\tINDEX foo_y_idx (y ASC),\n\tFAMILY \"primary\" (i, x, y, z)\n)", string(schema); expected != got {
+		if expected, got := "CREATE TABLE foo (\n\ti INT8 NOT NULL,\n\tx INT8 NULL,\n\ty INT8 NULL,\n\tz INT8 NULL,\n\tCONSTRAINT \"primary\" PRIMARY KEY (i ASC),\n\tINDEX foo_y_idx (y ASC),\n\tFAMILY \"primary\" (i, x, y, z)\n);", string(schema); expected != got {
 			t.Fatalf("expected %q, got %q", expected, got)
 		}
 	})

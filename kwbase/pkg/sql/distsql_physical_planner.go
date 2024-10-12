@@ -5524,6 +5524,10 @@ func (dsp *DistSQLPlanner) createPlanForExport(
 		return PhysicalPlan{}, err
 	}
 
+	var colsNum int64
+	if value, ok := n.source.(*renderNode); ok {
+		colsNum = int64(len(value.columns))
+	}
 	core := execinfrapb.ProcessorCoreUnion{CSVWriter: &execinfrapb.CSVWriterSpec{
 		Destination: n.fileName,
 		NamePattern: exportFilePatternDefault,
@@ -5533,6 +5537,7 @@ func (dsp *DistSQLPlanner) createPlanForExport(
 		OnlyMeta:    n.expOpts.onlyMeta,
 		OnlyData:    n.expOpts.onlyData,
 		IsTS:        n.isTS,
+		ColsNum:     colsNum,
 	}}
 	var resTypes []types.T
 	if n.isTS {

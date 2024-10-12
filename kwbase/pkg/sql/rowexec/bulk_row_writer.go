@@ -113,7 +113,7 @@ func (sp *bulkRowWriter) work(ctx context.Context) error {
 	kvCh := make(chan row.KVBatch, 10)
 	var g ctxgroup.Group
 
-	conv, err := row.NewDatumRowConverter(ctx,
+	conv, err := row.NewDatumRowConverter(ctx, nil,
 		&sp.spec.Table /* targetColNames */, sp.EvalCtx, kvCh)
 	if err != nil {
 		return err

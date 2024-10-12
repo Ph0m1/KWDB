@@ -138,6 +138,7 @@ message CSVWriterSpec {
   optional bool only_data = 7 [(gogoproto.nullable) = false];
   optional bool isTS = 8 [(gogoproto.nullable) = false];
   repeated string colNames = 9;
+  optional int64 colsNum = 10 [(gogoproto.nullable) = false];
 }
 
 // BulkRowWriterSpec is the specification for a processor that consumes rows and

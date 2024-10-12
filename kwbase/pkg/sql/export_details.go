@@ -148,28 +148,72 @@ func (ex *connExecutor) dispatchExportDB(
 		return nil
 	}
 	// generate statement of create database,write databaseName.sql
+	planner.stmt.AST.(*tree.Export).IgnoreCheckComment = true
+	var findComment bool
+	sqlDB := "CREATE DATABASE " + string(exp.Database) + ";"
+	if expOpts.withComment {
+		// add database comment
+		selectStmt := fmt.Sprintf("select shobj_description(oid, 'pg_database') from pg_catalog.pg_database where datname = '%s';", string(exp.Database))
+		row, err := ex.planner.ExecCfg().InternalExecutor.QueryRowEx(ctx, "select database comment statement", nil,
+			sqlbase.InternalExecutorSessionDataOverride{Database: "defaultdb", User: security.RootUser}, selectStmt)
+		if err != nil {
+			res.SetError(errors.Errorf("%v error: %v", selectStmt, err.Error()))
+			return nil
+		}
+		if len(row) == 0 {
+			res.SetError(errors.Errorf("The database %v has not been created or has been deleted.", string(exp.Database)))
+			return nil
+		}
+		if row[0] != tree.DNull {
+			comments := string(tree.MustBeDString(row[0]))
+			commentSQL := "COMMENT ON DATABASE " + string(exp.Database) + " IS '" + comments + "';" + "\n"
+			sqlDB = sqlDB + "\n" + commentSQL
+			findComment = true
+		}
+	}
+
+	if ex.server.cfg.TestingKnobs.BeforeGetTablesName != nil {
+		ex.server.cfg.TestingKnobs.BeforeGetTablesName(ctx, planner.stmt.String())
+	}
+
+	var tableNames []*tree.TableName
+	var err error
+	if expOpts.withComment && !findComment {
+		tableNames, findComment, err = getTablesNameByDBWithFindComment(
+			planner.ExtendedEvalContext().Ctx(),
+			planner.execCfg.InternalExecutor,
+			planner.txn,
+			exp.Database)
+		if err != nil {
+			res.SetError(err)
+			return nil
+		}
+		if !findComment {
+			res.SetError(errors.Errorf("DATABASE or TABLE or COLUMN without COMMENTS cannot be used 'WITH COMMENT'"))
+			return nil
+		}
+	} else {
+		tableNames, err = getTablesNameByDatabase(
+			planner.ExtendedEvalContext().Ctx(),
+			planner.execCfg.InternalExecutor,
+			planner.txn,
+			exp.Database)
+		if err != nil {
+			res.SetError(err)
+			return nil
+		}
+	}
+
 	if err := createStmtFunc(
 		planner.EvalContext().Ctx(),
 		dbPath,
 		strings.Replace(exportFilePatternSQL, exportFilePatternPart, "meta", -1),
-		"CREATE DATABASE "+string(exp.Database),
+		sqlDB,
 	); err != nil {
 		res.SetError(err)
 		return nil
 	}
-	if ex.server.cfg.TestingKnobs.BeforeGetTablesName != nil {
-		ex.server.cfg.TestingKnobs.BeforeGetTablesName(ctx, planner.stmt.String())
-	}
-	// get tables
-	tableNames, err := getTablesNameByDatabase(
-		planner.ExtendedEvalContext().Ctx(),
-		planner.execCfg.InternalExecutor,
-		planner.txn,
-		exp.Database)
-	if err != nil {
-		res.SetError(err)
-		return nil
-	}
+
 	f := tree.NewFmtCtx(tree.FmtExport)
 	uri, err := url.Parse(dbPath)
 	if err != nil {
@@ -269,6 +313,41 @@ func getTablesNameByDatabase(
 		tableNames = append(tableNames, tblName)
 	}
 	return tableNames, nil
+}
+
+// getTablesNameByDBWithFindComment is same as getTablesNameByDatabase. In addition, check whether comments exists.
+func getTablesNameByDBWithFindComment(
+	ctx context.Context, exec *InternalExecutor, txn *kv.Txn, dbName tree.Name,
+) ([]*tree.TableName, bool, error) {
+	rows, err := exec.Query(ctx, "EXPORT DB WITH COMMENTS", txn, fmt.Sprintf(`
+				SELECT schema_name, descriptor_name, create_statement, descriptor_id
+				FROM %s.kwdb_internal.create_statements
+				WHERE database_name = $1 AND descriptor_type = 'table'
+				ORDER BY descriptor_id
+			`, tree.NameString(string(dbName))), dbName)
+	if err != nil {
+		return nil, false, err
+	}
+	var tableNames []*tree.TableName
+	var findComment bool
+	str := "COMMENT ON"
+	for _, row := range rows {
+		schema := string(tree.MustBeDString(row[0]))
+		table := string(tree.MustBeDString(row[1]))
+		tblName := &tree.TableName{}
+		tblName.TableName = tree.Name(table)
+		tblName.SchemaName = tree.Name(schema)
+		tblName.CatalogName = dbName
+		tblName.ExplicitCatalog = true
+		tblName.ExplicitSchema = true
+		tableNames = append(tableNames, tblName)
+		tblCreate := new(string)
+		*tblCreate = string(tree.MustBeDString(row[2]))
+		if !findComment && strings.Contains(*tblCreate, str) {
+			findComment = true
+		}
+	}
+	return tableNames, findComment, nil
 }
 
 // checkExportOptions is used to check whether the export options is legal.

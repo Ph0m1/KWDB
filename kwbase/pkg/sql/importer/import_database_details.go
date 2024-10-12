@@ -64,11 +64,15 @@ func checkAndGetDetailsInDatabase(
 	if !ok {
 		return false, "", nil, nil, "", errors.New("The first sql CREATE DATABASE SQL has errors")
 	}
+	databaseComment := ""
+	var hasComment bool
+	var scNames []string
+	var tableDetails []sqlbase.ImportTable
+	var hasTableComment bool
+	var isTs bool
 	// timeseries database
 	if dbCreate.EngineType == tree.EngineTypeTimeseries {
-		var tableDetails []sqlbase.ImportTable
-		databaseComment := ""
-		var hasComment bool
+		isTs = true
 		for i := range stmts {
 			if i == 0 {
 				// skip create db stmt
@@ -136,18 +140,39 @@ func checkAndGetDetailsInDatabase(
 				}
 			}
 		}
-		// Check if there are comments in SQL
-		if withComment && !hasComment {
-			return false, "", nil, nil, "", errors.New("NO COMMENT statement in the SQL file")
+	} else {
+		// relational database
+		// Check and obtain comments in the SQL file if WITH COMMENT
+		if withComment {
+			for i := range stmts {
+				if i == 0 {
+					// skip create db stmt
+					continue
+				}
+				// Check if there is a COMMENT ON DATABASE, and if so, whether the database has been established
+				dbComment, ok := stmts[i].AST.(*tree.CommentOnDatabase)
+				if ok {
+					if dbComment.Name == dbCreate.Name {
+						databaseComment = stmts[i].SQL
+						hasComment = true
+						continue
+					} else {
+						return false, "", nil, nil, "", errors.New("The database for COMMENT ON was not created")
+					}
+				}
+			}
 		}
-		return true, dbCreate.Name.String(), nil, tableDetails, databaseComment, nil
+		scNames, tableDetails, hasTableComment, err = readTablesInDbFromStore(ctx, p, dbPath, stmts, withComment)
+		if err != nil {
+			return false, "", nil, nil, "", err
+		}
+		hasComment = hasComment || hasTableComment
 	}
-	// relational database
-	scNames, tableDetails, err := readTablesInDbFromStore(ctx, p, dbPath, stmts)
-	if err != nil {
-		return false, "", nil, nil, "", err
+	// Check if there are comments in SQL
+	if withComment && !hasComment {
+		return false, "", nil, nil, "", errors.New("NO COMMENT statement in the SQL file")
 	}
-	return false, dbCreate.Name.String(), scNames, tableDetails, "", nil
+	return isTs, dbCreate.Name.String(), scNames, tableDetails, databaseComment, nil
 }
 
 // isTableCreated used to determine whether a table with a specific name has a table creation statement,
@@ -173,24 +198,22 @@ func isColumnCreated(columnName tree.Name, tableDetail sqlbase.ImportTable) bool
 
 // readTablesInDbFromStore reads the SQL file from the subdirectory and generate tableDetails.
 func readTablesInDbFromStore(
-	ctx context.Context, p sql.PlanHookState, dbPath string, stmts parser.Statements,
-) ([]string, []sqlbase.ImportTable, error) {
+	ctx context.Context, p sql.PlanHookState, dbPath string, stmts parser.Statements, OptComment bool,
+) ([]string, []sqlbase.ImportTable, bool, error) {
 	var scNames []string
 	var tableDetails []sqlbase.ImportTable
+	var hasTableComment bool
 	externalStorageFromURI := p.ExecCfg().DistSQLSrv.ExternalStorageFromURI
 	dbPath = dbPath + string(os.PathSeparator)
 	dbStore, err := externalStorageFromURI(ctx, dbPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	defer dbStore.Close()
-	if len(stmts) != 1 {
-		return nil, nil, errors.Errorf("expected 1 create database statement, found %d", len(stmts))
-	}
 	// dbPath, get all files in dbPath
 	filesInDbDir, err := dbStore.ListFiles(ctx, "*")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	for _, scFolderName := range filesInDbDir {
 		// find dbSQL
@@ -207,13 +230,13 @@ func readTablesInDbFromStore(
 		scPath := dbPath + scFolderName + string(os.PathSeparator)
 		scStore, err := externalStorageFromURI(ctx, scPath)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		defer scStore.Close()
 		// dbPath, get all files in dbPath
 		filesInScDir, err := scStore.ListFiles(ctx, "*")
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		for _, tbFolderName := range filesInScDir {
 			if tbFolderName == "meta.sql" { // SC SQL
@@ -222,32 +245,41 @@ func readTablesInDbFromStore(
 			// table SQL
 			tbReader, err := scStore.ReadFile(ctx, tbFolderName+string(os.PathSeparator)+"meta.sql")
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
 			defer tbReader.Close()
 			tableDefStr, err := ioutil.ReadAll(tbReader)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
 			stmts, err = parser.Parse(string(tableDefStr))
 			if err != nil {
-				return nil, nil, err
-			}
-			if len(stmts) != 1 {
-				return nil, nil, errors.Errorf("expected 1 create table statement, found %d", len(stmts))
+				return nil, nil, false, err
 			}
 			tbCreate, ok := stmts[0].AST.(*tree.CreateTable)
 			if !ok {
-				return nil, nil, errors.New("expected CREATE TABLE statement in database file")
+				return nil, nil, false, errors.New("expected CREATE TABLE statement in database file")
 			}
 			if err = checkCreateTableLegal(ctx, tbCreate); err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
-			tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[0].SQL, IsNew: true, TableName: tbCreate.Table.Table(), SchemaName: scFolderName})
+			var tableDetail []sqlbase.ImportTable
+			var hasComment bool
+			_, tableDetail, hasComment, err = checkAndGetDetailsInTable(ctx, p, stmts, OptComment)
+			if err != nil {
+				return nil, tableDetails, false, err
+			}
+			if tableDetail != nil {
+				for _, detail := range tableDetail {
+					detail.SchemaName = scFolderName
+					tableDetails = append(tableDetails, detail)
+				}
+			}
+			hasTableComment = hasComment
 		}
 	}
 	if tableDetails == nil {
-		return nil, nil, errors.Errorf("cannot import an empty database")
+		return nil, nil, false, errors.Errorf("cannot import an empty database")
 	}
-	return scNames, tableDetails, nil
+	return scNames, tableDetails, hasTableComment, nil
 }

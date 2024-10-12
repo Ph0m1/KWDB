@@ -254,11 +254,20 @@ ERROR: multiple assignments to the same column e3
 > drop table test_impexp.tb1;
 DROP TABLE
 > EXPORT INTO CSV "nodelocal://1/export_column/test_7/" FROM SELECT e1 FROM test_impexp.ds_tb order by e1;
-ERROR: can not export with operator: sort
+  result
+-----------
+  succeed
+(1 row)
 > EXPORT INTO CSV "nodelocal://1/export_column/test_7/" FROM SELECT e1 FROM test_impexp.ds_tb group by e1;
-ERROR: can not export with operator: distinct-on
+  result
+-----------
+  succeed
+(1 row)
 > EXPORT INTO CSV "nodelocal://1/export_column/test_7/" FROM SELECT max(e1) FROM test_impexp.ds_tb;
-ERROR: can not export with operator: scalar-group-by
+  result
+-----------
+  succeed
+(1 row)
 > use defaultdb;
 SET
 > drop database test_impexp cascade;

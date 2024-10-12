@@ -17,6 +17,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,24 @@ func checkDatabaseSql(t *testing.T, extIoDir, dbName string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(content) != "CREATE DATABASE "+dbName {
+	if string(content) != "CREATE DATABASE "+dbName+";" {
+		t.Fatal(fmt.Errorf("invalid content of %s.sql", dbName))
+	}
+}
+
+func checkDatabaseSqlWithComment(t *testing.T, extIoDir, dbName string) {
+	dbPath := filepath.Join(extIoDir, dbName)
+	metaPath := strings.Join([]string{dbPath, "meta.sql"}, "/")
+	content, err := ioutil.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	str := "COMMENT ON"
+	if !strings.Contains(string(content), str) {
+		t.Fatal(fmt.Errorf("no comment statement was found"))
+	}
+	dbSQL := "CREATE DATABASE " + dbName + ";\n" + "COMMENT ON DATABASE " + dbName + " IS 'DB for comment';\n"
+	if string(content) != dbSQL {
 		t.Fatal(fmt.Errorf("invalid content of %s.sql", dbName))
 	}
 }
@@ -62,6 +80,27 @@ func checkTableSql(t *testing.T, schemaDir, tblName, createStmt string) {
 	}
 	// check meta.sql
 	if createStmt != string(content) {
+		t.Logf("meta.sql=`%s`, createStmt=`%s`", string(content), createStmt)
+	}
+}
+
+func checkTableSqlWithComment(
+	t *testing.T, schemaDir, tblName, createStmt string, CheckComment bool,
+) {
+	tblPath := filepath.Join(schemaDir, tblName)
+	metaPath := strings.Join([]string{tblPath, "meta.sql"}, "/")
+	content, err := ioutil.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if CheckComment {
+		str := "COMMENT ON"
+		if !strings.Contains(string(content), str) {
+			t.Fatal(fmt.Errorf("no comment statement was found"))
+		}
+	}
+	// check meta.sql
+	if createStmt+";" != string(content) {
 		t.Logf("meta.sql=`%s`, createStmt=`%s`", string(content), createStmt)
 	}
 }
@@ -847,4 +886,351 @@ func TestExportDatabaseWithMultiEmptySchemas(t *testing.T) {
 	// There will be no meta.sql of empty schema
 	// checkSchemaSql(t, filepath.Join(dir, database), schema1)
 	// checkSchemaSql(t, filepath.Join(dir, database), schema2)
+}
+
+// Export the database of one table with comment
+func TestExportDBWithCommentForDB(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	dir, cleanupDir := testutils.TempDir(t)
+	defer cleanupDir()
+
+	database := "testdb"
+	table := "t1"
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE DATABASE %s`, database),
+		fmt.Sprintf(`COMMENT ON DATABASE %s IS 'DB for comment'`, database),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, table, cols[0], cols[1], cols[2]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, table, i+1, (i+1)*(i+1), i))
+	}
+
+	srv, db, _ := serverutils.StartServer(t, base.TestServerArgs{
+		ExternalIODir: dir,
+		UseDatabase:   database,
+	})
+	defer srv.Stopper().Stop(context.Background())
+	sqlDB := sqlutils.MakeSQLRunner(db)
+
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+
+	// export database with comment for DB
+	sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM DATABASE %s WITH COMMENT`, database, database))
+
+	// check sql
+	tblStmt := sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+
+	checkDatabaseSqlWithComment(t, dir, database)
+	checkTableSqlWithComment(t, filepath.Join(dir, database, "public"), table, tblStmt[0][0], false)
+	sqlDB.QueryStr(t, fmt.Sprintf(`use defaultdb`))
+	sqlDB.QueryStr(t, fmt.Sprintf(`drop database %s`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT DATABASE CSV DATA ('nodelocal://1/%s') with comment`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SHOW DATABASES WITH COMMENT;`))
+	str := "DB for comment"
+	if !strings.Contains(string(tblStmt[3][2]), str) {
+		t.Fatal(fmt.Errorf("no comment statement was found %s", tblStmt))
+	}
+}
+
+// Export the database of one table with comment
+func TestExportDBWithComment(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	dir, cleanupDir := testutils.TempDir(t)
+	defer cleanupDir()
+
+	database := "testdb"
+	table := "t1"
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE DATABASE %s`, database),
+		fmt.Sprintf(`COMMENT ON DATABASE %s IS 'DB for comment'`, database),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, table, cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`comment on table %s.%s is 'table for comment'`, database, table),
+		fmt.Sprintf(`COMMENT ON COLUMN %s.%s.%s IS 'first column for comment'`, database, table, cols[0]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, table, i+1, (i+1)*(i+1), i))
+	}
+
+	srv, db, _ := serverutils.StartServer(t, base.TestServerArgs{
+		ExternalIODir: dir,
+		UseDatabase:   database,
+	})
+	defer srv.Stopper().Stop(context.Background())
+	sqlDB := sqlutils.MakeSQLRunner(db)
+
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+
+	// export database with comment for DB
+	sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM DATABASE %s WITH COMMENT`, database, database))
+
+	// check sql
+	tblStmt := sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+
+	checkDatabaseSqlWithComment(t, dir, database)
+	checkTableSqlWithComment(t, filepath.Join(dir, database, "public"), table, tblStmt[0][0], true)
+	sqlDB.QueryStr(t, fmt.Sprintf(`use defaultdb`))
+	sqlDB.QueryStr(t, fmt.Sprintf(`drop database %s`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT DATABASE CSV DATA ('nodelocal://1/%s') WITH COMMENT`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SHOW DATABASES WITH COMMENT;`))
+	str := "DB for comment"
+	if !strings.Contains(string(tblStmt[3][2]), str) {
+		t.Fatal(fmt.Errorf("no comment statement was found %s", tblStmt))
+	}
+	str = "COMMENT ON"
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+	if !strings.Contains(tblStmt[0][0], str) {
+		t.Fatal(fmt.Errorf("no comment statement was found"))
+	}
+}
+
+// Export the database of one table with comment
+func TestExportDBWithCommentForTable(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	dir, cleanupDir := testutils.TempDir(t)
+	defer cleanupDir()
+
+	database := "testdb"
+	tables := []string{"t1", "t2"}
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE DATABASE %s`, database),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, tables[0], cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`comment on table %s.%s is 'table for comment'`, database, tables[0]),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, tables[1], cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`COMMENT ON COLUMN %s.%s.%s IS 'first column for comment'`, database, tables[1], cols[0]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, tables[0], i+1, (i+1)*(i+1), i))
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, tables[1], i+1, (i+1)*(i+1), i))
+	}
+
+	srv, db, _ := serverutils.StartServer(t, base.TestServerArgs{
+		ExternalIODir: dir,
+		UseDatabase:   database,
+	})
+	defer srv.Stopper().Stop(context.Background())
+	sqlDB := sqlutils.MakeSQLRunner(db)
+
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+
+	// export database with comment for table
+	sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM DATABASE %s WITH COMMENT`, database, database))
+
+	// check sql
+	checkDatabaseSql(t, dir, database)
+	for _, table := range tables {
+		tblStmt := sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+		checkTableSqlWithComment(t, filepath.Join(dir, database, "public"), table, tblStmt[0][0], true)
+	}
+	sqlDB.QueryStr(t, fmt.Sprintf(`use defaultdb`))
+	sqlDB.QueryStr(t, fmt.Sprintf(`drop database %s`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT DATABASE CSV DATA ('nodelocal://1/%s') WITH COMMENT`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	str := "COMMENT ON"
+	for _, table := range tables {
+		tblStmt := sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+		if !strings.Contains(tblStmt[0][0], str) {
+			t.Fatal(fmt.Errorf("no comment statement was found"))
+		}
+	}
+}
+
+// Export one table with comment
+func TestExportTableWithCommentForTable(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	dir, cleanupDir := testutils.TempDir(t)
+	defer cleanupDir()
+
+	database := "testdb"
+	//table := "t1"
+	tables := []string{"t1", "t2"}
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE DATABASE %s`, database),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, tables[0], cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`comment on table %s.%s is 'table for comment'`, database, tables[0]),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, tables[1], cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`COMMENT ON COLUMN %s.%s.%s IS 'first column for comment'`, database, tables[1], cols[0]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, tables[0], i+1, (i+1)*(i+1), i))
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, tables[1], i+1, (i+1)*(i+1), i))
+	}
+
+	srv, db, _ := serverutils.StartServer(t, base.TestServerArgs{
+		ExternalIODir: dir,
+		UseDatabase:   database,
+	})
+	defer srv.Stopper().Stop(context.Background())
+	sqlDB := sqlutils.MakeSQLRunner(db)
+
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+
+	// export table with comment for table and column
+	str := "COMMENT ON"
+	for _, table := range tables {
+		sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM TABLE %s WITH COMMENT`, table, table))
+		// check sql
+		tblStmt := sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+		checkTableSqlWithComment(t, filepath.Join(dir), table, tblStmt[0][0], true)
+		sqlDB.QueryStr(t, fmt.Sprintf(`drop table %s`, table))
+		sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT TABLE CREATE USING 'nodelocal://1/%s/meta.sql' CSV DATA ('nodelocal://1/%s/n1.0.csv') with comment`, table, table))
+		tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+		if !strings.Contains(tblStmt[0][0], str) {
+			t.Fatal(fmt.Errorf("no comment statement was found"))
+		}
+	}
+}
+
+// Export one table with comment in the cluster
+func TestExpDBWithCommentForCluster(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	sqlDB, dir, cleanup := setupExportableBank(t, 3, 100)
+	defer cleanup()
+
+	database := "test"
+	table := "t1"
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`COMMENT ON DATABASE %s IS 'DB for comment'`, database),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, table, cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`comment on table %s.%s is 'table for comment'`, database, table),
+		fmt.Sprintf(`COMMENT ON COLUMN %s.%s.%s IS 'first column for comment'`, database, table, cols[0]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, table, i+1, (i+1)*(i+1), i))
+	}
+
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+	// export database with comment for DB
+	sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM DATABASE %s WITH COMMENT`, database, database))
+
+	// check sql
+	checkDatabaseSqlWithComment(t, dir, database)
+	var tblStmt [][]string
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+	checkTableSqlWithComment(t, filepath.Join(dir, database, "public"), table, tblStmt[0][0], true)
+
+	sqlDB.QueryStr(t, fmt.Sprintf(`use defaultdb`))
+	sqlDB.QueryStr(t, fmt.Sprintf(`drop database %s cascade`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT DATABASE CSV DATA ('nodelocal://1/%s') WITH COMMENT`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SHOW DATABASES WITH COMMENT;`))
+	str := "DB for comment"
+	if !strings.Contains(string(tblStmt[3][2]), str) {
+		t.Fatal(fmt.Errorf("no comment statement was found %s", tblStmt))
+	}
+	str = "COMMENT ON"
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+	if !strings.Contains(tblStmt[0][0], str) {
+		t.Fatal(fmt.Errorf("no comment statement was found"))
+	}
+}
+
+// Export one table with comment in the cluster
+func TestExpDBWithCommentForClusterAndCol(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	sqlDB, dir, cleanup := setupExportableBank(t, 3, 100)
+	defer cleanup()
+
+	database := "test"
+	table := "t1"
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, table, cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`COMMENT ON COLUMN %s.%s.%s IS 'first column for comment'`, database, table, cols[0]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, table, i+1, (i+1)*(i+1), i))
+	}
+
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+	// export database with comment for DB
+	sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM DATABASE %s WITH COMMENT`, database, database))
+
+	// check sql
+	var tblStmt [][]string
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+	checkTableSqlWithComment(t, filepath.Join(dir, database, "public"), table, tblStmt[0][0], true)
+
+	sqlDB.QueryStr(t, fmt.Sprintf(`use defaultdb`))
+	sqlDB.QueryStr(t, fmt.Sprintf(`drop database %s cascade`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT DATABASE CSV DATA ('nodelocal://1/%s') WITH COMMENT`, database))
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SHOW DATABASES WITH COMMENT;`))
+	str := "COMMENT ON"
+	tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+	if !strings.Contains(tblStmt[0][0], str) {
+		t.Fatal(fmt.Errorf("no comment statement was found"))
+	}
+}
+
+// Export one table with comment in the cluster
+func TestExpTblWithCommentForCluster(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	sqlDB, dir, cleanup := setupExportableBank(t, 3, 100)
+	defer cleanup()
+
+	database := "test"
+	tables := []string{"t1", "t2"}
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, tables[0], cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`comment on table %s.%s is 'table for comment'`, database, tables[0]),
+		fmt.Sprintf(`CREATE TABLE %s.%s (%s INT, %s VARCHAR, %s INT)`, database, tables[1], cols[0], cols[1], cols[2]),
+		fmt.Sprintf(`COMMENT ON COLUMN %s.%s.%s IS 'first column for comment'`, database, tables[1], cols[0]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, tables[0], i+1, (i+1)*(i+1), i))
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s.%s VALUES (%d, '%d', %d)`, database, tables[1], i+1, (i+1)*(i+1), i))
+	}
+
+	sqlDB.QueryStr(t, fmt.Sprintf(`use %s`, database))
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+
+	// export DB with comment for column
+	str := "COMMENT ON"
+	for _, table := range tables {
+		row := sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM TABLE %s WITH COMMENT`, table, table))
+		nodeID, err := strconv.Atoi(row[0][2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		// check sql
+		tblStmt := sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+		checkTableSqlWithComment(t, filepath.Join(dir), table, tblStmt[0][0], true)
+		sqlDB.QueryStr(t, fmt.Sprintf(`drop table %s`, table))
+		sqlDB.QueryStr(t, fmt.Sprintf(`IMPORT TABLE CREATE USING 'nodelocal://1/%s/meta.sql' CSV DATA ('nodelocal://1/%s/n%d.0.csv') with comment`, table, table, nodeID))
+		tblStmt = sqlDB.QueryStr(t, fmt.Sprintf(`SELECT create_statement FROM [SHOW CREATE %s]`, table))
+		if !strings.Contains(tblStmt[0][0], str) {
+			t.Fatal(fmt.Errorf("no comment statement was found"))
+		}
+	}
 }

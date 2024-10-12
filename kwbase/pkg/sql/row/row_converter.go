@@ -29,6 +29,7 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/builtins"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/transform"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -245,6 +246,7 @@ func TestingSetDatumRowConverterBatchSize(newSize int) func() {
 // NewDatumRowConverter returns an instance of a DatumRowConverter.
 func NewDatumRowConverter(
 	ctx context.Context,
+	spec *execinfrapb.ReadImportDataSpec,
 	tableDesc *sqlbase.TableDescriptor,
 	evalCtx *tree.EvalContext,
 	kvCh chan<- KVBatch,
@@ -256,7 +258,19 @@ func NewDatumRowConverter(
 		EvalCtx:   evalCtx,
 	}
 	var err error
-	targetColDescriptors := immutDesc.VisibleColumns()
+	var targetColDescriptors []sqlbase.ColumnDescriptor
+	if spec != nil && len(spec.Table.IntoCols) > 0 {
+		var targetColNames tree.NameList
+		for _, col := range spec.Table.IntoCols {
+			targetColNames = append(targetColNames, tree.Name(col))
+		}
+		if targetColDescriptors, err = sqlbase.ProcessTargetColumns(immutDesc, targetColNames,
+			true /* ensureColumns */, false /* allowMutations */); err != nil {
+			return nil, err
+		}
+	} else {
+		targetColDescriptors = immutDesc.VisibleColumns()
+	}
 	isTargetColID := make(map[sqlbase.ColumnID]struct{})
 	for _, col := range targetColDescriptors {
 		isTargetColID[col.ID] = struct{}{}

@@ -161,6 +161,23 @@ func (sp *csvWriter) csvNewWriter() (*csv.Writer, *bytes.Buffer) {
 	return writer, &buf
 }
 
+// csvColumnNameWriterWithLen written to specify the length of the column name.
+func (sp *csvWriter) csvColumnNameWriterWithLen(colsNum int64) (*csv.Writer, *bytes.Buffer) {
+	if len(sp.spec.ColNames) != 0 {
+		csvRow := make([]string, colsNum)
+		colNameWriter, colNameBuf := sp.csvNewWriter()
+		for i, cn := range sp.spec.ColNames {
+			csvRow[i] = cn
+		}
+		if err := colNameWriter.Write(csvRow, nil); err != nil {
+			return nil, nil
+		}
+		colNameWriter.Flush()
+		return colNameWriter, colNameBuf
+	}
+	return nil, nil
+}
+
 func (sp *csvWriter) csvColumnNameWriter() (*csv.Writer, *bytes.Buffer) {
 	if len(sp.spec.ColNames) != 0 {
 		typs := sp.input.OutputTypes()
@@ -214,7 +231,7 @@ func (sp *csvWriter) Run(ctx context.Context) {
 	ctx, span := tracing.ChildSpan(ctx, "csvWriter", int32(sp.flowCtx.NodeID))
 	defer tracing.FinishSpan(span)
 
-	var numRowsTotal, sizeTotal, numRowsOfFile int64
+	var numRowsTotal, sizeTotal, numRowsOfFile, colsNum int64
 
 	err := func() error {
 		if sp.spec.OnlyMeta {
@@ -244,9 +261,13 @@ func (sp *csvWriter) Run(ctx context.Context) {
 			return err
 		}
 		defer es.Close()
-
+		if int64(len(typs)) != sp.spec.ColsNum && sp.spec.ColsNum != 0 {
+			colsNum = sp.spec.ColsNum
+		} else {
+			colsNum = int64(len(typs))
+		}
 		// write col names buf
-		_, colNameBuf := sp.csvColumnNameWriter()
+		_, colNameBuf := sp.csvColumnNameWriterWithLen(colsNum)
 		filename := getFileName(int(sp.flowCtx.EvalCtx.NodeID), 0, pattern)
 		// transfer charset of col name
 		if colNameBuf != nil && sp.spec.Options.Charset != "UTF-8" && sp.spec.Options.Charset != "" {
@@ -275,7 +296,7 @@ func (sp *csvWriter) Run(ctx context.Context) {
 			alloc := &sqlbase.DatumAlloc{}
 			f := tree.NewFmtCtx(tree.FmtExport)
 			defer f.Close()
-			csvRow := make([]string, len(typs))
+			csvRow := make([]string, colsNum)
 
 			for value := range cwf.csvCh {
 				// receive data, then lock, block other goroutine
@@ -368,7 +389,7 @@ func (sp *csvWriter) Run(ctx context.Context) {
 						done = true
 						break
 					}
-					c.rows = append(c.rows, row.Copy())
+					c.rows = append(c.rows, row.CopyLen(colsNum))
 					rowsCount++
 				}
 				if rowsCount < 1 {

@@ -32,7 +32,7 @@ import (
 // checkAndGetDetailsInTableInto checks relational table
 // if table is interleaved or has default value column and return tableDetails.
 func checkAndGetDetailsInTableInto(
-	table *sqlbase.MutableTableDescriptor,
+	table *sqlbase.MutableTableDescriptor, intoCols []string,
 ) ([]sqlbase.ImportTable, error) {
 	var tableDetails []sqlbase.ImportTable
 	// IMPORT INTO does not currently support interleaved tables.
@@ -48,7 +48,7 @@ func checkAndGetDetailsInTableInto(
 			return tableDetails, errors.Errorf("cannot IMPORT INTO a table with a DEFAULT expression for any of its columns")
 		}
 	}
-	tableDetails = []sqlbase.ImportTable{{Desc: &table.TableDescriptor, IsNew: false}}
+	tableDetails = []sqlbase.ImportTable{{Desc: &table.TableDescriptor, IsNew: false, IntoCols: intoCols}}
 	return tableDetails, nil
 }
 
@@ -60,10 +60,15 @@ func checkAndGetDetailsInTableNew(
 	p sql.PlanHookState,
 	importStmt *tree.Import,
 	createFileFn func() (string, error),
+	OptComment bool,
 ) (string, []sqlbase.ImportTable, error) {
 	var create *tree.CreateTable
 	var table *tree.TableName
 	var tableDetails []sqlbase.ImportTable
+	var stmts parser.Statements
+	var dbName string
+	var createFile bool
+	var hasTableComment bool
 	// 1.IMPORT gets create stmt from createDefs or create file.
 	if importStmt.CreateDefs != nil { /* Specify the table structure when importing */
 		create = &tree.CreateTable{
@@ -72,14 +77,16 @@ func checkAndGetDetailsInTableNew(
 		}
 		table = importStmt.Table
 	} else { /* Specifies the table structure in sqlFile */
+		createFile = true
 		sqlFile, err := createFileFn()
 		if err != nil {
 			return "", tableDetails, err
 		}
-		create, err = readCreateTableFromStore(ctx, sqlFile, p.ExecCfg().DistSQLSrv.ExternalStorageFromURI)
+		stmts, err = readCreateTableFromStore(ctx, sqlFile, p.ExecCfg().DistSQLSrv.ExternalStorageFromURI)
 		if err != nil {
 			return "", tableDetails, err
 		}
+		create, _ = stmts[0].AST.(*tree.CreateTable)
 		table = &create.Table
 	}
 	if err := checkCreateTableLegal(ctx, create); err != nil {
@@ -96,14 +103,23 @@ func checkAndGetDetailsInTableNew(
 	if err := p.CheckPrivilege(ctx, &dbDesc, privilege.CREATE); err != nil {
 		return "", tableDetails, err
 	}
-	tableDetails = []sqlbase.ImportTable{{Create: create.String(), IsNew: true, SchemaName: table.Schema(), TableName: table.Table()}}
-	return dbDesc.Name, tableDetails, nil
+	if !createFile {
+		tableDetails = []sqlbase.ImportTable{{Create: create.String(), IsNew: true, SchemaName: table.Schema(), TableName: table.Table()}}
+		return dbDesc.Name, tableDetails, nil
+	}
+	if dbName, tableDetails, hasTableComment, err = checkAndGetDetailsInTable(ctx, p, stmts, OptComment); err != nil {
+		return "", tableDetails, err
+	}
+	if OptComment && !hasTableComment {
+		return "", tableDetails, errors.New("NO COMMENT statement in the TABLE SQL file")
+	}
+	return dbName, tableDetails, err
 }
 
 // readCreateTableFromStore read meta.sql at target path and parse it to stmts.
 func readCreateTableFromStore(
 	ctx context.Context, filename string, externalStorageFromURI cloud.ExternalStorageFromURIFactory,
-) (*tree.CreateTable, error) {
+) (parser.Statements, error) {
 	store, err := externalStorageFromURI(ctx, filename)
 	if err != nil {
 		return nil, err
@@ -122,14 +138,11 @@ func readCreateTableFromStore(
 	if err != nil {
 		return nil, err
 	}
-	if len(stmts) != 1 {
-		return nil, errors.Errorf("expected 1 create table statement, found %d", len(stmts))
-	}
-	create, ok := stmts[0].AST.(*tree.CreateTable)
+	_, ok := stmts[0].AST.(*tree.CreateTable)
 	if !ok {
 		return nil, errors.New("expected CREATE TABLE statement in table file")
 	}
-	return create, nil
+	return stmts, nil
 }
 
 // We have a target table, so it might specify a DB in its name.
@@ -223,14 +236,14 @@ func checkTableMetaFile(
 	return stmts, nil
 }
 
-// checkAndGetTSDetailsInTableNew generate ts tables' tableDetails and return.
-func checkAndGetTSDetailsInTableNew(
+// checkAndGetDetailsInTable generate ts tables' tableDetails and return.
+func checkAndGetDetailsInTable(
 	ctx context.Context, p sql.PlanHookState, stmts parser.Statements, OptComment bool,
-) (string, []sqlbase.ImportTable, error) {
+) (string, []sqlbase.ImportTable, bool, error) {
 	tbCreate, _ := stmts[0].AST.(*tree.CreateTable)
 	prefix, err := sql.ResolveTargetObject(ctx, p, &tbCreate.Table)
 	if err != nil {
-		return "", nil, err
+		return "", nil, false, err
 	}
 	dbName := prefix.Database.Name
 	var tableDetails []sqlbase.ImportTable
@@ -249,7 +262,8 @@ func checkAndGetTSDetailsInTableNew(
 					columnName = append(columnName, string(tag.TagName))
 				}
 			}
-			tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[i].SQL, IsNew: true, TableName: tbCreate.Table.Table(), UsingSource: tb.UsingSource.Table(), TableType: tb.TableType, ColumnName: columnName})
+			tableDetails = append(tableDetails, sqlbase.ImportTable{Create: stmts[i].SQL, IsNew: true, TableName: tbCreate.Table.Table(),
+				UsingSource: tb.UsingSource.Table(), TableType: tb.TableType, ColumnName: columnName, SchemaName: tb.Table.Schema()})
 			continue
 		}
 		// Check and obtain comments in the SQL file if WITH COMMENT
@@ -259,7 +273,7 @@ func checkAndGetTSDetailsInTableNew(
 			if comment {
 				n, hasTable := isTableCreated(tableComment.Table.ToTableName().TableName, tableDetails)
 				if !hasTable {
-					return "", nil, errors.New("The table for COMMENT ON was not created")
+					return "", nil, false, errors.New("The table for COMMENT ON was not created")
 				}
 				tableDetails[n].TableComment = stmts[i].SQL
 				hasComment = true
@@ -271,11 +285,11 @@ func checkAndGetTSDetailsInTableNew(
 			if comment {
 				n, hasTable := isTableCreated(columnComment.TableName.ToTableName().TableName, tableDetails)
 				if !hasTable {
-					return "", nil, errors.New("The table containing this column for COMMENT has not been created")
+					return "", nil, false, errors.New("The table containing this column for COMMENT has not been created")
 				}
 				hasColumn := isColumnCreated(columnComment.ColumnName, tableDetails[n])
 				if !hasColumn {
-					return "", nil, errors.New("The column for COMMENT ON was not created")
+					return "", nil, false, errors.New("The column for COMMENT ON was not created")
 				}
 				tableDetails[n].ColumnComment = append(tableDetails[n].ColumnComment, stmts[i].SQL)
 				hasComment = true
@@ -283,11 +297,7 @@ func checkAndGetTSDetailsInTableNew(
 			}
 		}
 	}
-	// Check if there are comments in SQL
-	if OptComment && !hasComment {
-		return "", nil, errors.New("NO COMMENT statement in the SQL file")
-	}
-	return dbName, tableDetails, nil
+	return dbName, tableDetails, hasComment, nil
 }
 
 // execCreateTableMeta exec create table sql use InternalExecutor.

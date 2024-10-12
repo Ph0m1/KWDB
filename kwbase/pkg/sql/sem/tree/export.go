@@ -26,12 +26,13 @@ package tree
 
 // Export represents a EXPORT statement.
 type Export struct {
-	Query      *Select
-	FileFormat string
-	File       Expr
-	Options    KVOptions
-	Database   Name
-	IsTS       bool
+	Query              *Select
+	FileFormat         string
+	File               Expr
+	Options            KVOptions
+	Database           Name
+	IsTS               bool
+	IgnoreCheckComment bool
 }
 
 var _ Statement = &Export{}

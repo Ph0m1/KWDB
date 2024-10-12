@@ -37,7 +37,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/treeprinter"
-	"github.com/pkg/errors"
 )
 
 func (b *Builder) buildCreateTable(ct *memo.CreateTableExpr) (execPlan, error) {
@@ -339,12 +338,6 @@ func (b *Builder) buildExport(export *memo.ExportExpr) (execPlan, error) {
 	input, err := b.buildRelational(export.Input)
 	if err != nil {
 		return execPlan{}, err
-	}
-	if b.PhysType == tree.TS {
-		op, canExport := limitExport(export.Input)
-		if !canExport {
-			return execPlan{}, errors.Errorf("can not export with operator: %v", op)
-		}
 	}
 	scalarCtx := buildScalarCtx{}
 	fileName, err := b.buildScalar(&scalarCtx, export.FileName)
