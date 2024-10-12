@@ -2490,6 +2490,8 @@ func (s *Server) startServeUI(
 		s.stopper.RunWorker(workersCtx, func(context.Context) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				// clean the authorization
+				s.restful.authorization = ""
 				if restAuth := r.Header.Get("Authorization"); restAuth != "" {
 					s.restful.authorization = restAuth
 				}

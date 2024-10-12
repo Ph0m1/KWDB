@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils/sqlutils"
@@ -46,6 +48,16 @@ var DDlIncluded = []string{
 	"update",
 	"grant",
 	"revoke"}
+
+// queryKeyWords to be filtered out when query
+var queryKeyWords = []string{
+	"insert",
+	"set",
+	"drop",
+	"alter",
+	"delete",
+	"update",
+}
 
 var transTypeToLength = map[string]int64{
 	"BOOL":        1,
@@ -114,6 +126,20 @@ var SQLRestfulTimeOut = settings.RegisterPublicIntSetting(
 	"server.rest.timeout",
 	"time out for restful api(in minutes)",
 	60,
+)
+
+// SQLRestfulTimeZone information of timezone
+var SQLRestfulTimeZone = settings.RegisterValidatedIntSetting(
+	"server.restful_service.default_request_timezone",
+	"set time zone for restful api",
+	0,
+	func(v int64) error {
+		if v < -12 || v > 14 {
+			return pgerror.Newf(pgcode.InvalidParameterValue,
+				"server.restful_service.default_request_timezone must be set between -12 and 14")
+		}
+		return nil
+	},
 )
 
 // loginResponseSuccess is use for return login success
@@ -605,6 +631,13 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 		s.sendJSONResponse(ctx, w, -1, nil, desc)
 		return
 	}
+
+	if ifKey, keyword := startsWithKeywords(restQuery); ifKey {
+		desc = "do not support " + keyword + " statement for query interface, please check."
+		s.sendJSONResponse(ctx, w, -1, nil, desc)
+		return
+	}
+
 	// Calculate the execution time if needed
 	QueryStartTime := timeutil.Now()
 	rows, err := db.Query(restQuery)
@@ -796,6 +829,21 @@ func (s *restfulServer) checkConn(
 		s.sendJSONResponse(ctx, w, -1, nil, desc)
 		return &pgConnection{}, nil, err
 	}
+
+	// get timezone by context.
+	paraTimeZone := r.FormValue("tz")
+	// get dbname by path.
+	if paraTimeZone == "" {
+		timezone := SQLRestfulTimeZone.Get(&s.server.cfg.Settings.SV)
+		paraTimeZone = fmt.Sprintf("%d", timezone)
+	}
+	if _, err := db.Exec(fmt.Sprintf("set time zone %s", paraTimeZone)); err != nil {
+		desc := err.Error()
+		clear(ctx, db)
+		s.sendJSONResponse(ctx, w, -1, nil, desc)
+		return &pgConnection{}, nil, err
+	}
+
 	return connCache, db, nil
 }
 
@@ -1044,13 +1092,11 @@ func (s *restfulServer) pickConnCache(ctx context.Context) (*pgConnection, error
 }
 
 // verifyUser verifys if the user has logged in.
-func (s *restfulServer) verifyUser(
-	ctx context.Context,
-) (isadmin bool, method string, key string, username string, err error) {
-	key = ctx.Value(webCacheKey{}).(string)
-	username = ctx.Value(webSessionUserKey{}).(string)
+func (s *restfulServer) verifyUser(ctx context.Context) (bool, string, string, string, error) {
+	key := ctx.Value(webCacheKey{}).(string)
+	username := ctx.Value(webSessionUserKey{}).(string)
 	password := ctx.Value(webSessionPassKey{}).(string)
-	method = ctx.Value(webCacheMethodKey{}).(string)
+	method := ctx.Value(webCacheMethodKey{}).(string)
 	if method == "token" {
 		if pgconn, ok := s.connCache[key]; ok {
 			if pgconn.isAdmin {
@@ -1280,4 +1326,16 @@ func (s *restfulServer) getUserWIthPass(
 		return "", "", fmt.Errorf("wrong username or password, please check")
 	}
 	return slice[0], slice[1], nil
+}
+
+// startsWithKeywords check key words
+func startsWithKeywords(s string) (bool, string) {
+	s = strings.ToLower(s)
+
+	for _, keyword := range queryKeyWords {
+		if strings.HasPrefix(s, keyword) {
+			return true, keyword
+		}
+	}
+	return false, ""
 }
