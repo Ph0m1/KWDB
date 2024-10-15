@@ -58,7 +58,7 @@ insert into test1.t5 values('2023-07-29 03:32:59.688', 23,  23,32,323237,9223372
 insert into test1.t5 values('2023-07-29 03:36:59.688', 3,  3,3,323231,9223372036854775807,2147483644);
 insert into test1.t5 values('2023-07-29 03:37:59.688', 20,  21,3,9223372036854775807,33,3);
 -- the expected result is wrong, need to do overflow
-select sum(a),sum(b),sum(c),ROUND((sum(d)/100000)*100000, 0),ROUND((sum(tag1)/100000)*100000,0),sum(tag2) from test1.t5;
+select sum(a),sum(b),sum(c),ROUND((sum(d)/100000), 0),ROUND((sum(tag1)/100000),0),sum(tag2) from test1.t5;
 
 
 CREATE TABLE test1.t6(k_timestamp TIMESTAMP not null, a int, c int8) TAGS (tag1 int not null,tag2 int) PRIMARY TAGS (tag1);

@@ -56,13 +56,13 @@ execute p2(11);
 -- ZDP-41401
 set cluster setting sql.query_cache.enabled=true;
 set cluster setting sql.auto_limit.quantity=default;
-select time from test_ts.ts_table;
+select time from test_ts.ts_table order by time;
 set cluster setting sql.auto_limit.quantity=10;
-select time from test_ts.ts_table;
+select time from test_ts.ts_table order by time;
 
 -- ZDP-41661
 set cluster setting sql.auto_limit.quantity=20;
-select time from test_ts.ts_table;
+select time from test_ts.ts_table order by time;
 
 use defaultdb;
 set cluster setting sql.query_cache.enabled=default;
