@@ -478,6 +478,9 @@ FieldTypeCastString::FieldTypeCastString(Field *field, k_uint32 field_length,
         letter_len_ = 1;
       }
     }
+  } else {
+      storage_type_ = roachpb::DataType::VARCHAR;
+      storage_len_ = field_length > 0 ? field_length : 256;
   }
 
   switch (field_->get_storage_type()) {
@@ -569,6 +572,9 @@ FieldTypeCastTimestamptz2String::FieldTypeCastTimestamptz2String(
     } else {
       storage_len_ = 2;
     }
+  } else {
+      storage_type_ = roachpb::DataType::VARCHAR;
+      storage_len_ = field_length > 0 ? field_length : 256;
   }
 }
 
