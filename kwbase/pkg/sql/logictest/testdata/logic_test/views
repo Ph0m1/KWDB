@@ -344,56 +344,69 @@ CREATE VIEW virt2 AS SELECT range_id, lease_holder FROM kwdb_internal.ranges
 statement ok
 DROP VIEW virt2
 
-# Verify correct rejection of star expressions
-# TODO(a-robinson): Support star expressions as soon as we can (#10028)
+statement ok
+create view s1 AS SELECT * FROM t;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT * FROM t
+statement ok
+create view s1 AS SELECT t.* FROM t;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t.* FROM t
+statement ok
+create view s1 AS SELECT a FROM t ORDER BY t.*;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT a FROM t ORDER BY t.*
+statement ok
+create view s1 AS SELECT count(1) FROM t GROUP BY t.*;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT count(1) FROM t GROUP BY t.*
+statement ok
+create view s1 AS SELECT alias.* FROM t AS alias;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT alias.* FROM t AS alias
+statement ok
+create view s1 AS TABLE t;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS TABLE t
+statement ok
+create view s1 AS SELECT a FROM (SELECT * FROM t);
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT a FROM (SELECT * FROM t)
+statement ok
+create view s1 AS SELECT a FROM t WHERE NOT a IN (SELECT a FROM (SELECT * FROM t));
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT a FROM t WHERE NOT a IN (SELECT a FROM (SELECT * FROM t))
+statement ok
+create view s1 AS SELECT a FROM t GROUP BY a HAVING a IN (SELECT a FROM (SELECT * FROM t));
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT a FROM t GROUP BY a HAVING a IN (SELECT a FROM (SELECT * FROM t))
+statement error duplicate column name: "a"
+create view s1 AS SELECT t1.*, t2.a FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t1.*, t2.a FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a
+statement error duplicate column name: "a"
+create view s1 AS SELECT t1.a, t2.* FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t1.a, t2.* FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a
+statement error duplicate column name: "a"
+create view s1 AS SELECT t1.*, t2.* FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t1.*, t2.* FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a
+statement error duplicate column name: "a"
+create view s1 AS SELECT * FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT * FROM t AS t1 JOIN t AS t2 ON t1.a = t2.a
+statement error duplicate column name: "a"
+create view s1 AS SELECT t1.a, t2.a FROM (SELECT * FROM t) AS t1 JOIN t AS t2 ON t1.a = t2.a;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t1.a, t2.a FROM (SELECT * FROM t) AS t1 JOIN t AS t2 ON t1.a = t2.a
+statement error duplicate column name: "a"
+create view s1 AS SELECT t1.a, t2.a FROM t AS t1 JOIN (SELECT * FROM t) AS t2 ON t1.a = t2.a;
+drop view s1;
 
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t1.a, t2.a FROM t AS t1 JOIN (SELECT * FROM t) AS t2 ON t1.a = t2.a
-
-statement error views do not currently support \* expressions
-create view s1 AS SELECT t1.a, t2.a FROM t AS t1 JOIN t AS t2 ON t1.a IN (SELECT a FROM (SELECT * FROM t))
+statement error duplicate column name: "a"
+create view s1 AS SELECT t1.a, t2.a FROM t AS t1 JOIN t AS t2 ON t1.a IN (SELECT a FROM (SELECT * FROM t));
+drop view s1;
 
 statement ok
 create view s1 AS SELECT count(*) FROM t

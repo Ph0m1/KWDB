@@ -1408,6 +1408,7 @@ var (
 	tableTypeNormalTimeSeries = tree.NewDString("TIME SERIES TABLE")
 	tableTypeSuper            = tree.NewDString("TEMPLATE TABLE")
 	tableTypeChild            = tree.NewDString("INSTANCE TABLE")
+	tableTypeMaterializedView = tree.NewDString("MATERIALIZED VIEW")
 )
 
 var informationSchemaTablesTable = virtualSchemaTable{
@@ -1428,6 +1429,9 @@ https://www.postgresql.org/docs/9.5/infoschema-tables.html`,
 					insertable = noString
 				} else if table.IsView() {
 					tableType = tableTypeView
+					if table.MaterializedView() {
+						tableType = tableTypeMaterializedView
+					}
 					insertable = noString
 				} else if table.Temporary {
 					tableType = tableTypeTemporary

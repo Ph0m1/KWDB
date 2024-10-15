@@ -27,8 +27,11 @@ package sql
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -51,7 +54,8 @@ type createViewNode struct {
 	// planDeps tracks which tables and views the view being created
 	// depends on. This is collected during the construction of
 	// the view query's logical plan.
-	planDeps planDependencies
+	planDeps     planDependencies
+	materialized bool
 }
 
 // ReadingOwnWrites implements the planNodeReadingOwnWrites interface.
@@ -73,6 +77,12 @@ func (n *createViewNode) startExec(params runParams) error {
 		backRefMutable := params.p.Tables().getUncommittedTableByID(id).MutableTableDescriptor
 		if backRefMutable == nil {
 			backRefMutable = sqlbase.NewMutableExistingTableDescriptor(*updated.desc.TableDesc())
+		}
+		if n.materialized && (backRefMutable.Temporary || strings.Contains(backRefMutable.ViewQuery, "pg_temp_")) {
+			if backRefMutable.IsView() {
+				return pgerror.New(pgcode.FeatureNotSupported, "cannot create materialized view using temporary views")
+			}
+			return pgerror.New(pgcode.FeatureNotSupported, "cannot create materialized view using temporary tables")
 		}
 		if !isTemporary && backRefMutable.Temporary {
 			// This notice is sent from pg, let's imitate.
@@ -120,6 +130,29 @@ func (n *createViewNode) startExec(params runParams) error {
 	)
 	if err != nil {
 		return err
+	}
+
+	if n.materialized {
+		if !params.p.EvalContext().TxnImplicit {
+			return pgerror.Newf(pgcode.InvalidTransactionState, "cannot create materialized view in an explicit transaction")
+		}
+		// Ensure all nodes are the correct version.
+		if !params.ExecCfg().Settings.Version.IsActive(params.ctx, clusterversion.VersionMaterializedViews) {
+			return pgerror.New(pgcode.FeatureNotSupported,
+				"all nodes are not the correct version to use materialized views")
+		}
+		// If the view is materialized, set up some more state on the view descriptor.
+		// In particular,
+		// * mark the descriptor as a materialized view
+		// * mark the state as adding and remember the AsOf time to perform
+		//   the view query
+		// * use AllocateIDs to give the view descriptor a primary key
+		desc.IsMaterializedView = true
+		desc.State = sqlbase.TableDescriptor_ADD
+		desc.CreateAsOfTime = params.p.Txn().ReadTimestamp()
+		if err := desc.AllocateIDs(); err != nil {
+			return err
+		}
 	}
 
 	// Collect all the tables/views this view depends on.
@@ -205,6 +238,9 @@ func makeViewTableDesc(
 	desc.ViewQuery = viewQuery
 	for _, colRes := range resultColumns {
 		columnTableDef := tree.ColumnTableDef{Name: tree.Name(colRes.Name), Type: colRes.Typ}
+		// Nullability constraints do not need to exist on the view, since they are
+		// already enforced on the source data.
+		columnTableDef.Nullable.Nullability = tree.SilentNull
 		// The new types in the CREATE VIEW column specs never use
 		// SERIAL so we need not process SERIAL types here.
 		col, _, _, err := sqlbase.MakeColumnDefDescs(&columnTableDef, semaCtx)

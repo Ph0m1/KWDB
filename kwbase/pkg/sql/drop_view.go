@@ -60,6 +60,10 @@ func (p *planner) DropView(ctx context.Context, n *tree.DropView) (planNode, err
 			continue
 		}
 
+		if err := checkViewMatchesMaterialized(*droppedDesc, true /* requireView */, n.IsMaterialized); err != nil {
+			return nil, err
+		}
+
 		td = append(td, toDelete{tn, droppedDesc})
 	}
 

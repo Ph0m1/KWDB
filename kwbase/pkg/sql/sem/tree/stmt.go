@@ -1008,6 +1008,18 @@ func (*RebalanceTsData) StatementTag() string { return "REBALANCE" }
 func (*RebalanceTsData) StatTargetType() string { return "" }
 
 // StatementType implements the Statement interface.
+func (*RefreshMaterializedView) StatementType() StatementType { return DDL }
+
+// StatementTag implements the Statement interface.
+func (*RefreshMaterializedView) StatementTag() string { return "REFRESH MATERIALIZED VIEW" }
+
+// StatTargetType implements the Statement interface.
+func (*RefreshMaterializedView) StatTargetType() string { return "MATERIALIZED VIEW" }
+
+// StatOp implements the Statement interface.
+func (n *RefreshMaterializedView) StatOp() string { return "REFRESH" }
+
+// StatementType implements the Statement interface.
 func (*ReleaseSavepoint) StatementType() StatementType { return Ack }
 
 // StatOp implements the StatOp interface.
@@ -2010,6 +2022,7 @@ func (n *ImportPortal) String() string                   { return AsString(n) }
 func (n *ParenSelect) String() string                    { return AsString(n) }
 func (n *Prepare) String() string                        { return AsString(n) }
 func (n *RebalanceTsData) String() string                { return AsString(n) }
+func (n *RefreshMaterializedView) String() string        { return AsString(n) }
 func (n *ReleaseSavepoint) String() string               { return AsString(n) }
 func (n *Relocate) String() string                       { return AsString(n) }
 func (n *RenameColumn) String() string                   { return AsString(n) }

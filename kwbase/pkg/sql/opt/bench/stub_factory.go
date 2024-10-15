@@ -492,13 +492,7 @@ func (f *stubFactory) ConstructCancelSessions(input exec.Node, ifExists bool) (e
 }
 
 func (f *stubFactory) ConstructCreateView(
-	schema cat.Schema,
-	viewName string,
-	ifNotExists bool,
-	temporary bool,
-	viewQuery string,
-	columns sqlbase.ResultColumns,
-	deps opt.ViewDeps,
+	schema cat.Schema, columns sqlbase.ResultColumns, cv *memo.CreateViewExpr,
 ) (exec.Node, error) {
 	return struct{}{}, nil
 }

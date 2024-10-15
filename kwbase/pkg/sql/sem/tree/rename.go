@@ -46,12 +46,17 @@ type RenameTable struct {
 	IfExists   bool
 	IsView     bool
 	IsSequence bool
+
+	IsMaterialized bool
 }
 
 // Format implements the NodeFormatter interface.
 func (node *RenameTable) Format(ctx *FmtCtx) {
 	ctx.WriteString("ALTER ")
 	if node.IsView {
+		if node.IsMaterialized {
+			ctx.WriteString("MATERIALIZED ")
+		}
 		ctx.WriteString("VIEW ")
 	} else if node.IsSequence {
 		ctx.WriteString("SEQUENCE ")

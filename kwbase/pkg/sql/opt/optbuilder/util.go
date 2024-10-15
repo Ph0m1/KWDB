@@ -39,7 +39,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
-	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil/unimplemented"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 	"github.com/lib/pq/oid"
@@ -77,9 +76,7 @@ func getTypedExprs(exprs []tree.Expr) []tree.TypedExpr {
 func (b *Builder) expandStar(
 	expr tree.Expr, inScope *scope,
 ) (aliases []string, exprs []tree.TypedExpr) {
-	if b.insideViewDef {
-		panic(unimplemented.NewWithIssue(10028, "views do not currently support * expressions"))
-	}
+
 	switch t := expr.(type) {
 	case *tree.TupleStar:
 		texpr := inScope.resolveType(t.Expr, types.Any)
@@ -715,7 +712,10 @@ func (b *Builder) resolveTableForMutation(
 	if outerAlias != nil {
 		alias = *outerAlias
 	}
-
+	// We can't mutate materialized views.
+	if tab.IsMaterializedView() {
+		panic(pgerror.Newf(pgcode.WrongObjectType, "cannot mutate materialized view %q", tab.Name()))
+	}
 	return tab, depName, alias, columns
 }
 

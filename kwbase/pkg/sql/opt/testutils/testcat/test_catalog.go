@@ -621,6 +621,11 @@ func (tt *Table) IsVirtualTable() bool {
 	return tt.IsVirtual
 }
 
+// IsMaterializedView is part of the cat.Table interface.
+func (tt *Table) IsMaterializedView() bool {
+	return false
+}
+
 // IsInterleaved is part of the cat.Table interface.
 func (tt *Table) IsInterleaved() bool {
 	return false

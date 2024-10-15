@@ -296,6 +296,8 @@ func TestParse(t *testing.T) {
 		{`CREATE VIEW a (x, y) AS VALUES (1, 'one'), (2, 'two')`},
 		{`CREATE VIEW a AS TABLE b`},
 		{`CREATE TEMPORARY VIEW a AS SELECT b`},
+		{`CREATE MATERIALIZED VIEW a AS SELECT * FROM b`},
+		{`REFRESH MATERIALIZED VIEW a.b`},
 
 		{`CREATE SEQUENCE a`},
 		{`EXPLAIN CREATE SEQUENCE a`},
@@ -386,6 +388,8 @@ func TestParse(t *testing.T) {
 		{`DROP VIEW IF EXISTS a, b RESTRICT`},
 		{`DROP VIEW a.b CASCADE`},
 		{`DROP VIEW a, b CASCADE`},
+		{`DROP MATERIALIZED VIEW a, b`},
+		{`DROP MATERIALIZED VIEW IF EXISTS a`},
 		{`DROP SEQUENCE a`},
 		{`EXPLAIN DROP SEQUENCE a`},
 		{`DROP SEQUENCE a.b`},
@@ -1317,6 +1321,11 @@ func TestParse(t *testing.T) {
 		{`ALTER INDEX db.t@i CONFIGURE ZONE USING DEFAULT`},
 		{`ALTER INDEX t@i CONFIGURE ZONE USING DEFAULT`},
 		{`ALTER INDEX i CONFIGURE ZONE USING DEFAULT`},
+
+		{`ALTER VIEW v RENAME TO v`},
+		{`ALTER VIEW IF EXISTS v RENAME TO v`},
+		{`ALTER MATERIALIZED VIEW v RENAME TO v`},
+		{`ALTER MATERIALIZED VIEW IF EXISTS v RENAME TO v`},
 
 		{`COMMENT ON COLUMN a.b IS 'a'`},
 		{`COMMENT ON COLUMN a.b IS NULL`},
@@ -3186,7 +3195,6 @@ func TestUnimplementedSyntax(t *testing.T) {
 		//{`CREATE FUNCTION a`, 17511, `create`, ``},
 		//{`CREATE OR REPLACE FUNCTION a`, 17511, `create`, ``},
 		{`CREATE LANGUAGE a`, 17511, `create language a`, ``},
-		{`CREATE MATERIALIZED VIEW a`, 41649, ``, ``},
 		{`CREATE OPERATOR a`, 0, `create operator`, ``},
 		{`CREATE PUBLICATION a`, 0, `create publication`, ``},
 		{`CREATE RULE a`, 0, `create rule`, ``},

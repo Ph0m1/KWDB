@@ -96,6 +96,9 @@ func ShowCreateView(
 	if desc.Temporary {
 		f.WriteString("TEMP ")
 	}
+	if desc.IsMaterializedView {
+		f.WriteString("MATERIALIZED ")
+	}
 	f.WriteString("VIEW ")
 	f.FormatNode(tn)
 	f.WriteString(" (")

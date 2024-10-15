@@ -763,6 +763,12 @@ func (desc *TableDescriptor) IsView() bool {
 	return desc.ViewQuery != ""
 }
 
+// MaterializedView returns whether this TableDescriptor is a
+// MaterializedView.
+func (desc *TableDescriptor) MaterializedView() bool {
+	return desc.IsMaterializedView
+}
+
 // IsAs returns true if the TableDescriptor actually describes
 // a Table resource with an As source.
 func (desc *TableDescriptor) IsAs() bool {
@@ -808,7 +814,7 @@ func IsVirtualTable(id ID) bool {
 // Sequences count as physical tables because their values are stored in
 // the KV layer.
 func (desc *TableDescriptor) IsPhysicalTable() bool {
-	return desc.IsSequence() || (desc.IsTable() && !desc.IsVirtualTable())
+	return desc.IsSequence() || (desc.IsTable() && !desc.IsVirtualTable()) || desc.MaterializedView()
 }
 
 // KeysPerRow returns the maximum number of keys used to encode a row for the
@@ -1942,6 +1948,11 @@ func (desc *TableDescriptor) ValidateTable() error {
 			if m.Direction == DescriptorMutation_NONE {
 				return errors.AssertionFailedf(
 					"primary key swap mutation in state %s, direction %s", errors.Safe(m.State), errors.Safe(m.Direction))
+			}
+		case *DescriptorMutation_MaterializedViewRefresh:
+			if m.Direction == DescriptorMutation_NONE {
+				return errors.Errorf(
+					"materialized view refresh mutation in state %s, direction %s", errors.Safe(m.State), errors.Safe(m.Direction))
 			}
 		default:
 			return errors.AssertionFailedf(
@@ -3269,6 +3280,11 @@ func (desc *MutableTableDescriptor) MakeMutationComplete(m DescriptorMutation) e
 					return err
 				}
 			}
+		case *DescriptorMutation_MaterializedViewRefresh:
+			// Completing a refresh mutation just means overwriting the table's
+			// indexes with the new indexes that have been backfilled already.
+			desc.PrimaryIndex = t.MaterializedViewRefresh.NewPrimaryIndex
+			desc.Indexes = t.MaterializedViewRefresh.NewIndexes
 		}
 
 	case DescriptorMutation_DROP:
@@ -3424,6 +3440,18 @@ func (desc *MutableTableDescriptor) AddIndexMutation(
 // AddPrimaryKeySwapMutation adds a PrimaryKeySwap mutation to the table descriptor.
 func (desc *MutableTableDescriptor) AddPrimaryKeySwapMutation(swap *PrimaryKeySwap) {
 	m := DescriptorMutation{Descriptor_: &DescriptorMutation_PrimaryKeySwap{PrimaryKeySwap: swap}, Direction: DescriptorMutation_ADD}
+	desc.addMutation(m)
+}
+
+// AddMaterializedViewRefreshMutation adds a MaterializedViewRefreshMutation to
+// the table descriptor.
+func (desc *MutableTableDescriptor) AddMaterializedViewRefreshMutation(
+	refresh *MaterializedViewRefresh,
+) {
+	m := DescriptorMutation{
+		Descriptor_: &DescriptorMutation_MaterializedViewRefresh{MaterializedViewRefresh: refresh},
+		Direction:   DescriptorMutation_ADD,
+	}
 	desc.addMutation(m)
 }
 

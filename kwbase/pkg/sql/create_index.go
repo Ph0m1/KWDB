@@ -51,10 +51,29 @@ type createIndexNode struct {
 //	       mysql requires INDEX on the table.
 func (p *planner) CreateIndex(ctx context.Context, n *tree.CreateIndex) (planNode, error) {
 	tableDesc, err := p.ResolveMutableTableDescriptor(
-		ctx, &n.Table, true /*required*/, ResolveRequireTableDesc,
+		ctx, &n.Table, true /*required*/, ResolveRequireTableOrViewDesc,
 	)
 	if err != nil {
 		return nil, err
+	}
+	// can not create index on view which is not a materialized view.
+	if tableDesc.IsView() && !tableDesc.MaterializedView() {
+		return nil, pgerror.Newf(pgcode.WrongObjectType, "%q is not a table or materialized view", tableDesc.Name)
+	}
+
+	if tableDesc.MaterializedView() {
+		if n.Interleave != nil {
+			return nil, pgerror.New(pgcode.InvalidObjectDefinition,
+				"cannot create interleaved index on materialized view")
+		}
+		if n.Sharded != nil {
+			return nil, pgerror.New(pgcode.InvalidObjectDefinition,
+				"cannot create hash sharded index on materialized view")
+		}
+		if n.Unique {
+			return nil, pgerror.New(pgcode.InvalidObjectDefinition,
+				"cannot create unique index on materialized view")
+		}
 	}
 
 	if tableDesc != nil && tableDesc.IsReplTable && tableDesc.ReplicateFrom != "" {

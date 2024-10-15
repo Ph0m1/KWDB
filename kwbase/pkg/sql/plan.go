@@ -222,6 +222,7 @@ var _ planNode = &ordinalityNode{}
 var _ planNode = &projectSetNode{}
 var _ planNode = &pauseScheduleNode{}
 var _ planNode = &recursiveCTENode{}
+var _ planNode = &refreshMaterializedViewNode{}
 var _ planNode = &relocateNode{}
 var _ planNode = &renameColumnNode{}
 var _ planNode = &renameDatabaseNode{}

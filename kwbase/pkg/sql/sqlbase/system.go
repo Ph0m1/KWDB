@@ -53,7 +53,9 @@ func ShouldSplitAtID(id uint32, rawDesc *roachpb.Value) bool {
 	}
 	if tableDesc := desc.Table(rawDesc.Timestamp); tableDesc != nil {
 		if viewStr := tableDesc.GetViewQuery(); viewStr != "" {
-			return false
+			if !tableDesc.IsMaterializedView {
+				return false
+			}
 		}
 	}
 	return true

@@ -266,6 +266,8 @@ func TestContextualHelp(t *testing.T) {
 
 		{`PAUSE ??`, `PAUSE JOBS`},
 
+		{`REFRESH ??`, `REFRESH`},
+
 		{`RESUME ??`, `RESUME JOBS`},
 		{`REVOKE ALL ??`, `REVOKE`},
 		{`REVOKE ALL ON foo FROM ??`, `REVOKE`},

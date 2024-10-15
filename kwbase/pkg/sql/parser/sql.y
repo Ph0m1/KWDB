@@ -676,7 +676,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 
 %token <str> QUERIES QUERY
 
-%token <str> RANGE RANGES RD READ REAL REBALANCE RECURSIVE REF REFERENCES
+%token <str> RANGE RANGES RD READ REAL REBALANCE RECURSIVE REF REFERENCES REFRESH
 %token <str> REGCLASS REGPROC REGPROCEDURE REGNAMESPACE REGTYPE REINDEX
 %token <str> REMOVE_PATH RENAME REPEATABLE REPLACE
 %token <str> RELEASE RESET RESTORE RESTRICT RESUME RETENTIONS RETURNING RECURRING RETURNS REVOKE RIGHT
@@ -866,6 +866,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <tree.PartitionedBackup> partitioned_backup
 %type <[]tree.PartitionedBackup> partitioned_backup_list
 %type <tree.Statement> revoke_stmt
+%type <tree.Statement> refresh_stmt
 %type <*tree.Select> select_stmt
 %type <tree.Statement> abort_stmt
 %type <tree.Statement> rollback_stmt
@@ -1294,6 +1295,7 @@ stmt:
 | revoke_stmt       // EXTEND WITH HELP: REVOKE
 | savepoint_stmt    // EXTEND WITH HELP: SAVEPOINT
 | release_stmt      // EXTEND WITH HELP: RELEASE
+| refresh_stmt      // EXTEND WITH HELP: REFRESH
 | nonpreparable_set_stmt // help texts in sub-rule
 | transaction_stmt  // help texts in sub-rule
 | reindex_stmt
@@ -1387,7 +1389,7 @@ alter_partition_stmt:
 // %Help: ALTER VIEW - change the definition of a view
 // %Category: DDL
 // %Text:
-// ALTER VIEW [IF EXISTS] <name> RENAME TO <newname>
+// ALTER [MATERIALIZED] VIEW [IF EXISTS] <name> RENAME TO <newname>
 // %SeeAlso:
 alter_view_stmt:
   alter_rename_view_stmt
@@ -2496,7 +2498,6 @@ create_unsupported:
 //| CREATE FUNCTION error { return unimplementedWithIssueDetail(sqllex, 17511, "create function") }
 //| CREATE OR REPLACE FUNCTION error { return unimplementedWithIssueDetail(sqllex, 17511, "create function") }
 | CREATE opt_or_replace opt_trusted opt_procedural LANGUAGE name error { return unimplementedWithIssueDetail(sqllex, 17511, "create language " + $6) }
-| CREATE MATERIALIZED VIEW error { return unimplementedWithIssue(sqllex, 41649) }
 | CREATE OPERATOR error { return unimplemented(sqllex, "create operator") }
 | CREATE PUBLICATION error { return unimplemented(sqllex, "create publication") }
 | CREATE opt_or_replace RULE error { return unimplemented(sqllex, "create rule") }
@@ -2858,7 +2859,7 @@ drop_ddl_stmt:
 
 // %Help: DROP VIEW - remove a view
 // %Category: DDL
-// %Text: DROP VIEW [IF EXISTS] <tablename> [, ...] [CASCADE | RESTRICT]
+// %Text: DROP [MATERIALIZED] VIEW [IF EXISTS] <tablename> [, ...] [CASCADE | RESTRICT]
 // %SeeAlso: SHOW TABLES
 drop_view_stmt:
   DROP VIEW table_name_list opt_drop_behavior
@@ -2868,6 +2869,24 @@ drop_view_stmt:
 | DROP VIEW IF EXISTS table_name_list opt_drop_behavior
   {
     $$.val = &tree.DropView{Names: $5.tableNames(), IfExists: true, DropBehavior: $6.dropBehavior()}
+  }
+| DROP MATERIALIZED VIEW table_name_list opt_drop_behavior
+  {
+    $$.val = &tree.DropView{
+       Names: $4.tableNames(),
+       IfExists: false,
+       DropBehavior: $5.dropBehavior(),
+       IsMaterialized: true,
+     }
+  }
+| DROP MATERIALIZED VIEW IF EXISTS table_name_list opt_drop_behavior
+  {
+    $$.val = &tree.DropView{
+      Names: $6.tableNames(),
+      IfExists: true,
+      DropBehavior: $7.dropBehavior(),
+      IsMaterialized: true,
+    }
   }
 | DROP VIEW error // SHOW HELP: DROP VIEW
 
@@ -6254,7 +6273,7 @@ role_or_group_or_user:
 
 // %Help: CREATE VIEW - create a new view
 // %Category: DDL
-// %Text: CREATE [TEMPORARY | TEMP] VIEW <viewname> [( <colnames...> )] AS <source>
+// %Text: CREATE [TEMPORARY | TEMP | MATERIALIZED] VIEW <viewname> [( <colnames...> )] AS <source>
 // %SeeAlso: CREATE TABLE, SHOW CREATE, SHOW TABLES
 create_view_stmt:
   CREATE opt_temp opt_view_recursive VIEW view_name opt_column_list AS select_stmt
@@ -6280,6 +6299,28 @@ create_view_stmt:
     }
   }
 | CREATE OR REPLACE opt_temp opt_view_recursive VIEW error { return unimplementedWithIssue(sqllex, 24897) }
+| CREATE MATERIALIZED VIEW view_name opt_column_list AS select_stmt
+  {
+    name := $4.unresolvedObjectName().ToTableName()
+    $$.val = &tree.CreateView{
+      Name: name,
+      ColumnNames: $5.nameList(),
+      AsSource: $7.slct(),
+      Materialized: true,
+      IfNotExists: false,
+    }
+  }
+| CREATE MATERIALIZED VIEW IF NOT EXISTS view_name opt_column_list AS select_stmt
+  {
+    name := $7.unresolvedObjectName().ToTableName()
+    $$.val = &tree.CreateView{
+      Name: name,
+      ColumnNames: $8.nameList(),
+      AsSource: $10.slct(),
+      Materialized: true,
+      IfNotExists: true,
+    }
+  }
 | CREATE opt_temp opt_view_recursive VIEW error // SHOW HELP: CREATE VIEW
 
 role_option:
@@ -6732,11 +6773,35 @@ alter_rename_view_stmt:
     newName := $6.unresolvedObjectName()
     $$.val = &tree.RenameTable{Name: name, NewName: newName, IfExists: false, IsView: true}
   }
+| ALTER MATERIALIZED VIEW relation_expr RENAME TO view_name
+  {
+    name := $4.unresolvedObjectName()
+    newName := $7.unresolvedObjectName()
+    $$.val = &tree.RenameTable{
+      Name: name,
+      NewName: newName,
+      IfExists: false,
+      IsView: true,
+      IsMaterialized: true,
+    }
+  }
 | ALTER VIEW IF EXISTS relation_expr RENAME TO view_name
   {
     name := $5.unresolvedObjectName()
     newName := $8.unresolvedObjectName()
     $$.val = &tree.RenameTable{Name: name, NewName: newName, IfExists: true, IsView: true}
+  }
+| ALTER MATERIALIZED VIEW IF EXISTS relation_expr RENAME TO view_name
+  {
+    name := $6.unresolvedObjectName()
+    newName := $9.unresolvedObjectName()
+    $$.val = &tree.RenameTable{
+      Name: name,
+      NewName: newName,
+      IfExists: true,
+      IsView: true,
+      IsMaterialized: true,
+    }
   }
 
 alter_rename_sequence_stmt:
@@ -6789,6 +6854,17 @@ rebalance_stmt:
     name := $6.unresolvedObjectName().ToTableName()
     $$.val = &tree.RebalanceTsData{TableName: name}
   }
+
+// %Help: REFRESH - recalculate a materialized view
+// %Category: Misc
+// %Text:
+// REFRESH MATERIALIZED VIEW view_name
+refresh_stmt:
+  REFRESH MATERIALIZED VIEW view_name
+  {
+    $$.val = &tree.RefreshMaterializedView{Name: $4.unresolvedObjectName(),}
+  }
+| REFRESH error // SHOW HELP: REFRESH
 
 // %Help: RELEASE - complete a sub-transaction
 // %Category: Txn
@@ -11848,6 +11924,7 @@ unreserved_keyword:
 | READ
 | RECURSIVE
 | REF
+| REFRESH
 | REGCLASS
 | REGPROC
 | REGPROCEDURE

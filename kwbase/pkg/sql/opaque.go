@@ -139,6 +139,8 @@ func buildOpaque(
 		plan, err = p.CreateImportPortal(ctx, n)
 	case *tree.RebalanceTsData:
 		plan, err = p.RebalanceTsDataNode(ctx, n)
+	case *tree.RefreshMaterializedView:
+		plan, err = p.RefreshMaterializedView(ctx, n)
 	case *tree.RenameColumn:
 		plan, err = p.RenameColumn(ctx, n)
 	case *tree.RenameDatabase:
@@ -238,6 +240,7 @@ func init() {
 		&tree.ImportPortal{},
 		&tree.Grant{},
 		&tree.GrantRole{},
+		&tree.RefreshMaterializedView{},
 		&tree.RenameColumn{},
 		&tree.RenameDatabase{},
 		&tree.RenameIndex{},

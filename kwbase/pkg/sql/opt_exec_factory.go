@@ -2054,15 +2054,9 @@ func (ef *execFactory) ConstructCreateTables(
 
 // ConstructCreateView is part of the exec.Factory interface.
 func (ef *execFactory) ConstructCreateView(
-	schema cat.Schema,
-	viewName string,
-	ifNotExists bool,
-	temporary bool,
-	viewQuery string,
-	columns sqlbase.ResultColumns,
-	deps opt.ViewDeps,
+	schema cat.Schema, columns sqlbase.ResultColumns, cv *memo.CreateViewExpr,
 ) (exec.Node, error) {
-
+	deps := cv.Deps
 	planDeps := make(planDependencies, len(deps))
 	for _, d := range deps {
 		desc, err := getDescForDataSource(d.DataSource)
@@ -2092,15 +2086,16 @@ func (ef *execFactory) ConstructCreateView(
 
 	db := schema.Name().CatalogName
 	sc := schema.Name().SchemaName
-	viewTblName := tree.MakeTableNameWithSchema(db, sc, tree.Name(viewName))
+	viewTblName := tree.MakeTableNameWithSchema(db, sc, tree.Name(cv.ViewName))
 	return &createViewNode{
-		viewName:    &viewTblName,
-		ifNotExists: ifNotExists,
-		temporary:   temporary,
-		viewQuery:   viewQuery,
-		dbDesc:      schema.(*optSchema).database,
-		columns:     columns,
-		planDeps:    planDeps,
+		viewName:     &viewTblName,
+		ifNotExists:  cv.IfNotExists,
+		temporary:    cv.Temporary,
+		materialized: cv.Materialized,
+		viewQuery:    cv.ViewQuery,
+		dbDesc:       schema.(*optSchema).database,
+		columns:      columns,
+		planDeps:     planDeps,
 	}, nil
 }
 

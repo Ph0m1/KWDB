@@ -624,6 +624,7 @@ var (
 	relKindSequence = tree.NewDString("S")
 
 	relPersistencePermanent = tree.NewDString("p")
+	relKindMaterializedView = tree.NewDString("m")
 )
 
 var pgCatalogClassTable = virtualSchemaTable{
@@ -669,6 +670,9 @@ CREATE TABLE pg_catalog.pg_class (
 				relAm := forwardIndexOid
 				if table.IsView() {
 					relKind = relKindView
+					if table.MaterializedView() {
+						relKind = relKindMaterializedView
+					}
 					relAm = oidZero
 				} else if table.IsSequence() {
 					relKind = relKindSequence

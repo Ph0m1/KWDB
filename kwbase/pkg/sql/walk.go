@@ -1122,4 +1122,6 @@ var planNodeNames = map[reflect.Type]string{
 	reflect.TypeOf(&zeroNode{}):                 "norows",
 	reflect.TypeOf(&zigzagJoinNode{}):           "zigzag-join",
 	reflect.TypeOf(&importPortalNode{}):         "import portal",
+
+	reflect.TypeOf(&refreshMaterializedViewNode{}): "refresh materialized view",
 }

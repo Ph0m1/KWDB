@@ -31,6 +31,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"github.com/cockroachdb/errors"
 )
 
 // constructProjectForScope constructs a projection if it will result in a
@@ -172,8 +173,10 @@ func (b *Builder) analyzeSelectList(
 ) {
 
 	colIndexTmp := 0
+	var expansions tree.SelectExprs
 	for i := 0; i < len(*selects); i++ {
 		e := (*selects)[i]
+		expanded := false
 		// Start with fast path, looking for simple column reference.
 		texpr := b.resolveColRef(e.Expr, inScope)
 		if texpr == nil {
@@ -232,6 +235,20 @@ func (b *Builder) analyzeSelectList(
 					}
 
 					aliases, exprs := b.expandStar(e.Expr, inScope)
+					if b.insideViewDef {
+						expanded = true
+						for _, expr := range exprs {
+							switch col := expr.(type) {
+							case *scopeColumn:
+								expansions = append(expansions, tree.SelectExpr{Expr: tree.NewColumnItem(&col.table, col.name)})
+							case *tree.ColumnAccessExpr:
+								expansions = append(expansions, tree.SelectExpr{Expr: col})
+							default:
+								panic(errors.AssertionFailedf("unexpected column type in expansion"))
+							}
+						}
+					}
+
 					colIndexTmp += len(exprs)
 					if outScope.cols == nil {
 						outScope.cols = make([]scopeColumn, 0, len(*selects)+len(exprs)-1)
@@ -278,6 +295,12 @@ func (b *Builder) analyzeSelectList(
 			alias = Gapfill
 		}
 		b.addColumn(outScope, alias, texpr, false)
+		if b.insideViewDef && !expanded {
+			expansions = append(expansions, e)
+		}
+	}
+	if b.insideViewDef {
+		*selects = expansions
 	}
 }
 

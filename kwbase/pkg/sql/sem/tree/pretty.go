@@ -1239,6 +1239,9 @@ func (node *CreateView) doc(p *PrettyCfg) pretty.Doc {
 	if node.Temporary {
 		title = pretty.ConcatSpace(title, pretty.Keyword("TEMPORARY"))
 	}
+	if node.Materialized {
+		title = pretty.ConcatSpace(title, pretty.Keyword("MATERIALIZED"))
+	}
 	title = pretty.ConcatSpace(title, pretty.Keyword("VIEW"))
 	if node.IfNotExists {
 		title = pretty.ConcatSpace(title, pretty.Keyword("IF NOT EXISTS"))

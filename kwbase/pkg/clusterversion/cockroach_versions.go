@@ -74,6 +74,7 @@ const (
 	VersionTimeTZType
 	VersionTimePrecision
 	Version20_1
+	VersionMaterializedViews
 
 	// Add new versions here (step one of two).
 )
@@ -475,6 +476,10 @@ var versionsSingleton = keyedVersions([]keyedVersion{
 		// Version20_1 is CockroachDB v20.1. It's used for all v20.1.x patch releases.
 		Key:     Version20_1,
 		Version: roachpb.Version{Major: 20, Minor: 1},
+	},
+	{
+		Key:     VersionMaterializedViews,
+		Version: roachpb.Version{Major: 20, Minor: 1, Unstable: 1},
 	},
 
 	// Add new versions here (step two of two).

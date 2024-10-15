@@ -29,8 +29,8 @@ descriptor_id  descriptor_name  column_id  column_name  column_type             
 82             test_kvi1        1          k            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        false     NULL            false
 83             test_kvi2        1          k            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        false     NULL            false
 83             test_kvi2        2          v            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        true      NULL            false
-84             test_v1          1          v            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        false     NULL            false
-85             test_v2          1          v            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        false     NULL            false
+84             test_v1          1          v            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        true      NULL            false
+85             test_v2          1          v            family:IntFamily width:32 precision:0 locale:"" visible_type:0 oid:23 time_precision_is_set:false type_engine:0        true      NULL            false
 
 query ITITTBB colnames
 SELECT * FROM kwdb_internal.table_indexes WHERE descriptor_name LIKE 'test_%' ORDER BY descriptor_id, index_id

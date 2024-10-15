@@ -453,10 +453,10 @@ t3            rowid    -1         NULL      NULL        NULL      true        tr
 primary       rowid    -1         NULL      NULL        NULL      true        true
 t3_a_b_idx    a        -1         NULL      NULL        NULL      false       false
 t3_a_b_idx    b        -1         NULL      NULL        NULL      false       false
-v1            p        -1         NULL      NULL        NULL      true        false
-v1            a        -1         NULL      NULL        NULL      true        false
-v1            b        -1         NULL      NULL        NULL      true        false
-v1            c        -1         NULL      NULL        NULL      true        false
+v1            p        -1         NULL      NULL        NULL      false       false
+v1            a        -1         NULL      NULL        NULL      false       false
+v1            b        -1         NULL      NULL        NULL      false       false
+v1            c        -1         NULL      NULL        NULL      false       false
 
 query TTBBITTT colnames
 SELECT c.relname, attname, attisdropped, attislocal, attinhcount, attacl, attoptions, attfdwoptions

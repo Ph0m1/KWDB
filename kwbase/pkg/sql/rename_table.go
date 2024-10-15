@@ -68,6 +68,9 @@ func (p *planner) RenameTable(ctx context.Context, n *tree.RenameTable) (planNod
 		// Noop.
 		return newZeroNode(nil /* columns */), nil
 	}
+	if err := checkViewMatchesMaterialized(*tableDesc, n.IsView, n.IsMaterialized); err != nil {
+		return nil, err
+	}
 
 	if tableDesc.IsReplTable && tableDesc.ReplicateFrom != "" {
 		return nil, errors.Errorf("Can not rename replicated table %s ", tableDesc.Name)

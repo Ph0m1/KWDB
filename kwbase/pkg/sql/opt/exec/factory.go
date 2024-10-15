@@ -566,12 +566,8 @@ type Factory interface {
 	// statement.
 	ConstructCreateView(
 		schema cat.Schema,
-		viewName string,
-		ifNotExists bool,
-		temporary bool,
-		viewQuery string,
-		columns sqlbase.ResultColumns,
-		deps opt.ViewDeps,
+		cols sqlbase.ResultColumns,
+		cv *memo.CreateViewExpr,
 	) (Node, error)
 
 	// ConstructSequenceSelect creates a node that implements a scan of a sequence

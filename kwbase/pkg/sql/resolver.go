@@ -593,7 +593,8 @@ func findTableContainingIndex(
 		if err != nil {
 			return nil, nil, err
 		}
-		if tableDesc == nil || !tableDesc.IsTable() {
+		// skip non-table but not skip materialized views,as of materialized view maybe contain index
+		if tableDesc == nil || !(tableDesc.IsTable() || tableDesc.MaterializedView()) {
 			continue
 		}
 
@@ -646,9 +647,13 @@ func expandIndexName(
 	tn = &index.Table
 	if tn.Table() != "" {
 		// The index and its table prefix must exist already. Resolve the table.
-		desc, err = ResolveMutableExistingObject(ctx, sc, tn, requireTable, ResolveRequireTableDesc)
+		desc, err = ResolveMutableExistingObject(ctx, sc, tn, requireTable, ResolveRequireTableOrViewDesc)
 		if err != nil {
 			return nil, nil, err
+		}
+		if desc != nil && desc.IsView() && !desc.MaterializedView() {
+			return nil, nil, pgerror.Newf(pgcode.WrongObjectType,
+				"%q is not a table or materialized view", tn.Table())
 		}
 		return tn, desc, nil
 	}

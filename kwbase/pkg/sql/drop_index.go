@@ -49,8 +49,9 @@ type dropIndexNode struct {
 
 // DropIndex drops an index.
 // Privileges: CREATE on table.
-//   Notes: postgres allows only the index owner to DROP an index.
-//          mysql requires the INDEX privilege on the table.
+//
+//	Notes: postgres allows only the index owner to DROP an index.
+//	       mysql requires the INDEX privilege on the table.
 func (p *planner) DropIndex(ctx context.Context, n *tree.DropIndex) (planNode, error) {
 	// Keep a track of the indexes that exist to check. When the IF EXISTS
 	// options are provided, we will simply not include any indexes that
@@ -98,13 +99,18 @@ func (n *dropIndexNode) startExec(params runParams) error {
 		// the mutation list and new version number created by the first
 		// drop need to be visible to the second drop.
 		tableDesc, err := params.p.ResolveMutableTableDescriptor(
-			ctx, index.tn, true /*required*/, ResolveRequireTableDesc)
+			ctx, index.tn, true /*required*/, ResolveRequireTableOrViewDesc)
 		if err != nil {
 			// Somehow the descriptor we had during planning is not there
 			// any more.
 			return errors.NewAssertionErrorWithWrappedErrf(err,
 				"table descriptor for %q became unavailable within same txn",
 				tree.ErrString(index.tn))
+		}
+
+		// can not drop index on view which is not a materialized view.
+		if tableDesc.IsView() && !tableDesc.MaterializedView() {
+			return pgerror.Newf(pgcode.WrongObjectType, "%q is not a table or materialized view", tableDesc.Name)
 		}
 
 		// If we couldn't find the index by name, this is either a legitimate error or

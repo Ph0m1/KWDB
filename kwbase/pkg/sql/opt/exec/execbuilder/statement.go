@@ -100,15 +100,7 @@ func (b *Builder) buildCreateView(cv *memo.CreateViewExpr) (execPlan, error) {
 		cols[i].Name = cv.Columns[i].Alias
 		cols[i].Typ = md.ColumnMeta(cv.Columns[i].ID).Type
 	}
-	root, err := b.factory.ConstructCreateView(
-		schema,
-		cv.ViewName,
-		cv.IfNotExists,
-		cv.Temporary,
-		cv.ViewQuery,
-		cols,
-		cv.Deps,
-	)
+	root, err := b.factory.ConstructCreateView(schema, cols, cv)
 	return execPlan{root: root}, err
 }
 

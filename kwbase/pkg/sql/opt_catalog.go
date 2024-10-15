@@ -344,8 +344,10 @@ func (oc *optCatalog) dataSourceForDesc(
 	desc *sqlbase.ImmutableTableDescriptor,
 	name *cat.DataSourceName,
 ) (cat.DataSource, error) {
-	if desc.IsTable() {
+	if desc.IsTable() || desc.MaterializedView() {
 		// Tables require invalidation logic for cached wrappers.
+		// Because they are backed by physical data, we treat materialized views
+		// as tables for the purposes of planning.
 		return oc.dataSourceForTable(ctx, flags, desc, name)
 	}
 
@@ -782,6 +784,11 @@ func (ot *optTable) Name() tree.Name {
 // IsVirtualTable is part of the cat.Table interface.
 func (ot *optTable) IsVirtualTable() bool {
 	return false
+}
+
+// IsMaterializedView implements the cat.Table interface.
+func (ot *optTable) IsMaterializedView() bool {
+	return ot.desc.MaterializedView()
 }
 
 // IsInterleaved is part of the cat.Table interface.
@@ -1459,6 +1466,11 @@ func (ot *optVirtualTable) IsVirtualTable() bool {
 // IsInterleaved is part of the cat.Table interface.
 func (ot *optVirtualTable) IsInterleaved() bool {
 	return ot.desc.IsInterleaved()
+}
+
+// IsMaterializedView implements the cat.Table interface.
+func (ot *optVirtualTable) IsMaterializedView() bool {
+	return ot.desc.MaterializedView()
 }
 
 // ColumnCount is part of the cat.Table interface.
