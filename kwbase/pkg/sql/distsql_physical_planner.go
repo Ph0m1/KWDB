@@ -926,7 +926,7 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 	nodeMap := make(map[roachpb.NodeID]int)
 	// nodeVerCompatMap maintains info about which nodes advertise DistSQL
 	// versions compatible with this plan and which ones don't.
-	//nodeVerCompatMap := make(map[roachpb.NodeID]bool)
+	nodeVerCompatMap := make(map[roachpb.NodeID]bool)
 	if planCtx.isLocal {
 		planCtx.NodeAddresses = make(map[roachpb.NodeID]string)
 		planCtx.NodeAddresses[dsp.nodeDesc.NodeID] = dsp.nodeDesc.Address.String()
@@ -938,7 +938,7 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 	}
 
 	for _, span := range spans {
-		//var lastNodeID roachpb.NodeID
+		var lastNodeID roachpb.NodeID
 		// lastKey maintains the EndKey of the last piece of `span`.
 		if log.V(1) {
 			log.Infof(ctx, "partitioning span %s", span)
@@ -965,44 +965,53 @@ func (dsp *DistSQLPlanner) partitionTSSpans(
 
 			partitionIdx, inNodeMap := nodeMap[nodeID]
 
-			// TODO by fyx, 由于分布式查询无法在分发层根据Gateway节点驱动进行查询, 自动健康状态检查无效. 计划版本无效. 待优化
 			if !inNodeMap {
 				// This is the first time we are seeing nodeID for these spans. Check
 				// its health.
-				addr, inAddrMap := planCtx.NodeAddresses[nodeID]
-				if !inAddrMap {
-					nodeDesc, err := dsp.gossip.GetNodeDescriptor(nodeID)
-					if err != nil {
-						log.Errorf(ctx, "failed get nodeDesc for nodeID %v, err: %+v", nodeID, err)
-						return nil, errors.Wrap(err, "get node descriptor")
-					}
-					addr = nodeDesc.Address.String()
-					//if err := dsp.nodeHealth.check(ctx, nodeID); err != nil {
-					//	addr = ""
-					//}
-					if err == nil && addr != "" {
-						planCtx.NodeAddresses[nodeID] = addr
-					}
+				compat := true
+				// Check if the node's DistSQL version is compatible with this plan.
+				// If it isn't, we'll use the gateway.
+				var ok bool
+				if compat, ok = nodeVerCompatMap[nodeID]; !ok {
+					compat = dsp.nodeVersionIsCompatible(nodeID, dsp.planVersion)
+					nodeVerCompatMap[nodeID] = compat
 				}
-
-				partitionIdx = len(partitions)
-				partitions = append(partitions, SpanPartition{Node: nodeID})
-				nodeMap[nodeID] = partitionIdx
+				// If the node is unhealthy or its DistSQL version is incompatible, use
+				// the gateway to process this span instead of the unhealthy host.
+				// An empty address indicates an unhealthy host.
+				if !compat {
+					log.Eventf(ctx, "not planning on node %d. incompatible version: %t", nodeID, !compat)
+					nodeID = dsp.nodeDesc.NodeID
+					partitionIdx, inNodeMap = nodeMap[nodeID]
+				}
+				if !inNodeMap {
+					partitionIdx = len(partitions)
+					partitions = append(partitions, SpanPartition{Node: nodeID})
+					nodeMap[nodeID] = partitionIdx
+				}
 			}
 			partition := &partitions[partitionIdx]
 
+			var complete bool
 			if nextKey.Compare(span.EndKey) > 0 {
+				nextKey = span.EndKey
+				complete = true
+			}
+
+			if lastNodeID == nodeID {
+				// Two consecutive ranges on the same node, merge the spans.
+				partition.Spans[len(partition.Spans)-1].EndKey = nextKey
+			} else {
 				partition.Spans = append(partition.Spans, roachpb.Span{
 					Key:    rangeKey,
-					EndKey: span.EndKey,
+					EndKey: nextKey,
 				})
+				lastNodeID = nodeID
+			}
+
+			if complete {
 				break
 			}
-			// TODO by fyx ts不进行merge
-			partition.Spans = append(partition.Spans, roachpb.Span{
-				Key:    rangeKey,
-				EndKey: nextKey,
-			})
 
 			rangeKey = nextKey
 		}
