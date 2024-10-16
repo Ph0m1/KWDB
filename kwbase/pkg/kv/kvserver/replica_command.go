@@ -2411,8 +2411,119 @@ func checkDescsEqual(desc *roachpb.RangeDescriptor) func(*roachpb.RangeDescripto
 		if desc2 != nil {
 			desc2.Replicas() // for sorting side-effect
 		}
+		equal := desc.Equal(desc2)
+		if !equal {
+			// This function should be functionally identical to equal, only adding additional logging output.
+			equalLogPrint := func(this *roachpb.RangeDescriptor, that interface{}) bool {
+				if that == nil {
+					if this != nil {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc is %v while desc2 is nil", desc)
+					}
+					return this == nil
+				}
+
+				that1, ok := that.(*roachpb.RangeDescriptor)
+				if !ok {
+					that2, ok := that.(roachpb.RangeDescriptor)
+					if ok {
+						that1 = &that2
+					} else {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc type is (*roachpb.RangeDescriptor)\n while desc2 is %T", desc2)
+						return false
+					}
+				}
+				if that1 == nil {
+					if this != nil {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc is %v while desc2 is nil", desc)
+					}
+					return this == nil
+				} else if this == nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc is nil while desc2 is %v", desc2)
+					return false
+				}
+				if this.RangeID != that1.RangeID {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.RangeID is %v while desc2.RangeID is %v", desc.RangeID, desc2.RangeID)
+					return false
+				}
+				if !bytes.Equal(this.StartKey, that1.StartKey) {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.StartKey is %v while desc2.StartKey is %v", desc.StartKey, desc2.StartKey)
+					return false
+				}
+				if !bytes.Equal(this.EndKey, that1.EndKey) {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.EndKey is %v while desc2.EndKey is %v", desc.EndKey, desc2.EndKey)
+					return false
+				}
+				if len(this.InternalReplicas) != len(that1.InternalReplicas) {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.InternalReplicas is %v while desc2.InternalReplicas is %v", desc.InternalReplicas, desc2.InternalReplicas)
+					return false
+				}
+				for i := range this.InternalReplicas {
+					if !this.InternalReplicas[i].Equal(&that1.InternalReplicas[i]) {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc.InternalReplicas[%d] is %v while desc2.InternalReplicas[%d] is %v", i, desc.InternalReplicas, i, desc2.InternalReplicas)
+						return false
+					}
+				}
+				if this.NextReplicaID != that1.NextReplicaID {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.NextReplicaID is %v while desc2.NextReplicaID is %v", desc.NextReplicaID, desc2.NextReplicaID)
+					return false
+				}
+				if this.Generation != nil && that1.Generation != nil {
+					if *this.Generation != *that1.Generation {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc.Generation is %v while desc2.Generation is %v", *desc.Generation, *desc2.Generation)
+						return false
+					}
+				} else if this.Generation != nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.Generation is %v while desc2.Generation is nil", *desc.Generation)
+					return false
+				} else if that1.Generation != nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.Generation is nil while desc2.Generation is %v", *desc2.Generation)
+					return false
+				}
+				if this.GenerationComparable != nil && that1.GenerationComparable != nil {
+					if *this.GenerationComparable != *that1.GenerationComparable {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc.GenerationComparable is %v while desc2.GenerationComparable is %v", *desc.GenerationComparable, *desc2.GenerationComparable)
+						return false
+					}
+				} else if this.GenerationComparable != nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.GenerationComparable is nil while desc2.GenerationComparable is %v", *desc2.GenerationComparable)
+					return false
+				} else if that1.GenerationComparable != nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.GenerationComparable is %v while desc2.GenerationComparable is nil", *desc2.GenerationComparable)
+					return false
+				}
+				if !this.StickyBit.Equal(that1.StickyBit) {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.StickyBit is %v while desc2.StickyBit is %v", desc.StickyBit, desc2.StickyBit)
+
+					return false
+				}
+				if this.RangeType != nil && that1.RangeType != nil {
+					if *this.RangeType != *that1.RangeType {
+						log.Warningf(context.TODO(), "checkDescsEqual failed. desc.RangeType is %v while desc2.RangeType is %v", *desc.RangeType, *desc2.RangeType)
+
+						return false
+					}
+				} else if this.RangeType != nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.RangeType is %v while desc2.RangeType is nil", *desc.RangeType)
+
+					return false
+				} else if that1.RangeType != nil {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.RangeType is nil while desc2.RangeType is %v", *desc2.RangeType)
+					return false
+				}
+				if this.TableId != that1.TableId {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.TableId is %v while desc2.TableId is %v", desc.TableId, desc2.TableId)
+					return false
+				}
+				if !this.LastSplitTime.Equal(that1.LastSplitTime) {
+					log.Warningf(context.TODO(), "checkDescsEqual failed. desc.LastSplitTime is %v while desc2.LastSplitTime is %v", desc.LastSplitTime, desc2.LastSplitTime)
+					return false
+				}
+				return true
+			}
+			equalLogPrint(desc, desc2)
+		}
 		//log.Errorf(context.TODO(), "desc: +%v, desc2: +%v, +%v, +%v, +%v, +%v, +%v, +%v,", desc, desc2, desc.TableId, desc.RangeType, desc.StickyBit,desc2.TableId, desc2.RangeType, desc2.StickyBit)
-		return desc.Equal(desc2)
+		return equal
 	}
 }
 
