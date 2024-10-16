@@ -415,9 +415,9 @@ const (
 	MLJobsTableID              = 51
 	MLPrivilegesTableID        = 52
 	KWDBShowJobsTableID        = 53
-	DefinedFunctionTableID     = 54
-	EventLogTableID            = 55
-	ScheduledJobsTableID       = 56
+	DefinedFunctionTableID     = 55
+	EventLogTableID            = 56
+	ScheduledJobsTableID       = 57
 	// CommentType is type for system.comments
 	DatabaseCommentType = 0
 	TableCommentType    = 1
