@@ -617,8 +617,9 @@ TEST_F(TestPartitionBigTable, undoPut) {
   char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoIncludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now + 10000, false);
   kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
+  uint32_t inc_unordered_cnt;
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
-  mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &dedup_result);
+  mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &inc_unordered_cnt, &dedup_result);
   ASSERT_TRUE(err_info.errcode >= 0);
   mt_table->publish_payload_space(cur_alloc_spans, to_del_rows, entity_id, true);
 
@@ -697,8 +698,9 @@ TEST_F(TestPartitionBigTable, redoPut) {
   char* data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoIncludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now + 10000, false);
   kwdbts::Payload pd(root_bt_manager, {data, payload_len});
   pd.SetLsn(lsn);
+  uint32_t inc_unordered_cnt;
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
-  mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &dedup_result);
+  mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &inc_unordered_cnt, &dedup_result);
   if (err_info.errcode >= 0) {
     mt_table->publish_payload_space(cur_alloc_spans, to_del_rows, entity_id, true);
   }
@@ -831,7 +833,8 @@ TEST_F(TestPartitionBigTable, disorderPut) {
   pd.SetLsn(lsn);
   pd.dedup_rule_ = kwdbts::DedupRule::KEEP;
   for (int i = 0; i < 2; i++) {
-    mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &dedup_result);
+    uint32_t inc_unordered_cnt;
+    mt_table->push_back_payload(ctx_, entity_id, &pd, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &inc_unordered_cnt, &dedup_result);
     if (err_info.errcode >= 0) {
       mt_table->publish_payload_space(cur_alloc_spans, to_del_rows, entity_id, true);
     }
@@ -843,8 +846,9 @@ TEST_F(TestPartitionBigTable, disorderPut) {
   char* disorder_data = BtUtil::GenSomePayloadData(mt_table->getSchemaInfoExcludeDropped(), mt_table->getColsIdxExcludeDropped(), row_num, payload_len, ts_now, false);
   kwdbts::Payload pd_disorder(root_bt_manager, {disorder_data, payload_len});
   pd_disorder.SetLsn(lsn);
+  uint32_t inc_unordered_cnt;
   pd_disorder.dedup_rule_ = kwdbts::DedupRule::KEEP;
-  mt_table->push_back_payload(ctx_, entity_id, &pd_disorder, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info,&dedup_result);
+  mt_table->push_back_payload(ctx_, entity_id, &pd_disorder, 0, row_num, &cur_alloc_spans, &to_del_rows, err_info, &inc_unordered_cnt, &dedup_result);
   if (err_info.errcode >= 0) {
     mt_table->publish_payload_space(cur_alloc_spans, to_del_rows, entity_id, true);
   }

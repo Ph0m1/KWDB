@@ -181,10 +181,12 @@ KStatus LoggedTsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint
 }
 
 KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id,
+                                     uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
                                      DedupResult* dedup_result, DedupRule dedup_rule) {
   // Iterate through the payloads array and invoke the PutData method to ensure that all payloads are successfully written.
   for (int i = 0; i < length; i++) {
-    KStatus s = LoggedTsEntityGroup::PutData(ctx, payloads[i], mtr_id, dedup_result, dedup_rule);
+    KStatus s = LoggedTsEntityGroup::PutData(ctx, payloads[i], mtr_id, inc_entity_cnt,
+                                             inc_unordered_cnt, dedup_result, dedup_rule);
     if (s == FAIL) {
       return s;
     }
@@ -193,8 +195,8 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice* payloads, int l
 }
 
 // If wal is enabled, this interface will be used.
-KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
-                                     DedupResult* dedup_result, DedupRule dedup_rule) {
+KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id, uint16_t* inc_entity_cnt,
+                                     uint32_t* inc_unordered_cnt, DedupResult* dedup_result, DedupRule dedup_rule) {
   ErrorInfo err_info;
   // 1. Check whether the timing table is available and construct the payload
   // The Payload struct encapsulates the interface for reading data, allowing for quick retrieval of corresponding data
@@ -225,6 +227,7 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
     return KStatus::FAIL;
   }
   if (new_tag) {
+    ++(*inc_entity_cnt);
     // require Tag lock to ensure the thread safety of putTagData
     // Apply for a write lock on the Tag table (upgrade the read lock to a write lock)
     // to ensure that the records written to the Tag table are unique.
@@ -261,7 +264,7 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
   }
 
   // Call putDataColumnar to write data into the specified entity by column
-  s = putDataColumnar(ctx, group_id, entity_id, pd, dedup_result);
+  s = putDataColumnar(ctx, group_id, entity_id, pd, inc_unordered_cnt, dedup_result);
   if (s == KStatus::FAIL) {
     return s;
   }

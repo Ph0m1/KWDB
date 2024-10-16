@@ -151,6 +151,12 @@ type DedupResult struct {
 	DiscardBitmap []byte // The bitmap of discard data
 }
 
+// EntitiesAffect is affect of entities and unordered row count
+type EntitiesAffect struct {
+	EntityCount    uint16
+	UnorderedCount uint32
+}
+
 // TsEngine is ts database instance.
 type TsEngine struct {
 	stopper *stop.Stopper
@@ -474,9 +480,11 @@ func (r *TsEngine) PutEntity(
 }
 
 // PutData write in tag data and write in ts data
-func (r *TsEngine) PutData(tableID uint64, payload [][]byte, tsTxnID uint64) (DedupResult, error) {
+func (r *TsEngine) PutData(
+	tableID uint64, payload [][]byte, tsTxnID uint64,
+) (DedupResult, EntitiesAffect, error) {
 	if len(payload) == 0 {
-		return DedupResult{}, errors.New("payload is nul")
+		return DedupResult{}, EntitiesAffect{}, errors.New("payload is nul")
 	}
 
 	cTsSlice := make([]C.TSSlice, len(payload))
@@ -499,9 +507,13 @@ func (r *TsEngine) PutData(tableID uint64, payload [][]byte, tsTxnID uint64) (De
 	}
 
 	var dedupResult C.DedupResult
-	status := C.TSPutData(r.tdb, C.TSTableID(tableID), &cTsSlice[0], (C.size_t)(len(cTsSlice)), cRangeGroup, C.uint64_t(tsTxnID), &dedupResult)
+	var affect EntitiesAffect
+	var entitiesAffected C.uint16_t
+	var unorderedAffected C.uint32_t
+	status := C.TSPutData(r.tdb, C.TSTableID(tableID), &cTsSlice[0], (C.size_t)(len(cTsSlice)), cRangeGroup, C.uint64_t(tsTxnID),
+		&entitiesAffected, &unorderedAffected, &dedupResult)
 	if err := statusToError(status); err != nil {
-		return DedupResult{}, errors.Wrap(err, "could not PutData")
+		return DedupResult{}, EntitiesAffect{}, errors.Wrap(err, "could not PutData")
 	}
 
 	res := DedupResult{
@@ -510,15 +522,17 @@ func (r *TsEngine) PutData(tableID uint64, payload [][]byte, tsTxnID uint64) (De
 		DiscardBitmap: cSliceToGoBytes(dedupResult.discard_bitmap),
 	}
 	defer C.free(unsafe.Pointer(dedupResult.discard_bitmap.data))
-	return res, nil
+	affect.EntityCount = uint16(entitiesAffected)
+	affect.UnorderedCount = uint32(unorderedAffected)
+	return res, affect, nil
 }
 
 // PutRowData 行存tags值和时序数据写入
 func (r *TsEngine) PutRowData(
 	tableID uint64, headerPrefix []byte, payload [][]byte, size int32, tsTxnID uint64,
-) (DedupResult, error) {
+) (DedupResult, EntitiesAffect, error) {
 	if len(payload) == 0 {
-		return DedupResult{}, errors.New("payload is nul")
+		return DedupResult{}, EntitiesAffect{}, errors.New("payload is nul")
 	}
 
 	sizeLimit := int32(TsPayloadSizeLimit.Get(&r.cfg.Settings.SV))
@@ -532,7 +546,7 @@ func (r *TsEngine) PutRowData(
 	cTsSlice.len = C.size_t(int(size) + headerLen + dataLen)
 	cTsSlice.data = (*C.char)(C.malloc(cTsSlice.len))
 	if cTsSlice.data == nil {
-		return DedupResult{}, errors.New("failed malloc")
+		return DedupResult{}, EntitiesAffect{}, errors.New("failed malloc")
 	}
 	defer C.free(unsafe.Pointer(cTsSlice.data))
 
@@ -549,6 +563,7 @@ func (r *TsEngine) PutRowData(
 	partRowCnt := 0
 	totalRowCnt := len(payload)
 	var res DedupResult
+	var affect EntitiesAffect
 	for i := 0; i < totalRowCnt; i++ {
 		p := payload[i]
 		if len(p) == 0 {
@@ -563,11 +578,16 @@ func (r *TsEngine) PutRowData(
 			// fill row_num
 			*(*int32)(unsafe.Pointer(uintptr(unsafe.Pointer(cTsSlice.data)) + rowNumOffset)) = int32(partRowCnt)
 			var dedupResult C.DedupResult
-			status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID), &dedupResult)
+			var entitiesAffected C.uint16_t
+			var unorderedAffected C.uint32_t
+			status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID),
+				&entitiesAffected, &unorderedAffected, &dedupResult)
 			if err := statusToError(status); err != nil {
-				return DedupResult{}, errors.Wrap(err, "could not PutData")
+				return DedupResult{}, EntitiesAffect{}, errors.Wrap(err, "could not PutData")
 			}
 			res.DedupRows += int(dedupResult.dedup_rows)
+			affect.EntityCount += uint16(entitiesAffected)
+			affect.UnorderedCount += uint32(unorderedAffected)
 			C.free(unsafe.Pointer(dedupResult.discard_bitmap.data))
 
 			payloadSize = partLen
@@ -584,18 +604,23 @@ func (r *TsEngine) PutRowData(
 	// fill row_num
 	*(*int32)(unsafe.Pointer(uintptr(unsafe.Pointer(cTsSlice.data)) + rowNumOffset)) = int32(partRowCnt)
 	var dedupResult C.DedupResult
-	status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID), &dedupResult)
+	var entitiesAffected C.uint16_t
+	var unorderedAffected C.uint32_t
+	status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID),
+		&entitiesAffected, &unorderedAffected, &dedupResult)
 	if err := statusToError(status); err != nil {
-		return DedupResult{}, errors.Wrap(err, "could not PutData")
+		return DedupResult{}, EntitiesAffect{}, errors.Wrap(err, "could not PutData")
 	}
 
 	res.DedupRows += int(dedupResult.dedup_rows)
 	res.DedupRule = int(dedupResult.dedup_rule)
+	affect.EntityCount += uint16(entitiesAffected)
+	affect.UnorderedCount += uint32(unorderedAffected)
 	// the DiscardBitmap is not complete if the payload is truncated due to the size limit.
 	res.DiscardBitmap = cSliceToGoBytes(dedupResult.discard_bitmap)
 	C.free(unsafe.Pointer(dedupResult.discard_bitmap.data))
 
-	return res, nil
+	return res, affect, nil
 }
 
 // GetDataVolume gets DataVolume for ts range.

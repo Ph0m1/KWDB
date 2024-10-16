@@ -1733,7 +1733,11 @@ func (p *PhysicalPlan) initPhyPlanForTsReaders(
 ) error {
 	planCtx.tsTableReaderID++
 	tr := execinfrapb.TSReaderSpec{TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, TableVersion: n.Table.GetTSVersion(),
-		TsTablereaderId: planCtx.tsTableReaderID}
+		OrderedScan: n.orderedType.UserOrderedScan(), TsTablereaderId: planCtx.tsTableReaderID}
+
+	if n.orderedType.NeedReverse() {
+		tr.Reverse = &tr.OrderedScan
+	}
 	for i := range colMetas {
 		tr.ColMetas = append(tr.ColMetas, &colMetas[i])
 	}
@@ -3424,6 +3428,8 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 	orderedGroupColSet util.FastIntSet,
 	n *groupNode,
 	addTSTwiceAgg bool,
+	secOpt bool,
+	addSync bool,
 ) (execinfrapb.AggregatorSpec, execinfrapb.PostProcessSpec, error) {
 	var finalAggsSpec execinfrapb.AggregatorSpec
 	var finalAggsPost execinfrapb.PostProcessSpec
@@ -3493,7 +3499,7 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		Aggregations:     localAggs,
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
-		AggPushDown:      n.aggPushDown,
+		AggPushDown:      n.optType.PushLocalAggToScanOpt(),
 	}
 
 	// construct Synchronizer post spec
@@ -3503,41 +3509,52 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 	for i, typ := range intermediateTypes {
 		tsPost.OutputTypes[i] = typ.InternalType.Family
 	}
-	// add ts local agg
-	p.AddTSNoGroupingStage(
-		execinfrapb.TSProcessorCoreUnion{Aggregator: &localAggsSpec},
-		tsPost,
-		intermediateTypes,
-		execinfrapb.Ordering{Columns: ordCols},
-	)
-	pushDownProcessorToTSReader(p, n.aggPushDown, true)
 
-	// add parallel processor
-	if n.addSynchronizer {
-		addSynchronizerForAgg(planCtx, p, intermediateTypes, ordCols, &tsPost)
+	if localAggsSpec.AggPushDown {
+		for _, idx := range p.ResultRouters {
+			pushAggToScan(p, idx, &localAggsSpec, &tsPost, n.optType.PruneLocalAggOpt())
+		}
+	}
 
-		// add ts final agg processor
-		if addTSTwiceAgg {
-			tsFinialAggsSpec := execinfrapb.AggregatorSpec{
-				Type:             aggType,
-				Aggregations:     tsFinalAggs,
-				GroupCols:        finalGroupCols,        // group col from final col idx
-				OrderedGroupCols: finalOrderedGroupCols, // order cols from final col idx
-				AggPushDown:      false,                 // must false
+	if !n.optType.PruneLocalAggOpt() {
+		// add ts local agg
+		p.AddTSNoGroupingStage(
+			execinfrapb.TSProcessorCoreUnion{Aggregator: &localAggsSpec},
+			tsPost,
+			intermediateTypes,
+			execinfrapb.Ordering{Columns: ordCols},
+		)
+	}
+
+	if !secOpt || len(p.ResultRouters) > 1 {
+		// add parallel processor
+		if addSync {
+			addSynchronizerForAgg(planCtx, p, intermediateTypes, ordCols, &tsPost)
+
+			// add ts final agg processor
+			if addTSTwiceAgg {
+				tsFinialAggsSpec := execinfrapb.AggregatorSpec{
+					Type:             aggType,
+					Aggregations:     tsFinalAggs,
+					GroupCols:        finalGroupCols,        // group col from final col idx
+					OrderedGroupCols: finalOrderedGroupCols, // order cols from final col idx
+					AggPushDown:      false,                 // must false
+				}
+
+				tsPostTwice := execinfrapb.TSPostProcessSpec{}
+				tsPostTwice.OutputTypes = make([]types.Family, len(tsAggsTypes))
+				for i, typ := range tsAggsTypes {
+					tsPostTwice.OutputTypes[i] = typ.InternalType.Family
+				}
+
+				// add twice stage agg for parallel
+				p.AddTSNoGroupingStage(
+					execinfrapb.TSProcessorCoreUnion{Aggregator: &tsFinialAggsSpec},
+					tsPostTwice,
+					tsAggsTypes,
+					execinfrapb.Ordering{Columns: ordCols},
+				)
 			}
-
-			tsPost.OutputTypes = make([]types.Family, len(tsAggsTypes))
-			for i, typ := range tsAggsTypes {
-				tsPost.OutputTypes[i] = typ.InternalType.Family
-			}
-
-			// add twice stage agg for parallel
-			p.AddTSNoGroupingStage(
-				execinfrapb.TSProcessorCoreUnion{Aggregator: &tsFinialAggsSpec},
-				tsPost,
-				tsAggsTypes,
-				execinfrapb.Ordering{Columns: ordCols},
-			)
 		}
 	}
 
@@ -3556,6 +3573,23 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 	}
 
 	return finalAggsSpec, finalAggsPost, nil
+}
+
+func pushAggToScan(
+	p *PhysicalPlan,
+	idx physicalplan.ProcessorIdx,
+	localAggsSpec *execinfrapb.AggregatorSpec,
+	tsPost *execinfrapb.TSPostProcessSpec,
+	pruneLocalAgg bool,
+) {
+	if p.Processors[idx].TSSpec.Core.TableReader != nil {
+		r := p.Processors[idx].TSSpec.Core.TableReader
+		r.Aggregator = localAggsSpec
+		if pruneLocalAgg {
+			r.OrderedScan = true
+		}
+		r.AggregatorPost = tsPost
+	}
 }
 
 // getAggFuncAndType get plan agg function and type
@@ -4141,26 +4175,19 @@ func (dsp *DistSQLPlanner) addSynchronizerForTS(p *PhysicalPlan, degree int32) e
 
 // addTSAggregators add ts engine agg processor
 func (dsp *DistSQLPlanner) addTSAggregators(
-	planCtx *PlanningCtx, p *PhysicalPlan, n *groupNode,
-) error {
+	planCtx *PlanningCtx, p *PhysicalPlan, n *groupNode, secOpt bool, addSync bool,
+) (bool, error) {
 	// get agg spec and agg column type
 	aggregations, aggregationsColumnTypes, _, err := getAggFuncAndType(planCtx, n.funcs, n.aggFuncs,
 		p.PlanToStreamColMap, false, n.statisticIndex)
 	if err != nil {
-		return err
-	}
-
-	// the special operator not support distinct.
-	for _, v := range aggregations {
-		if v.Distinct {
-			n.aggPushDown = false
-		}
+		return true, err
 	}
 
 	// get agg col output type
 	finalOutTypes, err1 := getFinalColumnType(p, aggregations, aggregationsColumnTypes)
 	if err1 != nil {
-		return err1
+		return true, err1
 	}
 
 	aggType := execinfrapb.AggregatorSpec_NON_SCALAR
@@ -4182,7 +4209,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 		Aggregations:     aggregations,
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
-		AggPushDown:      n.aggPushDown,
+		AggPushDown:      n.optType.PushLocalAggToScanOpt(),
 	}}
 
 	// Set up the final stage.
@@ -4191,43 +4218,73 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 	// has been programmed to produce the same columns as the groupNode.
 	p.PlanToStreamColMap = identityMap(p.PlanToStreamColMap, len(aggregations))
 
+	addOutPutType := true
 	if len(p.ResultRouters) == 1 {
-		// add synchronizer need parallel execute, so need local agg and finial agg
-		if n.addSynchronizer {
-			// add local agg
-			finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType, aggregations, groupCols,
-				orderedGroupCols, orderedGroupColSet, n, false)
-			if err != nil {
-				return err
+		if n.optType.PushLocalAggToScanOpt() && secOpt {
+			resultRouters := p.ResultRouters
+			if p.ChildIsTSParallelProcessor() {
+				resultRouters = p.SynchronizerChildRouters
+			}
+			tsPost := execinfrapb.TSPostProcessSpec{}
+			for _, v := range finalOutTypes {
+				tsPost.OutputTypes = append(tsPost.OutputTypes, v.InternalType.Family)
+			}
+			for _, idx := range resultRouters {
+				if p.Processors[idx].TSSpec.Core.TableReader != nil {
+					pushAggToScan(p, idx, coreUnion.Aggregator, &tsPost, n.optType.PruneLocalAggOpt())
+					addOutPutType = false
+				} else if p.Processors[idx].TSSpec.Core.StatisticReader != nil {
+					p.Processors[idx].TSSpec.Post.Renders = make([]string, len(aggregations))
+					for i, agg := range aggregations {
+						p.Processors[idx].TSSpec.Post.Renders[i] = fmt.Sprintf("@%d", agg.ColIdx[0]+1)
+					}
+					addOutPutType = true
+				}
 			}
 
-			// add twice agg for ts engine
-			var tsFinalAggsPost execinfrapb.TSPostProcessSpec
-			for _, val := range finalAggsPost.RenderExprs {
-				tsFinalAggsPost.Renders = append(tsFinalAggsPost.Renders, val.String())
+			if addSync {
+				addSynchronizerForAgg(planCtx, p, finalOutTypes, []execinfrapb.Ordering_Column{}, &tsPost)
 			}
-			tsFinalAggsPost.Projection = finalAggsPost.Projection
-			tsFinalAggsPost.OutputColumns = finalAggsPost.OutputColumns
-			dsp.addSingleGroupStateForTS(p, prevStageNode, execinfrapb.TSProcessorCoreUnion{Aggregator: &finalAggsSpec},
-				tsFinalAggsPost, finalOutTypes)
+
+			p.ResultTypes = finalOutTypes
 		} else {
-			// No GROUP BY, or we have a single stream. Use a single final aggregator.
-			// If the previous stage was all on a single node, put the final
-			// aggregator there. Otherwise, bring the results back on this node.
-			dsp.addSingleGroupStateForTS(p, prevStageNode, coreUnion, execinfrapb.TSPostProcessSpec{}, finalOutTypes)
-			pushDownProcessorToTSReader(p, n.aggPushDown, true)
+			// add synchronizer need parallel execute, so need local agg and finial agg
+			if addSync {
+				// add local agg
+				finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType, aggregations, groupCols,
+					orderedGroupCols, orderedGroupColSet, n, false, secOpt, addSync)
+				if err != nil {
+					return addOutPutType, err
+				}
+
+				// add twice agg for ts engine
+				var tsFinalAggsPost execinfrapb.TSPostProcessSpec
+				for _, val := range finalAggsPost.RenderExprs {
+					tsFinalAggsPost.Renders = append(tsFinalAggsPost.Renders, val.String())
+				}
+				tsFinalAggsPost.Projection = finalAggsPost.Projection
+				tsFinalAggsPost.OutputColumns = finalAggsPost.OutputColumns
+				dsp.addSingleGroupStateForTS(p, prevStageNode, execinfrapb.TSProcessorCoreUnion{Aggregator: &finalAggsSpec},
+					tsFinalAggsPost, finalOutTypes)
+			} else {
+				// No GROUP BY, or we have a single stream. Use a single final aggregator.
+				// If the previous stage was all on a single node, put the final
+				// aggregator there. Otherwise, bring the results back on this node.
+				dsp.addSingleGroupStateForTS(p, prevStageNode, coreUnion, execinfrapb.TSPostProcessSpec{}, finalOutTypes)
+				pushDownProcessorToTSReader(p, n.optType.PushLocalAggToScanOpt(), true)
+			}
 		}
 	} else {
 		// Check whether twice aggregation is necessary in time series engine
 		needsTSTwiceAgg, err := needsTSTwiceAggregation(n, planCtx)
 		if err != nil {
-			return err
+			return addOutPutType, err
 		}
 		// add twice agg local
 		finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType,
-			aggregations, groupCols, orderedGroupCols, orderedGroupColSet, n, needsTSTwiceAgg)
+			aggregations, groupCols, orderedGroupCols, orderedGroupColSet, n, needsTSTwiceAgg, secOpt, addSync)
 		if err != nil {
-			return err
+			return addOutPutType, err
 		}
 
 		p.AddTSTableReader()
@@ -4241,7 +4298,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 		}
 	}
 
-	return nil
+	return addOutPutType, nil
 }
 
 func (dsp *DistSQLPlanner) createPlanForIndexJoin(
@@ -4564,23 +4621,36 @@ func (dsp *DistSQLPlanner) createPlanForSynchronizer(
 // createPlanForGroup creates a distributed plan for a group node.
 func (dsp *DistSQLPlanner) createPlanForGroup(
 	planCtx *PlanningCtx, n *groupNode,
-) (PhysicalPlan, error) {
+) (PhysicalPlan, bool, error) {
 	plan, err := dsp.createPlanForNode(planCtx, n.plan)
 	if err != nil {
-		return PhysicalPlan{}, err
+		return PhysicalPlan{}, true, err
 	}
 
+	addOutPutType := true
 	if plan.SelfCanExecInTSEngine(n.engine == tree.EngineTypeTimeseries) {
-		err = dsp.addTSAggregators(planCtx, &plan, n)
+		pruneFinalAgg := n.optType.PruneFinalAggOpt()
+		addSynchronizer := n.addSynchronizer
+		if len(plan.ResultRouters) > 1 {
+			pruneFinalAgg = false
+			if !plan.HasTSParallelProcessor() {
+				addSynchronizer = true
+			}
+		}
+		if !pruneFinalAgg || n.statisticIndex.Empty() {
+			addOutPutType, err = dsp.addTSAggregators(planCtx, &plan, n, pruneFinalAgg, addSynchronizer)
+		} else if addSynchronizer {
+			addSynchronizerForAgg(planCtx, &plan, plan.ResultTypes, []execinfrapb.Ordering_Column{}, &execinfrapb.TSPostProcessSpec{})
+		}
 	} else {
 		err = dsp.addAggregators(planCtx, &plan, n)
 	}
 
 	if err != nil {
-		return PhysicalPlan{}, err
+		return PhysicalPlan{}, addOutPutType, err
 	}
 
-	return plan, nil
+	return plan, addOutPutType, nil
 }
 
 // getTypesForPlanResult returns the types of the elements in the result streams
@@ -4883,6 +4953,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 ) (plan PhysicalPlan, err error) {
 	planCtx.planDepth++
 
+	addOutPutType := true
 	switch n := node.(type) {
 	// Keep these cases alphabetized, please!
 	case *distinctNode:
@@ -4903,7 +4974,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 	case *synchronizerNode:
 		plan, err = dsp.createPlanForSynchronizer(planCtx, n)
 	case *groupNode:
-		plan, err = dsp.createPlanForGroup(planCtx, n)
+		plan, addOutPutType, err = dsp.createPlanForGroup(planCtx, n)
 	case *indexJoinNode:
 		plan, err = dsp.createPlanForIndexJoin(planCtx, n)
 
@@ -4953,26 +5024,70 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 		plan, err = dsp.createTableReaders(planCtx, n, nil)
 
 	case *tsScanNode:
-		plan, err = dsp.createTSReaders(planCtx, n)
-		if err != nil {
-			return plan, err
+		countPTagValue := 0
+		if len(n.PrimaryTagValues) > 0 {
+			for _, v := range n.PrimaryTagValues {
+				countPTagValue += len(v)
+				break
+			}
 		}
-		if planCtx.IsLocal() {
-			// add output types
-			plan.addTSOutputType(false)
 
-			// add synchronizer
-			if err = dsp.addSynchronizerForTS(&plan, planCtx.GetTsDop()); err != nil {
-				return PhysicalPlan{}, err
+		if countPTagValue > 1 && n.orderedType == opt.OrderedScan {
+			plan, err = dsp.createPlanForOrderdTSScanUnion(planCtx, n)
+		} else {
+			plan, err = dsp.createTSReaders(planCtx, n)
+			if err != nil {
+				return plan, err
 			}
 
-			// add output types
-			plan.addTSOutputType(false)
+			if n.orderedType == opt.SortAfterScan {
+				// add output types
+				plan.addTSOutputType(false)
+				kwdbordering := execinfrapb.GetTSColMappedSpecOrdering(plan.PlanToStreamColMap)
+				plan.AddTSNoGroupingStage(
+					execinfrapb.TSProcessorCoreUnion{
+						Sorter: &execinfrapb.SorterSpec{
+							OutputOrdering:   kwdbordering,
+							OrderingMatchLen: 0,
+						},
+					},
+					execinfrapb.TSPostProcessSpec{},
+					plan.ResultTypes,
+					kwdbordering,
+				)
 
-			// add noop for gateway node to collect all data from all node
-			plan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, true, false)
+				// add output types
+				plan.addTSOutputType(false)
+
+				plan.AddTSNoGroupingStage(
+					execinfrapb.TSProcessorCoreUnion{
+						Sorter: &execinfrapb.SorterSpec{
+							OutputOrdering:   kwdbordering,
+							OrderingMatchLen: 0,
+						},
+					},
+					execinfrapb.TSPostProcessSpec{},
+					plan.ResultTypes,
+					kwdbordering,
+				)
+			}
+
+			if planCtx.IsLocal() {
+				// add output types
+				plan.addTSOutputType(false)
+
+				// add synchronizer
+				if err = dsp.addSynchronizerForTS(&plan, planCtx.GetTsDop()); err != nil {
+					return PhysicalPlan{}, err
+				}
+
+				// add output types
+				plan.addTSOutputType(false)
+
+				// add noop for gateway node to collect all data from all node
+				plan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, true, false)
+			}
 		}
-
 	case *tsInsertNode:
 		plan, err = dsp.createTSInsert(planCtx, n)
 
@@ -5064,7 +5179,9 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 	}
 
 	// add output types for ts processor
-	plan.addTSOutputType(false)
+	if addOutPutType {
+		plan.addTSOutputType(false)
+	}
 
 	if dsp.shouldPlanTestMetadata() {
 		if err := plan.CheckLastStagePost(); err != nil {
@@ -5796,6 +5913,145 @@ func (dsp *DistSQLPlanner) createPlanForSetOp(
 	return p, nil
 }
 
+func (dsp *DistSQLPlanner) createPlanForOnePrimaryTag(
+	planCtx *PlanningCtx, n *tsScanNode, pTagID []uint32, pTagValue *[][]string,
+) (PhysicalPlan, error) {
+	if len((*pTagValue)[0]) > 0 {
+		pTagValue1 := make([]string, len(*pTagValue))
+		for i := 0; i < len(*pTagValue); i++ {
+			pTagValue1[i] = (*pTagValue)[i][0]
+			(*pTagValue)[i] = (*pTagValue)[i][1:]
+		}
+
+		n.PrimaryTagValues = make(map[uint32][]string, len(pTagID))
+		for i := range pTagID {
+			n.PrimaryTagValues[pTagID[i]] = []string{pTagValue1[i]}
+		}
+
+		leftPlan, err := dsp.createPlanForNode(planCtx, n)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
+		return leftPlan, nil
+	}
+
+	return PhysicalPlan{}, nil
+}
+
+func (dsp *DistSQLPlanner) createPlanForOrderdTSScanUnion(
+	planCtx *PlanningCtx, n *tsScanNode,
+) (PhysicalPlan, error) {
+	var pTagID []uint32
+	var pTagValue [][]string
+	for k, v := range n.PrimaryTagValues {
+		pTagID = append(pTagID, k)
+		pTagValue = append(pTagValue, v)
+	}
+
+	leftPlan, err := dsp.createPlanForOnePrimaryTag(planCtx, n, pTagID, &pTagValue)
+	if err != nil {
+		return PhysicalPlan{}, err
+	}
+
+	for len(pTagValue[0]) > 0 {
+		leftPlan, err = dsp.createPlanForUnion(planCtx, leftPlan, n, pTagID, &pTagValue)
+		if err != nil {
+			return PhysicalPlan{}, err
+		}
+	}
+
+	return leftPlan, nil
+}
+
+func (dsp *DistSQLPlanner) createPlanForUnion(
+	planCtx *PlanningCtx,
+	leftPlan PhysicalPlan,
+	n *tsScanNode,
+	pTagID []uint32,
+	pTagValue *[][]string,
+) (PhysicalPlan, error) {
+	rightPlan, err := dsp.createPlanForOnePrimaryTag(planCtx, n, pTagID, pTagValue)
+	if err != nil {
+		return PhysicalPlan{}, err
+	}
+
+	if len(rightPlan.PlanToStreamColMap) > 0 {
+		return dsp.createPlanForOrderedTSScanSetOpImp(leftPlan, rightPlan)
+	}
+
+	return leftPlan, nil
+}
+
+func (dsp *DistSQLPlanner) createPlanForOrderedTSScanSetOpImp(
+	leftPlan, rightPlan PhysicalPlan,
+) (PhysicalPlan, error) {
+	planToStreamColMap := leftPlan.PlanToStreamColMap
+	streamCols := make([]uint32, 0, len(planToStreamColMap))
+	for _, streamCol := range planToStreamColMap {
+		if streamCol < 0 {
+			continue
+		}
+		streamCols = append(streamCols, uint32(streamCol))
+	}
+
+	var p PhysicalPlan
+	p.SetRowEstimates(&leftPlan.PhysicalPlan, &rightPlan.PhysicalPlan)
+
+	// Merge the plans' PlanToStreamColMap, which we know are equivalent.
+	p.PlanToStreamColMap = planToStreamColMap
+	resultTypes := leftPlan.ResultTypes
+
+	// TODO(radu): for INTERSECT and EXCEPT, the mergeOrdering should be set when
+	// we can use merge joiners below. The optimizer needs to be modified to take
+	// advantage of this optimization and pass down merge orderings. Tracked by
+	// #40797.
+	var mergeOrdering execinfrapb.Ordering
+
+	// Merge processors, streams, result routers, and stage counter.
+	var leftRouters, rightRouters []physicalplan.ProcessorIdx
+	p.PhysicalPlan, leftRouters, rightRouters = physicalplan.MergePlans(&leftPlan.PhysicalPlan, &rightPlan.PhysicalPlan)
+
+	p.AddNoopForJoinToAgent(findJoinProcessorNodes(leftRouters, rightRouters, p.Processors),
+		leftRouters, rightRouters, dsp.nodeDesc.NodeID, &leftPlan.ResultTypes, &rightPlan.ResultTypes)
+
+	// We just need to append the left and right streams together, so append
+	// the left and right output routers.
+	p.ResultRouters = append(leftRouters, rightRouters...)
+
+	p.ResultTypes = resultTypes
+	p.SetMergeOrdering(mergeOrdering)
+
+	// With UNION ALL, we can end up with multiple streams on the same node.
+	// We don't want to have unnecessary routers and cross-node streams, so
+	// merge these streams now.
+	//
+	// More importantly, we need to guarantee that if everything is planned
+	// on a single node (which is always the case when there are mutations),
+	// we can fuse everything so there are no concurrent KV operations (see
+	// #40487, #41307).
+	//
+	// Furthermore, in order to disable auto-parallelism that could occur
+	// when merging multiple streams on the same node, we force the
+	// serialization of the merge operation (otherwise, it would be
+	// possible that we have a source of unbounded parallelism, see #51548).
+	p.EnsureSingleStreamPerNode(true /* forceSerialization */, false, dsp.gatewayNodeID)
+
+	// UNION ALL is special: it doesn't have any required downstream
+	// processor, so its two inputs might have different post-processing
+	// which would violate an assumption later down the line. Check for this
+	// condition and add a no-op stage if it exists.
+	if err := p.CheckLastStagePost(); err != nil {
+		p.AddSingleGroupStage(
+			dsp.nodeDesc.NodeID,
+			execinfrapb.ProcessorCoreUnion{Noop: &execinfrapb.NoopCoreSpec{}},
+			execinfrapb.PostProcessSpec{},
+			p.ResultTypes,
+		)
+	}
+
+	return p, nil
+}
+
 // createPlanForWindow creates a physical plan for computing window functions.
 // We add a new stage of windower processors for each different partitioning
 // scheme found in the query's window functions.
@@ -6408,6 +6664,9 @@ func addHashPointMap(
 //     Similar to the first example, if c1 and c2 are all PTAGs, this function would also return false
 //     for the same reason: the grouping covers all primary tag columns.
 func needsTSTwiceAggregation(n *groupNode, planCtx *PlanningCtx) (bool, error) {
+	if n.optType.PushLocalAggToScanOpt() {
+		return true, nil
+	}
 	var primaryTagColIDs, groupColIDs util.FastIntSet
 	needsTSTwiceAgg := true
 

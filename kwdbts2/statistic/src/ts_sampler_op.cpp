@@ -68,6 +68,7 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
     k_uint32 i {0};
     k_uint32 total_columns {0};
     k_uint32 normalColCount {0};
+    std::unordered_set<uint32_t> col_idx;
     for (auto & sk : tsInfo->sketches()) {
       // Currently only supports one algorithm
       if (SketchMethod_HLL_PLUS_PLUS != static_cast<SketchMethods>(sk.sketch_type())) {
@@ -84,11 +85,12 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
           {},
           0,
           0,
-          i
+          i,
+          {}
       };
       for (int s = 0; s < sk.col_idx_size(); s++) {
         tempSpec.statsCol_idx.emplace_back(sk.col_idx(s));
-        total_columns++;
+        col_idx.insert(sk.col_idx(s));
       }
       for (int s = 0; s < sk.col_type_size(); s++) {
         tempSpec.statsCol_typ.emplace_back(sk.col_type(s));
@@ -100,7 +102,7 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
         return FAIL;
       }
       switch (tempSpec.statsCol_typ[0]) {
-        case NormalCol:
+        case Metrics:
           tempSpec.column_type = roachpb::KWDBKTSColumn::TYPE_DATA;
           normalCol_sketches_.emplace_back(tempSpec);
           normalColCount++;
@@ -108,27 +110,36 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
         case PrimaryTag:
           tempSpec.column_type = roachpb::KWDBKTSColumn::TYPE_PTAG;
           if (sk.hasallptag()) {
+            if (sk.has_sortedhistogram()) {
+              sorted_histogram_.histogram_info = sk.sortedhistogram();
+              sorted_histogram_.sketchIdx = tempSpec.sketchIdx;
+            }
             primary_tag_sketches_.emplace_back(tempSpec);
           } else {
-            normalCol_sketches_.emplace_back(tempSpec);
+            tag_sketches_.emplace_back(tempSpec);
           }
           continue;
         case Tag:
           tempSpec.column_type = roachpb::KWDBKTSColumn::TYPE_TAG;
-          normalCol_sketches_.emplace_back(tempSpec);
+          tag_sketches_.emplace_back(tempSpec);
           continue;
         default:
           return FAIL;
       }
     }
 
+    total_columns = col_idx.size();
     // Scan tag table only for tag statistics, so we need to minus normalColCount for all tag col idx.
     for (auto& ss : primary_tag_sketches_) {
-      ss.statsCol_idx[0] -= normalColCount;
+      for (int i = 0; i < ss.statsCol_idx.size(); ++i) {
+        ss.statsCol_idx[i] -= normalColCount;
+      }
     }
 
     for (auto& ss : tag_sketches_) {
-      ss.statsCol_idx[0] -= normalColCount;
+      for (int i = 0; i < ss.statsCol_idx.size(); ++i) {
+        ss.statsCol_idx[i] -= normalColCount;
+      }
     }
 
     rankCol_ = total_columns;
@@ -136,14 +147,16 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
     numRowsCol_ = total_columns + 2;
     numNullsCol_ = total_columns + 3;
     sketchCol_ = total_columns + 4;
-    LOG_DEBUG("tsSamplerOperator setup success and table id is %d in create statistics", input_->table()->object_id_);
+    bucketIDCol_ = total_columns + 5;
+    bucketNumRowsCol_ = total_columns + 6;
+    LOG_DEBUG("tsSamplerOperator setup success and table id is %ld in create statistics", input_->table()->object_id_);
     code = SUCCESS;
   }
   return code;
 }
 
 template<>
-EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
+EEIteratorErrCode TsSamplerOperator::mainLoop<Metrics>(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   if (!current_thd) {
@@ -199,7 +212,8 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<NormalCol>(kwdbContext_p ctx) {
       }
     }
   } else {
-    LOG_ERROR("scanning normal column data fails in %u table during statistics collection", input_->table()->object_id_)
+    LOG_ERROR("scanning normal column data fails in %lu table during statistics collection",
+              input_->table()->object_id_)
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
                                   "scanning normal column data fail during statistics collection");
     Return(EE_ERROR);
@@ -275,7 +289,7 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<Tag>(kwdbContext_p ctx) {
       }
     }
   } else {
-    LOG_ERROR("scanning tag columns data fails in %u table during statistics collection",
+    LOG_ERROR("scanning tag columns data fails in %lu table during statistics collection",
                 input_->table()->object_id_)
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
                                   "scanning tag columns data fail during statistics collection");
@@ -285,9 +299,63 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<Tag>(kwdbContext_p ctx) {
   Return(EE_Sample);
 }
 
+template<>
+EEIteratorErrCode TsSamplerOperator::mainLoop<SortedHistogram>(kwdbContext_p ctx) {
+  EnterFunc();
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  if (!current_thd) {
+    Return(code)
+  }
+
+  kwdbts::SortedHistogramInfo histogram_info = sorted_histogram_.histogram_info;
+  k_int64 minTsTimestamp = histogram_info.fromtimestamp();
+  k_int64 maxTsTimestamp = histogram_info.totimestamp();
+
+  if (minTsTimestamp >= maxTsTimestamp) {
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  const k_int64 totalDuration = maxTsTimestamp - minTsTimestamp;
+  const k_uint32 numBuckets = std::min(
+      histogram_info.histogrammaxbuckets(),
+      static_cast<k_uint32>(
+          std::ceil(totalDuration / static_cast<double>(minBucketSpan))) +
+          1);
+  const k_int64 bucketSpan = std::max(static_cast<k_int64>(minBucketSpan), totalDuration / (numBuckets-1));
+
+  vector<optional<DataVariant>> bucket_data;
+  for (int i = 0; i < numBuckets; ++i) {
+    KwTsSpan ts_span;
+    if (i == 0) {
+      ts_span.begin = minTsTimestamp;
+      ts_span.end = minTsTimestamp;
+    } else {
+      ts_span.begin = minTsTimestamp + (i-1) * bucketSpan;
+      ts_span.end = (i == numBuckets - 1) ? maxTsTimestamp : ts_span.begin + bucketSpan;
+      ts_span.begin += 1;
+    }
+
+    bucket_data.resize(outRetrunTypes_.size(), std::nullopt);
+    UnorderedDataStats bucketStats{};
+    ts_table_->GetUnorderedDataInfo(ctx, ts_span, &bucketStats);
+
+    bucket_data[sketchIdxCol_] = static_cast<k_int64>(sorted_histogram_.sketchIdx);
+    bucket_data[bucketIDCol_] = static_cast<k_int64>(i+1);
+    bucket_data[bucketNumRowsCol_] = static_cast<k_int64>(bucketStats.total_data_rows);
+    bucket_data[rankCol_] = static_cast<k_int64>(bucketStats.unordered_data_rows);
+    bucket_data[numRowsCol_] = static_cast<k_int64>(bucketStats.ordered_entity_cnt);
+    bucket_data[numNullsCol_] = static_cast<k_int64>(bucketStats.unordered_entity_cnt);
+
+    sorted_histogram_.histogram_data.emplace_back(bucket_data);
+    total_sample_rows_++;
+  }
+
+  Return(EE_Sample);
+}
+
 void TsSamplerOperator::AddData(const vector<optional<DataVariant>>& row_data, DataChunkPtr& chunk) {
   if (row_data.size() != chunk->ColumnNum()) {
-    LOG_ERROR("out row size exceeds elements with table %d during getting sample result in create statistics",
+    LOG_ERROR("out row size exceeds elements with table %ld during getting sample result in create statistics",
               input_->table()->object_id_)
     return;
   }
@@ -401,6 +469,19 @@ EEIteratorErrCode TsSamplerOperator::Init(kwdbContext_p ctx) {
     outStorageTypes_.emplace_back(roachpb::DataType::VARBINARY);
     // The maximum byte length used for different value calculations
     outLens_.emplace_back(MAX_SKETCH_LEN);
+    // BucketID col
+    outRetrunTypes_.emplace_back(KWDBTypeFamily::IntFamily);
+    outStorageTypes_.emplace_back(roachpb::DataType::BIGINT);
+    outLens_.emplace_back(8);
+    outRetrunTypes_.emplace_back(KWDBTypeFamily::IntFamily);
+    outStorageTypes_.emplace_back(roachpb::DataType::BIGINT);
+    outLens_.emplace_back(8);
+
+    KStatus res = KStatus::FAIL;
+    auto *ts_engine = static_cast<TSEngine *>(ctx->ts_engine);
+    if (ts_engine)
+      res = ts_engine->GetTsTable(ctx, table_->object_id_, ts_table_);
+    ret = res == KStatus::SUCCESS ? EEIteratorErrCode::EE_OK: EEIteratorErrCode::EE_ERROR;
   } while (false);
 
   Return(ret);
@@ -423,7 +504,7 @@ EEIteratorErrCode TsSamplerOperator::Start(kwdbContext_p ctx) {
 
 EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
-  LOG_DEBUG("start collecting timeseries table %d statistics", input_->table()->object_id_);
+  LOG_DEBUG("start collecting timeseries table %ld statistics", input_->table()->object_id_);
   LOG_DEBUG("normal columns num: %zu; primary key columns num: %zu", normalCol_sketches_.size(),
              primary_tag_sketches_.size());
   if (!current_thd) {
@@ -434,12 +515,14 @@ EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
     Return(EE_END_OF_RECORD)
   }
 
-  auto processSketches = [&](statsColType colType) {
-    switch (colType) {
-      case NormalCol:
-        return mainLoop<NormalCol>(ctx);
+  auto processSketches = [&](sampleObject object) {
+    switch (object) {
+      case Metrics:
+        return mainLoop<Metrics>(ctx);
       case Tag:
         return mainLoop<Tag>(ctx);
+      case SortedHistogram:
+        return mainLoop<SortedHistogram>(ctx);
       default:
         return EE_ERROR;
     }
@@ -449,7 +532,11 @@ EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
   if ((!primary_tag_sketches_.empty() || !tag_sketches_.empty()) && processSketches(Tag) != EE_Sample) Return(EE_ERROR);
 
   // Collect normal column's statistic
-  if (!normalCol_sketches_.empty() && processSketches(NormalCol) != EE_Sample) Return(EE_ERROR);
+  if (!normalCol_sketches_.empty() && processSketches(Metrics) != EE_Sample) Return(EE_ERROR);
+
+  if (sorted_histogram_.histogram_info.generatesortedhistogram() &&
+      processSketches(SortedHistogram) != EE_Sample)
+    Return(EE_ERROR);
 
   KStatus ret = GetSampleResult(ctx, chunk);
   if (ret != SUCCESS) {
@@ -457,7 +544,7 @@ EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
   }
 
   is_done_ = true;
-  LOG_DEBUG("complete collecting timeseries table %d statistics", input_->table()->object_id_);
+  LOG_DEBUG("complete collecting timeseries table %ld statistics", input_->table()->object_id_);
   Return(EE_OK);
 }
 
@@ -491,6 +578,12 @@ KStatus TsSamplerOperator::GetSampleResult(kwdbContext_p ctx, DataChunkPtr& chun
     Return(FAIL)
   }
 
+  if (sorted_histogram_.histogram_info.generatesortedhistogram()) {
+    for (const auto& out_row : sorted_histogram_.histogram_data) {
+      AddData(out_row, chunk);
+    }
+  }
+
   LOG_DEBUG("sampling result set is collected successes");
   Return(SUCCESS);
 }
@@ -522,7 +615,7 @@ KStatus TsSamplerOperator::ProcessSketches(kwdbContext_p ctx, const std::vector<
     sketchVal = sk.sketch->MarshalBinary();
     if (sketchVal.size() > MAX_SKETCH_LEN) {
       // Avoid over length
-      LOG_ERROR("sketch column over length when scanning table %d", input_->table()->object_id_)
+      LOG_ERROR("sketch column over length when scanning table %ld", input_->table()->object_id_)
       char buffer[256];
       snprintf(buffer, sizeof(buffer), "sketch column %u over length during statistics collection. ", sk.sketchIdx);
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, buffer);
@@ -551,7 +644,7 @@ k_uint32 TsSamplerOperator::GetSampleSize() const {
 }
 
 template<>
-std::vector<SketchSpec> TsSamplerOperator::GetSketches<NormalCol>() const {
+std::vector<SketchSpec> TsSamplerOperator::GetSketches<Metrics>() const {
   return normalCol_sketches_;
 }
 

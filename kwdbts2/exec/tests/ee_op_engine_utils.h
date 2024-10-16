@@ -15,17 +15,16 @@
 #include <string>
 #include <vector>
 
-#include "ee_op_test_utils.h"
 #include "engine.h"
 #include "libkwdbts2.h"
 
 namespace kwdbts {
 
-RangeGroup test_range{2, 0};
+RangeGroup test_range{default_entitygroup_id_in_dist_v2, 0};
 
 TSEngine* CreateTestTsEngine(kwdbContext_p ctx, const string& db_path) {
   EngineOptions opts;
-  opts.wal_level = 1;
+  opts.wal_level = 0;
   opts.db_path = db_path;
   auto* ts_engine = static_cast<TSEngine*>(ctx->ts_engine);
   TSEngineImpl::OpenTSEngine(ctx, db_path, opts, &ts_engine);

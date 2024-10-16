@@ -196,6 +196,7 @@ func initTsSamplerSpec(
 			ColIdx:            columnIDxs,
 			ColTypes:          columnTypes,
 			HasAllPTag:        tsConfig.ReqStats[i].hasAllPTag,
+			SortedHistogram:   tsConfig.ReqStats[i].sortedHistogram,
 		}
 	}
 	return s, nil
@@ -341,10 +342,26 @@ func appendExtraColumns(
 		PGAttributeNum: resCols[0].PGAttributeNum + 5,
 		TypeModifier:   types.Int.TypeModifier(),
 	}
+	bucketIDCol := sqlbase.ResultColumn{
+		Name:           "bucketIDCol",
+		Typ:            types.Int,
+		TableID:        desc.GetID(),
+		PGAttributeNum: resCols[0].PGAttributeNum + 6,
+		TypeModifier:   types.Int.TypeModifier(),
+	}
+	bucketNumRowsCol := sqlbase.ResultColumn{
+		Name:           "bucketNumRowsCol",
+		Typ:            types.Int,
+		TableID:        desc.GetID(),
+		PGAttributeNum: resCols[0].PGAttributeNum + 7,
+		TypeModifier:   types.Int.TypeModifier(),
+	}
 	resultColumns = append(resultColumns, rankCol)
 	resultColumns = append(resultColumns, sketchIdxCol)
 	resultColumns = append(resultColumns, numRowsCol)
 	resultColumns = append(resultColumns, numNullsCol)
 	resultColumns = append(resultColumns, sketchCol)
+	resultColumns = append(resultColumns, bucketIDCol)
+	resultColumns = append(resultColumns, bucketNumRowsCol)
 	return resultColumns
 }

@@ -12,14 +12,9 @@
 #include "gtest/gtest.h"
 #include "ee_dml_exec.h"
 #include "ee_op_test_base.h"
-#include "ee_op_operator_utils.h"
 #include "ee_op_spec_utils.h"
 
 namespace kwdbts {
-
-const int row_num_per_payload = 1;
-const int insert_batch = 1;
-const int test_table_id = 800;
 
 vector<vector<vector<string>>> tsTableData = {
   // case 0
@@ -96,7 +91,7 @@ DataChunkPtr GenerateInfoData() {
 // TestHashTagScanOp for multiple model processing
 class TestHashTagScanOp : public OperatorTestBase {
  public:
-  TestHashTagScanOp() : OperatorTestBase(test_table_id) {
+  TestHashTagScanOp() : OperatorTestBase() {
 
   }
 
@@ -104,7 +99,8 @@ class TestHashTagScanOp : public OperatorTestBase {
   roachpb::CreateTsTable meta_;
 
   void SetUp() override {
-    OperatorTestBase::SetUp();
+    // OperatorTestBase::SetUp();
+    ExecPool::GetInstance().Init(ctx_);
     EngineOptions::is_single_node_ = true;
     test_range.range_group_id = default_entitygroup_id_in_dist_v2;
     TSBSSchema::constructTableMetadata(meta_, "test_table", table_id_);
@@ -125,14 +121,17 @@ class TestHashTagScanOp : public OperatorTestBase {
       auto data_value = TSBSSchema::genPayloadData(ctx_, row_num_per_payload, p_len, start_ts, meta_, tsTableData[case_num][i]);
       TSSlice payload{data_value.get(), p_len};
       DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-      engine_->PutData(ctx_, table_id_, test_range.range_group_id, &payload, 1, 0, &dedup_result);
+      uint16_t inc_entity_cnt;
+      uint32_t inc_unordered_cnt;
+      engine_->PutData(ctx_, table_id_, test_range.range_group_id, &payload, 1,
+                       0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
     }
   }
 
   DataChunkPtr GenerateRelData(k_uint32 case_num) {
     DataChunkPtr chunk = nullptr;
 
-    k_uint32 capacity{relTableData[case_num].size()};
+    k_uint32 capacity = relTableData[case_num].size();
     std::vector<ColumnInfo> col_info;
     col_info.reserve(3);
 
@@ -206,7 +205,6 @@ class TestHashTagScanOp : public OperatorTestBase {
     auto message = make_unique<char[]>(size);
     flow.SerializeToArray(message.get(), size);
 
-    k_uint16 len3 = 0;
     auto* request = reinterpret_cast<QueryInfo*>(req.get());
     auto* response = reinterpret_cast<QueryInfo*>(resp.get());
     request->tp = EnMqType::MQ_TYPE_DML_SETUP;

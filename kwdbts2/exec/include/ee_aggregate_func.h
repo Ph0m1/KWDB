@@ -550,7 +550,7 @@ class MaxAggregate : public AggregateFunc {
           current_data_chunk_->SetNotNull(target_row, col_idx_);
           k_uint16 len = max_val.length();
           std::memcpy(dest_ptr, &len, STRING_WIDE);
-          std::memcpy(dest_ptr + STRING_WIDE, max_val.data(), len + 1);
+          std::memcpy(dest_ptr + STRING_WIDE, max_val.data(), len);
         }
 
         // if the current chunk is full.
@@ -585,7 +585,7 @@ class MaxAggregate : public AggregateFunc {
       current_data_chunk_->SetNotNull(target_row, col_idx_);
       k_uint16 len = max_val.length();
       std::memcpy(dest_ptr, &len, STRING_WIDE);
-      std::memcpy(dest_ptr + STRING_WIDE, max_val.data(), len + 1);
+      std::memcpy(dest_ptr + STRING_WIDE, max_val.data(), len);
     }
   }
 
@@ -1046,7 +1046,7 @@ class MinAggregate : public AggregateFunc {
           current_data_chunk_->SetNotNull(target_row, col_idx_);
           k_uint16 len = min_val.length();
           std::memcpy(dest_ptr, &len, STRING_WIDE);
-          std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len + 1);
+          std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len);
         }
 
         // if the current chunk is full.
@@ -1082,7 +1082,7 @@ class MinAggregate : public AggregateFunc {
       current_data_chunk_->SetNotNull(target_row, col_idx_);
       k_uint16 len = min_val.length();
       std::memcpy(dest_ptr, &len, STRING_WIDE);
-      std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len + 1);
+      std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len);
     }
   }
 
@@ -1270,7 +1270,7 @@ class MinAggregate : public AggregateFunc {
           current_data_chunk_->SetNotNull(target_row, col_idx_);
           k_uint16 len = min_val.length();
           std::memcpy(dest_ptr, &len, STRING_WIDE);
-          std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len + 1);
+          std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len);
         }
 
         // if the current chunk is full.
@@ -1311,7 +1311,7 @@ class MinAggregate : public AggregateFunc {
       current_data_chunk_->SetNotNull(target_row, col_idx_);
       k_uint16 len = min_val.length();
       std::memcpy(dest_ptr, &len, STRING_WIDE);
-      std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len + 1);
+      std::memcpy(dest_ptr + STRING_WIDE, min_val.data(), len);
     }
   }
 
@@ -2532,6 +2532,72 @@ class AVGRowAggregate : public AggregateFunc {
       std::memcpy(dest_ptr + sizeof(k_double64), &count, sizeof(k_int64));
     }
     return 0;
+  }
+
+  void addOrUpdate(std::vector<DataChunk*>& chunks, k_int32 start_line_in_begin_chunk, RowBatch* row_batch,
+                                              GroupByMetadata& group_by_metadata, Field** renders) override {
+    k_uint32 arg_idx = arg_idx_[0];
+    auto data_container_count = row_batch->Count();
+    k_uint32 chunk_idx = 0;
+    k_int32 target_row = start_line_in_begin_chunk;
+    auto current_data_chunk_ = chunks[chunk_idx];
+    auto chunk_capacity = current_data_chunk_->Capacity();
+
+    char* dest_ptr;
+    k_double64 sum_val = 0.0;
+    k_int64 count = 0;
+    bool is_dest_null = true;
+
+    if (target_row >= 0) {
+      dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
+      if (!is_dest_null) {
+        sum_val = *reinterpret_cast<k_double64*>(dest_ptr);
+        count = *reinterpret_cast<k_int64*>(dest_ptr + sizeof(k_double64));
+      }
+    }
+
+    auto* arg_field = renders[arg_idx];
+
+    for (k_uint32 row = 0; row < data_container_count; ++row) {
+      if (group_by_metadata.isNewGroup(row)) {
+        // save the agg result of last bucket
+        if (!is_dest_null) {
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+          std::memcpy(dest_ptr, &sum_val, len_);
+          std::memcpy(dest_ptr + sizeof(k_double64), &count, sizeof(k_int64));
+        }
+
+        // if the current chunk is full.
+        if (target_row == chunk_capacity - 1) {
+          current_data_chunk_ = chunks[++chunk_idx];
+          target_row = 0;
+        } else {
+          ++target_row;
+        }
+        dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+        sum_val = 0.0;
+        count = 0;
+        is_dest_null = true;
+      }
+
+      if (!(arg_field->isNullable() && arg_field->is_nullable())) {
+        is_dest_null = false;
+        char* src_ptr = arg_field->get_ptr(row_batch);
+
+        T src_val = *reinterpret_cast<T*>(src_ptr);
+        sum_val += src_val;
+        ++count;
+      }
+
+      row_batch->NextLine();
+    }
+
+    if (!is_dest_null) {
+      current_data_chunk_->SetNotNull(target_row, col_idx_);
+      std::memcpy(dest_ptr, &sum_val, len_);
+      std::memcpy(dest_ptr + sizeof(k_double64), &count, sizeof(k_int64));
+    }
   }
 };
 

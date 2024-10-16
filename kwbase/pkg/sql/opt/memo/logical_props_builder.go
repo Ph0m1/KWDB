@@ -193,6 +193,26 @@ func (b *logicalPropsBuilder) buildTSScanProps(scan *TSScanExpr, rel *props.Rela
 	//	rel.FuncDeps.ProjectCols(rel.OutputCols)
 	//}
 
+	// Initialize key FD's from the table schema, including constant columns from
+	// the constraint, minus any columns that are not projected by the Scan
+	// operator.
+
+	if scan.OrderedScanType.Ordered() {
+		fd := &props.FuncDepSet{}
+		var keyCols opt.ColSet
+		keyCols.Add(scan.Table.ColumnID(0))
+		var allCols opt.ColSet
+		tab := md.Table(scan.Table)
+		for i := 0; i < tab.DeletableColumnCount(); i++ {
+			allCols.Add(scan.Table.ColumnID(i))
+		}
+		fd.AddStrictKey(keyCols, allCols)
+		rel.FuncDeps.CopyFrom(fd)
+
+		rel.FuncDeps.MakeNotNull(rel.NotNullCols)
+		rel.FuncDeps.ProjectCols(rel.OutputCols)
+	}
+
 	// Cardinality
 	// -----------
 	// Restrict cardinality based on constraint, FDs, and hard limit.

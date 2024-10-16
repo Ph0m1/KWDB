@@ -219,11 +219,21 @@ message TSReaderSpec {
 
   optional TSOrdering   sorter = 10;
   required int32 TsTablereaderId = 11;
+
+  required bool OrderedScan = 12;
 }
 
 enum SketchMethod {
   // Computes the count-distinct statistical algorithm for columns
   HLL_PLUS_PLUS = 0;
+}
+
+// SortedHistogramInfo supports sorted histogram collection for entities in tag table
+message SortedHistogramInfo {
+   optional bool generateSortedHistogram = 1;
+   optional int64 fromTimeStamp = 2;
+   optional int64 toTimeStamp = 3;
+   optional uint32 histogramMaxBuckets = 4;
 }
 
 // time series statistic info
@@ -251,6 +261,8 @@ message SketchInfo {
   repeated uint32 col_type = 5;
   // Whether has all primary tags
   required bool HasAllPTag = 6;
+  // Whether generate sorted histogram for primary tags
+  optional SortedHistogramInfo sortedHistogram = 7;
 }
 
 message DistinctSpec {

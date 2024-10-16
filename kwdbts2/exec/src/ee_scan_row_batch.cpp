@@ -156,4 +156,79 @@ void ScanRowBatch::CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_le
   }
 }
 
+/**
+ *  nextline
+ */
+k_int32 ReverseScanRowBatch::NextLine() {
+  if (is_filter_) {
+    if (current_line_ + 1 >= effect_count_) {
+      return -1;
+    }
+    current_line_++;
+    current_batch_no_ = selection_[current_line_].batch_;
+    current_batch_line_ = selection_[current_line_].line_;
+    return current_line_;
+  } else {
+    if (current_line_ + 1 >= count_) {
+      return -1;
+    }
+    if (res_.col_num_ > 0) {
+      if (current_batch_line_ > 0) {
+        current_batch_line_--;
+      } else {
+        current_batch_no_++;
+        current_batch_line_ = res_.data[0][current_batch_no_]->count - 1;
+      }
+    }
+    current_line_++;
+    return current_line_;
+  }
+}
+
+/**
+ *  ResetLine
+ */
+void ReverseScanRowBatch::ResetLine() {
+  if (effect_count_ > 0) {
+    is_filter_ = true;
+    current_line_ = 0;
+    current_batch_no_ = selection_[current_line_].batch_;
+    current_batch_line_ = selection_[current_line_].line_;
+  } else {
+    current_batch_no_ = 0;
+    current_batch_line_ = 0;
+    if (res_.col_num_ > 0) {
+      current_batch_line_ = res_.data[0][current_batch_no_]->count - 1;
+    }
+    current_line_ = 0;
+  }
+}
+
+void ReverseScanRowBatch::CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
+                                  roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) {
+  if (roachpb::KWDBKTSColumn::TYPE_PTAG == ctype || roachpb::KWDBKTSColumn::TYPE_TAG == ctype) {
+    auto src = static_cast<char*>(tagdata_[col_idx].tag_data);
+    if (src == nullptr) {
+      return;
+    }
+    for (int row = 0; row < count_; row++) {
+      memcpy(dest + row * data_len, src, data_len);
+    }
+  } else {
+    k_uint32 offset = 0;
+    for (auto& batch : res_.data[col_idx]) {
+      k_uint32 total_len = batch->count * data_len;
+      if (batch->mem == nullptr) {
+        offset += total_len;
+        continue;
+      }
+      char* mem = static_cast<char*>(batch->mem);
+      for (k_int32 i = batch->count - 1; i >= 0; i--) {
+        memcpy(dest + offset, mem + i * data_len, data_len);
+        offset = offset + data_len;
+      }
+    }
+  }
+}
+
 }  // namespace kwdbts

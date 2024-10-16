@@ -63,7 +63,7 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/kwbasedb/kwbase/pkg/kv"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
@@ -73,8 +73,16 @@ import (
 // maybeRefreshTsStats implements the core logic described in the comment for
 // Refresher. It is called by the background Refresher thread.
 func (r *Refresher) maybeRefreshTsStats(
-	ctx context.Context, tableID sqlbase.ID, rowsAffected int64, asOf time.Duration,
+	ctx context.Context,
+	tableID sqlbase.ID,
+	tabDesc *sqlbase.TableDescriptor,
+	affected Affected,
+	asOf time.Duration,
 ) {
+	enableMetricAutomaticCollection := AutomaticTsStatisticsClusterMode.Get(&r.st.SV)
+	enableTagAutomaticCollection := AutomaticTagStatisticsClusterMode.Get(&r.st.SV)
+	enableTSOrderedTable := opt.TSOrderedTable.Get(&r.st.SV)
+	colsNewDesc := tabDesc.Columns
 	tableStats, err := r.cache.GetTableStats(ctx, tableID)
 	if err != nil {
 		log.Errorf(ctx, "failed to get table statistics cache for table (ID: %d) when refreshing statistics: %v", tableID, err)
@@ -82,34 +90,30 @@ func (r *Refresher) maybeRefreshTsStats(
 	}
 	// Here, we need to refresh the statistics for the first time
 	if len(tableStats) == 0 {
-		err := r.firstRefreshStats(ctx, tableID, asOf)
-		if err != nil {
-			log.Warningf(ctx, "failed to create statistics on table (ID: %d): %v when refreshing statistic for the first time", tableID, err)
+		// Sample Metric and tag table
+		if enableMetricAutomaticCollection && enableTagAutomaticCollection {
+			err := r.firstRefreshStats(ctx, tableID, asOf)
+			if err != nil {
+				log.Warningf(ctx, "failed to create statistics on table (ID: %d): %v when refreshing statistic for the first time", tableID, err)
+			}
 		}
-		return
-	}
 
-	var colDesc []sqlbase.ColumnDescriptor
-	err = r.cache.ClientDB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		tabDesc, err := sqlbase.GetTableDescFromID(ctx, txn, tableID)
-		if err != nil {
-			return err
+		// Only sample tag table
+		if !enableMetricAutomaticCollection && (enableTagAutomaticCollection || enableTSOrderedTable) {
+			err := r.firstRefreshTagStats(ctx, tableID, colsNewDesc, enableTSOrderedTable)
+			if err != nil {
+				log.Warningf(ctx, "failed to create statistics on table (ID: %d): %v when refreshing tag statistic for the first time", tableID, err)
+			}
 		}
-		colDesc = tabDesc.Columns
-		return nil
-	})
-	if err != nil {
-		log.Errorf(ctx, "failed to get table desc for table (ID: %d) when refreshing statistic: %v", tableID, err)
 		return
 	}
 
 	// Determine the column type based on all column IDs in tableID and tableStats
-	tsColumnStats := make([]*TableStatistic, 0)
+	tsMetricStats := make([]*TableStatistic, 0)
 	tsTagStats := make([]*TableStatistic, 0)
-	tsPrimaryTagStats := make([]*TableStatistic, 0)
 
 	colDescMap := make(map[sqlbase.ColumnID]sqlbase.ColumnDescriptor)
-	for _, desc := range colDesc {
+	for _, desc := range colsNewDesc {
 		colDescMap[desc.ID] = desc
 	}
 	// Here we need to judge the logic based on the actual column id and type.
@@ -121,11 +125,9 @@ func (r *Refresher) maybeRefreshTsStats(
 			// Currently, the normal column, tag column use the same sampling method,
 			// and the PTag columns are special.
 			case sqlbase.ColumnType_TYPE_DATA:
-				tsColumnStats = append(tsColumnStats, stat)
-			case sqlbase.ColumnType_TYPE_TAG:
-				tsColumnStats = append(tsColumnStats, stat)
-			case sqlbase.ColumnType_TYPE_PTAG:
-				tsPrimaryTagStats = append(tsPrimaryTagStats, stat)
+				tsMetricStats = append(tsMetricStats, stat)
+			case sqlbase.ColumnType_TYPE_TAG, sqlbase.ColumnType_TYPE_PTAG:
+				tsTagStats = append(tsTagStats, stat)
 			default:
 				log.Errorf(ctx, "unknown column type %v when refreshing statistic for table (ID: %d)", desc.TsCol.ColumnType.String(), tableID)
 				return
@@ -133,39 +135,74 @@ func (r *Refresher) maybeRefreshTsStats(
 		}
 	}
 
-	// Statistics refresh ploy for normal columns
-	if len(tsColumnStats) > 0 {
-		r.HandleTsColumnStats(ctx, tsColumnStats, tableID, rowsAffected, asOf)
+	// Statistics refresh ploy for metric columns
+	if len(tsMetricStats) > 0 && enableMetricAutomaticCollection {
+		r.HandleTsMetricStats(ctx, tsMetricStats, tableID, affected, colsNewDesc)
 	}
 
 	// Statistics refresh ploy for Tag columns
-	if len(tsTagStats) > 0 {
-		r.HandleTsTagStats(ctx, tsTagStats, tableID, rowsAffected, asOf)
-	}
-
-	// Statistics refresh ploy for Primary Tag columns
-	if len(tsPrimaryTagStats) > 0 {
-		r.HandleTsPrimaryTagStats(ctx, tsPrimaryTagStats, tableID, rowsAffected, asOf)
+	if len(tsTagStats) > 0 && (enableTagAutomaticCollection || enableTSOrderedTable) {
+		r.HandleTsTagStats(ctx, tsTagStats, tableID, affected, colsNewDesc, enableTSOrderedTable)
 	}
 }
 
-// refreshTsStats is used to refresh timeseries table statistic
-func (r *Refresher) refreshTsStats(
-	ctx context.Context, tableID sqlbase.ID, tableStatistic []*TableStatistic, asOf time.Duration,
+// refreshTsStats is used to refresh tag table statistic
+func (r *Refresher) refreshTagStats(
+	ctx context.Context,
+	tableID sqlbase.ID,
+	colsNewDesc []sqlbase.ColumnDescriptor,
+	enableTSOrderedTable bool,
 ) error {
-	columnIDSet := make(map[int]struct{})
 	var columnIDList strings.Builder
 
-	for _, stats := range tableStatistic {
-		for _, colID := range stats.ColumnIDs {
-			if _, exists := columnIDSet[int(colID)]; !exists {
-				columnIDSet[int(colID)] = struct{}{}
-
-				if columnIDList.Len() > 0 {
-					columnIDList.WriteString(",")
-				}
-				columnIDList.WriteString(strconv.Itoa(int(colID)))
+	for _, colDesc := range colsNewDesc {
+		if colDesc.TsCol.ColumnType != sqlbase.ColumnType_TYPE_DATA {
+			if columnIDList.Len() > 0 {
+				columnIDList.WriteString(",")
 			}
+			columnIDList.WriteString(strconv.Itoa(int(colDesc.ColID())))
+		}
+	}
+
+	var autoCollectionSQL string
+	if enableTSOrderedTable {
+		autoCollectionSQL = fmt.Sprintf(
+			"CREATE STATISTICS %s ON [%s] FROM [%d] with options collect_sorted_histogram",
+			AutoStatsName,
+			columnIDList.String(),
+			tableID,
+		)
+	} else {
+		autoCollectionSQL = fmt.Sprintf(
+			"CREATE STATISTICS %s ON [%s] FROM [%d]",
+			AutoStatsName,
+			columnIDList.String(),
+			tableID,
+		)
+	}
+
+	// Create statistics for specify the id of the columns on the given table.
+	_ /* rows */, err := r.ex.Exec(
+		ctx,
+		"create-stats",
+		nil, /* txn */
+		autoCollectionSQL,
+	)
+	return err
+}
+
+// refreshMetricStats is used to refresh metric table statistic
+func (r *Refresher) refreshMetricStats(
+	ctx context.Context, tableID sqlbase.ID, colsNewDesc []sqlbase.ColumnDescriptor,
+) error {
+	var columnIDList strings.Builder
+
+	for _, colDesc := range colsNewDesc {
+		if colDesc.TsCol.ColumnType == sqlbase.ColumnType_TYPE_DATA {
+			if columnIDList.Len() > 0 {
+				columnIDList.WriteString(",")
+			}
+			columnIDList.WriteString(strconv.Itoa(int(colDesc.ColID())))
 		}
 	}
 	// Create statistics for specify the id of the columns on the given table.
@@ -183,14 +220,14 @@ func (r *Refresher) refreshTsStats(
 	return err
 }
 
-// HandleTsColumnStats is used to make sure whether refresh normal columns statistic
+// HandleTsMetricStats is used to make sure whether refresh normal columns statistic
 // If the refresh requirements are met, the refresh will then be performed
-func (r *Refresher) HandleTsColumnStats(
+func (r *Refresher) HandleTsMetricStats(
 	ctx context.Context,
 	tsColumnStats []*TableStatistic,
 	tableID sqlbase.ID,
-	rowsAffected int64,
-	asOf time.Duration,
+	affected Affected,
+	colsNewDesc []sqlbase.ColumnDescriptor,
 ) {
 	var rowCount float64
 	mustRefresh := false
@@ -224,12 +261,12 @@ func (r *Refresher) HandleTsColumnStats(
 
 	targetRows := int64(rowCount*AutomaticStatisticsFractionStaleRows.Get(&r.st.SV)) +
 		4*AutomaticStatisticsMinStaleRows.Get(&r.st.SV)
-	if !mustRefresh && rowsAffected < math.MaxInt32 && targetRows > rowsAffected {
+	if !mustRefresh && affected.rowsAffected < math.MaxInt32 && targetRows > affected.rowsAffected {
 		// No refresh is happening this time.
 		return
 	}
 
-	if err := r.refreshTsStats(ctx, tableID, tsColumnStats, asOf); err != nil {
+	if err := r.refreshMetricStats(ctx, tableID, colsNewDesc); err != nil {
 		if errors.Is(err, ConcurrentCreateStatsError) {
 			// Another stats job was already running. Attempt to reschedule this
 			// refresh.
@@ -265,8 +302,9 @@ func (r *Refresher) HandleTsTagStats(
 	ctx context.Context,
 	tsTagStats []*TableStatistic,
 	tableID sqlbase.ID,
-	rowsAffected int64,
-	asOf time.Duration,
+	affected Affected,
+	colsNewDesc []sqlbase.ColumnDescriptor,
+	enableTSOrderedTable bool,
 ) {
 	var rowCount float64
 	mustRefresh := false
@@ -282,14 +320,22 @@ func (r *Refresher) HandleTsTagStats(
 		mustRefresh = true
 	}
 
-	targetRows := int64(rowCount*AutomaticTsStatisticsFractionStaleRows.Get(&r.st.SV)) +
+	var targetUnorderedRows int64
+	var collectSortHistogram bool
+	if enableTSOrderedTable {
+		targetUnorderedRows = int64(rowCount*AutomaticTsUnorderedFractionStaleRows) +
+			int64(AutomaticTsUnorderedMinStaleRows)
+		collectSortHistogram = targetUnorderedRows > affected.unorderedAffected
+	}
+
+	targetEntitiesRows := int64(rowCount*AutomaticTsStatisticsFractionStaleRows.Get(&r.st.SV)) +
 		AutomaticTsStatisticsMinStaleRows.Get(&r.st.SV)
-	if !mustRefresh && rowsAffected < math.MaxInt32 && targetRows > rowsAffected {
+	if !mustRefresh && affected.entitiesAffected < math.MaxInt32 && (targetEntitiesRows > affected.entitiesAffected && collectSortHistogram) {
 		// No refresh is happening this time.
 		return
 	}
 
-	if err := r.refreshTsStats(ctx, tableID, tsTagStats, asOf); err != nil {
+	if err := r.refreshTagStats(ctx, tableID, colsNewDesc, enableTSOrderedTable); err != nil {
 		if errors.Is(err, ConcurrentCreateStatsError) {
 			// Another stats job was already running. Attempt to reschedule this
 			// refresh.
@@ -307,67 +353,7 @@ func (r *Refresher) HandleTsTagStats(
 				// AutomaticStatisticsFractionStaleRows statistical ideal. We
 				// ensure that the refresh is triggered during the next cycle by
 				// passing a very large number for rowsAffected.
-				r.mutations <- mutation{tableID: tableID, rowsAffected: math.MaxInt32}
-			}
-			return
-		}
-
-		// Log other errors but don't automatically reschedule the refresh, since
-		// that could lead to endless retries.
-		log.Warningf(ctx, "failed to create statistics for table (ID: %d) with error message: %v", tableID, err)
-		return
-	}
-}
-
-// HandleTsPrimaryTagStats is used to make sure whether refresh normal columns statistic
-// If the refresh requirements are met, the refresh will then be performed
-func (r *Refresher) HandleTsPrimaryTagStats(
-	ctx context.Context,
-	tsPrimaryTagStats []*TableStatistic,
-	tableID sqlbase.ID,
-	rowsAffected int64,
-	asOf time.Duration,
-) {
-	var rowCount float64
-	mustRefresh := false
-	if stat := mostRecentAutomaticStat(tsPrimaryTagStats); stat != nil {
-		maxTimeBetweenRefreshes := stat.CreatedAt.Add(4*avgTsPrimaryTagRefreshTime(tsPrimaryTagStats) + r.extraTime)
-		if timeutil.Now().After(maxTimeBetweenRefreshes) {
-			mustRefresh = true
-		}
-		rowCount = float64(stat.RowCount)
-	} else {
-		// If there are no statistics available on this table, we must perform a
-		// refresh.
-		mustRefresh = true
-	}
-
-	targetRows := int64(rowCount*AutomaticTsStatisticsFractionStaleRows.Get(&r.st.SV)) +
-		AutomaticTsStatisticsMinStaleRows.Get(&r.st.SV)
-	if !mustRefresh && rowsAffected < math.MaxInt32 && r.randGen.randInt(targetRows) >= rowsAffected {
-		// No refresh is happening this time.
-		return
-	}
-
-	if err := r.refreshTsStats(ctx, tableID, tsPrimaryTagStats, asOf); err != nil {
-		if errors.Is(err, ConcurrentCreateStatsError) {
-			// Another stats job was already running. Attempt to reschedule this
-			// refresh.
-			if mustRefresh {
-				// For the cases where mustRefresh=true (stats don't yet exist or it
-				// has been 2x the average time since a refresh), we want to make sure
-				// that maybeRefreshStats is called on this table during the next
-				// cycle so that we have another chance to trigger a refresh. We pass
-				// rowsAffected=0 so that we don't force a refresh if another node has
-				// already done it.
-				r.mutations <- mutation{tableID: tableID, rowsAffected: 0}
-			} else {
-				// If this refresh was caused by a "dice roll", we want to make sure
-				// that the refresh is rescheduled so that we adhere to the
-				// AutomaticStatisticsFractionStaleRows statistical ideal. We
-				// ensure that the refresh is triggered during the next cycle by
-				// passing a very large number for rowsAffected.
-				r.mutations <- mutation{tableID: tableID, rowsAffected: math.MaxInt32}
+				r.mutations <- mutation{tableID: tableID, entitiesAffected: math.MaxInt32}
 			}
 			return
 		}
@@ -447,6 +433,65 @@ func avgTsPrimaryTagRefreshTime(tableStats []*TableStatistic) time.Duration {
 		return defaultAverageTimeBetweenTsRefreshes
 	}
 	return sum / time.Duration(count)
+}
+
+// firstRefreshTagStats is used to create statistic on every for the first time
+func (r *Refresher) firstRefreshTagStats(
+	ctx context.Context,
+	tableID sqlbase.ID,
+	colsDesc []sqlbase.ColumnDescriptor,
+	enableTSOrderedTable bool,
+) error {
+	var columnIDList strings.Builder
+
+	for _, colDesc := range colsDesc {
+		if colDesc.TsCol.ColumnType != sqlbase.ColumnType_TYPE_DATA {
+			colID := colDesc.ColID()
+			if columnIDList.Len() > 0 {
+				columnIDList.WriteString(",")
+			}
+			columnIDList.WriteString(strconv.Itoa(int(colID)))
+		}
+	}
+
+	var autoCollectionSQL string
+	if enableTSOrderedTable {
+		autoCollectionSQL = fmt.Sprintf(
+			"CREATE STATISTICS %s ON [%s] FROM [%d] with options collect_sorted_histogram",
+			AutoStatsName,
+			columnIDList.String(),
+			tableID,
+		)
+	} else {
+		fmt.Sprintf(
+			"CREATE STATISTICS %s ON [%s] FROM [%d]",
+			AutoStatsName,
+			columnIDList.String(),
+			tableID,
+		)
+	}
+
+	// Create tag statistics for specify the id of the columns on the given table.
+	_ /* rows */, err := r.ex.Exec(
+		ctx,
+		"create-stats",
+		nil, /* txn */
+		autoCollectionSQL,
+	)
+
+	if err != nil {
+		if errors.Is(err, ConcurrentCreateStatsError) {
+			// For the cases where mustRefresh=true (stats don't yet exist or it
+			// has been 2x the average time since a refresh), we want to make sure
+			// that maybeRefreshStats is called on this table during the next
+			// cycle so that we have another chance to trigger a refresh. We pass
+			// rowsAffected=0 so that we don't force a refresh if another node has
+			// already done it.
+			r.mutations <- mutation{tableID: tableID, rowsAffected: 0, entitiesAffected: 0}
+		}
+		return err
+	}
+	return nil
 }
 
 // firstRefreshStats is used to create statistic on every for the first time

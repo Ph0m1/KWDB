@@ -286,7 +286,7 @@ class TsTimePartition : public TSObject {
   virtual int64_t push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t entity_id,
                                     kwdbts::Payload* payload, size_t start_in_payload, size_t num,
                                     std::vector<BlockSpan>* alloc_spans, std::vector<MetricRowID>* todo_markdel,
-                                    ErrorInfo& err_info, DedupResult* dedup_result);
+                                    ErrorInfo& err_info, uint32_t* inc_unordered_cnt, DedupResult* dedup_result);
 
   virtual ostream& printRecord(uint32_t entity_id, std::ostream& os, size_t row);
 
@@ -416,7 +416,7 @@ class TsTimePartition : public TSObject {
   int GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse = false);
 
   int GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>& ts_spans, std::deque<BlockSpan>& block_spans,
-                       bool compaction = false);
+                       bool compaction = false, bool reverse = false);
 
   BlockItem* GetBlockItem(BLOCK_ID item_id);
 

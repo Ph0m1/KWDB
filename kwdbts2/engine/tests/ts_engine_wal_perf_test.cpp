@@ -315,8 +315,10 @@ class TestEngineWALPerf : public TestBigTableInstance {
 
         auto write_start = std::chrono::system_clock::now();
         for (int i = 0 ; i < insert_num_ ; i++) {
+          uint16_t inc_entity_cnt;
+          uint32_t inc_unordered_cnt;
           DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-          ts_engine_->PutData(&ctx1, cur_table_id, test_range.range_group_id, &payload, 1, 0, &dedup_result);
+          ts_engine_->PutData(&ctx1, cur_table_id, test_range.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
         }
 
         auto write_end = std::chrono::system_clock::now();
@@ -354,10 +356,12 @@ class TestEngineWALPerf : public TestBigTableInstance {
     TSSlice payload{data_value, p_len};
     for (int k = 0; k < run_num_; k++) {
       for (int i = 0; i < insert_num_; i++) {
+        uint16_t inc_entity_cnt;
+        uint32_t inc_unordered_cnt;
         DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
         uint64_t mtr_id = 0;
         ts_engine_->TSMtrBegin(&ctx1, table_id, range_group_id, 1, 1, mtr_id);
-        ts_engine_->PutData(&ctx1, table_id, range_group_id, &payload, 1, 0, &dedup_result);
+        ts_engine_->PutData(&ctx1, table_id, range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
         // ts_engine_->TSMtrCommit(&ctx1, table_id, range_group_id, mtr_id);
         ts_engine_->TSMtrRollback(&ctx1, table_id, range_group_id, mtr_id);
       }

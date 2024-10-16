@@ -258,7 +258,14 @@ func (tr *TableReaderSpec) summary() (string, []string) {
 func (tr *TSReaderSpec) summary() (string, []string) {
 	details := []string{
 		fmt.Sprintf("TableID: %v", tr.TableID),
-		fmt.Sprintf("Use statistic: %v", tr.UseStatistic),
+	}
+
+	if tr.UseStatistic {
+		details = append(details, fmt.Sprintf("Use statistic: %v", tr.UseStatistic))
+	}
+
+	if tr.OrderedScan {
+		details = append(details, fmt.Sprintf("Ordered scan: %v", tr.OrderedScan))
 	}
 
 	if len(tr.TsSpans) > 0 {
@@ -280,6 +287,10 @@ func (tr *TSReaderSpec) summary() (string, []string) {
 		res := tr.Sorter.diagramString()
 		details = append(details, "Sorter:")
 		details = append(details, res)
+	}
+
+	if tr.Reverse != nil {
+		details = append(details, fmt.Sprintf("Ordered direction: %v", *tr.Reverse))
 	}
 
 	return "TableReader", details
@@ -624,9 +635,6 @@ func (post *TSPostProcessSpec) summary() []string {
 	}
 
 	if len(post.Renders) > 0 {
-		//for i, val := range post.Scanaggtypes {
-		//	res = append(res, fmt.Sprintf("statistic[%d]: %d(@%d)", i, post.Scancols[i]+1, val))
-		//}
 		var buf bytes.Buffer
 		buf.WriteString("Render: ")
 		for i, expr := range post.Renders {

@@ -70,6 +70,7 @@ class SpecBase {
     table_reader_ = KNEW TSReaderSpec();
     table_reader_->set_tableid(table_id_);
     table_reader_->set_usestatistic(false);
+    table_reader_->set_orderedscan(false);
     table_reader_->set_aggpushdown(agg_push_down_);
     table_reader_->set_tableversion(1);
     table_reader_->set_tstablereaderid(1);

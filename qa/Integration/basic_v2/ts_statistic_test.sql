@@ -328,6 +328,151 @@ select "name","columnIDs","rowCount","distinctCount","nullCount" from system.tab
 create statistics auto_multiy on [6,7,8] from t6;
 select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'auto_multiy';
 
+
+-- Test Sort histogram
+--- Complete order
+Create table t7(k_timestamp timestamp not null,c1 int2,c2 int4,c3 float4,c4 float8,c5 char,c6 varchar(10),c7 int8,c8 nchar(10),c9 nvarchar(10),c10 varbytes,c11 timestamptz,c12 bool) tags (size int not null) primary tags (size) ;
+Insert into t7 values ('2024-1-1 1:00:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,1);
+Insert into t7 values ('2024-1-1 1:10:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,1);
+Insert into t7 values ('2024-1-1 1:20:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,2);
+Insert into t7 values ('2024-1-1 1:30:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,2);
+Insert into t7 values ('2024-1-1 1:40:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,2);
+Insert into t7 values ('2024-1-1 2:00:00',2,200,0.2,0.1,'a','aaa',1000,'e','f','g','2024-1-1 1:00:00',true,3);
+Insert into t7 values ('2024-1-1 2:30:00',2,200,0.2,0.1,'a','aaa',1000,'e','f','g','2024-1-1 1:00:00',true,4);
+Insert into t7 values ('2024-1-1 3:00:00',3,200,0.3,0.1,'a','aaa',2000,'ee','ff','gg','2024-1-1 1:00:01',true,5);
+Insert into t7 values ('2024-1-1 4:00:00',4,500,0.4,0.2,'b','bb',2000,'ee','ff','gg','2024-1-1 1:00:01',false,6);
+Insert into t7 values ('2024-1-1 5:00:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,7);
+Insert into t7 values ('2024-1-1 5:10:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,8);
+Insert into t7 values ('2024-1-1 5:20:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,9);
+Insert into t7 values ('2024-1-1 5:30:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,10);
+Insert into t7 values ('2024-1-1 6:00:00',6,6,0.6,0.2,'b','bbb',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,11);
+Insert into t7 values ('2024-1-1 7:00:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,12);
+Insert into t7 values ('2024-1-1 7:30:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,12);
+Insert into t7 values ('2024-1-1 7:50:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,12);
+Insert into t7 values ('2024-1-1 8:00:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,13);
+Insert into t7 values ('2024-1-1 8:10:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,14);
+Insert into t7 values ('2024-1-1 8:20:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,14);
+Insert into t7 values ('2024-1-1 8:30:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,14);
+Insert into t7 values ('2024-1-1 8:50:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,15);
+Insert into t7 values ('2024-1-1 9:00:00',9,9,0.9,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',true,16);
+Insert into t7 values ('2024-1-1 10:00:00',10,10,1.0,0.3,'c','ccc',6000,'eeee','fffff','ggg','2024-1-1 1:00:05',false,17);
+ALTER TABLE t7 INJECT STATISTICS '[
+  {
+    "columns": ["size"],
+    "created_at": "2024-09-05",
+    "row_count": 17,
+    "distinct_count": 17,
+    "null_count": 0,
+    "sort_histogram_buckets": [
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 17:00:00+00:00"},
+      {"row_count": 6,"unordered_row_count": 0,"ordered_entities": 3,"unordered_entities": 0,"upper_bound": "2023-12-31 18:00:00+00:00"},
+      {"row_count": 2,"unordered_row_count": 0,"ordered_entities": 2,"unordered_entities": 0,"upper_bound": "2023-12-31 19:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 20:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 21:00:00+00:00"},
+      {"row_count": 4,"unordered_row_count": 0,"ordered_entities": 4,"unordered_entities": 0,"upper_bound": "2023-12-31 22:00:00+00:00"},
+      {"row_count": 3,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 23:00:00+00:00"},
+      {"row_count": 4,"unordered_row_count": 0,"ordered_entities": 2,"unordered_entities": 0,"upper_bound": "2024-01-01 00:00:00+00:00"},
+      {"row_count": 5,"unordered_row_count": 0,"ordered_entities": 3,"unordered_entities": 0,"upper_bound": "2024-01-01 01:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2024-01-01 02:00:00+00:00"}
+    ],
+    "histo_col_type": "TIMESTAMPTZ"
+  }]';
+show sort_histogram for table t7;
+
+--- Complete unordered
+Create table t8(k_timestamp timestamp not null,c1 int2,c2 int4,c3 float4,c4 float8,c5 char,c6 varchar(10),c7 int8,c8 nchar(10),c9 nvarchar(10),c10 varbytes,c11 timestamptz,c12 bool) tags (size int not null) primary tags (size) ;
+Insert into t8 values ('2024-1-1 10:00:00',10,10,1.0,0.3,'c','ccc',6000,'eeee','fffff','ggg','2024-1-1 1:00:05',false,17);
+Insert into t8 values ('2024-1-1 9:00:00',9,9,0.9,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',true,16);
+Insert into t8 values ('2024-1-1 8:50:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,15);
+Insert into t8 values ('2024-1-1 8:30:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,14);
+Insert into t8 values ('2024-1-1 8:20:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,14);
+Insert into t8 values ('2024-1-1 8:10:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,14);
+Insert into t8 values ('2024-1-1 8:00:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,13);
+Insert into t8 values ('2024-1-1 7:50:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,12);
+Insert into t8 values ('2024-1-1 7:30:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,12);
+Insert into t8 values ('2024-1-1 7:00:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,12);
+Insert into t8 values ('2024-1-1 6:00:00',6,6,0.6,0.2,'b','bbb',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,11);
+Insert into t8 values ('2024-1-1 5:30:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,10);
+Insert into t8 values ('2024-1-1 5:20:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,9);
+Insert into t8 values ('2024-1-1 5:10:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,8);
+Insert into t8 values ('2024-1-1 5:00:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,7);
+Insert into t8 values ('2024-1-1 4:00:00',4,500,0.4,0.2,'b','bb',2000,'ee','ff','gg','2024-1-1 1:00:01',false,6);
+Insert into t8 values ('2024-1-1 3:00:00',3,200,0.3,0.1,'a','aaa',2000,'ee','ff','gg','2024-1-1 1:00:01',true,5);
+Insert into t8 values ('2024-1-1 2:30:00',2,200,0.2,0.1,'a','aaa',1000,'e','f','g','2024-1-1 1:00:00',true,4);
+Insert into t8 values ('2024-1-1 2:00:00',2,200,0.2,0.1,'a','aaa',1000,'e','f','g','2024-1-1 1:00:00',true,3);
+Insert into t8 values ('2024-1-1 1:40:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,2);
+Insert into t8 values ('2024-1-1 1:30:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,2);
+Insert into t8 values ('2024-1-1 1:20:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,2);
+Insert into t8 values ('2024-1-1 1:10:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,1);
+Insert into t8 values ('2024-1-1 1:00:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,1);
+ALTER TABLE t8 INJECT STATISTICS '[
+  {
+    "columns": ["size"],
+    "created_at": "2024-09-05",
+    "row_count": 17,
+    "distinct_count": 17,
+    "null_count": 0,
+    "sort_histogram_buckets": [
+      {"row_count": 1,"unordered_row_count": 1,"ordered_entities": 0,"unordered_entities": 1,"upper_bound": "2023-12-31 17:00:00+00:00"},
+      {"row_count": 6,"unordered_row_count": 5,"ordered_entities": 1,"unordered_entities": 2,"upper_bound": "2023-12-31 18:00:00+00:00"},
+      {"row_count": 2,"unordered_row_count": 0,"ordered_entities": 2,"unordered_entities": 0,"upper_bound": "2023-12-31 19:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 20:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 21:00:00+00:00"},
+      {"row_count": 4,"unordered_row_count": 0,"ordered_entities": 4,"unordered_entities": 0,"upper_bound": "2023-12-31 22:00:00+00:00"},
+      {"row_count": 3,"unordered_row_count": 3,"ordered_entities": 0,"unordered_entities": 1,"upper_bound": "2023-12-31 23:00:00+00:00"},
+      {"row_count": 4,"unordered_row_count": 3,"ordered_entities": 1,"unordered_entities": 1,"upper_bound": "2024-01-01 00:00:00+00:00"},
+      {"row_count": 5,"unordered_row_count": 3,"ordered_entities": 2,"unordered_entities": 1,"upper_bound": "2024-01-01 01:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2024-01-01 02:00:00+00:00"}
+    ],
+    "histo_col_type": "TIMESTAMPTZ"
+  }]';
+show sort_histogram for table t8;
+
+--- Partial order
+Insert into t7 values ('2024-1-1 1:09:00',10,10,1.0,0.3,'c','ccc',6000,'eeee','fffff','ggg','2024-1-1 1:00:05',false,1);
+Insert into t7 values ('2024-1-1 1:08:00',9,9,0.9,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',true,1);
+Insert into t7 values ('2024-1-1 1:06:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,1);
+Insert into t7 values ('2024-1-1 1:05:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,1);
+Insert into t7 values ('2024-1-1 1:03:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,1);
+Insert into t7 values ('2024-1-1 2:10:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,4);
+Insert into t7 values ('2024-1-1 2:20:00',8,8,0.8,0.3,'c','cc',5000,'eeee','fff','ggg','2024-1-1 1:00:03',false,4);
+Insert into t7 values ('2024-1-1 2:45:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,5);
+Insert into t7 values ('2024-1-1 2:55:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,5);
+Insert into t7 values ('2024-1-1 5:21:00',7,7,0.7,0.3,'c','cc',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,10);
+Insert into t7 values ('2024-1-1 5:22:00',6,6,0.6,0.2,'b','bbb',3000,'eee','fff','ggg','2024-1-1 1:00:02',true,10);
+Insert into t7 values ('2024-1-1 5:23:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,10);
+Insert into t7 values ('2024-1-1 5:26:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,10);
+Insert into t7 values ('2024-1-1 5:27:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,10);
+Insert into t7 values ('2024-1-1 5:28:00',5,500,0.5,0.2,'b','bb',3000,'eee','ff','gg','2024-1-1 1:00:02',false,10);
+Insert into t7 values ('2024-1-1 7:51:00',4,500,0.4,0.2,'b','bb',2000,'ee','ff','gg','2024-1-1 1:00:01',false,13);
+Insert into t7 values ('2024-1-1 7:52:00',3,200,0.3,0.1,'a','aaa',2000,'ee','ff','gg','2024-1-1 1:00:01',true,13);
+Insert into t7 values ('2024-1-1 7:53:00',2,200,0.2,0.1,'a','aaa',1000,'e','f','g','2024-1-1 1:00:00',true,13);
+Insert into t7 values ('2024-1-1 7:55:00',2,200,0.2,0.1,'a','aaa',1000,'e','f','g','2024-1-1 1:00:00',true,13);
+Insert into t7 values ('2024-1-1 7:56:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,13);
+Insert into t7 values ('2024-1-1 7:58:00',1,100,0.1,0.1,'a','aa',1000,'e','f','g','2024-1-1 1:00:00',true,13);
+ALTER TABLE t7 INJECT STATISTICS '[
+  {
+    "columns": ["size"],
+    "created_at": "2024-09-05",
+    "row_count": 17,
+    "distinct_count": 17,
+    "null_count": 0,
+    "sort_histogram_buckets": [
+      {"row_count": 1,"unordered_row_count": 1,"ordered_entities": 0,"unordered_entities": 1,"upper_bound": "2023-12-31 17:00:00+00:00"},
+      {"row_count": 11,"unordered_row_count": 7,"ordered_entities": 2,"unordered_entities": 1,"upper_bound": "2023-12-31 18:00:00+00:00"},
+      {"row_count": 6,"unordered_row_count": 6,"ordered_entities": 0,"unordered_entities": 2,"upper_bound": "2023-12-31 19:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 20:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 21:00:00+00:00"},
+      {"row_count": 10,"unordered_row_count": 7,"ordered_entities": 3,"unordered_entities": 1,"upper_bound": "2023-12-31 22:00:00+00:00"},
+      {"row_count": 3,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2023-12-31 23:00:00+00:00"},
+      {"row_count": 10,"unordered_row_count": 7,"ordered_entities": 1,"unordered_entities": 1,"upper_bound": "2024-01-01 00:00:00+00:00"},
+      {"row_count": 5,"unordered_row_count": 0,"ordered_entities": 3,"unordered_entities": 0,"upper_bound": "2024-01-01 01:00:00+00:00"},
+      {"row_count": 1,"unordered_row_count": 0,"ordered_entities": 1,"unordered_entities": 0,"upper_bound": "2024-01-01 02:00:00+00:00"}
+    ],
+    "histo_col_type": "TIMESTAMPTZ"
+  }]';
+show sort_histogram for table t7;
+
 set timezone = 0;
 use default;
 drop database test cascade;

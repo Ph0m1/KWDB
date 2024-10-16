@@ -1706,6 +1706,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | aggregate 10                             | any_not_null(hostname)
                   │                | group by                                 | region, datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -1727,7 +1728,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | hostname = 'host_0'
-(60 rows)
+(61 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, first_row(usage_idle), lastts(usage_nice), lastts(usage_irq), lastts(usage_guest_nice), max(usage_idle), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND hostname = 'host_1' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |                  field                   |                                   description
 -----------------------------------+------------------------------------------+----------------------------------------------------------------------------------
@@ -1770,6 +1771,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | aggregate 10                             | any_not_null(hostname)
                   │                | group by                                 | region, datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -1791,7 +1793,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | hostname = 'host_1'
-(60 rows)
+(61 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, sum(usage_guest), count(usage_idle), avg(usage_system), max(usage_steal), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND hostname = 'host_0' AND region = 'aaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |                  field                   |                                description
 -----------------------------------+------------------------------------------+----------------------------------------------------------------------------
@@ -1830,6 +1832,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 7                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | aggregate 8                              | any_not_null(hostname)
                   │                | group by                                 | datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -1851,7 +1854,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | hostname = 'host_0'
                                    | tag filter[1]                            | region = 'aaa'
-(56 rows)
+(57 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, last_row(usage_iowait), avg(usage_irq), max(usage_system), firstts(usage_irq), lastts(usage_softirq), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND hostname = 'host_0' AND region = 'aaaaaaaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |                  field                   |                                 description
 -----------------------------------+------------------------------------------+-------------------------------------------------------------------------------
@@ -1893,6 +1896,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | aggregate 9                              | any_not_null(hostname)
                   │                | group by                                 | datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -1914,7 +1918,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | hostname = 'host_0'
                                    | tag filter[1]                            | region = 'aaaaaaaa'
-(59 rows)
+(60 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,first_row(usage_irq),lastts(usage_iowait),sum(usage_iowait),hostname,first_row(usage_system),lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND region = 'aaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |                  field                   |                                 description
 -----------------------------------+------------------------------------------+------------------------------------------------------------------------------
@@ -1953,6 +1957,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 7                              | first_row(usage_system, k_timestamp)
                   │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | group by                                 | hostname, datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -1972,7 +1977,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | region = 'aaa'
-(54 rows)
+(55 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, first (usage_nice), min (usage_system), min (usage_softirq), last_row(usage_guest_nice), hostname, lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' AND region = 'aaaaaaaa' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
                 tree               |                  field                   |                                description
 -----------------------------------+------------------------------------------+----------------------------------------------------------------------------
@@ -2011,6 +2016,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 7                              | last_row(usage_guest_nice, k_timestamp)
                   │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | group by                                 | hostname, datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -2031,7 +2037,7 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                                    | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | region = 'aaaaaaaa'
-(55 rows)
+(56 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, avg(usage_steal), avg(usage_guest_nice), last_row(usage_guest), min(usage_idle), hostname, lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts LIMIT 10;
                 tree               |                  field                   |                                description
 -----------------------------------+------------------------------------------+----------------------------------------------------------------------------
@@ -2065,7 +2071,10 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                   │                | aggregate 8                              | min(usage_idle)
                   │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
+                  │                | pruneLocalAgg                            | true
+                  │                | pruneFinalAgg                            | true
                   └── render       |                                          |
                        │           | engine type                              | time series
                        │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
@@ -2082,10 +2091,11 @@ FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024
                        │           | rack                                     | rack
                        └── ts scan |                                          |
                                    | ts-table                                 | cpu
+                                   | ordered type                             | order scan
                                    | access mode                              | tableTableMeta
                                    | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(50 rows)
+(54 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        sum(usage_nice),
@@ -2133,6 +2143,7 @@ OFFSET 2;
                   │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | aggregate 9                              | any_not_null(hostname)
                   │                | group by                                 | datacenter, rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -2154,7 +2165,7 @@ OFFSET 2;
                                    | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]                            | hostname = 'host_1'
                                    | tag filter[1]                            | region = 'aaa'
-(50 rows)
+(51 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        min(usage_iowait),
@@ -2210,6 +2221,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                   │                | aggregate 7                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                   │                | aggregate 8                              | any_not_null(hostname)
                   │                | group by                                 | rack, k_timestamp_b
+                  │                | pushLocalAggToScan                       | true
                   │                | addSynchronizer                          | true
                   └── render       |                                          |
                        │           | engine type                              | time series
@@ -2232,7 +2244,7 @@ ORDER BY hostname, k_timestamp_b, last_ts;
                                    | tag filter[0]                            | hostname = 'host_0'
                                    | tag filter[1]                            | region = 'aaa'
                                    | tag filter[2]                            | datacenter = 888888
-(59 rows)
+(60 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        first_row(usage_iowait),
@@ -2312,57 +2324,61 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
   AND k_timestamp < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | sum                                      | sum
-   │                               | sum                                      | sum
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | sum                                      | sum
-             │                     | sum                                      | sum
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | sum(usage_guest_nice)
-                  │                | aggregate 6                              | sum(usage_irq)
-                  │                | aggregate 7                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_irq                                | usage_irq
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(48 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | sum                                      | sum
+   │                                    | sum                                      | sum
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | sum                                      | sum
+                  │                     | sum                                      | sum
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | sum(usage_guest_nice)
+                       │                | aggregate 6                              | sum(usage_irq)
+                       │                | aggregate 7                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_irq                                | usage_irq
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(52 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        min(usage_nice),
@@ -2375,68 +2391,72 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | min                                      | min
-   │                               | firstts                                  | firstts
-   │                               | min                                      | min
-   │                               | first                                    | first
-   │                               | first                                    | first
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | min                                      | min
-             │                     | firstts                                  | firstts
-             │                     | min                                      | min
-             │                     | first                                    | first
-             │                     | first                                    | first
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | min(usage_nice)
-                  │                | aggregate 6                              | firstts(usage_user, k_timestamp)
-                  │                | aggregate 7                              | min(usage_guest)
-                  │                | aggregate 8                              | first(usage_idle, k_timestamp)
-                  │                | aggregate 9                              | first(usage_softirq, k_timestamp)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_idle                               | usage_idle
-                       │           | usage_nice                               | usage_nice
-                       │           | usage_softirq                            | usage_softirq
-                       │           | usage_guest                              | usage_guest
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(59 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | min                                      | min
+   │                                    | firstts                                  | firstts
+   │                                    | min                                      | min
+   │                                    | first                                    | first
+   │                                    | first                                    | first
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | min                                      | min
+                  │                     | firstts                                  | firstts
+                  │                     | min                                      | min
+                  │                     | first                                    | first
+                  │                     | first                                    | first
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | min(usage_nice)
+                       │                | aggregate 6                              | firstts(usage_user, k_timestamp)
+                       │                | aggregate 7                              | min(usage_guest)
+                       │                | aggregate 8                              | first(usage_idle, k_timestamp)
+                       │                | aggregate 9                              | first(usage_softirq, k_timestamp)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_idle                               | usage_idle
+                            │           | usage_nice                               | usage_nice
+                            │           | usage_softirq                            | usage_softirq
+                            │           | usage_guest                              | usage_guest
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(63 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        count(usage_iowait), last (usage_guest_nice), sum (usage_softirq), first_row(usage_user),
@@ -2482,7 +2502,10 @@ OFFSET 1;
                        │                | aggregate 8                              | first_row(usage_user, k_timestamp)
                        │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
                        │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
                        │                | addSynchronizer                          | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
                        └── render       |                                          |
                             │           | engine type                              | time series
                             │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
@@ -2498,10 +2521,11 @@ OFFSET 1;
                             │           | rack                                     | rack
                             └── ts scan |                                          |
                                         | ts-table                                 | cpu
+                                        | ordered type                             | order scan
                                         | access mode                              | tableTableMeta
                                         | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
                                         | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(50 rows)
+(54 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        firstts(usage_iowait), last (usage_user), min (usage_steal),
@@ -2512,60 +2536,64 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | firstts                                  | firstts
-   │                               | last                                     | last
-   │                               | min                                      | min
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | firstts                                  | firstts
-             │                     | last                                     | last
-             │                     | min                                      | min
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | firstts(usage_iowait, k_timestamp)
-                  │                | aggregate 6                              | last(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 7                              | min(usage_steal)
-                  │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_iowait                             | usage_iowait
-                       │           | usage_steal                              | usage_steal
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(51 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | firstts                                  | firstts
+   │                                    | last                                     | last
+   │                                    | min                                      | min
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | firstts                                  | firstts
+                  │                     | last                                     | last
+                  │                     | min                                      | min
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | firstts(usage_iowait, k_timestamp)
+                       │                | aggregate 6                              | last(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 7                              | min(usage_steal)
+                       │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_iowait                             | usage_iowait
+                            │           | usage_steal                              | usage_steal
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(55 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        first_row(usage_guest),
@@ -2577,60 +2605,64 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
   AND k_timestamp < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                 description
------------------------------------+------------------------------------------+------------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | first_row                                | first_row
-   │                               | firstts                                  | firstts
-   │                               | lastts                                   | lastts
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | first_row                                | first_row
-             │                     | firstts                                  | firstts
-             │                     | lastts                                   | lastts
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | first_row(usage_guest, k_timestamp)
-                  │                | aggregate 6                              | firstts(usage_system, k_timestamp)
-                  │                | aggregate 7                              | lastts(usage_system, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_system                             | usage_system
-                       │           | usage_guest                              | usage_guest
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(51 rows)
+                  tree                  |                  field                   |                                 description
+----------------------------------------+------------------------------------------+------------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | first_row                                | first_row
+   │                                    | firstts                                  | firstts
+   │                                    | lastts                                   | lastts
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | first_row                                | first_row
+                  │                     | firstts                                  | firstts
+                  │                     | lastts                                   | lastts
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | first_row(usage_guest, k_timestamp)
+                       │                | aggregate 6                              | firstts(usage_system, k_timestamp)
+                       │                | aggregate 7                              | lastts(usage_system, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 8                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_system                             | usage_system
+                            │           | usage_guest                              | usage_guest
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(55 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname, first (usage_steal), count (usage_system), firstts(usage_steal), lastts(usage_steal), first_row(usage_steal),
     lastts(usage_user) as last_ts
@@ -2640,66 +2672,70 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+-----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | first                                    | first
-   │                               | count                                    | count
-   │                               | firstts                                  | firstts
-   │                               | lastts                                   | lastts
-   │                               | first_row                                | first_row
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | first                                    | first
-             │                     | count                                    | count
-             │                     | firstts                                  | firstts
-             │                     | lastts                                   | lastts
-             │                     | first_row                                | first_row
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | first(usage_steal, k_timestamp)
-                  │                | aggregate 6                              | count(usage_system)
-                  │                | aggregate 7                              | firstts(usage_steal, k_timestamp)
-                  │                | aggregate 8                              | lastts(usage_steal, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 9                              | first_row(usage_steal, k_timestamp)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_system                             | usage_system
-                       │           | usage_steal                              | usage_steal
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(57 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+-----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | first                                    | first
+   │                                    | count                                    | count
+   │                                    | firstts                                  | firstts
+   │                                    | lastts                                   | lastts
+   │                                    | first_row                                | first_row
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | first                                    | first
+                  │                     | count                                    | count
+                  │                     | firstts                                  | firstts
+                  │                     | lastts                                   | lastts
+                  │                     | first_row                                | first_row
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | first(usage_steal, k_timestamp)
+                       │                | aggregate 6                              | count(usage_system)
+                       │                | aggregate 7                              | firstts(usage_steal, k_timestamp)
+                       │                | aggregate 8                              | lastts(usage_steal, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 9                              | first_row(usage_steal, k_timestamp)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_system                             | usage_system
+                            │           | usage_steal                              | usage_steal
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(61 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname, first (usage_guest_nice), last (usage_guest), first (usage_iowait), firstts(usage_guest),
     lastts(usage_user) as last_ts
@@ -2709,64 +2745,68 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | first                                    | first
-   │                               | last                                     | last
-   │                               | first                                    | first
-   │                               | firstts                                  | firstts
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | first                                    | first
-             │                     | last                                     | last
-             │                     | first                                    | first
-             │                     | firstts                                  | firstts
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | first(usage_guest_nice, k_timestamp)
-                  │                | aggregate 6                              | last(usage_guest, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 7                              | first(usage_iowait, k_timestamp)
-                  │                | aggregate 8                              | firstts(usage_guest, k_timestamp)
-                  │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_iowait                             | usage_iowait
-                       │           | usage_guest                              | usage_guest
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(55 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | first                                    | first
+   │                                    | last                                     | last
+   │                                    | first                                    | first
+   │                                    | firstts                                  | firstts
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | first                                    | first
+                  │                     | last                                     | last
+                  │                     | first                                    | first
+                  │                     | firstts                                  | firstts
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | first(usage_guest_nice, k_timestamp)
+                       │                | aggregate 6                              | last(usage_guest, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 7                              | first(usage_iowait, k_timestamp)
+                       │                | aggregate 8                              | firstts(usage_guest, k_timestamp)
+                       │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_iowait                             | usage_iowait
+                            │           | usage_guest                              | usage_guest
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        lastts(usage_user),
@@ -2778,61 +2818,65 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+-----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | lastts                                   | lastts
-   │                               | firstts                                  | firstts
-   │                               | last                                     | last
-   │                               | last_row                                 | last_row
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | lastts                                   | lastts
-             │                     | firstts                                  | firstts
-             │                     | last                                     | last
-             │                     | last_row                                 | last_row
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 6                              | firstts(usage_guest_nice, k_timestamp)
-                  │                | aggregate 7                              | last(usage_softirq, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 8                              | last_row(usage_softirq, k_timestamp)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_softirq                            | usage_softirq
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(52 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+-----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | lastts                                   | lastts
+   │                                    | firstts                                  | firstts
+   │                                    | last                                     | last
+   │                                    | last_row                                 | last_row
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | lastts                                   | lastts
+                  │                     | firstts                                  | firstts
+                  │                     | last                                     | last
+                  │                     | last_row                                 | last_row
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 6                              | firstts(usage_guest_nice, k_timestamp)
+                       │                | aggregate 7                              | last(usage_softirq, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 8                              | last_row(usage_softirq, k_timestamp)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_softirq                            | usage_softirq
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(56 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        firstts(usage_idle),
@@ -2846,68 +2890,72 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
   AND k_timestamp < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | firstts                                  | firstts
-   │                               | first_row                                | first_row
-   │                               | avg                                      | avg
-   │                               | count                                    | count
-   │                               | count                                    | count
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | firstts                                  | firstts
-             │                     | first_row                                | first_row
-             │                     | avg                                      | avg
-             │                     | count                                    | count
-             │                     | count                                    | count
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | firstts(usage_idle, k_timestamp)
-                  │                | aggregate 6                              | first_row(usage_guest_nice, k_timestamp)
-                  │                | aggregate 7                              | avg(usage_user)
-                  │                | aggregate 8                              | count(usage_softirq)
-                  │                | aggregate 9                              | count(usage_steal)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_idle                               | usage_idle
-                       │           | usage_softirq                            | usage_softirq
-                       │           | usage_steal                              | usage_steal
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(59 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | firstts                                  | firstts
+   │                                    | first_row                                | first_row
+   │                                    | avg                                      | avg
+   │                                    | count                                    | count
+   │                                    | count                                    | count
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | firstts                                  | firstts
+                  │                     | first_row                                | first_row
+                  │                     | avg                                      | avg
+                  │                     | count                                    | count
+                  │                     | count                                    | count
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | firstts(usage_idle, k_timestamp)
+                       │                | aggregate 6                              | first_row(usage_guest_nice, k_timestamp)
+                       │                | aggregate 7                              | avg(usage_user)
+                       │                | aggregate 8                              | count(usage_softirq)
+                       │                | aggregate 9                              | count(usage_steal)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_idle                               | usage_idle
+                            │           | usage_softirq                            | usage_softirq
+                            │           | usage_steal                              | usage_steal
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(63 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        max(usage_nice), first (usage_system), avg (usage_idle), last (usage_irq), first (usage_irq),
@@ -2918,68 +2966,72 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | max                                      | max
-   │                               | first                                    | first
-   │                               | avg                                      | avg
-   │                               | last                                     | last
-   │                               | first                                    | first
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | max                                      | max
-             │                     | first                                    | first
-             │                     | avg                                      | avg
-             │                     | last                                     | last
-             │                     | first                                    | first
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | max(usage_nice)
-                  │                | aggregate 6                              | first(usage_system, k_timestamp)
-                  │                | aggregate 7                              | avg(usage_idle)
-                  │                | aggregate 8                              | last(usage_irq, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 9                              | first(usage_irq, k_timestamp)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_system                             | usage_system
-                       │           | usage_idle                               | usage_idle
-                       │           | usage_nice                               | usage_nice
-                       │           | usage_irq                                | usage_irq
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(59 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | max                                      | max
+   │                                    | first                                    | first
+   │                                    | avg                                      | avg
+   │                                    | last                                     | last
+   │                                    | first                                    | first
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | max                                      | max
+                  │                     | first                                    | first
+                  │                     | avg                                      | avg
+                  │                     | last                                     | last
+                  │                     | first                                    | first
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | max(usage_nice)
+                       │                | aggregate 6                              | first(usage_system, k_timestamp)
+                       │                | aggregate 7                              | avg(usage_idle)
+                       │                | aggregate 8                              | last(usage_irq, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 9                              | first(usage_irq, k_timestamp)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_system                             | usage_system
+                            │           | usage_idle                               | usage_idle
+                            │           | usage_nice                               | usage_nice
+                            │           | usage_irq                                | usage_irq
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(63 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        max(usage_guest_nice),
@@ -2993,308 +3045,328 @@ WHERE k_timestamp >= '2023-01-01 00:00:00'
     < '2024-01-01 00:00:00'
 GROUP BY hostname, region, datacenter, rack, k_timestamp_b
 ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | max                                      | max
-   │                               | lastts                                   | lastts
-   │                               | max                                      | max
-   │                               | avg                                      | avg
-   │                               | first                                    | first
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | max                                      | max
-             │                     | lastts                                   | lastts
-             │                     | max                                      | max
-             │                     | avg                                      | avg
-             │                     | first                                    | first
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | max(usage_guest_nice)
-                  │                | aggregate 6                              | lastts(usage_idle, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 7                              | max(usage_guest)
-                  │                | aggregate 8                              | avg(usage_nice)
-                  │                | aggregate 9                              | first(usage_guest, k_timestamp)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_idle                               | usage_idle
-                       │           | usage_nice                               | usage_nice
-                       │           | usage_guest                              | usage_guest
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(59 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | max                                      | max
+   │                                    | lastts                                   | lastts
+   │                                    | max                                      | max
+   │                                    | avg                                      | avg
+   │                                    | first                                    | first
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | max                                      | max
+                  │                     | lastts                                   | lastts
+                  │                     | max                                      | max
+                  │                     | avg                                      | avg
+                  │                     | first                                    | first
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | max(usage_guest_nice)
+                       │                | aggregate 6                              | lastts(usage_idle, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 7                              | max(usage_guest)
+                       │                | aggregate 8                              | avg(usage_nice)
+                       │                | aggregate 9                              | first(usage_guest, k_timestamp)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_idle                               | usage_idle
+                            │           | usage_nice                               | usage_nice
+                            │           | usage_guest                              | usage_guest
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(63 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        min(usage_guest_nice),
        max(usage_softirq),lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | min                                      | min
-   │                               | max                                      | max
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | min                                      | min
-             │                     | max                                      | max
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | min(usage_guest_nice)
-                  │                | aggregate 6                              | max(usage_softirq)
-                  │                | aggregate 7                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_softirq                            | usage_softirq
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(48 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | min                                      | min
+   │                                    | max                                      | max
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | min                                      | min
+                  │                     | max                                      | max
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | min(usage_guest_nice)
+                       │                | aggregate 6                              | max(usage_softirq)
+                       │                | aggregate 7                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_softirq                            | usage_softirq
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(52 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, last (usage_steal), count (usage_user), avg (usage_iowait), count (usage_guest), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | last                                     | last
-   │                               | count                                    | count
-   │                               | avg                                      | avg
-   │                               | count                                    | count
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | last                                     | last
-             │                     | count                                    | count
-             │                     | avg                                      | avg
-             │                     | count                                    | count
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | last(usage_steal, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 6                              | count(usage_user)
-                  │                | aggregate 7                              | avg(usage_iowait)
-                  │                | aggregate 8                              | count(usage_guest)
-                  │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_iowait                             | usage_iowait
-                       │           | usage_steal                              | usage_steal
-                       │           | usage_guest                              | usage_guest
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(55 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | last                                     | last
+   │                                    | count                                    | count
+   │                                    | avg                                      | avg
+   │                                    | count                                    | count
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | last                                     | last
+                  │                     | count                                    | count
+                  │                     | avg                                      | avg
+                  │                     | count                                    | count
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | last(usage_steal, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 6                              | count(usage_user)
+                       │                | aggregate 7                              | avg(usage_iowait)
+                       │                | aggregate 8                              | count(usage_guest)
+                       │                | aggregate 9                              | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_iowait                             | usage_iowait
+                            │           | usage_steal                              | usage_steal
+                            │           | usage_guest                              | usage_guest
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(59 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b, hostname, count(usage_guest_nice), firstts(usage_softirq), last (usage_nice), sum (usage_user), max (usage_iowait), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | count                                    | count
-   │                               | firstts                                  | firstts
-   │                               | last                                     | last
-   │                               | sum                                      | sum
-   │                               | max                                      | max
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | count                                    | count
-             │                     | firstts                                  | firstts
-             │                     | last                                     | last
-             │                     | sum                                      | sum
-             │                     | max                                      | max
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | count(usage_guest_nice)
-                  │                | aggregate 6                              | firstts(usage_softirq, k_timestamp)
-                  │                | aggregate 7                              | last(usage_nice, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 8                              | sum(usage_user)
-                  │                | aggregate 9                              | max(usage_iowait)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_nice                               | usage_nice
-                       │           | usage_iowait                             | usage_iowait
-                       │           | usage_softirq                            | usage_softirq
-                       │           | usage_guest_nice                         | usage_guest_nice
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(59 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | count                                    | count
+   │                                    | firstts                                  | firstts
+   │                                    | last                                     | last
+   │                                    | sum                                      | sum
+   │                                    | max                                      | max
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | count                                    | count
+                  │                     | firstts                                  | firstts
+                  │                     | last                                     | last
+                  │                     | sum                                      | sum
+                  │                     | max                                      | max
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | count(usage_guest_nice)
+                       │                | aggregate 6                              | firstts(usage_softirq, k_timestamp)
+                       │                | aggregate 7                              | last(usage_nice, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 8                              | sum(usage_user)
+                       │                | aggregate 9                              | max(usage_iowait)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_nice                               | usage_nice
+                            │           | usage_iowait                             | usage_iowait
+                            │           | usage_softirq                            | usage_softirq
+                            │           | usage_guest_nice                         | usage_guest_nice
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(63 rows)
 > explain SELECT count(usage_irq),time_bucket(k_timestamp, '2s') as k_timestamp_b,hostname,avg(usage_softirq),first_row(usage_softirq),first_row(usage_nice), last (usage_iowait), lastts(usage_user) as last_ts FROM test.cpu WHERE k_timestamp >= '2023-01-01 00:00:00' AND k_timestamp < '2024-01-01 00:00:00' GROUP BY hostname, region, datacenter, rack, k_timestamp_b ORDER BY hostname, k_timestamp_b, last_ts;
-                tree               |                  field                   |                                description
------------------------------------+------------------------------------------+----------------------------------------------------------------------------
-                                   | distributed                              | true
-                                   | vectorized                               | false
-  render                           |                                          |
-   │                               | engine type                              | time series
-   │                               | count                                    | count
-   │                               | k_timestamp_b                            | k_timestamp_b
-   │                               | hostname                                 | hostname
-   │                               | avg                                      | avg
-   │                               | first_row                                | first_row
-   │                               | first_row                                | first_row
-   │                               | last                                     | last
-   │                               | last_ts                                  | lastts
-   └── sort                        |                                          |
-        │                          | engine type                              | time series
-        │                          | order                                    | +hostname,+k_timestamp_b,+lastts
-        └── render                 |                                          |
-             │                     | engine type                              | time series
-             │                     | hostname                                 | hostname
-             │                     | count                                    | count
-             │                     | avg                                      | avg
-             │                     | first_row                                | first_row
-             │                     | first_row                                | first_row
-             │                     | last                                     | last
-             │                     | lastts                                   | lastts
-             │                     | k_timestamp_b                            | k_timestamp_b
-             └── group             |                                          |
-                  │                | engine type                              | time series
-                  │                | aggregate 0                              | hostname
-                  │                | aggregate 1                              | region
-                  │                | aggregate 2                              | datacenter
-                  │                | aggregate 3                              | rack
-                  │                | aggregate 4                              | k_timestamp_b
-                  │                | aggregate 5                              | count(usage_irq)
-                  │                | aggregate 6                              | avg(usage_softirq)
-                  │                | aggregate 7                              | first_row(usage_softirq, k_timestamp)
-                  │                | aggregate 8                              | first_row(usage_nice, k_timestamp)
-                  │                | aggregate 9                              | last(usage_iowait, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
-                  │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
-                  │                | addSynchronizer                          | true
-                  └── render       |                                          |
-                       │           | engine type                              | time series
-                       │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
-                       │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
-                       │           | k_timestamp                              | k_timestamp
-                       │           | usage_user                               | usage_user
-                       │           | usage_nice                               | usage_nice
-                       │           | usage_iowait                             | usage_iowait
-                       │           | usage_irq                                | usage_irq
-                       │           | usage_softirq                            | usage_softirq
-                       │           | hostname                                 | hostname
-                       │           | region                                   | region
-                       │           | datacenter                               | datacenter
-                       │           | rack                                     | rack
-                       └── ts scan |                                          |
-                                   | ts-table                                 | cpu
-                                   | access mode                              | tableTableMeta
-                                   | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
-                                   | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
-(59 rows)
+                  tree                  |                  field                   |                                description
+----------------------------------------+------------------------------------------+----------------------------------------------------------------------------
+                                        | distributed                              | true
+                                        | vectorized                               | false
+  render                                |                                          |
+   │                                    | engine type                              | time series
+   │                                    | count                                    | count
+   │                                    | k_timestamp_b                            | k_timestamp_b
+   │                                    | hostname                                 | hostname
+   │                                    | avg                                      | avg
+   │                                    | first_row                                | first_row
+   │                                    | first_row                                | first_row
+   │                                    | last                                     | last
+   │                                    | last_ts                                  | lastts
+   └── sort                             |                                          |
+        │                               | engine type                              | time series
+        │                               | order                                    | +hostname,+k_timestamp_b,+lastts
+        └── synchronizer                |                                          |
+             └── render                 |                                          |
+                  │                     | engine type                              | time series
+                  │                     | hostname                                 | hostname
+                  │                     | count                                    | count
+                  │                     | avg                                      | avg
+                  │                     | first_row                                | first_row
+                  │                     | first_row                                | first_row
+                  │                     | last                                     | last
+                  │                     | lastts                                   | lastts
+                  │                     | k_timestamp_b                            | k_timestamp_b
+                  └── group             |                                          |
+                       │                | engine type                              | time series
+                       │                | aggregate 0                              | hostname
+                       │                | aggregate 1                              | region
+                       │                | aggregate 2                              | datacenter
+                       │                | aggregate 3                              | rack
+                       │                | aggregate 4                              | k_timestamp_b
+                       │                | aggregate 5                              | count(usage_irq)
+                       │                | aggregate 6                              | avg(usage_softirq)
+                       │                | aggregate 7                              | first_row(usage_softirq, k_timestamp)
+                       │                | aggregate 8                              | first_row(usage_nice, k_timestamp)
+                       │                | aggregate 9                              | last(usage_iowait, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | aggregate 10                             | lastts(usage_user, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
+                       │                | group by                                 | hostname, region, datacenter, rack, k_timestamp_b
+                       │                | pushLocalAggToScan                       | true
+                       │                | pruneLocalAgg                            | true
+                       │                | pruneFinalAgg                            | true
+                       └── render       |                                          |
+                            │           | engine type                              | time series
+                            │           | '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ | '2970-01-01 00:00:00+00:00'
+                            │           | k_timestamp_b                            | time_bucket(k_timestamp, '2s')
+                            │           | k_timestamp                              | k_timestamp
+                            │           | usage_user                               | usage_user
+                            │           | usage_nice                               | usage_nice
+                            │           | usage_iowait                             | usage_iowait
+                            │           | usage_irq                                | usage_irq
+                            │           | usage_softirq                            | usage_softirq
+                            │           | hostname                                 | hostname
+                            │           | region                                   | region
+                            │           | datacenter                               | datacenter
+                            │           | rack                                     | rack
+                            └── ts scan |                                          |
+                                        | ts-table                                 | cpu
+                                        | ordered type                             | order scan
+                                        | access mode                              | tableTableMeta
+                                        | spans:fromTime                           | 2023-01-01 00:00:00 +0000 UTC
+                                        | spans:toTime                             | 2023-12-31 23:59:59.999 +0000 UTC
+(63 rows)
 > drop database test cascade;
 DROP DATABASE
 > create ts database test;

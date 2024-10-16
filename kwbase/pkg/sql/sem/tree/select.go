@@ -676,6 +676,11 @@ func (node *OrderBy) Format(ctx *FmtCtx) {
 	}
 }
 
+// Empty check element is empty
+func (node *OrderBy) Empty() bool {
+	return len(*node) == 0
+}
+
 // Direction for ordering results.
 type Direction int8
 

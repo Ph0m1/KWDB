@@ -35,6 +35,7 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -279,6 +280,11 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 	case *tsScanNode:
 		if v.observer.attr != nil {
 			v.observer.attr(name, "ts-table", fmt.Sprintf("%s", n.Table.Name()))
+			if n.orderedType == opt.OrderedScan || n.orderedType == opt.ForceOrderedScan {
+				v.observer.attr(name, "ordered type", "order scan")
+			} else if n.orderedType == opt.SortAfterScan {
+				v.observer.attr(name, "ordered type", "sort after scan")
+			}
 			v.observer.attr(name, "access mode", n.AccessMode.String())
 			if len(n.ScanAggArray) != 0 {
 				for i := 0; i < 5 && i < len(n.ScanAggArray); i++ {
@@ -617,11 +623,17 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 			if n.isScalar {
 				v.observer.attr(name, "scalar", "")
 			}
-			if n.aggPushDown {
-				v.observer.attr(name, "aggPushDown ", "true")
+			if n.optType.PushLocalAggToScanOpt() {
+				v.observer.attr(name, "pushLocalAggToScan ", "true")
 			}
 			if n.addSynchronizer {
 				v.observer.attr(name, "addSynchronizer ", "true")
+			}
+			if n.optType.PruneLocalAggOpt() {
+				v.observer.attr(name, "pruneLocalAgg ", "true")
+			}
+			if n.optType.PruneFinalAggOpt() {
+				v.observer.attr(name, "pruneFinalAgg ", "true")
 			}
 		}
 

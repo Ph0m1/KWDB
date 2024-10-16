@@ -33,7 +33,7 @@ syntax = "proto2";
 package kwbase.sql.distsqlrun;
 option go_package = "execinfrapb";
 
-//import "sql/sqlbase/structured.proto";
+import "sql/sqlbase/structured.proto";
 import "gogoproto/gogo.proto";
 
 enum SketchType {
@@ -69,6 +69,12 @@ message SketchSpec {
 
   // Indicates that the columns are all PTag
   optional bool has_allPTag = 7 [(gogoproto.nullable) = false];
+
+  // Virtual sketch is a reference for collecting statistics of tag columns
+  optional bool virtual_sketch = 8 [(gogoproto.nullable) = false];
+
+  // SortedHistogram supports sorted histogram collection for entities in time series tables
+  optional sqlbase.SortedHistogramInfo sortedHistogramInfo = 9 [(gogoproto.nullable) = false];
 }
 
 // SamplerSpec is the specification of a "sampler" processor which
@@ -165,4 +171,8 @@ message SampleAggregatorSpec {
   // CREATE STATISTICS. Used for progress reporting. If rows expected is 0,
   // reported progress is 0 until the very end.
   optional uint64 rows_expected = 7 [(gogoproto.nullable) = false];
+
+  optional bool isTsStats = 8 [(gogoproto.nullable) = false];
+
+  optional string timeZone = 9 [(gogoproto.nullable) = false];
 }

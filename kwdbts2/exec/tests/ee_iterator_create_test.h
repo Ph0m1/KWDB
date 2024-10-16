@@ -15,7 +15,6 @@
 #include <memory>
 
 #include "ee_iterator_data_test.h"
-#include "ee_metadata_data_test.h"
 #include "ee_noop_op.h"
 #include "ee_scan_op.h"
 #include "ee_sort_op.h"
@@ -26,22 +25,6 @@
 #include "ee_synchronizer_op.h"
 
 namespace kwdbts {
-
-class CreateEngine {
- public:
-  void SetUp(kwdbContext_p ctx, string db_path, k_uint32 table_id) {
-    table_id_ = table_id;
-    CreateTestTsEngine(ctx, db_path, table_id);
-  }
-
-  void TearDown(kwdbContext_p ctx) {
-    DropTsTable(ctx, table_id_);
-    CloseTestTsEngine(ctx);
-  }
-
-  k_uint32 table_id_{0};
-};
-
 class CreateIterator {
  public:
   CreateIterator() {}
@@ -49,9 +32,9 @@ class CreateIterator {
   TSPostProcessSpec *post_{nullptr};
   BaseOperator *iter_{nullptr};
   TABLE *table_{nullptr};
-  void TearDown() {
-    SafeDelete(post_);
-    SafeDelete(iter_);
+  virtual void TearDown() {
+    SafeDeletePointer(post_);
+    SafeDeletePointer(iter_);
   }
 };
 
@@ -65,8 +48,8 @@ class CreateTagReader : public CreateIterator {
     iter_ = NewIterator<TagScanOperator>(nullptr, spec_, post_, table_, 0);
   }
   void TearDown() {
-    SafeDelete(spec_);
-    SafeDelete(table_);
+    SafeDeletePointer(spec_);
+    SafeDeletePointer(table_);
     CreateIterator::TearDown();
   }
   TSTagReaderSpec *spec_{nullptr};
@@ -87,7 +70,7 @@ class CreateTableReader : public CreateIterator {
 
   void TearDown() {
     tag_reader_.TearDown();
-    SafeDelete(spec_);
+    SafeDeletePointer(spec_);
     CreateIterator::TearDown();
   }
   CreateTagReader tag_reader_;
@@ -106,9 +89,9 @@ class CreateDistinct : public CreateIterator {
 
   void TearDown() {
     table_reader_.TearDown();
-    SafeDelete(iter_);
-    SafeDelete(spec_);
-    SafeDelete(post_);
+    SafeDeletePointer(iter_);
+    SafeDeletePointer(spec_);
+    SafeDeletePointer(post_);
   }
 
   CreateTableReader table_reader_;
@@ -128,9 +111,9 @@ class CreateAggregate : public CreateIterator {
 
   void TearDown() {
     table_reader_.TearDown();
-    SafeDelete(iter_);
-    SafeDelete(spec_);
-    SafeDelete(post_);
+    SafeDeletePointer(iter_);
+    SafeDeletePointer(spec_);
+    SafeDeletePointer(post_);
   }
 
   CreateTableReader table_reader_;
@@ -149,7 +132,7 @@ class CreateSort : public CreateIterator {
 
   void TearDown(kwdbContext_p ctx) {
     table_reader_.TearDown();
-    SafeDelete(spec_);
+    SafeDeletePointer(spec_);
     CreateIterator::TearDown();
   }
 
@@ -170,8 +153,8 @@ class CreateSynchronizerIterator : public CreateIterator {
   void TearDown() {
     CreateIterator::TearDown();
     table_reader_.TearDown();
-    SafeDelete(spec_);
-    SafeDelete(post_);
+    SafeDeletePointer(spec_);
+    SafeDeletePointer(post_);
   }
 
   CreateTableReader table_reader_;
@@ -190,8 +173,8 @@ class CreateSortAggregate : public CreateIterator {
   void TearDown() {
     CreateIterator::TearDown();
     sync_iter_.TearDown();
-    SafeDelete(spec_);
-    SafeDelete(post_);
+    SafeDeletePointer(spec_);
+    SafeDeletePointer(post_);
   }
 
   CreateSynchronizerIterator sync_iter_;
@@ -210,7 +193,7 @@ class CreateNoop : public CreateIterator {
 
   void TearDown(kwdbContext_p ctx) {
     table_reader_.TearDown();
-    SafeDelete(spec_);
+    SafeDeletePointer(spec_);
     CreateIterator::TearDown();
   }
 

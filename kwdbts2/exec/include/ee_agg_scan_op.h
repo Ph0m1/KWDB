@@ -42,9 +42,11 @@ class AggTableScanOperator : public TableScanOperator {
       : TableScanOperator(other, input, processor_id),
         table_reader_spec_(other.table_reader_spec_),
         aggregation_spec_(other.aggregation_spec_),
-        aggregation_post_(other.aggregation_post_) {}
+        aggregation_post_(other.aggregation_post_),
+        has_post_agg_(other.has_post_agg_) {}
 
   ~AggTableScanOperator() override {
+    SafeDeletePointer(agg_param_);
     if (agg_num_ > 0 && agg_renders_) {
       free(agg_renders_);
       agg_renders_ = nullptr;
@@ -78,19 +80,22 @@ class AggTableScanOperator : public TableScanOperator {
   // resolve agg func
   KStatus ResolveAggFuncs(kwdbContext_p ctx);
 
+  KStatus getAggResult(kwdbContext_p ctx, DataChunkPtr& chunk);
+
   [[nodiscard]] bool hasTimeBucket() const {
     return interval_seconds_ != 0;
   }
   // timebucket
   void extractTimeBucket(Field** readers, k_uint32 render_num) {
-    for (k_int32 i = 0; i < render_num; ++i) {
+    for (k_uint32 i = 0; i < render_num; ++i) {
       Field* field = readers[i];
       auto time_bucket_field = dynamic_cast<FieldFuncTimeBucket*>(field);
       if (time_bucket_field != nullptr) {
         interval_seconds_ = time_bucket_field->interval_seconds_;
         year_bucket_ = time_bucket_field->year_bucket_;
         timezone_ = time_bucket_field->time_zone_;
-        col_idx_ = time_bucket_field->get_num();
+        // col_idx_ = time_bucket_field->get_num();
+        col_idx_ = i;
       }
     }
   }
@@ -98,7 +103,7 @@ class AggTableScanOperator : public TableScanOperator {
   // construct agg info
   inline void constructAggResults() {
     // initialize the agg output buffer.
-    current_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info);
+    current_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_);
     if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
@@ -143,6 +148,8 @@ class AggTableScanOperator : public TableScanOperator {
     }
   }
 
+  void SetHasPostAgg(bool post_agg) { has_post_agg_ = post_agg; }
+
  private:
   k_uint32 col_idx_{0};
   k_int64 interval_seconds_{0};
@@ -151,7 +158,7 @@ class AggTableScanOperator : public TableScanOperator {
 
   // the list of input column's type
   std::vector<roachpb::DataType> data_types_;
-
+  AggregatorSpecParam<TSAggregatorSpec> *agg_param_{nullptr};
   TSReaderSpec& table_reader_spec_;
 
   // group cols
@@ -174,11 +181,13 @@ class AggTableScanOperator : public TableScanOperator {
   k_uint32 agg_num_{0};           // the count of agg projection column
 
   std::vector<Field*> agg_output_fields_;  // the output field of agg operator
-  std::vector<ColumnInfo> agg_output_col_info;  // construct agg output col
+  std::vector<ColumnInfo> agg_output_col_info_;  // construct agg output col
+  bool is_resolve_datachunk_{false};
 
   // used to save if the current row is a new group based on the input groupby information.
   GroupByMetadata group_by_metadata_;
   bool disorder_{false};  // it is disorder if only group by timebucket
+  bool has_post_agg_{false};
 };
 
 }  //  namespace kwdbts

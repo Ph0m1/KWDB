@@ -113,6 +113,7 @@ class TABLE {
   std::vector<k_uint32> scan_rel_cols_;
   std::vector<Sumfunctype> scan_agg_types_;
   std::vector<Sumfunctype> scan_real_agg_types_;
+  std::vector<k_int32> statistic_col_fix_idx_;  // for statistic
   std::vector<uint32_t> hash_points_;
   std::unordered_map<uint32_t, std::vector<KwTsSpan>> hash_points_spans_;
   std::vector<k_int64>
@@ -124,6 +125,7 @@ class TABLE {
   k_uint32 table_version_{0};
   bool is_reverse_{0};
   k_int32 ptag_size_{0};
+  bool ordered_scan_{false};
 
  protected:
   // relational fields for multiple model processing

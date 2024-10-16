@@ -27,7 +27,6 @@ package sql
 import (
 	"context"
 
-	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -40,7 +39,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/querycache"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 )
@@ -421,17 +419,10 @@ func (opc *optPlanningCtx) InitTS(ctx context.Context) {
 	if IsSingleNodeMode(opc.p.execCfg.StartMode) {
 		m.SetFlag(opt.SingleMode)
 	}
-	if opt.PushdownAll.Get(sv) {
-		// ExecInTSEngine is set when the sql.all_push_down.enabled is true.
-		m.SetFlag(opt.ExecInTSEngine)
-	}
+
 	if opt.CheckOptMode(opt.TSQueryOptMode.Get(sv), opt.PushScalarSubQuery) {
 		// ScalarSubQueryPush is set when the optimization of SubQuery is opened.
 		m.SetFlag(opt.ScalarSubQueryPush)
-	}
-	if !stats.AutomaticTsStatisticsClusterMode.Get(sv) {
-		// ForceAEGroup is set when cluster setting sql.stats.ts_automatic_collection.enabled is true.
-		m.InitCheckHelper(keys.ForceAEGroup)
 	}
 
 	// init degree of parallelism

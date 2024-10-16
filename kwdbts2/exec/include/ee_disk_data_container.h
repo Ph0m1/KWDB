@@ -34,7 +34,7 @@ class DiskDataContainer : public DataContainer {
   }
 
   DiskDataContainer(std::vector<ColumnOrderInfo>& order_info, std::vector<ColumnInfo>& col_info)
-      : col_info_(col_info), order_info_(order_info) {
+      : order_info_(order_info), col_info_(col_info) {
     row_size_ = DataChunk::ComputeRowSize(col_info);
     capacity_ = ComputeCapacity();
   }

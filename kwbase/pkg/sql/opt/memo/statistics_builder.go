@@ -29,6 +29,7 @@ import (
 	"reflect"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/constraint"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
@@ -465,8 +466,13 @@ func (sb *statisticsBuilder) colStatLeaf(
 
 	if colSet.Len() == 1 {
 		col, _ := colSet.Next(0)
-		colStat.DistinctCount = unknownDistinctCountRatio * s.RowCount
-		colStat.NullCount = unknownNullCountRatio * s.RowCount
+		if sb.md.ColumnMeta(col).IsPrimaryTag() {
+			colStat.DistinctCount = unknownPTagDistinctCountRatio * s.RowCount
+			colStat.NullCount = 0
+		} else {
+			colStat.DistinctCount = unknownDistinctCountRatio * s.RowCount
+			colStat.NullCount = unknownNullCountRatio * s.RowCount
+		}
 		if notNullCols.Contains(col) {
 			colStat.NullCount = 0
 		}
@@ -529,15 +535,11 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 		// Get the RowCount from the most recent statistic. Stats are ordered
 		// with most recent first.
 		stats.Available = true
-		stats.RowCount = float64(tab.Statistic(0).RowCount())
-
-		// Make sure the row count is at least 1. The stats may be stale, and we
-		// can end up with weird and inefficient plans if we estimate 0 rows.
-		stats.RowCount = max(stats.RowCount, 1)
 
 		// Get all primary tag columns in time series table
 		var primaryTagCols opt.ColSet
-		if tab.GetTableType() == tree.TimeseriesTable {
+		tableType := tab.GetTableType()
+		if tableType == tree.TimeseriesTable {
 			for i := 0; i < tab.DeletableColumnCount(); i++ {
 				col := tab.Column(i)
 				if col.IsPrimaryTagCol() {
@@ -545,7 +547,15 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 				}
 			}
 			stats.PTagCount = defaultPTagCount
+			stats.RowCount = unknownTSRowCount
+		} else {
+			stats.RowCount = float64(tab.Statistic(0).RowCount())
+
+			// Make sure the row count is at least 1. The stats may be stale, and we
+			// can end up with weird and inefficient plans if we estimate 0 rows.
+			stats.RowCount = max(stats.RowCount, 1)
 		}
+
 		// Add all the column statistics, using the most recent statistic for each
 		// column set. Stats are ordered with most recent first.
 		for i := 0; i < tab.StatisticCount(); i++ {
@@ -563,8 +573,19 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 					colStat.Histogram.Init(sb.evalCtx, col, stat.Histogram())
 				}
 
-				if cols.Equals(primaryTagCols) {
-					stats.PTagCount = float64(stat.RowCount())
+				if tableType == tree.TimeseriesTable {
+					if cols.Equals(primaryTagCols) {
+						stats.PTagCount = float64(stat.RowCount())
+						if len(stat.SortedHistogram()) > 0 && opt.TSOrderedTable.Get(&sb.evalCtx.Settings.SV) {
+							stats.SortDistribution = &props.SortDistributionStats{}
+							stats.SortDistribution.SortedHistogram = &props.SortedHistogram{}
+							stats.SortDistribution.SortedHistogram.Init(sb.evalCtx, tabID.ColumnID(cat.PrimaryIndex), stat.SortedHistogram())
+						}
+					}
+					if stat.ColumnCount() == 1 && !tab.Column(stat.ColumnOrdinal(0)).IsTagCol() {
+						// For time series tables, the number of table rows is determined by non-tag columns
+						stats.RowCount = float64(stat.RowCount())
+					}
 				}
 
 				// Make sure the distinct count is at least 1, for the same reason as
@@ -668,6 +689,14 @@ func (sb *statisticsBuilder) buildTSScan(scan *TSScanExpr, relProps *props.Relat
 	inputStats := sb.makeTableStatistics(scan.Table)
 	s.RowCount = inputStats.RowCount
 	s.PTagCount = inputStats.PTagCount
+	if inputStats.SortDistribution != nil {
+		if !inputStats.SortDistribution.Filtered {
+			s.SortDistribution = inputStats.SortDistribution
+			s.SortDistribution.RowCount = inputStats.SortDistribution.SortedHistogram.ValuesCount()
+			s.SortDistribution.UnorderedRowCount = inputStats.SortDistribution.SortedHistogram.UnorderedValuesCount()
+		}
+	}
+
 	//if scan.Constraint != nil && scan.Constraint.Spans.Count() < 2 {
 	//	// This constraint has at most one span.
 	//	sb.constrainScan(scan, scan.Constraint, relProps, s)
@@ -906,8 +935,46 @@ func (sb *statisticsBuilder) buildSelect(sel *SelectExpr, relProps *props.Relati
 	// selectivityFromDistinctCounts and selectivityFromEquivalencies.
 	sb.applyEquivalencies(equivReps, &relProps.FuncDeps, sel, relProps)
 
+	// Calculate sort histograms by constrained columns
+	sb.applySortHistogram(sel, inputStats, s.PTagCount)
+
 	sb.finalizeFromCardinality(relProps)
 	inputStats.PTagCount = s.PTagCount
+}
+
+// applySortHistogram optimizes histogram based on input statistics and selection filters.
+func (sb *statisticsBuilder) applySortHistogram(
+	sel *SelectExpr, inputStats *props.Statistics, filteredPTagCount float64,
+) {
+	SortDistribution := inputStats.SortDistribution
+
+	if _, ok := sel.Input.(*TSScanExpr); ok && SortDistribution != nil {
+		for i := range sel.Filters {
+			cs := sel.Filters[i].ScalarProps().Constraints
+			if cs != nil && cs.Length() == 1 {
+				c := cs.Constraint(0)
+				if SortDistribution.SortedHistogram != nil && SortDistribution.SortedHistogram.CanFilter(c, sb.md) {
+					newSortedHistogram := SortDistribution.SortedHistogram.Filter(c)
+					SortDistribution.SortedHistogram = newSortedHistogram
+				}
+			}
+		}
+
+		rowCount := SortDistribution.SortedHistogram.ValuesCount()
+		unorderedRowCount := SortDistribution.SortedHistogram.UnorderedValuesCount()
+		entitiesCount := SortDistribution.SortedHistogram.EntitiesCount()
+		unorderedEntitiesCount := SortDistribution.SortedHistogram.UnorderedEntitiesCount()
+
+		var unorderedEntitiesRatio float64
+		if entitiesCount == 0 {
+			unorderedEntitiesRatio = 0
+		} else {
+			unorderedEntitiesRatio = math.Min(unorderedEntitiesCount/entitiesCount, 1)
+		}
+		SortDistribution.RowCount = rowCount * (filteredPTagCount / inputStats.PTagCount)
+		SortDistribution.UnorderedRowCount = unorderedRowCount * ((unorderedEntitiesRatio * filteredPTagCount) / inputStats.PTagCount)
+		SortDistribution.Filtered = true
+	}
 }
 
 func (sb *statisticsBuilder) colStatSelect(
@@ -2750,6 +2817,10 @@ const (
 	// used in the absence of any real statistics for non-key columns.
 	// TODO(rytaft): See if there is an industry standard value for this.
 	unknownDistinctCountRatio = 0.1
+
+	// This is the ratio of distinct column values to number of rows in time series table,
+	// which is used in the absence of any real statistics for primary tag columns.
+	unknownPTagDistinctCountRatio = 0.0001
 
 	// This is the ratio of null column values to number of rows for nullable
 	// columns, which is used in the absence of any real statistics.

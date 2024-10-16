@@ -22,17 +22,22 @@
 #include "ts_hyperloglog.h"
 #include "ee_data_chunk.h"
 #include "ee_kwthd_context.h"
+#include "engine.h"
 
 enum SketchMethods {
     // Computes the count-distinct statistical algorithm for columns
     SketchMethod_HLL_PLUS_PLUS  = 0
 };
 
-enum statsColType {
-    NormalCol,
+enum sampleObject {
+    Metrics,
     Tag,
-    PrimaryTag
+    PrimaryTag,
+    SortedHistogram
 };
+
+// minBucketSpan is minimum time span for each bucket
+const int minBucketSpan = 3600000;
 
 namespace kwdbts {
 
@@ -59,6 +64,17 @@ struct SketchSpec {
 
     // addRow adds a row to the sketch and updates row counts.
     void addRow(BaseOperator* input, RowBatch* data_handle);
+};
+
+// Sort Histogram info
+struct SortHistogram {
+  kwdbts::SortedHistogramInfo histogram_info;
+
+  // Store sorted histogram data
+  vector<vector<optional<DataVariant>>> histogram_data;
+
+  // Currently sketch index
+  k_uint32 sketchIdx{0};
 };
 
 class TsSamplerOperator : public BaseOperator {
@@ -96,14 +112,14 @@ class TsSamplerOperator : public BaseOperator {
    * @OUT primary_tag_sketches_ : Vector holding sketch structures for primary tag columns, updated similarly.
    * @Return EEIteratorErrCode : Error code representing the status of the function execution.
    */
-  template<statsColType N>
+  template<sampleObject N>
   EEIteratorErrCode mainLoop(kwdbContext_p ctx);
 
   KStatus Close(kwdbContext_p ctx) override;
 
   k_uint32 GetSampleSize() const;
 
-  template<statsColType N>
+  template<sampleObject N>
   std::vector<SketchSpec> GetSketches() const;
 
   EEIteratorErrCode Reset(kwdbContext_p ctx);
@@ -123,6 +139,8 @@ class TsSamplerOperator : public BaseOperator {
 
   // All sketch of statistic columns of tag columns
   std::vector<SketchSpec> tag_sketches_;
+
+  std::shared_ptr<TsTable> ts_table_{nullptr};
 
   // Input iterator
   BaseOperator* input_;
@@ -149,7 +167,10 @@ class TsSamplerOperator : public BaseOperator {
   k_uint32 numRowsCol_{0};
   k_uint32 numNullsCol_{0};
   k_uint32 sketchCol_{0};
+  k_uint32 bucketIDCol_{0};
+  k_uint32 bucketNumRowsCol_{0};
 
+  SortHistogram sorted_histogram_{};
   k_bool is_done_{false};
   k_uint32 total_sample_rows_{0};
 };

@@ -54,6 +54,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/jobs"
 	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
+	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
@@ -89,6 +90,9 @@ var createTsStats = settings.RegisterPublicBoolSetting(
 	"if set, we will collect time series statistics",
 	true,
 )
+
+// SortHistogramBuckets represents sort histogram maximum bucket counts.
+const SortHistogramBuckets = 200
 
 func (p *planner) CreateStatistics(ctx context.Context, n *tree.CreateStats) (planNode, error) {
 	return &createStatsNode{
@@ -270,6 +274,8 @@ func (n *createStatsNode) makeJobRecord(ctx context.Context) (*jobs.Record, erro
 		}
 	}
 
+	isTsStats := tableDesc.TableType == tree.TimeseriesTable
+
 	// Check whether it is legal to create statistics
 	if err := n.checkTable(tableDesc); err != nil {
 		return nil, err
@@ -288,7 +294,7 @@ func (n *createStatsNode) makeJobRecord(ctx context.Context) (*jobs.Record, erro
 	// Evaluate the AS OF time, if any.
 	var asOf *hlc.Timestamp
 	if n.Options.AsOf.Expr != nil {
-		if tableDesc.TableType == tree.TimeseriesTable {
+		if isTsStats {
 			return nil, pgerror.Newf(pgcode.FeatureNotSupported, "create statistics do not support `as of system time` on time series tables")
 		}
 		asOfTs, err := n.p.EvalAsOfTimestamp(n.Options.AsOf)
@@ -310,6 +316,15 @@ func (n *createStatsNode) makeJobRecord(ctx context.Context) (*jobs.Record, erro
 		description = statement
 		statement = ""
 	}
+
+	// Collect sorted histogram for entities in tag table.
+	if isTsStats && n.Options.SortedHistogram {
+		// Init sorted histogram
+		if err := n.initSortedHistogram(ctx, colStats, tableDesc, fqTableName); err != nil {
+			return nil, err
+		}
+	}
+
 	return &jobs.Record{
 		Description: description,
 		Statement:   statement,
@@ -323,6 +338,7 @@ func (n *createStatsNode) makeJobRecord(ctx context.Context) (*jobs.Record, erro
 			AsOf:            asOf,
 			MaxFractionIdle: n.Options.Throttling,
 			IsTsStats:       tableDesc.IsTSTable(),
+			TimeZone:        n.p.EvalContext().SessionData.DataConversion.Location.String(),
 		},
 		Progress: jobspb.CreateStatsProgress{},
 	}, nil
@@ -413,6 +429,16 @@ func createStatsDefaultColumns(
 		}
 	}
 	if len(columnIDs) > 0 {
+		// Append every statistics of PTag
+		if len(columnIDs) > 1 {
+			for i := range columnIDs {
+				colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
+					ColumnIDs:    []sqlbase.ColumnID{columnIDs[i]},
+					HasHistogram: false,
+					ColumnTypes:  []int32{columnTypes[i]},
+				})
+			}
+		}
 		colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
 			ColumnIDs:    columnIDs,
 			HasHistogram: false,
@@ -490,6 +516,7 @@ func createTsStatsByColumnIDs(
 
 	var columnIDs []sqlbase.ColumnID
 	var columnTypes []int32
+	var hasTag bool
 	nonIdxCols := 0
 	for _, colID := range resColumnIDs {
 		columnDesc, err := desc.FindColumnByID(sqlbase.ColumnID(colID))
@@ -500,6 +527,9 @@ func createTsStatsByColumnIDs(
 
 		switch columnsType {
 		case sqlbase.ColumnType_TYPE_DATA, sqlbase.ColumnType_TYPE_TAG:
+			if columnsType == sqlbase.ColumnType_TYPE_TAG {
+				hasTag = true
+			}
 			// Handle normal and tag columns specifically.
 			if requestedCols.Contains(int(colID)) {
 				colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
@@ -524,6 +554,7 @@ func createTsStatsByColumnIDs(
 			normalCols.Add(int(colID))
 
 		case sqlbase.ColumnType_TYPE_PTAG:
+			hasTag = true
 			// Handle primary tag columns specifically.
 			if primaryTagCols.Contains(int(colID)) {
 				columnIDs = append(columnIDs, sqlbase.ColumnID(colID))
@@ -535,11 +566,12 @@ func createTsStatsByColumnIDs(
 		}
 	}
 
+	// Determine if all primary tag columns are included, or exactly one.
+	var hasAllPTag bool
 	// Append statistics based on the specified column IDs, considering primary tag conditions.
 	// This block handles both the scenarios where all primary tags are included or just a single column.
 	// It ensures that statistics are only created when all primary tags or exactly one are included.
 	if len(columnIDs) > 0 {
-		var hasAllPTag bool // Determine if all primary tag columns are included, or exactly one.
 		if len(columnIDs) == primaryTagCols.Len() {
 			hasAllPTag = true
 		} else if len(columnIDs) == 1 {
@@ -547,29 +579,39 @@ func createTsStatsByColumnIDs(
 		} else {
 			return nil, pgerror.New(pgcode.FeatureNotSupported, "statistics can be created only in all primary tag columns or in one of them")
 		}
-
+		// Append every statistics of PTag
+		if len(columnIDs) > 1 {
+			for i := range columnIDs {
+				colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
+					ColumnIDs:    []sqlbase.ColumnID{columnIDs[i]},
+					HasHistogram: false,
+					ColumnTypes:  []int32{columnTypes[i]},
+				})
+			}
+		}
 		colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
 			ColumnIDs:    columnIDs,
 			HasHistogram: false,
 			ColumnTypes:  columnTypes,
 			HasAllPTag:   hasAllPTag,
 		})
-	} else {
-		// Handle cases where no specific primary tag columns are targeted.
-		// It adds statistics for all other columns that are not JSON type when add column in this table,
-		// not already requested, and not in primary or normal tag sets, limited by `maxNonIndexCols`.
-		for i := 0; i < len(desc.Columns) && nonIdxCols < maxNonIndexCols; i++ {
-			col := &desc.Columns[i]
-			if col.Type.Family() != types.JsonFamily && !requestedCols.Contains(int(col.ID)) &&
-				!primaryTagCols.Contains(int(col.ID)) && !normalCols.Contains(int(col.ID)) {
-				colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
-					ColumnIDs:    []sqlbase.ColumnID{col.ID},
-					HasHistogram: false,
-					ColumnTypes:  []int32{int32(col.TsCol.ColumnType)},
-				})
-				nonIdxCols++
-			}
-		}
+	}
+
+	// For statistics of tag, add virtual sketch to get row count
+	if hasTag && !hasAllPTag {
+		var primaryTagColIDs []sqlbase.ColumnID
+		var primaryTagColTypes []int32
+		primaryTagCols.ForEach(func(colID int) {
+			primaryTagColIDs = append(primaryTagColIDs, sqlbase.ColumnID(colID))
+			primaryTagColTypes = append(primaryTagColTypes, int32(sqlbase.ColumnType_TYPE_PTAG))
+		})
+		colStats = append(colStats, jobspb.CreateStatsDetails_ColStat{
+			ColumnIDs:     primaryTagColIDs,
+			HasHistogram:  false,
+			ColumnTypes:   primaryTagColTypes,
+			HasAllPTag:    true,
+			VirtualSketch: true,
+		})
 	}
 
 	return colStats, nil
@@ -811,6 +853,7 @@ func (n *createStatsNode) identifyColumnsForStats(
 		var primaryTagCols util.FastIntSet
 		// Flag to check if there are repeated column IDs.
 		var hasAllPTags bool
+		var isTag bool
 		// Here, we need to check multi-column statistics.
 		// Statistics for ts table can be created only for all primary columns or one of them.
 		// Check the validity of the input column(s) by `FindActiveColumnsByNames` in the above code block
@@ -845,6 +888,9 @@ func (n *createStatsNode) identifyColumnsForStats(
 				if len(columnIDs) != 1 {
 					return nil, pgerror.Newf(pgcode.FeatureNotSupported, "statistics can be created only in all primary tag columns or in one of them")
 				}
+				if columnTypes[0] == int32(sqlbase.ColumnType_TYPE_TAG) || columnTypes[0] == int32(sqlbase.ColumnType_TYPE_PTAG) {
+					isTag = true
+				}
 			}
 		}
 		colStats = []jobspb.CreateStatsDetails_ColStat{
@@ -855,6 +901,25 @@ func (n *createStatsNode) identifyColumnsForStats(
 				HasAllPTag:   hasAllPTags,
 			},
 		}
+
+		// Append virtual primary tag sketch
+		if isTag {
+			var primaryTagColIDs []sqlbase.ColumnID
+			var primaryTagColTypes []int32
+			primaryTagCols.ForEach(func(colID int) {
+				primaryTagColIDs = append(primaryTagColIDs, sqlbase.ColumnID(colID))
+				primaryTagColTypes = append(primaryTagColTypes, int32(sqlbase.ColumnType_TYPE_PTAG))
+			})
+			primaryTagcolStats := jobspb.CreateStatsDetails_ColStat{
+				ColumnIDs:     primaryTagColIDs,
+				HasHistogram:  false,
+				ColumnTypes:   primaryTagColTypes,
+				HasAllPTag:    true,
+				VirtualSketch: true,
+			}
+			colStats = append(colStats, primaryTagcolStats)
+		}
+
 		if len(columnIDs) == 1 && columns[0].Type.Family() != types.ArrayFamily {
 			// By default, create histograms on all explicitly requested column stats
 			// with a single column. (We cannot create histograms on array columns
@@ -863,4 +928,66 @@ func (n *createStatsNode) identifyColumnsForStats(
 		}
 	}
 	return colStats, nil
+}
+
+// initSortedHistogram is used to init sorted histogram.
+func (n *createStatsNode) initSortedHistogram(
+	ctx context.Context,
+	colStats []jobspb.CreateStatsDetails_ColStat,
+	tableDesc *ImmutableTableDescriptor,
+	fqTableName string,
+) error {
+	for i, colStat := range colStats {
+		if colStat.HasAllPTag {
+			newColStat := &colStats[i]
+
+			// Get ts col name
+			var tsColName string
+			for _, desc := range tableDesc.Columns {
+				if desc.TsCol.ColumnType == sqlbase.ColumnType_TYPE_DATA {
+					if desc.ID == 1 {
+						tsColName = desc.Name
+						break
+					}
+				}
+			}
+
+			// TODO(zh): Get timestamp range faster.
+			getTsTimeStampInfo := fmt.Sprintf(`select min(%s),max(%s) from %s`, tsColName, tsColName, fqTableName)
+			row, err := n.p.ExtendedEvalContext().ExecCfg.InternalExecutor.QueryRowEx(
+				ctx,
+				"read-max/min-timestamp",
+				n.p.txn,
+				sqlbase.InternalExecutorSessionDataOverride{User: security.RootUser},
+				getTsTimeStampInfo,
+			)
+			if err != nil {
+				log.Error(ctx, errors.New("failed to get min and max tsTimeStamp for automatic stats"))
+				return pgerror.Newf(pgcode.Warning, "failed to get min and max tsTimeStamp for automatic stats")
+			}
+			if row == nil || len(row) != 2 {
+				log.Error(ctx, errors.New("failed to get min and max tsTimeStamp for automatic stats: expected 2 columns"))
+				return pgerror.Newf(pgcode.Warning, "failed to get min and max tsTimeStamp for stats: expected 2 columns")
+			}
+
+			//fmt.Printf("Sorted histogram SQL:[%s]\n minTsTimestamp:[%d],maxTsTimestamp:[%d]\n", getTsTimeStampInfo, row[0].(*tree.DTimestampTZ).UnixMilli(), row[1].(*tree.DTimestampTZ).UnixMilli())
+			var minTimeStamp int64
+			var maxTimeStamp int64
+			if minTimeStampVal, ok := row[0].(*tree.DTimestampTZ); ok {
+				minTimeStamp = minTimeStampVal.UnixMilli()
+			}
+			if maxTimeStampVal, ok := row[1].(*tree.DTimestampTZ); ok {
+				maxTimeStamp = maxTimeStampVal.UnixMilli()
+			}
+			if maxTimeStamp > minTimeStamp {
+				newColStat.SortedHistogram = sqlbase.SortedHistogramInfo{
+					GenerateSortedHistogram: true,
+					FromTimeStamp:           minTimeStamp,
+					ToTimeStamp:             maxTimeStamp,
+					HistogramMaxBuckets:     SortHistogramBuckets,
+				}
+			}
+		}
+	}
+	return nil
 }

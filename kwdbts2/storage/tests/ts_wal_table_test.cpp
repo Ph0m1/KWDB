@@ -178,8 +178,9 @@ TEST_F(TestTSWALTable, PutData) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
-
-  s = log_eg->PutData(ctx_, payload, 0, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   k_uint32 entity_id = 1;
@@ -222,8 +223,9 @@ TEST_F(TestTSWALTable, batchPutData) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
-
-  s = log_eg->PutData(ctx_, payloads.data(), payloads.size(), 0, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payloads.data(), payloads.size(), 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   k_uint32 entity_id = 1;
@@ -281,7 +283,9 @@ TEST_F(TestTSWALTable, mulitiInsert) {
       ASSERT_EQ(s, KStatus::SUCCESS);
 
       for (size_t i = 0; i < batch_times; i++) {
-        s = log_eg->PutData(&ctx1, payloads->data(), payloads->size(), 0, &dedup_result_, kwdbts::DedupRule::KEEP);
+        uint16_t inc_entity_cnt;
+        uint32_t inc_unordered_cnt;
+        s = log_eg->PutData(&ctx1, payloads->data(), payloads->size(), 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_, kwdbts::DedupRule::KEEP);
         // s = log_eg->PutData(&ctx1, payloads->at(i), 1);
         ASSERT_EQ(s, KStatus::SUCCESS);
       }
@@ -356,9 +360,11 @@ TEST_F(TestTSWALTable, DeleteData) {
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
 
   // insert
-  s = log_eg->PutData(ctx_, payload2, 0, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payload2, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  s = log_eg->PutData(ctx_, payload, 0, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num * 2);
@@ -395,7 +401,9 @@ TEST_F(TestTSWALTable, putRollback) {
   TSSlice payload{data_value, p_len};
   TS_LSN mtr_id = 0;
   ASSERT_EQ(log_eg->MtrBegin(ctx_, range_group_id_, 1, mtr_id), KStatus::SUCCESS);
-  s = log_eg->PutData(ctx_, &payload, 1, mtr_id, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, &payload, 1, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + 1000}), 10);
@@ -426,7 +434,9 @@ TEST_F(TestTSWALTable, DeleteDataRollback) {
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
 
   // insert
-  s = log_eg->PutData(ctx_, payloads->data(), 2, 0, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payloads->data(), 2, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   uint64_t count = 0;
@@ -489,7 +499,9 @@ TEST_F(TestTSWALTable, putDeleteRollback) {
   ASSERT_EQ(log_eg->MtrBegin(ctx_, range_group_id_, 1, mtr_id), KStatus::SUCCESS);
 
   // insert
-  s = log_eg->PutData(ctx_, payloads.data(), 2, mtr_id, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payloads.data(), 2, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num * 2);
 
@@ -504,7 +516,7 @@ TEST_F(TestTSWALTable, putDeleteRollback) {
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num - 2);
 
   // insert
-  s = log_eg->PutData(ctx_, payload3, mtr_id, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload3, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num - 2 + row_num);
 
@@ -530,8 +542,10 @@ TEST_F(TestTSWALTable, DeleteEntitiesRollback) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
-  s = log_eg->PutData(ctx_, payload, 0, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // check result
@@ -583,7 +597,9 @@ TEST_F(TestTSWALTable, putDeleteEntityRollback) {
   ASSERT_EQ(log_eg->MtrBegin(ctx_, range_group_id_, 1, mtr_id), KStatus::SUCCESS);
 
   // insert
-  s = log_eg->PutData(ctx_, payloads.data(), 2, mtr_id, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payloads.data(), 2, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num * 2);
 
@@ -597,7 +613,7 @@ TEST_F(TestTSWALTable, putDeleteEntityRollback) {
   EXPECT_EQ(del_cnt, row_num * 2);
 
   // insert
-  s = log_eg->PutData(ctx_, payload3, mtr_id, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload3, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}, 2), row_num);
 
@@ -623,9 +639,11 @@ TEST_F(TestTSWALTable, putRecover) {
 
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   auto pd1 = Payload(getSchema(), getActualCols(), payload);
-  s = log_eg->PutData(ctx_, &payload, 1, 0, &dedup_result_);
+  s = log_eg->PutData(ctx_, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
   table_->FlushBuffer(ctx_);
   delete table_;
@@ -812,10 +830,12 @@ TEST_F(TestTSWALTable, deleteDataRecover) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   auto pd1 = Payload(getSchema(), getActualCols(), payload);
   TS_LSN mtr_id = 0;
-  s = log_eg->PutData(ctx_, payload, mtr_id, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
@@ -945,9 +965,11 @@ TEST_F(TestTSWALTable, incompleteRollbackRecover) {
   TS_LSN mtr_id = 0;
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   auto pd1 = Payload(getSchema(), getActualCols(), payload);
-  s = log_eg->PutData(ctx_, payload, mtr_id, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
@@ -1021,7 +1043,9 @@ TEST_F(TestTSWALTable, deleteRollbackRecover) {
   TSSlice payload{data_value, p_len};
   auto pd1 = Payload(getSchema(), getActualCols(), payload);
   // First insert 10 rows of data
-  s = log_eg->PutData(ctx_, payload, mtr_id, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payload, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
@@ -1232,8 +1256,10 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
-  s = log_eg->PutData(ctx_, payload, 0, &dedup_result_);
+  s = log_eg->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // check result
@@ -1365,8 +1391,9 @@ TEST_F(TestTSWALTable, autoCheckpoint) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
-
-  s = log_eg->PutData(ctx_, payloads.data(), payloads.size(), 0, &dedup_result_);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
+  s = log_eg->PutData(ctx_, payloads.data(), payloads.size(), 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   for (auto p : payloads) {

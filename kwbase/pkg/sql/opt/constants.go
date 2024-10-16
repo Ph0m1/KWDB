@@ -137,6 +137,12 @@ const (
 	FilterOptOrder = 1 << 3
 )
 
+// TSOrderedTable ts get ordered table data
+var TSOrderedTable = settings.RegisterPublicBoolSetting(
+	"ts.ordered_table.enabled",
+	"get ordered table in ts",
+	false)
+
 // memo ts flags
 const (
 	// IncludeTSTable for marking query includes ts table
@@ -148,21 +154,75 @@ const (
 	// SingleMode start by single node
 	SingleMode = 1 << 2
 
-	// ExecInTSEngine  is set when all processors can exec in ts engine.
-	ExecInTSEngine = 1 << 3
-
 	// OrderGroupBy is set when sort is before group by.
-	OrderGroupBy = 1 << 4
+	OrderGroupBy = 1 << 3
 
 	// HasGapFill is set when use time_bucket_gapfill function in SQL.
-	HasGapFill = 1 << 5
+	HasGapFill = 1 << 4
 
 	// HasAutoLimit is set when the limit is autoLimit
-	HasAutoLimit = 1 << 6
+	HasAutoLimit = 1 << 5
 
 	// FinishOptInsideOut is set when the optimization of inside-out is done.
-	FinishOptInsideOut = 1 << 7
+	FinishOptInsideOut = 1 << 6
 
 	// ScalarSubQueryPush is set when the switch of push-scalar-subQuery is turned on
-	ScalarSubQueryPush = 1 << 8
+	ScalarSubQueryPush = 1 << 7
 )
+
+// OrderedTableType TSScanOrderedType
+type OrderedTableType uint8
+
+// TSScanOrderedType
+const (
+	NoOrdered OrderedTableType = iota
+	// OrderedScan represents use ordered scan iterator
+	OrderedScan
+	// SortAfterScan represents sort table after scan
+	SortAfterScan
+	// ForceOrderedScan represents use ordered scan iterator
+	ForceOrderedScan
+)
+
+// Ordered is ordered type
+func (v OrderedTableType) Ordered() bool {
+	return v != NoOrdered
+}
+
+// UserOrderedScan return use ordered scan
+func (v OrderedTableType) UserOrderedScan() bool {
+	return v == OrderedScan || v == ForceOrderedScan
+}
+
+// NeedReverse return need reverse
+func (v OrderedTableType) NeedReverse() bool {
+	return v == OrderedScan
+}
+
+// GroupOptType represents Group expr opt type
+type GroupOptType uint64
+
+// GroupOptType
+const (
+	// PushLocalAggToScan represents push local agg to scan compute
+	PushLocalAggToScan = 1 << 0
+	// PruneLocalAgg represents prune local agg
+	PruneLocalAgg = 1 << 1
+	// PruneFinalAgg represents prune final agg
+	PruneFinalAgg = 1 << 2
+)
+
+// PushLocalAggToScanOpt return true if has PushLocalAggToScan opt
+func (v GroupOptType) PushLocalAggToScanOpt() bool {
+	return v&PushLocalAggToScan > 0
+}
+
+// PruneLocalAggOpt return true if has PruneLocalAgg opt
+func (v GroupOptType) PruneLocalAggOpt() bool {
+	return v&PruneLocalAgg > 0
+}
+
+// PruneFinalAggOpt return true if has PruneFinalAgg opt
+func (v GroupOptType) PruneFinalAggOpt() bool {
+	return v&PruneFinalAgg > 0
+}

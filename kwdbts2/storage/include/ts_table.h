@@ -167,10 +167,12 @@ class TsTable {
    * @return KStatus
    */
   virtual KStatus PutData(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
-                          uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule);
+                          uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                          DedupResult* dedup_result, const DedupRule& dedup_rule);
 
   KStatus PutDataWithoutWAL(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
-                            uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule);
+                            uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                            DedupResult* dedup_result, const DedupRule& dedup_rule);
   /**
   * @brief Flush caches the WAL of all EntityGroups in the current timeline to a disk file
   *
@@ -434,6 +436,8 @@ class TsTable {
                               TsTableIterator** iter, std::vector<timestamp64> ts_points,
                               bool reverse, bool sorted);
 
+  virtual KStatus GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats);
+
   /**
     * @brief Create the iterator TsIterator in the order of entity_ids for the timeline and query the data of all entities within the Leader EntityGroup for multiple model processing
     * @param[in] ts_span
@@ -677,8 +681,9 @@ class TsEntityGroup {
    * @param dedup_rule The deduplication rule defaults to OVERRIDE.
    * @return Return the status code of the operation, indicating its success or failure.
    */
-  virtual KStatus PutData(kwdbContext_p ctx, TSSlice payload_data, TS_LSN mini_trans_id, DedupResult* dedup_result,
-                          DedupRule dedup_rule = DedupRule::OVERRIDE);
+  virtual KStatus PutData(kwdbContext_p ctx, TSSlice payload_data, TS_LSN mini_trans_id,
+                          uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                          DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE);
 
   /**
    * PutData writes the Tag value and time series data to the entity
@@ -690,11 +695,12 @@ class TsEntityGroup {
    * @param dedup_rule The deduplication rule defaults to OVERRIDE.
    * @return Return the status code of the operation, indicating its success or failure.
    */
-  virtual KStatus PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id, DedupResult* dedup_result,
-                          DedupRule dedup_rule = DedupRule::OVERRIDE);
+  virtual KStatus PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id,
+                          uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                          DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE);
 
-  KStatus PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
-                            DedupResult* dedup_result, DedupRule dedup_rule);
+  KStatus PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id, uint16_t* inc_entity_cnt,
+                            uint32_t* inc_unordered_cnt, DedupResult* dedup_result, DedupRule dedup_rule);
 
   /**
    * get all partition times. not partition object.
@@ -807,6 +813,8 @@ class TsEntityGroup {
                               std::shared_ptr<TsEntityGroup> entity_group,
                               std::vector<timestamp64> ts_points,
                               bool reverse, bool sorted, bool compaction);
+
+  virtual KStatus GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats);
 
   /**
    * @brief Create an iterator TsIterator for Tag tables
@@ -968,7 +976,7 @@ class TsEntityGroup {
    * @return Operation status, success returns KStatus::SUCCESS, failure returns KStatus::FAIL.
    */
   virtual KStatus putDataColumnar(kwdbContext_p ctx, int32_t group_id, int32_t entity_id,
-                                  Payload& payload, DedupResult* dedup_result);
+                                  Payload& payload, uint32_t* inc_unordered_cnt, DedupResult* dedup_result);
 
   /**
    * payloadNextSlice attempts to retrieve the payload for the next partition from within the payload.

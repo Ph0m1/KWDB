@@ -72,6 +72,9 @@ type Statistics struct {
 	// PTagCount is the estimated number of primary tag rows returned by the expression.
 	PTagCount float64
 
+	// SortDistribution is the timestamp data distribution of primary tag in time series table.
+	SortDistribution *SortDistributionStats
+
 	// ColStats is a collection of statistics that pertain to columns in an
 	// expression or table. It is keyed by a set of one or more columns over which
 	// the statistic is defined.
@@ -81,6 +84,14 @@ type Statistics struct {
 	// reduction in number of rows for the top-level operator in this
 	// expression.
 	Selectivity float64
+}
+
+// SortDistributionStats store sort histogram
+type SortDistributionStats struct {
+	SortedHistogram   *SortedHistogram
+	RowCount          float64
+	UnorderedRowCount float64
+	Filtered          bool
 }
 
 // Init initializes the data members of Statistics.
@@ -136,6 +147,10 @@ func (s *Statistics) String() string {
 	for _, col := range colStats {
 		fmt.Fprintf(&buf, ", distinct%s=%.9g", col.Cols.String(), col.DistinctCount)
 		fmt.Fprintf(&buf, ", null%s=%.9g", col.Cols.String(), col.NullCount)
+	}
+	if s.SortDistribution != nil {
+		fmt.Fprintf(&buf, ", filteredRowCount=%.9g", s.SortDistribution.RowCount)
+		fmt.Fprintf(&buf, ", disorderRowCount=%.9g", s.SortDistribution.UnorderedRowCount)
 	}
 	buf.WriteString("]")
 	for _, col := range colStats {

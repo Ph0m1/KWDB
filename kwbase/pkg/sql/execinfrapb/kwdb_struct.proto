@@ -163,6 +163,7 @@ message TSReaderSpec {
   required uint32 tableVersion = 9 [(gogoproto.nullable) = false];
   optional Ordering sorter = 10;
   required int32 TsTablereaderId = 11 [(gogoproto.nullable) = false];
+  required bool OrderedScan = 12 [(gogoproto.nullable) = false];
 }
 
 // StatisticTSTableReader operator
@@ -262,6 +263,9 @@ message SketchInfo {
 
   // Whether has all primary tag columns
   required bool HasAllPTag = 6 [(gogoproto.nullable) = false];
+
+  // SortedHistogram supports sorted histogram collection for entities in time series tables
+  optional sqlbase.SortedHistogramInfo sortedHistogram = 7 [(gogoproto.nullable) = false];
 }
 
 message TSNoopSpec {

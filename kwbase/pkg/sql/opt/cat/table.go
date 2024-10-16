@@ -219,6 +219,9 @@ type TableStatistic interface {
 	// and it represents the distribution of values for that column.
 	// See HistogramBucket for more details.
 	Histogram() []HistogramBucket
+
+	// SortedHistogram returns timestamp data distribution for entities in time series tables
+	SortedHistogram() []SortedHistogramBucket
 }
 
 // HistogramBucket contains the data for a single histogram bucket. Note
@@ -237,6 +240,24 @@ type HistogramBucket struct {
 	// bound of the previous bucket and UpperBound (both boundaries are
 	// exclusive).
 	DistinctRange float64
+
+	// UpperBound is the upper bound of the bucket.
+	UpperBound tree.Datum
+}
+
+// SortedHistogramBucket contains the data for a single sorted histogram bucket.
+type SortedHistogramBucket struct {
+	// The estimated number of row count within the timestamp range.
+	RowCount float64
+
+	// The estimated number of unordered row count within the timestamp range.
+	UnorderedRowCount float64
+
+	// The estimated number of unordered row count within the timestamp range.
+	UnorderedEntities float64
+
+	// The estimated number of unordered entities within the timestamp range.
+	OrderedEntities float64
 
 	// UpperBound is the upper bound of the bucket.
 	UpperBound tree.Datum

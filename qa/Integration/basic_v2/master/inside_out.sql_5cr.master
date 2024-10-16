@@ -377,25 +377,25 @@ where p.station_sn=s.station_sn and p.pipeline_sn=pi.pipeline_sn and p.point_sn=
              │                     | type               | cross
              ├── hash-join         |                    |
              │    │                | type               | inner
-             │    │                | equality           | (pipeline_sn) = (pipeline_sn)
+             │    │                | equality           | (point_sn) = (point_sn)
              │    │                | right cols are key |
              │    ├── synchronizer |                    |
              │    │    └── ts scan |                    |
              │    │                | ts-table           | t_point
              │    │                | access mode        | tableTableMeta
              │    └── scan         |                    |
-             │                     | table              | pipeline_info@pipeline_sn_index
+             │                     | table              | point_info@primary
              │                     | spans              | FULL SCAN
              └── hash-join         |                    |
                   │                | type               | inner
-                  │                | equality           | (point_sn) = (point_sn)
+                  │                | equality           | (pipeline_sn) = (pipeline_sn)
                   │                | right cols are key |
                   ├── synchronizer |                    |
                   │    └── ts scan |                    |
                   │                | ts-table           | t_point
                   │                | access mode        | tableTableMeta
                   └── scan         |                    |
-                                   | table              | point_info@primary
+                                   | table              | pipeline_info@pipeline_sn_index
                                    | spans              | FULL SCAN
 (31 rows)
 > SELECT li.pipeline_name,

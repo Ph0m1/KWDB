@@ -66,6 +66,11 @@ type AggFuncNames []string
 // StatisticIndex used by group by private for splitting statistic
 type StatisticIndex [][]uint32
 
+// Empty return index is empty
+func (s *StatisticIndex) Empty() bool {
+	return len(*s) == 0
+}
+
 // Metadata assigns unique ids to the columns, tables, and other metadata used
 // within the scope of a particular query. Because it is specific to one query,
 // the ids tend to be small integers that can be efficiently stored and

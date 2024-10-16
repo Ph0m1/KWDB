@@ -112,6 +112,7 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
           Return(code);
         }
       }
+      row_batch->ResetLine();
       break;
     }
   }
@@ -265,7 +266,8 @@ EEIteratorErrCode StorageHandler::NewTsIterator(kwdbContext_p ctx) {
     } else {
       ret = ts_table_->GetIterator(ctx, entities_, ts_spans, table_->scan_cols_,
                                  table_->scan_real_agg_types_, table_->table_version_,
-                                 &ts_iterator, table_->scan_real_last_ts_points_, table_->is_reverse_, false);
+                                 &ts_iterator, table_->scan_real_last_ts_points_,
+                                 table_->is_reverse_, table_->ordered_scan_);
     }
     if (KStatus::FAIL == ret) {
       code = EEIteratorErrCode::EE_ERROR;

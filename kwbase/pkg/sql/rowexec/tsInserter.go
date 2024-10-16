@@ -58,6 +58,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
@@ -158,18 +159,25 @@ func startForSingleMode(ctx context.Context, tri *tsInserter) context.Context {
 		return ctx
 	}
 
+	var entitiesAffected uint32
+	var unorderedAffected uint32
 	for _, rawResponse := range ba.RawResponse().Responses {
 		if v, ok := rawResponse.Value.(*roachpb.ResponseUnion_TsPut); ok {
 			tri.dedupRule = v.TsPut.DedupRule
 			tri.dedupRows += v.TsPut.NumKeys
+			entitiesAffected += v.TsPut.EntitiesAffected
+			unorderedAffected += v.TsPut.UnorderedAffected
 		}
 	}
 	tri.insertRows = int64(insertRowSum) - tri.dedupRows
 
 	tri.insertSuccess = true
 	// Here we need to notify the statistics table of changes in the number of rows.
-	if len(tri.payload) > 0 && len(tri.rowNums) > 0 && ExtractTableIDFromPayload(tri.payload[0]) != 0 {
-		tri.FlowCtx.Cfg.StatsRefresher.NotifyTsMutation(sqlbase.ID(ExtractTableIDFromPayload(tri.payload[0])), int(tri.insertRows))
+	if NeedNotifyTsMutation(&tri.EvalCtx.Settings.SV) {
+		if tableID := ExtractTableIDFromPayload(tri.payload); tableID > 0 {
+			tri.FlowCtx.Cfg.StatsRefresher.NotifyTsMutation(sqlbase.ID(tableID), int(tri.insertRows),
+				int(entitiesAffected), int(unorderedAffected))
+		}
 	}
 	return ctx
 }
@@ -224,21 +232,31 @@ func startForDistributeMode(ctx context.Context, tri *tsInserter) context.Contex
 		return ctx
 	}
 
+	var entitiesAffected uint32
+	var unorderedAffected uint32
 	for _, rawResponse := range ba.RawResponse().Responses {
 		if v, ok := rawResponse.Value.(*roachpb.ResponseUnion_TsRowPut); ok {
 			tri.dedupRule = v.TsRowPut.DedupRule
 			tri.insertRows += v.TsRowPut.NumKeys
+			entitiesAffected += v.TsRowPut.EntitiesAffected
+			unorderedAffected += v.TsRowPut.UnorderedAffected
 		} else if v, ok := rawResponse.Value.(*roachpb.ResponseUnion_TsPutTag); ok {
 			tri.dedupRule = v.TsPutTag.DedupRule
 			tri.insertRows += v.TsPutTag.NumKeys
+		} else if v, ok := rawResponse.Value.(*roachpb.ResponseUnion_TsPut); ok {
+			entitiesAffected += v.TsPut.EntitiesAffected
+			unorderedAffected += v.TsPut.UnorderedAffected
 		}
 	}
 	tri.dedupRows = int64(insertRowSum) - tri.insertRows
 
 	tri.insertSuccess = true
 	// Here we need to notify the statistics table of changes in the number of rows.
-	if len(tri.payload) > 0 && len(tri.rowNums) > 0 && ExtractTableIDFromPayload(tri.payload[0]) != 0 {
-		tri.FlowCtx.Cfg.StatsRefresher.NotifyTsMutation(sqlbase.ID(ExtractTableIDFromPayload(tri.payload[0])), int(tri.insertRows))
+	if NeedNotifyTsMutation(&tri.EvalCtx.Settings.SV) {
+		if tableID := ExtractTableIDFromPayload(tri.payloadPrefix); tableID > 0 {
+			tri.FlowCtx.Cfg.StatsRefresher.NotifyTsMutation(sqlbase.ID(tableID), int(tri.insertRows),
+				int(entitiesAffected), int(unorderedAffected))
+		}
 	}
 	return ctx
 }
@@ -275,18 +293,33 @@ func (tri *tsInserter) ConsumerClosed() {
 	tri.InternalClose()
 }
 
+// NeedNotifyTsMutation is used to check automatic stats are enabled.
+func NeedNotifyTsMutation(sv *settings.Values) bool {
+	if opt.TSOrderedTable.Get(sv) || stats.AutomaticTagStatisticsClusterMode.Get(sv) ||
+		stats.AutomaticTsStatisticsClusterMode.Get(sv) {
+		// Automatic stats are enabled.
+		return true
+	}
+	return false
+}
+
 // ExtractTableIDFromPayload extracts the tableID from the given payload.
 // The payload structure should match that created by BuildPayloadForTsInsert.
-func ExtractTableIDFromPayload(payload []byte) uint64 {
+func ExtractTableIDFromPayload(payload [][]byte) uint64 {
+	if len(payload) == 0 {
+		return 0
+	}
+
+	payloadPrefix := payload[0]
 	// Check if the payload has enough bytes.
-	if len(payload) < execbuilder.TSVersionOffset+execbuilder.TSVersionSize {
+	if len(payloadPrefix) < execbuilder.TSVersionOffset+execbuilder.TSVersionSize {
 		return 0
 	}
 
 	// Extract 8 bytes from payload starting from TableIDOffset and convert to uint64.
 	tableIDOffset := execbuilder.TableIDOffset
 	tableIDEnd := tableIDOffset + execbuilder.TableIDSize
-	tableID := binary.LittleEndian.Uint64(payload[tableIDOffset:tableIDEnd])
+	tableID := binary.LittleEndian.Uint64(payloadPrefix[tableIDOffset:tableIDEnd])
 	return tableID
 }
 

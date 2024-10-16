@@ -1099,6 +1099,11 @@ func (ts *TableStat) Histogram() []cat.HistogramBucket {
 	return histogram
 }
 
+// SortedHistogram is part of the cat.TableStatistic interface.
+func (ts *TableStat) SortedHistogram() []cat.SortedHistogramBucket {
+	return nil
+}
+
 // TableStats is a slice of TableStat pointers.
 type TableStats []*TableStat
 

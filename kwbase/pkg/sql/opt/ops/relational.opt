@@ -519,12 +519,12 @@ define GroupingPrivate {
     # for split statistic
     AggIndex StatisticIndex
 
-    # optimize flag of push agg to scan compute, for optimizing time_bucket query
-    OptTimeBucket bool
-
     # must add sort to group when having time_bucket_gapFill.
     TimeBucketGapFillColId ColumnID
     TimeBucketGapFillColIdOrdinal ColumnID
+
+    # OptFlags flags of group by type, type is opt.GroupOptType
+    OptFlags TSGroupOptType
 }
 
 # ScalarGroupBy computes aggregate functions over the complete set of input
@@ -1007,6 +1007,12 @@ define TSScanPrivate {
 
     # HintType select hint type for control plan
     HintType  TSHintType
+
+    # ExploreOrderedScan is a flag for order by ts scan ts table
+    ExploreOrderedScan bool
+
+    # OrderedScanType is a flag for order by ts scan ts table
+    OrderedScanType TSOrderedScanType
 }
 
 # TSInsert is an expression for INSERT DEVICE. Applies only to constant value inserts.

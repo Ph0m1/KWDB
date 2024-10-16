@@ -146,12 +146,12 @@ class BaseOperator {
 
   DataChunkPtr current_data_chunk_;
   std::queue<DataChunkPtr> output_queue_;
-  DataChunkPtr temporary_data_chunk_;
   k_bool is_done_{false};
 
   bool is_clone_{false};
 
  public:
+  DataChunkPtr temporary_data_chunk_;
   OperatorFetcher fetcher_;
   TsFetcherCollection* collection_{nullptr};
 };

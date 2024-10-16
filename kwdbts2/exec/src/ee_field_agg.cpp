@@ -11,6 +11,7 @@
 
 #include "ee_field_agg.h"
 #include "ee_aggregate_op.h"
+#include "ee_agg_scan_op.h"
 #include "ee_aggregate_func.h"
 
 namespace kwdbts {
@@ -31,6 +32,12 @@ k_bool FieldAggNum::is_nullable() {
   if (ordered_agg_op != nullptr) {
     return ordered_agg_op->temporary_data_chunk_->IsNull(num_);
   }
+
+  AggTableScanOperator *agg_tablescan = dynamic_cast<AggTableScanOperator *>(op_);
+  if (nullptr != agg_tablescan) {
+    return agg_tablescan->temporary_data_chunk_->IsNull(num_);
+  }
+
   return false;
 }
 
@@ -49,6 +56,11 @@ char *FieldAggNum::get_ptr() {
       dynamic_cast<OrderedAggregateOperator *>(op_);
   if (ordered_agg_op != nullptr) {
     return ordered_agg_op->temporary_data_chunk_->GetData(num_);
+  }
+
+  AggTableScanOperator *agg_tablescan = dynamic_cast<AggTableScanOperator *>(op_);
+  if (nullptr != agg_tablescan) {
+    return agg_tablescan->temporary_data_chunk_->GetData(num_);
   }
 
   return nullptr;

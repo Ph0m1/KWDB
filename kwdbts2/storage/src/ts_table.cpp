@@ -125,29 +125,33 @@ KStatus TsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint64_t m
 }
 
 KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id,
+                               uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
                                DedupResult* dedup_result, DedupRule dedup_rule) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   for (int i = 0; i < length; i++) {
     // Based on the number of payloads, call PutData repeatedly to write data
-    KStatus s = PutData(ctx, payloads[i], 0, dedup_result, dedup_rule);
+    KStatus s = PutData(ctx, payloads[i], 0, inc_entity_cnt, inc_unordered_cnt, dedup_result, dedup_rule);
     if (s == FAIL) return s;
   }
   return SUCCESS;
 }
 
 KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload) {
+  uint16_t inc_entity_cnt = 0;
+  uint32_t inc_unordered_cnt = 0;
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  return PutData(ctx, payload, 0, &dedup_result, g_dedup_rule);
+  return PutData(ctx, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, g_dedup_rule);
 }
 
-KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
-                               DedupResult* dedup_result, DedupRule dedup_rule) {
-  return PutDataWithoutWAL(ctx, payload, mini_trans_id, dedup_result, dedup_rule);
+KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id, uint16_t* inc_entity_cnt,
+                               uint32_t* inc_unordered_cnt, DedupResult* dedup_result, DedupRule dedup_rule) {
+  return PutDataWithoutWAL(ctx, payload, mini_trans_id, inc_entity_cnt, inc_unordered_cnt, dedup_result, dedup_rule);
 }
 
 KStatus TsEntityGroup::PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
-                               DedupResult* dedup_result, DedupRule dedup_rule) {
+                                         uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                                         DedupResult* dedup_result, DedupRule dedup_rule) {
   // If wal is not enabled, this function will be used.
   KStatus status = SUCCESS;
   uint32_t group_id, entity_id;
@@ -181,12 +185,15 @@ KStatus TsEntityGroup::PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_
     LOG_ERROR("allocateEntityGroupId failed, entity id: %d, group id: %d.", entity_id, group_id);
     return KStatus::FAIL;
   }
+  if (new_one) {
+    ++(*inc_entity_cnt);
+  }
   if (pd.GetFlag() == Payload::TAG_ONLY) {
     // Only when a tag is present, do not write data
     return KStatus::SUCCESS;
   }
   if (pd.GetRowCount() > 0) {
-    return putDataColumnar(ctx, group_id, entity_id, pd, dedup_result);
+    return putDataColumnar(ctx, group_id, entity_id, pd, inc_unordered_cnt, dedup_result);
   }
   return KStatus::SUCCESS;
 }
@@ -303,7 +310,7 @@ KStatus TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload
 }
 
 KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int32_t entity_id,
-                                       Payload& payload, DedupResult* dedup_result) {
+                                       Payload& payload, uint32_t* inc_unordered_cnt, DedupResult* dedup_result) {
   KWDB_DURATION(StStatistics::Get().put_data);
   KWDB_STAT_ADD(StStatistics::Get().payload_row, payload.GetRowCount());
   ErrorInfo err_info;
@@ -380,7 +387,8 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     // All rows that need to be deleted (deduplicated) are recorded in the returned to_deleted_real_rows,
     // and recordPutAfterProInfo will process them.
     err_info.errcode = p_bt->push_back_payload(ctx, entity_id, &payload, batch_start, row_id - batch_start,
-                                               &cur_alloc_spans, &to_deleted_real_rows, err_info, dedup_result);
+                                               &cur_alloc_spans, &to_deleted_real_rows, err_info,
+                                               inc_unordered_cnt, dedup_result);
 
     // After handling a partition, record the information to be processed subsequently
     recordPutAfterProInfo(after_process_info, p_bt, cur_alloc_spans, to_deleted_real_rows);
@@ -701,6 +709,64 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
     return s;
   }
   *iter = ts_iter;
+  return KStatus::SUCCESS;
+}
+
+KStatus TsEntityGroup::GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats) {
+  RW_LATCH_S_LOCK(drop_mutex_);
+  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
+  ErrorInfo err_info;
+  for (uint32_t i = 1; i <= ebt_manager_->GetMaxSubGroupId(); ++i) {
+    TsSubEntityGroup* subgroup = ebt_manager_->GetSubGroup(i, err_info);
+    if (!subgroup) {
+      continue;
+    }
+    k_uint32 total_entity_cnt = 0;
+    k_uint32 unordered_entity_cnt = 0;
+    std::vector<uint32_t> entities = subgroup->GetEntities();
+    KwTsSpan p_span{ts_span.begin / 1000, ts_span.end / 1000};
+    vector<TsTimePartition*> partitions = ebt_manager_->GetPartitionTables(p_span, i, err_info);
+    for (auto entity_id : entities) {
+      bool is_in_span = false;
+      bool is_disordered = false;
+      for (int i = 0; i < partitions.size(); ++i) {
+        EntityItem* entity = partitions[i]->getEntityItem(entity_id);
+        if (entity->min_ts > ts_span.end || entity->max_ts < ts_span.begin) {
+          continue;
+        }
+        is_in_span = true;
+        std::deque<BlockItem*> block_queue;
+        partitions[i]->GetAllBlockItems(entity_id, block_queue);
+        while (!block_queue.empty()) {
+          BlockItem* block = block_queue.front();
+          block_queue.pop_front();
+          std::shared_ptr<MMapSegmentTable> segment_tbl = partitions[i]->getSegmentTable(block->block_id);
+          timestamp64 min_ts = KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, Sumfunctype::MIN));
+          timestamp64 max_ts = KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, Sumfunctype::MAX));
+          if (ts_span.begin > max_ts || ts_span.end < min_ts) {
+            continue;
+          }
+          bool flag = (ts_span.begin == ts_span.end);
+          stats->total_data_rows += flag ? 1 : block->publish_row_count;
+          if (block->unordered_flag) {
+            is_disordered = true;
+            stats->unordered_data_rows += flag ? 1 : block->publish_row_count;
+          }
+        }
+      }
+      if (is_in_span) {
+        ++total_entity_cnt;
+      }
+      if (is_disordered) {
+        ++unordered_entity_cnt;
+      }
+    }
+    for (auto p_bt : partitions) {
+      ebt_manager_->ReleasePartitionTable(p_bt);
+    }
+    stats->ordered_entity_cnt += (total_entity_cnt - unordered_entity_cnt);
+    stats->unordered_entity_cnt += unordered_entity_cnt;
+  }
   return KStatus::SUCCESS;
 }
 
@@ -1466,7 +1532,8 @@ TsTable::GetEntityGroupByHash(kwdbContext_p ctx, uint16_t hashpoint, uint64_t *r
 }
 
 KStatus TsTable::PutData(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
-                         uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule) {
+                         uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                         DedupResult* dedup_result, const DedupRule& dedup_rule) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
@@ -1484,12 +1551,14 @@ KStatus TsTable::PutData(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* pa
     }
     entity_grp = it->second;
   }
-  KStatus s = entity_grp->PutData(ctx, payload, payload_num, mtr_id, dedup_result, dedup_rule);
+  KStatus s = entity_grp->PutData(ctx, payload, payload_num, mtr_id,
+                                  inc_entity_cnt, inc_unordered_cnt, dedup_result, dedup_rule);
   return s;
 }
 
 KStatus TsTable::PutDataWithoutWAL(kwdbContext_p ctx, uint64_t range_group_id, TSSlice* payload, int payload_num,
-                         uint64_t mtr_id, DedupResult* dedup_result, const DedupRule& dedup_rule) {
+                                   uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                                   DedupResult* dedup_result, const DedupRule& dedup_rule) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
@@ -1507,7 +1576,8 @@ KStatus TsTable::PutDataWithoutWAL(kwdbContext_p ctx, uint64_t range_group_id, T
     }
     entity_grp = it->second;
   }
-  KStatus s = entity_grp->PutDataWithoutWAL(ctx, *payload, mtr_id, dedup_result, dedup_rule);
+  KStatus s = entity_grp->PutDataWithoutWAL(ctx, *payload, mtr_id, inc_entity_cnt,
+                                            inc_unordered_cnt, dedup_result, dedup_rule);
   return s;
 }
 
@@ -2179,6 +2249,15 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
   LOG_DEBUG("TsTable::GetIterator success.agg: %lu, iter num: %lu",
               scan_agg_types.size(), ts_table_iterator->GetIterNumber());
   (*iter) = ts_table_iterator;
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats) {
+  for (auto& entity_group : entity_groups_) {
+    UnorderedDataStats cur_stats;
+    entity_group.second->GetUnorderedDataInfo(ctx, ts_span, &cur_stats);
+    *stats += cur_stats;
+  }
   return KStatus::SUCCESS;
 }
 

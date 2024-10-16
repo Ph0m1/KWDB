@@ -1773,13 +1773,14 @@ func (b *Builder) buildSort(sort *memo.SortExpr) (execPlan, error) {
 	inputOrdering := sort.Input.ProvidedPhysical().Ordering
 	alreadyOrderedPrefix := 0
 	for i := range inputOrdering {
-		if i == len(ordering) {
-			return execPlan{}, errors.AssertionFailedf("sort ordering already provided by input")
-		}
 		if inputOrdering[i] != ordering[i] {
 			break
 		}
 		alreadyOrderedPrefix = i + 1
+	}
+
+	if alreadyOrderedPrefix == len(ordering) {
+		return input, nil
 	}
 
 	node, err := b.factory.ConstructSort(input.root, input.sqlOrdering(ordering), alreadyOrderedPrefix, sort.IsTSEngine())

@@ -190,6 +190,8 @@ func (ef *execFactory) ConstructTSScan(
 	tsScan.AccessMode = execinfrapb.TSTableReadMode(private.AccessMode)
 	tsScan.HintType = private.HintType
 	tsScan.ScanAggArray = make([]ScanAgg, len(private.ScanAggs))
+	tsScan.orderedType = private.OrderedScanType
+
 	// Convert logical column ID  in ScanAggs of memo.TSScanExpr into physical column ID and bind them to tsScanNode.
 	for funcIdx, v := range private.ScanAggs {
 		tsScan.ScanAggArray[funcIdx].AggTyp = v.AggTyp
@@ -324,6 +326,15 @@ func (ef *execFactory) ConstructFilter(
 			if s, ok := src.plan.(*tsScanNode); ok {
 				s.filter = s.filterVars.Rebind(filter, true /* alsoReset */, false /* normalizeToNonNil */)
 				return src, nil
+			}
+		case *sortNode:
+			if s, ok := src.plan.(*synchronizerNode); ok {
+				if s1, ok1 := s.plan.(*sortNode); ok1 {
+					if s2, ok2 := s1.plan.(*tsScanNode); ok2 {
+						s2.filter = s2.filterVars.Rebind(filter, true /* alsoReset */, false /* normalizeToNonNil */)
+						return src, nil
+					}
+				}
 			}
 		}
 	}
@@ -676,9 +687,9 @@ func (ef *execFactory) ConstructGroupBy(
 		reqOrdering:      ReqOrdering(reqOrdering),
 		aggFuncs:         funcs,
 		engine:           engine,
-		addSynchronizer:  addSynchronizer,
 		statisticIndex:   private.AggIndex,
-		aggPushDown:      private.OptTimeBucket,
+		addSynchronizer:  addSynchronizer,
+		optType:          private.OptFlags,
 	}
 	inputCols := planColumns(n.plan)
 	for i := range groupCols {

@@ -211,8 +211,10 @@ TEST_F(TestTsBLockItemMaxNoCore, mulitiInsert) {
       kwdbContext_t ctx_1;
       KStatus s = InitServerKWDBContext(&ctx_1);
       for (size_t i = 0; i < batch_times; i++) {
+        uint16_t inc_entity_cnt;
+        uint32_t inc_unordered_cnt;
         DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-        s = entity_group_leader_->PutData(&ctx_1, payload, 0, &dedup_result, DedupRule::KEEP);
+        s = entity_group_leader_->PutData(&ctx_1, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, DedupRule::KEEP);
         if (s != KStatus::SUCCESS) {
           std::cout << "put data error." << i << std::endl;
         }

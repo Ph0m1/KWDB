@@ -1186,6 +1186,11 @@ func (os *optTableStat) Histogram() []cat.HistogramBucket {
 	return os.stat.Histogram
 }
 
+// SortedHistogram is part of the cat.TableStatistic interface.
+func (os *optTableStat) SortedHistogram() []cat.SortedHistogramBucket {
+	return os.stat.SortedHistogram
+}
+
 // optFamily is a wrapper around sqlbase.ColumnFamilyDescriptor that keeps a
 // reference to the table wrapper.
 type optFamily struct {

@@ -420,7 +420,7 @@ int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start
 int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdbts::Payload* payload,
                                            size_t start_in_payload, size_t num,
                                            std::vector<BlockSpan>* alloc_spans, std::vector<MetricRowID>* todo_markdel,
-                                           ErrorInfo& err_info, DedupResult* dedup_result) {
+                                           ErrorInfo& err_info, uint32_t* inc_unordered_cnt, DedupResult* dedup_result) {
   KWDB_DURATION(StStatistics::Get().push_payload);
   int64_t err_code = 0;
   err_info.errcode = 0;
@@ -534,7 +534,8 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
       return err_code;
     }
     // Write in a columnar format and update the aggregated results
-    err_code = segment_tbl->PushPayload(entity_id, entity_num_node, payload, start_in_payload + count, span, dedup_info);
+    err_code = segment_tbl->PushPayload(entity_id, entity_num_node, payload,
+                                        start_in_payload + count, span, inc_unordered_cnt, dedup_info);
     if (err_code < 0) {
       err_info.errcode = err_code;
       err_info.errmsg = "PushPayload failed : " + string(strerror(errno));
@@ -1082,7 +1083,9 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
       return err_code;
     }
     // Write in a columnar format and update the aggregated results
-    err_code = segment_tbl->PushPayload(entity_id, entity_num_node, payload, start_row + count, span, dedup_info);
+    uint32_t inc_unordered_cnt = 0;
+    err_code = segment_tbl->PushPayload(entity_id, entity_num_node, payload,
+                                        start_row + count, span, &inc_unordered_cnt, dedup_info);
     if (err_code < 0) {
       err_info.errcode = err_code;
       err_info.errmsg = "PushPayload failed : " + string(strerror(errno));
@@ -1912,82 +1915,136 @@ int TsTimePartition::FindFirstBlockItem(uint32_t entity_id, kwdbts::TS_LSN lsn, 
 }
 
 int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>& ts_spans,
-                                         std::deque<BlockSpan>& block_spans, bool compaction) {
-  std::deque<BlockItem*> block_items;
-  GetAllBlockItems(entity_id, block_items);
+                                         std::deque<BlockSpan>& block_spans, bool compaction, bool reverse) {
+  std::deque<BlockItem*> block_queue;
+  GetAllBlockItems(entity_id, block_queue);
   EntityItem *entity = getEntityItem(entity_id);
 
   if (!entity->is_disordered) {
-    while (!block_items.empty()) {
-      BlockItem* block_item = block_items.front();
-      block_items.pop_front();
-      block_spans.push_back({block_item, 0, block_item->publish_row_count});
-    }
-    return 0;
-  }
-
-  std::multimap<timestamp64, MetricRowID> ts_order;  // Save every undeleted row_id under each timestamp
-  while (!block_items.empty()) {
-    BlockItem* block_item = block_items.front();
-    block_items.pop_front();
-
-    if (block_item->publish_row_count > 0) {
-      if (compaction && block_item->block_id > entity->max_compacting_block) {
-        // Because TsTimePartition::CompactingStatus set that max_compacting_block must be the largest block of
-        // the segment to which it belongs, and the next block must be the next segment, the reorganization is only
-        // done for max_compacting_block to ensure that the segment being written will not be reorganized
-        // TODO(qlp): TsSortedRowDataIterator is not necessarily only for data reorganization, it is better
-        //  to write a class in the future that inherits TsSortedRowDataIterator and only for data reorganization
-        entity->max_compacting_block = 0;
-        // The purpose of limiting the read range of the iterator with max_compacting_block has been achieved,
-        // remember to reset to zero
-        break;
-      }
+    while (!block_queue.empty()) {
+      BlockItem* block_item = block_queue.front();
+      block_queue.pop_front();
       std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block_item->block_id);
       if (segment_tbl == nullptr) {
         LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, GetPath().c_str());
         return -1;
       }
 
-      bool all_within_spans =
-          isTimestampWithinSpans(ts_spans,
-                                 KTimestamp(segment_tbl->columnAggAddr(block_item->block_id, 0, Sumfunctype::MIN)),
-                                 KTimestamp(segment_tbl->columnAggAddr(block_item->block_id, 0, Sumfunctype::MAX)));
-
+      uint32_t first_row = 1;
       for (uint32_t i = 1; i <= block_item->publish_row_count; ++i) {
         MetricRowID row_id = block_item->getRowID(i);
         timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
-        if (all_within_spans || (CheckIfTsInSpan(cur_ts, ts_spans))) {
-          if (!segment_tbl->IsRowVaild(block_item, i)) {
-            continue;
+        if (!(CheckIfTsInSpan(cur_ts, ts_spans)) || !segment_tbl->IsRowVaild(block_item, i)) {
+          if (i > first_row) {
+            reverse ? block_spans.push_front({block_item, first_row - 1, i - first_row}) :
+                      block_spans.push_back({block_item, first_row - 1, i - first_row});
           }
-          ts_order.insert(std::make_pair(cur_ts, row_id));
+          first_row = i + 1;
+          continue;
         }
       }
-    }
-  }
 
-  BlockSpan block_span;
-  MetricRowID last_row_id;
-  for (auto& iter : ts_order) {
-    // Convert a time-sorted row_id into a BlockSpan that represents the continuity of the data
-    MetricRowID& cur_row_id = iter.second;
-    if (last_row_id + 1 != cur_row_id) {
-      // When data continuity is interrupted,
-      // the data that has just been checked to be continuous is stored and the next check is started
-      if (block_span.row_num > 0) {
-        block_spans.push_back(block_span);
+      if (first_row <= block_item->publish_row_count) {
+        reverse ? block_spans.push_front({block_item, first_row - 1, block_item->publish_row_count - first_row + 1}) :
+                  block_spans.push_back({block_item, first_row - 1, block_item->publish_row_count - first_row + 1});
       }
-      block_span = BlockSpan{getBlockItem(cur_row_id.block_id), cur_row_id.offset_row - 1, 1};
-    } else {
-      block_span.row_num++;
     }
-    last_row_id = cur_row_id;
+    return 0;
   }
 
-  if (block_span.row_num > 0) {
-    block_spans.push_back(block_span);
+  vector<vector<timestamp64>> intervals;
+  map<pair<timestamp64, timestamp64>, BlockItem*> interval_block_map;
+  while (!block_queue.empty()) {
+    BlockItem* cur_block = block_queue.front();
+    block_queue.pop_front();
+    std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block->block_id);
+    timestamp64 min_ts = segment_tbl->getBlockMinTs(cur_block->block_id);
+    timestamp64 max_ts = segment_tbl->getBlockMaxTs(cur_block->block_id);
+    if (isTimestampInSpans(ts_spans, min_ts, max_ts) && cur_block->publish_row_count > 0) {
+      intervals.push_back({min_ts, max_ts});
+      interval_block_map[{min_ts, max_ts}] = cur_block;
+    }
   }
+
+  sort(intervals.begin(), intervals.end());
+  vector<pair<pair<timestamp64, timestamp64>, vector<BlockItem*>>> block_items;
+  for (auto interval : intervals) {
+    if (block_items.empty() || interval[0] >= block_items.end()->first.second) {
+      block_items.push_back({{interval[0], interval[1]}, {interval_block_map[{interval[0], interval[1]}]}});
+    } else {
+      if (interval[1] > block_items.back().first.second) {
+        block_items.back().first.second = interval[1];
+      }
+      block_items.back().second.push_back(interval_block_map[{interval[0], interval[1]}]);
+    }
+  }
+  intervals.clear();
+  interval_block_map.clear();
+
+  for (auto it : block_items) {
+    vector<BlockItem*> blocks = it.second;
+    if (blocks.size() == 1 && !blocks[0]->unordered_flag) {
+      BlockSpan block_span = BlockSpan{blocks[0], 0, blocks[0]->publish_row_count};
+      reverse ? block_spans.push_front(block_span) : block_spans.push_back(block_span);
+    } else {
+      std::multimap<timestamp64, MetricRowID> ts_order;  // Save every undeleted row_id under each timestamp
+      for (auto block : blocks) {
+        if (compaction && block->block_id > entity->max_compacting_block) {
+          // Because TsTimePartition::CompactingStatus set that max_compacting_block must be the largest block of
+          // the segment to which it belongs, and the next block must be the next segment, the reorganization is only
+          // done for max_compacting_block to ensure that the segment being written will not be reorganized
+          // TODO(qlp): TsSortedRowDataIterator is not necessarily only for data reorganization, it is better
+          //  to write a class in the future that inherits TsSortedRowDataIterator and only for data reorganization
+          entity->max_compacting_block = 0;
+          // The purpose of limiting the read range of the iterator with max_compacting_block has been achieved,
+          // remember to reset to zero
+          break;
+        }
+        std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block->block_id);
+        if (segment_tbl == nullptr) {
+          LOG_ERROR("Can not find segment use block [%d], in path [%s]", block->block_id, GetPath().c_str());
+          return -1;
+        }
+
+        bool all_within_spans = isTimestampWithinSpans(ts_spans,
+                                   KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, Sumfunctype::MIN)),
+                                   KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, Sumfunctype::MAX)));
+
+        for (uint32_t i = 1; i <= block->publish_row_count; ++i) {
+          MetricRowID row_id = block->getRowID(i);
+          timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
+          if (all_within_spans || (CheckIfTsInSpan(cur_ts, ts_spans))) {
+            if (!segment_tbl->IsRowVaild(block, i)) {
+              continue;
+            }
+            ts_order.insert(std::make_pair(cur_ts, row_id));
+          }
+        }
+      }
+      BlockSpan block_span;
+      MetricRowID last_row_id;
+      for (auto& iter : ts_order) {
+        // Convert a time-sorted row_id into a BlockSpan that represents the continuity of the data
+        MetricRowID& cur_row_id = iter.second;
+        if (last_row_id + 1 != cur_row_id) {
+          // When data continuity is interrupted,
+          // the data that has just been checked to be continuous is stored and the next check is started
+          if (block_span.row_num > 0) {
+            reverse ? block_spans.push_front(block_span) : block_spans.push_back(block_span);
+          }
+          block_span = BlockSpan{getBlockItem(cur_row_id.block_id), cur_row_id.offset_row - 1, 1};
+        } else {
+          block_span.row_num++;
+        }
+        last_row_id = cur_row_id;
+      }
+
+      if (block_span.row_num > 0) {
+        reverse ? block_spans.push_front(block_span) : block_spans.push_back(block_span);
+      }
+    }
+  }
+
   return 0;
 }
 

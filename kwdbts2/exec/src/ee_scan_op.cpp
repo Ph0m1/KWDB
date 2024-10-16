@@ -59,6 +59,12 @@ TableScanOperator::TableScanOperator(TsFetcherCollection* collection, TSReaderSp
     ts_span.end = kInt64Max;
     ts_kwspans_.push_back(ts_span);
   }
+  if (spec->orderedscan()) {
+    table->ordered_scan_ = true;
+  }
+  if (spec->reverse()) {
+    table->is_reverse_ = true;
+  }
 }
 
 TableScanOperator::TableScanOperator(const TableScanOperator& other, BaseOperator* input, int32_t processor_id)
@@ -393,7 +399,11 @@ EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRow
   if (nullptr != *row_batch) {
     (*row_batch)->Reset();
   } else {
-    *row_batch = KNEW ScanRowBatch(table_);
+    if (table_->is_reverse_) {
+      *row_batch = KNEW ReverseScanRowBatch(table_);
+    } else {
+      *row_batch = KNEW ScanRowBatch(table_);
+    }
     KWThdContext* thd = current_thd;
     thd->SetRowBatch(*row_batch);
   }

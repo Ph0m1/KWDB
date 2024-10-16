@@ -176,7 +176,7 @@ KStatus DmlExec::Setup(kwdbContext_p ctx, k_char *message, k_uint32 len,
   resp->value = 0;
   resp->len = 0;
   resp->unique_id = uniqueID;
-  resp->handle = 0;
+  resp->handle = static_cast<char *>(static_cast<void *>(this));
   TsScan *tsScan = nullptr;
   do {
     if (tsscan_head_ && tsscan_head_->id == id) {
@@ -215,7 +215,6 @@ KStatus DmlExec::Setup(kwdbContext_p ctx, k_char *message, k_uint32 len,
       tsscan_end_ = tsScan;
     }
     resp->ret = 1;
-    resp->handle = static_cast<char *>(static_cast<void *>(this));
   } while (0);
   if (resp->ret == 0) {
     DestroyTsScan(tsScan);

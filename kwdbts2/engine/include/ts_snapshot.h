@@ -201,11 +201,12 @@ class TsTableSnapshot {
    */
   KStatus genMigratePayloadByBuilder(kwdbContext_p ctx, uint32_t row_id, KwTsSpan ts_span);
 
+  SnapshotInfo snapshot_info_;
   string db_path_;
   KTableKey table_id_;
   string tbl_sub_path_;
   MMapRootTableManager* entity_bt_manager_;
-  SnapshotInfo snapshot_info_;
+
   // TsEntityGroup instance of a snapshot
   TsEntityGroup* snapshot_group_;
   // TsEntityGroup instance of the original ts table

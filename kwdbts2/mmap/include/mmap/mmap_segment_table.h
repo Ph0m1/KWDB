@@ -190,7 +190,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
    * @return int The result status code returned after the operation, 0 for success, non-zero error codes for failure.
    */
   int PushPayload(uint32_t entity_id, MetricRowID start_row, kwdbts::Payload* payload,
-                  size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info);
+                  size_t start_in_payload, const BlockSpan& span,
+                  uint32_t* inc_unordered_cnt, kwdbts::DedupInfo& dedup_info);
 
   /**
    *  @brief copy block from snapshot to segment file  directly.

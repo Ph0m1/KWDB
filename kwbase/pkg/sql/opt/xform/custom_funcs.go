@@ -29,7 +29,6 @@ import (
 	"sort"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/constraint"
@@ -74,6 +73,11 @@ func (c *CustomFuncs) Init(e *explorer) {
 // unaltered primary index Scan operator (i.e. unconstrained and not limited).
 func (c *CustomFuncs) IsCanonicalScan(scan *memo.ScanPrivate) bool {
 	return scan.IsCanonical()
+}
+
+// ExploreOrderedTSScan returns true if the given ScanPrivate need explore ordered tsscan
+func (c *CustomFuncs) ExploreOrderedTSScan(scan *memo.TSScanPrivate) bool {
+	return scan.ExploreOrderedScan
 }
 
 // IsLocking returns true if the ScanPrivate is configured to use a row-level
@@ -139,6 +143,15 @@ func (c *CustomFuncs) GenerateIndexScans(grp memo.RelExpr, scanPrivate *memo.Sca
 		sb.setScan(&newScanPrivate)
 
 		sb.addIndexJoin(scanPrivate.Cols)
+		sb.build(grp)
+	}
+}
+
+// GenerateOrderedTSScans create sort two type for ordered table
+func (c *CustomFuncs) GenerateOrderedTSScans(grp memo.RelExpr, scanPrivate *memo.TSScanPrivate) {
+	if scanPrivate.ExploreOrderedScan {
+		var sb orderedTSScanBuilder
+		sb.init(c, *scanPrivate)
 		sb.build(grp)
 	}
 }
@@ -2643,7 +2656,7 @@ func (c *CustomFuncs) GenerateTagTSScans(
 	grp memo.RelExpr, TSScanPrivate *memo.TSScanPrivate, explicitFilters memo.FiltersExpr,
 ) {
 	// only ts scan can execute in ts engine
-	if !c.e.mem.CheckFlag(opt.ExecInTSEngine) {
+	if !c.e.mem.TSSupportAllProcessor() {
 		return
 	}
 	private := *TSScanPrivate
@@ -2653,7 +2666,7 @@ func (c *CustomFuncs) GenerateTagTSScans(
 	// leaveFilter is  a > 12
 	// tagFilters is tag1 < 11
 	// primaryTagFilters is ptag = 10
-	leaveFilter, tagFilters, primaryTagFilters := GetPrimaryTagFilterValue(&private, &explicitFilters, c.e.mem)
+	leaveFilter, tagFilters, primaryTagFilters := memo.GetPrimaryTagFilterValue(&private, &explicitFilters, c.e.mem)
 	if tagFilters == nil && primaryTagFilters == nil {
 		// can not optimize when have not tag filter
 		return
@@ -2670,11 +2683,12 @@ func (c *CustomFuncs) GenerateTagTSScans(
 	// primary tag value and tag filter ----- tag index table
 	// only tag filter --- table table table
 	// not exist primary tag value and tag filter  ----- meta table
-	private.AccessMode = getAccessMode(primaryTagFilters != nil, tagFilters != nil, TSScanPrivate, c.e.mem)
+	private.AccessMode = memo.GetAccessMode(primaryTagFilters != nil, tagFilters != nil, TSScanPrivate, c.e.mem)
 
 	// filter can all push to table reader, so need remover select expr
 	if leaveFilter == nil {
 		newTSScan := &memo.TSScanExpr{TSScanPrivate: private}
+		grp.Relational().Stats.SortDistribution = grp.Child(0).(*memo.TSScanExpr).Relational().Stats.SortDistribution
 		c.e.mem.AddTSScanToGroup(newTSScan, grp)
 	} else {
 		newFilters := *(leaveFilter.(*memo.FiltersExpr))
@@ -2691,116 +2705,4 @@ func (c *CustomFuncs) GenerateTagTSScans(
 			c.e.mem.AddSelectToGroup(sel, grp)
 		}
 	}
-}
-
-// GetPrimaryTagFilterValue splits the filtering conditions into tag filter conditions, primary tag filter
-// conditions,ordinary column filter conditions and then return them.
-// private record HINT and PrimaryTagValues.
-// e is the original filter expr.
-// m record the table cache.
-func GetPrimaryTagFilterValue(
-	private *memo.TSScanPrivate, e opt.Expr, m *memo.Memo,
-) (opt.Expr, []opt.Expr, []opt.Expr) {
-	tabID := private.Table
-
-	table := m.Metadata().TableMeta(tabID).Table
-	colMap := make(memo.TagColMap, 1)
-	primaryColMap := make(memo.TagColMap, 1)
-	for i := 0; i < table.ColumnCount(); i++ {
-		if table.Column(i).IsTagCol() {
-			colMap[tabID.ColumnID(i)] = struct{}{}
-		}
-
-		if table.Column(i).IsPrimaryTagCol() {
-			primaryColMap[tabID.ColumnID(i)] = struct{}{}
-		}
-	}
-
-	// 1. spilt original filter expr to ordinary column filter conditions and tag filter conditions
-	// 2. spilt tag filter conditions to ordinary tag filter conditions, primary tag filter conditions
-	leave, tagFilter := m.SplitTagExpr(e, colMap)
-
-	// hint control use TagTable
-	if tagFilter != nil && private.HintType == keys.ForceTagTableHint {
-		return leave, tagFilter, nil
-	}
-	var tags []opt.Expr
-	var PrimaryTags []opt.Expr
-	private.PrimaryTagValues = make(map[uint32][]string, 1)
-	for i := 0; i < len(tagFilter); i++ {
-		if !memo.GetPrimaryTagValues(tagFilter[i], primaryColMap, &private.PrimaryTagValues) {
-			tags = append(tags, tagFilter[i])
-		} else {
-			PrimaryTags = append(PrimaryTags, tagFilter[i])
-		}
-	}
-
-	// check primary tag
-	if !CheckPrimaryTagCanUse(m.Metadata().TableMeta(tabID).PrimaryTagCount, &private.PrimaryTagValues) {
-		tags = append(tags, PrimaryTags...)
-		PrimaryTags = nil
-		private.PrimaryTagValues = nil
-	}
-	return leave, tags, PrimaryTags
-}
-
-// CheckPrimaryTagCanUse checks if the number of values matches the number of primary tag columns.
-// primaryTagCount is the number of primary tag column.
-// value is the primary tag values.
-func CheckPrimaryTagCanUse(primaryTagCount int, value *memo.PTagValues) bool {
-	// all primary tag value count in filter can not use index
-	if len(*value) != primaryTagCount {
-		return false
-	}
-
-	count := 0
-	first := true
-	for _, val := range *value {
-		if first {
-			count = len(val)
-			first = false
-		} else {
-			// all primary tag value count is not equal can not use index
-			if count != len(val) {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-// getAccessMode get access mode by filter expr.
-// hasPrimaryFilter is true when there have primary tag filter.
-// hasTagFilter is true when there have ordinary tag filter.
-// sel is the SelectExpr.
-// m record the table cache.
-func getAccessMode(
-	hasPrimaryFilter bool, hasTagFilter bool, private *memo.TSScanPrivate, m *memo.Memo,
-) (accessMode int) {
-	if private.AccessMode != -1 {
-		return private.AccessMode
-	}
-	var hasNormalTags, outputHasTag bool
-	hasPrimaryTags := hasPrimaryFilter
-
-	private.Cols.ForEach(func(colID opt.ColumnID) {
-		colMeta := m.Metadata().ColumnMeta(colID)
-		outputHasTag = outputHasTag || colMeta.IsNormalTag()
-	})
-	if hasTagFilter || outputHasTag {
-		hasNormalTags = true
-	}
-	if hasPrimaryTags {
-		if !hasNormalTags {
-			accessMode = int(execinfrapb.TSTableReadMode_tagIndex)
-		} else {
-			accessMode = int(execinfrapb.TSTableReadMode_tagIndexTable)
-		}
-	} else if hasNormalTags {
-		accessMode = int(execinfrapb.TSTableReadMode_tableTableMeta)
-	} else { // !hasPrimaryTags && !hasNormalTags
-		accessMode = int(execinfrapb.TSTableReadMode_metaTable)
-	}
-	return accessMode
 }

@@ -26,6 +26,7 @@ package rowexec
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/jobs"
@@ -39,6 +40,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
+	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
@@ -76,6 +78,10 @@ type sampleAggregator struct {
 	numRowsCol   int
 	numNullsCol  int
 	sketchCol    int
+
+	bucketIDCol      int
+	bucketNumRowsCol int
+	timeZone         string
 }
 
 var _ execinfra.Processor = &sampleAggregator{}
@@ -85,6 +91,9 @@ const sampleAggregatorProcName = "sample aggregator"
 // SampleAggregatorProgressInterval is the frequency at which the
 // SampleAggregator processor will report progress. It is mutable for testing.
 var SampleAggregatorProgressInterval = 5 * time.Second
+
+// MinBucketSpan is minimum time span for each bucket
+const MinBucketSpan = 3600000
 
 func newSampleAggregator(
 	flowCtx *execinfra.FlowCtx,
@@ -114,7 +123,13 @@ func newSampleAggregator(
 	// The processor will disable histogram collection if this limit is not
 	// enough.
 	memMonitor := execinfra.NewLimitedMonitor(ctx, flowCtx.EvalCtx.Mon, flowCtx.Cfg, "sample-aggregator-mem")
-	rankCol := len(input.OutputTypes()) - 5
+	var rankCol int
+	if spec.IsTsStats {
+		rankCol = len(input.OutputTypes()) - 7
+	} else {
+		rankCol = len(input.OutputTypes()) - 5
+	}
+
 	s := &sampleAggregator{
 		spec:         spec,
 		input:        input,
@@ -130,6 +145,10 @@ func newSampleAggregator(
 		numNullsCol:  rankCol + 3,
 		sketchCol:    rankCol + 4,
 	}
+	if spec.IsTsStats {
+		s.bucketIDCol = rankCol + 5
+		s.bucketNumRowsCol = rankCol + 6
+	}
 
 	var sampleCols util.FastIntSet
 	for i := range spec.Sketches {
@@ -141,6 +160,14 @@ func newSampleAggregator(
 		}
 		if spec.Sketches[i].GenerateHistogram {
 			sampleCols.Add(int(spec.Sketches[i].Columns[0]))
+		}
+		if spec.Sketches[i].HasAllPTag {
+			s.timeZone = spec.TimeZone
+			s.sketches[i].SampledSortedData = SampledSortedInfo{
+				minTimestamp:        spec.Sketches[i].SortedHistogramInfo.FromTimeStamp,
+				maxTimestamp:        spec.Sketches[i].SortedHistogramInfo.ToTimeStamp,
+				sampledSortedBucket: make(map[int]SortedBucket),
+			}
 		}
 	}
 
@@ -215,21 +242,6 @@ func (s *sampleAggregator) mainLoop(ctx context.Context) (earlyExit bool, err er
 		}
 	}
 
-	var tableType tree.TableType
-	err = s.FlowCtx.Cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		tbl, err := sqlbase.GetTableDescFromID(ctx, txn, s.tableID)
-		if err != nil {
-			log.Errorf(ctx, "Failed to get table desc when create statistic : %v", err)
-			return err
-		}
-		tableType = tbl.TableType
-		return nil
-	})
-	if err != nil {
-		log.Errorf(ctx, "Failed to get table desc when collect statistic : %v", err)
-		return false, err
-	}
-
 	lastReportedFractionCompleted := float32(-1)
 	// Report progress (0 to 1).
 	progFn := func(fractionCompleted float32) error {
@@ -292,6 +304,13 @@ func (s *sampleAggregator) mainLoop(ctx context.Context) (earlyExit bool, err er
 		//  - a sampled row, which has NULLs on all columns from sketchIdxCol
 		//    onward, or
 		//  - a sketch row, which has all NULLs on all columns before sketchIdxCol.
+		//  - a sortedHistogram row
+		if s.spec.IsTsStats && !row[s.bucketIDCol].IsNull() {
+			if err := s.updateBucketData(row); err != nil {
+				return false, err
+			}
+			continue
+		}
 		if row[s.sketchIdxCol].IsNull() {
 			// This must be a sampled row.
 			rank, err := row[s.rankCol].GetInt()
@@ -332,7 +351,7 @@ func (s *sampleAggregator) mainLoop(ctx context.Context) (earlyExit bool, err er
 		s.sketches[sketchIdx].numNulls += numNulls
 		// Normal columns need to calculate distinct-count
 		// Primary Tag is a foreign key index, no need to calculate distinct-count
-		if canEncodeBytes(tableType, s.sketches[sketchIdx].spec, s.inTypes[sketchIdx].Family()) {
+		if canEncodeBytes(s.spec.IsTsStats, s.sketches[sketchIdx].spec, s.inTypes[sketchIdx].Family()) {
 			// Decode the sketch.
 			if err := row[s.sketchCol].EnsureDecoded(&s.inTypes[s.sketchCol], &da); err != nil {
 				return false, err
@@ -371,15 +390,40 @@ func (s *sampleAggregator) writeResults(ctx context.Context) error {
 	// internal executor instead of doing this weird thing where it uses the
 	// internal executor to execute one statement at a time inside a db.Txn()
 	// closure.
+	var primaryTagSketch []sketchInfo
+	var primaryTagRowCount int64
+	if s.spec.IsTsStats {
+		for _, si := range s.sketches {
+			if si.spec.HasAllPTag {
+				primaryTagSketch = append(primaryTagSketch, si)
+			}
+		}
+
+		if len(primaryTagSketch) > 0 {
+			primaryTagRowCount = int64(primaryTagSketch[0].sketch.Estimate())
+		}
+	}
+
 	if err := s.FlowCtx.Cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
 		var distinctCount int64
 		for _, si := range s.sketches {
+			// For the tag table, the virtual sketch is used to get the row number
+			if si.spec.VirtualSketch {
+				continue
+			}
 			distinctCount = int64(si.sketch.Estimate())
-			// Primary tag is a foreign key index, distinctCount is same as rowCount
-			if len(si.spec.ColumnTypes) > 0 && (si.spec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_PTAG) && si.spec.HasAllPTag) {
-				si.numRows = distinctCount
+			// For the tag table, the row number of tag column and primary column rows is primaryTagRowCount
+			if s.spec.IsTsStats && si.isTagSketch() {
+				si.numRows = primaryTagRowCount
 			}
 			var histogram *stats.HistogramData
+			if si.spec.HasAllPTag && len(si.SampledSortedData.sampledSortedBucket) > 0 {
+				h, err := s.generateSortedHistogram(si.SampledSortedData)
+				if err != nil {
+					return err
+				}
+				histogram = &h
+			}
 			if si.spec.GenerateHistogram && len(s.sr.Get()) != 0 {
 				colIdx := int(si.spec.Columns[0])
 				typ := &s.inTypes[colIdx]
@@ -491,12 +535,57 @@ func (s *sampleAggregator) generateHistogram(
 	return stats.EquiDepthHistogram(evalCtx, colType, values, numRows, distinctCount, maxBuckets)
 }
 
+func (s *sampleAggregator) generateSortedHistogram(
+	samples SampledSortedInfo,
+) (stats.HistogramData, error) {
+	numBuckets := len(samples.sampledSortedBucket)
+	totalDuration := samples.maxTimestamp - samples.minTimestamp
+
+	// Calculate the time span of each bucket
+	bucketSpan := math.Max(float64(MinBucketSpan), float64(totalDuration)/float64(numBuckets))
+
+	h := stats.HistogramData{
+		SortedBuckets: make([]stats.HistogramData_SortedHistogramBucket, 0),
+	}
+	// Get the current session timezone
+	loc, err := timeutil.TimeZoneStringToLocation(s.timeZone, timeutil.TimeZoneStringToLocationISO8601Standard)
+	if err != nil {
+		return h, err
+	}
+
+	for i := 1; i <= numBuckets; i++ {
+		sampledBucket := samples.sampledSortedBucket[i]
+
+		// Calculate the upper boundary of the bucket
+		var upperBoundTimestamp int64
+		if i == 1 {
+			upperBoundTimestamp = samples.minTimestamp
+		} else {
+			upperBoundTimestamp = samples.minTimestamp + int64(i-1)*int64(bucketSpan)
+		}
+
+		timeValue := timeutil.Unix(0, upperBoundTimestamp*int64(time.Millisecond)).In(loc)
+		upperBoundValue := tree.MakeDTimestampTZ(timeValue, time.Millisecond)
+
+		encoded, err := sqlbase.EncodeTableKey(nil, upperBoundValue, encoding.Ascending)
+		if err != nil {
+			return stats.HistogramData{}, err
+		}
+		h.SortedBuckets = append(h.SortedBuckets, stats.HistogramData_SortedHistogramBucket{
+			RowCount:          sampledBucket.RowCount / sampledBucket.NodeCount,
+			UnorderedRowCount: sampledBucket.UnorderedRowCount / sampledBucket.NodeCount,
+			UnorderedEntities: float64(sampledBucket.UnorderedEntities / sampledBucket.NodeCount),
+			OrderedEntities:   float64(sampledBucket.OrderedEntities / sampledBucket.NodeCount),
+			UpperBound:        encoded,
+		})
+	}
+	return h, nil
+}
+
 // canEncodeBytes is used to determine whether you need to encode bytes for distinct-count
-func canEncodeBytes(
-	tableType tree.TableType, sketchSpec execinfrapb.SketchSpec, family types.Family,
-) bool {
+func canEncodeBytes(isTsStats bool, sketchSpec execinfrapb.SketchSpec, family types.Family) bool {
 	// Check if the table type is RELATIONAL_TABLE, which directly allows encoding
-	if tableType == tree.RelationalTable {
+	if !isTsStats {
 		return true
 	}
 
@@ -517,4 +606,61 @@ func canEncodeBytes(
 
 	// Return true if both the type and family checks pass
 	return isSpecifiedType && isAllowedFamily
+}
+
+// updateBucketData is used to summarize and update bucket data for sorted histogram
+func (s *sampleAggregator) updateBucketData(row sqlbase.EncDatumRow) error {
+	bucketID, err := row[s.bucketIDCol].GetInt()
+	if err != nil {
+		return err
+	}
+
+	sketchIdx, err := row[s.sketchIdxCol].GetInt()
+	if err != nil {
+		return err
+	}
+
+	if sketchIdx < 0 || sketchIdx >= int64(len(s.sketches)) {
+		return pgerror.Newf(pgcode.Warning, "invalid sketch index %d", sketchIdx)
+	}
+
+	bucketNumRows, err := row[s.bucketNumRowsCol].GetInt()
+	if err != nil {
+		return err
+	}
+
+	unorderedNumRows, err := row[s.rankCol].GetInt()
+	if err != nil {
+		return err
+	}
+
+	orderedEntities, err := row[s.numRowsCol].GetInt()
+	if err != nil {
+		return err
+	}
+
+	unOrderedEntities, err := row[s.numNullsCol].GetInt()
+	if err != nil {
+		return err
+	}
+
+	sampledSorted := &s.sketches[sketchIdx].SampledSortedData
+	if sampledSorted.sampledSortedBucket == nil {
+		return pgerror.Newf(pgcode.Warning, "the sort histogram is not initialized")
+	}
+	bucket, exists := sampledSorted.sampledSortedBucket[int(bucketID)]
+	if !exists {
+		bucket = SortedBucket{NodeCount: 1}
+	}
+
+	bucket.RowCount += uint64(bucketNumRows)
+	bucket.UnorderedRowCount += uint64(unorderedNumRows)
+	bucket.OrderedEntities += uint64(orderedEntities)
+	bucket.UnorderedEntities += uint64(unOrderedEntities)
+	if bucketNumRows != 0 {
+		bucket.NodeCount++
+	}
+
+	sampledSorted.sampledSortedBucket[int(bucketID)] = bucket
+	return nil
 }

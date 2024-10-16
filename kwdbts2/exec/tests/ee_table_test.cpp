@@ -10,7 +10,7 @@
 // See the Mulan PSL v2 for more details.
 #include "ee_table.h"
 
-#include "ee_metadata_data_test.h"
+// #include "ee_metadata_data_test.h"
 #include "gtest/gtest.h"
 namespace kwdbts {
   const int datatype[13][2] = {
@@ -63,7 +63,7 @@ TEST_F(TestTable, TestTableInit) {
     EXPECT_TRUE(field != nullptr);
   }
 
-  SafeDelete(post_);
-  SafeDelete(table);
+  SafeDeletePointer(post_);
+  SafeDeletePointer(table);
 }
 }  // namespace kwdbts

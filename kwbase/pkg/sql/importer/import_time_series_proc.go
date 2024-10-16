@@ -727,7 +727,7 @@ func (t *timeSeriesImportInfo) ingest(
 				}
 			}
 		}
-		resp, err := t.flowCtx.Cfg.TsEngine.PutData(uint64(t.tbID), [][]byte{payload}, uint64(0))
+		resp, _, err := t.flowCtx.Cfg.TsEngine.PutData(uint64(t.tbID), [][]byte{payload}, uint64(0))
 		if err != nil {
 			for i := range datums {
 				cols := datums[i]

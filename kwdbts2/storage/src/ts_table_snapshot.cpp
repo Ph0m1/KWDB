@@ -508,10 +508,12 @@ KStatus TsSnapshotConsumerByPayload::writeDataWithPayload(kwdbContext_p ctx, TSS
     LOG_ERROR("can not get entitygroup id by primary key.");
     return s;
   }
+  uint16_t inc_entity_cnt = 0;
+  uint32_t inc_unordered_cnt = 0;
   total_rows_ += Payload::GetRowCountFromPayload(&data);
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
   return snapshot_info_.table->PutDataWithoutWAL(ctx, cur_egrp_id , &data, 1, entity_grp_mtr_id_[cur_egrp_id],
-                                                  &dedup_result, DedupRule::KEEP);
+                                                 &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, DedupRule::KEEP);
 }
 
 KStatus TsSnapshotConsumerByPayload::Init(kwdbContext_p ctx, const TsSnapshotInfo& info) {
@@ -584,8 +586,11 @@ KStatus TsSnapshotConsumerByBlock::GenEmptyTagForPrimaryKey(kwdbContext_p ctx,
   }
   std::shared_ptr<kwdbts::TsEntityGroup> entity_group{nullptr};
   snapshot_info_.table->GetEntityGroup(ctx, entity_grp_id, &entity_group);
+  uint16_t inc_entity_cnt = 0;
+  uint32_t inc_unordered_cnt = 0;
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  KStatus s = entity_group->PutDataWithoutWAL(ctx, tag_data, 1, &dedup_result, DedupRule::KEEP);
+  KStatus s = entity_group->PutDataWithoutWAL(ctx, tag_data, 1, &inc_entity_cnt, &inc_unordered_cnt,
+                                              &dedup_result, DedupRule::KEEP);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("tag not found, so create one, created failed.");
     return s;

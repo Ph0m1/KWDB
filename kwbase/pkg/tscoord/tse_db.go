@@ -137,7 +137,7 @@ func (s *TsSender) Send(
 			}
 		}
 		if putPayload != nil {
-			dedupRes, err := s.tsEngine.PutData(1, putPayload, 0)
+			dedupRes, entitiesAffect, err := s.tsEngine.PutData(1, putPayload, 0)
 			if err != nil {
 				// todo need to process dedupResult
 				return nil, &roachpb.Error{Message: err.Error()}
@@ -148,8 +148,10 @@ func (s *TsSender) Send(
 						ResponseHeader: roachpb.ResponseHeader{
 							NumKeys: int64(dedupRes.DedupRows),
 						},
-						DedupRule:     int64(dedupRes.DedupRule),
-						DiscardBitmap: dedupRes.DiscardBitmap,
+						DedupRule:         int64(dedupRes.DedupRule),
+						DiscardBitmap:     dedupRes.DiscardBitmap,
+						EntitiesAffected:  uint32(entitiesAffect.EntityCount),
+						UnorderedAffected: entitiesAffect.UnorderedCount,
 					},
 				},
 			})

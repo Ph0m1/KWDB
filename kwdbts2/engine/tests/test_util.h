@@ -551,7 +551,6 @@ TSSlice GenSomePayloadDataRowBased(kwdbContext_p ctx, k_uint32 count, KTimestamp
   char* cur_row_mem = value + (data_length - data_len);
   for (size_t i = 0; i < count; i++) {
     size_t cur_row_len = row_based_tuple_size + bitmap_len;
-    size_t cur_row_var_offset = 0;
     size_t cur_col_offset_in_row_mem = bitmap_len;
     for (int col = 0; col < schema.size(); col++) {
       size_t col_store_len = isVarLenType(schema[col].type) ? sizeof(intptr_t) : schema[col].size;

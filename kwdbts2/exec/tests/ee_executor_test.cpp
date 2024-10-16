@@ -16,11 +16,7 @@
 #include <string>
 
 #include "../../roachpb/ee_pb_plan.pb.h"
-// #include "cm_assert.h"
 #include "gtest/gtest.h"
-// #include "me_cache_manager.h"
-// #include "th_kwdb_dynamic_thread_pool.h"
-// #include "cn_conn_array.h"
 
 namespace kwdbts {
 

@@ -230,9 +230,11 @@ TEST_F(TestEngine, insert) {
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   delete[] data_value;
@@ -265,9 +267,11 @@ TEST_F(TestEngine, insertNull) {
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   delete[] data_value;
@@ -300,9 +304,11 @@ TEST_F(TestEngine, columnInsert) {
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   delete[] data_value;
@@ -335,9 +341,11 @@ TEST_F(TestEngine, DeleteEntities) {
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   vector<AttributeInfo> schema;
@@ -380,7 +388,7 @@ TEST_F(TestEngine, DeleteEntities) {
   EXPECT_EQ(ret_cnt, 0);
   delete iter1;
 
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   entity_id = 2;
@@ -420,10 +428,12 @@ TEST_F(TestEngine, DeleteData) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // insert
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = tbl_range->PutData(ctx_, payload2, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload2, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   vector<AttributeInfo> schema;
@@ -694,8 +704,10 @@ TEST_F(TestEngine, DropColumn) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // insert
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = tbl_range->PutData(ctx_, payload, 0, &dedup_result);
+  s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value;
 

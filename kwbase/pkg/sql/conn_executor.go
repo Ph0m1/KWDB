@@ -2581,7 +2581,7 @@ func (ex *connExecutor) notifyStatsRefresherOfNewTables(ctx context.Context) {
 			// created/refreshed here.
 			if desc.TableType == tree.TimeseriesTable {
 				ex.planner.execCfg.StatsRefresher.
-					NotifyTsMutation(desc.ID, math.MaxInt32 /* rowsAffected */)
+					NotifyTsMutation(desc.ID, math.MaxInt32 /* rowsAffected */, math.MaxInt32 /* entitiesAffected */, math.MaxInt32 /* unorderedAffected */)
 			} else if desc.TableType == tree.RelationalTable {
 				ex.planner.execCfg.StatsRefresher.
 					NotifyMutation(desc.ID, math.MaxInt32 /* rowsAffected */)

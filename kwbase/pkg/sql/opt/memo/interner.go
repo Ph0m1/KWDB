@@ -735,6 +735,14 @@ func (h *hasher) HashTSTableReadMode(val execinfrapb.TSTableReadMode) {
 	h.HashInt(int(val))
 }
 
+func (h *hasher) HashTSOrderedScanType(val opt.OrderedTableType) {
+	h.HashInt(int(val))
+}
+
+func (h *hasher) HashTSGroupOptType(val opt.GroupOptType) {
+	h.HashUint64(uint64(val))
+}
+
 // ----------------------------------------------------------------------
 //
 // Equality functions
@@ -1230,6 +1238,20 @@ func (h *hasher) IsRowsValueEqual(left, right opt.RowsValue) bool {
 		return true
 	}
 	return false
+}
+
+func (h *hasher) IsTSOrderedScanTypeEqual(l, r opt.OrderedTableType) bool {
+	if l != r {
+		return false
+	}
+	return true
+}
+
+func (h *hasher) IsTSGroupOptTypeEqual(l, r opt.GroupOptType) bool {
+	if l != r {
+		return false
+	}
+	return true
 }
 
 // encodeDatum turns the given datum into an encoded string of bytes. If two

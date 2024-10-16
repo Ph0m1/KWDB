@@ -77,6 +77,10 @@ type requestedStat struct {
 	name                string
 	columnsTypes        []sqlbase.ColumnType
 	hasAllPTag          bool
+	// virtual sketch is used to determine the row count of tag table
+	virtualSketch bool
+	// sortedHistogram supports sorted histogram collection for entities in tag table
+	sortedHistogram sqlbase.SortedHistogramInfo
 }
 
 // TsSamplerConfig Configure parameters for TsSamplerConfig
@@ -323,9 +327,9 @@ func (dsp *DistSQLPlanner) createTsStatsPlan(
 	}
 
 	// The ts sampler outputs the original columns plus a rank column and four sketch columns.
-	outTypes := make([]types.T, 0, len(tsSamplerCfg.StatsCols)+5)
+	outTypes := make([]types.T, 0, len(tsSamplerCfg.StatsCols)+7)
 	outTypes = append(outTypes, tsSamplerCfg.StatsColsTypes...)
-	extraColumns := []types.T{*types.Int, *types.Int, *types.Int, *types.Int, *types.Bytes}
+	extraColumns := []types.T{*types.Int, *types.Int, *types.Int, *types.Int, *types.Bytes, *types.Int, *types.Int}
 	outTypes = append(outTypes, extraColumns...)
 	p.AddTSNoGroupingStage(
 		execinfrapb.TSProcessorCoreUnion{Sampler: tsSamplerSpec},
@@ -365,6 +369,8 @@ func (dsp *DistSQLPlanner) createTsStatsPlan(
 			ColumnTypes:         make([]uint32, len(s.columns)),
 			StatName:            s.name,
 			HasAllPTag:          s.hasAllPTag,
+			VirtualSketch:       s.virtualSketch,
+			SortedHistogramInfo: s.sortedHistogram,
 		}
 		for i, colID := range s.columns {
 			colIdx, ok := colIdxMap[colID]
@@ -402,6 +408,7 @@ func (dsp *DistSQLPlanner) createTsStatsPlan(
 		jobID = *job.ID()
 	}
 
+	details := job.Details().(jobspb.CreateStatsDetails)
 	// Set up the final SampleAggregator stage.
 	agg := &execinfrapb.SampleAggregatorSpec{
 		Sketches:         sketchAggSpecs,
@@ -410,6 +417,8 @@ func (dsp *DistSQLPlanner) createTsStatsPlan(
 		TableID:          desc.ID,
 		JobID:            jobID,
 		RowsExpected:     rowsExpected,
+		IsTsStats:        true,
+		TimeZone:         details.TimeZone,
 	}
 	// Plan the SampleAggregator on the gateway, unless we have a single Sampler.
 	node := dsp.nodeDesc.NodeID
@@ -444,6 +453,8 @@ func (dsp *DistSQLPlanner) createPlanForCreateStats(
 			name:                details.Name,
 			columnsTypes:        columnTypes,
 			hasAllPTag:          details.ColumnStats[i].HasAllPTag,
+			virtualSketch:       details.ColumnStats[i].VirtualSketch,
+			sortedHistogram:     details.ColumnStats[i].SortedHistogram,
 		}
 	}
 	tableDesc := sqlbase.NewImmutableTableDescriptor(details.Table)

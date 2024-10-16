@@ -197,12 +197,14 @@ TEST_F(TestTsEntityGroup, create) {
   TSSlice payload;
   GenPayloadData(primary_key, start_ts, 3, &payload);
   EXPECT_EQ(s, KStatus::SUCCESS);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = entity_group_leader_->PutData(ctx_, payload, 0, &dedup_result);
+  s = entity_group_leader_->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   EXPECT_EQ(s, KStatus::SUCCESS);
-  s = entity_group_follower_->PutData(ctx_, payload, 0, &dedup_result);
+  s = entity_group_follower_->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   EXPECT_EQ(s, KStatus::SUCCESS);
-  s = entity_group_other_->PutData(ctx_, payload, 0, &dedup_result);
+  s = entity_group_other_->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   EXPECT_EQ(s, KStatus::SUCCESS);
   free(payload.data);
 
@@ -285,8 +287,10 @@ TEST_F(TestTsEntityGroup, InsertSometimes) {
   TSSlice payload;
   GenPayloadData(primary_key, start_ts, batch_count, &payload);
   for (size_t i = 0; i < batch_times; i++) {
+    uint16_t inc_entity_cnt;
+    uint32_t inc_unordered_cnt;
     DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-    s = entity_group_leader_->PutData(ctx_, payload, 0, &dedup_result,kwdbts::DedupRule::KEEP);
+    s = entity_group_leader_->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result,kwdbts::DedupRule::KEEP);
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
   free(payload.data);
@@ -324,8 +328,10 @@ TEST_F(TestTsEntityGroup, InsertCrossPartitionSometimes) {
   TSSlice payload;
   GenPayloadData(primary_key, start_ts, batch_count, &payload, 10000);
   for (size_t i = 0; i < batch_times; i++) {
+    uint16_t inc_entity_cnt;
+    uint32_t inc_unordered_cnt;
     DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-    s = entity_group_leader_->PutData(ctx_, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+    s = entity_group_leader_->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
   free(payload.data);
@@ -368,8 +374,10 @@ TEST_F(TestTsEntityGroup, mulitiInsert) {
       kwdbContext_t ctx_1;
       KStatus s = InitServerKWDBContext(&ctx_1);
       for (size_t i = 0; i < batch_times; i++) {
+        uint16_t inc_entity_cnt;
+        uint32_t inc_unordered_cnt;
         DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-        s = entity_group_leader_->PutData(&ctx_1, payload, 0, &dedup_result,kwdbts::DedupRule::KEEP);
+        s = entity_group_leader_->PutData(&ctx_1, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result,kwdbts::DedupRule::KEEP);
         if (s != KStatus::SUCCESS) {
           std::cout << "put data error." << i << std::endl;
         }
@@ -419,8 +427,10 @@ TEST_F(TestTsEntityGroup, mulitiInsertCrossPartition) {
       kwdbContext_t ctx_1;
       KStatus s = InitServerKWDBContext(&ctx_1);
       for (size_t i = 0; i < batch_times; i++) {
+        uint16_t inc_entity_cnt;
+        uint32_t inc_unordered_cnt;
         DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-        s = entity_group_leader_->PutData(&ctx_1, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+        s = entity_group_leader_->PutData(&ctx_1, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
         if (s != KStatus::SUCCESS) {
           std::cout << "put data error." << i << std::endl;
         }
@@ -497,8 +507,10 @@ TEST_F(TestTsEntityGroup, mulitiInsertMultiEntity) {
             ent_count1++;
           }
         }
+        uint16_t inc_entity_cnt;
+        uint32_t inc_unordered_cnt;
         DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-        s = entity_group_leader_->PutData(&ctx_1, cur_payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+        s = entity_group_leader_->PutData(&ctx_1, cur_payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
         if (s != KStatus::SUCCESS) {
           std::cout << "put data error." << i << std::endl;
         }
@@ -558,8 +570,10 @@ TEST_F(TestTsEntityGroup, InsertAndDel) {
   TSSlice payload;
   GenPayloadData(primary_key, start_ts, batch_count, &payload);
   for (size_t i = 0; i < batch_times; i++) {
+    uint16_t inc_entity_cnt;
+    uint32_t inc_unordered_cnt;
     DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-    s = entity_group_leader_->PutData(ctx_, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+    s = entity_group_leader_->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
     ASSERT_EQ(s, KStatus::SUCCESS);
     ASSERT_EQ(s, KStatus::SUCCESS);
   }

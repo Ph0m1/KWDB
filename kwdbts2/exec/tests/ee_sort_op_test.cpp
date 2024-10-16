@@ -12,52 +12,21 @@
 #include "gtest/gtest.h"
 #include "ee_dml_exec.h"
 #include "ee_op_test_base.h"
-#include "ee_op_operator_utils.h"
 #include "ee_op_spec_utils.h"
 
 namespace kwdbts {
 
-const int row_num_per_payload = 1;
-const int insert_batch = 1;
-const int test_table_id = 800;
-
 class TestSortOp : public OperatorTestBase {
  public:
-  TestSortOp() : OperatorTestBase(test_table_id) {
-
-  }
+  TestSortOp() : OperatorTestBase() {}
 
  protected:
   void SetUp() override {
     OperatorTestBase::SetUp();
-    roachpb::CreateTsTable meta;
-    TSBSSchema::constructTableMetadata(meta, "test_table", table_id_);
-
-    CreateTable(meta);
-    InsertRecords(meta);
   }
 
   void TearDown() override {
     OperatorTestBase::TearDown();
-  }
-
-  void CreateTable(roachpb::CreateTsTable& meta) {
-    ASSERT_EQ(engine_->CreateTsTable(ctx_, table_id_, &meta, {test_range}),
-              KStatus::SUCCESS);
-  }
-
-  void InsertRecords(roachpb::CreateTsTable& meta) {
-    for (int round = 0; round < insert_batch; round++) {
-      k_uint32 p_len = 0;
-//      KTimestamp start_ts = std::chrono::duration_cast<std::chrono::milliseconds>(
-//          std::chrono::system_clock::now().time_since_epoch())
-//          .count();
-      KTimestamp start_ts = 0;
-      auto data_value = TSBSSchema::genPayloadData(ctx_, row_num_per_payload, p_len, start_ts, meta);
-      TSSlice payload{data_value.get(), p_len};
-      DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-      engine_->PutData(ctx_, table_id_, test_range.range_group_id, &payload, 1, 0, &dedup_result);
-    }
   }
 };
 

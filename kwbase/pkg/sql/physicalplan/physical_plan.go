@@ -890,6 +890,16 @@ func (p *PhysicalPlan) ChildIsTSParallelProcessor() bool {
 	return p.Processors[p.ResultRouters[0]].TSSpec.Core.Synchronizer != nil
 }
 
+// HasTSParallelProcessor check has synchronizer
+func (p *PhysicalPlan) HasTSParallelProcessor() bool {
+	for i := range p.Processors {
+		if p.Processors[i].ExecInTSEngine && p.Processors[i].TSSpec.Core.Synchronizer != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // CheckLastIsNoop check last is noop
 func (p *PhysicalPlan) CheckLastIsNoop() bool {
 	return p.Processors[p.ResultRouters[0]].TSSpec.Core.Noop != nil

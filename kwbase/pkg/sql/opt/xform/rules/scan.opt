@@ -8,3 +8,9 @@
 (Scan $scanPrivate:* & (IsCanonicalScan $scanPrivate))
 =>
 (GenerateIndexScans $scanPrivate)
+
+
+[GenerateOrderedTSScan, Explore]
+(TSScan $scanPrivate:* & (ExploreOrderedTSScan $scanPrivate))
+=>
+(GenerateOrderedTSScans $scanPrivate)

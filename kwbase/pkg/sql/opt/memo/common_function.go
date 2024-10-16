@@ -15,6 +15,8 @@ import (
 	"hash/fnv"
 	"strconv"
 
+	"gitee.com/kwbasedb/kwbase/pkg/keys"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
@@ -340,6 +342,118 @@ func CheckFilterExprCanExecInTSEngine(src opt.Expr, pos ExprPos, f CheckFunc) bo
 	}
 
 	return true
+}
+
+// GetPrimaryTagFilterValue splits the filtering conditions into tag filter conditions, primary tag filter
+// conditions,ordinary column filter conditions and then return them.
+// private record HINT and PrimaryTagValues.
+// e is the original filter expr.
+// m record the table cache.
+func GetPrimaryTagFilterValue(
+	private *TSScanPrivate, e opt.Expr, m *Memo,
+) (opt.Expr, []opt.Expr, []opt.Expr) {
+	tabID := private.Table
+
+	table := m.Metadata().TableMeta(tabID).Table
+	colMap := make(TagColMap, 1)
+	primaryColMap := make(TagColMap, 1)
+	for i := 0; i < table.ColumnCount(); i++ {
+		if table.Column(i).IsTagCol() {
+			colMap[tabID.ColumnID(i)] = struct{}{}
+		}
+
+		if table.Column(i).IsPrimaryTagCol() {
+			primaryColMap[tabID.ColumnID(i)] = struct{}{}
+		}
+	}
+
+	// 1. spilt original filter expr to ordinary column filter conditions and tag filter conditions
+	// 2. spilt tag filter conditions to ordinary tag filter conditions, primary tag filter conditions
+	leave, tagFilter := m.SplitTagExpr(e, colMap)
+
+	// hint control use TagTable
+	if tagFilter != nil && private.HintType == keys.ForceTagTableHint {
+		return leave, tagFilter, nil
+	}
+	var tags []opt.Expr
+	var PrimaryTags []opt.Expr
+	private.PrimaryTagValues = make(map[uint32][]string, 1)
+	for i := 0; i < len(tagFilter); i++ {
+		if !GetPrimaryTagValues(tagFilter[i], primaryColMap, &private.PrimaryTagValues) {
+			tags = append(tags, tagFilter[i])
+		} else {
+			PrimaryTags = append(PrimaryTags, tagFilter[i])
+		}
+	}
+
+	// check primary tag
+	if !CheckPrimaryTagCanUse(m.Metadata().TableMeta(tabID).PrimaryTagCount, &private.PrimaryTagValues) {
+		tags = append(tags, PrimaryTags...)
+		PrimaryTags = nil
+		private.PrimaryTagValues = nil
+	}
+	return leave, tags, PrimaryTags
+}
+
+// CheckPrimaryTagCanUse checks if the number of values matches the number of primary tag columns.
+// primaryTagCount is the number of primary tag column.
+// value is the primary tag values.
+func CheckPrimaryTagCanUse(primaryTagCount int, value *PTagValues) bool {
+	// all primary tag value count in filter can not use index
+	if len(*value) != primaryTagCount {
+		return false
+	}
+
+	count := 0
+	first := true
+	for _, val := range *value {
+		if first {
+			count = len(val)
+			first = false
+		} else {
+			// all primary tag value count is not equal can not use index
+			if count != len(val) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// GetAccessMode get access mode by filter expr.
+// hasPrimaryFilter is true when there have primary tag filter.
+// hasTagFilter is true when there have ordinary tag filter.
+// sel is the SelectExpr.
+// m record the table cache.
+func GetAccessMode(
+	hasPrimaryFilter bool, hasTagFilter bool, private *TSScanPrivate, m *Memo,
+) (accessMode int) {
+	if private.AccessMode != -1 {
+		return private.AccessMode
+	}
+	var hasNormalTags, outputHasTag bool
+	hasPrimaryTags := hasPrimaryFilter
+
+	private.Cols.ForEach(func(colID opt.ColumnID) {
+		colMeta := m.Metadata().ColumnMeta(colID)
+		outputHasTag = outputHasTag || colMeta.IsNormalTag()
+	})
+	if hasTagFilter || outputHasTag {
+		hasNormalTags = true
+	}
+	if hasPrimaryTags {
+		if !hasNormalTags {
+			accessMode = int(execinfrapb.TSTableReadMode_tagIndex)
+		} else {
+			accessMode = int(execinfrapb.TSTableReadMode_tagIndexTable)
+		}
+	} else if hasNormalTags {
+		accessMode = int(execinfrapb.TSTableReadMode_tableTableMeta)
+	} else { // !hasPrimaryTags && !hasNormalTags
+		accessMode = int(execinfrapb.TSTableReadMode_metaTable)
+	}
+	return accessMode
 }
 
 // SplitTagExpr find all ts engine tag filter expr for ts engine execute tag index

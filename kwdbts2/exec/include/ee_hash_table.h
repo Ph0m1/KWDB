@@ -38,8 +38,8 @@ class HashTableIterator {
   bool operator!=(const HashTableIterator& t) const;
 
  private:
-  k_uint64 loc_idx_{0};
   const LinearProbingHashTable* ht_{nullptr};
+  k_uint64 loc_idx_{0};
 };
 
 /**

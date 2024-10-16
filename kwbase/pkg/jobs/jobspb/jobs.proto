@@ -477,6 +477,10 @@ message CreateStatsDetails {
     repeated int32 column_types = 3;
     // Indicates that the columns are all PTag
     bool has_allPTag = 4;
+    // Virtual sketch is a reference for collecting statistics of tag columns
+    bool virtual_sketch = 5;
+    // SortedHistogram supports sorted histogram collection for entities in time series tables
+    sqlbase.SortedHistogramInfo sortedHistogram = 6 [(gogoproto.nullable) = false];
   }
   string name = 1;
   sqlbase.TableDescriptor table = 2 [(gogoproto.nullable) = false];
@@ -488,6 +492,7 @@ message CreateStatsDetails {
   // Fully qualified table name.
   string fq_table_name = 6 [(gogoproto.customname) = "FQTableName"];
   bool isTsStats = 8;
+  string time_zone = 9;
 }
 
 message CreateStatsProgress {

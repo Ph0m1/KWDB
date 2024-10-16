@@ -2191,7 +2191,7 @@ ORDER BY e1;
    │         └── ts scan      |                  |
    │                          | ts-table         | t1
    │                          | access mode      | tableTableMeta
-   │                          | filter           | ((((e2 > 25) OR (e4 IS NULL)) AND ((e5 > @S1) OR (e5 < @S2))) AND (((tag2 >= 200) AND (tag2 <= 300)) OR (tag1 = 101))) OR ((e3 < @S3) AND (e1 > 15))
+   │                          | filter           | ((((e2 > 25) OR (e4 IS NULL)) AND ((e5 > @S1) OR (e5 < @S2))) AND ((tag1 = 101) OR ((tag2 >= 200) AND (tag2 <= 300)))) OR ((e3 < @S3) AND (e1 > 15))
    ├── subquery               |                  |
    │    │                     | id               | @S1
    │    │                     | original sql     | (SELECT avg(e5) FROM t1)

@@ -1172,6 +1172,10 @@ func (b *Builder) buildSelectClause(
 	b.buildWindow(outScope, fromScope)
 	b.validateLockingInFrom(sel, locking, fromScope)
 
+	if b.factory.Memo().EnableOrderedScan() && !sel.Distinct && orderBy.Empty() && b.PhysType == tree.TS {
+		b.checkOrderedTSScan(outScope.expr)
+	}
+
 	// Construct the projection.
 	b.constructProjectForScope(outScope, projectionsScope)
 	outScope = projectionsScope

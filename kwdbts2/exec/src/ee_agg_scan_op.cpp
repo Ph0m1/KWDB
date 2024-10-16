@@ -58,32 +58,38 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
     }
 
     // extract from agg spec
-    auto agg_param_ = AggregatorSpecParam<TSAggregatorSpec>(this,
+    agg_param_ = new AggregatorSpecParam<TSAggregatorSpec>(this,
                                                             const_cast<TSAggregatorSpec*>(&aggregation_spec_),
                                                             const_cast<TSPostProcessSpec*>(&aggregation_post_),
-                                                            table_);
+                                                            table_, this);
+    if (nullptr == agg_param_) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+      ret = EEIteratorErrCode::EE_ERROR;
+      break;
+    }
+
     if (aggregation_spec_.group_cols_size() <= 1) {
       disorder_ = true;
     }
     // get the size of renders
-    agg_param_.RenderSize(ctx, &agg_num_);
+    agg_param_->RenderSize(ctx, &agg_num_);
 
     // resolve renders
-    ret = agg_param_.ResolveRender(ctx, &agg_renders_, agg_num_);
+    ret = agg_param_->ResolveRender(ctx, &agg_renders_, agg_num_);
     if (ret != EEIteratorErrCode::EE_OK) {
       LOG_ERROR("ResolveRender() failed\n")
       break;
     }
 
     // resolve output type (return type)
-    ret = agg_param_.ResolveOutputType(ctx, agg_renders_, agg_num_);
+    ret = agg_param_->ResolveOutputType(ctx, agg_renders_, agg_num_);
     if (ret != EEIteratorErrCode::EE_OK) {
       LOG_ERROR("ResolveOutputType() failed\n")
       break;
     }
 
     // resolve output Field
-    ret = agg_param_.ResolveOutputFields(ctx, agg_renders_, agg_num_, agg_output_fields_);
+    ret = agg_param_->ResolveOutputFields(ctx, agg_renders_, agg_num_, agg_output_fields_);
     if (ret != EEIteratorErrCode::EE_OK) {
       LOG_ERROR("ResolveOutputFields() failed\n")
       break;
@@ -98,11 +104,20 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
     ResolveAggFuncs(ctx);
 
     // construct the output column information for agg functions.
-    agg_output_col_info.reserve(agg_output_fields_.size());
-    for (auto field : agg_output_fields_) {
-      agg_output_col_info.emplace_back(field->get_storage_length(), field->get_storage_type(),
-                                       field->get_return_type());
+    agg_output_col_info_.reserve(agg_param_->aggs_size_);
+    for (k_uint32 i = 0; i < agg_param_->aggs_size_; ++i) {
+      if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
+        agg_output_col_info_.emplace_back(agg_param_->aggs_[i]->get_storage_length() + sizeof(k_int64),
+                                      agg_param_->aggs_[i]->get_storage_type(),
+                                      agg_param_->aggs_[i]->get_return_type());
+        is_resolve_datachunk_ = true;
+      } else {
+        agg_output_col_info_.emplace_back(agg_param_->aggs_[i]->get_storage_length(),
+                                       agg_param_->aggs_[i]->get_storage_type(),
+                                       agg_param_->aggs_[i]->get_return_type());
+      }
     }
+
     constructAggResults();
     if (current_data_chunk_ == nullptr) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -116,6 +131,14 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
 
     for (int i = 0; i < num_; ++i) {
       data_types_.push_back(renders_[i]->get_storage_type());
+    }
+    if (!has_post_agg_) {
+      std::swap(output_fields_, agg_output_fields_);
+    }
+    output_col_info_.clear();
+    output_col_info_.reserve(output_fields_.size());
+    for (auto field : output_fields_) {
+      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
     }
   } while (false);
   Return(ret)
@@ -199,7 +222,16 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
   } while (!is_done_ && output_queue_.empty());
 
   if (!output_queue_.empty()) {
-    chunk = std::move(output_queue_.front());
+    if (is_resolve_datachunk_) {
+      temporary_data_chunk_ = std::move(output_queue_.front());
+      KStatus ret = getAggResult(ctx, chunk);
+      if (KStatus::FAIL == ret) {
+        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+        Return(EEIteratorErrCode::EE_ERROR);
+      }
+    } else {
+      chunk = std::move(output_queue_.front());
+    }
     output_queue_.pop();
     auto end = std::chrono::high_resolution_clock::now();
     fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
@@ -482,6 +514,19 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
           break;
         }
 
+        bool ignore = 0;
+        for (k_uint32 i = 0; i < group_cols_size_; ++i) {
+          if (group_cols_[i] == argIdx) {
+            ignore = 1;
+            break;
+          }
+        }
+
+        if (ignore) {
+          aggfunc_new_flag = false;
+          break;
+        }
+
         switch (output_fields_[argIdx]->get_storage_type()) {
           case roachpb::DataType::BOOL:
             agg_func = make_unique<AnyNotNullAggregate<k_bool>>
@@ -662,9 +707,34 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
         agg_func = make_unique<FirstRowTSAggregate>(i, argIdx, tsIdx, len);
         break;
       }
-      case Sumfunctype::STDDEV:
-      case Sumfunctype::AVG: {
+      case Sumfunctype::STDDEV: {
         status = KStatus::FAIL;
+        break;
+      }
+      case Sumfunctype::AVG: {
+        k_uint32 len = agg_output_fields_[i]->get_storage_length();;
+        switch (output_fields_[argIdx]->get_storage_type()) {
+          case roachpb::DataType::SMALLINT:
+            agg_func = make_unique<AVGRowAggregate<k_int16>>(i, argIdx, len);
+            break;
+          case roachpb::DataType::INT:
+            agg_func = make_unique<AVGRowAggregate<k_int32>>(i, argIdx, len);
+            break;
+          case roachpb::DataType::BIGINT:
+            agg_func = make_unique<AVGRowAggregate<k_int64>>(i, argIdx, len);
+            break;
+          case roachpb::DataType::FLOAT:
+            agg_func = make_unique<AVGRowAggregate<k_float32>>(i, argIdx, len);
+            break;
+          case roachpb::DataType::DOUBLE:
+            agg_func = make_unique<AVGRowAggregate<k_double64>>(i, argIdx, len);
+            break;
+          default:
+            LOG_ERROR("unsupported data type for sum aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for sum aggregation");
+            status = KStatus::FAIL;
+            break;
+        }
         break;
       }
       default:
@@ -687,6 +757,27 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
     }
   }
   Return(status)
+}
+
+KStatus AggTableScanOperator::getAggResult(kwdbContext_p ctx, DataChunkPtr& chunk) {
+  if (chunk == nullptr) {
+    chunk = std::make_unique<DataChunk>(output_col_info_);
+    if (chunk->Initialize() != true) {
+      chunk = nullptr;
+      return KStatus::FAIL;
+    }
+    chunk->SetAllNull();
+  }
+
+  k_int32 count = temporary_data_chunk_->Count();
+  temporary_data_chunk_->ResetLine();
+  temporary_data_chunk_->NextLine();
+  for (k_int32 i = 0; i < count; ++i) {
+    FieldsToChunk(agg_renders_, agg_num_, i, chunk);
+    temporary_data_chunk_->NextLine();
+    chunk->AddCount();
+  }
+  return KStatus::SUCCESS;
 }
 
 BaseOperator* AggTableScanOperator::Clone() {

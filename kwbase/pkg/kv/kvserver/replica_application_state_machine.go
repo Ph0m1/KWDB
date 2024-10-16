@@ -678,9 +678,10 @@ func (r *Replica) stageTsBatchRequest(
 			{
 				var payload [][]byte
 				var dedupResult tse.DedupResult
+				var entitiesAffect tse.EntitiesAffect
 				payload = append(payload, req.Value.RawBytes)
 				if payload != nil {
-					if dedupResult, err = r.store.TsEngine.PutData(1, payload, tsTxnID); err != nil {
+					if dedupResult, entitiesAffect, err = r.store.TsEngine.PutData(1, payload, tsTxnID); err != nil {
 						errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
 						if errRollback != nil {
 							return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
@@ -699,8 +700,10 @@ func (r *Replica) stageTsBatchRequest(
 									ResponseHeader: roachpb.ResponseHeader{
 										NumKeys: int64(dedupResult.DedupRows),
 									},
-									DedupRule:     int64(dedupResult.DedupRule),
-									DiscardBitmap: dedupResult.DiscardBitmap,
+									DedupRule:         int64(dedupResult.DedupRule),
+									DiscardBitmap:     dedupResult.DiscardBitmap,
+									EntitiesAffected:  uint32(entitiesAffect.EntityCount),
+									UnorderedAffected: entitiesAffect.UnorderedCount,
 								},
 							},
 						}
@@ -710,8 +713,9 @@ func (r *Replica) stageTsBatchRequest(
 		case *roachpb.TsRowPutRequest:
 			{
 				var dedupResult tse.DedupResult
+				var entitiesAffect tse.EntitiesAffect
 				if req.Values != nil {
-					if dedupResult, err = r.store.TsEngine.PutRowData(1, req.HeaderPrefix, req.Values, req.ValueSize, tsTxnID); err != nil {
+					if dedupResult, entitiesAffect, err = r.store.TsEngine.PutRowData(1, req.HeaderPrefix, req.Values, req.ValueSize, tsTxnID); err != nil {
 						errRollback := r.store.TsEngine.MtrRollback(tableID, rangeGroupID, tsTxnID)
 						if errRollback != nil {
 							return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to rollback mini-transaction")
@@ -730,8 +734,10 @@ func (r *Replica) stageTsBatchRequest(
 									ResponseHeader: roachpb.ResponseHeader{
 										NumKeys: int64(len(req.Values) - dedupResult.DedupRows),
 									},
-									DedupRule:     int64(dedupResult.DedupRule),
-									DiscardBitmap: dedupResult.DiscardBitmap,
+									DedupRule:         int64(dedupResult.DedupRule),
+									DiscardBitmap:     dedupResult.DiscardBitmap,
+									EntitiesAffected:  uint32(entitiesAffect.EntityCount),
+									UnorderedAffected: entitiesAffect.UnorderedCount,
 								},
 							},
 						}

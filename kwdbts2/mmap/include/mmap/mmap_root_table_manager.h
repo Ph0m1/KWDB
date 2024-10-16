@@ -75,8 +75,8 @@ public:
    * @param table_id ID of the table.
    */
   MMapRootTableManager(const string& db_path, const string& tbl_sub_path, uint32_t table_id) :
-      name_(to_string(table_id)), db_path_(db_path), tbl_sub_path_(tbl_sub_path), table_id_(table_id),
-      cur_table_version_(0), rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK),
+      rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK), name_(to_string(table_id)), db_path_(db_path),
+      tbl_sub_path_(tbl_sub_path), table_id_(table_id), cur_table_version_(0),
       delete_data_latch_(DELETE_DATA_LATCH_BUCKET_NUM, LATCH_ID_TSTABLE_DELETE_DATA_LOCK) {}
 
   /**
@@ -89,8 +89,8 @@ public:
    */
   MMapRootTableManager(const string& db_path, const string& tbl_sub_path, uint32_t table_id,
                        uint64_t partition_interval) :
-      name_(to_string(table_id)), db_path_(db_path), tbl_sub_path_(tbl_sub_path), table_id_(table_id),
-      cur_table_version_(0), partition_interval_(partition_interval), rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK),
+      rw_latch_(RWLATCH_ID_MMAP_ROOT_TABLE_RWLOCK), name_(to_string(table_id)), db_path_(db_path),
+      tbl_sub_path_(tbl_sub_path), table_id_(table_id), cur_table_version_(0), partition_interval_(partition_interval),
       delete_data_latch_(DELETE_DATA_LATCH_BUCKET_NUM, LATCH_ID_TSTABLE_DELETE_DATA_LOCK) {}
 
   /**

@@ -218,9 +218,11 @@ TEST_F(TestEngineWAL, insert) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta);
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, mtr_id, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = ts_engine_->TSMtrCommit(ctx_, cur_table_id, kTestRange.range_group_id, mtr_id);
@@ -264,9 +266,11 @@ TEST_F(TestEngineWAL, insertRollback) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta);
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, mtr_id, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {start_ts, start_ts + 1000}), row_num_);
@@ -307,9 +311,11 @@ TEST_F(TestEngineWAL, checkpoint) {
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta);
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = ts_engine_->CreateCheckpoint(ctx_);
@@ -348,8 +354,10 @@ TEST_F(TestEngineWAL, DeleteData) {
   payloads.push_back(payload);
   payloads.push_back(payload2);
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, payloads.data(), 2, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, payloads.data(), 2, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, ts + 10000}), row_num_ * 2);
@@ -408,8 +416,10 @@ TEST_F(TestEngineWAL, DeleteDataRollback) {
   payloads.push_back(payload);
   payloads.push_back(payload2);
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, payloads.data(), 2, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, payloads.data(), 2, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, ts + 10000}), row_num_ * 2);
@@ -467,9 +477,11 @@ TEST_F(TestEngineWAL, DeleteEntities) {
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta);
 
   // insert
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // delete entities
@@ -491,7 +503,7 @@ TEST_F(TestEngineWAL, DeleteEntities) {
   // check result
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, start_ts + 10000}), 0);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, start_ts + 10000}, 2), row_num_);
@@ -527,9 +539,11 @@ TEST_F(TestEngineWAL, DeleteEntitiesRollback) {
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta);
 
   // insert
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // delete entities
@@ -580,8 +594,10 @@ TEST_F(TestEngineWAL, updateTag) {
   for (int i = 0; i < cnt; i++) {
     k_uint32 p_len = 0;
     data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts1 + i * 100, &meta, 10, 0, false);
+    uint16_t inc_entity_cnt;
+    uint32_t inc_unordered_cnt;
     TSSlice payload1{data_value, p_len};
-    ASSERT_EQ(ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload1, 1, 0, &dedup_result), KStatus::SUCCESS);
+    ASSERT_EQ(ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload1, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result), KStatus::SUCCESS);
     delete[] data_value;
   }
   // update
@@ -679,8 +695,10 @@ TEST_F(TestEngineWAL, EngineApi) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // insert
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, payloads.data(), 2, mtr_id, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, payloads.data(), 2, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, start_ts + 10000}, 2), row_num_ * 2);
 
@@ -707,7 +725,7 @@ TEST_F(TestEngineWAL, EngineApi) {
   // check result
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, start_ts + 10000}, 2), row_num_ - 2);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, start_ts + 10000}, 2), row_num_);
@@ -750,8 +768,10 @@ TEST_F(TestEngineWAL, ShiftWalLevel) {
   char* data_value4 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts + 3000, &meta);
   TSSlice payload4{data_value4, p_len};
 
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = ts_engine_->CreateCheckpoint(ctx_);
@@ -786,9 +806,9 @@ TEST_F(TestEngineWAL, ShiftWalLevel) {
   s = ts_engine_->CreateTsTable(ctx_, cur_table_id2, &meta2, ranges2);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  s = ts_engine_->PutData(ctx_, cur_table_id2, test_range2.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id2, test_range2.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = ts_engine_->CreateCheckpoint(ctx_);
@@ -809,7 +829,7 @@ TEST_F(TestEngineWAL, ShiftWalLevel) {
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {0, start_ts + 10000}), row_num_ * 2);
   ASSERT_EQ(GetTableRows(cur_table_id2, ranges2, {0, start_ts + 10000}), row_num_);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload3, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload3, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = TSEngineImpl::CloseTSEngine(ctx_, ts_engine_);
@@ -823,9 +843,9 @@ TEST_F(TestEngineWAL, ShiftWalLevel) {
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {0, start_ts + 10000}), row_num_ * 3);
   ASSERT_EQ(GetTableRows(cur_table_id2, ranges2, {0, start_ts + 10000}), row_num_);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload4, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload4, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  s = ts_engine_->PutData(ctx_, cur_table_id2, test_range2.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id2, test_range2.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = ts_engine_->CreateCheckpoint(ctx_);
@@ -874,9 +894,11 @@ TEST_F(TestEngineWAL, TsxAlterColumn) {
       (std::chrono::system_clock::now().time_since_epoch()).count();
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta, 10, 0, false);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value;
 
@@ -939,7 +961,7 @@ TEST_F(TestEngineWAL, TsxAlterColumn) {
 
   char* data_value2 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta, 10, 0, false);
   TSSlice payload2{data_value2, p_len};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value2;
 
@@ -966,9 +988,11 @@ TEST_F(TestEngineWAL, TsxMultiAlterColumn) {
       (std::chrono::system_clock::now().time_since_epoch()).count();
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta_1, 10, 0, false);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice{nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value;
 
@@ -1715,7 +1739,7 @@ TEST_F(TestEngineWAL, TsxMultiAlterColumn) {
   start_ts += 10 * 10;
   char* data_value2 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta_3, 10, 0, false);
   TSSlice payload2{data_value2, p_len};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value2;
 
@@ -1723,7 +1747,7 @@ TEST_F(TestEngineWAL, TsxMultiAlterColumn) {
   start_ts += 10 * 10;
   char* data_value3 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta_30, 10, 0, false);
   TSSlice payload3{data_value3, p_len};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload3, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload3, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value3;
 
@@ -1731,7 +1755,7 @@ TEST_F(TestEngineWAL, TsxMultiAlterColumn) {
   start_ts += 10 * 10;
   char* data_value4 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta_1, 10, 0, false);
   TSSlice payload4{data_value4, p_len};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload4, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload4, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value4;
 
@@ -1739,7 +1763,7 @@ TEST_F(TestEngineWAL, TsxMultiAlterColumn) {
   start_ts += 10 * 10;
   char* data_value5 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta_60, 10, 0, false);
   TSSlice payload5{data_value5, p_len};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload5, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload5, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value5;
 
@@ -1747,7 +1771,7 @@ TEST_F(TestEngineWAL, TsxMultiAlterColumn) {
   start_ts += 10 * 10;
   char* data_value6 = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta_32, 10, 0, false);
   TSSlice payload6{data_value6, p_len};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload6, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload6, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
   delete[] data_value6;
 
@@ -1782,9 +1806,11 @@ TEST_F(TestEngineWAL, TsxAddDropColumnRollback) {
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta, 10, 0, false);
   TSSlice payload{data_value, p_len};
   char* data_value2 = GenSomePayloadData(ctx_, row_num_, p_len2, start_ts + 1000, &meta, 10, 0, false);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload2{data_value2, p_len2};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0 , &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   string trans_id = "0000000000000001";
@@ -1855,7 +1881,7 @@ TEST_F(TestEngineWAL, TsxAddDropColumnRollback) {
   s = ts_engine_->TSxRollback(ctx_, cur_table_id, trans_id.data());
   ASSERT_EQ(s, KStatus::SUCCESS);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   delete[] data_value;
@@ -1884,9 +1910,11 @@ TEST_F(TestEngineWAL, TsxAddDropColumnRecover) {
       (std::chrono::system_clock::now().time_since_epoch()).count();
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta, 10, 0, false);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload{data_value, p_len};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   s = TSEngineImpl::CloseTSEngine(ctx_, ts_engine_);
@@ -1977,7 +2005,7 @@ TEST_F(TestEngineWAL, TsxAddDropColumnRecover) {
   k_uint32 p_len2 = 0;
   char* data_value2 = GenSomePayloadData(ctx_, row_num_, p_len2, start_ts + 1000, &meta, 10, 0, false);
   TSSlice payload2{data_value2, p_len2};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   delete[] data_value;
@@ -2010,9 +2038,11 @@ TEST_F(TestEngineWAL, TsxAlterColumnRollback) {
   char* data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts, &meta, 10, 0, false);
   TSSlice payload{data_value, p_len};
   char* data_value2 = GenSomePayloadData(ctx_, row_num_, p_len2, start_ts + 1000, &meta, 10, 0, false);
+  uint16_t inc_entity_cnt;
+  uint32_t inc_unordered_cnt;
   TSSlice payload2{data_value2, p_len2};
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0 , &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload, 1, 0 , &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   string trans_id = "0000000000000001";
@@ -2068,7 +2098,7 @@ TEST_F(TestEngineWAL, TsxAlterColumnRollback) {
   s = ts_engine_->TSxRollback(ctx_, cur_table_id, trans_id.data());
   ASSERT_EQ(s, KStatus::SUCCESS);
 
-  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &dedup_result);
+  s = ts_engine_->PutData(ctx_, cur_table_id, kTestRange.range_group_id, &payload2, 1, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   delete[] data_value;

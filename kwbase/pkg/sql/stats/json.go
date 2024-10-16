@@ -48,8 +48,9 @@ type JSONStatistic struct {
 	// HistogramColumnType is the string representation of the column type for the
 	// histogram (or unset if there is no histogram). Parsable with
 	// tree.ParseType.
-	HistogramColumnType string            `json:"histo_col_type"`
-	HistogramBuckets    []JSONHistoBucket `json:"histo_buckets,omitempty"`
+	HistogramColumnType  string                `json:"histo_col_type"`
+	HistogramBuckets     []JSONHistoBucket     `json:"histo_buckets,omitempty"`
+	SortHistogramBuckets []JSONSortHistoBucket `json:"sort_histogram_buckets,omitempty"`
 }
 
 // JSONHistoBucket is a struct used for JSON marshaling and unmarshaling of
@@ -60,6 +61,18 @@ type JSONHistoBucket struct {
 	NumEq         int64   `json:"num_eq"`
 	NumRange      int64   `json:"num_range"`
 	DistinctRange float64 `json:"distinct_range"`
+	// UpperBound is the string representation of a datum; parsable with
+	// sqlbase.ParseDatumStringAs.
+	UpperBound string `json:"upper_bound"`
+}
+
+// JSONSortHistoBucket is a struct used for JSON marshaling and unmarshaling of
+// sort histogram data.
+type JSONSortHistoBucket struct {
+	RowCount          uint64  `json:"row_count"`
+	UnorderedRowCount uint64  `json:"unordered_row_count"`
+	UnorderedEntities float64 `json:"unordered_entities"`
+	OrderedEntities   float64 `json:"ordered_entities"`
 	// UpperBound is the string representation of a datum; parsable with
 	// sqlbase.ParseDatumStringAs.
 	UpperBound string `json:"upper_bound"`
@@ -137,6 +150,36 @@ func (js *JSONStatistic) GetHistogram(evalCtx *tree.EvalContext) (*HistogramData
 		h.Buckets[i].NumRange = hb.NumRange
 		h.Buckets[i].DistinctRange = hb.DistinctRange
 		h.Buckets[i].UpperBound, err = sqlbase.EncodeTableKey(nil, upperVal, encoding.Ascending)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return h, nil
+}
+
+// GetSortHistogram converts the json histogram into HistogramData.
+func (js *JSONStatistic) GetSortHistogram(evalCtx *tree.EvalContext) (*HistogramData, error) {
+	if len(js.SortHistogramBuckets) == 0 {
+		return nil, nil
+	}
+	h := &HistogramData{}
+	colType, err := parser.ParseType(js.HistogramColumnType)
+	if err != nil {
+		return nil, err
+	}
+	h.ColumnType = *colType
+	h.SortedBuckets = make([]HistogramData_SortedHistogramBucket, len(js.SortHistogramBuckets))
+	for i := range h.SortedBuckets {
+		hb := &js.SortHistogramBuckets[i]
+		upperVal, err := sqlbase.ParseDatumStringAs(colType, hb.UpperBound, evalCtx)
+		if err != nil {
+			return nil, err
+		}
+		h.SortedBuckets[i].RowCount = hb.RowCount
+		h.SortedBuckets[i].UnorderedRowCount = hb.UnorderedRowCount
+		h.SortedBuckets[i].OrderedEntities = hb.OrderedEntities
+		h.SortedBuckets[i].UnorderedEntities = hb.UnorderedEntities
+		h.SortedBuckets[i].UpperBound, err = sqlbase.EncodeTableKey(nil, upperVal, encoding.Ascending)
 		if err != nil {
 			return nil, err
 		}

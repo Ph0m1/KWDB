@@ -1911,6 +1911,9 @@ type CreateStatsOptions struct {
 	// Note that the timestamp will be moved up during the operation if it gets
 	// too old (in order to avoid problems with TTL expiration).
 	AsOf AsOfClause
+
+	// SortedHistogram enables sorting histogram collection for entities in time series tables
+	SortedHistogram bool
 }
 
 // Empty returns true if no options were provided.

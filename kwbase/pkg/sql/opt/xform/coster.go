@@ -412,14 +412,30 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	// when needPtagRow = 50, pTagRowCount = 100, talbeCountFactor is 50/100, then only scan half of table
 	var talbeCountFactor = 1.0
 	stats := tsScan.Relational().Stats
+	// Get statistics of out-of-order
+	disorderRowCount := stats.RowCount * 0.1
+	filteredRowCount := stats.RowCount
+	if stats.SortDistribution != nil {
+		if stats.SortDistribution.RowCount > 0 {
+			filteredRowCount = stats.SortDistribution.RowCount
+		}
+		if stats.SortDistribution.UnorderedRowCount >= 0 {
+			disorderRowCount = stats.SortDistribution.UnorderedRowCount
+		}
+	}
 	colStat, ok := stats.ColStats.Lookup(pTagColIDs)
 	if ok {
 		// row count of full tag table.
-		pTagRowCount = colStat.DistinctCount
+		pTagRowCount = stats.PTagCount // table ptag count
 
 		// needPtagRow is needed Ptag rows obtained through selection rate
-		needPtagRow := stats.PTagCount
-		talbeCountFactor = needPtagRow / pTagRowCount
+		needPtagRow := colStat.DistinctCount // ptag count after filter
+
+		if pTagRowCount == 0 {
+			talbeCountFactor = cpuCostFactor
+		} else {
+			talbeCountFactor = math.Min(needPtagRow/pTagRowCount, 1) * cpuCostFactor
+		}
 	}
 
 	// row count of full table.
@@ -432,28 +448,45 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	allColsWidth := pTagColsWith + tagColsWith + colsWith
 	// Calculate parallel num in timing scenarios
 	tsScan.Memo().CalculateDop(rowCount, stats.PTagCount, uint32(allColsWidth))
-
+	var cost memo.Cost
 	if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter == nil {
 		// case: TagIndex
-		return memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount +
+		cost = memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount +
 			talbeCountFactor*fullScanTblCost)
 	} else if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter != nil {
 		// case: TagIndexTable
-		return memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount +
+		cost = memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount*tableScanCostUnit +
 			talbeCountFactor*fullScanTagTblCost +
 			talbeCountFactor*fullScanTblCost)
 	} else if tsScan.PrimaryTagFilter == nil && tsScan.TagFilter != nil {
 		// case: tagTable
 		// TagFilter cannot affect talbeCountFactor, default to 0.5
 		// The cost should be smaller than a full table scan
-		return memo.Cost(fullScanTagTblCost + 0.5*fullScanTblCost)
+		cost = memo.Cost(fullScanTagTblCost + 0.5*fullScanTblCost)
 	} else if tsScan.AccessMode == int(execinfrapb.TSTableReadMode_onlyTag) {
 		// case: TagOnly
-		return memo.Cost(tableScanCostUnit * pTagRowCount * float64(tagColsWith))
+		cost = memo.Cost(tableScanCostUnit * pTagRowCount * float64(tagColsWith))
+	} else {
+		// case: TsMetadate, need scan all tag table when there are tag columns in query
+		cost = memo.Cost(fullScanTagTblCost + fullScanTblCost)
 	}
 
-	// case: TsMetadate, need scan all tag table when there are tag columns in query
-	return memo.Cost(fullScanTagTblCost + fullScanTblCost)
+	switch tsScan.OrderedScanType {
+	case opt.OrderedScan:
+		// disorder partition order cost plus return batch cost
+		// Sorting out out out of order partitions leads to a decrease in the amount of data returned within the batch
+		// , thus increasing the cost of obtaining batches multiple times
+		if 0 < disorderRowCount {
+			cost += memo.Cost(disorderRowCount * math.Log(disorderRowCount) * cpuCostFactor)
+			cost += memo.Cost(0.003 * disorderRowCount)
+		}
+	case opt.SortAfterScan:
+		if filteredRowCount > 0 {
+			cost += memo.Cost(filteredRowCount * math.Log(filteredRowCount) * cpuCostFactor)
+		}
+	}
+
+	return cost
 }
 
 func (c *coster) computeVirtualScanCost(scan *memo.VirtualScanExpr) memo.Cost {

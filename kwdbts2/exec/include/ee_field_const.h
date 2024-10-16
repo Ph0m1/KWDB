@@ -38,6 +38,8 @@ class FieldConstInt : public FieldConst {
     return_type_ = KWDBTypeFamily::IntFamily;
   }
 
+  char *get_ptr(RowBatch *batch) override;
+
   k_int64 ValInt() override;
   k_int64 ValInt(k_char *ptr) override;
   k_double64 ValReal() override;
@@ -63,6 +65,7 @@ class FieldConstInterval : public FieldConst {
     type_ = FIELD_INTERVAL;
   }
 
+  char *get_ptr(RowBatch *batch) override;
   k_int64 ValInt() override;
   k_int64 ValInt(k_char *ptr) { return 0; }
   k_int64 ValInt(k_int64 *val, k_bool negative) override;
@@ -88,6 +91,7 @@ class FieldConstDouble : public FieldConst {
     return_type_ = KWDBTypeFamily::FloatFamily;
   }
 
+  char *get_ptr(RowBatch *batch) override;
   k_int64 ValInt() override;
   k_int64 ValInt(k_char *ptr) override;
   k_double64 ValReal() override;
@@ -116,6 +120,7 @@ class FieldConstString : public FieldConst {
     return_type_ = KWDBTypeFamily::StringFamily;
   }
 
+  char *get_ptr(RowBatch *batch) override;
   k_int64 ValInt() override;
   k_int64 ValInt(k_char *ptr) override;
   k_double64 ValReal() override;

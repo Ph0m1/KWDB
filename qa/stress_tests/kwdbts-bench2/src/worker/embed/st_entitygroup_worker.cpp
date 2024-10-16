@@ -46,7 +46,11 @@ KBStatus TSEntityGroupWriteWorker::do_work(KTimestamp  new_ts) {
   {
       KWDB_START();
       DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-      stat = entity_group_->PutData(ctx, payload, 0, &dedup_result, StInstance::Get()->GetDedupRule());
+      uint16_t inc_entity_cnt;
+      uint32_t inc_unordered_cnt;
+      stat = entity_group_->PutData(ctx, payload, 0, &inc_entity_cnt,
+                                    &inc_unordered_cnt, &dedup_result,
+                                    StInstance::Get()->GetDedupRule());
       KWDB_DURATION(_row_put_time);
   }
   delete[] payload.data;

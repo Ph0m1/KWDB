@@ -29,10 +29,9 @@ struct SelectionItem {
 
 class ScanRowBatch;
 typedef std::vector<SelectionItem> Selection;
-typedef std::shared_ptr<ScanRowBatch> ScanRowBatchPtr;
 
 class ScanRowBatch : public RowBatch {
- private:
+ protected:
   Selection selection_;
   k_uint32 current_batch_line_{0};
   k_uint32 current_batch_no_{0};
@@ -58,7 +57,7 @@ class ScanRowBatch : public RowBatch {
     table_ = table;
     res_.setColumnNum(table_->scan_cols_.size());
   }
-  ~ScanRowBatch() { res_.clear(); }
+  virtual ~ScanRowBatch() { res_.clear(); }
   explicit ScanRowBatch(ScanRowBatch *handle) {
     typ_ = RowBatchType::RowBatchTypeScan;
     stage_ = Stage::STAGE_SCAN;
@@ -86,11 +85,11 @@ class ScanRowBatch : public RowBatch {
   /**
    *  Move the cursor to the next line, default 0
    */
-  k_int32 NextLine() override;
+  virtual k_int32 NextLine();
   /**
    *  Move the cursor to the first line
    */
-  void ResetLine() override;
+  virtual void ResetLine();
 
   bool IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype) override;
 
@@ -110,6 +109,15 @@ class ScanRowBatch : public RowBatch {
 
   [[nodiscard]] bool hasFilter() const { return is_filter_; }
 
+  virtual void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
+                      roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt);
+};
+
+class ReverseScanRowBatch : public ScanRowBatch {
+ public:
+  using ScanRowBatch::ScanRowBatch;
+  k_int32 NextLine() override;
+  void ResetLine() override;
   void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
                       roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) override;
 };

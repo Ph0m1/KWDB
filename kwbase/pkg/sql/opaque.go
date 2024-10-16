@@ -173,6 +173,8 @@ func buildOpaque(
 		plan, err = p.ShowClusterSetting(ctx, n)
 	case *tree.ShowHistogram:
 		plan, err = p.ShowHistogram(ctx, n)
+	case *tree.ShowSortHistogram:
+		plan, err = p.ShowSortHistogram(ctx, n)
 	case *tree.ShowTableStats:
 		plan, err = p.ShowTableStats(ctx, n)
 	case *tree.ShowTraceForSession:
@@ -259,6 +261,7 @@ func init() {
 		&tree.SetSessionCharacteristics{},
 		&tree.ShowClusterSetting{},
 		&tree.ShowHistogram{},
+		&tree.ShowSortHistogram{},
 		&tree.ShowTableStats{},
 		&tree.ShowTraceForSession{},
 		&tree.ShowZoneConfig{},

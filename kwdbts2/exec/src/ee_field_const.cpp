@@ -17,6 +17,10 @@
 
 namespace kwdbts {
 
+char *FieldConstInt::get_ptr(RowBatch *batch) {
+  return reinterpret_cast<char *>(&value_);
+}
+
 k_int64 FieldConstInt::ValInt() { return value_; }
 
 k_int64 FieldConstInt::ValInt(k_char *ptr) {
@@ -202,6 +206,10 @@ k_int64 getTimeFormTimestamp(KString *value_) {
   return mktime(&ltm) * 1000 + intervalMS + ltm.tm_gmtoff*1000;
 }
 
+char *FieldConstInterval::get_ptr(RowBatch *batch) {
+  return value_.data();
+}
+
 k_int64 FieldConstInterval::ValInt() {
   // get timestamp(int64) from timestamp of interval type  or string type
   k_int64 orgVal = 0;
@@ -219,6 +227,10 @@ Field *FieldConstInterval::field_to_copy() {
   }
 
   return field;
+}
+
+char *FieldConstDouble::get_ptr(RowBatch *batch) {
+  return reinterpret_cast<char *>(&value_);
 }
 
 k_int64 FieldConstDouble::ValInt() { return value_; }
@@ -265,6 +277,10 @@ k_bool FieldConstDouble::fill_template_field(char *ptr) {
   memcpy(ptr, &value_, storage_len_);
 
   return 0;
+}
+
+char *FieldConstString::get_ptr(RowBatch *batch) {
+  return value_.data();
 }
 
 // %Y-%m-%d %H:%M:%S.ms

@@ -47,12 +47,46 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
+// SortedBucket is used to display sort bucket
+type SortedBucket struct {
+	// The estimated number of row count within the timestamp range.
+	RowCount uint64
+
+	// The estimated number of unordered row count within the timestamp range.
+	UnorderedRowCount uint64
+
+	// The estimated number of unordered row count within the timestamp range.
+	UnorderedEntities uint64
+
+	// The estimated number of unordered entities within the timestamp range.
+	OrderedEntities uint64
+
+	// UpperBound is the upper bound of the bucket.
+	UpperBound tree.Datum
+
+	NodeCount uint64
+}
+
+// SampledSortedInfo is used to represent sorted histogram for entities.
+type SampledSortedInfo struct {
+	minTimestamp int64
+	maxTimestamp int64
+
+	sampledSortedBucket map[int]SortedBucket
+}
+
 // sketchInfo contains the specification and run-time state for each sketch.
 type sketchInfo struct {
-	spec     execinfrapb.SketchSpec
-	sketch   *hyperloglog.Sketch
-	numNulls int64
-	numRows  int64
+	spec              execinfrapb.SketchSpec
+	sketch            *hyperloglog.Sketch
+	numNulls          int64
+	numRows           int64
+	SampledSortedData SampledSortedInfo
+}
+
+func (si *sketchInfo) isTagSketch() bool {
+	return len(si.spec.ColumnTypes) > 0 && (si.spec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_PTAG) ||
+		si.spec.ColumnTypes[0] == uint32(sqlbase.ColumnType_TYPE_TAG))
 }
 
 // A sampler processor returns a random sample of rows, as well as "global"

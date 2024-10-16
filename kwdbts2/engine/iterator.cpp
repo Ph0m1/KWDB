@@ -110,6 +110,7 @@ KStatus TsIterator::Init(bool is_reversed) {
     return KStatus::FAIL;
   }
   partition_table_iter_ = sub_grp->GetPTIteartor(ts_spans_);
+  partition_table_iter_->Reset(is_reversed_);
   return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
 
@@ -224,7 +225,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
           return KStatus::SUCCESS;
         }
          // current entity scan over, we need scan next entity in same subgroup, and scan same partiton tables.
-        partition_table_iter_->Reset();
+        partition_table_iter_->Reset(is_reversed_);
       } else if (ret == NextBlkStatus::error) {
         LOG_ERROR("can not get next block item.");
         return KStatus::FAIL;
@@ -1460,7 +1461,7 @@ KStatus TsTableIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
 }
 
 void TsSortedRowDataIterator::fetchBlockSpans(k_uint32 entity_id) {
-  cur_partiton_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, compaction_);
+  cur_partiton_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, compaction_, is_reversed_);
 }
 
 int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {
@@ -1509,6 +1510,7 @@ KStatus TsSortedRowDataIterator::Init(bool is_reversed) {
     return KStatus::FAIL;
   }
   partition_table_iter_ = sub_grp->GetPTIteartor(ts_spans_);
+  partition_table_iter_->Reset(is_reversed_);
   return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
 
@@ -1604,12 +1606,34 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
           *is_finished = true;
           break;
         }
-        partition_table_iter_->Reset();
+        partition_table_iter_->Reset(is_reversed_);
       } else if (ret == -2) {
         LOG_ERROR("can not get next block item.");
         return KStatus::FAIL;
       }
       continue;
+    }
+    TsTimePartition* cur_pt = cur_partiton_table_;
+    BlockItem* cur_block_item = cur_block_span_.block_item;
+    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(cur_block_item->block_id);
+    if (segment_tbl == nullptr) {
+      LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item->block_id, cur_pt->GetPath().c_str());
+      return FAIL;
+    }
+    if (ts != INVALID_TS) {
+      timestamp64 min_ts = KTimestamp(segment_tbl->columnAddrByBlk(cur_block_item->block_id,
+                                                           cur_block_span_.start_row, 0));
+      timestamp64 max_ts = KTimestamp(segment_tbl->columnAddrByBlk(cur_block_item->block_id,
+                                                           cur_block_span_.start_row + cur_block_span_.row_num - 1, 0));
+      if (!is_reversed_ && min_ts > ts) {
+        // At this time, if no data smaller than ts exists, -1 is returned directly, and the query is ended
+        nextEntity();
+        return SUCCESS;
+      } else if (is_reversed_ && max_ts < ts) {
+        // In this case, if no data larger than ts exists, -1 is returned and the query is completed
+        nextEntity();
+        return SUCCESS;
+      }
     }
     if (!cur_block_span_.row_num) {
       continue;
@@ -1617,18 +1641,10 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
 
     *count = cur_block_span_.row_num;
     uint32_t first_row = cur_block_span_.start_row + 1;
-    BlockItem* block_item = cur_block_span_.block_item;
-    MetricRowID first_real_row = block_item->getRowID(first_row);
-
-    TsTimePartition* cur_pt = cur_partiton_table_;
-    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
-    if (segment_tbl == nullptr) {
-      LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
-      return FAIL;
-    }
+    MetricRowID first_real_row = cur_block_item->getRowID(first_row);
 
     cur_block_span_ = BlockSpan{};
-    GetBatch(segment_tbl, block_item, first_row, res, *count);
+    GetBatch(segment_tbl, cur_block_item, first_row, res, *count);
     res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
     KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
     return SUCCESS;

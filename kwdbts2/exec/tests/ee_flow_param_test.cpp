@@ -12,7 +12,7 @@
 
 #include "ee_global.h"
 #include "ee_iterator_data_test.h"
-#include "ee_metadata_data_test.h"
+// #include "ee_metadata_data_test.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_table.h"
 #include "gtest/gtest.h"
@@ -63,9 +63,9 @@ class TestFlowParam : public testing::Test {
     table_->Init(ctx_, spec_);
   }
   virtual void TearDown() {
-    SafeDelete(table_);
-    SafeDelete(spec_);
-    SafeDelete(post_);
+    SafeDeletePointer(table_);
+    SafeDeletePointer(spec_);
+    SafeDeletePointer(post_);
     free(renders_);
   }
   TABLE* table_{nullptr};
@@ -99,7 +99,7 @@ TEST_F(TestFlowParam, TestReadPostResolve) {
   ASSERT_EQ(postResolve->ResolveOutputType(ctx_, renders_, num_),
             EEIteratorErrCode::EE_OK);
 
-  SafeDelete(postResolve);
+  SafeDeletePointer(postResolve);
 }
 
 }  // namespace kwdbts

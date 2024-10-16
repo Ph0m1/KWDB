@@ -1011,9 +1011,6 @@ func (n *alterTableNode) startExec(params runParams) error {
 		  }*/
 
 		case *tree.AlterTableInjectStats:
-			if n.tableDesc.IsTSTable() {
-				return pgerror.New(pgcode.WrongObjectType, "can not INJECT STATISTICS on timeseries table")
-			}
 			sd, ok := n.statsData[i]
 			if !ok {
 				return errors.AssertionFailedf("missing stats data")
@@ -1888,9 +1885,17 @@ func injectTableStats(
 	// Insert each statistic.
 	for i := range jsonStats {
 		s := &jsonStats[i]
-		h, err := s.GetHistogram(params.EvalContext())
+		var h *stats.HistogramData
+		var err error
+		h, err = s.GetHistogram(params.EvalContext())
 		if err != nil {
 			return err
+		}
+		if len(s.SortHistogramBuckets) > 0 {
+			h, err = s.GetSortHistogram(params.EvalContext())
+			if err != nil {
+				return err
+			}
 		}
 		// histogram will be passed to the INSERT statement; we want it to be a
 		// nil interface{} if we don't generate a histogram.

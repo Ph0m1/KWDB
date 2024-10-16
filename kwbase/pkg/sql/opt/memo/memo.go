@@ -43,6 +43,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
@@ -168,6 +169,12 @@ type Memo struct {
 	saveTablesPrefix            string
 	insertFastPath              bool
 
+	// The following are selected fields from global data which can affect
+	// planning. We need to cross-check these before reusing a cached memo.
+	tsCanPushAllProcessor      bool
+	tsForcePushGroupToTSEngine bool
+	tsOrderedScan              bool
+
 	// curID is the highest currently in-use scalar expression ID.
 	curID opt.ScalarID
 
@@ -234,6 +241,15 @@ type TSCheckHelper struct {
 	// or must be executed in the relationship engine
 	// HintType: ForceNoSynchronizerGroup and ForceRelationalGroup
 	GroupHint keys.GroupHintType
+
+	// scan ordered cols
+	orderedCols opt.ColSet
+
+	// scan ordered type
+	orderedScanType opt.OrderedTableType
+
+	// only have one primary tag value
+	onlyOnePTagValue bool
 }
 
 // init inits the TSCheckHelper
@@ -394,6 +410,15 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 	m.saveTablesPrefix = evalCtx.SessionData.SaveTablesPrefix
 	m.insertFastPath = evalCtx.SessionData.InsertFastPath
 
+	if evalCtx.Settings != nil {
+		m.tsOrderedScan = opt.TSOrderedTable.Get(&evalCtx.Settings.SV)
+		m.tsCanPushAllProcessor = opt.PushdownAll.Get(&evalCtx.Settings.SV)
+		m.tsForcePushGroupToTSEngine = !stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV)
+	} else {
+		m.tsCanPushAllProcessor = true
+		m.tsForcePushGroupToTSEngine = true
+	}
+
 	m.curID = 0
 	m.curWithID = 0
 	m.ColsUsage = nil
@@ -428,6 +453,21 @@ func (m *Memo) GetWhiteList() *sqlbase.WhiteListMap {
 // SetWhiteList set white list
 func (m *Memo) SetWhiteList(src *sqlbase.WhiteListMap) {
 	m.CheckHelper.whiteList = src
+}
+
+// EnableOrderedScan check ordered scan is enable
+func (m *Memo) EnableOrderedScan() bool {
+	return m.tsOrderedScan
+}
+
+// TSSupportAllProcessor check ts engine support all
+func (m *Memo) TSSupportAllProcessor() bool {
+	return m.tsCanPushAllProcessor
+}
+
+// ForcePushGroupToTSEngine check force group to ts engine
+func (m *Memo) ForcePushGroupToTSEngine() bool {
+	return m.tsForcePushGroupToTSEngine
 }
 
 // NotifyOnNewGroup sets a callback function which is invoked each time we
@@ -533,7 +573,10 @@ func (m *Memo) IsStale(
 		m.optimizerFKs != evalCtx.SessionData.OptimizerFKs ||
 		m.safeUpdates != evalCtx.SessionData.SafeUpdates ||
 		m.saveTablesPrefix != evalCtx.SessionData.SaveTablesPrefix ||
-		m.insertFastPath != evalCtx.SessionData.InsertFastPath {
+		m.insertFastPath != evalCtx.SessionData.InsertFastPath ||
+		m.tsOrderedScan != opt.TSOrderedTable.Get(&evalCtx.Settings.SV) ||
+		m.tsCanPushAllProcessor != opt.PushdownAll.Get(&evalCtx.Settings.SV) ||
+		m.tsForcePushGroupToTSEngine == stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV) {
 		return true, nil
 	}
 
@@ -849,13 +892,11 @@ func (m *Memo) CheckWhiteListAndAddSynchronize(src *RelExpr) error {
 		return nil
 	}
 	// the main implementation of checking white list and setting flag for adding Synchronizer.
-	execInTSEngine, hasAddSynchronizer, _, err := m.CheckWhiteListAndAddSynchronizeImp(src)
-	if err != nil {
-		return err
+	retTop := m.CheckWhiteListAndAddSynchronizeImp(src)
+	if retTop.err != nil {
+		return retTop.err
 	}
-	if execInTSEngine && !hasAddSynchronizer {
-		(*src).SetAddSynchronizer()
-	}
+	addSynchronizeStruct(&retTop, *src)
 	return nil
 }
 
@@ -892,23 +933,56 @@ func (m *Memo) DealTSScan(src RelExpr) {
 	walkDealTSScan(src, addColForTSScan)
 }
 
+func (m *Memo) addOrderedColumn(src *bestProps) {
+	if src != nil && !m.CheckHelper.orderedCols.Empty() {
+		for i := range src.provided.Ordering {
+			m.CheckHelper.orderedCols.Add(src.provided.Ordering[i].ID())
+		}
+		m.CheckHelper.orderedCols.ForEach(func(col opt.ColumnID) {
+			if m.CheckHelper.orderedScanType.Ordered() {
+				src.provided.Ordering = append(src.provided.Ordering, opt.MakeOrderingColumn(col, false))
+			}
+		})
+	}
+}
+
+// checkOptPruneFinalAgg checkout can prune final agg for single node mode
+// 1. onlyOnePTagValue is a flag for primary tag value filter, only query one primary tag
+// eg: select sum(a) from tsdb.t1 where ptag = 1 group by b;
+// 2. group by  contain all primary tag
+// eg: select sum(a) from tsdb.t1 group by ptag;
+func checkOptPruneFinalAgg(gp *GroupingPrivate, meta *opt.Metadata, onlyOnePTagValue bool) {
+	if onlyOnePTagValue {
+		gp.OptFlags |= opt.PruneFinalAgg
+	} else {
+		PrimaryTagCount := 0
+		tableID := opt.TableID(0)
+		gp.GroupingCols.ForEach(func(colID opt.ColumnID) {
+			colMeta := meta.ColumnMeta(colID)
+			if colMeta.IsPrimaryTag() {
+				PrimaryTagCount++
+			}
+			if tableID == 0 {
+				tableID = colMeta.Table
+			} else if colMeta.Table != 0 && tableID != colMeta.Table {
+				PrimaryTagCount = 0
+			}
+		})
+
+		if tableID != 0 && PrimaryTagCount != 0 {
+			tableMeta := meta.TableMeta(tableID)
+			if PrimaryTagCount == tableMeta.PrimaryTagCount && gp.AggIndex.Empty() {
+				gp.OptFlags |= opt.PruneFinalAgg
+			}
+		}
+	}
+}
+
 // dealWithGroupBy
 // src is GroupByExpr or ScalarGroupByExpr
-// input is the child expr of GroupByExpr or ScalarGroupByExpr
-// execInTSEngine is true when(GroupByExpr / ScalarGroupByExpr) can execute in ts engine
-// aggParallel is true when (GroupByExpr / ScalarGroupByExpr) can be paralleled
-// hasDistinct is true when agg with distinct
-// hasSynchronizer is true when the child have added the flag
-// optTimeBucket is true when optimizing query efficiency in time_bucket case
-func (m *Memo) dealWithGroupBy(
-	src RelExpr,
-	child RelExpr,
-	execInTSEngine *bool,
-	aggParallel bool,
-	aggWithDistinct bool,
-	hasSynchronizer bool,
-	optTimeBucket bool,
-) bool {
+// child is the child expr of GroupByExpr or ScalarGroupByExpr
+// ret is return param struct
+func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheckResults) {
 	aggs := make([]AggregationsItem, 0)
 	var gp *GroupingPrivate
 	switch t := src.(type) {
@@ -927,19 +1001,19 @@ func (m *Memo) dealWithGroupBy(
 	}
 
 	// do nothing when group by can not execute in ts engine.
-	if !(*execInTSEngine) {
-		return false
+	if !ret.commonRet.execInTSEngine {
+		return
 	}
 
 	// case: agg with distinct
-	if aggWithDistinct {
+	if ret.hasDistinct {
 		// multi node, agg with distinct can not execute in ts engine.
 		if !(m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode()) {
-			if !hasSynchronizer {
-				m.setSynchronizerForChild(child, &hasSynchronizer)
+			if !ret.commonRet.hasAddSynchronizer {
+				m.setSynchronizerForChild(child, &ret.commonRet.hasAddSynchronizer)
 			}
-			*execInTSEngine = false
-			return false
+			ret.commonRet.execInTSEngine = false
+			return
 		}
 	}
 	src.SetEngineTS()
@@ -947,44 +1021,45 @@ func (m *Memo) dealWithGroupBy(
 	// fill statistics
 	m.fillStatistic(&child, aggs, gp)
 
-	if aggParallel {
-		if !hasSynchronizer {
-			if m.CheckHelper.GroupHint != keys.ForceNoSynchronizerGroup {
-				src.SetAddSynchronizer()
-			}
-			hasSynchronizer = true
+	if ret.commonRet.canTimeBucketOptimize {
+		checkOptPruneFinalAgg(gp, m.Metadata(), m.CheckHelper.onlyOnePTagValue)
+
+		gp.OptFlags |= opt.PushLocalAggToScan
+
+		// single device can prune local agg
+		if m.CheckHelper.onlyOnePTagValue || gp.OptFlags.PruneFinalAggOpt() {
+			gp.OptFlags |= opt.PruneLocalAgg
+			// set ts scan use ordered scan table
+			walkDealTSScan(src, setOrderedForce)
 		}
 	}
 
-	if optTimeBucket {
-		if private, ok := src.Private().(*GroupingPrivate); ok {
-			private.OptTimeBucket = true
+	if ret.isParallel && !ret.commonRet.hasAddSynchronizer && !gp.OptFlags.PruneFinalAggOpt() {
+		if m.CheckHelper.GroupHint != keys.ForceNoSynchronizerGroup {
+			src.SetAddSynchronizer()
 		}
+		ret.commonRet.hasAddSynchronizer = true
 	}
+}
 
-	return hasSynchronizer
+func setOrderedForce(expr *TSScanExpr) {
+	expr.OrderedScanType = opt.ForceOrderedScan
 }
 
 // dealWithOrderBy set engine and add flag for the child of order by
 // when it's child can exec in ts engine.
 // sort is memo.SortExpr of memo tree.
-// execInTSEngine is true when the child of sort can exec in ts engine.
-// hasAddSynchronizer is true when the child have added the flag.
+// ret is return param struct.
 // props is the bestProps of (memo.GroupByExpr or memo.DistinctOnExpr),
 // props is not nil when there is a OrderGroupBy.
-func (m *Memo) dealWithOrderBy(
-	sort *SortExpr, execInTSEngine bool, hasAddSynchronizer *bool, props *bestProps,
-) {
-	if execInTSEngine {
+func (m *Memo) dealWithOrderBy(sort *SortExpr, ret *CrossEngCheckResults, props *bestProps) {
+	if ret.execInTSEngine {
 		// only single node, order by can exec in ts engine.
 		if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
 			sort.SetEngineTS()
 		}
 
-		if !(*hasAddSynchronizer) {
-			sort.Input.SetAddSynchronizer()
-			*hasAddSynchronizer = true
-		}
+		addSynchronize(&ret.hasAddSynchronizer, sort.Input)
 	}
 	// OrderGroupBy case, reset bestProps of (memo.GroupByExpr or memo.DistinctOnExpr)
 	if props != nil {
@@ -1071,6 +1146,10 @@ func (m *Memo) tsScanFillStatistic(
 		return
 	}
 
+	if tsScan.OrderedScanType != opt.NoOrdered && gp.GroupingCols.Len() > 0 {
+		gp.OptFlags |= opt.PruneFinalAgg
+	}
+
 	gp.GroupingCols.ForEach(func(colID opt.ColumnID) {
 		gp.AggIndex = append(gp.AggIndex, []uint32{uint32(len(tsScan.ScanAggs))})
 		tsScan.ScanAggs = append(tsScan.ScanAggs, ScanAgg{Params: execinfrapb.TSStatisticReaderSpec_Params{
@@ -1080,8 +1159,14 @@ func (m *Memo) tsScanFillStatistic(
 		}, AggTyp: execinfrapb.AggregatorSpec_ANY_NOT_NULL})
 	})
 
-	for i := range aggs {
-		m.addScanAggs(aggs[i].Agg, &tsScan.ScanAggs, gp, tsScan.Table.ColumnID(0))
+	if gp.OptFlags.PruneFinalAggOpt() && m.CheckFlag(opt.SingleMode) {
+		for i := range aggs {
+			m.addScanAggsForNoSecondAgg(aggs[i].Agg, &tsScan.ScanAggs, gp, tsScan.Table.ColumnID(0))
+		}
+	} else {
+		for i := range aggs {
+			m.addScanAggs(aggs[i].Agg, &tsScan.ScanAggs, gp, tsScan.Table.ColumnID(0))
+		}
 	}
 }
 
@@ -1237,6 +1322,24 @@ var StatisticAggTable = map[opt.Operator]statisticAgg{
 	},
 }
 
+// opToSpecFuncTable  op convert to spec function table
+var opToSpecFuncTable = map[opt.Operator]execinfrapb.AggregatorSpec_Func{
+	opt.SumOp:               execinfrapb.AggregatorSpec_SUM,
+	opt.MinOp:               execinfrapb.AggregatorSpec_MIN,
+	opt.MaxOp:               execinfrapb.AggregatorSpec_MAX,
+	opt.AvgOp:               execinfrapb.AggregatorSpec_AVG,
+	opt.CountOp:             execinfrapb.AggregatorSpec_COUNT,
+	opt.CountRowsOp:         execinfrapb.AggregatorSpec_COUNT,
+	opt.FirstOp:             execinfrapb.AggregatorSpec_FIRST,
+	opt.FirstTimeStampOp:    execinfrapb.AggregatorSpec_FIRSTTS,
+	opt.FirstRowOp:          execinfrapb.AggregatorSpec_FIRST_ROW,
+	opt.FirstRowTimeStampOp: execinfrapb.AggregatorSpec_FIRST_ROW_TS,
+	opt.LastOp:              execinfrapb.AggregatorSpec_LAST,
+	opt.LastTimeStampOp:     execinfrapb.AggregatorSpec_LASTTS,
+	opt.LastRowOp:           execinfrapb.AggregatorSpec_LAST_ROW,
+	opt.LastRowTimeStampOp:  execinfrapb.AggregatorSpec_LAST_ROW_TS,
+}
+
 // addScanAggs adds scan Aggs to tsExpr.ScanAggs.
 // agg is the one of the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
 // scanAggs is ScanAggs of memo.TSScanExpr.
@@ -1307,6 +1410,34 @@ func (m *Memo) addScanAggs(
 	return
 }
 
+// addScanAggsForNoSecondAgg adds scan Aggs to tsExpr.ScanAggs for second agg optimize
+// agg is the one of the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
+// scanAggs is ScanAggs of memo.TSScanExpr.
+// gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
+// tsCol is the logical column ID of the timestamp colimn of the ts table.
+func (m *Memo) addScanAggsForNoSecondAgg(
+	agg opt.ScalarExpr, scanAggs *ScanAggArray, gp *GroupingPrivate, tsCol opt.ColumnID,
+) {
+	if val, ok := opToSpecFuncTable[agg.Op()]; ok {
+		colID := tsCol
+		if agg.ChildCount() > 0 {
+			colID = m.getArgColID(agg.Child(0).(opt.ScalarExpr))
+		}
+
+		var index []uint32
+		Param := []execinfrapb.TSStatisticReaderSpec_ParamInfo{
+			{Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(colID)}}
+		// exists agg , use it
+		if idx := m.fillScanAggs(scanAggs, Param, val); idx != -1 {
+			index = append(index, uint32(idx))
+		} else {
+			index = append(index, uint32(len(*scanAggs)-1))
+		}
+		gp.AggIndex = append(gp.AggIndex, index)
+	}
+	return
+}
+
 // parseTZ converts a string timestamp value to an integer timestamp value.
 func parseTZ(boundaryStr string) int64 {
 	d, err := tree.ParseDTimestampTZ(nil, boundaryStr, time.Millisecond)
@@ -1368,45 +1499,93 @@ func addDistinctScanAgg(scanAggs *ScanAggArray, scanAgg *ScanAgg) int {
 	return -1
 }
 
+// CrossEngCheckResults includes various flags and an error status related to the optimization and execution checks in ts engine.
+type CrossEngCheckResults struct {
+	// execInTSEngine: return true when the expr can execute in ts engine.
+	execInTSEngine bool
+	// hasAddSynchronizer: return true when the expr is set the addSynchronizer to true.
+	hasAddSynchronizer bool
+	// canTimeBucketOptimize: return true when optimizing query efficiency in time_bucket case.
+	canTimeBucketOptimize bool
+	// err: is the error.
+	err error
+}
+
+func (r CrossEngCheckResults) init() {
+	r.execInTSEngine = false
+	r.hasAddSynchronizer = false
+	r.canTimeBucketOptimize = false
+	r.err = nil
+}
+
+// aggCrossEngCheckResults  agg cross engine check result struct
+type aggCrossEngCheckResults struct {
+	// isParallel return true when the (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr) can parallel in ts engine.
+	isParallel bool
+	// hasDistinct return true when the agg functions with distinct.
+	hasDistinct bool
+
+	commonRet CrossEngCheckResults
+}
+
+// disableExecInTSEngine disable can execute in ts engine, return error
+func (r CrossEngCheckResults) disableExecInTSEngine() CrossEngCheckResults {
+	return CrossEngCheckResults{err: r.err}
+}
+
+func addSynchronize(hasAdded *bool, src RelExpr) {
+	if !*hasAdded {
+		src.SetAddSynchronizer()
+		*hasAdded = true
+	}
+}
+
+func addSynchronizeStruct(ret *CrossEngCheckResults, src RelExpr) {
+	if ret.execInTSEngine && !ret.hasAddSynchronizer {
+		src.SetAddSynchronizer()
+		ret.hasAddSynchronizer = true
+	}
+
+	ret.execInTSEngine = false
+}
+
 // CheckWhiteListAndAddSynchronizeImp check if each expr of memo tree can execute in ts engine,
 // and set the engine of expr to opt.EngineTS when it can execute in ts engine,
 // and set the addSynchronizer of expr to true when it needs to be synchronized.
 // src is the expr of memo tree.
 // returns:
-// param1: return true when the expr can execute in ts engine.
-// param2: return true when the expr is set the addSynchronizer to true.
-// param3: return true when optimizing query efficiency in time_bucket case.
-// param4: is the error.
-func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (bool, bool, bool, error) {
+// ret: return param struct
+func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngCheckResults) {
+	ret.init()
 	switch source := (*src).(type) {
 	case *TSScanExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.CheckTSScan(source)
-		return execInTSEngine, hasAddSynchronizer, true, err
+		return m.CheckTSScan(source)
 	case *SelectExpr:
 		return m.checkSelect(source)
 	case *ProjectExpr:
 		return m.checkProject(source)
 	case *ProjectSetExpr:
-		_, _, _, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-		return false, false, false, err
+		retTmp := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+		return retTmp.disableExecInTSEngine()
 	case *GroupByExpr:
+		input := source.Input
 		sort, ok := (*src).Child(0).(*SortExpr)
 		if ok {
 			m.SetFlag(opt.OrderGroupBy)
+			input = sort.Input
 		}
-		execInTSEngine, canMerge, aggWithDistinct, hasAddSynchronizer, optTimeBucket, err := m.checkGroupBy(source.Input, &source.Aggregations,
-			&source.GroupingPrivate)
-		if err != nil {
-			return false, false, false, err
+		retAgg := m.checkGroupBy(input, &source.Aggregations, &source.GroupingPrivate)
+		if retAgg.commonRet.err != nil {
+			return retAgg.commonRet.disableExecInTSEngine()
 		}
-		selfAdd := m.dealWithGroupBy(source, source.Input, &execInTSEngine, canMerge, aggWithDistinct, hasAddSynchronizer, optTimeBucket)
+		m.dealWithGroupBy(source, input, &retAgg)
 		if ok {
-			if execInTSEngine {
+			if retAgg.commonRet.execInTSEngine {
 				// swap the positions of GroupByExpr and OrderExpr, when GroupByExpr exec
 				// in ts engine and there is the OrderGroupBy.
 				source.Input = sort.Input
 				sort.Input = source
-				m.dealWithOrderBy(sort, execInTSEngine, &hasAddSynchronizer, source.bestProps())
+				m.dealWithOrderBy(sort, &retAgg.commonRet, source.bestProps())
 				*src = sort
 			} else {
 				// group by can not exec in ts engine, clear flag and not need set root.
@@ -1414,61 +1593,57 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (bool, bool, boo
 			}
 		}
 
-		return execInTSEngine, selfAdd, optTimeBucket, nil
-	case *ScalarGroupByExpr:
-		execInTSEngine, canMerge, aggWithDistinct, hasAddSynchronizer, optTimeBucket, err := m.checkGroupBy(source.Input, &source.Aggregations,
-			&source.GroupingPrivate)
-		if err != nil {
-			return false, false, false, err
+		if source.OptFlags.PruneFinalAggOpt() {
+			m.addOrderedColumn(source.bestProps())
 		}
-		selfAdd := m.dealWithGroupBy(source, source.Input, &execInTSEngine, canMerge, aggWithDistinct, hasAddSynchronizer, optTimeBucket)
-		return execInTSEngine, selfAdd, optTimeBucket, nil
+
+		return retAgg.commonRet
+	case *ScalarGroupByExpr:
+		retAgg := m.checkGroupBy(source.Input, &source.Aggregations,
+			&source.GroupingPrivate)
+		if retAgg.commonRet.err != nil {
+			return retAgg.commonRet.disableExecInTSEngine()
+		}
+		m.dealWithGroupBy(source, source.Input, &retAgg)
+		return retAgg.commonRet
 	case *InnerJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.checkJoin(source)
-		return execInTSEngine, hasAddSynchronizer, false, err
+		return m.checkJoin(source)
 	case *UnionAllExpr, *UnionExpr, *IntersectExpr, *IntersectAllExpr, *ExceptAllExpr, *ExceptExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.checkSetop((*src).Child(0).(RelExpr), (*src).Child(1).(RelExpr))
-		return execInTSEngine, hasAddSynchronizer, false, err
+		return m.checkSetop((*src).Child(0).(RelExpr), (*src).Child(1).(RelExpr))
 	case *AntiJoinExpr, *AntiJoinApplyExpr, *SemiJoinExpr, *SemiJoinApplyExpr, *MergeJoinExpr,
 		*LeftJoinApplyExpr, *LeftJoinExpr, *RightJoinExpr, *InnerJoinApplyExpr, *FullJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.checkOtherJoin(source)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.checkOtherJoin(source)
 	case *LookupJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.checkLookupJoin(source)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.checkLookupJoin(source)
 	case *DistinctOnExpr:
 		sort, ok := (*src).Child(0).(*SortExpr)
 		if ok {
 			m.SetFlag(opt.OrderGroupBy)
 		}
-		execInTSEngine, _, _, hasAddSynchronizer, _, err := m.checkGroupBy(source.Input, &source.Aggregations, &source.GroupingPrivate)
-		if err != nil {
-			return false, false, false, err
+
+		retAgg := m.checkGroupBy(source.Input, &source.Aggregations, &source.GroupingPrivate)
+		if retAgg.commonRet.err != nil {
+			return retAgg.commonRet.disableExecInTSEngine()
 		}
-		if execInTSEngine {
+
+		if retAgg.commonRet.execInTSEngine {
 			if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
 				source.SetEngineTS()
 			} else {
-				execInTSEngine = false
+				retAgg.commonRet.execInTSEngine = false
 			}
-			if !hasAddSynchronizer {
+			if !retAgg.commonRet.hasAddSynchronizer {
 				if !ok {
 					source.Input.SetAddSynchronizer()
-					hasAddSynchronizer = true
+					retAgg.commonRet.hasAddSynchronizer = true
 				} else {
 					// swap the positions of DistinctOnExpr and OrderExpr, when DistinctOnExpr can exec
 					// in ts engine and there is the OrderGroupBy.
 					sort.Input.SetAddSynchronizer()
-					hasAddSynchronizer = true
+					retAgg.commonRet.hasAddSynchronizer = true
 					source.Input = sort.Input
 					sort.Input = source
-					m.dealWithOrderBy(sort, execInTSEngine, &hasAddSynchronizer, source.bestProps())
+					m.dealWithOrderBy(sort, &retAgg.commonRet, source.bestProps())
 					*src = sort
 				}
 			}
@@ -1478,109 +1653,77 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (bool, bool, boo
 				m.ClearFlag(opt.OrderGroupBy)
 			}
 		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		if source.OptFlags.PruneFinalAggOpt() {
+			m.addOrderedColumn(source.bestProps())
+		}
+		return retAgg.commonRet
 	case *LimitExpr:
-		execInTSEngine, hasAddSynchronizer, _, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-		if err != nil {
-			return false, false, false, err
+		ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+		if ret.err != nil {
+			return ret.disableExecInTSEngine()
 		}
-		if execInTSEngine {
-			if !hasAddSynchronizer {
-				source.SetAddSynchronizer()
-				hasAddSynchronizer = true
-			}
+		if ret.execInTSEngine {
+			addSynchronize(&ret.hasAddSynchronizer, source)
 			source.SetEngineTS()
-			if !hasAddSynchronizer {
-				source.SetAddSynchronizer()
-				hasAddSynchronizer = true
-			}
 		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return ret
 	case *ScanExpr:
-		return false, false, false, nil
+		return ret
 	case *OffsetExpr:
-		_, hasAddSynchronizer, _, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-		if err != nil {
-			return false, false, false, err
-		}
-		return false, hasAddSynchronizer, false, nil
+		ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+		ret.execInTSEngine = false
+		return ret
 	case *ValuesExpr:
-		return false, false, false, nil
+		return ret
 	case *Max1RowExpr: // local plan ,so can not add synchronizer
-		execInTSEngine, hasAddSynchronizer, err := m.dealCanNotAddSynchronize(&source.Input)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.dealCanNotAddSynchronize(&source.Input)
 	case *OrdinalityExpr: // local plan ,so can not add synchronizer
-		execInTSEngine, hasAddSynchronizer, err := m.dealCanNotAddSynchronize(&source.Input)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.dealCanNotAddSynchronize(&source.Input)
 	case *VirtualScanExpr:
-		return false, false, false, nil
+		return ret
 	case *ExplainExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.dealCanNotAddSynchronize(&source.Input)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.dealCanNotAddSynchronize(&source.Input)
 	case *ExportExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.dealCanNotAddSynchronize(&source.Input)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.dealCanNotAddSynchronize(&source.Input)
 	case *OpaqueRelExpr:
-		return false, false, false, nil
+		return ret
 	case *SortExpr:
-		execInTSEngine, hasAddSynchronizer, optTimeBucket, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-		if err != nil {
-			return false, false, false, err
+		ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+		if ret.err != nil {
+			return ret.disableExecInTSEngine()
 		}
 
 		if !m.CheckFlag(opt.OrderGroupBy) {
-			m.dealWithOrderBy(source, execInTSEngine, &hasAddSynchronizer, nil)
+			m.dealWithOrderBy(source, &ret, nil)
 		}
-		return execInTSEngine, hasAddSynchronizer, optTimeBucket, nil
+		return ret
 	case *WithExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.dealCanNotAddSynchronize(&source.Binding)
-		if err != nil {
-			return false, false, false, err
+		ret1 := m.dealCanNotAddSynchronize(&source.Binding)
+		if ret1.err != nil {
+			return ret1.disableExecInTSEngine()
 		}
 
-		execInTSEngine, hasAddSynchronizer, err = m.dealCanNotAddSynchronize(&source.Main)
-		if err != nil {
-			return false, false, false, err
+		ret2 := m.dealCanNotAddSynchronize(&source.Main)
+		if ret2.err != nil {
+			return ret2.disableExecInTSEngine()
 		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return ret2
 	case *WindowExpr:
-		execInTSEngine, hasAddSynchronizer, err := m.dealCanNotAddSynchronize(&source.Input)
-		if err != nil {
-			return false, false, false, err
-		}
-		return execInTSEngine, hasAddSynchronizer, false, nil
+		return m.dealCanNotAddSynchronize(&source.Input)
 	case *WithScanExpr:
-		return false, false, false, nil
+		return ret
 	default:
-		execInTSEngine := false
-		hasAddSynchronizer := false
-		var err error
 		for i := 0; i < source.ChildCount(); i++ {
 			if val, ok := source.Child(i).(RelExpr); ok {
-				execInTSEngine, hasAddSynchronizer, _, err = m.CheckWhiteListAndAddSynchronizeImp(&val)
-				if err != nil {
-					return false, false, false, err
+				ret1 := m.CheckWhiteListAndAddSynchronizeImp(&val)
+				if ret1.err != nil {
+					return ret1.disableExecInTSEngine()
 				}
-				if execInTSEngine && !hasAddSynchronizer {
-					val.SetAddSynchronizer()
-					hasAddSynchronizer = true
-				}
+				addSynchronizeStruct(&ret1, val)
 			}
 		}
 
-		return false, false, false, nil
+		return ret
 	}
 }
 
@@ -1588,31 +1731,27 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (bool, bool, boo
 // when the memo expr itself can not execute in ts engine.
 // child is the child of memo expr.
 // returns:
-// param1: the memo expr can not execute in ts engine, always false.
-// param2: return true when the child of memo expr is set the addSynchronizer to true.
-// param3: is the error.
-func (m *Memo) dealCanNotAddSynchronize(child *RelExpr) (bool, bool, error) {
-	execInTSEngine, hasAddSynchronizer, _, err := m.CheckWhiteListAndAddSynchronizeImp(child)
-	if err != nil {
-		return false, false, err
+// ret: return param struct
+func (m *Memo) dealCanNotAddSynchronize(child *RelExpr) CrossEngCheckResults {
+	ret := m.CheckWhiteListAndAddSynchronizeImp(child)
+	if ret.err != nil {
+		return ret
 	}
-	if execInTSEngine && !hasAddSynchronizer {
-		(*child).SetAddSynchronizer()
-		hasAddSynchronizer = true
-	}
-
-	return false, true, nil
+	addSynchronizeStruct(&ret, *child)
+	ret.execInTSEngine = false
+	ret.hasAddSynchronizer = true
+	return ret
 }
 
 // CheckTSScan deal with memo.TSScanExpr of memo tree.
 // Record the columns in PushHelper for future memo expr to
 // determine if they can be executed in ts engine.
 // returns:
-// param1: the memo.TSScanExpr can execute in ts engine, always true.
-// param2: return true when there is TagOnlyHint.
-// param3: is the error.
-func (m *Memo) CheckTSScan(source *TSScanExpr) (bool, bool, error) {
+// ret: return param struct
+func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 	hasNotTag := false
+	ret.init()
+	ret.execInTSEngine = true
 	source.Cols.ForEach(func(colID opt.ColumnID) {
 		colMeta := m.metadata.ColumnMeta(colID)
 		if colMeta.IsNormalCol() {
@@ -1620,18 +1759,39 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (bool, bool, error) {
 		}
 		m.AddColumn(colID, colMeta.Alias, ExprTypCol, ExprPosNone, 0, false)
 	})
-
+	ret.err = nil
+	ret.canTimeBucketOptimize = true
 	if source.HintType == keys.TagOnlyHint && hasNotTag {
-		return true, source.HintType == keys.TagOnlyHint, pgerror.New(pgcode.FeatureNotSupported, "TAG_ONLY can only query tag columns")
+		ret.hasAddSynchronizer = source.HintType == keys.TagOnlyHint
+		ret.err = pgerror.New(pgcode.FeatureNotSupported, "TAG_ONLY can only query tag columns")
+	} else {
+		// when the tagFilter has a subquery, it needs to Walk to check whether it can execute in ts engine.
+		param := GetSubQueryExpr{m: m}
+		for _, filter := range source.TagFilter {
+			filter.Walk(&param)
+		}
+		source.SetEngineTS()
+		// only tag mode should not add synchronizer, so param2 will be true.
+		ret.hasAddSynchronizer = source.HintType == keys.TagOnlyHint || source.OrderedScanType == opt.SortAfterScan
 	}
-	// when the tagFilter has a subquery, it needs to Walk to check whether it can execute in ts engine.
-	param := GetSubQueryExpr{m: m}
-	for _, filter := range source.TagFilter {
-		filter.Walk(&param)
+
+	if source.HintType == keys.TagOnlyHint || len(source.PrimaryTagValues) == 0 {
+		source.OrderedScanType = opt.NoOrdered
+	} else {
+		for _, v := range source.PrimaryTagValues {
+			if len(v) > 100 {
+				source.OrderedScanType = opt.NoOrdered
+			} else if len(v) == 1 {
+				m.CheckHelper.onlyOnePTagValue = true
+			}
+		}
 	}
-	source.SetEngineTS()
-	// only tag mode should not add synchronizer, so param2 will be true.
-	return true, source.HintType == keys.TagOnlyHint, nil
+
+	if source.OrderedScanType != opt.NoOrdered {
+		m.CheckHelper.orderedCols.Add(source.Table.ColumnID(0))
+	}
+	m.CheckHelper.orderedScanType = source.OrderedScanType
+	return ret
 }
 
 // GetSubQueryExpr save expr all info
@@ -1666,83 +1826,81 @@ func (p *GetSubQueryExpr) HandleChildExpr(parent opt.Expr, child opt.Expr) bool 
 // checkSelect check if memo.SelectExpr can execute in ts engine.
 // source is the memo.SelectExpr of memo tree.
 // returns:
-// param1: return true when the memo.SelectExpr can execute in ts engine.
-// param2: return true when the memo.SelectExpr is set the addSynchronizer to true.
-// param3: return true when optimizing query efficiency in time_bucket case.
-// param4: is the error.
-func (m *Memo) checkSelect(source *SelectExpr) (bool, bool, bool, error) {
-	childExecInTS, hasAddSynchronizer, optTimeBucket, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-	if err != nil {
-		return false, false, false, err
+// ret: return param struct
+func (m *Memo) checkSelect(source *SelectExpr) (ret CrossEngCheckResults) {
+	ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+	if ret.err != nil {
+		return ret
 	}
 
 	// scan or group by
 	param := GetSubQueryExpr{m: m}
-	selfExecInTS := childExecInTS
+	selfExecInTS := ret.execInTSEngine
 	for i, filter := range source.Filters {
 		filter.Walk(&param)
 		if param.hasSub && !m.CheckFlag(opt.ScalarSubQueryPush) {
 			// can not break ,  need deal with all sub query
 			selfExecInTS = false
-			optTimeBucket = false
+			ret.canTimeBucketOptimize = false
 			continue
 		}
-		if childExecInTS {
+
+		if ret.execInTSEngine {
 			if CheckFilterExprCanExecInTSEngine(filter.Condition, ExprPosSelect, m.CheckHelper.whiteList.CheckWhiteListParam) {
-				if optTimeBucket {
-					optTimeBucket = m.checkFilterOptTimeBucket(filter.Condition)
+				if ret.canTimeBucketOptimize {
+					ret.canTimeBucketOptimize = m.checkFilterOptTimeBucket(filter.Condition)
 				}
 				source.Filters[i].SetEngineTS()
 			} else {
 				selfExecInTS = false
-				optTimeBucket = false
+				ret.canTimeBucketOptimize = false
 			}
 		}
 	}
 
 	// has the columns that not belong to this table, so memo.SelectExpr can not execute in ts engine
 	if !source.Relational().OuterCols.Empty() {
-		if !hasAddSynchronizer {
-			source.Input.SetAddSynchronizer()
-		}
-		return false, true, false, nil
+		addSynchronize(&ret.hasAddSynchronizer, source.Input)
+		ret.execInTSEngine = false
+		return ret
 	}
 
 	// all condition can execute in ts engine
-	if childExecInTS {
+	if ret.execInTSEngine {
 		if selfExecInTS {
 			source.SetEngineTS()
-		} else if !hasAddSynchronizer {
-			source.Input.SetAddSynchronizer()
-			hasAddSynchronizer = true
+		} else {
+			addSynchronize(&ret.hasAddSynchronizer, source.Input)
 		}
 	}
 
-	return selfExecInTS, hasAddSynchronizer, optTimeBucket, nil
+	ret.execInTSEngine = selfExecInTS
+
+	return ret
 }
 
 // checkProject check if memo.ProjectExpr can execute in ts engine.
 // source is the memo.ProjectExpr of memo tree.
 // returns:
-// param1: return true when the memo.ProjectExpr can execute in ts engine.
-// param2: return true when the child of memo.ProjectExpr is set the addSynchronizer to true.
-// param3: return true when optimizing query efficiency in time_bucket case.
-// param4: is the error.
-func (m *Memo) checkProject(source *ProjectExpr) (bool, bool, bool, error) {
-	childExecInTS, hasAddSynchronizer, optTimeBucket, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-	if err != nil {
-		return false, false, false, err
+// ret: return param struct
+func (m *Memo) checkProject(source *ProjectExpr) (ret CrossEngCheckResults) {
+	ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+	if ret.err != nil {
+		return ret
 	}
 
 	var param GetSubQueryExpr
 	param.m = m
-	selfExecInTS := childExecInTS
+	selfExecInTS := ret.execInTSEngine
+	old := m.CheckHelper.orderedCols
+	m.CheckHelper.orderedCols = opt.ColSet{}
+	findTimeBucket := false
 	for _, proj := range source.Projections {
 		proj.Walk(&param)
 		if param.hasSub && !m.CheckFlag(opt.ScalarSubQueryPush) {
 			selfExecInTS = false
 		}
-		if childExecInTS {
+		if ret.execInTSEngine {
 			// check if element of ProjectionExpr can execute in ts engine.
 			if execInTSEngine, hashcode := CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), ExprPosProjList,
 				m.CheckHelper.whiteList.CheckWhiteListParam, false); execInTSEngine {
@@ -1753,32 +1911,48 @@ func (m *Memo) checkProject(source *ProjectExpr) (bool, bool, bool, error) {
 		}
 
 		// case: check if the element is time_bucket function when where need optimize time_bucket.
-		if optTimeBucket {
+		if ret.canTimeBucketOptimize {
 			if proj.Element.Op() == opt.FunctionOp {
 				f := proj.Element.(*FunctionExpr)
 				if f.Name != tree.FuncTimeBucket {
-					optTimeBucket = false
+					ret.canTimeBucketOptimize = false
 				} else {
 					if v, ok := m.CheckHelper.PushHelper.Find(proj.Col); ok {
 						m.AddColumn(proj.Col, v.Alias, v.Type, v.Pos, v.Hash, true)
+						m.CheckHelper.orderedCols.Add(proj.Col)
 					}
+					findTimeBucket = true
+				}
+			} else if proj.Element.Op() == opt.ConstOp {
+				if v, ok := m.CheckHelper.PushHelper.Find(proj.Col); ok {
+					m.AddColumn(proj.Col, v.Alias, v.Type, v.Pos, v.Hash, true)
+					//m.CheckHelper.orderedCols.Add(proj.Col)
 				}
 			} else {
-				optTimeBucket = false
+				ret.canTimeBucketOptimize = false
 			}
 		}
+	}
+
+	// has not time_bucket function
+	if !findTimeBucket {
+		ret.canTimeBucketOptimize = false
 	}
 
 	if selfExecInTS {
 		source.SetEngineTS()
 	} else {
-		if childExecInTS && !hasAddSynchronizer {
-			source.Input.SetAddSynchronizer()
-			hasAddSynchronizer = true
+		if ret.execInTSEngine {
+			addSynchronize(&ret.hasAddSynchronizer, source.Input)
 		}
 	}
 
-	return selfExecInTS, hasAddSynchronizer, optTimeBucket, nil
+	if m.CheckHelper.orderedCols.Empty() {
+		m.CheckHelper.orderedCols = old
+	}
+
+	ret.execInTSEngine = selfExecInTS
+	return ret
 }
 
 // checkGrouping check if group cols can execute in ts engine.
@@ -1858,39 +2032,35 @@ func checkParallelAgg(expr opt.Expr) (bool, bool) {
 // aggs is the AggregationsExpr of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
 // gp is the GroupingPrivate of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
 // returns:
-// param1: return true when the (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr) can execute in ts engine.
-// param2: return true when the (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr) can parallel in ts engine.
-// param3: return true when the agg functions with distinct.
-// param4: return true when the input of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr) is set the addSynchronizer to true.
-// param5: return true when optimizing query efficiency in time_bucket case.
-// param6: is the error.
+// ret: return param struct
 func (m *Memo) checkGroupBy(
 	input RelExpr, aggs *AggregationsExpr, gp *GroupingPrivate,
-) (bool, bool, bool, bool, bool, error) {
-	isParallel := true
-	execInTSEngine, hasSynchronizer, optTimeBucket, err := m.CheckWhiteListAndAddSynchronizeImp(&input)
-	if err != nil || m.CheckHelper.GroupHint == keys.ForceRelationalGroup {
+) (ret aggCrossEngCheckResults) {
+	ret.commonRet = m.CheckWhiteListAndAddSynchronizeImp(&input)
+	if ret.commonRet.err != nil || m.CheckHelper.GroupHint == keys.ForceRelationalGroup {
 		// case: error or hint force group by can not execute in ts engine.
-		return false, false, false, false, false, err
+		return ret
 	}
+
+	ret.isParallel = true
 
 	// memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr
 	// should not parallel when the rows less than ten hundred.
-	if input.Relational().Stats.RowCount < 1000 && !optTimeBucket && m.CheckHelper.GroupHint != keys.ForceAEGroup {
-		if execInTSEngine && !hasSynchronizer {
-			input.SetAddSynchronizer()
-			hasSynchronizer = true
+	if input.Relational().Stats.RowCount < 1000 && !ret.commonRet.canTimeBucketOptimize &&
+		!m.ForcePushGroupToTSEngine() {
+		if ret.commonRet.execInTSEngine {
+			addSynchronize(&ret.commonRet.hasAddSynchronizer, input)
 		}
 	}
 
-	aggExecParallel, hasDistinct := false, false
+	aggExecParallel := false
 
-	m.checkOptTimeBucketFlag(input, &optTimeBucket)
+	m.checkOptTimeBucketFlag(input, &ret.commonRet.canTimeBucketOptimize)
 
-	if execInTSEngine {
+	if ret.commonRet.execInTSEngine {
 		// check if group cols can execute in ts engine
-		execInTSEngine = m.checkGrouping(gp.GroupingCols, &optTimeBucket)
-		if execInTSEngine {
+		ret.commonRet.execInTSEngine = m.checkGrouping(gp.GroupingCols, &ret.commonRet.canTimeBucketOptimize)
+		if ret.commonRet.execInTSEngine {
 			// case: child of memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr and group cols can execute in ts engine
 			// then check if the aggs can execute in ts engine
 			for i := 0; i < len(*aggs); i++ {
@@ -1901,35 +2071,39 @@ func (m *Memo) checkGroupBy(
 				// second: check if agg itself can execute in ts engine.
 				if !m.CheckChildExecInTS(srcExpr, hashCode) ||
 					!m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList) {
-					if !hasSynchronizer {
-						m.setSynchronizerForChild(input, &hasSynchronizer)
+					if !ret.commonRet.hasAddSynchronizer {
+						m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
 					}
-					return false, false, false, hasSynchronizer, false, nil
+
+					ret.commonRet = ret.commonRet.disableExecInTSEngine()
+					return ret
 				}
 				m.AddColumn((*aggs)[i].Col, "", ExprTypeAggOp, ExprPosGroupBy, hashCode, false)
 				var aggWithDistinct bool
 				aggExecParallel, aggWithDistinct = checkParallelAgg((*aggs)[i].Agg)
 				if aggWithDistinct {
-					hasDistinct = true
+					ret.hasDistinct = true
+					ret.commonRet.canTimeBucketOptimize = false
 					aggExecParallel = false
 				}
-				isParallel = isParallel && aggExecParallel
+				ret.isParallel = ret.isParallel && aggExecParallel
 			}
 			// case: group by can execute in ts engine, but agg can not Parallel.
-			if !isParallel && !hasSynchronizer {
-				m.setSynchronizerForChild(input, &hasSynchronizer)
+			if !ret.isParallel && !ret.commonRet.hasAddSynchronizer {
+				m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
 			}
 		} else {
 			// case: group cols can not execute in ts engine.
-			if !hasSynchronizer {
-				m.setSynchronizerForChild(input, &hasSynchronizer)
+			if !ret.commonRet.hasAddSynchronizer {
+				m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
 			}
 		}
 
-		return execInTSEngine, isParallel, hasDistinct, hasSynchronizer, optTimeBucket, nil
+		return ret
 	}
 
-	return false, false, hasDistinct, hasSynchronizer, optTimeBucket, nil
+	ret.commonRet.execInTSEngine = false
+	return ret
 }
 
 // setSynchronizerForChild add flag for the child of memo.OrderBy in OrderGroupBy case,
@@ -1954,31 +2128,9 @@ func (m *Memo) setSynchronizerForChild(child RelExpr, hasSynchronizer *bool) {
 // join can not execute in ts engine, so just check child of InnerJoinExpr and add synchronize Expr.
 // source is the memo.InnerJoinExpr of memo tree.
 // returns:
-// param1: the memo.InnerJoinExpr can not execute in ts engine, always false.
-// param2: return true when the child of memo.InnerJoinExpr is set the addSynchronizer to true.
-// param3: is the error.
-func (m *Memo) checkJoin(source *InnerJoinExpr) (bool, bool, error) {
-	execInTSEngineL, hasAddSynchronizerL, _, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Left)
-	if err != nil {
-		return false, false, err
-	}
-
-	execInTSEngineR, hasAddSynchronizerR, _, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Right)
-	if err != nil {
-		return false, false, err
-	}
-
-	if execInTSEngineL && !hasAddSynchronizerL {
-		source.Left.SetAddSynchronizer()
-		hasAddSynchronizerL = true
-	}
-
-	if execInTSEngineR && !hasAddSynchronizerR {
-		source.Right.SetAddSynchronizer()
-		hasAddSynchronizerR = true
-	}
-
-	return false, hasAddSynchronizerL || hasAddSynchronizerR, nil
+// ret: return param struct
+func (m *Memo) checkJoin(source *InnerJoinExpr) (ret CrossEngCheckResults) {
+	return m.checkTwoParams(source.Left, source.Right)
 }
 
 // checkSetop check if (UnionAllExpr, UnionExpr, IntersectExpr,
@@ -1986,120 +2138,84 @@ func (m *Memo) checkJoin(source *InnerJoinExpr) (bool, bool, error) {
 // They can not execute in ts engine, check their child
 // left, right: childs of setop expr
 // returns:
-// param1: can not execute in ts engine, always false.
-// param2: return true when the child of (UnionAllExpr, UnionExpr,
-// IntersectExpr,IntersectAllExpr, ExceptAllExpr, ExceptExpr) is set the addSynchronizer to true.
-// param3: is the error.
-func (m *Memo) checkSetop(left, right RelExpr) (bool, bool, error) {
-	execInTSEngineL, hasAddSynchronizerL, _, err := m.CheckWhiteListAndAddSynchronizeImp(&left)
-	if err != nil {
-		return false, false, err
+// ret: return param struct
+func (m *Memo) checkSetop(left, right RelExpr) (ret CrossEngCheckResults) {
+	return m.checkTwoParams(left, right)
+}
+
+func (m *Memo) checkTwoParams(left, right RelExpr) (ret CrossEngCheckResults) {
+	lRet := m.CheckWhiteListAndAddSynchronizeImp(&left)
+	if lRet.err != nil {
+		return lRet
 	}
 
-	execInTSEngineR, hasAddSynchronizerR, _, err := m.CheckWhiteListAndAddSynchronizeImp(&right)
-	if err != nil {
-		return false, false, err
+	rRet := m.CheckWhiteListAndAddSynchronizeImp(&right)
+	if rRet.err != nil {
+		return rRet
 	}
-
-	if execInTSEngineL && !hasAddSynchronizerL {
-		left.SetAddSynchronizer()
-		hasAddSynchronizerL = true
-	}
-
-	if execInTSEngineR && !hasAddSynchronizerR {
-		right.SetAddSynchronizer()
-		hasAddSynchronizerR = true
-	}
-
-	return false, hasAddSynchronizerL || hasAddSynchronizerR, nil
+	addSynchronizeStruct(&lRet, left)
+	addSynchronizeStruct(&rRet, right)
+	ret.hasAddSynchronizer = lRet.hasAddSynchronizer || rRet.hasAddSynchronizer
+	return ret
 }
 
 // checkOtherJoinChildExpr check if the child of (SemiJoinExpr,MergeJoinExpr,LeftJoinApplyExpr,
 // RightJoinExpr,InnerJoinApplyExpr,FullJoinExpr,LeftJoinExpr) can execute in ts engine.
 // left is the left child of memo.**JoinExpr, right is the right child of memo.**JoinExpr.
 // returns:
-// param1: the memo.**JoinExpr can not execute in ts engine, always false.
-// param2: return true when the child of memo.**JoinExpr is set the addSynchronizer to true.
-// param3: is the error.
-func (m *Memo) checkOtherJoinChildExpr(left, right RelExpr) (bool, bool, error) {
-	execInTSEngineL, hasAddSynchronizerL, _, err := m.CheckWhiteListAndAddSynchronizeImp(&left)
-	if err != nil {
-		return false, false, err
-	}
-
-	execInTSEngineR, hasAddSynchronizerR, _, err := m.CheckWhiteListAndAddSynchronizeImp(&right)
-	if err != nil {
-		return false, false, err
-	}
-
-	if execInTSEngineL && !hasAddSynchronizerL {
-		left.SetAddSynchronizer()
-		hasAddSynchronizerL = true
-	}
-
-	if execInTSEngineR && !hasAddSynchronizerR {
-		right.SetAddSynchronizer()
-		hasAddSynchronizerR = true
-	}
-
-	return false, hasAddSynchronizerL || hasAddSynchronizerR, nil
+// ret: return param struct
+func (m *Memo) checkOtherJoinChildExpr(left, right RelExpr) (ret CrossEngCheckResults) {
+	return m.checkTwoParams(left, right)
 }
 
 // checkOtherJoin check if (SemiJoinExpr,MergeJoinExpr,LeftJoinApplyExpr,RightJoinExpr,InnerJoinApplyExpr,FullJoinExpr,LeftJoinExpr)
 // can execute in ts engine. they can not execute in ts engine, so just check their child node and add synchronize Expr.
 // source is the memo.**JoinExpr of memo tree.
 // returns:
-// param1: the memo.**JoinExpr can not execute in ts engine, always false.
-// param2: return true when the child of memo.**JoinExpr is set the addSynchronizer to true.
-// param3: is the error.
-func (m *Memo) checkOtherJoin(
-	source RelExpr,
-) (execInTSEngine bool, hasAddSynchronizer bool, err error) {
+// ret: return param struct
+func (m *Memo) checkOtherJoin(source RelExpr) (ret CrossEngCheckResults) {
 	switch s := source.(type) {
 	case *SemiJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *SemiJoinApplyExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *MergeJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *LeftJoinApplyExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *RightJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *InnerJoinApplyExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *FullJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *LeftJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *AntiJoinExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *AntiJoinApplyExpr:
-		execInTSEngine, hasAddSynchronizer, err = m.checkOtherJoinChildExpr(s.Left, s.Right)
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	}
-	if err != nil {
-		return false, hasAddSynchronizer, err
+	if ret.err != nil {
+		return ret
 	}
-	return false, hasAddSynchronizer, nil
+	return ret
 }
 
 // checkLookupJoin check if memo.LookupJoinExpr can execute in ts engine.
 // join can not execute in ts engine, so just check child of LookupJoinExpr and add synchronize Expr.
 // source is the memo.LookupJoinExpr of memo tree.
 // returns:
-// param1: the memo.LookupJoinExpr can not execute in ts engine, always false.
-// param2: return true when the child of memo.LookupJoinExpr is set the addSynchronizer to true.
-// param3: is the error.
-func (m *Memo) checkLookupJoin(source *LookupJoinExpr) (bool, bool, error) {
-	execInTSEngine, hasAddSynchronizer, _, err := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-	if err != nil {
-		return false, false, err
+// ret: return param struct
+func (m *Memo) checkLookupJoin(source *LookupJoinExpr) CrossEngCheckResults {
+	ret := m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+	if ret.err != nil {
+		return ret
 	}
-	if execInTSEngine && !hasAddSynchronizer {
-		source.Input.SetAddSynchronizer()
-		hasAddSynchronizer = true
-	}
-	return false, hasAddSynchronizer, nil
+
+	addSynchronizeStruct(&ret, source.Input)
+
+	return ret
 }
 
 // checkFilterOptTimeBucket check if only timestamp col in filter.

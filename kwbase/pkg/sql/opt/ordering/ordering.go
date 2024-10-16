@@ -114,6 +114,11 @@ func init() {
 		buildChildReqOrdering: noChildReqOrdering,
 		buildProvidedOrdering: scanBuildProvided,
 	}
+	funcMap[opt.TSScanOp] = funcs{
+		canProvideOrdering:    tsScanCanProvideOrdering,
+		buildChildReqOrdering: noChildReqOrdering,
+		buildProvidedOrdering: tsScanBuildProvided,
+	}
 	funcMap[opt.SelectOp] = funcs{
 		canProvideOrdering:    selectCanProvideOrdering,
 		buildChildReqOrdering: selectBuildChildReqOrdering,

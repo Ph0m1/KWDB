@@ -235,7 +235,7 @@ func (o *Optimizer) Optimize() (_ opt.Expr, err error) {
 	// tree by default.
 	root = o.setLowestCostTree(root, rootProps).(memo.RelExpr)
 	o.mem.SetRoot(root, rootProps)
-	if o.mem.CheckFlag(opt.ExecInTSEngine) {
+	if o.mem.TSSupportAllProcessor() {
 		err = o.mem.CheckWhiteListAndAddSynchronize(&root)
 		if err != nil {
 			return root, err
@@ -546,7 +546,7 @@ func (o *Optimizer) optimizeGroupMember(
 	// we need to consider adjusting the order of filtering conditions
 	// to speed up the execution of queries.
 	if opt.CheckOptMode(opt.TSQueryOptMode.Get(&o.evalCtx.Settings.SV), opt.FilterOptOrder) &&
-		o.mem.CheckFlag(opt.ExecInTSEngine) &&
+		o.mem.TSSupportAllProcessor() &&
 		o.mem.CheckFlag(opt.IncludeTSTable) {
 		if selectExpr, ok := member.(*memo.SelectExpr); ok {
 			o.mem.SortFilters(selectExpr, member.Relational())

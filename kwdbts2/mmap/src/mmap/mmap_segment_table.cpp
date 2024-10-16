@@ -789,15 +789,18 @@ int MMapSegmentTable::CopyColBlocks(BlockItem* blk_item, const TsBlockFullData& 
 }
 
 int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwdbts::Payload* payload,
-                                size_t start_in_payload, const BlockSpan& span, kwdbts::DedupInfo& dedup_info) {
+                                size_t start_in_payload, const BlockSpan& span,
+                                uint32_t* inc_unordered_cnt, kwdbts::DedupInfo& dedup_info) {
   int error_code = 0;
   // During writing, a determination is made as to whether the current payload contains out-of-order data.
   // If present, entity_item is marked as being out of order.
   // During subsequent queries, a judgment will be made. If the result set is unordered, a secondary HASH aggregation based on AGG SCAN is required.
   EntityItem* entity_item = meta_manager_->getEntityItem(entity_id);
+  timestamp64 block_max_ts = KTimestamp(columnAggAddr(span.block_item->block_id, 0, Sumfunctype::MAX));
   if (payload->IsDisordered(start_in_payload, span.row_num) ||
-      payload->GetTimestamp(start_in_payload) < entity_item->max_ts) {
-    entity_item->is_disordered = true;
+      (span.block_item->publish_row_count != 0 && payload->GetTimestamp(start_in_payload) < block_max_ts)) {
+    span.block_item->unordered_flag = true;
+    (*inc_unordered_cnt) += span.row_num;
   }
   int payload_col_idx = 1;
   for (size_t i = 1; i < cols_info_exclude_dropped_.size(); ++i) {

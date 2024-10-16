@@ -34,6 +34,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -45,6 +46,14 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/errors"
 )
+
+// Affected is the number of rows and entities affected by update, insert and
+// delete.
+type Affected struct {
+	rowsAffected      int64
+	entitiesAffected  int64
+	unorderedAffected int64
+}
 
 // AutoStatsClusterSettingName is the name of the automatic stats collection
 // cluster setting.
@@ -58,15 +67,27 @@ var AutomaticStatisticsClusterMode = settings.RegisterPublicBoolSetting(
 	true,
 )
 
-// AutoTsStatsClusterSettingName is the name of the ts automatic stats collection
+// AutoTsStatsClusterSettingName is the name of the time series metrics automatic stats collection
 // cluster setting.
 const AutoTsStatsClusterSettingName = "sql.stats.ts_automatic_collection.enabled"
+
+// AutoTagStatsClusterSettingName is the name of the time series tag automatic stats collection
+// cluster setting.
+const AutoTagStatsClusterSettingName = "sql.stats.tag_automatic_collection.enabled"
 
 // AutomaticTsStatisticsClusterMode controls the cluster setting for enabling
 // automatic timeseries table statistics collection.
 var AutomaticTsStatisticsClusterMode = settings.RegisterPublicBoolSetting(
 	AutoTsStatsClusterSettingName,
 	"automatic timing statistics collection mode",
+	false,
+)
+
+// AutomaticTagStatisticsClusterMode controls the cluster setting for enabling
+// automatic tag table statistics collection.
+var AutomaticTagStatisticsClusterMode = settings.RegisterPublicBoolSetting(
+	AutoTagStatsClusterSettingName,
+	"automatic tag statistics of timing series collection mode",
 	false,
 )
 
@@ -140,6 +161,15 @@ var AutomaticTsStatisticsMinStaleRows = func() *settings.IntSetting {
 	s.SetVisibility(settings.Public)
 	return s
 }()
+
+// AutomaticTsUnorderedFractionStaleRows controls the cluster setting for
+// the target fraction of unordered rows in a ts table that should be stale before statistics on that table are refreshed,
+// in addition to the constant value AutomaticTsUnorderedMinStaleRows.
+var AutomaticTsUnorderedFractionStaleRows = 0.2
+
+// AutomaticTsUnorderedMinStaleRows controls the target number of rows that should be updated
+// before a time series table is refreshed, in addition to the fraction AutomaticTsUnorderedFractionStaleRows.
+var AutomaticTsUnorderedMinStaleRows = 500
 
 // DefaultRefreshInterval is the frequency at which the Refresher will check if
 // the stats for each table should be refreshed. It is mutable for testing.
@@ -252,14 +282,16 @@ type Refresher struct {
 
 	// mutationCounts contains aggregated mutation counts for each table that
 	// have yet to be processed by the refresher.
-	mutationCounts map[sqlbase.ID]int64
+	mutationCounts map[sqlbase.ID]Affected
 }
 
 // mutation contains metadata about a SQL mutation and is the message passed to
 // the background refresher thread to (possibly) trigger a statistics refresh.
 type mutation struct {
-	tableID      sqlbase.ID
-	rowsAffected int
+	tableID           sqlbase.ID
+	rowsAffected      int
+	entitiesAffected  int
+	unorderedAffected int
 }
 
 // MakeRefresher creates a new Refresher.
@@ -279,7 +311,7 @@ func MakeRefresher(
 		mutations:      make(chan mutation, refreshChanBufferLen),
 		asOfTime:       asOfTime,
 		extraTime:      time.Duration(rand.Int63n(int64(time.Hour))),
-		mutationCounts: make(map[sqlbase.ID]int64, 32),
+		mutationCounts: make(map[sqlbase.ID]Affected, 32),
 	}
 }
 
@@ -325,15 +357,17 @@ func (r *Refresher) Start(
 							return
 						}
 
-						for tableID, rowsAffected := range mutationCounts {
+						for tableID, affected := range mutationCounts {
 							var tableType tree.TableType
+							var tabDesc *sqlbase.TableDescriptor
 							err := r.cache.ClientDB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-								tbl, err := sqlbase.GetTableDescFromID(ctx, txn, tableID)
+								var err error
+								tabDesc, err = sqlbase.GetTableDescFromID(ctx, txn, tableID)
 								if err != nil {
 									log.Errorf(ctx, "failed to get table desc for %d when create statistic: %v", tableID, err)
 									return err
 								}
-								tableType = tbl.TableType
+								tableType = tabDesc.TableType
 								return nil
 							})
 							if err != nil {
@@ -349,9 +383,9 @@ func (r *Refresher) Start(
 							// Implement different refresh ploy based on different table types
 							switch tableType {
 							case tree.RelationalTable:
-								r.maybeRefreshStats(ctx, stopper, tableID, rowsAffected, r.asOfTime)
+								r.maybeRefreshStats(ctx, stopper, tableID, affected.rowsAffected, r.asOfTime)
 							case tree.TimeseriesTable:
-								r.maybeRefreshTsStats(ctx, tableID, rowsAffected, r.asOfTime)
+								r.maybeRefreshTsStats(ctx, tableID, tabDesc, affected, r.asOfTime)
 							default:
 								log.Errorf(ctx, "unknown table type %d for statistics refresh", tableType)
 								return
@@ -369,10 +403,17 @@ func (r *Refresher) Start(
 					}); err != nil {
 					log.Errorf(ctx, "failed to refresh stats: %v", err)
 				}
-				r.mutationCounts = make(map[sqlbase.ID]int64, len(r.mutationCounts))
+				r.mutationCounts = make(map[sqlbase.ID]Affected, len(r.mutationCounts))
 
 			case mut := <-r.mutations:
-				r.mutationCounts[mut.tableID] += int64(mut.rowsAffected)
+				if affected, ok := r.mutationCounts[mut.tableID]; ok {
+					affected.rowsAffected += int64(mut.rowsAffected)
+					affected.entitiesAffected += int64(mut.entitiesAffected)
+					affected.unorderedAffected += int64(mut.unorderedAffected)
+					r.mutationCounts[mut.tableID] = affected
+				} else {
+					r.mutationCounts[mut.tableID] = Affected{int64(mut.rowsAffected), int64(mut.entitiesAffected), int64(mut.unorderedAffected)}
+				}
 
 			case <-stopper.ShouldStop():
 				return
@@ -417,7 +458,9 @@ AND drop_time IS NULL
 		// TODO(rytaft): Don't add views here either. Unfortunately views are not
 		// identified differently from tables in kwdb_internal.tables.
 		if !sqlbase.IsReservedID(tableID) && !sqlbase.IsVirtualTable(tableID) {
-			r.mutationCounts[tableID] += 0
+			if _, ok := r.mutationCounts[tableID]; !ok {
+				r.mutationCounts[tableID] = Affected{0, 0, 0}
+			}
 		}
 	}
 }
@@ -460,8 +503,11 @@ func (r *Refresher) NotifyMutation(tableID sqlbase.ID, rowsAffected int) {
 // Refresher that a timeseries table has been mutated. It should be called after any
 // successful insert. rowsAffected refers to the number of rows written as part
 // of the mutation operation.
-func (r *Refresher) NotifyTsMutation(tableID sqlbase.ID, rowsAffected int) {
-	if !AutomaticTsStatisticsClusterMode.Get(&r.st.SV) {
+func (r *Refresher) NotifyTsMutation(
+	tableID sqlbase.ID, rowsAffected int, entitiesAffected int, unorderedAffected int,
+) {
+	if !AutomaticTsStatisticsClusterMode.Get(&r.st.SV) && !AutomaticTagStatisticsClusterMode.Get(&r.st.SV) &&
+		!opt.TSOrderedTable.Get(&r.st.SV) {
 		// Automatic stats are disabled.
 		return
 	}
@@ -479,7 +525,7 @@ func (r *Refresher) NotifyTsMutation(tableID sqlbase.ID, rowsAffected int) {
 	// Send mutation info to the refresher thread to avoid adding latency to
 	// the calling transaction.
 	select {
-	case r.mutations <- mutation{tableID: tableID, rowsAffected: rowsAffected}:
+	case r.mutations <- mutation{tableID: tableID, rowsAffected: rowsAffected, entitiesAffected: entitiesAffected, unorderedAffected: unorderedAffected}:
 	default:
 		// Don't block if there is no room in the buffered channel.
 		if bufferedChanFullLogLimiter.ShouldLog() {
@@ -703,9 +749,8 @@ func shouldRefreshStats(tableType tree.TableType, sv *settings.Values) bool {
 	case tree.RelationalTable:
 		return AutomaticStatisticsClusterMode.Get(sv)
 	case tree.TimeseriesTable:
-		return AutomaticTsStatisticsClusterMode.Get(sv)
-	case tree.TemplateTable, tree.InstanceTable:
-		return false
+		return AutomaticTsStatisticsClusterMode.Get(sv) || AutomaticTagStatisticsClusterMode.Get(sv) ||
+			opt.TSOrderedTable.Get(sv)
 	default:
 		return false
 	}

@@ -67,16 +67,14 @@ type groupNode struct {
 	// engine is a bit set that indicates which engine to exec.
 	engine tree.EngineType
 
-	// ts engine parallel execute flag and degree
-	addSynchronizer      bool
-	tsParallelExecDegree int32
-
 	// the column index of agg func used from statistic reader
 	statisticIndex opt.StatisticIndex
 
-	// aggPushDown is true when the AggPushDown of memo.GroupBy is true,
-	// aggPushDown is set only in time_bucket case, for optimizing time_bucket query.
-	aggPushDown bool
+	// ts engine parallel execute flag and degree
+	addSynchronizer bool
+
+	// optType is flags of group by type, type is opt.GroupOptType
+	optType opt.GroupOptType
 }
 
 func (n *groupNode) startExec(params runParams) error {

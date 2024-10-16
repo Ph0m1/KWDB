@@ -38,9 +38,7 @@ class StatisticSpecResolve : public PostResolve {
 
  public:
   TSStatisticReaderSpec *spec_{nullptr};
-  k_int16 statistic_tag_index_{0};
   k_int16 insert_ts_index_{0};
-  k_int16 statistic_const_index_{0};
   k_int16 statistic_last_tag_index_{0};
   k_int16 is_insert_ts_index_{0};
   k_int16 insert_last_tag_ts_num_{0};

@@ -62,6 +62,21 @@ struct DelRowSpans {
   std::vector<DelRowSpan> spans;
 };
 
+struct UnorderedDataStats {
+  k_uint32 total_data_rows = 0;
+  k_uint32 unordered_data_rows = 0;
+  k_uint32 ordered_entity_cnt = 0;
+  k_uint32 unordered_entity_cnt = 0;
+
+  UnorderedDataStats operator+=(const UnorderedDataStats& stats) {
+    total_data_rows += stats.total_data_rows;
+    unordered_data_rows += stats.unordered_data_rows;
+    ordered_entity_cnt += stats.ordered_entity_cnt;
+    unordered_entity_cnt += stats.unordered_entity_cnt;
+    return *this;
+  }
+};
+
 enum SortOrder {
   ASC = 0,
   DESC,

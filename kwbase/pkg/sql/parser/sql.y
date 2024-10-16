@@ -627,7 +627,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %token <str> CONFLICT CONSTRAINT CONSTRAINTS CONTAINS CONVERSION COPY COVERING CREATE CREATEROLE CREATE_TIME
 %token <str> CROSS CUBE CURRENT CURRENT_CATALOG CURRENT_DATE CURRENT_SCHEMA
 %token <str> CURRENT_ROLE CURRENT_TIME CURRENT_TIMESTAMP
-%token <str> CURRENT_USER CYCLE
+%token <str> CURRENT_USER CYCLE COLLECT_SORTED_HISTOGRAM
 
 %token <str> D DATA DATABASE DATABASES DATAS DATE DAY DDLREPLAY DEC DECIMAL DEFAULT
 %token <str> DEALLOCATE DEFERRABLE DEFERRED DELETE DESC DEVICE
@@ -645,7 +645,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 
 %token <str> GB GEOMETRY GLOBAL GRANT GRANTS GREATEST GROUP GROUPING GROUPS
 
-%token <str> H HAVING HASH HIGH HISTOGRAM HOUR
+%token <str> H HAVING HASH HIGH HISTOGRAM HOUR SORT_HISTOGRAM
 
 %token <str> IF IFERROR IFNULL IGNORE_FOREIGN_KEYS ILIKE IMMEDIATE IMPORT IN INCLUDE INCREMENT INCREMENTAL
 %token <str> INET INET_CONTAINED_BY_OR_EQUALS
@@ -893,6 +893,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <tree.Statement> show_fingerprints_stmt
 %type <tree.Statement> show_grants_stmt
 %type <tree.Statement> show_histogram_stmt
+%type <tree.Statement> show_sort_histogram_stmt
 %type <tree.Statement> show_indexes_stmt
 %type <tree.Statement> show_partitions_stmt
 %type <tree.Statement> show_jobs_stmt
@@ -2674,6 +2675,12 @@ create_stats_option:
       AsOf: $1.asOfClause(),
     }
   }
+| COLLECT_SORTED_HISTOGRAM
+  {
+    $$.val = &tree.CreateStatsOptions{
+      SortedHistogram: true,
+    }
+  }
 
 create_changefeed_stmt:
   CREATE CHANGEFEED FOR changefeed_targets opt_changefeed_sink opt_with_options
@@ -3767,6 +3774,7 @@ show_stmt:
 | show_fingerprints_stmt
 | show_grants_stmt          // EXTEND WITH HELP: SHOW GRANTS
 | show_histogram_stmt       // EXTEND WITH HELP: SHOW HISTOGRAM
+| show_sort_histogram_stmt
 | show_indexes_stmt         // EXTEND WITH HELP: SHOW INDEXES
 | show_partitions_stmt
 | show_jobs_stmt            // EXTEND WITH HELP: SHOW JOBS
@@ -3896,6 +3904,23 @@ show_histogram_stmt:
     $$.val = &tree.ShowHistogram{HistogramID: id}
   }
 | SHOW HISTOGRAM error // SHOW HELP: SHOW HISTOGRAM
+
+show_sort_histogram_stmt:
+  SHOW SORT_HISTOGRAM ICONST
+  {
+    /* SKIP DOC */
+    id, err := $3.numVal().AsInt64()
+    if err != nil {
+      return setErr(sqllex, err)
+    }
+    $$.val = &tree.ShowSortHistogram{HistogramID: id}
+  }
+| SHOW SORT_HISTOGRAM FOR TABLE table_name
+  {
+      /* SKIP DOC */
+      $$.val = &tree.ShowSortHistogram{Table: $5.unresolvedObjectName()}
+  }
+| SHOW SORT_HISTOGRAM error // SHOW HELP: SHOW HISTOGRAM
 
 // %Help: SHOW ATTRIBUTES - list the attributes of the timeseries table
 // %Category: DDL
@@ -11761,6 +11786,7 @@ unreserved_keyword:
 | CUBE
 | CURRENT
 | CYCLE
+| COLLECT_SORTED_HISTOGRAM
 | D
 | DATA
 | DATABASE
@@ -11818,6 +11844,7 @@ unreserved_keyword:
 | HASH
 | HIGH
 | HISTOGRAM
+| SORT_HISTOGRAM
 | HOUR
 | IMMEDIATE
 | IMPORT

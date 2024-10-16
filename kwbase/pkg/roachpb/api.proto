@@ -251,6 +251,8 @@ message TsPutResponse {
 
   int64 dedupRule = 2;
   bytes discardBitmap = 3;
+  uint32 entitiesAffected = 4;
+  uint32 unorderedAffected = 5;
 }
 
 // A TsRowPutRequest is the argument to insert row values to TS DB in distribution mode
@@ -270,6 +272,8 @@ message TsRowPutResponse {
 
   int64 dedupRule = 2;
   bytes discardBitmap = 3;
+  uint32 entitiesAffected = 4;
+  uint32 unorderedAffected = 5;
 }
 
 // A TsPutTagRequest is the argument to insert only tag value for an entity

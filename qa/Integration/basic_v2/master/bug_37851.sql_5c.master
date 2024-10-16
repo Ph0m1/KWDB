@@ -5,48 +5,45 @@ CREATE TABLE
 > use db_pipec;
 SET
 > explain SELECT t.point_sn, count(*) FROM t_point t WHERE t.work_area_sn = 'work_area_sn_1' GROUP BY t.point_sn ORDER BY t.point_sn;
-           tree          |      field       |           description
--------------------------+------------------+----------------------------------
-                         | distributed      | true
-                         | vectorized       | false
-  sort                   |                  |
-   │                     | order            | +point_sn
-   └── group             |                  |
-        │                | engine type      | time series
-        │                | aggregate 0      | point_sn
-        │                | aggregate 1      | count_rows()
-        │                | group by         | point_sn
-        │                | addSynchronizer  | true
-        └── render       |                  |
-             │           | engine type      | time series
-             │           | point_sn         | point_sn
-             └── ts scan |                  |
-                         | ts-table         | t_point
-                         | access mode      | tableTableMeta
-                         | tag filter[0]    | work_area_sn = 'work_area_sn_1'
+        tree        |      field       |           description
+--------------------+------------------+----------------------------------
+                    | distributed      | true
+                    | vectorized       | false
+  sort              |                  |
+   │                | order            | +point_sn
+   └── group        |                  |
+        │           | engine type      | time series
+        │           | aggregate 0      | point_sn
+        │           | aggregate 1      | count_rows()
+        │           | group by         | point_sn
+        │           | addSynchronizer  | true
+        └── ts scan |                  |
+                    | ts-table         | t_point
+                    | access mode      | tableTableMeta
+                    | scan agg 0       | ANY_NOT_NULL(point_sn)
+                    | scan agg 1       | COUNT()
+                    | tag filter[0]    | work_area_sn = 'work_area_sn_1'
+(16 rows)
+> explain SELECT t.point_sn, last_row(t.measure_value) FROM t_point t WHERE t.work_area_sn = 'work_area_sn_1' GROUP BY t.point_sn ORDER BY t.point_sn;
+        tree        |      field       |              description
+--------------------+------------------+-----------------------------------------
+                    | distributed      | true
+                    | vectorized       | false
+  sort              |                  |
+   │                | order            | +point_sn
+   └── group        |                  |
+        │           | engine type      | time series
+        │           | aggregate 0      | point_sn
+        │           | aggregate 1      | last_row(measure_value, k_timestamp)
+        │           | group by         | point_sn
+        │           | addSynchronizer  | true
+        └── ts scan |                  |
+                    | ts-table         | t_point
+                    | access mode      | tableTableMeta
+                    | scan agg 0       | ANY_NOT_NULL(point_sn)
+                    | scan agg 1       | LAST_ROW(measure_value,k_timestamp)
+                    | scan agg 2       | LAST_ROW_TS(measure_value,k_timestamp)
+                    | tag filter[0]    | work_area_sn = 'work_area_sn_1'
 (17 rows)
-> explain SELECT t.point_sn, last_row(t.measure_value) FROM t_point t WHERE t.work_area_sn = 'work_area_sn_1' GROUP BY t.point_sn ORDER BY t.point_sn;;
-           tree          |      field       |             description
--------------------------+------------------+---------------------------------------
-                         | distributed      | true
-                         | vectorized       | false
-  sort                   |                  |
-   │                     | order            | +point_sn
-   └── group             |                  |
-        │                | engine type      | time series
-        │                | aggregate 0      | point_sn
-        │                | aggregate 1      | last_row(measure_value, k_timestamp)
-        │                | group by         | point_sn
-        │                | addSynchronizer  | true
-        └── render       |                  |
-             │           | engine type      | time series
-             │           | k_timestamp      | k_timestamp
-             │           | measure_value    | measure_value
-             │           | point_sn         | point_sn
-             └── ts scan |                  |
-                         | ts-table         | t_point
-                         | access mode      | tableTableMeta
-                         | tag filter[0]    | work_area_sn = 'work_area_sn_1'
-(19 rows)
 > drop database db_pipec cascade;
 DROP DATABASE

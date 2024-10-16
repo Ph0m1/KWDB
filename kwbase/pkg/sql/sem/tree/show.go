@@ -724,6 +724,17 @@ func (node *ShowHistogram) Format(ctx *FmtCtx) {
 	ctx.Printf("SHOW HISTOGRAM %d", node.HistogramID)
 }
 
+// ShowSortHistogram represents a SHOW SORT HISTOGRAM statement.
+type ShowSortHistogram struct {
+	Table       *UnresolvedObjectName
+	HistogramID int64
+}
+
+// Format implements the NodeFormatter interface.
+func (node *ShowSortHistogram) Format(ctx *FmtCtx) {
+	ctx.Printf("SHOW SORT HISTOGRAM %d", node.HistogramID)
+}
+
 // ShowPartitions represents a SHOW PARTITIONS statement.
 type ShowPartitions struct {
 	IsDB     bool

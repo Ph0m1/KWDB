@@ -357,9 +357,11 @@ TEST_F(TestPayload, varColumnInsert1) {
     std::shared_ptr<TsEntityGroup> tbl_range;
     s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
     ASSERT_EQ(s, KStatus::SUCCESS);
+    uint16_t inc_entity_cnt;
+    uint32_t inc_unordered_cnt;
     TSSlice payload{data_value, p_len};
     DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-    s = tbl_range->PutData(ctx_, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+    s = tbl_range->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
     ASSERT_EQ(s, KStatus::SUCCESS);
 
     delete[] data_value;
@@ -629,9 +631,11 @@ TEST_F(TestPayload, multityColumnInsert) {
       std::shared_ptr<TsEntityGroup> tbl_range;
       s = ts_table->GetEntityGroup(ctx, kTestRange.range_group_id, &tbl_range);
       ASSERT_EQ(s, KStatus::SUCCESS);
+      uint16_t inc_entity_cnt;
+      uint32_t inc_unordered_cnt;
       TSSlice payload{data_value, p_len};
       DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-      s = tbl_range->PutData(ctx, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+      s = tbl_range->PutData(ctx, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
       ASSERT_EQ(s, KStatus::SUCCESS);
       delete[] data_value;
     }, 0);
@@ -710,9 +714,11 @@ TEST_F(TestPayload, multityColumnInsert1) {
       std::shared_ptr<TsEntityGroup> tbl_range;
       s = ts_table->GetEntityGroup(ctx, kTestRange.range_group_id, &tbl_range);
       ASSERT_EQ(s, KStatus::SUCCESS);
+      uint16_t inc_entity_cnt;
+      uint32_t inc_unordered_cnt;
       TSSlice payload{data_value, p_len};
       DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-      s = tbl_range->PutData(ctx, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+      s = tbl_range->PutData(ctx, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
       ASSERT_EQ(s, KStatus::SUCCESS);
       delete[] data_value;
     }, 0);
@@ -790,9 +796,11 @@ TEST_F(TestPayload, multityVarColumnInsert) {
       std::shared_ptr<TsEntityGroup> tbl_range;
       s = ts_table->GetEntityGroup(ctx, kTestRange.range_group_id, &tbl_range);
       ASSERT_EQ(s, KStatus::SUCCESS);
+      uint16_t inc_entity_cnt;
+      uint32_t inc_unordered_cnt;
       TSSlice payload{data_value, p_len};
       DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-      s = tbl_range->PutData(ctx, payload, 0, &dedup_result, kwdbts::DedupRule::KEEP);
+      s = tbl_range->PutData(ctx, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, kwdbts::DedupRule::KEEP);
       ASSERT_EQ(s, KStatus::SUCCESS);
       delete[] data_value;
     }, 0);

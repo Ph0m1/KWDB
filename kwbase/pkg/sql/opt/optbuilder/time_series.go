@@ -179,3 +179,56 @@ func resetFuncExpr(info *aggregateInfo) *tree.FuncExpr {
 	}
 	return nil
 }
+
+// GetSubQueryExpr save expr all info
+type GetSubQueryExpr struct {
+	hasSub bool
+}
+
+// IsTargetExpr checks if it's target expr to handle
+func (p *GetSubQueryExpr) IsTargetExpr(self opt.Expr) bool {
+	switch self.(type) {
+	case *memo.SubqueryExpr, *memo.ExistsExpr, *memo.ArrayFlattenExpr, *memo.AnyExpr:
+		p.hasSub = true
+		return true
+	}
+
+	return false
+}
+
+// NeedToHandleChild checks if children expr need to be handled
+func (p *GetSubQueryExpr) NeedToHandleChild() bool {
+	return true
+}
+
+// HandleChildExpr deals with all child expr
+func (p *GetSubQueryExpr) HandleChildExpr(parent opt.Expr, child opt.Expr) bool {
+	return true
+}
+
+// checkOrderedTSScan check can use ordered scan for ts scan
+//
+// Parameters:
+//   - indexFlags: only use when it is hint select for show tag values.
+//     This table access mode is only tag.
+func (b *Builder) checkOrderedTSScan(expr memo.RelExpr) {
+	switch src := expr.(type) {
+	case *memo.ProjectExpr:
+		param := GetSubQueryExpr{}
+		for _, proj := range src.Projections {
+			proj.Walk(&param)
+			if !param.hasSub {
+				b.checkOrderedTSScan(src.Input)
+			}
+		}
+	case *memo.SelectExpr:
+		param := GetSubQueryExpr{}
+		for _, filter := range src.Filters {
+			filter.Walk(&param)
+		}
+		if v, ok := src.Input.(*memo.TSScanExpr); ok && !param.hasSub {
+			v.OrderedScanType = opt.OrderedScan
+			v.ExploreOrderedScan = true
+		}
+	}
+}

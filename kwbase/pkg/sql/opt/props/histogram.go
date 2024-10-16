@@ -180,6 +180,9 @@ func maxDistinctValuesInRange(lowerBound, upperBound tree.Datum) (_ float64, ok 
 // This is the case if there is only one constrained column in c, it is
 // ascending, and it matches the column of the histogram.
 func (h *Histogram) CanFilter(c *constraint.Constraint) bool {
+	if h.BucketCount() <= 0 {
+		return false
+	}
 	if c.ConstrainedColumns(h.evalCtx) != 1 || c.Columns.Get(0).ID() != h.col {
 		return false
 	}

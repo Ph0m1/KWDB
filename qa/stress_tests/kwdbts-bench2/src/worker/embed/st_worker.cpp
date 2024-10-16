@@ -79,7 +79,11 @@ KBStatus StWriteWorker::do_work(KTimestamp  new_ts) {
   {
     KWDB_START();
     DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-    stat = st_inst_->GetTSEngine()->PutData(ctx, w_table, st_inst_->rangeGroup(),  &payload, 1, 0, &dedup_result);
+    uint16_t inc_entity_cnt;
+    uint32_t inc_unordered_cnt;
+    stat = st_inst_->GetTSEngine()->PutData(
+        ctx, w_table, st_inst_->rangeGroup(), &payload, 1, 0, &inc_entity_cnt,
+        &inc_unordered_cnt, &dedup_result);
     if (stat != KStatus::SUCCESS) {
       std::cout << "failed put data." << std::endl;
     }

@@ -298,6 +298,14 @@ class TsIterator {
 
   void fetchBlockItems(k_uint32 entity_id);
 
+  void nextEntity() {
+    cur_block_item_ = nullptr;
+    cur_blockdata_offset_ = 1;
+    block_item_queue_.clear();
+    ++cur_entity_idx_;
+    partition_table_iter_->Reset(is_reversed_);
+  }
+
  protected:
   uint64_t entity_group_id_{0};
   uint32_t subgroup_id_{0};
@@ -346,14 +354,6 @@ class TsRawDataIterator : public TsIterator {
    * @param is_finished    identify whether the iterator has completed querying
    */
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
-
- private:
-  void nextEntity() {
-    cur_block_item_ = nullptr;
-    cur_blockdata_offset_ = 1;
-    block_item_queue_.clear();
-    ++cur_entity_idx_;
-  }
 };
 
 class TsSortedRowDataIterator : public TsIterator {
@@ -428,7 +428,7 @@ class TsAggIterator : public TsIterator {
     cur_blockdata_offset_ = 1;
     ++cur_entity_idx_;
     first_last_row_.Reset();
-    partition_table_iter_->Reset();
+    partition_table_iter_->Reset(is_reversed_);
   }
 
   inline bool onlyHasFirstAggType() {

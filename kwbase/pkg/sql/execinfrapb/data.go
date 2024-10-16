@@ -68,20 +68,33 @@ func ConvertToMappedSpecOrdering(
 	specOrdering := Ordering{}
 	specOrdering.Columns = make([]Ordering_Column, len(columnOrdering))
 	for i, c := range columnOrdering {
-		colIdx := c.ColIdx
-		if planToStreamColMap != nil {
-			colIdx = planToStreamColMap[c.ColIdx]
-			if colIdx == -1 {
-				panic(fmt.Sprintf("column %d in sort ordering not available", c.ColIdx))
-			}
-		}
-		specOrdering.Columns[i].ColIdx = uint32(colIdx)
+		specOrdering.Columns[i].ColIdx = getPhysicalColIdx(c.ColIdx, planToStreamColMap)
 		if c.Direction == encoding.Ascending {
 			specOrdering.Columns[i].Direction = Ordering_Column_ASC
 		} else {
 			specOrdering.Columns[i].Direction = Ordering_Column_DESC
 		}
 	}
+	return specOrdering
+}
+
+func getPhysicalColIdx(colIdx int, planToStreamColMap []int) uint32 {
+	physicalColIdx := colIdx
+	if planToStreamColMap != nil {
+		physicalColIdx = planToStreamColMap[colIdx]
+		if physicalColIdx == -1 {
+			panic("column 0 in sort ordering not available")
+		}
+	}
+	return uint32(physicalColIdx)
+}
+
+// GetTSColMappedSpecOrdering get k_timestamp col ordering spec
+func GetTSColMappedSpecOrdering(planToStreamColMap []int) Ordering {
+	specOrdering := Ordering{}
+	specOrdering.Columns = make([]Ordering_Column, 1)
+	specOrdering.Columns[0].ColIdx = getPhysicalColIdx(0, planToStreamColMap)
+	specOrdering.Columns[0].Direction = Ordering_Column_DESC
 	return specOrdering
 }
 

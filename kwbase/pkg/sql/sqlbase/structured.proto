@@ -1211,3 +1211,10 @@ message KWDBScheOption {
   optional string wait = 1 [(gogoproto.nullable) = false];
   optional string on_error = 2 [(gogoproto.nullable) = false];
 }
+
+message SortedHistogramInfo {
+   optional bool generateSortedHistogram = 1 [(gogoproto.nullable) = false];
+   optional int64 fromTimeStamp = 2 [(gogoproto.nullable) = false];
+   optional int64 toTimeStamp = 3 [(gogoproto.nullable) = false];
+   optional uint32 histogramMaxBuckets = 4 [(gogoproto.nullable) = false];
+}

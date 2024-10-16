@@ -68,4 +68,24 @@ message HistogramData {
   // Histogram buckets. Note that NULL values are excluded from the
   // histogram.
   repeated Bucket buckets = 1 [(gogoproto.nullable) = false];
+
+  message SortedHistogramBucket {
+    // The estimated number of row count within the timestamp range.
+    uint64 rowCount = 1;
+
+    // The estimated number of unordered row count within the timestamp range.
+    uint64 unorderedRowCount = 2;
+
+    // The estimated number of unordered entities within the timestamp range.
+    double unorderedEntities = 3;
+
+    // The estimated number of ordered entities within the timestamp range.
+    double orderedEntities = 4;
+
+    bytes upper_bound = 5;
+  }
+
+  // Sorted Histogram buckets. Note that NULL values are excluded from the
+  // histogram.
+  repeated SortedHistogramBucket sortedBuckets = 3 [(gogoproto.nullable) = false];
 }

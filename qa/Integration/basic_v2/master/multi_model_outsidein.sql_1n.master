@@ -734,78 +734,62 @@ WHERE wi.work_area_name = 'work_area_1'    -- 1/41
 GROUP BY si.station_name
 HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
-                               tree                              |         field         |                              description
------------------------------------------------------------------+-----------------------+-------------------------------------------------------------------------
-                                                                 | distributed           | true
-                                                                 | vectorized            | false
-  render                                                         |                       |
-   │                                                             | station_name          | station_name
-   │                                                             | count                 | sum_int
-   │                                                             | avg                   | sum / sum_int
-   └── filter                                                    |                       |
-        │                                                        | filter                | sum_int > 0
-        └── group                                                |                       |
-             │                                                   | aggregate 0           | station_name
-             │                                                   | aggregate 1           | sum_int(count(measure_value))
-             │                                                   | aggregate 2           | sum(sum(measure_value))
-             │                                                   | aggregate 3           | sum_int(count(measure_value))
-             │                                                   | group by              | station_name
-             │                                                   | ordered               | +station_name
-             └── render                                          |                       |
-                  │                                              | station_name          | station_name
-                  │                                              | count(measure_value)  | "count(measure_value)"
-                  │                                              | sum(measure_value)    | "sum(measure_value)"
-                  └── sort                                       |                       |
-                       │                                         | order                 | +station_name
-                       └── render                                |                       |
-                            │                                    | station_sn            | station_sn
-                            │                                    | station_sn            | station_sn
-                            │                                    | station_name          | station_name
-                            │                                    | work_area_sn          | work_area_sn
-                            │                                    | work_area_sn          | work_area_sn
-                            │                                    | work_area_name        | work_area_name
-                            │                                    | count(measure_value)  | "count(measure_value)"
-                            │                                    | sum(measure_value)    | "sum(measure_value)"
-                            └── lookup-join                      |                       |
-                                 │                               | table                 | workarea_info@workarea_name_index
-                                 │                               | type                  | inner
-                                 │                               | equality              | (project_const_col_@17, work_area_sn) = (work_area_name, work_area_sn)
-                                 │                               | equality cols are key |
-                                 │                               | parallel              |
-                                 └── render                      |                       |
-                                      │                          | project_const_col_@17 | 'work_area_1'
-                                      │                          | station_sn            | station_sn
-                                      │                          | station_sn            | station_sn
-                                      │                          | station_name          | station_name
-                                      │                          | work_area_sn          | work_area_sn
-                                      │                          | count(measure_value)  | count
-                                      │                          | sum(measure_value)    | sum
-                                      └── lookup-join            |                       |
-                                           │                     | table                 | station_info@primary
-                                           │                     | type                  | inner
-                                           │                     | equality              | (station_sn) = (station_sn)
-                                           │                     | equality cols are key |
-                                           │                     | parallel              |
-                                           └── group             |                       |
-                                                │                | engine type           | time series
-                                                │                | aggregate 0           | station_sn
-                                                │                | aggregate 1           | count(measure_value)
-                                                │                | aggregate 2           | sum(measure_value)
-                                                │                | group by              | station_sn
-                                                │                | addSynchronizer       | true
-                                                └── render       |                       |
-                                                     │           | engine type           | time series
-                                                     │           | measure_value         | measure_value
-                                                     │           | station_sn            | station_sn
-                                                     └── ts scan |                       |
-                                                                 | ts-table              | t_point
-                                                                 | access mode           | tagIndexTable
-                                                                 | tag filter[0]         | measure_type = 1
-                                                                 | ptag filter[0]        | point_sn = 'a1'
-                                                                 |                       |
-  warning messages                                               | multi-model fall back | unsupported aggregation function or expression
-                                                                 |                       | unsupported data type
-(69 rows)
+                          tree                         |         field         |                  description
+-------------------------------------------------------+-----------------------+-------------------------------------------------
+                                                       | distributed           | true
+                                                       | vectorized            | false
+  render                                               |                       |
+   │                                                   | station_name          | station_name
+   │                                                   | count                 | sum_int
+   │                                                   | avg                   | sum / sum_int
+   └── filter                                          |                       |
+        │                                              | filter                | sum_int > 0
+        └── group                                      |                       |
+             │                                         | aggregate 0           | station_name
+             │                                         | aggregate 1           | sum_int(count)
+             │                                         | aggregate 2           | sum(sum)
+             │                                         | aggregate 3           | sum_int(count)
+             │                                         | group by              | station_name
+             │                                         | ordered               | +station_name
+             └── render                                |                       |
+                  │                                    | station_name          | station_name
+                  │                                    | count                 | count
+                  │                                    | sum                   | sum
+                  └── lookup-join                      |                       |
+                       │                               | table                 | workarea_info@primary
+                       │                               | type                  | inner
+                       │                               | equality              | (work_area_sn) = (work_area_sn)
+                       │                               | equality cols are key |
+                       │                               | parallel              |
+                       │                               | pred                  | @8 = 'work_area_1'
+                       └── sort                        |                       |
+                            │                          | order                 | +station_name
+                            └── lookup-join            |                       |
+                                 │                     | table                 | station_info@primary
+                                 │                     | type                  | inner
+                                 │                     | equality              | (station_sn) = (station_sn)
+                                 │                     | equality cols are key |
+                                 │                     | parallel              |
+                                 └── group             |                       |
+                                      │                | engine type           | time series
+                                      │                | aggregate 0           | station_sn
+                                      │                | aggregate 1           | count(measure_value)
+                                      │                | aggregate 2           | sum(measure_value)
+                                      │                | group by              | station_sn
+                                      │                | addSynchronizer       | true
+                                      └── render       |                       |
+                                           │           | engine type           | time series
+                                           │           | measure_value         | measure_value
+                                           │           | station_sn            | station_sn
+                                           └── ts scan |                       |
+                                                       | ts-table              | t_point
+                                                       | access mode           | tagIndexTable
+                                                       | tag filter[0]         | measure_type = 1
+                                                       | ptag filter[0]        | point_sn = 'a1'
+                                                       |                       |
+  warning messages                                     | multi-model fall back | unsupported aggregation function or expression
+                                                       |                       | unsupported data type
+(53 rows)
 > SELECT li.pipeline_name,
        li.pipe_start,
        li.pipe_end,

@@ -17,6 +17,7 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
@@ -77,6 +78,9 @@ type tsScanNode struct {
 
 	// RelInfo for hash tagscan
 	RelInfo RelationalInfo
+
+	// ts table ordered type
+	orderedType opt.OrderedTableType
 }
 
 // RelationalInfo contains relational information from the other side of

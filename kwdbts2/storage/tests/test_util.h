@@ -474,8 +474,9 @@ class TestBigTableInstance : public ::testing::Test {
       std::vector<MetricRowID> del_rows;
       char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), insert_num, payload_len, ts, false, value);
       kwdbts::Payload pd(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), {data, payload_len});
+      uint32_t inc_unordered_cnt;
       pd.dedup_rule_ = dedup_rule;
-      bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, dedup_result);
+      bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, &inc_unordered_cnt, dedup_result);
       if (err_info.errcode >= 0) {
         bt->publish_payload_space(cur_alloc_spans, del_rows, entity_id, true);
       }
@@ -498,8 +499,9 @@ class TestBigTableInstance : public ::testing::Test {
       std::vector<MetricRowID> del_rows;
       char* data = BtUtil::GenSomePayloadData(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), insert_num, payload_len, ts, true);
       kwdbts::Payload pd(bt->getSchemaInfoIncludeDropped(), bt->getColsIdxExcludeDropped(), {data, payload_len});
+      uint32_t inc_unordered_cnt;
       pd.dedup_rule_ = dedup_rule;
-      bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, dedup_result);
+      bt->push_back_payload(ctx, entity_id, &pd, 0, insert_num, &cur_alloc_spans, &del_rows, err_info, &inc_unordered_cnt, dedup_result);
       if (err_info.errcode >= 0) {
         bt->publish_payload_space(cur_alloc_spans, del_rows, entity_id, true);
       }
