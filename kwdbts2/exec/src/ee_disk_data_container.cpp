@@ -209,11 +209,12 @@ k_uint32 DiskDataContainer::UpdateReadCacheChunk(k_uint32 row) {
 
   k_uint32 chunk_count = *reinterpret_cast<k_uint16*>(ptr);
   if (read_cache_chunk_ptr_ != nullptr) {
-    read_cache_chunk_ptr_->~DataChunk();
-  }
-  read_cache_chunk_ptr_ =
+    read_cache_chunk_ptr_->ResetDataPtr(ptr + 2, chunk_count);
+  } else {
+    read_cache_chunk_ptr_ =
       new(read_cache_chunk_obj_)DataChunk(col_info_, ptr + 2, chunk_count, capacity_);
-  read_cache_chunk_ptr_->Initialize();
+    read_cache_chunk_ptr_->Initialize();
+  }
 
   return row - cumulative_count_[read_cache_chunk_index_ - 1];
 }
@@ -233,11 +234,11 @@ KStatus DiskDataContainer::UpdateWriteCacheChunk(bool& isUpdated) {
     temp_table_->resize(want_size);
     *(reinterpret_cast<k_uint16*>(write_data_ptr_)) = 0;
     if (write_cache_chunk_ptr_ != nullptr) {
-      write_cache_chunk_ptr_->~DataChunk();
+      write_cache_chunk_ptr_->ResetDataPtr(write_data_ptr_ + 2, 0);
+    } else {
+      write_cache_chunk_ptr_ = new(write_cache_chunk_obj_)DataChunk(col_info_, write_data_ptr_ + 2, 0, capacity_);
+      write_cache_chunk_ptr_->Initialize();
     }
-    write_cache_chunk_ptr_ =
-        new(write_cache_chunk_obj_)DataChunk(col_info_, write_data_ptr_ + 2, 0, capacity_);
-    write_cache_chunk_ptr_->Initialize();
     isUpdated = true;
   } else {
     isUpdated = false;

@@ -267,6 +267,12 @@ class DataChunk : public IChunk {
   // get data of analyse from chunk
   KStatus GetAnalyse(kwdbContext_p ctx);
 
+  void ResetDataPtr(char *data_ptr, k_int32 data_count) {
+    data_ = data_ptr;
+    count_ = data_count;
+    current_line_ = -1;
+  }
+
   /**
    * @brief Encode decimal value (actually double64 or int64) using kwbase
    * protocol.
