@@ -66,7 +66,8 @@ show all zone configurations ;
 alter table tsdb.ts1 configure zone using ts_merge.days = 300s;
 show all zone configurations ;
 
--- sleep: 120s
+-- sleep: 30s
+-- wait-all-replica-health: 300s
 -- kill: c4
 -- kill: c5
 

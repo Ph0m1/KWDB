@@ -356,6 +356,30 @@ if __name__ == "__main__":
                       "    echo \"wait-zero-replica timeout after 180s\";" \
                       "fi".format(kwbin_path, url, node_id, kwbin_path, url, node_id)
                 cmds.append(cmd)
+
+        elif re.match('-- wait-all-replica-health',sql):
+            strs = sql.split(':')
+            if len(strs) < 2:
+                continue
+            ts = strs[1]
+            ts = re.sub('s','',ts)
+            # node_ids = get_nodes(sql)
+            for node_id in last_exec_node:
+                url = get_url_from_node_id(1)
+                cmd = "count=0;" \
+                  "while [ $({} sql --insecure --host={} " \
+                  "-e \"WITH liveness_and_nodes AS (SELECT node_id AS id, CASE WHEN split_part(expiration, ',', 1)::decimal > now()::decimal AND NOT upgrading THEN true ELSE false END AS is_available, COALESCE(is_live, false) AS is_live, ranges AS gossiped_replicas, decommissioning AS is_decommissioning, draining AS is_draining FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id) ), kv_store_metrics AS (SELECT node_id AS id, sum((metrics->>'replicas.leaders')::DECIMAL)::INT AS replicas_leaders, sum((metrics->>'replicas.leaseholders')::DECIMAL)::INT AS replicas_leaseholders, sum((metrics->>'replicas')::DECIMAL)::INT AS ranges, sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable, sum((metrics->>'ranges.underreplicated')::DECIMAL)::INT AS ranges_underreplicated FROM kwdb_internal.kv_store_status GROUP BY node_id ) select sum(ranges_underreplicated) from kv_store_metrics ;\" --format=raw | grep -v '#' ) -ne 0 ] && [ $count -lt {} ]; do" \
+                  "    count=$((count+1));" \
+                  "    sleep 1;" \
+                  "done\n" \
+                  "if [ $count -ge {} ]; then" \
+                  "    {} sql --insecure --host={} " \
+                  "     -e \"WITH liveness_and_nodes AS (SELECT node_id AS id, CASE WHEN split_part(expiration, ',', 1)::decimal > now()::decimal AND NOT upgrading THEN true ELSE false END AS is_available, COALESCE(is_live, false) AS is_live, ranges AS gossiped_replicas, decommissioning AS is_decommissioning, draining AS is_draining FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id) ), kv_store_metrics AS (SELECT node_id AS id, sum((metrics->>'replicas.leaders')::DECIMAL)::INT AS replicas_leaders, sum((metrics->>'replicas.leaseholders')::DECIMAL)::INT AS replicas_leaseholders, sum((metrics->>'replicas')::DECIMAL)::INT AS ranges, sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable, sum((metrics->>'ranges.underreplicated')::DECIMAL)::INT AS ranges_underreplicated FROM kwdb_internal.kv_store_status GROUP BY node_id ) select sum(ranges_underreplicated) from kv_store_metrics ;;\";" \
+                  "    echo \"wait-all-replica-health timeout after {}s\";" \
+                  "fi;"\
+                    "echo cost $count s".format(kwbin_path, url, ts,ts,kwbin_path, url,ts)
+                cmds.append(cmd)
+
         elif re.match('-- upgrade-complete', sql):
             node_ids = get_nodes(sql)
             for node_id in node_ids:
