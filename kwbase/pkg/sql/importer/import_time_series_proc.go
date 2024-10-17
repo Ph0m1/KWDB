@@ -81,11 +81,12 @@ func runTimeSeriesImport(
 		return nil, err
 	}
 	tsInfo.rejectedHandler = make(chan string, 10)
-	g := ctxgroup.WithContext(ctx)
-	g.GoCtx(func(ctx context.Context) error {
+	gr := ctxgroup.WithContext(ctx)
+	gr.GoCtx(func(ctx context.Context) error {
 		return tsInfo.saveRejectedToFile(ctx, spec, flowCtx)
 	})
 	closeChan := make(chan struct{}, int(parallelNums))
+	g := ctxgroup.WithContext(ctx)
 	// Read csv file, convert it to datums and split datums by p_tag.
 	g.GoCtx(func(ctx context.Context) error {
 		defer func() {
@@ -102,12 +103,15 @@ func runTimeSeriesImport(
 	g.GoCtx(func(ctx context.Context) error {
 		defer func() {
 			log.Infof(ctx, "[import] write to storage finished")
-			close(tsInfo.rejectedHandler)
 		}()
 		log.Infof(ctx, "[import] write to storage start")
 		return tsInfo.ingestDatums(ctx, closeChan)
 	})
 	err = g.Wait()
+	// After waiting for the read-write thread to end, close the fault-tolerant thread
+	log.Infof(ctx, "[import] close rejectedHandler")
+	close(tsInfo.rejectedHandler)
+	err = gr.Wait()
 	return &roachpb.BulkOpSummary{TimeSeriesCounts: tsInfo.result.seq, RejectedCounts: tsInfo.RejectedCount, AbandonCounts: tsInfo.AbandonCount}, err
 }
 

@@ -1007,7 +1007,7 @@ func GetTableDescriptorUseTxn(
 	desc := &Descriptor{}
 	ts, err := txn.GetProtoTs(ctx, descKey, desc)
 	if err != nil || (*desc == Descriptor{}) {
-		log.Fatalf(ctx, "proto with id %d missing. err: %v", gr.ValueInt(), err)
+		return nil, errors.Errorf("proto with id %d missing. err: %v", gr.ValueInt(), err)
 	}
 	tableDesc := desc.Table(ts)
 	if tableDesc == nil {
@@ -1015,7 +1015,7 @@ func GetTableDescriptorUseTxn(
 	}
 	err = tableDesc.MaybeFillInDescriptor(ctx, txn)
 	if err != nil {
-		log.Fatalf(ctx, "failure to fill in descriptor. err: %v", err)
+		return nil, errors.Errorf("failure to fill in descriptor. err: %v", err)
 	}
 	return tableDesc, nil
 }
