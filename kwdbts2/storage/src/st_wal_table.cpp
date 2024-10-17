@@ -195,8 +195,9 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice* payloads, int l
 }
 
 // If wal is enabled, this interface will be used.
-KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id, uint16_t* inc_entity_cnt,
-                                     uint32_t* inc_unordered_cnt, DedupResult* dedup_result, DedupRule dedup_rule) {
+KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id,
+                                     uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
+                                     DedupResult* dedup_result, DedupRule dedup_rule, bool write_wal) {
   ErrorInfo err_info;
   // 1. Check whether the timing table is available and construct the payload
   // The Payload struct encapsulates the interface for reading data, allowing for quick retrieval of corresponding data
@@ -220,56 +221,79 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
   // payload verification
   Payload pd(root_bt_manager_, payload);
   pd.dedup_rule_ = dedup_rule;
-
-  bool new_tag;
-  if (KStatus::SUCCESS != allocateEntityGroupId(ctx, pd, &entity_id, &group_id, &new_tag)) {
-    LOG_ERROR("allocateEntityGroupId failed, entity id: %d, group id: %d.", entity_id, group_id);
-    return KStatus::FAIL;
-  }
-  if (new_tag) {
-    ++(*inc_entity_cnt);
-    // require Tag lock to ensure the thread safety of putTagData
-    // Apply for a write lock on the Tag table (upgrade the read lock to a write lock)
-    // to ensure that the records written to the Tag table are unique.
-    // INSERT WAL LOG
-    // only save the Tag payload
-    // no need lock, lock inside.
-    KStatus s = wal_manager_->WriteInsertWAL(ctx, mini_trans_id, 0, 0, payload);
-    if (s == KStatus::FAIL) {
-      LOG_ERROR("failed WriteInsertWAL for new tag.");
-      return s;
+  {
+    TSSlice tmp_slice = pd.GetPrimaryTag();
+    // Locking, concurrency control, and the putTagData operation must not be executed repeatedly
+    MUTEX_LOCK(logged_mutex_);
+    Defer defer{[&]() { MUTEX_UNLOCK(logged_mutex_); }};
+    if (tag_bt_->getEntityIdGroupId(tmp_slice.data, tmp_slice.len, entity_id, group_id) != 0) {
+      // not found
+      ++(*inc_entity_cnt);
+      if (write_wal) {
+        // no need lock, lock inside.
+        KStatus s = wal_manager_->WriteInsertWAL(ctx, mini_trans_id, 0, 0, payload);
+        if (s == KStatus::FAIL) {
+          LOG_ERROR("failed WriteInsertWAL for new tag.");
+          return s;
+        }
+      }
+      // put tag into tag table.
+      std::string tmp_str = std::to_string(table_id_);
+      uint64_t tag_hash = TsTable::GetConsistentHashId(tmp_str.data(), tmp_str.size());
+      std::string primary_tags;
+      err_info.errcode = ebt_manager_->AllocateEntity(primary_tags, tag_hash, &group_id, &entity_id);
+      if (err_info.errcode < 0) {
+        return KStatus::FAIL;
+      }
+      // insert tag table
+      if (KStatus::SUCCESS != putTagData(ctx, group_id, entity_id, pd)) {
+        return KStatus::FAIL;
+      }
     }
   }
 
   if (pd.GetFlag() == Payload::TAG_ONLY) {
     return KStatus::SUCCESS;
   }
-  // lock current lsn: Lock the current LSN until the log is written to the cache
-  wal_manager_->Lock();
-  TS_LSN current_lsn = wal_manager_->FetchCurrentLSN();
 
-  pd.SetLsn(current_lsn);
-  TS_LSN entry_lsn;
-  KStatus s = wal_manager_->WriteInsertWAL(ctx, mini_trans_id, 0, 0, pd.GetPrimaryTag(), payload, entry_lsn);
-  if (s == KStatus::FAIL) {
+  if (pd.GetRowCount() == 0) {
+    LOG_WARN("payload has no row to insert.");
+    return KStatus::SUCCESS;
+  }
+
+  TS_LSN entry_lsn = 0;
+  if (write_wal) {
+    // lock current lsn: Lock the current LSN until the log is written to the cache
+    wal_manager_->Lock();
+    TS_LSN current_lsn = wal_manager_->FetchCurrentLSN();
+
+    pd.SetLsn(current_lsn);
+    KStatus s = wal_manager_->WriteInsertWAL(ctx, mini_trans_id, 0, 0, pd.GetPrimaryTag(), payload, entry_lsn);
+    if (s == KStatus::FAIL) {
+      wal_manager_->Unlock();
+      return s;
+    }
+    // unlock current lsn
     wal_manager_->Unlock();
-    return s;
-  }
-  // unlock current lsn
-  wal_manager_->Unlock();
 
-  if (entry_lsn != current_lsn) {
-    LOG_ERROR("expected lsn is %lu, but got %lu ", current_lsn, entry_lsn);
-    return KStatus::FAIL;
+    if (entry_lsn != current_lsn) {
+      LOG_ERROR("expected lsn is %lu, but got %lu ", current_lsn, entry_lsn);
+      return KStatus::FAIL;
+    }
+    // Call putDataColumnar to write data into the specified entity by column
+    s = putDataColumnar(ctx, group_id, entity_id, pd, inc_unordered_cnt, dedup_result);
+    if (s == KStatus::FAIL) {
+      return s;
+    }
+    // The TS data has been persisted, update the Optimistic Read LSN.
+    SetOptimisticReadLsn(entry_lsn);
+  } else {
+    pd.SetLsn(1);
+    KStatus s = putDataColumnar(ctx, group_id, entity_id, pd, inc_unordered_cnt, dedup_result);
+    if (s == KStatus::FAIL) {
+      return s;
+    }
   }
-
-  // Call putDataColumnar to write data into the specified entity by column
-  s = putDataColumnar(ctx, group_id, entity_id, pd, inc_unordered_cnt, dedup_result);
-  if (s == KStatus::FAIL) {
-    return s;
-  }
-  // The TS data has been persisted, update the Optimistic Read LSN.
-  SetOptimisticReadLsn(entry_lsn);
   return KStatus::SUCCESS;
 }
 

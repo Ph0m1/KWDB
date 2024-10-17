@@ -145,7 +145,8 @@ KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload) {
 }
 
 KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN mini_trans_id, uint16_t* inc_entity_cnt,
-                               uint32_t* inc_unordered_cnt, DedupResult* dedup_result, DedupRule dedup_rule) {
+                               uint32_t* inc_unordered_cnt, DedupResult* dedup_result,
+                               DedupRule dedup_rule, bool write_wal) {
   return PutDataWithoutWAL(ctx, payload, mini_trans_id, inc_entity_cnt, inc_unordered_cnt, dedup_result, dedup_rule);
 }
 
@@ -1576,8 +1577,8 @@ KStatus TsTable::PutDataWithoutWAL(kwdbContext_p ctx, uint64_t range_group_id, T
     }
     entity_grp = it->second;
   }
-  KStatus s = entity_grp->PutDataWithoutWAL(ctx, *payload, mtr_id, inc_entity_cnt,
-                                            inc_unordered_cnt, dedup_result, dedup_rule);
+  KStatus s = entity_grp->PutData(ctx, *payload, mtr_id, inc_entity_cnt,
+                                            inc_unordered_cnt, dedup_result, dedup_rule, false);
   return s;
 }
 

@@ -683,7 +683,7 @@ class TsEntityGroup {
    */
   virtual KStatus PutData(kwdbContext_p ctx, TSSlice payload_data, TS_LSN mini_trans_id,
                           uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
-                          DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE);
+                          DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE, bool write_wal = true);
 
   /**
    * PutData writes the Tag value and time series data to the entity
