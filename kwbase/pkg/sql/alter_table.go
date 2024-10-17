@@ -1545,7 +1545,17 @@ func applyColumnMutation(
 	switch t := mut.(type) {
 	case *tree.AlterTableAlterColumnType:
 		typ := t.ToType
-
+		// can not alter column type if any table or view depends on this column
+		for _, tableRef := range tableDesc.DependedOnBy {
+			for _, colID := range tableRef.ColumnIDs {
+				if colID == col.ID {
+					return false, pgerror.New(
+						pgcode.DependentObjectsStillExist,
+						"can not alter column type because there are objects that depend on it",
+					)
+				}
+			}
+		}
 		if tableDesc.IsTSTable() {
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", tableDesc.Name, tableDesc.ID, mut)
 			if t.Using != nil || t.Collation != "" {
