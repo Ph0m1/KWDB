@@ -219,8 +219,7 @@ type CheckFunc func(key uint32, pos uint32) bool
 
 // These types support exec in ts engine in castExpr
 var castSupportType = []oid.Oid{oid.T_timestamp, oid.T_timestamptz, oid.T_int2, oid.T_int4, oid.T_int8,
-	oid.T_float4, oid.T_float8, oid.T_bool, oid.T_bpchar, types.T_nchar, oid.T_varchar, types.T_nvarchar,
-	oid.T_bytea, oid.T_varbytea, oid.T_numeric, oid.T_interval, oid.T_text}
+	oid.T_float4, oid.T_float8, oid.T_bool, oid.T_bpchar, types.T_nchar, oid.T_varchar, types.T_nvarchar, oid.T_varbytea, oid.T_interval, oid.T_text}
 
 // check whether type of expr support exec in ts engine
 func checkAESupportType(id oid.Oid) bool {

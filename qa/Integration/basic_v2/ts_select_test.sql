@@ -1566,6 +1566,8 @@ select floor(t1.e4), lower(t1.e6) from test_ts.ts_table as t1, test_ts.ts_table2
 select power(t1.e4, 2), lpad(t1.e6, 1) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.e1=t2.e1 and rpad(t1.e6, 1)='tes' order by t1.e4, t1.e6;
 select round(t1.e4), ltrim(t1.e6) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.e1=t2.e1 and rtrim(t1.e6)='test_ts1' order by t1.e4, t1.e6;
 
+-- ZDP-40021
+select count(localtime()) from test_ts.ts_table;
 
 -- ZDP-33026
 CREATE TS DATABASE tsmtest;
@@ -1858,13 +1860,19 @@ select
 use defaultdb;
 drop database tsmtest cascade;
 
--- ZDP-40021
-select count(localtime()) from test_ts.ts_table;
+-- ZDP-42134
+create ts database last_db;
+use last_db;
+create table t(k_timestamp timestamp not null, x float) tags(a int not null) primary tags(a);
+insert into t values('2023-07-29 03:11:59.688', 1.0, 1);
 
+select cast(x as decimal(18, 6)) from t;
+
+use defaultdb;
+drop database last_db cascade;
+
+-- clean data
 use defaultdb;
 drop database test_ts cascade;
-
-
-use defaultdb;
 drop database test cascade;
 set cluster setting sql.all_push_down.enabled=default;
