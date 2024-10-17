@@ -17,7 +17,11 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <filesystem>
+#if defined(__GNUC__) && (__GNUC__ < 8)
+  #include <experimental/filesystem>
+#else
+  #include <filesystem>
+#endif
 #include <utility>
 #include <random>
 #include <unordered_map>
