@@ -788,8 +788,7 @@ ORDER BY si.station_name;
                                                        | ptag filter[0]        | point_sn = 'a1'
                                                        |                       |
   warning messages                                     | multi-model fall back | unsupported aggregation function or expression
-                                                       |                       | unsupported data type
-(53 rows)
+(52 rows)
 > SELECT li.pipeline_name,
        li.pipe_start,
        li.pipe_end,

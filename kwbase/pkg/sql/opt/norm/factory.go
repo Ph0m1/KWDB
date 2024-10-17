@@ -780,13 +780,13 @@ func constructNewAgg(
 				sum := f.ConstructSum(agg.Agg.Child(0).(opt.ScalarExpr))
 				count := f.ConstructCount(agg.Agg.Child(0).(opt.ScalarExpr))
 
-				newSumID := addAggColumnAndGetNewID(f, sum, "sum"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, types.Decimal, &aggMap, aggHelper)
+				newSumID := addAggColumnAndGetNewID(f, sum, "sum"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, sum.DataType(), &aggMap, aggHelper)
 				newCountID := addAggColumnAndGetNewID(f, count, "count"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, types.Int, &aggMap, aggHelper)
 
 				// construct twice agg
 				sumTwo := f.ConstructSum(f.ConstructVariable(newSumID))
 				sumIntTwo := f.ConstructSumInt(f.ConstructVariable(newCountID))
-				newSumTwoID := f.Metadata().AddColumn("sum("+f.Metadata().ColumnMeta(newSumID).Alias+")", types.Decimal)
+				newSumTwoID := f.Metadata().AddColumn("sum("+f.Metadata().ColumnMeta(newSumID).Alias+")", sumTwo.DataType())
 				newSumIntTwoID := f.Metadata().AddColumn("sum_int("+f.Metadata().ColumnMeta(newCountID).Alias+")", types.Int)
 				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumTwo, newSumTwoID))
 				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumIntTwo, newSumIntTwoID))
