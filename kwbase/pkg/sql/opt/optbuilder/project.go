@@ -210,7 +210,7 @@ func (b *Builder) analyzeSelectList(
 						panic(pgerror.Newf(pgcode.Syntax, "%q cannot be aliased", strExpr))
 					}
 					// expand *
-					aliases, exprs := b.expandStar(v, inScope)
+					aliases, exprs := b.expandStar(v, inScope, true)
 					colIndexTmp += len(exprs)
 					if outScope.cols == nil {
 						outScope.cols = make([]scopeColumn, 0, len(*selects)+len(exprs)-1)
@@ -234,7 +234,7 @@ func (b *Builder) analyzeSelectList(
 							"%q cannot be aliased", tree.ErrString(v)))
 					}
 
-					aliases, exprs := b.expandStar(e.Expr, inScope)
+					aliases, exprs := b.expandStar(e.Expr, inScope, false)
 					if b.insideViewDef {
 						expanded = true
 						for _, expr := range exprs {
@@ -248,7 +248,6 @@ func (b *Builder) analyzeSelectList(
 							}
 						}
 					}
-
 					colIndexTmp += len(exprs)
 					if outScope.cols == nil {
 						outScope.cols = make([]scopeColumn, 0, len(*selects)+len(exprs)-1)

@@ -56,9 +56,9 @@ INSERT 1
   2023-07-29 03:35:59.688+00:00 |       5 |       2 | e       |       1
 (1 row)
 > select last(t.*) from t; -- throw error
-        last(k_timestamp)       | last(x) | last(y) | last(z)
---------------------------------+---------+---------+----------
-  2023-07-29 03:35:59.688+00:00 |       5 |       2 | e
+        last(k_timestamp)       | last(x) | last(y) | last(z) | last(a)
+--------------------------------+---------+---------+---------+----------
+  2023-07-29 03:35:59.688+00:00 |       5 |       2 | e       |       1
 (1 row)
 > select last(k_timestamp), last(x), last(y), last(z) from t;
               last              | last | last | last
@@ -96,9 +96,9 @@ INSERT 1
   2023-07-29 03:11:59.688+00:00 |       1 |       1 | a       |       1
 (1 row)
 > select last(t.*) from t where y in (6,5,3,1); -- throw error
-        last(k_timestamp)       | last(x) | last(y) | last(z)
---------------------------------+---------+---------+----------
-  2023-07-29 03:11:59.688+00:00 |       1 |       1 | a
+        last(k_timestamp)       | last(x) | last(y) | last(z) | last(a)
+--------------------------------+---------+---------+---------+----------
+  2023-07-29 03:11:59.688+00:00 |       1 |       1 | a       |       1
 (1 row)
 > select last(k_timestamp), last(x), last(y), last(z) from t where k_timestamp between '2023-07-29 03:12:59.680' and '2023-07-29 03:35:59.688';
               last              | last | last | last

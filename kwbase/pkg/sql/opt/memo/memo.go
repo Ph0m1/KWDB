@@ -174,6 +174,7 @@ type Memo struct {
 	tsCanPushAllProcessor      bool
 	tsForcePushGroupToTSEngine bool
 	tsOrderedScan              bool
+	tsQueryOptMode             int64
 
 	// curID is the highest currently in-use scalar expression ID.
 	curID opt.ScalarID
@@ -414,9 +415,11 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 		m.tsOrderedScan = opt.TSOrderedTable.Get(&evalCtx.Settings.SV)
 		m.tsCanPushAllProcessor = opt.PushdownAll.Get(&evalCtx.Settings.SV)
 		m.tsForcePushGroupToTSEngine = !stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV)
+		m.tsQueryOptMode = opt.TSQueryOptMode.Get(&evalCtx.Settings.SV)
 	} else {
 		m.tsCanPushAllProcessor = true
 		m.tsForcePushGroupToTSEngine = true
+		m.tsQueryOptMode = opt.DefaultQueryOptMode
 	}
 
 	m.curID = 0
@@ -576,6 +579,7 @@ func (m *Memo) IsStale(
 		m.insertFastPath != evalCtx.SessionData.InsertFastPath ||
 		m.tsOrderedScan != opt.TSOrderedTable.Get(&evalCtx.Settings.SV) ||
 		m.tsCanPushAllProcessor != opt.PushdownAll.Get(&evalCtx.Settings.SV) ||
+		m.tsQueryOptMode != opt.TSQueryOptMode.Get(&evalCtx.Settings.SV) ||
 		m.tsForcePushGroupToTSEngine == stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV) {
 		return true, nil
 	}

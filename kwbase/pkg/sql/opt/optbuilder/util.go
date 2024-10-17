@@ -71,10 +71,43 @@ func getTypedExprs(exprs []tree.Expr) []tree.TypedExpr {
 	return argExprs
 }
 
+// expandLastStar expands the star and places the data column in front of the tag column,
+// which is specifically for last(*) expansion
+func (b *Builder) expandLastStar(
+	cols []scopeColumn, checkTblName bool, tableName string,
+) (exprs []tree.TypedExpr, aliases []string) {
+	tsCols := make([]tree.TypedExpr, 0)
+	tsAliases := make([]string, 0)
+	tagCols := make([]tree.TypedExpr, 0)
+	tagAliases := make([]string, 0)
+	for i := range cols {
+		col := &cols[i]
+		if checkTblName {
+			if string(col.table.TableName) != tableName {
+				continue
+			}
+		}
+		if !col.hidden {
+			if b.factory.Metadata().ColumnMeta(col.id).IsTag() {
+				tagCols = append(tagCols, col)
+				tagAliases = append(tagAliases, string(col.name))
+			} else {
+				tsCols = append(tsCols, col)
+				tsAliases = append(tsAliases, string(col.name))
+			}
+		}
+	}
+	exprs = append(exprs, tsCols...)
+	aliases = append(aliases, tsAliases...)
+	exprs = append(exprs, tagCols...)
+	aliases = append(aliases, tagAliases...)
+	return exprs, aliases
+}
+
 // expandStar expands expr into a list of columns if expr
 // corresponds to a "*", "<table>.*" or "(Expr).*".
 func (b *Builder) expandStar(
-	expr tree.Expr, inScope *scope,
+	expr tree.Expr, inScope *scope, isLast bool,
 ) (aliases []string, exprs []tree.TypedExpr) {
 
 	switch t := expr.(type) {
@@ -156,11 +189,15 @@ func (b *Builder) expandStar(
 		refScope := srcMeta.(*scope)
 		exprs = make([]tree.TypedExpr, 0, len(refScope.cols))
 		aliases = make([]string, 0, len(refScope.cols))
-		for i := range refScope.cols {
-			col := &refScope.cols[i]
-			if col.table == *src && !col.hidden {
-				exprs = append(exprs, col)
-				aliases = append(aliases, string(col.name))
+		if isLast {
+			exprs, aliases = b.expandLastStar(refScope.cols, false, "")
+		} else {
+			for i := range refScope.cols {
+				col := &refScope.cols[i]
+				if col.table == *src && !col.hidden {
+					exprs = append(exprs, col)
+					aliases = append(aliases, string(col.name))
+				}
 			}
 		}
 
@@ -171,11 +208,15 @@ func (b *Builder) expandStar(
 		}
 		exprs = make([]tree.TypedExpr, 0, len(inScope.cols))
 		aliases = make([]string, 0, len(inScope.cols))
-		for i := range inScope.cols {
-			col := &inScope.cols[i]
-			if !col.hidden {
-				exprs = append(exprs, col)
-				aliases = append(aliases, string(col.name))
+		if isLast {
+			exprs, aliases = b.expandLastStar(inScope.cols, false, "")
+		} else {
+			for i := range inScope.cols {
+				col := &inScope.cols[i]
+				if !col.hidden {
+					exprs = append(exprs, col)
+					aliases = append(aliases, string(col.name))
+				}
 			}
 		}
 
@@ -190,20 +231,7 @@ func (b *Builder) expandStar(
 func (b *Builder) expandTableStar(
 	tableName string, inScope *scope,
 ) (aliases []string, exprs []tree.TypedExpr) {
-	for i := range inScope.cols {
-		col := &inScope.cols[i]
-		if string(col.table.TableName) != tableName {
-			continue
-		}
-		if b.factory.Metadata().ColumnMeta(col.id).IsTag() {
-			continue
-		}
-		if !col.hidden {
-			exprs = append(exprs, col)
-			aliases = append(aliases, string(col.name))
-		}
-	}
-
+	exprs, aliases = b.expandLastStar(inScope.cols, true, tableName)
 	return aliases, exprs
 }
 
@@ -216,7 +244,7 @@ func (b *Builder) expandStarAndResolveType(
 ) (exprs []tree.TypedExpr) {
 	switch t := expr.(type) {
 	case *tree.AllColumnsSelector, tree.UnqualifiedStar, *tree.TupleStar:
-		_, exprs = b.expandStar(expr, inScope)
+		_, exprs = b.expandStar(expr, inScope, false)
 
 	case *tree.UnresolvedName:
 		vn, err := t.NormalizeVarName()

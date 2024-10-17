@@ -1519,9 +1519,7 @@ func (p *PhysicalPlan) AddFilter(
 	if post.Projection {
 		compositeMap = reverseProjection(post.OutputColumns, indexVarMap)
 	}
-
-	filter, err := MakeExpression(expr, exprCtx, compositeMap, !filterCanExecInTSEngine && len(p.ResultRouters) == 1,
-		filterCanExecInTSEngine)
+	filter, err := MakeTSExpression(expr, exprCtx, compositeMap)
 	if err != nil {
 		return err
 	}

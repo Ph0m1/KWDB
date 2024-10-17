@@ -106,8 +106,11 @@ var TSHashScanMode = settings.RegisterPublicIntSetting(
 // default value: 1110
 // turn on the first three optimizations.
 var TSQueryOptMode = settings.RegisterPublicIntSetting(
-	"ts.sql.query_opt_mode", "ts query optimize mode", 1110,
+	"ts.sql.query_opt_mode", "ts query optimize mode", DefaultQueryOptMode,
 )
+
+// DefaultQueryOptMode is the default value of TSQueryOptMode
+const DefaultQueryOptMode = 1110
 
 // CheckOptMode checks whether the query opt mode is enabled.
 //

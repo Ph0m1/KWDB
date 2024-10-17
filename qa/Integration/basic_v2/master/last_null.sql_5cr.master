@@ -57,9 +57,9 @@ INSERT 1
   2023-07-29 03:39:59.688+00:00 |       9 |       9 | g       |       1
 (1 row)
 > select last(t.*) from t; -- throw error
-        last(k_timestamp)       | last(x) | last(y) | last(z)
---------------------------------+---------+---------+----------
-  2023-07-29 03:39:59.688+00:00 |       9 |       9 | g
+        last(k_timestamp)       | last(x) | last(y) | last(z) | last(a)
+--------------------------------+---------+---------+---------+----------
+  2023-07-29 03:39:59.688+00:00 |       9 |       9 | g       |       1
 (1 row)
 > select last(*), avg(x) from t;
         last(k_timestamp)       | last(x) | last(y) | last(z) | last(a) | avg
@@ -107,9 +107,9 @@ INSERT 1
   2023-07-29 03:39:59.688+00:00 | NULL        | NULL        | NULL        |           1
 (1 row)
 > select last_row(t.*) from t; -- throw error
-      last_row(k_timestamp)     | last_row(x) | last_row(y) | last_row(z)
---------------------------------+-------------+-------------+--------------
-  2023-07-29 03:39:59.688+00:00 | NULL        | NULL        | NULL
+      last_row(k_timestamp)     | last_row(x) | last_row(y) | last_row(z) | last_row(a)
+--------------------------------+-------------+-------------+-------------+--------------
+  2023-07-29 03:39:59.688+00:00 | NULL        | NULL        | NULL        |           1
 (1 row)
 > select last_row(*), avg(x) from t;
       last_row(k_timestamp)     | last_row(x) | last_row(y) | last_row(z) | last_row(a) | avg

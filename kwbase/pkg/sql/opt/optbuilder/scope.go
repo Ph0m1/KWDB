@@ -960,7 +960,7 @@ func (s *scope) VisitPre(expr tree.Expr) (recurse bool, newExpr tree.Expr) {
 		//    SELECT (kv.*) FROM kv               -> SELECT (k, v) FROM kv
 		//    SELECT COUNT(DISTINCT kv.*) FROM kv -> SELECT COUNT(DISTINCT (k, v)) FROM kv
 		//
-		labels, exprs := s.builder.expandStar(expr, s)
+		labels, exprs := s.builder.expandStar(expr, s, false)
 		// We return an untyped tuple because name resolution occurs
 		// before type checking, and type checking will resolve the
 		// tuple's type. However we need to preserve the labels in
