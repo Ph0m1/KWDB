@@ -885,19 +885,25 @@ func (r *importResumer) prepareTableDescsForIngestion(
 	ctx context.Context, p sql.PlanHookState, details jobspb.ImportDetails,
 ) error {
 	dbName := details.DatabaseName
+	cleanedDbName := strings.Trim(dbName, "\"")
 	return p.ExecCfg().DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
 		defer p.ExecCfg().InternalExecutor.SetSessionData(new(sessiondata.SessionData))
 		importDetails := details
 		var err error
 		var desc *sqlbase.TableDescriptor
+		var createSchema string
 		if details.IsDatabase {
 			createDatabase := fmt.Sprintf(`CREATE DATABASE %s;`, dbName)
 			if _, err := p.ExecCfg().InternalExecutor.Exec(ctx, `import-create-database`, txn, createDatabase); err != nil {
 				return err
 			}
-			p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: dbName})
+			p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: cleanedDbName})
 			for _, sc := range details.SchemaNames {
-				createSchema := fmt.Sprintf(`CREATE SCHEMA %s;`, sc)
+				if sql.ContainsUpperCase(sc) {
+					createSchema = fmt.Sprintf(`CREATE SCHEMA "%s";`, sc)
+				} else {
+					createSchema = fmt.Sprintf(`CREATE SCHEMA %s;`, sc)
+				}
 				if _, err := p.ExecCfg().InternalExecutor.Exec(ctx, `import-create-schema`, txn, createSchema); err != nil {
 					return err
 				}
@@ -906,13 +912,12 @@ func (r *importResumer) prepareTableDescsForIngestion(
 		for i, table := range details.Tables {
 			if table.IsNew {
 				searchPath := sessiondata.SetSearchPath(p.CurrentSearchPath(), []string{table.SchemaName})
-				p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: dbName, SearchPath: searchPath})
+				p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: cleanedDbName, SearchPath: searchPath})
 				_, err = p.ExecCfg().InternalExecutor.Exec(ctx, `import-create-table`, txn, table.Create)
 				if err != nil {
 					return err
 				}
-
-				desc, err = sqlbase.GetTableDescriptorUseTxn(txn, dbName, table.SchemaName, table.TableName)
+				desc, err = sqlbase.GetTableDescriptorUseTxn(txn, cleanedDbName, table.SchemaName, table.TableName)
 				if err != nil {
 					return err
 				}
@@ -938,6 +943,7 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 	ctx context.Context, p sql.PlanHookState, details jobspb.ImportDetails,
 ) error {
 	dbName := details.DatabaseName
+	cleanedDbName := strings.Trim(dbName, "\"")
 	var err error
 	if details.IsDatabase {
 		createDatabase := fmt.Sprintf(`CREATE TS DATABASE %s;`, dbName)
@@ -946,26 +952,26 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 		}
 		// Add COMMENT to the database
 		if details.DatabaseComment != "" {
-			if err = execCommentOnMeta(ctx, p, details.DatabaseComment, dbName); err != nil {
+			if err = execCommentOnMeta(ctx, p, details.DatabaseComment, cleanedDbName); err != nil {
 				return err
 			}
 		}
 	}
 	for _, table := range details.Tables {
 		if table.IsNew {
-			if err = execCreateTableMeta(ctx, p, table.Create, dbName); err != nil {
+			if err = execCreateTableMeta(ctx, p, table.Create, cleanedDbName); err != nil {
 				return err
 			}
 			// Add COMMENT to the table
 			if table.TableComment != "" {
-				if err = execCommentOnMeta(ctx, p, table.TableComment, dbName); err != nil {
+				if err = execCommentOnMeta(ctx, p, table.TableComment, cleanedDbName); err != nil {
 					return err
 				}
 			}
 			// Add COMMENT to the column
 			if table.ColumnComment != nil {
 				for _, colComment := range table.ColumnComment {
-					if err = execCommentOnMeta(ctx, p, colComment, dbName); err != nil {
+					if err = execCommentOnMeta(ctx, p, colComment, cleanedDbName); err != nil {
 						return err
 					}
 				}
@@ -979,7 +985,7 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 		var desc *sqlbase.TableDescriptor
 		for i, table := range details.Tables {
 			if table.IsNew {
-				if desc, err = sqlbase.GetTableDescriptorUseTxn(txn, dbName, tree.PublicSchema, table.TableName); err != nil {
+				if desc, err = sqlbase.GetTableDescriptorUseTxn(txn, cleanedDbName, tree.PublicSchema, table.TableName); err != nil {
 					return err
 				}
 				importDetails.Tables[i].Desc = desc

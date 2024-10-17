@@ -148,9 +148,13 @@ func (ex *connExecutor) dispatchExportDB(
 		return nil
 	}
 	// generate statement of create database,write databaseName.sql
+	DatabaseName := string(exp.Database)
+	if ContainsUpperCase(DatabaseName) {
+		DatabaseName = "\"" + DatabaseName + "\""
+	}
 	planner.stmt.AST.(*tree.Export).IgnoreCheckComment = true
 	var findComment bool
-	sqlDB := "CREATE DATABASE " + string(exp.Database) + ";"
+	sqlDB := "CREATE DATABASE " + DatabaseName + ";"
 	if expOpts.withComment {
 		// add database comment
 		selectStmt := fmt.Sprintf("select shobj_description(oid, 'pg_database') from pg_catalog.pg_database where datname = '%s';", string(exp.Database))
@@ -233,11 +237,15 @@ func (ex *connExecutor) dispatchExportDB(
 			if !found {
 				// create schema statement
 				uri.Path = path.Join(relPath, string(tbl.SchemaName))
+				schemaName := string(tbl.SchemaName)
+				if ContainsUpperCase(schemaName) {
+					schemaName = "\"" + schemaName + "\""
+				}
 				if err = createStmtFunc(
 					planner.EvalContext().Ctx(),
 					uri.String(),
 					strings.Replace(exportFilePatternSQL, exportFilePatternPart, "meta", -1),
-					"CREATE SCHEMA "+string(tbl.SchemaName),
+					"CREATE SCHEMA "+schemaName,
 				); err != nil {
 					res.SetError(err)
 					return nil
@@ -495,7 +503,11 @@ func (ex *connExecutor) dispatchExportTSDB(
 		}
 		defer es.Close()
 		// write create database
-		createDB := "CREATE TS DATABASE " + string(exp.Database)
+		DatabaseName := string(exp.Database)
+		if ContainsUpperCase(DatabaseName) {
+			DatabaseName = "\"" + DatabaseName + "\""
+		}
+		createDB := "CREATE TS DATABASE " + DatabaseName
 		if _, err = writer.GetBufio().WriteString(createDB + ";" + "\n"); err != nil {
 			res.SetError(err)
 			return nil

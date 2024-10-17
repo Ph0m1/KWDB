@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec"
@@ -469,4 +470,14 @@ func getOnlyOneTableName(exp *tree.Export) (*tree.TableName, bool) {
 		}
 	}
 	return nil, false
+}
+
+// ContainsUpperCase determines whether the characters in the string are capitalized.
+func ContainsUpperCase(s string) bool {
+	for _, r := range s {
+		if unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
 }
