@@ -144,7 +144,7 @@ struct EntityHeader {
 struct EntityItem {
   uint64_t cloumns_varchar_offset;  // .s file writing offset. all columns use one .s file.
   uint64_t row_allocated;           // allocated row num for writing.
-  uint64_t row_written;             // row num that has writen into file.
+  int64_t row_written;             // row num that has writen into file.
   uint64_t lasted_checkpoint;       // WAL check point.
   uint32_t entity_id;
   BLOCK_ID block_count;             // block count for current entity.

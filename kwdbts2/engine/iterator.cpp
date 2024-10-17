@@ -938,6 +938,48 @@ KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timest
   return KStatus::SUCCESS;
 }
 
+KStatus TsAggIterator::countDataUseStatitics(ResultSet* res, k_uint32* count, timestamp64 ts) {
+  *count = 0;
+  partition_table_iter_->Reset();
+  std::vector<timestamp64> partition_need_traverse;
+  while (partition_table_iter_->Valid()) {
+    KStatus s = partition_table_iter_->Next(&cur_partiton_table_);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("countDataUseStatitics failed. next partition at entitygroup [%lu]", entity_group_id_);
+      return KStatus::FAIL;
+    }
+    if (cur_partiton_table_ == nullptr) {
+      // all partition table scan over.
+      break;
+    }
+    if (!isTimestampWithinSpans(ts_spans_,
+                                cur_partiton_table_->minTimestamp() * 1000,
+                                cur_partiton_table_->maxTimestamp() * 1000)) {
+      partition_need_traverse.push_back(cur_partiton_table_->minTimestamp());
+    } else {
+      auto entity_item = cur_partiton_table_->getEntityItem(entity_ids_[cur_entity_idx_]);
+      auto* b = new AggBatch(malloc(sizeof(k_uint64)), 1, nullptr);
+      b->is_new = true;
+      *static_cast<k_uint64*>(b->mem) = entity_item->row_written;
+      res->push_back(0, b);
+    }
+  }
+  KStatus s = KStatus::SUCCESS;
+  if (partition_need_traverse.size() > 0) {
+    ErrorInfo err_info;
+    auto sub_grp = entity_group_->GetSubEntityGroupManager()->GetSubGroup(subgroup_id_, err_info);
+    partition_table_iter_ = std::make_shared<TsSubGroupPTIterator>(sub_grp, partition_need_traverse);
+    do {
+      s = traverseAllBlocks(res, count, ts);
+      if (s != KStatus::SUCCESS) {
+        LOG_ERROR("countDataUseStatitics failed at traverseAllBlocks. [%lu]", entity_group_id_);
+        return KStatus::FAIL;
+      }
+    } while (*count != 0);
+  }
+  return s;
+}
+
 KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item, int type) {
   for (int i = 0; i < ts_scan_cols_.size(); i++) {
     auto& col_idx = ts_scan_cols_[i];
@@ -1274,6 +1316,7 @@ KStatus TsAggIterator::Init(bool is_reversed) {
   only_last_type_ = onlyHasLastAggType();
   only_last_row_type_ = onlyLastRowAggType();
   only_first_last_type_ = onlyHasFirstLastAggType();
+  only_count_ts_ = onlyCountTs();
   if (!col_blk_bitmaps_.Init(scan_agg_types_.size(), all_agg_cols_not_null_)) {
     LOG_ERROR("col_blk_bitmaps_ new memory failed.");
     return KStatus::FAIL;
@@ -1308,16 +1351,20 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
   }
 
   ResultSet result{(k_uint32) kw_scan_cols_.size()};
-  // Continuously calling the traceAllBlocks function to obtain
-  // the intermediate aggregation result of all data for the current query entity.
-  // When the count is 0, it indicates that the query is complete.
-  // Further integration and calculation of the results in the variable result are needed in the future.
-  do {
-    s = traverseAllBlocks(&result, count, ts);
-    if (s != KStatus::SUCCESS) {
-      return KStatus::FAIL;
-    }
-  } while (*count != 0);
+  if (only_count_ts_) {
+    s = countDataUseStatitics(&result, count, ts);
+  } else {
+    // Continuously calling the traceAllBlocks function to obtain
+    // the intermediate aggregation result of all data for the current query entity.
+    // When the count is 0, it indicates that the query is complete.
+    // Further integration and calculation of the results in the variable result are needed in the future.
+    do {
+      s = traverseAllBlocks(&result, count, ts);
+      if (s != KStatus::SUCCESS) {
+        return KStatus::FAIL;
+      }
+    } while (*count != 0);
+  }
 
   if (result.empty() && !first_last_row_.NeedFirstLastAgg()) {
     reset();

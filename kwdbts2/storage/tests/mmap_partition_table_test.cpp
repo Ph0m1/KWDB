@@ -240,7 +240,7 @@ TEST_F(TestPartitionBigTable, override) {
     block_item->isDeleted(i + 1, &is_deleted);
     ASSERT_TRUE(is_deleted);
   }
-  ASSERT_EQ(mt_table->size(entity_id), 2 * row_count);
+  ASSERT_EQ(mt_table->size(entity_id), row_count);
   ASSERT_EQ(block_item->min_ts_in_block, current_time_ms);
   // Also verify aggregation result on a specific column
   ASSERT_EQ(KInt16(segment_table->columnAggAddr(1, 0, kwdbts::Sumfunctype::COUNT)), 20);
@@ -427,7 +427,7 @@ TEST_F(TestPartitionBigTable, merge) {
     MetricRowID row{1, i+1};
     ASSERT_EQ(KInt64(segment_tbl->columnAddr(row, 1)), 11);
   }
-  ASSERT_EQ(mt_table->size(entity_id), 2 * row_num);
+  ASSERT_EQ(mt_table->size(entity_id), row_num);
   ASSERT_EQ(block_item->min_ts_in_block, ts_now);
   ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(1, 0, kwdbts::Sumfunctype::COUNT)), 20);
 
@@ -534,7 +534,7 @@ TEST_F(TestPartitionBigTable, keepToMerge) {
   MetricRowID row{1, row_num + 1};
   ASSERT_EQ(KInt64(segment_tbl->columnAddr(row, 1)), row_num * (row_num - 1));
   // Validate the total row count after merging
-  ASSERT_EQ(mt_table->size(entity_id), row_num + 1);
+  ASSERT_EQ(mt_table->size(entity_id), 1);
   // Ensure the minimum timestamp remains unchanged after merge
   ASSERT_EQ(block_item->min_ts_in_block, ts_now);
   delete mt_table;
@@ -659,7 +659,7 @@ TEST_F(TestPartitionBigTable, undoPut) {
 
   // Continue to write data
   initData2(ctx_, mt_table, entity_id, ts_now + 100000, 100, &dedup_result);
-  ASSERT_EQ(mt_table->size(entity_id), 210);
+  ASSERT_EQ(mt_table->size(entity_id), 200);
 
   delete[]data;
   delete mt_table;
@@ -780,7 +780,7 @@ TEST_F(TestPartitionBigTable, aggUpdate) {
     block_item->isDeleted(i + 1, &is_deleted);
     ASSERT_TRUE(is_deleted);
   }
-  EXPECT_EQ(mt_table->size(entity_id), count * 11);
+  EXPECT_EQ(mt_table->size(entity_id), count * 10);
   ASSERT_EQ(block_item->publish_row_count, 1000);
   ASSERT_EQ(block_item->is_agg_res_available, true);
   ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(1, 0, kwdbts::Sumfunctype::COUNT)), 900);
@@ -902,7 +902,7 @@ TEST_F(TestPartitionBigTable, aggUpdateNull) {
     block_item->isDeleted(i + 1, &is_deleted);
     ASSERT_TRUE(is_deleted);
   }
-  EXPECT_EQ(mt_table->size(entity_id), count * 2);
+  EXPECT_EQ(mt_table->size(entity_id), count);
   ASSERT_EQ(block_item->publish_row_count, 10);
   ASSERT_EQ(block_item->is_agg_res_available, false);
 

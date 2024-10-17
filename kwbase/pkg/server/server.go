@@ -212,6 +212,10 @@ var (
 		"immediate_compression.threads",
 		"number of threads for immediate compression for both relation and time series data",
 		3)
+	tsCountUseRowWritten = settings.RegisterPublicBoolSetting(
+		"ts.count.use_statistics.enabled",
+		"use row written when querying count",
+		true)
 )
 
 // TODO(peter): Until go1.11, ServeMux.ServeHTTP was not safe to call

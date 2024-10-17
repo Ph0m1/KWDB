@@ -32,6 +32,7 @@
 #include "TSLockfreeOrderList.h"
 #include "entity_block_meta_manager.h"
 
+#define ENTITY_ITEM_LATCH_BUCKET_NUM 10
 
 bool ReachMetaMaxBlock(BLOCK_ID cur_block_id);
 
@@ -48,6 +49,7 @@ class TsTimePartition : public TSObject {
   TsTimePartitionRWLatch* rw_latch_;
   TsTimePartitionLatch* segments_lock_;  // data_segments lock
   TsTimePartitionLatch* partition_table_latch_;  // partition table object latch
+  TsHashLatch entity_item_latch_;  // control entity item row written
 
   // collect all segments with status ActiveSegment and ImmuSegment
   std::vector<std::shared_ptr<MMapSegmentTable>> GetAllSegmentsForCompressing();
@@ -93,7 +95,8 @@ class TsTimePartition : public TSObject {
 
  public:
   explicit TsTimePartition(MMapRootTableManager*& root_table_manager, uint16_t config_subgroup_entities) :
-    TSObject(), root_table_manager_(root_table_manager) {
+    TSObject(), root_table_manager_(root_table_manager),
+    entity_item_latch_(ENTITY_ITEM_LATCH_BUCKET_NUM, LATCH_ID_ENTITY_ITEM_MUTEX) {
     meta_manager_.max_entities_per_subgroup = config_subgroup_entities;
     rw_latch_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
     segments_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
@@ -272,6 +275,9 @@ class TsTimePartition : public TSObject {
 
   inline BlockItem* getBlockItem(uint item_id) {
     return meta_manager_.GetBlockItem(item_id);
+  }
+  inline TsHashLatch* GetEntityItemLatch() {
+    return &entity_item_latch_;
   }
 
 /**
@@ -588,7 +594,7 @@ class TsTimePartition : public TSObject {
 
   int ProcessDuplicateData(kwdbts::Payload* payload, size_t start_in_payload, size_t count,
                            const BlockSpan span, kwdbts::DedupInfo& dedup_info,
-                           DedupResult* dedup_result, ErrorInfo& err_info);
+                           DedupResult* dedup_result, ErrorInfo& err_info, int* deleted_rows);
 
 
   // When delete a table, check whether there is no other refcount other than the cache

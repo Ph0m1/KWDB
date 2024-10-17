@@ -702,6 +702,12 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     g_compression.compression_level = level;
     } else if ("immediate_compression.threads" == key) {
     g_mk_squashfs_option.processors_immediate = atoi(value.c_str());
+  } else if ("ts.count.use_statistics.enabled" == key) {
+    if ("true" == value) {
+      CLUSTER_SETTING_COUNT_USE_STATISTICS = true;
+    } else {
+      CLUSTER_SETTING_COUNT_USE_STATISTICS = false;
+    }
   }
 #ifndef KWBASE_OSS
   else if ("ts.storage.autonomy.mode" == key) {  // NOLINT

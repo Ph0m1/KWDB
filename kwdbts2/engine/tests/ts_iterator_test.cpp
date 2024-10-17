@@ -11,6 +11,7 @@
 
 #include "engine.h"
 #include "test_util.h"
+#include "st_config.h"
 
 using namespace kwdbts;  // NOLINT
 
@@ -1699,5 +1700,151 @@ TEST_F(TestIterator, multi_thread) {
   ASSERT_EQ(next_time.load(), write_count / 2);
 
   delete iter;
+  ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
+}
+
+// 乱序数据count测试
+TEST_F(TestIterator, disorderCount) {
+  roachpb::CreateTsTable meta;
+  CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 10;
+  CLUSTER_SETTING_COUNT_USE_STATISTICS = true;
+  KTableKey cur_table_id = 1001;
+  ConstructRoachpbTable(&meta, "test_table", cur_table_id);
+
+  std::vector<RangeGroup> ranges{kTestRange};
+  ASSERT_EQ(ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges), KStatus::SUCCESS);
+
+  char* data_value;
+  k_uint32 p_len = 0;
+  KTimestamp start_ts = 10000 * 1000, disorder_ts = 7200 * 1000;
+  std::shared_ptr<TsTable> ts_table;
+  ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
+  std::shared_ptr<TsEntityGroup> tbl_range;
+  ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
+
+  int write_count = 200;
+  // 交叉写入乱序数据
+  for (int i = 0; i < write_count; ++i) {
+    if (i % 2 == 0) {
+      data_value = GenSomePayloadData(ctx_, 1, p_len, start_ts + i, &meta);
+    } else {
+      // 写入乱序数据
+      data_value = GenSomePayloadData(ctx_, 1, p_len, disorder_ts + i, &meta);
+    }
+    TSSlice payload{data_value, p_len};
+    ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
+    delete[] data_value;
+    data_value = nullptr;
+  }
+
+  k_uint32 entity_id = 1;
+  KwTsSpan ts_span = {start_ts, start_ts + write_count * 10};
+  std::vector<k_uint32> scancols = {0};
+  std::vector<Sumfunctype> scanaggtypes = {Sumfunctype::COUNT};
+  TsIterator* iter;
+  SubGroupID group_id = 1;
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scancols, scancols,
+                                   scanaggtypes, 1, &iter, tbl_range, {}, false, true, false), KStatus::SUCCESS);
+
+  k_uint32 count;
+  ResultSet res{(k_uint32) scancols.size()};
+  bool is_finished = false;
+  ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 1);
+  ASSERT_EQ(KInt16(res.data[0][0]->mem), write_count / 2);
+  // 迭代器数据读取完成
+  res.clear();
+  is_finished = false;
+  ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 0);
+  delete iter;
+
+  ts_span = {0, INT64_MAX};
+  TsIterator* iter2;
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scancols, scancols,
+                                   scanaggtypes, 1, &iter2, tbl_range, {}, false, true, false), KStatus::SUCCESS);
+  res.clear();
+  is_finished = false;
+  ASSERT_EQ(iter2->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 1);
+  ASSERT_EQ(KInt16(res.data[0][0]->mem), write_count);
+  // 迭代器数据读取完成
+  res.clear();
+  is_finished = false;
+  ASSERT_EQ(iter2->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 0);
+  delete iter2;
+  ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
+}
+
+// 跨分区count测试
+TEST_F(TestIterator, aggCount) {
+  // 调小分区时间
+  kwdbts::EngineOptions::iot_interval = 10;
+  roachpb::CreateTsTable meta;
+  CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 10;
+  CLUSTER_SETTING_COUNT_USE_STATISTICS = true;
+  KTableKey cur_table_id = 1001;
+  ConstructRoachpbTable(&meta, "test_table", cur_table_id);
+
+  std::vector<RangeGroup> ranges{kTestRange};
+  ASSERT_EQ(ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges), KStatus::SUCCESS);
+
+  char* data_value;
+  k_uint32 p_len = 0;
+  KTimestamp start_ts = 10000 * 1000;
+  std::shared_ptr<TsTable> ts_table;
+  ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
+  std::shared_ptr<TsEntityGroup> tbl_range;
+  ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
+
+  int write_count = 3000;
+  data_value = GenSomePayloadData(ctx_, write_count, p_len, start_ts, &meta);
+  TSSlice payload{data_value, p_len};
+  ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);
+  delete[] data_value;
+  data_value = nullptr;
+
+  // 读取全部范围数据
+  k_uint32 entity_id = 1;
+  KwTsSpan ts_span = {start_ts, start_ts + write_count * 10};
+  std::vector<k_uint32> scancols = {0};
+  std::vector<Sumfunctype> scanaggtypes = {Sumfunctype::COUNT};
+  TsIterator* iter;
+
+  SubGroupID group_id = 1;
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scancols, scancols,
+                                   scanaggtypes, 1, &iter, tbl_range, {}, false, true, false), KStatus::SUCCESS);
+
+  k_uint32 count;
+  ResultSet res{(k_uint32) scancols.size()};
+  bool is_finished = false;
+  ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 1);
+  ASSERT_EQ(KInt16(res.data[0][0]->mem), write_count);
+  // 迭代器数据读取完成
+  res.clear();
+  is_finished = false;
+  ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 0);
+  delete iter;
+
+  // 读取部分范围数据
+  ts_span = {start_ts + 100 * 10, start_ts + 2500 * 10};
+  TsIterator* iter2;
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scancols, scancols,
+                                   scanaggtypes, 1, &iter2, tbl_range, {}, false, true, false), KStatus::SUCCESS);
+  res.clear();
+  is_finished = false;
+  k_uint32 total_count = 0;
+  ASSERT_EQ(iter2->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 1);
+  ASSERT_EQ(KInt16(res.data[0][0]->mem), 2401);
+  // 迭代器数据读取完成
+  res.clear();
+  is_finished = false;
+  ASSERT_EQ(iter2->Next(&res, &count, &is_finished), KStatus::SUCCESS);
+  ASSERT_EQ(count, 0);
+  delete iter2;
   ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
 }

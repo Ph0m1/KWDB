@@ -25,6 +25,7 @@
 #include "mmap/mmap_segment_table_iterator.h"
 #include "ts_common.h"
 #include "st_subgroup.h"
+#include "st_config.h"
 
 namespace kwdbts {
 class TsEntityGroup;
@@ -508,12 +509,22 @@ class TsAggIterator : public TsIterator {
     return true;
   }
 
+  inline bool onlyCountTs() {
+    if (CLUSTER_SETTING_COUNT_USE_STATISTICS && scan_agg_types_.size() == 1
+        && scan_agg_types_[0] == Sumfunctype::COUNT && ts_scan_cols_.size() == 1 && ts_scan_cols_[0] == 0) {
+      return true;
+    }
+    return false;
+  }
+
   /**
    * @brief using iterator find first data info, store into first_last_row_
   */
   KStatus findFirstDataByIter(timestamp64 ts);
 
   KStatus findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts);
+
+  KStatus countDataUseStatitics(ResultSet* res, k_uint32* count, timestamp64 ts);
 
   /**
    * @brief using iterator find last data info, store into first_last_row_
@@ -583,6 +594,7 @@ class TsAggIterator : public TsIterator {
   // store all bitmap of columns copyed from mmap file.
   ColBlockBitmaps col_blk_bitmaps_;
   bool all_agg_cols_not_null_{false};
+  bool only_count_ts_ = false;
 };
 
 /**

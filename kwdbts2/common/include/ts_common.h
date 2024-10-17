@@ -877,4 +877,14 @@ inline int numDigit(double v) {
   return d + (v < 0);
 }
 
+inline timestamp64 convertTsToPTime(timestamp64 ts) {
+  timestamp64 ret;
+  if (ts < 0 && ts != INT64_MIN) {
+    ret = (ts - 999) / 1000;
+  } else {
+    ret = ts / 1000;
+  }
+  return ret;
+}
+
 }  //  namespace kwdbts

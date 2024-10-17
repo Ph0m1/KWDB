@@ -233,6 +233,14 @@ func checkTsQueryOptMode(encodedValue string) error {
 	return nil
 }
 
+func checkTsCountUseStatistics(encodedValue string) error {
+	_, err := strconv.ParseBool(encodedValue)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // CheckClusterSetting map of checking methods for saving cluster settings
 var CheckClusterSetting = map[string]CheckOperation{
 	"ts.dedup.rule":      checkTsDedupRule,
@@ -246,6 +254,7 @@ var CheckClusterSetting = map[string]CheckOperation{
 	"ts.compression.level":                        checkTsCompressLevel,
 	"immediate_compression.threads":               checkTsCompressThreads,
 	"ts.sql.query_opt_mode":                       checkTsQueryOptMode,
+	"ts.count.use_statistics.enabled":             checkTsCountUseStatistics,
 }
 
 func (n *setClusterSettingNode) startExec(params runParams) error {

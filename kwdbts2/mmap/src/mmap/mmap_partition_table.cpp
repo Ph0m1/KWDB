@@ -368,7 +368,7 @@ ostream& TsTimePartition::printRecord(uint32_t entity_id, std::ostream& os, size
 
 int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start_in_payload, size_t count,
                                           const BlockSpan span, DedupInfo& dedup_info,
-                                          DedupResult* dedup_result, ErrorInfo& err_info) {
+                                          DedupResult* dedup_result, ErrorInfo& err_info, int* deleted_rows) {
   int err_code = 0;
   if (payload->dedup_rule_ == DedupRule::REJECT || payload->dedup_rule_ == DedupRule::DISCARD) {
     for (size_t i = 0; i < span.row_num; i++) {
@@ -384,7 +384,7 @@ int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start
           return err_code;
         }
         span.block_item->setDeleted(span.start_row + i + 1);
-        // deleted_rows++;
+        *deleted_rows += 1;
         if (dedup_result->discard_bitmap.len != 0) {
           setRowDeleted(dedup_result->discard_bitmap.data, i + 1);
         }
@@ -400,7 +400,7 @@ int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start
       for (int i = kv.second.size() - 2; i >= 0; i--) {
         if (kv.second[i] >= start_in_payload + count && kv.second[i] < start_in_payload + count + span.row_num) {
           span.block_item->setDeleted(span.start_row + (kv.second[i] - start_in_payload - count) + 1);
-          // deleted_rows++;
+          *deleted_rows += 1;
           if (!(payload->dedup_rule_ == DedupRule::REJECT || payload->dedup_rule_ == DedupRule::DISCARD)
               || dedup_info.table_real_rows.find(kv.first) == dedup_info.table_real_rows.end()) {
             // only count when this ts is not processed before.
@@ -492,8 +492,11 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     }
     std::vector<size_t> full_block_idx;
     MUTEX_LOCK(partition_table_latch_);
+    TsHashLatch* entity_item_latch = GetEntityItemLatch();
+    entity_item_latch->Lock(entity_id);
     EntityItem* entity_item = getEntityItem(entity_id);
-    entity_item->row_written -= deleted_rows;
+    entity_item->row_written += (num - deleted_rows);
+    entity_item_latch->Unlock(entity_id);
     for (size_t i = 0; i < alloc_spans->size(); i++) {
       (*alloc_spans)[i].block_item->publish_row_count += (*alloc_spans)[i].row_num;
       if ((*alloc_spans)[i].block_item->publish_row_count >= (*alloc_spans)[i].block_item->max_rows_in_block) {
@@ -548,7 +551,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
       //  the entity currently will set the need_compact to true as long as there is data written
       entity_item->need_compact = true;
     }
-    err_code = ProcessDuplicateData(payload, start_in_payload, count, span, dedup_info, dedup_result, err_info);
+    err_code = ProcessDuplicateData(payload, start_in_payload, count, span, dedup_info, dedup_result, err_info, &deleted_rows);
     if (err_code < 0) {
       return err_code;
     }
@@ -829,6 +832,8 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
 
     // scan all data in this blockitem
     DelRowSpan row_span;
+    TsHashLatch* entity_item_latch = GetEntityItemLatch();
+    int delete_num = 0;
     for (k_uint32 row_idx = 1; row_idx <= block_item->alloc_row_count ; ++row_idx) {
       bool has_been_deleted = !segment_tbl->IsRowVaild(block_item, row_idx);
       auto cur_ts = KTimestamp(segment_tbl->columnAddr(block_item->getRowID(row_idx), 0));
@@ -837,13 +842,20 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
       }
       if (!evaluate_del) {
         if (block_item->setDeleted(row_idx) < 0) {
+          entity_item_latch->Lock(entity_id);
+          entity_item->row_written -= delete_num;
+          entity_item_latch->Unlock(entity_id);
           return -1;
         }
       } else if (delete_rows) {
         markDeleted(row_span.delete_flags, row_idx);
       }
       (*count)++;
+      delete_num++;
     }
+    entity_item_latch->Lock(entity_id);
+    entity_item->row_written -= delete_num;
+    entity_item_latch->Unlock(entity_id);
     if (evaluate_del && delete_rows) {
       row_span.blockitem_id = block_item_id;
       delete_rows->emplace_back(row_span);
@@ -911,8 +923,13 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
 
     // scan all data in blockitem
     k_uint32 row_count = block_item->publish_row_count;
+    int undo_num = 0;
+    TsHashLatch* entity_item_latch = GetEntityItemLatch();
     for (k_uint32 row_idx = 1; row_idx <= row_count; ++row_idx) {
       if (p_count == 0) {
+        entity_item_latch->Lock(entity_id);
+        entity_item->row_written -= undo_num;
+        entity_item_latch->Unlock(entity_id);
         return 0;
       }
       TimeStamp64LSN* ts_lsn = reinterpret_cast<TimeStamp64LSN*>(segment_tbl->columnAddr(
@@ -920,12 +937,14 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
       if (ts_lsn->lsn != lsn) {
         continue;
       }
-      entity_item->row_written--;
       block_item->setDeleted(row_idx);
       block_item->is_agg_res_available = false;
       p_count--;
+      undo_num++;
     }
-
+    entity_item_latch->Lock(entity_id);
+    entity_item->row_written -= undo_num;
+    entity_item_latch->Unlock(entity_id);
     block_item_id = block_item->prev_block_id;
   }
   return 0;
@@ -933,30 +952,31 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
 
 int TsTimePartition::UndoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
                                 const vector<DelRowSpan>* rows, ErrorInfo& err_info) {
+  uint32_t undo_num = 0;
+  /*
+     1. struct BlockItem.rows_delete_flags records the delete flags for 1000 rows in the data block.
+        A bit of 1 indicates that the row has been deleted
+     2. struct DelRowSpan uniquely locates a block item and records which rows in the data block are deleted
+        when DeleteData is called. The deleted row bit is set to 1
+     3. undo delete needs to change the bit corresponding to the row that was set to 1 during deletion back to 0
+     */
   for (auto row_span : *rows) {
     BlockItem* block_item = getBlockItem(row_span.blockitem_id);
-    for (int i = 0; i < 128; ++i) {
-      if (row_span.delete_flags[i] == 0) {
-        continue;
+    for (int i = 0; i < block_item->publish_row_count; i++) {
+      if (isRowDeleted(row_span.delete_flags, i + 1)) {
+        setRowValid(block_item->rows_delete_flags, i + 1);
+        undo_num++;
       }
-      /*
-       1. struct BlockItem.rows_delete_flags records the delete flags for 1000 rows in the data block.
-          A bit of 1 indicates that the row has been deleted
-       2. struct DelRowSpan uniquely locates a block item and records which rows in the data block are deleted
-          when DeleteData is called. The deleted row bit is set to 1
-       3. undo delete needs to change the bit corresponding to the row that was set to 1 during deletion back to 0
-       4. Algorithm description (taking 8 lines as an example)
-          1. Before executing DeleteData, the first 4 rows have been deleted,
-             and the rows_delete_flags bit string is [00001111]
-          2. After the last 4 rows are successfully deleted, the rows_delete_flags bit string becomes [11111111],
-             and the delete_flags bit is marked as [11110000]
-          3. The delete_flags are negated and bitwise ANDed with the rows_delete_flags to restore the rows_delete_flags:
-             (11111111) & ~(11110000) --> 00001111
-       */
-      block_item->rows_delete_flags[i] &= ~row_span.delete_flags[i];
+    }
+    if (block_item->publish_row_count >= block_item->max_rows_in_block) {
+      block_item->is_agg_res_available = false;
     }
   }
-
+  TsHashLatch* entity_item_latch = GetEntityItemLatch();
+  entity_item_latch->Lock(entity_id);
+  EntityItem* entity_item = getEntityItem(entity_id);
+  entity_item->row_written += undo_num;
+  entity_item_latch->Unlock(entity_id);
   return 0;
 }
 
@@ -1043,8 +1063,11 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     delete dedup_result;
     std::vector<size_t> full_block_idx;
     MUTEX_LOCK(partition_table_latch_);
+    TsHashLatch* entity_item_latch = GetEntityItemLatch();
+    entity_item_latch->Lock(entity_id);
     EntityItem* entity_item = getEntityItem(entity_id);
-    entity_item->row_written -= deleted_rows;
+    entity_item->row_written += (num - deleted_rows);
+    entity_item_latch->Unlock(entity_id);
     for (size_t i = 0; i < alloc_spans->size(); i++) {
       (*alloc_spans)[i].block_item->publish_row_count = (*alloc_spans)[i].block_item->alloc_row_count;
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[i].block_item->block_id);
@@ -1090,7 +1113,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
       err_info.errmsg = "PushPayload failed : " + string(strerror(errno));
       return err_code;
     }
-    err_code = ProcessDuplicateData(payload, start_row, count, span, dedup_info, dedup_result, err_info);
+    err_code = ProcessDuplicateData(payload, start_row, count, span, dedup_info, dedup_result, err_info, &deleted_rows);
     if (err_code < 0) {
       return err_code;
     }
@@ -1166,11 +1189,10 @@ int TsTimePartition::AllocateAllDataSpace(uint entity_id, size_t batch_num, std:
     }
     spans->clear();
   }
-  // Update entity's row_allocated and row_written
+  // Update entity's row_allocated
   auto entity = getEntityItem(entity_id);
   entity->entity_id = entity_id;
   entity->row_allocated += batch_num;
-  entity->row_written = entity->row_allocated;
 
   return err_code;
 }
@@ -1183,7 +1205,6 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
   size_t left_count = batch_num;
   BlockItem* block_item = nullptr;
   BlockSpan span;
-  EntityItem* entity_item = getEntityItem(entity_id);
   std::deque<BlockItem*> block_items;
 
   void* ts_begin = payload->GetColumnAddr(start_row, 0);
@@ -1194,11 +1215,16 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
 
   FindFirstBlockItem(entity_id, lsn, start_payload_ts, block_items, &pre_block_item, &pre_block_row,
                      partition_ts_map, p_time);
+  EntityItem* entity_item = getEntityItem(entity_id);
   do {
     // If pre_block_item is not null, it indicates that the block_item has already been allocated space,
     // eliminating the need for another allocation. If it is null,
     // it signifies that the previously requested space has been exhausted, necessitating the acquisition of a new one.
     if (pre_block_item != nullptr) {
+      TsHashLatch* entity_item_latch = GetEntityItemLatch();
+      entity_item_latch->Lock(entity_id);
+      entity_item->row_written -= (pre_block_item->publish_row_count - pre_block_row);
+      entity_item_latch->Unlock(entity_id);
       batch_num -= std::min(batch_num, size_t(pre_block_item->alloc_row_count));
       pre_block_item->alloc_row_count = pre_block_row;
       pre_block_item->publish_row_count = pre_block_row;
@@ -1241,10 +1267,9 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
   }
   partition_ts_map->insert(
       std::make_pair(p_time, MetricRowID{block_item->block_id, span.start_row + span.row_num + 1}));
-  // Update entity's row_allocated and row_written
+  // Update entity's row_allocated
   auto entity = getEntityItem(entity_id);
   entity->row_allocated += batch_num;
-  entity->row_written = entity->row_allocated;
   return err_code;
 }
 
@@ -1346,13 +1371,20 @@ void TsTimePartition::publish_payload_space(const std::vector<BlockSpan>& alloc_
       meta_manager_.MarkSpaceDeleted(entity_id, const_cast<BlockSpan*>(&alloc_span));
     }
   } else {
+    int delete_num = 0;
     for (auto delete_row : delete_rows) {
       if (delete_row.block_id == 0) {
         continue;
       }
       BlockItem* cur_blk_item = meta_manager_.GetBlockItem(delete_row.block_id);
       cur_blk_item->setDeleted(delete_row.offset_row);
+      delete_num++;
     }
+    EntityItem* entity_item = getEntityItem(entity_id);
+    TsHashLatch* entity_item_latch = GetEntityItemLatch();
+    entity_item_latch->Lock(entity_id);
+    entity_item->row_written -= delete_num;
+    entity_item_latch->Unlock(entity_id);
   }
 }
 
