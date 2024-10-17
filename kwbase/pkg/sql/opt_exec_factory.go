@@ -653,6 +653,7 @@ func (ef *execFactory) ConstructScalarGroupBy(
 		engine:          engine,
 		addSynchronizer: addSynchronizer,
 		statisticIndex:  private.AggIndex,
+		optType:         private.OptFlags,
 	}
 	if err := ef.addAggregations(n, aggregations); err != nil {
 		return nil, err

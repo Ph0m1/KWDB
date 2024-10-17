@@ -210,6 +210,9 @@ const (
 	PruneLocalAgg = 1 << 1
 	// PruneFinalAgg represents prune final agg
 	PruneFinalAgg = 1 << 2
+	// ScalarGroupByWithSumInt is set when scalarGroupBy with sum_Int agg in inside_out case,
+	// it must return 0 when the table is empty, because sum_int is the twice agg of count.
+	ScalarGroupByWithSumInt = 1 << 3
 )
 
 // PushLocalAggToScanOpt return true if has PushLocalAggToScan opt
@@ -225,4 +228,9 @@ func (v GroupOptType) PruneLocalAggOpt() bool {
 // PruneFinalAggOpt return true if has PruneFinalAgg opt
 func (v GroupOptType) PruneFinalAggOpt() bool {
 	return v&PruneFinalAgg > 0
+}
+
+// WithSumInt return true if scalarGroupBy with sum_Int agg in inside_out case.
+func (v GroupOptType) WithSumInt() bool {
+	return v&ScalarGroupByWithSumInt > 0
 }

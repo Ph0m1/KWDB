@@ -54,6 +54,7 @@ INSERT 1
                               | vectorized         | false
   group                       |                    |
    │                          | aggregate 0        | max(max)
+   │                          | scalar             |
    └── render                 |                    |
         │                     | max                | max
         └── hash-join         |                    |
@@ -74,7 +75,7 @@ INSERT 1
                               | access mode        | tableTableMeta
                               | scan agg 0         | ANY_NOT_NULL(tag1)
                               | scan agg 1         | MAX(e1)
-(24 rows)
+(25 rows)
 > select min(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
 -------
@@ -87,6 +88,7 @@ INSERT 1
                               | vectorized         | false
   group                       |                    |
    │                          | aggregate 0        | min(min)
+   │                          | scalar             |
    └── render                 |                    |
         │                     | min                | min
         └── hash-join         |                    |
@@ -107,7 +109,7 @@ INSERT 1
                               | access mode        | tableTableMeta
                               | scan agg 0         | ANY_NOT_NULL(tag1)
                               | scan agg 1         | MIN(e1)
-(24 rows)
+(25 rows)
 > select count(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   count
 ---------
@@ -120,6 +122,7 @@ INSERT 1
                               | vectorized         | false
   group                       |                    |
    │                          | aggregate 0        | sum_int(count)
+   │                          | scalar             |
    └── render                 |                    |
         │                     | count              | count
         └── hash-join         |                    |
@@ -140,7 +143,7 @@ INSERT 1
                               | access mode        | tableTableMeta
                               | scan agg 0         | ANY_NOT_NULL(tag1)
                               | scan agg 1         | COUNT(e1)
-(24 rows)
+(25 rows)
 > select sum(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   sum
 -------
@@ -153,6 +156,7 @@ INSERT 1
                               | vectorized         | false
   group                       |                    |
    │                          | aggregate 0        | sum(sum)
+   │                          | scalar             |
    └── render                 |                    |
         │                     | sum                | sum
         └── hash-join         |                    |
@@ -173,7 +177,7 @@ INSERT 1
                               | access mode        | tableTableMeta
                               | scan agg 0         | ANY_NOT_NULL(tag1)
                               | scan agg 1         | SUM(e1)
-(24 rows)
+(25 rows)
 > select avg(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   avg
 -------
@@ -189,6 +193,7 @@ INSERT 1
    └── group                       |                    |
         │                          | aggregate 0        | sum(sum)
         │                          | aggregate 1        | sum_int(count)
+        │                          | scalar             |
         └── render                 |                    |
              │                     | sum                | sum
              │                     | count              | count
@@ -212,7 +217,7 @@ INSERT 1
                                    | scan agg 0         | ANY_NOT_NULL(tag1)
                                    | scan agg 1         | SUM(e1)
                                    | scan agg 2         | COUNT(e1)
-(30 rows)
+(31 rows)
 > select count(*) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   count
 ---------
@@ -225,6 +230,7 @@ INSERT 1
                               | vectorized         | false
   group                       |                    |
    │                          | aggregate 0        | sum_int(count_rows)
+   │                          | scalar             |
    └── render                 |                    |
         │                     | count_rows         | count_rows
         └── hash-join         |                    |
@@ -245,7 +251,7 @@ INSERT 1
                               | access mode        | tableTableMeta
                               | scan agg 0         | ANY_NOT_NULL(tag1)
                               | scan agg 1         | COUNT()
-(24 rows)
+(25 rows)
 > select max(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   max
 -------
@@ -258,6 +264,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | max(max)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | max                | max
         └── hash-join              |                    |
@@ -280,7 +287,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(26 rows)
+(27 rows)
 > select min(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
 -------
@@ -293,6 +300,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | min(min)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | min                | min
         └── hash-join              |                    |
@@ -315,7 +323,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(26 rows)
+(27 rows)
 > select count(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   count
 ---------
@@ -328,6 +336,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | sum_int(count)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | count              | count
         └── hash-join              |                    |
@@ -350,7 +359,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(26 rows)
+(27 rows)
 > select sum(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   sum
 -------
@@ -363,6 +372,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | sum(sum)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | sum                | sum
         └── hash-join              |                    |
@@ -385,7 +395,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(26 rows)
+(27 rows)
 > select avg(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   avg
 -------
@@ -401,6 +411,7 @@ INSERT 1
    └── group                            |                    |
         │                               | aggregate 0        | sum(sum)
         │                               | aggregate 1        | sum_int(count)
+        │                               | scalar             |
         └── render                      |                    |
              │                          | sum                | sum
              │                          | count              | count
@@ -425,7 +436,7 @@ INSERT 1
                             └── ts scan |                    |
                                         | ts-table           | ts1
                                         | access mode        | tableTableMeta
-(31 rows)
+(32 rows)
 > select max(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   max
 -------
@@ -438,6 +449,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | max(e1)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | e1                 | e1
         └── hash-join              |                    |
@@ -453,7 +465,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(19 rows)
+(20 rows)
 > select min(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
 -------
@@ -466,6 +478,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | min(e1)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | e1                 | e1
         └── hash-join              |                    |
@@ -481,7 +494,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(19 rows)
+(20 rows)
 > select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   max
 -------
@@ -494,6 +507,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | max(e1 + e2)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | e1 + e2            | e1 + e2
         └── hash-join              |                    |
@@ -509,7 +523,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(19 rows)
+(20 rows)
 > select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
 -------
@@ -522,6 +536,7 @@ INSERT 1
                                    | vectorized         | false
   group                            |                    |
    │                               | aggregate 0        | min(e1 + e2)
+   │                               | scalar             |
    └── render                      |                    |
         │                          | e1 + e2            | e1 + e2
         └── hash-join              |                    |
@@ -537,7 +552,7 @@ INSERT 1
                        └── ts scan |                    |
                                    | ts-table           | ts1
                                    | access mode        | tableTableMeta
-(19 rows)
+(20 rows)
 > select max(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by r.e1;
   max
 -------
@@ -1148,6 +1163,7 @@ INSERT 1
                                    | vectorized        | false
   group                            |                   |
    │                               | aggregate 0       | min(e1 + e2)
+   │                               | scalar            |
    └── render                      |                   |
         │                          | e1 + e2           | e1 + e2
         └── hash-join              |                   |
@@ -1163,7 +1179,7 @@ INSERT 1
              └── scan              |                   |
                                    | table             | re1@primary
                                    | spans             | FULL SCAN
-(19 rows)
+(20 rows)
 > select min(ts.e1+ts.e2) from redb.re1 r join (select * from tsdb.ts1 where tsdb.ts1.e1 > 0) ts on ts.tag1=r.e1 and ts.tag2=r.e2 group by r.e1;
   min
 -------

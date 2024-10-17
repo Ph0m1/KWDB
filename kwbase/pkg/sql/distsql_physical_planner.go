@@ -4149,6 +4149,10 @@ func (dsp *DistSQLPlanner) addAggregators(
 		finalAggsSpec.HasTimeBucketGapFill = true
 		finalAggsSpec.TimeBucketGapFillColId = n.gapFillColID
 	}
+	if n.optType.WithSumInt() {
+		// the flag is used to make the sum_int return 0.
+		finalAggsSpec.ScalarGroupByWithSumInt = true
+	}
 	if len(finalAggsSpec.GroupCols) == 0 || len(p.ResultRouters) == 1 || notNeedDist {
 		// No GROUP BY, or we have a single stream. Use a single final aggregator.
 		// If the previous stage was all on a single node, put the final

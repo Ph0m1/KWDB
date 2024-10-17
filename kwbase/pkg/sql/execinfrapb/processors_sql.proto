@@ -762,6 +762,9 @@ message AggregatorSpec {
   // HasTimeBucketGapFill is true if aggregations have function time_bucket_gapFill.
   optional bool has_time_bucket_gapFill = 7 [(gogoproto.nullable) = false];
   optional int32 time_bucket_gapFill_colId = 8 [(gogoproto.nullable) = false];
+  // ScalarGroupBy with sum_Int agg in inside_out case must return 0 when the table is empty, because sum_int
+  // is the twice agg of count.
+  optional bool scalar_group_by_with_sum_int = 9 [(gogoproto.nullable) = false];
 }
 
 // InterleavedReaderJoinerSpec is the specification for a processor that performs

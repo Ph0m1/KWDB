@@ -871,6 +871,11 @@ func (a *anyNotNullAggregate) Size() int64 {
 	return sizeOfAnyNotNullAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *anyNotNullAggregate) AggHandling() {
+	// do nothing
+}
+
 type arrayAggregate struct {
 	arr *tree.DArray
 	// Note that we do not embed singleDatumAggregateBase struct to help with
@@ -920,6 +925,11 @@ func (a *arrayAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *arrayAggregate) Size() int64 {
 	return sizeOfArrayAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *arrayAggregate) AggHandling() {
+	// do nothing
 }
 
 type avgAggregate struct {
@@ -997,6 +1007,11 @@ func (a *avgAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *avgAggregate) Size() int64 {
 	return sizeOfAvgAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *avgAggregate) AggHandling() {
+	// do nothing
 }
 
 type concatAggregate struct {
@@ -1104,6 +1119,11 @@ func (a *concatAggregate) Size() int64 {
 	return sizeOfConcatAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *concatAggregate) AggHandling() {
+	// do nothing
+}
+
 type bitAndAggregate struct {
 	sawNonNull bool
 	result     int64
@@ -1151,6 +1171,11 @@ func (a *bitAndAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *bitAndAggregate) Size() int64 {
 	return sizeOfBitAndAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *bitAndAggregate) AggHandling() {
+	// do nothing
 }
 
 type bitOrAggregate struct {
@@ -1202,6 +1227,11 @@ func (a *bitOrAggregate) Size() int64 {
 	return sizeOfBitOrAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *bitOrAggregate) AggHandling() {
+	// do nothing
+}
+
 type boolAndAggregate struct {
 	sawNonNull bool
 	result     bool
@@ -1244,6 +1274,11 @@ func (a *boolAndAggregate) Size() int64 {
 	return sizeOfBoolAndAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *boolAndAggregate) AggHandling() {
+	// do nothing
+}
+
 type boolOrAggregate struct {
 	sawNonNull bool
 	result     bool
@@ -1281,6 +1316,11 @@ func (a *boolOrAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *boolOrAggregate) Size() int64 {
 	return sizeOfBoolOrAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *boolOrAggregate) AggHandling() {
+	// do nothing
 }
 
 // corrAggregate represents SQL:2003 correlation coefficient.
@@ -1405,6 +1445,11 @@ func (a *corrAggregate) Size() int64 {
 	return sizeOfCorrAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *corrAggregate) AggHandling() {
+	// do nothing
+}
+
 func (a *corrAggregate) float64Val(datum tree.Datum) (float64, error) {
 	switch val := datum.(type) {
 	case *tree.DFloat:
@@ -1449,6 +1494,11 @@ func (a *countAggregate) Size() int64 {
 	return sizeOfCountAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *countAggregate) AggHandling() {
+	// do nothing
+}
+
 type countRowsAggregate struct {
 	count int
 }
@@ -1477,6 +1527,11 @@ func (a *countRowsAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *countRowsAggregate) Size() int64 {
 	return sizeOfCountRowsAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *countRowsAggregate) AggHandling() {
+	// do nothing
 }
 
 // maxAggregate keeps track of the largest value passed to Add.
@@ -1551,6 +1606,11 @@ func (a *maxAggregate) Size() int64 {
 	return sizeOfMaxAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *maxAggregate) AggHandling() {
+	// do nothing
+}
+
 // minAggregate keeps track of the smallest value passed to Add.
 type minAggregate struct {
 	singleDatumAggregateBase
@@ -1621,6 +1681,11 @@ func (a *minAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *minAggregate) Size() int64 {
 	return sizeOfMinAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *minAggregate) AggHandling() {
+	// do nothing
 }
 
 // add datum in last/lastts/last_row/first/firstts/first_row/
@@ -1754,6 +1819,11 @@ func (a *FirstAggregate) Size() int64 {
 	return sizeOfFirstAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *FirstAggregate) AggHandling() {
+	// do nothing
+}
+
 // FirsttsAggregate keeps track of the first value passed to Add.
 type FirsttsAggregate struct {
 	singleDatumAggregateBase
@@ -1818,6 +1888,11 @@ func (a *FirsttsAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *FirsttsAggregate) Size() int64 {
 	return sizeOfFirsttsAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *FirsttsAggregate) AggHandling() {
+	// do nothing
 }
 
 // Context returns the evalCtx of ag.
@@ -1889,6 +1964,11 @@ func (a *FirstrowAggregate) Size() int64 {
 	return sizeOfFirstrowAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *FirstrowAggregate) AggHandling() {
+	// do nothing
+}
+
 // SetTsEvalCtx set the tsEvalCtx.
 func (a *FirstrowAggregate) SetTsEvalCtx(tsEvalCtx *tree.EvalContext) {
 	a.tsEvalCtx = tsEvalCtx
@@ -1958,6 +2038,11 @@ func (a *FirstrowtsAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *FirstrowtsAggregate) Size() int64 {
 	return sizeOfFirstrowtsAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *FirstrowtsAggregate) AggHandling() {
+	// do nothing
 }
 
 // Context returns the evalCtx of ag.
@@ -2032,6 +2117,11 @@ func (a *LastAggregate) Size() int64 {
 	return sizeOfLastAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *LastAggregate) AggHandling() {
+	// do nothing
+}
+
 // SetTsEvalCtx set the tsEvalCtx.
 func (a *LastAggregate) SetTsEvalCtx(tsEvalCtx *tree.EvalContext) {
 	a.tsEvalCtx = tsEvalCtx
@@ -2103,6 +2193,11 @@ func (a *LasttsAggregate) Size() int64 {
 	return sizeOfLasttsAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *LasttsAggregate) AggHandling() {
+	// do nothing
+}
+
 // Context returns the evalCtx of ag.
 func (a *LasttsAggregate) Context() *tree.EvalContext {
 	return a.evalCtx
@@ -2170,6 +2265,11 @@ func (a *LastrowAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *LastrowAggregate) Size() int64 {
 	return sizeOfLastrowAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *LastrowAggregate) AggHandling() {
+	// do nothing
 }
 
 // SetTsEvalCtx set the tsEvalCtx.
@@ -2241,6 +2341,11 @@ func (a *LastrowtsAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *LastrowtsAggregate) Size() int64 {
 	return sizeOfLastrowtsAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *LastrowtsAggregate) AggHandling() {
+	// do nothing
 }
 
 // Context returns the evalCtx of ag.
@@ -2384,6 +2489,11 @@ func (a *matchingAggregate) Size() int64 {
 	return sizeOfMatchingAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *matchingAggregate) AggHandling() {
+	// do nothing
+}
+
 type smallIntSumAggregate struct {
 	sum         int64
 	seenNonNull bool
@@ -2428,6 +2538,12 @@ func (a *smallIntSumAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *smallIntSumAggregate) Size() int64 {
 	return sizeOfSmallIntSumAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *smallIntSumAggregate) AggHandling() {
+	// set to true in order to return 0.
+	a.seenNonNull = true
 }
 
 type intSumAggregate struct {
@@ -2521,6 +2637,11 @@ func (a *intSumAggregate) Size() int64 {
 	return sizeOfIntSumAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *intSumAggregate) AggHandling() {
+	// do nothing
+}
+
 type decimalSumAggregate struct {
 	singleDatumAggregateBase
 
@@ -2580,6 +2701,11 @@ func (a *decimalSumAggregate) Size() int64 {
 	return sizeOfDecimalSumAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *decimalSumAggregate) AggHandling() {
+	// do nothing
+}
+
 type floatSumAggregate struct {
 	sum        float64
 	sawNonNull bool
@@ -2622,6 +2748,11 @@ func (a *floatSumAggregate) Size() int64 {
 	return sizeOfFloatSumAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *floatSumAggregate) AggHandling() {
+	// do nothing
+}
+
 type intervalSumAggregate struct {
 	sum        duration.Duration
 	sawNonNull bool
@@ -2662,6 +2793,11 @@ func (a *intervalSumAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *intervalSumAggregate) Size() int64 {
 	return sizeOfIntervalSumAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *intervalSumAggregate) AggHandling() {
+	// do nothing
 }
 
 // Read-only constants used for square difference computations.
@@ -2722,6 +2858,11 @@ func (a *intSqrDiffAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *intSqrDiffAggregate) Size() int64 {
 	return sizeOfIntSqrDiffAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *intSqrDiffAggregate) AggHandling() {
+	// do nothing
 }
 
 type floatSqrDiffAggregate struct {
@@ -2788,6 +2929,11 @@ func (a *floatSqrDiffAggregate) Size() int64 {
 	return sizeOfFloatSqrDiffAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *floatSqrDiffAggregate) AggHandling() {
+	// do nothing
+}
+
 // TimeBucketAggregate is for timebucketagg
 type TimeBucketAggregate struct {
 	Time       time.Time
@@ -2834,6 +2980,11 @@ func (a *TimeBucketAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *TimeBucketAggregate) Size() int64 {
 	return sizeOfTimeBucketAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *TimeBucketAggregate) AggHandling() {
+	// do nothing
 }
 
 // TimestamptzBucketAggregate is for timebucketagg
@@ -2990,6 +3141,11 @@ func (a *TimestamptzBucketAggregate) Size() int64 {
 	return sizeOfTimestamptzBucketAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *TimestamptzBucketAggregate) AggHandling() {
+	// do nothing
+}
+
 // ImputationAggregate is for interpolateagg
 type ImputationAggregate struct {
 	Aggfunc    tree.AggregateFunc
@@ -3083,6 +3239,11 @@ func (a *ImputationAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *ImputationAggregate) Size() int64 {
 	return sizeOfImputationAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *ImputationAggregate) AggHandling() {
+	// do nothing
 }
 
 type decimalSqrDiffAggregate struct {
@@ -3185,6 +3346,11 @@ func (a *decimalSqrDiffAggregate) Size() int64 {
 	return sizeOfDecimalSqrDiffAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *decimalSqrDiffAggregate) AggHandling() {
+	// do nothing
+}
+
 type floatSumSqrDiffsAggregate struct {
 	count   int64
 	mean    float64
@@ -3261,6 +3427,11 @@ func (a *floatSumSqrDiffsAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *floatSumSqrDiffsAggregate) Size() int64 {
 	return sizeOfFloatSumSqrDiffsAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *floatSumSqrDiffsAggregate) AggHandling() {
+	// do nothing
 }
 
 type decimalSumSqrDiffsAggregate struct {
@@ -3380,6 +3551,11 @@ func (a *decimalSumSqrDiffsAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *decimalSumSqrDiffsAggregate) Size() int64 {
 	return sizeOfDecimalSumSqrDiffsAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *decimalSumSqrDiffsAggregate) AggHandling() {
+	// do nothing
 }
 
 type floatSqrDiff interface {
@@ -3508,6 +3684,11 @@ func (a *floatVarianceAggregate) Size() int64 {
 	return sizeOfFloatVarianceAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *floatVarianceAggregate) AggHandling() {
+	// do nothing
+}
+
 // Reset implements tree.AggregateFunc interface.
 func (a *decimalVarianceAggregate) Reset(ctx context.Context) {
 	a.agg.Reset(ctx)
@@ -3521,6 +3702,11 @@ func (a *decimalVarianceAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *decimalVarianceAggregate) Size() int64 {
 	return sizeOfDecimalVarianceAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *decimalVarianceAggregate) AggHandling() {
+	// do nothing
 }
 
 type floatStdDevAggregate struct {
@@ -3636,6 +3822,11 @@ func (a *floatStdDevAggregate) Size() int64 {
 	return sizeOfFloatStdDevAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *floatStdDevAggregate) AggHandling() {
+	// do nothing
+}
+
 // Reset implements tree.AggregateFunc interface.
 func (a *decimalStdDevAggregate) Reset(ctx context.Context) {
 	a.agg.Reset(ctx)
@@ -3649,6 +3840,11 @@ func (a *decimalStdDevAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *decimalStdDevAggregate) Size() int64 {
 	return sizeOfDecimalStdDevAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *decimalStdDevAggregate) AggHandling() {
+	// do nothing
 }
 
 type bytesXorAggregate struct {
@@ -3713,6 +3909,11 @@ func (a *bytesXorAggregate) Size() int64 {
 	return sizeOfBytesXorAggregate
 }
 
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *bytesXorAggregate) AggHandling() {
+	// do nothing
+}
+
 type intXorAggregate struct {
 	sum        int64
 	sawNonNull bool
@@ -3753,6 +3954,11 @@ func (a *intXorAggregate) Close(context.Context) {}
 // Size is part of the tree.AggregateFunc interface.
 func (a *intXorAggregate) Size() int64 {
 	return sizeOfIntXorAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *intXorAggregate) AggHandling() {
+	// do nothing
 }
 
 type jsonAggregate struct {
@@ -3810,4 +4016,9 @@ func (a *jsonAggregate) Close(ctx context.Context) {
 // Size is part of the tree.AggregateFunc interface.
 func (a *jsonAggregate) Size() int64 {
 	return sizeOfJSONAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *jsonAggregate) AggHandling() {
+	// do nothing
 }

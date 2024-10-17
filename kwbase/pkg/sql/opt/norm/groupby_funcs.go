@@ -345,7 +345,17 @@ func (c *CustomFuncs) TryPushAgg(
 	finishOpt, newInnerJoin, newAggItems, projectItems, passCols := PushAggIntoJoinTSEngineNode(c.f, join, aggs, private, private.GroupingCols, optHelper)
 	if finishOpt {
 		c.mem.SetFlag(opt.FinishOptInsideOut)
-		newGroup := c.f.ConstructGroupBy(newInnerJoin, newAggItems, private)
+		var newGroup memo.RelExpr
+		for _, agg := range newAggItems {
+			if private.GroupingCols.Empty() && agg.Agg.Op() == opt.SumIntOp {
+				private.OptFlags |= opt.ScalarGroupByWithSumInt
+			}
+		}
+		if private.GroupingCols.Empty() {
+			newGroup = c.f.ConstructScalarGroupBy(newInnerJoin, newAggItems, private)
+		} else {
+			newGroup = c.f.ConstructGroupBy(newInnerJoin, newAggItems, private)
+		}
 
 		if len(projectItems) > 0 {
 			newGroup = c.f.ConstructProject(newGroup, projectItems, passCols)

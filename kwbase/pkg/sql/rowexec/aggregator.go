@@ -104,6 +104,9 @@ type aggregatorBase struct {
 	// hasTimeBucketGapFill is true if aggregations have function time_bucket_gapFill.
 	hasTimeBucketGapFill   bool
 	timeBucketGapFillColID int32
+	// ScalarGroupBy with sum_Int agg in inside_out case must return 0 when the table is empty, because sum_int
+	// is the twice agg of count.
+	scalarGroupByWithSumInt bool
 }
 
 // aggGapFillState represents gapfill's state.
@@ -255,6 +258,7 @@ func (ag *aggregatorBase) init(
 	}
 	ag.gapfill.gapFillGroupDatum = make([]tree.Datum, len(gapFillGroup))
 	ag.hasTimeBucketGapFill = spec.HasTimeBucketGapFill
+	ag.scalarGroupByWithSumInt = spec.ScalarGroupByWithSumInt
 	ag.imputation = make([]imputationtype, len(spec.Aggregations))
 	// Loop over the select expressions and extract any aggregate functions --
 	// non-aggregation functions are replaced with parser.NewIdentAggregate,
@@ -1481,6 +1485,11 @@ func (ag *aggregatorBase) createAggregateFuncs() (aggregateFuncs, error) {
 	//var reserve int
 	for i, f := range ag.funcs {
 		agg := f.create(ag.EvalCtx, f.arguments)
+		if ag.scalarGroupByWithSumInt {
+			// AggHandling() will set seenNonNull to true of sum_int agg
+			// when scalarGroupByWithSumInt is true, in order to return 0.
+			agg.AggHandling()
+		}
 		if err := ag.bucketsAcc.Grow(ag.PbCtx(), agg.Size()); err != nil {
 			return nil, err
 		}
