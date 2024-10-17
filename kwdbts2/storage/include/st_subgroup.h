@@ -302,6 +302,15 @@ class TsSubEntityGroup : public TSObject {
   */
   int removePartitionTable(TsTimePartition* mt_table, bool is_force, ErrorInfo& err_info, bool skip_busy = false);
 
+  /**
+  * @brief delete the file directory directly
+  * @param db_path database path
+  * @param pt_tbl_sub_path partition table sub path
+  *
+  * @return error code
+  */
+  int removePartitionDir(const std::string& db_path, const std::string& pt_tbl_sub_path);
+
   inline string partitionTblSubPath(timestamp64 p_time) {
     if (p_time >= 0) {
       return std::move(tbl_sub_path_ + std::to_string(p_time) + "/");

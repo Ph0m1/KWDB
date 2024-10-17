@@ -514,10 +514,12 @@ TsTimePartition* TsSubEntityGroup::getPartitionTable(timestamp64 p_time, timesta
   mt_table = new TsTimePartition(root_tbl_manager_, entity_block_meta_->GetConfigSubgroupEntities());
   mt_table->open(table_name_ + ".bt", db_path_, pt_tbl_sub_path, MMAP_OPEN_NORECURSIVE, err_info);
   if (err_info.errcode == KWEDROPPEDOBJ) {
-    deleted_partitions_[mt_table->minTimestamp()] = mt_table->maxTimestamp();
     delete mt_table;
-    Remove(db_path_ + pt_tbl_sub_path);
-    return nullptr;
+    mt_table = nullptr;
+    removePartitionDir(db_path_, pt_tbl_sub_path);
+    if (!create_if_not_exist) {
+      return nullptr;
+    }
   }
   if (err_info.errcode < 0 && create_if_not_exist) {
     err_info.clear();
@@ -676,6 +678,31 @@ int TsSubEntityGroup::removePartitionTable(TsTimePartition* mt_table, bool is_fo
   delete mt_table;
   mt_table = nullptr;
   return err_info.errcode;
+}
+
+int TsSubEntityGroup::removePartitionDir(const std::string& db_path, const std::string& pt_tbl_sub_path) {
+  std::string real_partition_path = db_path + pt_tbl_sub_path;
+  DIR* dir_ptr = opendir(real_partition_path.c_str());
+  if (dir_ptr) {
+    struct dirent* entity;
+    while ((entity = readdir(dir_ptr)) != nullptr) {
+      if (entity->d_type == DT_REG) {
+        int dn_len = strlen(entity->d_name);
+        dn_len = dn_len - 5;
+        if (strcmp(entity->d_name + dn_len, ".sqfs") == 0) {
+          string part_name = string(entity->d_name, dn_len);
+          ErrorInfo err_info;
+          umount(db_path, pt_tbl_sub_path + part_name + '/', err_info);
+          if (err_info.errcode < 0) {
+            return err_info.errcode;
+          }
+        }
+      }
+    }
+    closedir(dir_ptr);
+  }
+  Remove(real_partition_path);
+  return 0;
 }
 
 map<int64_t, int64_t> TsSubEntityGroup::allPartitions() {

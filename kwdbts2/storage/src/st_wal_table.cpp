@@ -807,6 +807,7 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
       ebt_manager_->ReleasePartitionTable(p_bt);
       LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
       err_info.clear();
+      batch_start = row_id;
       continue;
     }
     if (err_info.errcode < 0) {
@@ -815,9 +816,9 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
       return KStatus::FAIL;
     }
     if (!p_bt->isValid()) {
-      LOG_WARN("Partition is invalid.");
-      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      LOG_WARN("Partition[%s] is invalid, unable to execute UndoPut", p_bt->tbl_sub_path().c_str());
       ebt_manager_->ReleasePartitionTable(p_bt);
+      batch_start = row_id;
       continue;
     }
     last_p_time = p_time;
@@ -887,6 +888,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
       ebt_manager_->ReleasePartitionTable(p_bt);
       LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
       err_info.clear();
+      batch_start = row_id;
       continue;
     }
     if (err_info.errcode < 0) {
@@ -896,9 +898,9 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
       break;
     }
     if (!p_bt->isValid()) {
-      LOG_WARN("Partition is invalid.");
-      err_info.setError(KWEDUPREJECT, "Partition is invalid.");
+      LOG_WARN("Partition[%s] is invalid, unable to execute RedoPut", p_bt->tbl_sub_path().c_str());
       ebt_manager_->ReleasePartitionTable(p_bt);
+      batch_start = row_id;
       continue;
     }
     last_p_time = p_time;
