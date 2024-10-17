@@ -538,7 +538,7 @@ func BuildRowBytesForPrepareTsInsert(
 ) error {
 
 	rowNum := di.RowNum / di.ColNum
-	rowBytes, dataOffset, varDataOffset, err := preAllocateDataRowBytes(rowNum, &di.Dcs)
+	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(rowNum, &di.Dcs)
 	if err != nil {
 		return err
 	}
@@ -548,10 +548,11 @@ func BuildRowBytesForPrepareTsInsert(
 	for i := 0; i < rowNum; i++ {
 		Payload := rowBytes[i]
 		offset := dataOffset
+		varDataOffset := independentOffset
 		for j, col := range di.PrettyCols {
 			colIdx := di.ColIndexs[int(col.ID)]
 			isLastDataCol := false
-			if colIdx < 0 {
+			if colIdx < 0 || Args[i*di.ColNum+colIdx] == nil {
 				if !col.Nullable {
 					return sqlbase.NewNonNullViolationError(col.Name)
 				} else if col.IsTagCol() {
@@ -570,26 +571,77 @@ func BuildRowBytesForPrepareTsInsert(
 					curColLength = execbuilder.VarColumnSize
 				}
 				// deal with NULL value
-				if colIdx < 0 {
+				if colIdx < 0 || Args[i*di.ColNum+colIdx] == nil {
 					Payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
 					offset += curColLength
 					// Fill the length of rowByte
 					if isLastDataCol {
 						binary.LittleEndian.PutUint32(Payload[0:], uint32(varDataOffset-execbuilder.DataLenSize))
+						rowBytes[i] = Payload[:varDataOffset]
 					}
 					continue
 				}
-				dataLen := len(Args[i*di.ColNum+colIdx])
-				copy(Payload[offset:offset+dataLen], Args[i*di.ColNum+colIdx])
+
+				switch col.Type.Oid() {
+				case oid.T_varchar, types.T_nvarchar:
+					vardataOffset := varDataOffset - bitmapOffset
+					binary.LittleEndian.PutUint32(Payload[offset:], uint32(vardataOffset))
+
+					addSize := len(Args[i*di.ColNum+colIdx]) + execbuilder.VarDataLenSize
+					if varDataOffset+addSize > len(Payload) {
+						// grow payload size
+						newPayload := make([]byte, len(Payload)+addSize)
+						copy(newPayload, Payload)
+						Payload = newPayload
+					}
+					binary.LittleEndian.PutUint16(Payload[varDataOffset:], uint16(len(Args[i*di.ColNum+colIdx])))
+					copy(Payload[varDataOffset+execbuilder.VarDataLenSize:], Args[i*di.ColNum+colIdx])
+					varDataOffset += addSize
+				case oid.T_bool:
+					dataLen := len(Args[i*di.ColNum+colIdx])
+					copy(Payload[offset:offset+dataLen], Args[i*di.ColNum+colIdx])
+
+				case oid.T_bytea:
+					// Special handling: When assembling the payload related to the bytes type,
+					// write the actual length of the bytes type data at the beginning of the byte array.
+					dataLen := len(Args[i*di.ColNum+colIdx])
+					copy(Payload[offset+2:offset+2+dataLen], Args[i*di.ColNum+colIdx])
+
+				case oid.T_varbytea:
+					vardataOffset := varDataOffset - bitmapOffset
+					binary.LittleEndian.PutUint32(Payload[offset:], uint32(vardataOffset))
+
+					addSize := len(Args[i*di.ColNum+colIdx]) + execbuilder.VarDataLenSize
+					if varDataOffset+addSize > len(Payload) {
+						// grow payload size
+						newPayload := make([]byte, len(Payload)+addSize)
+						copy(newPayload, Payload)
+						Payload = newPayload
+					}
+					binary.LittleEndian.PutUint16(Payload[varDataOffset:], uint16(len(Args[i*di.ColNum+colIdx])))
+					copy(Payload[varDataOffset+execbuilder.VarDataLenSize:], Args[i*di.ColNum+colIdx])
+					varDataOffset += addSize
+				default:
+					var dataLen int
+					if len(Args[i*di.ColNum+colIdx]) > curColLength {
+						dataLen = curColLength
+					} else {
+						dataLen = len(Args[i*di.ColNum+colIdx])
+					}
+					copy(Payload[offset:offset+dataLen], Args[i*di.ColNum+colIdx])
+
+				}
 				offset += curColLength
 			}
+
 			if isLastDataCol {
+				Payload = Payload[:varDataOffset]
 				// The length of the data is placed in the first 4 bytes of the payload
 				binary.LittleEndian.PutUint32(Payload[0:], uint32(varDataOffset-execbuilder.DataLenSize))
+				rowBytes[i] = Payload[:varDataOffset]
 			}
 		}
 	}
-
 	//	The following code uniformly calculates priTagValMap
 	var colIndexes []int
 	for _, col := range di.PrimaryTagCols {
@@ -675,7 +727,7 @@ func TsprepareTypeCheck(
 	di DirectInsert,
 ) ([][][]byte, []int64, error) {
 	rowNum := di.RowNum / di.ColNum
-	rowTimestamps := make([]int64, 0, rowNum)
+	rowTimestamps := make([]int64, rowNum)
 	if di.RowNum%di.ColNum != 0 {
 		return nil, nil, pgerror.Newf(
 			pgcode.Syntax,
@@ -939,6 +991,37 @@ func TsprepareTypeCheck(
 						if ArgFormatCodes[idx] == pgwirebase.FormatText {
 							// string type
 							t, err := tree.ParseDTimestampTZ(ptCtx, string(Args[idx]), tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
+							if err != nil {
+								return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+							}
+							tum := t.UnixMilli()
+							if tum < tree.TsMinTimestamp || tum > tree.TsMaxTimestamp {
+								if column.Type.Oid() == oid.T_timestamptz {
+									return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
+										"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+								}
+								return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
+									"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+							}
+							Args[idx] = make([]byte, 8)
+							binary.LittleEndian.PutUint64(Args[idx][0:], uint64(tum))
+							if isFirstCols {
+								rowTimestamps = append(rowTimestamps, tum)
+							}
+						} else {
+							i := int64(binary.BigEndian.Uint64(Args[idx]))
+							nanosecond := execbuilder.PgBinaryToTime(i).Nanosecond()
+							second := execbuilder.PgBinaryToTime(i).Unix()
+							tum := second*1000 + int64(nanosecond/1000000) - 8*60*60*1000
+							binary.LittleEndian.PutUint64(Args[idx][0:], uint64(tum))
+							if isFirstCols {
+								rowTimestamps = append(rowTimestamps, tum)
+							}
+						}
+					case oid.T_timestamp:
+						if ArgFormatCodes[idx] == pgwirebase.FormatText {
+							// string type
+							t, err := tree.ParseDTimestamp(ptCtx, string(Args[idx]), tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 							if err != nil {
 								return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
 							}

@@ -1782,6 +1782,11 @@ func BuildPreparePayloadForTsInsert(
 			offset += columnBitmapLen
 		}
 	}
+	if dataLenOffset == 0 {
+		if len(payload) > independentOffset {
+			payload = payload[:independentOffset]
+		}
+	}
 	// var column value length
 	colDataLen := independentOffset - dataLenOffset - DataLenSize
 	binary.LittleEndian.PutUint32(payload[dataLenOffset:], uint32(colDataLen))
