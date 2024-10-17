@@ -39,6 +39,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
 	"github.com/cockroachdb/errors"
 )
@@ -254,7 +255,8 @@ func (p *planner) MemberOfWithAdminOption(
 	}
 	tableDesc := objDesc.TableDesc()
 	tableVersion := tableDesc.Version
-
+	log.VEventf(ctx, 3, "user=%s, table version=%v, cache table version=%v",
+		member, tableVersion, roleMembersCache.tableVersion)
 	// We loop in case the table version changes while we're looking up memberships.
 	for {
 		// Check version and maybe clear cache while holding the mutex.
@@ -272,6 +274,8 @@ func (p *planner) MemberOfWithAdminOption(
 
 		if ok {
 			// Found: return.
+			log.VEventf(ctx, 3, "user=%s, find user in cache, role map=%v",
+				member, userMapping)
 			return userMapping, nil
 		}
 
