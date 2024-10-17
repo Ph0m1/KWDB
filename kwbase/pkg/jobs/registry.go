@@ -1089,7 +1089,7 @@ func (r *Registry) maybeAdoptJob(
 	ctx context.Context, nl NodeLiveness, randomizeJobOrder bool,
 ) error {
 	const stmt = `
-SELECT id, payload, progress IS NULL, status
+SELECT id, payload, progress IS NULL, status, created_by_type, created_by_id
 FROM system.jobs
 WHERE status IN ($1, $2, $3, $4, $5) ORDER BY created DESC`
 	rows, err := r.ex.Query(
@@ -1159,6 +1159,11 @@ WHERE status IN ($1, $2, $3, $4, $5) ORDER BY created DESC`
 		if log.V(3) {
 			log.Infof(ctx, "job %d: evaluating for adoption with status `%s` and lease %v",
 				*id, status, payload.Lease)
+		}
+
+		createdBy, err := unmarshalCreatedBy(row[4], row[5])
+		if err != nil {
+			return err
 		}
 
 		// In version 20.1, the registry must not adopt 19.2-style schema change
@@ -1233,7 +1238,7 @@ WHERE status IN ($1, $2, $3, $4, $5) ORDER BY created DESC`
 			}
 		}
 		// Below we know that this node holds the lease on the job.
-		job := &Job{id: id, registry: r}
+		job := &Job{id: id, registry: r, createdBy: createdBy}
 		resumeCtx, cancel := r.makeCtx()
 
 		if pauseRequested := status == StatusPauseRequested; pauseRequested {

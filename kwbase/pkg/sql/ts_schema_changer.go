@@ -326,6 +326,8 @@ func (sw *TSSchemaChangeWorker) handleResult(
 				},
 			}
 			updateErr = p.handleSetTagValue(ctx, d.SNTable, insTable, syncErr)
+		case compress, deleteExpiredData, autonomy:
+			updateErr = p.handleSchedule(ctx, sw.job, syncErr)
 		default:
 		}
 		if updateErr == nil {
@@ -334,10 +336,30 @@ func (sw *TSSchemaChangeWorker) handleResult(
 			log.Infof(ctx, "handle metadata failed: ", updateErr)
 		}
 	}
-	if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
-		log.Warningf(ctx, "ts schema change on table (%d) wait one version error: %s", sw.tableID, err.Error())
+	if sw.tableID != 0 {
+		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
+			log.Warningf(ctx, "ts schema change on table (%d) wait one version error: %s", sw.tableID, err.Error())
+		}
 	}
 	log.Infof(ctx, "%s metadata retry job finished, jobID: %d", opType, sw.job.ID())
+}
+
+// handleSchedule changes schedule status when job done.
+func (p *planner) handleSchedule(ctx context.Context, job *jobs.Job, syncErr error) error {
+	jobStatus := jobs.StatusSucceeded
+	if syncErr != nil {
+		jobStatus = jobs.StatusFailed
+	}
+	env := jobSchedulerEnv(p.RunParams(ctx))
+	if job.CreatedBy() == nil {
+		log.Errorf(ctx, "can not find create_by_id for job %d", *job.ID())
+		return nil
+	}
+	err := jobs.NotifyJobTermination(ctx, env, *job.ID(), jobStatus, job.Details(), job.CreatedBy().ID, p.execCfg.InternalExecutor, p.Txn())
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // handleSetTagValue restore instance table metadata is available,

@@ -24,6 +24,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 )
 
 // sqlScheduleResumer implements the jobs.Resumer interface for sql schedule
@@ -45,16 +46,28 @@ func (r *sqlScheduleResumer) Resume(
 ) error {
 	p := phs.(PlanHookState)
 	d := r.job.Details().(jobspb.SqlScheduleDetails)
+	job := r.job
 	switch d.ScheduleType {
 	case sqlSchedule:
 		p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{
 			DistSQLMode: sessiondata.DistSQLAuto,
 		})
+		env := jobSchedulerEnv(p.RunParams(ctx))
+		jobStatus := jobs.StatusSucceeded
+		defer func() {
+			if job.CreatedBy() != nil {
+				err := jobs.NotifyJobTermination(ctx, env, *job.ID(), jobStatus, job.Details(), job.CreatedBy().ID, p.ExecCfg().InternalExecutor, p.Txn())
+				log.Error(ctx, err)
+			} else {
+				log.Errorf(ctx, "can not find create_by_id for job %d", *job.ID())
+			}
+		}()
 		_, err := p.ExecCfg().InternalExecutor.ExecEx(ctx, "exec-schedule", p.Txn(),
 			sqlbase.InternalExecutorSessionDataOverride{User: security.RootUser},
 			d.Statement,
 		)
 		if err != nil {
+			jobStatus = jobs.StatusFailed
 			return err
 		}
 	}

@@ -60,39 +60,11 @@ func (e *ScheduledAutonomyExecutor) ExecuteJob(
 		Details:  syncDetail,
 		Progress: jobspb.SyncMetaCacheProgress{},
 	}
-	var job *jobs.StartableJob
-	var err1 error
-	if err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		job, err1 = jobRegistry.CreateStartableJobWithTxn(ctx, jobRecord, txn, nil)
-		if err1 != nil {
-			cleanupErr := job.CleanupOnRollback(ctx)
-			if cleanupErr != nil {
-				return cleanupErr
-			}
-			return err1
-		}
-		return nil
-	}); err != nil {
+	job, err := jobRegistry.CreateJobWithTxn(ctx, jobRecord, txn)
+	if err != nil {
 		return err
 	}
-	jobStatus := jobs.StatusRunning
-	defer func() {
-		err := jobs.NotifyJobTermination(ctx, env, *job.ID(), jobStatus, nil,
-			schedule.ScheduleID(), cfg.InternalExecutor, txn)
-		if err != nil {
-			log.Warningf(ctx, "callback to update schedule [%s] failed. err:%s", schedule.ScheduleID(), err.Error())
-		}
-	}()
-	if err := job.Run(ctx); err != nil {
-		jobStatus = jobs.StatusFailed
-		log.Error(ctx, "start compress job failed")
-		return err
-	}
-	jobStatus = jobs.StatusSucceeded
-
-	if jobUpdateErr := jobRegistry.Succeeded(ctx, txn, *job.ID()); jobUpdateErr != nil {
-		log.Errorf(ctx, "update job status failed. err: %s", jobUpdateErr.Error())
-	}
+	log.Infof(ctx, "autonomy schedule creates new job %d", job.ID())
 
 	return nil
 }

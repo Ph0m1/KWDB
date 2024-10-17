@@ -103,14 +103,14 @@ SELECT
   (SELECT count(*)
    FROM %s J
    WHERE
-      J.created_by_type = '%s' AND J.created_by_id = S.schedule_id AND
+      J.created_by_id = S.schedule_id AND
       J.status NOT IN ('%s', '%s', '%s')
   ) AS num_running, S.*
 FROM %s S
 WHERE next_run < %s
 ORDER BY random()
 %s
-FOR UPDATE`, env.SystemJobsTableName(), CreatedByScheduledJobs,
+FOR UPDATE`, env.SystemJobsTableName(),
 		StatusSucceeded, StatusCanceled, StatusFailed,
 		env.ScheduledJobsTableName(), env.NowExpr(), limitClause)
 }
@@ -213,9 +213,8 @@ func newLoopStats(
 	ctx context.Context, env scheduledjobs.JobSchedulerEnv, ex sqlutil.InternalExecutor, txn *kv.Txn,
 ) (*loopStats, error) {
 	numRunningJobsStmt := fmt.Sprintf(
-		"SELECT count(*) FROM %s WHERE created_by_type = '%s' AND status NOT IN ('%s', '%s', '%s')",
-		env.SystemJobsTableName(), CreatedByScheduledJobs,
-		StatusSucceeded, StatusCanceled, StatusFailed)
+		"SELECT count(*) FROM %s WHERE created_by_type IS NOT NULL AND status NOT IN ('%s', '%s', '%s')",
+		env.SystemJobsTableName(), StatusSucceeded, StatusCanceled, StatusFailed)
 	readyToRunStmt := fmt.Sprintf(
 		"SELECT count(*) FROM %s WHERE next_run < %s",
 		env.ScheduledJobsTableName(), env.NowExpr())

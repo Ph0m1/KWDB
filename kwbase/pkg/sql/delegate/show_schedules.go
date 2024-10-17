@@ -48,8 +48,8 @@ func (d *delegator) delegateShowSchedules(n *tree.ShowSchedule) (tree.Statement,
 		"(CASE WHEN schedule_expr IS NULL THEN 'NEVER' ELSE schedule_expr END) as recurrence",
 		fmt.Sprintf(`(
 SELECT count(*) FROM system.jobs
-WHERE status='%s' AND created_by_type='%s' AND created_by_id=schedule_id
-) AS jobsRunning`, jobs.StatusRunning, jobs.CreatedByScheduledJobs),
+WHERE status='%s' AND created_by_id=schedule_id
+) AS jobsRunning`, jobs.StatusRunning),
 		"owner",
 		"created",
 	}
