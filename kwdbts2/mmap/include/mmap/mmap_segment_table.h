@@ -453,16 +453,6 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return segment_id_;
   }
 
-  inline timestamp64 getBlockMinTs(BLOCK_ID block_id) {
-    return *reinterpret_cast<timestamp64*>(
-        columnAggAddr(block_id, 0, kwdbts::Sumfunctype::MIN));
-  }
-
-  inline timestamp64 getBlockMaxTs(BLOCK_ID block_id) {
-    return *reinterpret_cast<timestamp64*>(
-        columnAggAddr(block_id, 0, kwdbts::Sumfunctype::MAX));
-  }
-
   inline void* columnAddr(MetricRowID row_id, size_t c) const {
     // return: block address + bitmap size + aggs size + count size(2 bytes) + row index in block * column value size
     size_t offset_size = col_block_header_size_[c] + cols_info_include_dropped_[c].size * (row_id.offset_row - 1);

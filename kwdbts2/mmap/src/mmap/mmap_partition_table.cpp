@@ -819,8 +819,8 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
       continue;
     }
 
-    timestamp64 block_min_ts = segment_tbl->getBlockMinTs(block_item->block_id);
-    timestamp64 block_max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
+    timestamp64 block_min_ts, block_max_ts;
+    TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), block_min_ts, block_max_ts);
     if (!isTimestampInSpans(ts_spans, block_min_ts, block_max_ts)) {
       // blockitem ts span  not cross with ts_spans, no need scan data.
       block_item_id = block_item->prev_block_id;
@@ -898,9 +898,8 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
       continue;
     }
 
-    timestamp64 block_max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
-    timestamp64 block_min_ts = segment_tbl->getBlockMinTs(block_item->block_id);
-
+    timestamp64 block_min_ts, block_max_ts;
+    TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), block_min_ts, block_max_ts);
     if (block_max_ts < start_time || block_min_ts > end_time) {
       block_item_id = block_item->prev_block_id;
       continue;
@@ -1630,7 +1629,9 @@ int TsTimePartition::GetDedupRows(uint entity_id, const BlockSpan& first_span, k
       return KWENOOBJ;
     }
     // Check if the timestamp range of the block item overlaps with the timestamps of the deduplication information.
-    const KwTsSpan& ts_span = {segment_tbl->getBlockMinTs(block_item->block_id), segment_tbl->getBlockMaxTs(block_item->block_id)};
+    timestamp64 block_min_ts, block_max_ts;
+    TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), block_min_ts, block_max_ts);
+    const KwTsSpan& ts_span = {block_min_ts, block_max_ts};
     if (ts_span.begin > payload_span.end || ts_span.end < payload_span.begin) {
     // no match rows. so no need do anything.
     } else {
@@ -1870,6 +1871,7 @@ int TsTimePartition::FindFirstBlockItem(uint32_t entity_id, kwdbts::TS_LSN lsn, 
     // initiate the search from the starting position documented in the map.
     GetAllBlockItems(entity_id, block_items);
     uint32_t offset_row = 1;
+    timestamp64 block_min_ts, block_max_ts;
     while (!block_items.empty()) {
       auto block_item = block_items.front();
       block_items.pop_front();
@@ -1878,8 +1880,8 @@ int TsTimePartition::FindFirstBlockItem(uint32_t entity_id, kwdbts::TS_LSN lsn, 
         LOG_ERROR("Segment [%s] is null", (db_path_ + segment_tbl_sub_path(block_item->block_id)).c_str());
         return KWENOOBJ;
       }
-
-      KwTsSpan ts_span = {segment_tbl->getBlockMinTs(block_item->block_id), segment_tbl->getBlockMaxTs(block_item->block_id)};
+      TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), block_min_ts, block_max_ts);
+      KwTsSpan ts_span = {block_min_ts, block_max_ts};
       if (!(start_payload_ts >= ts_span.begin && start_payload_ts <= ts_span.end) ||
           pre_block_id > block_item->block_id) {
         continue;
@@ -1958,8 +1960,8 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
     BlockItem* cur_block = block_queue.front();
     block_queue.pop_front();
     std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block->block_id);
-    timestamp64 min_ts = segment_tbl->getBlockMinTs(cur_block->block_id);
-    timestamp64 max_ts = segment_tbl->getBlockMaxTs(cur_block->block_id);
+    timestamp64 min_ts, max_ts;
+    GetBlkMinMaxTs(cur_block, segment_tbl.get(), min_ts, max_ts);
     if (isTimestampInSpans(ts_spans, min_ts, max_ts) && cur_block->publish_row_count > 0) {
       intervals.push_back({min_ts, max_ts});
       interval_block_map[{min_ts, max_ts}] = cur_block;

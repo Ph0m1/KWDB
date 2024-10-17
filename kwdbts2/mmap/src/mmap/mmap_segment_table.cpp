@@ -835,6 +835,8 @@ int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwd
     AggDataAddresses addresses{};
     RW_LATCH_X_LOCK(&rw_latch_);
     columnAggCalculate(span, start_row, 0, addresses, span.row_num, false);
+    span.block_item->max_ts_in_block = KTimestamp(addresses.max);
+    span.block_item->min_ts_in_block = KTimestamp(addresses.min);
     // Update the maximum and minimum timestamp information of the current segment,
     // which will be used for subsequent compression and other operations
     if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {

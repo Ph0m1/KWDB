@@ -187,7 +187,9 @@ struct BlockItem {
   uint32_t alloc_row_count;   // row space that already allocated.
   char rows_delete_flags[BLOCK_ITEM_BITMAP_SIZE];  // Block bitmap that mark if row is deleted.
   uint32_t max_rows_in_block;  // max rows that can be stored in a block
-  char user_defined[28];      // reserved for user-defined information.
+  timestamp64 min_ts_in_block;
+  timestamp64 max_ts_in_block;
+  char user_defined[12];      // reserved for user-defined information.
 
   MetricRowID getRowID(uint32_t offset) {
     return std::move(MetricRowID{block_id, offset});

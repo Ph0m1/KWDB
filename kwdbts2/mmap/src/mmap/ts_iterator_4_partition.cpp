@@ -105,8 +105,8 @@ KStatus TsPartitonIterator::fillblockItemData(BlockItem* block_item, TsBlockFull
     segment_iter_ = new MMapSegmentTableIterator(segment_tbl, params_.ts_spans, params_.kw_scan_cols,
                                                  params_.ts_scan_cols, params_.attrs);
   }
-  auto block_min_ts = KTimestamp(segment_tbl->columnAggAddr(cur_block_item_->block_id, 0, Sumfunctype::MIN));
-  auto block_max_ts = KTimestamp(segment_tbl->columnAggAddr(cur_block_item_->block_id, 0, Sumfunctype::MAX));
+  timestamp64 block_min_ts, block_max_ts;
+  TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), block_min_ts, block_max_ts);
   if (!isTimestampInSpans(params_.ts_spans, block_max_ts, block_max_ts)) {
     *ignored = true;
     return KStatus::SUCCESS;
@@ -141,12 +141,12 @@ KStatus TsPartitonIterator::blockItemNext(ResultSet* res, k_uint32* count) {
   bool has_data = false;
   // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
   // there is no need to determine the timestamps for each row data.
+  timestamp64 block_min_ts, block_max_ts;
+  TsTimePartition::GetBlkMinMaxTs(cur_block_item_, segment_tbl.get(), block_min_ts, block_max_ts);
   if (cur_block_item_->publish_row_count > 0 &&
       cur_blockdata_offset_ == 1 &&
       cur_block_item_->publish_row_count == cur_block_item_->alloc_row_count &&
-      isTimestampWithinSpans(params_.ts_spans,
-              KTimestamp(segment_tbl->columnAggAddr(cur_block_item_->block_id, 0, Sumfunctype::MIN)),
-              KTimestamp(segment_tbl->columnAggAddr(cur_block_item_->block_id, 0, Sumfunctype::MAX)))) {
+      isTimestampWithinSpans(params_.ts_spans, block_min_ts, block_max_ts)) {
     k_uint32 cur_row = 1;
     while (cur_row <= cur_block_item_->alloc_row_count) {
       if (!segment_tbl->IsRowVaild(cur_block_item_, cur_row)) {

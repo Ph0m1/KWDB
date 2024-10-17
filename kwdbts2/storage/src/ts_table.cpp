@@ -3276,8 +3276,8 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
             }
           }
           // Calculate the number of rows
-          timestamp64 max_ts = segment_table->getBlockMaxTs(block_item->block_id);
-          timestamp64 min_ts = segment_table->getBlockMinTs(block_item->block_id);
+          timestamp64 min_ts, max_ts;
+          TsTimePartition::GetBlkMinMaxTs(block_item, segment_table.get(), min_ts, max_ts);
           timestamp64 intersect_ts = intersectLength(ts_span.begin, ts_span.end, min_ts, max_ts + 1);
           uint32_t count = 1.0L * intersect_ts / (max_ts - min_ts + 1) * block_item->publish_row_count;
           if (intersect_ts > 0 && block_item->publish_row_count > 0 && count == 0) {

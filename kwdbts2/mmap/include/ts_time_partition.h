@@ -118,6 +118,16 @@ class TsTimePartition : public TSObject {
     return MUTEX_UNLOCK(m_ref_cnt_mtx_);
   }
 
+  inline static void GetBlkMinMaxTs(BlockItem* cur_block, MMapSegmentTable* segment_tbl,
+    timestamp64 &blk_min_ts, timestamp64 &blk_max_ts) {
+    blk_min_ts = cur_block->min_ts_in_block;
+    blk_max_ts = cur_block->max_ts_in_block;
+    if (blk_min_ts == 0 && blk_max_ts == 0) {
+      blk_min_ts = KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MIN));
+      blk_max_ts = KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MAX));
+    }
+  }
+
   /**
  * @brief schema using MMapMetricsTable object. no need store schema at partition level.
  *
@@ -248,8 +258,7 @@ class TsTimePartition : public TSObject {
     if (segment_tbl == nullptr) {
       return false;
     }
-    *min_ts = KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, kwdbts::Sumfunctype::MIN));
-    *max_ts = KTimestamp(segment_tbl->columnAggAddr(block->block_id, 0, kwdbts::Sumfunctype::MAX));
+    GetBlkMinMaxTs(block, segment_tbl.get(), *min_ts, *max_ts);
     return true;
   }
 

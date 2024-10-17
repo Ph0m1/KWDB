@@ -164,13 +164,13 @@ bool TsIterator::getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegme
   *count = 0;
   // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
   // there is no need to determine the timestamps for each BlockItem.
+  timestamp64 blk_min_ts, blk_max_ts;
+  TsTimePartition::GetBlkMinMaxTs(cur_block, segment_tbl.get(), blk_min_ts, blk_max_ts);
   if (cur_block->is_agg_res_available && cur_block->publish_row_count > 0
       && cur_block->publish_row_count == cur_block->alloc_row_count
       && cur_blockdata_offset_ == 1
       && cur_block->getDeletedCount() == 0
-      && isTimestampWithinSpans(ts_spans_,
-                                KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MIN)),
-                                KTimestamp(segment_tbl->columnAggAddr(cur_block->block_id, 0, Sumfunctype::MAX)))) {
+      && isTimestampWithinSpans(ts_spans_, blk_min_ts, blk_max_ts)) {
     has_data = true;
     *first_row = 1;
     *count = cur_block->publish_row_count;
@@ -689,8 +689,8 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
         LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
         return KStatus::FAIL;
       }
-      timestamp64 min_ts = segment_tbl->getBlockMinTs(block_item->block_id);
-      timestamp64 max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
+      timestamp64 min_ts, max_ts;
+      TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), min_ts, max_ts);
       // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
       if (!isTimestampInSpans(ts_spans_, min_ts, max_ts)) {
         continue;
@@ -808,8 +808,8 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
                   block_item->block_id, cur_pt->GetPath().c_str());
         return KStatus::FAIL;
       }
-      timestamp64 min_ts = segment_tbl->getBlockMinTs(block_item->block_id);
-      timestamp64 max_ts = segment_tbl->getBlockMaxTs(block_item->block_id);
+      timestamp64 min_ts, max_ts;
+      TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), min_ts, max_ts);
       // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
       if (!isTimestampInSpans(ts_spans_, min_ts, max_ts)) {
         continue;
