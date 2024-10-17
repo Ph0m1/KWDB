@@ -126,7 +126,7 @@ func (b backfiller) getMutationsToProcess(
 }
 
 // Run is part of the Processor interface.
-func (b *backfiller) Run(ctx context.Context) {
+func (b *backfiller) Run(ctx context.Context) execinfra.RowStats {
 	opName := fmt.Sprintf("%sBackfiller", b.name)
 	ctx = logtags.AddTag(ctx, opName, int(b.spec.Table.ID))
 	ctx, span := execinfra.ProcessorSpan(ctx, opName, b.processorID)
@@ -136,6 +136,7 @@ func (b *backfiller) Run(ctx context.Context) {
 	if emitHelper(ctx, &b.out, nil /* row */, meta, func(ctx context.Context) {}) {
 		b.output.ProducerDone()
 	}
+	return execinfra.RowStats{}
 }
 
 func (b *backfiller) doRun(ctx context.Context) *execinfrapb.ProducerMetadata {

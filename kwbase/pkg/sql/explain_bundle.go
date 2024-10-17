@@ -279,7 +279,7 @@ func (b *stmtBundleBuilder) addExecPlan() {
 
 func (b *stmtBundleBuilder) addDistSQLDiagrams() {
 	for i, d := range b.plan.distSQLDiagrams {
-		d.AddSpans(b.trace)
+		d.AddSpans(b.trace, nil)
 		_, url, err := d.ToURL()
 
 		var contents string

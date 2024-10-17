@@ -192,7 +192,7 @@ func (s *sampleAggregator) pushTrailingMeta(ctx context.Context) {
 }
 
 // Run is part of the Processor interface.
-func (s *sampleAggregator) Run(ctx context.Context) {
+func (s *sampleAggregator) Run(ctx context.Context) execinfra.RowStats {
 	s.input.Start(ctx)
 	s.StartInternal(ctx, sampleAggregatorProcName)
 
@@ -205,6 +205,7 @@ func (s *sampleAggregator) Run(ctx context.Context) {
 		s.Out.Close()
 	}
 	s.MoveToDraining(nil /* err */)
+	return execinfra.RowStats{}
 }
 
 // RunTS is part of the Processor interface.

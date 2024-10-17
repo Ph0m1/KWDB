@@ -36,6 +36,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -497,6 +498,14 @@ func (mr *mirrorRouter) GetCols() int {
 	panic("unimplemented")
 }
 
+// AddStats record stallTime and number of rows
+func (mr *mirrorRouter) AddStats(time time.Duration, isAddRows bool) {}
+
+// GetStats get RowStats
+func (mr *mirrorRouter) GetStats() execinfra.RowStats {
+	return execinfra.RowStats{}
+}
+
 type hashRouter struct {
 	routerBase
 
@@ -509,6 +518,14 @@ type hashRouter struct {
 func (hr *hashRouter) GetCols() int {
 	//TODO unimplemented
 	panic("unimplemented")
+}
+
+// AddStats record stallTime and number of rows
+func (hr *hashRouter) AddStats(time time.Duration, isAddRows bool) {}
+
+// GetStats get RowStats
+func (hr *hashRouter) GetStats() execinfra.RowStats {
+	return execinfra.RowStats{}
 }
 
 // rangeRouter is a router that assumes the keyColumn'th column of incoming
@@ -533,6 +550,14 @@ type rangeRouter struct {
 func (rr *rangeRouter) GetCols() int {
 	//TODO unimplemented
 	panic("unimplemented")
+}
+
+// AddStats record stallTime and number of rows
+func (rr *rangeRouter) AddStats(time time.Duration, isAddRows bool) {}
+
+// GetStats get RowStats
+func (rr *rangeRouter) GetStats() execinfra.RowStats {
+	return execinfra.RowStats{}
 }
 
 var _ execinfra.RowReceiver = &mirrorRouter{}

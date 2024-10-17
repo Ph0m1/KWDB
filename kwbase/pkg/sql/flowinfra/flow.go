@@ -152,6 +152,9 @@ type Flow interface {
 
 	// GetFlowSpecMemSize get flowSpecMemSize.
 	GetFlowSpecMemSize() int64
+
+	// GetStats get RowStats
+	GetStats() execinfra.RowStats
 }
 
 // FlowBase is the shared logic between row based and vectorized flows. It
@@ -210,6 +213,9 @@ type FlowBase struct {
 	spec *execinfrapb.FlowSpec
 
 	flowSpecMemSize int64
+
+	// rowStats record stallTime and number of rows
+	rowStats execinfra.RowStats
 }
 
 // SetFlowSpecMemSize is part of the Flow interface.
@@ -220,6 +226,14 @@ func (f *FlowBase) SetFlowSpecMemSize(memSize int64) {
 // GetFlowSpecMemSize is part of the Flow interface.
 func (f *FlowBase) GetFlowSpecMemSize() int64 {
 	return f.flowSpecMemSize
+}
+
+// GetStats get RowStats
+func (f *FlowBase) GetStats() execinfra.RowStats {
+	if !f.Cfg.TestingKnobs.DeterministicStats {
+		return f.rowStats
+	}
+	return execinfra.RowStats{}
 }
 
 // Setup is part of the Flow interface.
@@ -566,7 +580,7 @@ func (f *FlowBase) Run(ctx context.Context, doneFn func()) error {
 		}
 
 		//f.ReceiveMessageQueue(ctx)
-		headProc.Run(ctx)
+		f.rowStats = headProc.Run(ctx)
 		return nil
 	}
 
@@ -581,7 +595,7 @@ func (f *FlowBase) Run(ctx context.Context, doneFn func()) error {
 		}
 		return err
 	}
-	headProc.Run(ctx)
+	f.rowStats = headProc.Run(ctx)
 	return nil
 }
 

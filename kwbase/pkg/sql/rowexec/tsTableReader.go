@@ -375,11 +375,46 @@ func (ttr *TsTableReader) NextPgWire() (val []byte, code int, err error) {
 			Handle:   ttr.tsHandle,
 			Buf:      []byte("exec next"),
 			TimeZone: ttr.timeZone,
+			Fetcher:  tse.TsFetcher{Collected: ttr.collected},
 		}
+		// Init analyse fetcher.
+		if ttr.collected {
+			tsFetchers := tse.NewTsFetcher(ttr.tsProcessorSpecs)
+			tsQueryInfo.Fetcher.CFetchers = tsFetchers
+			tsQueryInfo.Fetcher.Size = len(tsFetchers)
+			tsQueryInfo.Fetcher.Mu = &ttr.fetMu
+			if ttr.statsList == nil || len(ttr.statsList) <= 0 {
+				for j := len(ttr.tsProcessorSpecs) - 1; j >= 0; j-- {
+					rowNumFetcherStats := tse.TsFetcherStats{ProcessorID: ttr.tsProcessorSpecs[j].ProcessorID, ProcessorName: tsGetNameValue(&ttr.tsProcessorSpecs[j].Core)}
+					ttr.statsList = append(ttr.statsList, rowNumFetcherStats)
+				}
+			}
+		}
+
 		respInfo, err := ttr.FlowCtx.Cfg.TsEngine.NextTsFlowPgWire(&(ttr.Ctx), tsQueryInfo)
+		if ttr.collected {
+			if sp := opentracing.SpanFromContext(ttr.PbCtx()); sp != nil {
+				ttr.statsList = tse.AddStatsList(respInfo.Fetcher, ttr.statsList)
+			}
+		}
 		if respInfo.Code == -1 {
 			// Data read completed.
 			ttr.cleanup(context.Background())
+			if ttr.collected {
+				ttr.MoveToDraining(nil)
+				meta := ttr.DrainHelper()
+				if meta.Err != nil {
+					return nil, 0, meta.Err
+				}
+				if ttr.collected && len(meta.TraceData) > 0 {
+					span := opentracing.SpanFromContext(ttr.Ctx)
+					if span == nil {
+						return nil, 0, errors.New("trying to ingest remote spans but there is no recording span set up")
+					} else if err := tracing.ImportRemoteSpans(span, meta.TraceData); err != nil {
+						return nil, 0, errors.Errorf("error ingesting remote spans: %s", err)
+					}
+				}
+			}
 			return nil, respInfo.Code, nil
 		} else if respInfo.Code != 1 {
 			log.Errorf(context.Background(), err.Error())

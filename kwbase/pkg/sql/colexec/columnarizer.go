@@ -151,8 +151,9 @@ func (c *Columnarizer) Next(context.Context) coldata.Batch {
 //
 // Columnarizers are not expected to be Run, so we prohibit calling this method
 // on them.
-func (c *Columnarizer) Run(context.Context) {
+func (c *Columnarizer) Run(context.Context) execinfra.RowStats {
 	execerror.VectorizedInternalPanic("Columnarizer should not be Run")
+	return execinfra.RowStats{}
 }
 
 var _ Operator = &Columnarizer{}

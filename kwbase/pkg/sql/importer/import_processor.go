@@ -165,7 +165,7 @@ func (cp *readImportDataProcessor) OutputTypes() []types.T {
 
 // Run is the main loop of readImportDataProcessor.It calls runImport and send
 // summary to gateway node.
-func (cp *readImportDataProcessor) Run(ctx context.Context) {
+func (cp *readImportDataProcessor) Run(ctx context.Context) execinfra.RowStats {
 	ctx, span := tracing.ChildSpan(ctx, "readImportDataProcessor", int32(cp.flowCtx.NodeID))
 	defer tracing.FinishSpan(span)
 	defer cp.output.ProducerDone()
@@ -190,13 +190,13 @@ func (cp *readImportDataProcessor) Run(ctx context.Context) {
 	}
 	if err != nil {
 		cp.output.Push(nil, &execinfrapb.ProducerMetadata{Err: err})
-		return
+		return execinfra.RowStats{}
 	}
 	if cp.flowCtx.Cfg.TestingKnobs.InjectErrorAfterUpdateImportJob != nil && !cp.flowCtx.Cfg.TestingKnobs.IsImportFinished {
 		cp.flowCtx.Cfg.TestingKnobs.IsImportFinished = true
 		err = cp.flowCtx.Cfg.TestingKnobs.InjectErrorAfterUpdateImportJob()
 		cp.output.Push(nil, &execinfrapb.ProducerMetadata{Err: err})
-		return
+		return execinfra.RowStats{}
 	}
 	// Once the import is done, send back to the controller the serialized
 	// summary of the import operation. For more info see roachpb.BulkOpSummary.\
@@ -206,12 +206,13 @@ func (cp *readImportDataProcessor) Run(ctx context.Context) {
 	countsBytes, err := protoutil.Marshal(summary)
 	if err != nil {
 		cp.output.Push(nil, &execinfrapb.ProducerMetadata{Err: err})
-		return
+		return execinfra.RowStats{}
 	}
 	cp.output.Push(sqlbase.EncDatumRow{
 		sqlbase.DatumToEncDatum(types.Bytes, tree.NewDBytes(tree.DBytes(countsBytes))),
 		sqlbase.DatumToEncDatum(types.Bytes, tree.NewDBytes(tree.DBytes([]byte{}))),
 	}, nil)
+	return execinfra.RowStats{}
 }
 
 // runImport read csv file and ingest data to storage.

@@ -31,6 +31,8 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
+	"github.com/opentracing/opentracing-go"
 )
 
 // noopProcessor is a processor that simply passes rows through from the
@@ -99,6 +101,13 @@ func newNoopProcessor(
 	); err != nil {
 		return nil, err
 	}
+
+	ctx := flowCtx.EvalCtx.Ctx()
+	if sp := opentracing.SpanFromContext(ctx); sp != nil && tracing.IsRecording(sp) {
+		n.input = newInputStatCollector(n.input)
+		n.FinishTrace = n.outputStatsToTrace
+	}
+
 	return n, nil
 }
 
@@ -268,4 +277,40 @@ func (n *noopProcessor) Child(nth int, _ bool) execinfra.OpNode {
 		panic("input to noop is not an execinfra.OpNode")
 	}
 	panic(fmt.Sprintf("invalid index %d", nth))
+}
+
+const noopTagPrefix = "noop."
+
+// Stats implements the SpanStats interface.
+func (n *NoopStats) Stats() map[string]string {
+	return n.InputStats.Stats(noopTagPrefix)
+}
+
+// TsStats is stats of analyse in time series
+func (n *NoopStats) TsStats() map[int32]map[string]string {
+	return nil
+}
+
+// StatsForQueryPlan implements the DistSQLSpanStats interface.
+func (n *NoopStats) StatsForQueryPlan() []string {
+	return n.InputStats.StatsForQueryPlan("")
+}
+
+// TsStatsForQueryPlan key is processorid, value is list of statistics in time series
+func (n *NoopStats) TsStatsForQueryPlan() map[int32][]string {
+	return nil
+}
+
+// outputStatsToTrace outputs the collected distinct stats to the trace. Will
+// fail silently if the Distinct processor is not collecting stats.
+func (n *noopProcessor) outputStatsToTrace() {
+	is, ok := getInputStats(n.FlowCtx, n.input)
+	if !ok {
+		return
+	}
+	if sp := opentracing.SpanFromContext(n.PbCtx()); sp != nil {
+		tracing.SetSpanStats(
+			sp, &OrdinalityStats{InputStats: is},
+		)
+	}
 }

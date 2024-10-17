@@ -228,7 +228,7 @@ func (s *samplerProcessor) pushTrailingMeta(ctx context.Context) {
 }
 
 // Run is part of the Processor interface.
-func (s *samplerProcessor) Run(ctx context.Context) {
+func (s *samplerProcessor) Run(ctx context.Context) execinfra.RowStats {
 	s.input.Start(ctx)
 	s.StartInternal(ctx, samplerProcName)
 
@@ -241,6 +241,7 @@ func (s *samplerProcessor) Run(ctx context.Context) {
 		s.Out.Close()
 	}
 	s.MoveToDraining(nil /* err */)
+	return execinfra.RowStats{}
 }
 
 // TestingSamplerSleep introduces a sleep inside the sampler, every

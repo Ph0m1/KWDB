@@ -125,6 +125,8 @@ type DistSQLPlanner struct {
 	// rpcCtx is used to construct the spanResolver upon SetNodeDesc.
 	rpcCtx        *rpc.Context
 	gatewayNodeID roachpb.NodeID
+	// RowStats record stallTime and number of rows
+	RowStats execinfra.RowStats
 }
 
 // UintSlice is uint32 slice

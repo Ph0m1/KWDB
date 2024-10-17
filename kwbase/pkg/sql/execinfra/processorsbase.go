@@ -27,6 +27,7 @@ package execinfra
 import (
 	"context"
 	"math"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -49,7 +50,7 @@ type Processor interface {
 	OutputTypes() []types.T
 
 	// Run is the main loop of the processor.
-	Run(context.Context)
+	Run(context.Context) RowStats
 
 	// RunTS is the main loop of the kwdbprocessor
 	RunTS(ctx context.Context)
@@ -818,13 +819,21 @@ func (pb *ProcessorBase) OutputTypes() []types.T {
 	return pb.Out.OutputTypes
 }
 
+// RowStats record stallTime and number of rows
+type RowStats struct {
+	NumRows int64
+	// StallTime Duration in nanoseconds of the cumulative time spent stalled.
+	StallTime time.Duration
+}
+
 // Run is part of the processor interface.
-func (pb *ProcessorBase) Run(ctx context.Context) {
+func (pb *ProcessorBase) Run(ctx context.Context) RowStats {
 	if pb.Out.output == nil {
 		panic("processor output not initialized for emitting rows")
 	}
 	ctx = pb.self.Start(ctx)
 	Run(ctx, pb.self, pb.Out.output)
+	return pb.Out.output.GetStats()
 }
 
 // Push is part of the processor interface.

@@ -28,6 +28,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -76,6 +77,14 @@ type RowBuffer struct {
 func (rb *RowBuffer) GetCols() int {
 	//TODO unimplemented
 	panic("unimplemented")
+}
+
+// AddStats record stallTime and number of rows
+func (rb *RowBuffer) AddStats(time time.Duration, isAddRows bool) {}
+
+// GetStats get RowStats
+func (rb *RowBuffer) GetStats() execinfra.RowStats {
+	return execinfra.RowStats{}
 }
 
 var _ execinfra.RowReceiver = &RowBuffer{}

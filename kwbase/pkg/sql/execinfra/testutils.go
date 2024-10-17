@@ -27,6 +27,7 @@ package execinfra
 import (
 	"context"
 	"math"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
@@ -163,6 +164,14 @@ type RowDisposer struct{}
 func (r *RowDisposer) GetCols() int {
 	//TODO "unimplemented"
 	panic("unimplemented")
+}
+
+// AddStats record stallTime and number of rows
+func (r *RowDisposer) AddStats(time time.Duration, isAddRows bool) {}
+
+// GetStats get RowStats
+func (r *RowDisposer) GetStats() RowStats {
+	return RowStats{}
 }
 
 var _ RowReceiver = &RowDisposer{}

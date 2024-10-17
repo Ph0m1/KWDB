@@ -28,6 +28,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
@@ -35,6 +36,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
+	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"gitee.com/kwbasedb/kwbase/pkg/util/uuid"
 	"github.com/opentracing/opentracing-go"
@@ -101,6 +103,12 @@ type RowReceiver interface {
 	// is called, no other method can be called.
 	ProducerDone()
 	GetCols() int
+
+	// AddStats record stallTime and number of rows
+	AddStats(time time.Duration, isAddRows bool)
+
+	// GetStats get RowStats
+	GetStats() RowStats
 }
 
 // RowSource is any component of a flow that produces rows that can be consumed
@@ -175,7 +183,7 @@ type RowSource interface {
 // RowSourcedProcessor is the union of RowSource and Processor.
 type RowSourcedProcessor interface {
 	RowSource
-	Run(context.Context)
+	Run(context.Context) RowStats
 	RunTS(ctx context.Context)
 	Push(ctx context.Context, res []byte) error
 	NextPgWire() (val []byte, code int, err error)
@@ -188,25 +196,30 @@ type RowSourcedProcessor interface {
 //
 // src needs to have been Start()ed before calling this.
 func Run(ctx context.Context, src RowSource, dst RowReceiver) {
+	start := timeutil.Now()
 	for {
 		row, meta := src.Next()
 		// Emit the row; stop if no more rows are needed.
 		if row != nil || meta != nil {
 			switch dst.Push(row, meta) {
 			case NeedMoreRows:
+				dst.AddStats(0, row != nil)
 				continue
 			case DrainRequested:
 				DrainAndForwardMetadata(ctx, src, dst)
 				dst.ProducerDone()
+				dst.AddStats(timeutil.Since(start), row != nil)
 				return
 			case ConsumerClosed:
 				src.ConsumerClosed()
 				dst.ProducerDone()
+				dst.AddStats(timeutil.Since(start), row != nil)
 				return
 			}
 		}
 		// row == nil && meta == nil: the source has been fully drained.
 		dst.ProducerDone()
+		dst.AddStats(timeutil.Since(start), row != nil)
 		return
 	}
 }
@@ -457,6 +470,14 @@ type RowChannel struct {
 
 	// Single machine timing query, in order to reduce one channel pass
 	TsTableReader Processor
+}
+
+// AddStats record stallTime and number of rows
+func (rc *RowChannel) AddStats(time time.Duration, isAddRows bool) {}
+
+// GetStats get RowStats
+func (rc *RowChannel) GetStats() RowStats {
+	return RowStats{}
 }
 
 // GetCols is part of the distsql.RowReceiver interface.

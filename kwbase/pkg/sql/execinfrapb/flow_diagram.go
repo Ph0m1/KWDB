@@ -801,7 +801,7 @@ type FlowDiagram interface {
 	ToURL() (string, url.URL, error)
 
 	// AddSpans adds stats extracted from the input spans to the diagram.
-	AddSpans([]tracing.RecordedSpan)
+	AddSpans([]tracing.RecordedSpan, []string)
 
 	// MakeDistsqlJSON construct json in explain analyze
 	MakeDistsqlJSON(url string) (string, error)
@@ -848,11 +848,13 @@ func (d diagramData) MakeDistsqlJSON(url string) (string, error) {
 }
 
 // AddSpans implements the FlowDiagram interface.
-func (d *diagramData) AddSpans(spans []tracing.RecordedSpan) {
+func (d *diagramData) AddSpans(spans []tracing.RecordedSpan, responseSpan []string) {
 	processorStats, streamStats := extractStatsFromSpans(d.flowID, spans)
 	for i := range d.Processors {
 		if statDetails, ok := processorStats[int(d.Processors[i].processorID)]; ok {
 			d.Processors[i].Core.Details = append(d.Processors[i].Core.Details, statDetails...)
+		} else if d.Processors[i].processorID == -1 {
+			d.Processors[i].Core.Details = append(d.Processors[i].Core.Details, responseSpan...)
 		}
 	}
 	for i := range d.Edges {

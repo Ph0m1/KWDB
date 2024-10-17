@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -465,6 +466,21 @@ func (f *rowBasedFlow) Cleanup(ctx context.Context) {
 type copyingRowReceiver struct {
 	execinfra.RowReceiver
 	alloc sqlbase.EncDatumRowAlloc
+	// RowStats record stallTime and number of rows
+	execinfra.RowStats
+}
+
+// AddStats record stallTime and number of rows
+func (r *copyingRowReceiver) AddStats(time time.Duration, isAddRows bool) {
+	if isAddRows {
+		r.NumRows++
+	}
+	r.StallTime += time
+}
+
+// GetStats get RowStats
+func (r *copyingRowReceiver) GetStats() execinfra.RowStats {
+	return r.RowStats
 }
 
 // GetCols is part of the distsql.RowReceiver interface.

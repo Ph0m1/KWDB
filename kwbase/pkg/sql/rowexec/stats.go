@@ -250,3 +250,13 @@ func getFetcherInputStats(flowCtx *execinfra.FlowCtx, f rowFetcher) (InputStats,
 	}
 	return getStatsInner(flowCtx, rfsc.stats), true
 }
+
+// BuildResponseSpan build span of response with RowStats
+func BuildResponseSpan(rowStats execinfra.RowStats) []string {
+	responseSpan := make([]string, 2)
+	if rowStats.StallTime > 0 {
+		responseSpan[0] = fmt.Sprintf("%s: %d", rowsReadQueryPlanSuffix, rowStats.NumRows)
+		responseSpan[1] = fmt.Sprintf("%s: %v", stallTimeQueryPlanSuffix, rowStats.StallTime.Round(time.Microsecond))
+	}
+	return responseSpan
+}

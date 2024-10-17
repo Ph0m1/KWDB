@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvclient/kvcoord"
@@ -461,6 +462,7 @@ func (dsp *DistSQLPlanner) Run(
 		recv.SetError(err)
 		return func() {}
 	}
+	dsp.RowStats = flow.GetStats()
 
 	// TODO(yuzefovich): it feels like this closing should happen after
 	// PlanAndRun. We should refactor this and get rid off ignoreClose field.
@@ -561,6 +563,9 @@ type DistSQLReceiver struct {
 	insertRows int64
 
 	nodeErrForTsAlter map[int32]string
+
+	// RowStats record stallTime and number of rows
+	execinfra.RowStats
 }
 
 // rowResultWriter is a subset of CommandResult to be used with the
@@ -686,6 +691,19 @@ func (r *DistSQLReceiver) clone() *DistSQLReceiver {
 // to the resultWriter.
 func (r *DistSQLReceiver) SetError(err error) {
 	r.resultWriter.SetError(err)
+}
+
+// AddStats record stallTime and number of rows
+func (r *DistSQLReceiver) AddStats(time time.Duration, isAddRows bool) {
+	if isAddRows {
+		r.NumRows++
+	}
+	r.StallTime += time
+}
+
+// GetStats get RowStats
+func (r *DistSQLReceiver) GetStats() execinfra.RowStats {
+	return r.RowStats
 }
 
 // GetCols return column size of time-series plan

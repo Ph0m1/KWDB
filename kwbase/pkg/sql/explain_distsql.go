@@ -28,6 +28,7 @@ import (
 	"context"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/rowexec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
@@ -209,7 +210,7 @@ func (n *explainDistSQLNode) startExec(params runParams) error {
 		if err := rw.Err(); err != nil {
 			return err
 		}
-		diagram.AddSpans(spans)
+		diagram.AddSpans(spans, rowexec.BuildResponseSpan(distSQLPlanner.RowStats))
 	} else {
 		flows := plan.GenerateFlowSpecs(params.extendedEvalCtx.NodeID)
 		showInputTypes := n.options.Flags[tree.ExplainFlagTypes]

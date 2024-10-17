@@ -227,7 +227,7 @@ func (sp *csvWriter) transferCharset(ctx context.Context, line []byte) ([]byte, 
 // Run is the main loop of the processor.
 // It starts one goroutine to run input.NextRow() to get row values.
 // It starts parallelNum goroutine to read row value from channel, convert and write down.
-func (sp *csvWriter) Run(ctx context.Context) {
+func (sp *csvWriter) Run(ctx context.Context) execinfra.RowStats {
 	ctx, span := tracing.ChildSpan(ctx, "csvWriter", int32(sp.flowCtx.NodeID))
 	defer tracing.FinishSpan(span)
 
@@ -433,6 +433,7 @@ func (sp *csvWriter) Run(ctx context.Context) {
 	// TODO(dt): pick up tracing info in trailing meta
 	execinfra.DrainAndClose(
 		ctx, sp.output, err, func(context.Context) {} /* pushTrailingMeta */, sp.input)
+	return execinfra.RowStats{}
 }
 
 // sendResult is used to return the record of csv file for print
