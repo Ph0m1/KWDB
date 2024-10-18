@@ -484,7 +484,7 @@ func rangeUnavailableMessage(
 	}
 	return fmt.Sprintf(`have been waiting %.2fs for proposing command %s.
 This range is likely unavailable.
-Please submit this message to Cockroach Labs support along with the following information:
+Please submit this message to KWDB Labs support along with the following information:
 
 Descriptor:  %s
 Live:        %s

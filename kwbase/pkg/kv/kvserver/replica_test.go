@@ -12695,7 +12695,7 @@ func TestRangeUnavailableMessage(t *testing.T) {
 	act := rangeUnavailableMessage(desc, lm, &rs, &ba, dur)
 	const exp = `have been waiting 60.00s for proposing command RequestLease [/Min,/Min).
 This range is likely unavailable.
-Please submit this message to Cockroach Labs support along with the following information:
+Please submit this message to KWDB Labs support along with the following information:
 
 Descriptor:  r10:{-} [(n1,s10):1, (n2,s20):2, next=3, gen=0?]
 Live:        (n1,s10):1

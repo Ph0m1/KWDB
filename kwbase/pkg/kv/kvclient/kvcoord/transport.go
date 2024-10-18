@@ -256,7 +256,9 @@ func (gt *grpcTransport) MoveToFront(replica roachpb.ReplicaDescriptor) {
 
 func (gt *grpcTransport) moveToFrontLocked(replica roachpb.ReplicaDescriptor) {
 	for i := range gt.orderedClients {
-		if gt.orderedClients[i].replica == replica {
+		if gt.orderedClients[i].replica.ReplicaID == replica.ReplicaID &&
+			gt.orderedClients[i].replica.StoreID == replica.StoreID &&
+			gt.orderedClients[i].replica.NodeID == replica.NodeID {
 			// Clear the retryable bit as this replica is being made
 			// available.
 			gt.orderedClients[i].retryable = false

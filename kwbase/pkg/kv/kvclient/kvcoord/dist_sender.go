@@ -1388,8 +1388,10 @@ func (ds *DistSender) divideAndSendBatchToRanges(
 	if _, ok := ba.Requests[0].GetInner().(*roachpb.TsRowPutRequest); ok {
 		// please make sure that no other kind of request along with
 		// TsRawPutRequest in this BatchRequest.
-		const MaxTsPutRetries = 5
-		r := retry.StartWithCtx(ctx, retry.Options{MaxRetries: MaxTsPutRetries})
+		const MaxTsPutRetries = 10
+		retryOption := ds.rpcRetryOptions
+		retryOption.MaxRetries = MaxTsPutRetries
+		r := retry.StartWithCtx(ctx, retryOption)
 		return ds.divideAndSendTsRowPutBatch(ctx, ba, withCommit, batchIdx, &r)
 	}
 	// Get initial seek key depending on direction of iteration.
@@ -1974,6 +1976,7 @@ func (ds *DistSender) sendTsPartialBatch(
 		// with unknown mapping to our truncated reply).
 		log.Infof(ctx, "likely split; resending batch to span: %s, retried times %d", tErr, r.CurrentAttempts())
 		var retryErr *roachpb.Error
+		r.Reset()
 		reply, retryErr = ds.divideAndSendTsRowPutBatch(ctx, rangeBatch.ba, withCommit, batchIdx, r)
 		if retryErr == nil {
 			return response{reply: reply, positions: rangeBatch.positions}
@@ -2332,7 +2335,7 @@ func (ds *DistSender) sendToReplicas(
 			// information than a RangeNotFound).
 			if br != nil {
 				return nil, roachpb.NewSendError(
-					fmt.Sprintf("sending to all %d replicas failed; last error: %v %v", len(replicas), br, err),
+					fmt.Sprintf("sending to all %d replicas failed; last error: %v - %v", len(replicas), br, err),
 				)
 			}
 			return nil, roachpb.NewSendError(
