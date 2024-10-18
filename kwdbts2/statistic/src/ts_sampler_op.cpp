@@ -321,7 +321,9 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<SortedHistogram>(kwdbContext_p ctx
       static_cast<k_uint32>(
           std::ceil(totalDuration / static_cast<double>(minBucketSpan))) +
           1);
-  const k_int64 bucketSpan = std::max(static_cast<k_int64>(minBucketSpan), totalDuration / (numBuckets-1));
+  const k_int64 bucketSpan =
+      std::max(static_cast<k_int64>(minBucketSpan),
+               totalDuration / (numBuckets - 1));
 
   vector<optional<DataVariant>> bucket_data;
   for (int i = 0; i < numBuckets; ++i) {
@@ -529,10 +531,13 @@ EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
   };
 
   // Collect tag column's statistic
-  if ((!primary_tag_sketches_.empty() || !tag_sketches_.empty()) && processSketches(Tag) != EE_Sample) Return(EE_ERROR);
+  if ((!primary_tag_sketches_.empty() || !tag_sketches_.empty()) &&
+      processSketches(Tag) != EE_Sample)
+    Return(EE_ERROR);
 
   // Collect normal column's statistic
-  if (!normalCol_sketches_.empty() && processSketches(Metrics) != EE_Sample) Return(EE_ERROR);
+  if (!normalCol_sketches_.empty() && processSketches(Metrics) != EE_Sample)
+    Return(EE_ERROR);
 
   if (sorted_histogram_.histogram_info.generatesortedhistogram() &&
       processSketches(SortedHistogram) != EE_Sample)

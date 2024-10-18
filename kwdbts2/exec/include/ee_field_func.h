@@ -724,4 +724,48 @@ class FieldFuncCoalesce : public FieldFunc {
   Field *field_to_copy() override;
 };
 
+struct DiffInfo {
+  k_bool hasPrev;
+  k_bool includeNull;
+  k_bool ignoreNegative;
+  k_bool firstOutput;
+  union {
+    k_int64 i64_value;
+    k_double64  d64_value;
+  } prev;
+
+  k_int64 prevTs;
+};
+
+class FieldFuncDiff : public FieldFunc {
+ public:
+  explicit FieldFuncDiff(Field *a) : FieldFunc(a) {
+    type_ = FIELD_FUNC;
+    if (roachpb::DataType::FLOAT == a->get_storage_type() ||
+        roachpb::DataType::DOUBLE == a->get_storage_type()) {
+      sql_type_ = roachpb::DataType::DOUBLE;
+      storage_type_ = roachpb::DataType::DOUBLE;
+      storage_len_ = sizeof(k_double64);
+    } else {
+      sql_type_ = roachpb::DataType::BIGINT;
+      storage_type_ = roachpb::DataType::BIGINT;
+      storage_len_ = sizeof(k_int64);
+    }
+
+    diff_info_.hasPrev = false;
+    diff_info_.prevTs = -1;
+  }
+
+  enum Functype functype() override { return DIFF_FUNC; }
+
+  k_int64 ValInt() override;
+  k_double64 ValReal() override;
+  String ValStr() override;
+  Field *field_to_copy() override;
+  k_bool is_nullable() override;
+
+ public:
+  DiffInfo diff_info_;
+};
+
 }  // namespace kwdbts

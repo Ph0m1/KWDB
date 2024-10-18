@@ -67,6 +67,9 @@ type windowNode struct {
 	// colAndAggContainer is an IndexedVarContainer that provides indirection
 	// to migrate IndexedVars and aggregate functions below the windowing level.
 	colAndAggContainer windowNodeColAndAggContainer
+
+	// engine is a bit set that indicates which engine to exec.
+	engine tree.EngineType
 }
 
 func (n *windowNode) startExec(params runParams) error {

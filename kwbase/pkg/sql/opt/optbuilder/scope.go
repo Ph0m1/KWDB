@@ -1303,6 +1303,9 @@ func (s *scope) replaceWindowFn(f *tree.FuncExpr, def *tree.FunctionDefinition) 
 		panic(err)
 	}
 	if typedFunc == tree.DNull {
+		if funcName == tree.FunDiff {
+			panic(pgerror.New(pgcode.Syntax, "invalid parameter data type: diff"))
+		}
 		return tree.DNull
 	}
 

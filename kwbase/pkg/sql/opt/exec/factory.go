@@ -339,7 +339,7 @@ type Factory interface {
 
 	// ConstructWindow returns a node that executes a window function over the
 	// given node.
-	ConstructWindow(input Node, window WindowInfo) (Node, error)
+	ConstructWindow(input Node, window WindowInfo, execInTSEngine bool) (Node, error)
 
 	// RenameColumns modifies the column names of a node.
 	RenameColumns(input Node, colNames []string) (Node, error)

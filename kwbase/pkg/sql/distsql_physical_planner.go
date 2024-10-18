@@ -6131,12 +6131,25 @@ func (dsp *DistSQLPlanner) createPlanForWindow(
 			if len(nodes) == 1 {
 				node = nodes[0]
 			}
-			plan.AddSingleGroupStage(
-				node,
-				execinfrapb.ProcessorCoreUnion{Windower: &windowerSpec},
-				execinfrapb.PostProcessSpec{},
-				newResultTypes,
-			)
+			if plan.ChildIsExecInTSEngine() && n.engine == tree.EngineTypeTimeseries {
+				plan.AddTSSingleGroupStage(
+					node,
+					execinfrapb.TSProcessorCoreUnion{Window: &windowerSpec},
+					execinfrapb.TSPostProcessSpec{},
+					newResultTypes,
+				)
+			} else {
+				if planCtx.existTSTable {
+					plan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, planCtx.isLocal, false)
+				}
+				plan.AddSingleGroupStage(
+					node,
+					execinfrapb.ProcessorCoreUnion{Windower: &windowerSpec},
+					execinfrapb.PostProcessSpec{},
+					newResultTypes,
+				)
+			}
+
 		} else {
 			plan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, false, false)
 			// Set up the output routers from the previous stage.

@@ -260,7 +260,9 @@ func (f *stubFactory) ConstructProjectSet(
 	return struct{}{}, nil
 }
 
-func (f *stubFactory) ConstructWindow(n exec.Node, wi exec.WindowInfo) (exec.Node, error) {
+func (f *stubFactory) ConstructWindow(
+	n exec.Node, wi exec.WindowInfo, execInTSEngine bool,
+) (exec.Node, error) {
 	return struct{}{}, nil
 }
 

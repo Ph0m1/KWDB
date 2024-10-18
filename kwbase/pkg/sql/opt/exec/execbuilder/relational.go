@@ -658,6 +658,9 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 	if !b.buildArrayTypedExpr(scan.PrimaryTagFilter, &ctx, &primaryFilter) {
 		return execPlan{}, nil
 	}
+	if b.mem.CheckFlag(opt.HasDiff) && b.mem.CheckFlag(opt.SingleMode) {
+		scan.OrderedScanType = opt.ForceOrderedScan
+	}
 
 	// set access mode for multiple model processing.
 	primaryTagCount := md.TableMeta(scan.Table).PrimaryTagCount
@@ -2455,7 +2458,7 @@ func (b *Builder) buildWindow(w *memo.WindowExpr) (execPlan, error) {
 		FilterIdxs: filterIdxs,
 		Partition:  partitionIdxs,
 		Ordering:   input.sqlOrdering(ord),
-	})
+	}, w.IsTSEngine())
 	if err != nil {
 		return execPlan{}, err
 	}

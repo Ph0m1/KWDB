@@ -122,20 +122,13 @@ class Field {
   void set_field_type(Type type) { type_ = type; }
   Type get_field_type() const { return type_; }
 
-  void set_offset_in_template(k_int64 offset) { offset_in_template_ = offset; }
-  k_int64 get_offset_in_template() const { return offset_in_template_; }
-
-  void set_field_in_render_num(k_int32 num) { field_in_render_num_ = num; }
-  k_int32 get_field_in_render_num() const { return field_in_render_num_; }
-
-  void set_field_sort_mode(Sort sort) { sort_ = sort; }
-  Sort get_field_sort_mode() const { return sort_; }
-
   // void set_field_result(Field_result result) { field_result_ = result; }
   // Field_result get_field_result() const { return field_result_; }
 
   void set_field_statistic(k_bool ret) { is_statistic_ = ret; }
   k_bool get_field_statistic() const { return is_statistic_; }
+
+  void set_clearup_diff(k_bool ret) { is_clear_ = ret; }
 
  protected:
   struct CKDecimal int_to_decimal();
@@ -158,11 +151,9 @@ class Field {
   roachpb::KWDBKTSColumn::ColumnType column_type_{roachpb::KWDBKTSColumn::TYPE_DATA};                   // column type
   KWDBTypeFamily return_type_{AnyFamily};               // return type
   Type type_{FIELD_UNKNOW};                  // FIELD type
-  k_int64 offset_in_template_{-1};           // field offset in template
-  k_int32 field_in_render_num_{-1};          // Item_sum in renders num
-  Sort sort_{Sort::SORT_UNKNOW};             // sort mode
   k_bool is_statistic_{false};               // use statistic count
   bool nullable_{true};
+  k_bool is_clear_{false};               // check
 
  public:
   [[nodiscard]] bool isNullable() const {
@@ -541,7 +532,8 @@ class FieldFunc : public FieldFuncBase {
     RIGHT_FUNC,
     ANY_FUNC,
     ALL_FUNC,
-    NOT_FUNC
+    NOT_FUNC,
+    DIFF_FUNC
   };
 
   k_int64 ValInt() override { return 0; }

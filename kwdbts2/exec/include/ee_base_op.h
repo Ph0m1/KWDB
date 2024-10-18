@@ -118,19 +118,19 @@ class BaseOperator {
   static const k_uint64 DEFAULT_MAX_MEM_BUFFER_SIZE = 268435456;  // 256M
 
  protected:
-  inline void constructDataChunk() {
-    current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_);
+  inline void constructDataChunk(k_uint32 capacity = 0) {
+    current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_, capacity);
     if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
     }
   }
-
-  inline void constructDataChunk(k_uint32 capacity) {
-    current_data_chunk_ =
-        std::make_unique<DataChunk>(output_col_info_, capacity);
-    if (current_data_chunk_->Initialize() != true) {
-      current_data_chunk_ = nullptr;
+  inline void constructFilterDataChunk(std::vector<ColumnInfo>& column_info,
+                                       k_uint32 capacity = 0) {
+    current_filter_data_chunk_ =
+        std::make_unique<DataChunk>(column_info, capacity);
+    if (current_filter_data_chunk_->Initialize() != true) {
+      current_filter_data_chunk_ = nullptr;
       return;
     }
   }
@@ -145,6 +145,7 @@ class BaseOperator {
   std::vector<ColumnInfo> output_col_info_;
 
   DataChunkPtr current_data_chunk_;
+  DataChunkPtr current_filter_data_chunk_;
   std::queue<DataChunkPtr> output_queue_;
   k_bool is_done_{false};
 

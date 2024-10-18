@@ -27,6 +27,7 @@ package builtins
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
@@ -159,6 +160,17 @@ var windows = map[string]builtinDefinition{
 				"Returns `val` evaluated at the row that is the `n`th row of the window frame (counting from 1); "+
 					"null if no such row.")
 		}),
+	"diff": collectOverloads(winProps(), types.Scalar,
+		func(t *types.T) tree.Overload {
+			if t.Equal(*types.Int) {
+				return makeWindowOverload(tree.ArgTypes{{"val", types.Int}}, types.Int, newDiffWindowInt,
+					"Returns the difference between the current row's `val` and the previous row's `val` (both of type Int); if there is no previous row, returns null.")
+			} // 假设types.Double是浮点数类型
+			return makeWindowOverload(tree.ArgTypes{{"val", t}}, t, newDiffWindowFloat,
+				"Returns the difference between the current row's `val` and the previous row's `val` (both of type Float or Double); if there is no previous row, returns null.")
+
+		},
+	),
 }
 
 func makeWindowOverload(
@@ -450,7 +462,8 @@ func (w *denseRankWindow) Reset(context.Context) {
 func (w *denseRankWindow) Close(context.Context, *tree.EvalContext) {}
 
 // percentRankWindow computes the relative rank of the current row using:
-//   (rank - 1) / (total rows - 1)
+//
+//	(rank - 1) / (total rows - 1)
 type percentRankWindow struct {
 	peerRes *tree.DFloat
 }
@@ -484,7 +497,8 @@ func (w *percentRankWindow) Reset(context.Context) {
 func (w *percentRankWindow) Close(context.Context, *tree.EvalContext) {}
 
 // cumulativeDistWindow computes the relative rank of the current row using:
-//   (number of rows preceding or peer with current row) / (total rows)
+//
+//	(number of rows preceding or peer with current row) / (total rows)
 type cumulativeDistWindow struct {
 	peerRes *tree.DFloat
 }
@@ -804,3 +818,174 @@ func (nthValueWindow) Compute(
 func (nthValueWindow) Reset(context.Context) {}
 
 func (nthValueWindow) Close(context.Context, *tree.EvalContext) {}
+
+// DiffWindowInt is use for DiffWindow for arg int
+type DiffWindowInt struct {
+	notNull     tree.Datum
+	HasOut      bool
+	IsFirstNull bool
+}
+
+func newDiffWindowInt([]*types.T, *tree.EvalContext) tree.WindowFunc {
+	return &DiffWindowInt{}
+}
+
+// Compute is for DiffWindowInt compute
+func (dw *DiffWindowInt) Compute(
+	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
+) (tree.Datum, error) {
+	var err error
+	columnIdx := int(wfr.ArgsIdxs[0])
+
+	currentIndex := wfr.RowIdx
+
+	var prevRow tree.IndexedRow
+	var prevValue tree.Datum
+	prevRow, err = wfr.Rows.GetRow(ctx, currentIndex-1)
+	if err != nil {
+		return nil, err
+	}
+	prevValue, err = prevRow.GetDatum(columnIdx)
+	if err != nil {
+		return nil, err
+	}
+	if prevValue == tree.DNull {
+		if currentIndex == 1 {
+			dw.IsFirstNull = true
+		}
+		prevValue = dw.notNull
+	}
+
+	var currentRow tree.IndexedRow
+	currentRow, err = wfr.Rows.GetRow(ctx, currentIndex)
+	if err != nil {
+		return nil, err
+	}
+	var currentValue tree.Datum
+	currentValue, err = currentRow.GetDatum(columnIdx)
+	if err != nil {
+		return nil, err
+	}
+	if currentValue == tree.DNull {
+		if prevValue != tree.DNull {
+			dw.notNull = prevValue
+		}
+		return tree.DNull, nil
+	}
+
+	if prevValue == nil {
+		return tree.DNull, nil
+	}
+
+	diffValue := tree.MustBeDInt(currentValue) - tree.MustBeDInt(prevValue)
+	if err != nil {
+		return nil, err
+	}
+
+	return &diffValue, nil
+}
+
+// Reset 和 Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+func (dw *DiffWindowInt) Reset(context.Context) {}
+
+// Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+func (dw *DiffWindowInt) Close(context.Context, *tree.EvalContext) {}
+
+// DiffWindowFloat is use for DiffWindow for arg float
+type DiffWindowFloat struct {
+	notNull     tree.Datum
+	ifdecimal   bool
+	HasOut      bool
+	IsFirstNull bool
+}
+
+func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tree.WindowFunc {
+	result := &DiffWindowFloat{}
+	for _, difftype := range difftypes {
+		if difftype.InternalType.Family == types.DecimalFamily {
+			result.ifdecimal = true
+		}
+	}
+	return result
+}
+
+// Compute is for DiffWindowFloat compute
+func (dw *DiffWindowFloat) Compute(
+	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
+) (tree.Datum, error) {
+	var err error
+	columnIdx := int(wfr.ArgsIdxs[0])
+
+	currentIndex := wfr.RowIdx
+
+	var prevRow tree.IndexedRow
+	var prevValue tree.Datum
+	prevRow, err = wfr.Rows.GetRow(ctx, currentIndex-1)
+	if err != nil {
+		return nil, err
+	}
+	prevValue, err = prevRow.GetDatum(columnIdx)
+	if err != nil {
+		return nil, err
+	}
+	if prevValue == tree.DNull {
+		if currentIndex == 1 {
+			dw.IsFirstNull = true
+		}
+		prevValue = dw.notNull
+	}
+
+	var currentRow tree.IndexedRow
+	currentRow, err = wfr.Rows.GetRow(ctx, currentIndex)
+	if err != nil {
+		return nil, err
+	}
+	var currentValue tree.Datum
+	currentValue, err = currentRow.GetDatum(columnIdx)
+	if err != nil {
+		return nil, err
+	}
+	if currentValue == tree.DNull {
+		if prevValue != tree.DNull {
+			dw.notNull = prevValue
+		}
+		return tree.DNull, nil
+	}
+
+	if dw.ifdecimal {
+		currentDecimal, currentErr := strconv.ParseFloat(currentValue.String(), 64)
+		if currentErr != nil {
+			return nil, currentErr
+		}
+		if prevValue == nil {
+			return tree.DNull, nil
+		}
+		prevDecimal, prevErr := strconv.ParseFloat(prevValue.String(), 64)
+		if prevErr != nil {
+			return nil, prevErr
+		}
+		var result tree.DDecimal
+		diffValue, diffValueErr := result.SetFloat64(currentDecimal - prevDecimal)
+		if diffValueErr != nil {
+			return nil, diffValueErr
+		}
+		return &tree.DDecimal{*diffValue}, nil
+	}
+
+	if prevValue == nil {
+		return tree.DNull, nil
+	}
+
+	diffValue := tree.MustBeDFloat(currentValue) - tree.MustBeDFloat(prevValue)
+	if err != nil {
+		return nil, err
+	}
+
+	return &diffValue, nil
+}
+
+// Reset 和 Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+func (dw *DiffWindowFloat) Reset(context.Context) {}
+
+// Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+func (dw *DiffWindowFloat) Close(context.Context, *tree.EvalContext) {}

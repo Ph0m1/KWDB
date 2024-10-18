@@ -483,6 +483,22 @@ enum Sumfunctype {
   FIRSTROWTS = 35
 };
 
+enum WindowFunc {
+    // These mirror window functions from window_builtins.go.
+    ROW_NUMBER = 0,
+    RANK = 1,
+    DENSE_RANK = 2,
+    PERCENT_RANK = 3,
+    CUME_DIST = 4,
+    NTILE = 5,
+    LAG = 6,
+    LEAD = 7,
+    FIRST_VALUE = 8,
+    LAST_VALUE = 9,
+    NTH_VALUE = 10,
+    DIFF = 11
+  };
+
 /**
  * @brief A shared LRU cache based on std::unordered_map and std::list, with thread safety and automatic cleaning mechanism.
  *

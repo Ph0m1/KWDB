@@ -27,7 +27,7 @@ k_uint64 GetBinary64(k_double64 value) {
     k_uint64 output;
   } data;
   data.input = value;
-  std::bitset<sizeof(k_double64) * CHAR_BIT> bits(data.output);
+  // std::bitset<sizeof(k_double64) * CHAR_BIT> bits(data.output);
   return data.output;
 }
 

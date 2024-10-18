@@ -18,6 +18,7 @@
 #include "ee_table.h"
 #include "kwdb_type.h"
 #include "ts_common.h"
+#include "ee_string.h"
 
 namespace kwdbts {
 
@@ -73,7 +74,6 @@ class RowBatch{
                             roachpb::KWDBKTSColumn::ColumnType ctype) {
     return false;
   }
-
   /**
    * data count
    */

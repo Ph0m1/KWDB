@@ -17,6 +17,7 @@
 #include "ee_global.h"
 #include "pgcode.h"
 #include "ee_string.h"
+#include "ee_kwthd_context.h"
 
 namespace kwdbts {
 

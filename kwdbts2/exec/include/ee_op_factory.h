@@ -56,6 +56,13 @@ class OpFactory {
                                       const TSProcessorCoreUnion &core,
                                       BaseOperator **iterator, TABLE **table,
                                       BaseOperator *childIterator, int32_t processor_id);
+  static KStatus NewWindowScan(kwdbContext_p ctx,
+                               TsFetcherCollection *collection,
+                               const TSPostProcessSpec &post,
+                               const TSProcessorCoreUnion &core,
+                               BaseOperator **iterator, TABLE **table,
+                               BaseOperator *childIterator,
+                               int32_t processor_id);
 
  public:
   static KStatus NewOp(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec &post,

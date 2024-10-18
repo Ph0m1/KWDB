@@ -146,7 +146,7 @@ EEIteratorErrCode PostResolve::ResolveOutputFields(kwdbContext_p ctx,
       new_field->table_ = field->table_;
       new_field->set_return_type(field->get_return_type());
       // DataChunk columns are treated as TYPEDATA
-      new_field->set_column_type(roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
+      new_field->set_column_type(::roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
       output_fields.push_back(new_field);
     } else {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");

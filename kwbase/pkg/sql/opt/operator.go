@@ -273,6 +273,7 @@ var WindowOpReverseMap = map[Operator]string{
 	FirstValueOp:  "first_value",
 	LastValueOp:   "last_value",
 	NthValueOp:    "nth_value",
+	DiffOp:        "diff",
 }
 
 // NegateOpMap maps from a comparison operator type to its negated operator

@@ -51,26 +51,9 @@ k_double64 FieldTypeCast::ValReal(char *ptr) {
 
 String FieldTypeCast::ValStr(char *ptr) { return ValTempStr(ptr); }
 
-char *FieldTypeCast::get_ptr() {
-  char *ptr = nullptr;
-  if (offset_in_template_ >= 0) {
-    ptr = static_cast<char *>(table_->GetData(num_, offset_in_template_,
-                                              column_type_, storage_type_));
-  }
+char *FieldTypeCast::get_ptr() { return nullptr; }
 
-  return ptr;
-}
-
-k_bool FieldTypeCast::is_nullable() {
-  k_bool null = true;
-  if (offset_in_template_ >= 0) {
-    null = table_->is_nullable(num_, column_type_);
-  } else {
-    return field_->is_nullable();
-  }
-
-  return null;
-}
+k_bool FieldTypeCast::is_nullable() { return field_->is_nullable(); }
 
 k_bool FieldTypeCast::fill_template_field(char *ptr) {
   if (field_->is_nullable()) {

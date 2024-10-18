@@ -89,6 +89,8 @@ class DataChunk : public IChunk {
 
   void setDisorder(bool disorder) { disorder_ = disorder; }
 
+  void SetCount(k_uint32 count) { count_ = count; }
+
   /* override methods */
   DatumPtr GetData(k_uint32 row, k_uint32 col) override;
 
@@ -183,6 +185,13 @@ class DataChunk : public IChunk {
    * @param[in] renders
    */
   KStatus InsertData(kwdbContext_p ctx, IChunk* value, Field** renders);
+  /**
+   * @brief Insert one row from value or renders
+   * @param[in] ctx
+   * @param[in] value
+   * @param[in] Field*
+   */
+  KStatus InsertData(kwdbContext_p ctx, IChunk* value, std::vector<Field*> &output_fields);
 
   /**
    * @brief Insert data into location at (row, col). Expected return

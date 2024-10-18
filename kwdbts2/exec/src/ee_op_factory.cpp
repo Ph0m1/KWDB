@@ -24,6 +24,7 @@
 #include "ee_sort_scan_op.h"
 #include "ee_table.h"
 #include "ee_tag_scan_op.h"
+#include "ee_window_op.h"
 #include "ee_hash_tag_scan_op.h"
 #include "kwdb_type.h"
 #include "lg_api.h"
@@ -291,6 +292,28 @@ KStatus OpFactory::NewStatisticScan(
   Return(SUCCESS);
 }
 
+KStatus OpFactory::NewWindowScan(kwdbContext_p ctx,
+                                 TsFetcherCollection* collection,
+                                 const TSPostProcessSpec& post,
+                                 const TSProcessorCoreUnion& core,
+                                 BaseOperator** iterator, TABLE** table,
+                                 BaseOperator* childIterator,
+                                 int32_t processor_id) {
+  EnterFunc();
+  // Create WindowerSpec Operator
+  const WindowerSpec& windowerSpec = core.window();
+  *iterator = NewIterator<WindowOperator>(
+      collection, childIterator, const_cast<WindowerSpec*>(&windowerSpec),
+      const_cast<TSPostProcessSpec*>(&post), *table, processor_id);
+
+  if (!(*iterator)) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    Return(KStatus::FAIL);
+  }
+
+  Return(SUCCESS);
+}
+
 KStatus OpFactory::NewOp(kwdbContext_p ctx, TsFetcherCollection* collection, const TSPostProcessSpec& post,
                          const TSProcessorCoreUnion& core,
                          BaseOperator** iterator, TABLE** table,
@@ -327,6 +350,9 @@ KStatus OpFactory::NewOp(kwdbContext_p ctx, TsFetcherCollection* collection, con
   } else if (core.has_distinct()) {
     ret = NewDistinct(ctx, collection, post, core, iterator, table, childIterator,
                       processor_id);
+  } else if (core.has_window()) {
+    ret = NewWindowScan(ctx, collection, post, core, iterator, table,
+                        childIterator, processor_id);
   } else {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "Invalid operator type");
     ret = KStatus::FAIL;

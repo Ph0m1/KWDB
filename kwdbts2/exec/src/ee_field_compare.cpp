@@ -279,7 +279,7 @@ Field *FieldCondOr::field_to_copy() {
 }
 
 FieldFuncOptNeg::~FieldFuncOptNeg() {
-  if (nullptr != in_list_ && offset_in_template_ < 0) {
+  if (nullptr != in_list_) {
     SafeDeletePointer(in_list_);
   }
   negation_ = 0;

@@ -1004,6 +1004,10 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 		}
 	}
 
+	if !gp.GroupingCols.Empty() {
+		m.SetFlag(opt.DiffNotExecInAE)
+	}
+
 	// do nothing when group by can not execute in ts engine.
 	if !ret.commonRet.execInTSEngine {
 		return
@@ -1634,6 +1638,7 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		if retAgg.commonRet.execInTSEngine {
 			if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
 				source.SetEngineTS()
+				m.SetFlag(opt.DiffNotExecInAE)
 			} else {
 				retAgg.commonRet.execInTSEngine = false
 			}
@@ -1714,7 +1719,76 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		}
 		return ret2
 	case *WindowExpr:
-		return m.dealCanNotAddSynchronize(&source.Input)
+		ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
+		if ret.err != nil {
+			return ret.disableExecInTSEngine()
+		}
+
+		// check whether function is diff
+		diffColIDs := make([]opt.ColumnID, len(source.Windows))
+		isPushDown := !m.CheckFlag(opt.DiffNotExecInAE)
+		for i, w := range source.Windows {
+			if _, ok := w.Function.(*DiffExpr); !ok {
+				isPushDown = false
+				break
+			}
+			diffColIDs[i] = w.Col
+		}
+
+		// check whether partitionCol is pTag
+		var tableID opt.TableID
+		if isPushDown {
+			if source.Partition.Len() <= 0 {
+				isPushDown = false
+			}
+			source.Partition.ForEach(func(id opt.ColumnID) {
+				col := m.Metadata().ColumnMeta(id)
+				if col.Table == 0 {
+					isPushDown = false
+					return
+				}
+				tableID = col.Table
+				if !col.IsPrimaryTag() {
+					isPushDown = false
+					return
+				}
+			})
+		}
+
+		// check whether the number of ptags and the number of partitionCols are equal
+		if isPushDown && tableID > 0 {
+			pTagNum := 0
+			for i := 0; i < m.Metadata().Table(tableID).ColumnCount(); i++ {
+				if m.Metadata().Table(tableID).Column(i).IsPrimaryTagCol() {
+					pTagNum++
+				}
+			}
+			if pTagNum != source.Partition.Len() {
+				isPushDown = false
+			}
+		}
+
+		if ret.execInTSEngine {
+			if isPushDown && (m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode()) {
+				if m.CheckFlag(opt.HasDiff) {
+					panic(pgerror.Newf(pgcode.Syntax, "multiple diff functions are not supported"))
+				}
+				m.SetFlag(opt.HasDiff)
+				source.SetEngineTS()
+				ret.canTimeBucketOptimize = false
+				for _, id := range diffColIDs {
+					colMeta := m.metadata.ColumnMeta(id)
+					m.AddColumn(id, colMeta.Alias, ExprType(colMeta.TSType), ExprPosNone, 0, false)
+				}
+			} else {
+				ret.execInTSEngine = false
+				if !ret.hasAddSynchronizer {
+					source.Input.SetAddSynchronizer()
+					ret.hasAddSynchronizer = true
+				}
+			}
+		}
+		return ret
 	case *WithScanExpr:
 		return ret
 	default:

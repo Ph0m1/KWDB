@@ -1281,16 +1281,13 @@ String FieldFuncExpStrftime::ValStr() {
   const int kArraySize = this->storage_len_;
   String s(kArraySize);
   try {
-    std::strftime(
-        s.ptr_, kArraySize,
-        std::string(args_[1]->ValStr().getptr(), args_[1]->ValStr().length_)
-            .c_str(),
-        &ltm);
+    s.length_ =
+        std::strftime(s.ptr_, kArraySize, args_[1]->ValStr().getptr(), &ltm);
   } catch (const std::exception &e) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_DATETIME_FORMAT,
                                   "Strftime transfer error");
   }
-  s.length_ = strlen(s.ptr_);
+  // s.length_ = strlen(s.ptr_);
   return s;
 }
 
@@ -1786,6 +1783,77 @@ Field *FieldFuncCoalesce::field_to_copy() {
 
 k_bool FieldFuncCoalesce::is_nullable() {
   if (args_[0]->is_nullable() && args_[1]->is_nullable()) {
+    return true;
+  }
+  return false;
+}
+
+k_int64 FieldFuncDiff::ValInt() {
+  k_int64 val;
+  char *ptr = get_ptr();
+  if (nullptr != ptr) {
+    val = FieldFunc::ValInt(ptr);
+  } else {
+    val = args_[0]->ValInt();
+  }
+
+  if (is_clear_) {
+    diff_info_.hasPrev = false;
+  }
+  is_clear_ = false;
+
+  if (diff_info_.hasPrev) {
+    if (I64_SAFE_SUB_CHECK(val, diff_info_.prev.i64_value)) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
+                                    "integer out of range");
+      return 0;
+    }
+    k_int64 tmp = val - diff_info_.prev.i64_value;
+    diff_info_.prev.i64_value = val;
+    return tmp;
+  } else {
+    diff_info_.prev.i64_value = val;
+    diff_info_.hasPrev = true;
+    return 0;
+  }
+}
+
+k_double64 FieldFuncDiff::ValReal() {
+  k_double64 val;
+  char *ptr = get_ptr();
+  if (nullptr != ptr) {
+    val = FieldFunc::ValReal(ptr);
+  } else {
+    val = args_[0]->ValReal();
+  }
+
+  if (is_clear_) {
+    diff_info_.hasPrev = false;
+  }
+  is_clear_ = false;
+
+  if (diff_info_.hasPrev) {
+    k_double64 tmp = val - diff_info_.prev.d64_value;
+    diff_info_.prev.d64_value = val;
+    return tmp;
+  } else {
+    diff_info_.prev.d64_value = val;
+    diff_info_.hasPrev = true;
+    return 0.0;
+  }
+  return 0.0;
+}
+
+String FieldFuncDiff::ValStr() { return String(""); }
+
+Field *FieldFuncDiff::field_to_copy() {
+  FieldFuncDiff *field = new FieldFuncDiff(*this);
+
+  return field;
+}
+
+k_bool FieldFuncDiff::is_nullable() {
+  if (args_[0]->is_nullable()) {
     return true;
   }
   return false;

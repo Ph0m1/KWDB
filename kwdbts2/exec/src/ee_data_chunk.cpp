@@ -209,6 +209,86 @@ KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, Field** renders)
   Return(KStatus::SUCCESS);
 }
 
+KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, std::vector<Field*> &output_fields) {
+  EnterFunc();
+
+  for (k_uint32 col = 0; col < col_num_; ++col) {
+    Field* field = output_fields[col];
+
+    // dispose null
+    if (field->is_nullable()) {
+      SetNull(count_, col);
+      continue;
+    }
+
+    k_uint32 len = field->get_storage_length();
+    switch (field->get_storage_type()) {
+      case roachpb::DataType::BOOL: {
+        bool val = field->ValInt() > 0 ? 1 : 0;
+        InsertData(count_, col, reinterpret_cast<char*>(&val), len);
+        break;
+      }
+      case roachpb::DataType::TIMESTAMP:
+      case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::DATE:
+      case roachpb::DataType::BIGINT: {
+        k_int64 val = field->ValInt();
+        InsertData(count_, col, reinterpret_cast<char*>(&val), len);
+        break;
+      }
+      case roachpb::DataType::INT: {
+        k_int32 val = field->ValInt();
+        InsertData(count_, col, reinterpret_cast<char*>(&val), len);
+        break;
+      }
+      case roachpb::DataType::SMALLINT: {
+        k_int16 val = field->ValInt();
+        InsertData(count_, col, reinterpret_cast<char*>(&val), len);
+        break;
+      }
+      case roachpb::DataType::FLOAT: {
+        k_float32 val = field->ValReal();
+        InsertData(count_, col, reinterpret_cast<char*>(&val), len);
+        break;
+      }
+      case roachpb::DataType::DOUBLE: {
+        k_double64 val = field->ValReal();
+        InsertData(count_, col, reinterpret_cast<char*>(&val), len);
+        break;
+      }
+      case roachpb::DataType::CHAR:
+      case roachpb::DataType::NCHAR:
+      case roachpb::DataType::BINARY:
+      case roachpb::DataType::NVARCHAR:
+      case roachpb::DataType::VARCHAR:
+      case roachpb::DataType::VARBINARY: {
+        kwdbts::String val = field->ValStr();
+        if (val.isNull()) {
+          SetNull(count_, col);
+          break;
+        }
+        char* mem = const_cast<char*>(val.c_str());
+        InsertData(count_, col, mem, val.length());
+        break;
+      }
+      case roachpb::DataType::DECIMAL: {
+        if (field->get_field_type() == Field::Type::FIELD_AGG ||
+            field->get_field_type() == Field::Type::FIELD_ITEM) {
+          DatumPtr src = field->get_ptr();
+          InsertData(count_, col, src, len + BOOL_WIDE);
+        }
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+  AddCount();
+
+  Return(KStatus::SUCCESS);
+}
+
 DatumPtr DataChunk::GetDataPtr(k_uint32 row, k_uint32 col) {
   if (IsNull(row, col)) {
     return nullptr;
@@ -1004,10 +1084,12 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
         if (field->get_sql_type() == roachpb::DataType::DOUBLE ||
             field->get_sql_type() == roachpb::DataType::FLOAT || overflow) {
           k_double64 val = field->ValReal();
-          InsertDecimal(count_ + row, col, reinterpret_cast<char*>(&val), true);
+          InsertDecimal(count_ + row, col, reinterpret_cast<char*>(&val),
+                        true);
         } else {
           k_int64 val = field->ValInt();
-          InsertDecimal(count_ + row, col, reinterpret_cast<char*>(&val), false);
+          InsertDecimal(count_ + row, col, reinterpret_cast<char*>(&val),
+                        false);
         }
         row_batch->NextLine();
       }

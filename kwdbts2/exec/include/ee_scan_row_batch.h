@@ -76,6 +76,7 @@ class ScanRowBatch : public RowBatch {
                       roachpb::KWDBKTSColumn::ColumnType ctype) override;
   k_bool IsOverflow(k_uint32 col,
                     roachpb::KWDBKTSColumn::ColumnType ctype) override;
+
   void Reset();
 
   /**

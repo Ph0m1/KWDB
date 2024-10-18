@@ -117,6 +117,8 @@ message TSProcessorCoreUnion {
   optional TSTagReaderSpec tagReader = 10;
 
   optional DistinctSpec distinct = 11;
+
+  optional WindowerSpec window = 12;
 }
 
 // TSSynchronizerSpec operator

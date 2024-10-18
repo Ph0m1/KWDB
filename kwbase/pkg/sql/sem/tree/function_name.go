@@ -106,6 +106,8 @@ const (
 	FuncBucketFill = "time_bucket_gapfill_internal"
 	// FuncInterpolate represents string of "interpolate"
 	FuncInterpolate = "interpolate"
+	// FunDiff represents string of "diff"
+	FunDiff = "diff"
 )
 
 // FunctionName return name of func.

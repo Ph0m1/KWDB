@@ -35,6 +35,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"github.com/cockroachdb/errors"
+	"github.com/lib/pq/oid"
 )
 
 // windowInfo stores information about a window function call.
@@ -73,14 +74,35 @@ var unboundedEndBound = &tree.WindowFrameBound{BoundType: tree.UnboundedFollowin
 var defaultStartBound = &tree.WindowFrameBound{BoundType: tree.UnboundedPreceding}
 var defaultEndBound = &tree.WindowFrameBound{BoundType: tree.CurrentRow}
 
+// The diff function supports the following types
+var mapDiffFuncionType = map[oid.Oid]struct{}{
+	oid.T_int2:    {},
+	oid.T_int4:    {},
+	oid.T_int8:    {},
+	oid.T_float4:  {},
+	oid.T_float8:  {},
+	oid.T_numeric: {},
+}
+
 // buildWindow adds any window functions on top of the expression.
 func (b *Builder) buildWindow(outScope *scope, inScope *scope) {
 	if len(inScope.windows) == 0 {
 		return
 	}
 
-	// if table are stable or tstable, return error
-	if inScope.TableType.HasStable() || inScope.TableType.HasGtable() {
+	isDiff := true
+	// whether function is diff
+	for _, w := range inScope.windows {
+		if w.name != "diff" {
+			isDiff = false
+			break
+		}
+		if _, ok := mapDiffFuncionType[w.typ.Oid()]; !ok {
+			panic(pgerror.New(pgcode.Syntax, "diff function not supports the type"))
+		}
+	}
+
+	if !isDiff && (inScope.TableType.HasStable() || inScope.TableType.HasGtable()) {
 		panic(pgerror.New(pgcode.Warning, "window functions are not supported in tstable and stable"))
 	}
 

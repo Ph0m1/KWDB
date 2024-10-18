@@ -125,7 +125,7 @@ WHERE k_timestamp > '2024-01-01 00:00:00'
 AND   k_timestamp < '2025-04-01 00:00:00'
 AND  t.work_area_sn = 'c1'
 GROUP BY t.point_sn
-ORDER BY COUNT(*) DESC
+ORDER BY point_sn DESC
 LIMIT 1
 ) AND t.work_area_sn = 'c1'
 GROUP BY t.measure_value

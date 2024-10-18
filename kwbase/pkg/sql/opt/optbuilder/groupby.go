@@ -863,6 +863,8 @@ func (b *Builder) constructWindowFn(name string, args []opt.ScalarExpr) opt.Scal
 		return b.factory.ConstructLastValue(args[0])
 	case "nth_value":
 		return b.factory.ConstructNthValue(args[0], args[1])
+	case "diff":
+		return b.factory.ConstructDiff(args[0])
 	default:
 		return b.constructAggregate(name, args)
 	}

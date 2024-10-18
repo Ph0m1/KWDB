@@ -42,7 +42,10 @@ struct CKDecimal Field::ValDecimal() {
 
 k_int64 Field::ValInt(k_int64 *val, k_bool negative) { return this->ValInt(); }
 
-k_bool Field::is_nullable() { return table_->is_nullable(col_idx_in_rs_, column_type_); }
+k_bool Field::is_nullable() {
+  return current_thd->GetRowBatch()->IsNull(col_idx_in_rs_,
+                                                       column_type_);
+}
 
 k_uint32 Field::field_in_template_length() {
   if (IsStorageString(storage_type_)) {
@@ -102,15 +105,14 @@ k_bool FieldNum::is_nullable() {
 
 char *FieldNum::get_ptr() {
   if (false == is_chunk_) {
-    auto row_batch = current_thd->GetRowBatch();
-    return static_cast<char*>(row_batch->GetData(col_idx_in_rs_, storage_len_, column_type_, storage_type_));
+    return static_cast<char *>(current_thd->GetRowBatch()->GetData(
+        col_idx_in_rs_, storage_len_, column_type_, storage_type_));
   } else {
-    IChunk* data_chunk = current_thd->GetDataChunk();
-    return data_chunk->GetData(num_);
+    return static_cast<char *>(current_thd->GetDataChunk()->GetData(num_));
   }
 }
 k_bool FieldNum::is_over_flow() {
-  return table_->IsOverflow(col_idx_in_rs_, column_type_);
+  return current_thd->GetRowBatch()->IsOverflow(col_idx_in_rs_, column_type_);
 }
 
 k_bool FieldNum::fill_template_field(char *ptr) {
@@ -146,11 +148,7 @@ String FieldChar::ValStr() {
 
 String FieldChar::ValStr(char *ptr) {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      return String(ptr);
-    } else {
-      return ValTempStr(ptr);
-    }
+    return String(ptr);
   } else {
     return ValTempStr(ptr);
   }
@@ -178,17 +176,13 @@ String FieldNchar::ValStr() {
 
 String FieldNchar::ValStr(char *ptr) {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      size_t typ_len;
-      // calc valid length， the max length is field_length+1
-      if (typ_len = strnlen(static_cast<char *>(ptr), storage_len_),
-          typ_len >= storage_len_) {
-        typ_len = storage_len_;
-      }
-      return String{static_cast<char *>(ptr), typ_len};
-    } else {
-      return ValTempStr(ptr);
+    size_t typ_len;
+    // calc valid length， the max length is field_length+1
+    if (typ_len = strnlen(static_cast<char *>(ptr), storage_len_),
+        typ_len >= storage_len_) {
+      typ_len = storage_len_;
     }
+    return String{static_cast<char *>(ptr), typ_len};
   } else {
     return ValTempStr(ptr);
   }
@@ -350,11 +344,11 @@ Field *FieldLonglong::field_to_copy() {
 
 char *FieldTimestampTZ::get_ptr() {
   if (false == is_chunk_) {
-    RowBatch* row_batch = current_thd->GetRowBatch();
-    return row_batch->GetData(col_idx_in_rs_, 0 == num_ ? storage_len_ + 8 : storage_len_, column_type_, storage_type_);
+    return static_cast<char *>(current_thd->GetRowBatch()->GetData(
+        col_idx_in_rs_, 0 == num_ ? storage_len_ + 8 : storage_len_,
+        column_type_, storage_type_));
   } else {
-    IChunk* data_chunk = current_thd->GetDataChunk();
-    return data_chunk->GetData(num_);
+    return static_cast<char *>(current_thd->GetDataChunk()->GetData(num_));
   }
 }
 
@@ -515,11 +509,7 @@ k_int64 FieldSumInt::ValInt() { return ValInt(get_ptr()); }
 
 k_int64 FieldSumInt::ValInt(char *ptr) {
   k_int64 val = 0;
-  if (offset_in_template_ < 0) {
-    memcpy(&val, ptr, storage_len_);
-  } else {
-    memcpy(&val, ptr + sizeof(bool), storage_len_);
-  }
+  memcpy(&val, ptr, storage_len_);
   return val;
 }
 
@@ -529,11 +519,7 @@ k_double64 FieldSumInt::ValReal() {
 
 k_double64 FieldSumInt::ValReal(char *ptr) {
   k_double64 val = 0.0f;
-  if (offset_in_template_ < 0) {
-    memcpy(&val, ptr, storage_len_);
-  } else {
-    memcpy(&val, ptr + sizeof(bool), storage_len_);
-  }
+  memcpy(&val, ptr, storage_len_);
   return val;
 }
 
@@ -571,20 +557,15 @@ String FieldBlob::ValStr() { return ValStr(get_ptr()); }
 
 String FieldBlob::ValStr(char *ptr) {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      k_uint16 typ_len = *static_cast<k_uint16 *>(static_cast<void *>(ptr));
-      if (KWDBTypeFamily::StringFamily == return_type_) {
-        // calc length
-        if (typ_len = strnlen(static_cast<char *>(ptr), storage_len_),
-            typ_len >= storage_len_) {
-          typ_len = storage_len_;
-        }
+    k_uint16 typ_len = *static_cast<k_uint16 *>(static_cast<void *>(ptr));
+    if (KWDBTypeFamily::StringFamily == return_type_) {
+      // calc length
+      if (typ_len = strnlen(static_cast<char *>(ptr), storage_len_),
+          typ_len >= storage_len_) {
+        typ_len = storage_len_;
       }
-
-      return String{static_cast<char *>(ptr) + sizeof(k_uint16), typ_len};
-    } else {
-      return ValTempStr(ptr);
     }
+    return String{static_cast<char *>(ptr) + sizeof(k_uint16), typ_len};
   } else {
     return ValTempStr(ptr);
   }
@@ -608,11 +589,7 @@ String FieldVarchar::ValStr() { return ValStr(get_ptr()); }
 
 String FieldVarchar::ValStr(char *ptr) {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      return String{static_cast<char *>(ptr)};
-    } else {
-      return ValTempStr(ptr);
-    }
+    return String{static_cast<char *>(ptr)};
   } else {
     return ValTempStr(ptr);
   }
@@ -637,23 +614,21 @@ String FieldVarBlob::ValStr() { return ValStr(get_ptr()); }
 
 String FieldVarBlob::ValStr(char *ptr) {
   if (false == is_chunk_) {
-    if (offset_in_template_ < 0) {
-      k_uint16 len = table_->GetDataLen(col_idx_in_rs_, storage_len_, column_type_);
-      return String(ptr, len, false);
-    } else {
-      return ValTempStr(ptr);
-    }
+    k_uint16 len = current_thd->GetRowBatch()->GetDataLen(
+        col_idx_in_rs_, storage_len_, column_type_);
+    return String(ptr, len, false);
   } else {
     return ValTempStr(ptr);
   }
 }
 
 k_uint16 FieldVarBlob::ValStrLength(char *ptr) {
-  if (false == is_chunk_ && offset_in_template_ < 0) {
-    return table_->GetDataLen(col_idx_in_rs_, storage_len_, column_type_);
+  if (false == is_chunk_) {
+    return current_thd->GetRowBatch()->GetDataLen(
+        col_idx_in_rs_, storage_len_, column_type_);
   }
 
-  return *reinterpret_cast<k_uint16*>(ptr);
+  return *reinterpret_cast<k_uint16 *>(ptr);
 }
 
 Field *FieldVarBlob::field_to_copy() {
@@ -672,12 +647,12 @@ bool mul_integer_overflow(T& a, T b) {
 }
 
 char *FieldSumStatisticTagSum::get_ptr() {
-  return static_cast<char *>(
-      table_->GetData(num_, offset_in_template_, column_type_, storage_type_));
+  return static_cast<char *>(current_thd->GetRowBatch()->GetData(
+      num_, -1, column_type_, storage_type_));
 }
 
 k_bool FieldSumStatisticTagSum::is_nullable() {
-  return table_->is_nullable(num_, column_type_);
+  return current_thd->GetRowBatch()->IsNull(num_, column_type_);
 }
 
 Field *FieldSumStatisticTagSum::field_to_copy() {
@@ -737,11 +712,11 @@ k_bool FieldSumStatisticTagSum::fill_template_field(char *ptr) { return true; }
 
 char *FieldSumStatisticTagCount::get_ptr() {
   return static_cast<char *>(
-      table_->GetData(num_, offset_in_template_, column_type_, storage_type_));
+      current_thd->GetRowBatch()->GetData(num_, -1, column_type_, storage_type_));
 }
 
 k_bool FieldSumStatisticTagCount::is_nullable() {
-  return table_->is_nullable(num_, column_type_);
+  return current_thd->GetRowBatch()->IsNull(num_, column_type_);
 }
 
 Field *FieldSumStatisticTagCount::field_to_copy() {
@@ -787,10 +762,8 @@ FieldFuncBase::FieldFuncBase(const std::list<Field *> &fields) {
 }
 
 FieldFuncBase::~FieldFuncBase() {
-  if (offset_in_template_ < 0 || FIELD_SUM == type_) {
-    if (arg_count_ > array_elements(embedded_arguments_)) {
-      SafeFreePointer(args_);
-    }
+  if (arg_count_ > array_elements(embedded_arguments_)) {
+    SafeFreePointer(args_);
   }
 }
 
@@ -836,20 +809,9 @@ k_double64 FieldFunc::ValReal(char *ptr) {
 
 String FieldFunc::ValStr(char *ptr) { return ValTempStr(ptr); }
 
-char *FieldFunc::get_ptr() {
-  return nullptr;
-}
+char *FieldFunc::get_ptr() { return nullptr; }
 
-k_bool FieldFunc::is_nullable() {
-  k_bool null = true;
-  if (offset_in_template_ >= 0) {
-    null = table_->is_nullable(col_idx_in_rs_, column_type_);
-  } else {
-    null = field_is_nullable();
-  }
-
-  return null;
-}
+k_bool FieldFunc::is_nullable() { return field_is_nullable(); }
 
 k_bool FieldFunc::field_is_nullable() {
   for (k_uint32 i = 0; i < arg_count_; ++i) {

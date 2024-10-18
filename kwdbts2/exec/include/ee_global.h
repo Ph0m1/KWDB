@@ -67,7 +67,7 @@ typedef enum {
 #define CHECK_VALID_DOUBLE(n)    ((n) >= -DBL_MAX && (n) <= DBL_MAX)
 
 #define I64_SAFE_ADD_CHECK(a, b) (((a) >= 0 && (b) <= INT64_MAX - (a)) || ((a) < 0 && (b) >= INT64_MIN - (a)))
-
+#define I64_SAFE_SUB_CHECK(a, b) (((a) >= 0 && (b) <= INT64_MIN + (a)) || ((a) < 0 && (b) >= INT64_MAX + (a)))
 #define MAX_PG_ERROR_MSG_LEN 128
 struct EEPgErrorInfo {
   // error code

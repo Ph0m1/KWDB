@@ -1122,11 +1122,16 @@ func (ef *execFactory) ConstructProjectSet(
 }
 
 // ConstructWindow is part of the exec.Factory interface.
-func (ef *execFactory) ConstructWindow(root exec.Node, wi exec.WindowInfo) (exec.Node, error) {
+func (ef *execFactory) ConstructWindow(
+	root exec.Node, wi exec.WindowInfo, execInTSEngine bool,
+) (exec.Node, error) {
 	p := &windowNode{
 		plan:         root.(planNode),
 		columns:      wi.Cols,
 		windowRender: make([]tree.TypedExpr, len(wi.Cols)),
+	}
+	if execInTSEngine {
+		p.engine = tree.EngineTypeTimeseries
 	}
 
 	partitionIdxs := make([]int, len(wi.Partition))

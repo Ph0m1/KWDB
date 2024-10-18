@@ -201,7 +201,6 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx) {
       }
 
       total_read_row_ += row_batch_->count_;
-      LOG_DEBUG("TableScanOperator::Next data_count:%d", total_read_row_);
       if (nullptr == filter_ && 0 == cur_offset_ && 0 == limit_) {
         examined_rows_ += row_batch_->count_;
         break;
@@ -332,6 +331,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
             Return(EEIteratorErrCode::EE_ERROR)
           }
         }
+
         current_data_chunk_->AddRowBatchData(ctx, row_batch_, renders_,
                                              batch_copy_ && !row_batch_->hasFilter());
       }

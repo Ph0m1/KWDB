@@ -32,7 +32,6 @@ TEST_F(TestFieldFunc, TestFieldPlusFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncPlus *field = KNEW FieldFuncPlus(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
   k_double64 dval = field->ValReal();
@@ -52,7 +51,6 @@ TEST_F(TestFieldFunc, TestFieldMinusFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncMinus *field = KNEW FieldFuncMinus(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1);
   k_double64 dval = field->ValReal();
@@ -70,7 +68,6 @@ TEST_F(TestFieldFunc, TestFieldDivideFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncDivide *field = KNEW FieldFuncDivide(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
   k_double64 dval = field->ValReal();
@@ -88,7 +85,6 @@ TEST_F(TestFieldFunc, TestFieldDividezFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncDividez *field = KNEW FieldFuncDividez(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
   k_double64 dval = field->ValReal();
@@ -106,7 +102,6 @@ TEST_F(TestFieldFunc, TestFieldMultFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncMult *field = KNEW FieldFuncMult(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
   k_double64 dval = field->ValReal();
@@ -124,7 +119,6 @@ TEST_F(TestFieldFunc, TestFieldRemainderFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncRemainder *field = KNEW FieldFuncRemainder(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 3);
   k_double64 dval = field->ValReal();
@@ -142,7 +136,6 @@ TEST_F(TestFieldFunc, TestFieldPercentFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncPercent *field = KNEW FieldFuncPercent(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1);
   k_double64 dval = field->ValReal();
@@ -160,7 +153,6 @@ TEST_F(TestFieldFunc, TestFieldPowerFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncPower *field = KNEW FieldFuncPower(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
   k_double64 dval = field->ValReal();
@@ -178,7 +170,6 @@ TEST_F(TestFieldFunc, TestFieldModFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncMod *field = KNEW FieldFuncMod(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1);
   k_double64 dval = field->ValReal();
@@ -197,7 +188,6 @@ TEST_F(TestFieldFunc, TestFieldDateTruncFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncDateTrunc *field = KNEW FieldFuncDateTrunc(FieldConstValA, FieldConstValB, time_zone);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1712804880000);
   k_double64 dval = field->ValReal();
@@ -218,7 +208,6 @@ TEST_F(TestFieldFunc, TestFieldExtractFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncExtract *field = KNEW FieldFuncExtract(FieldConstValA, FieldConstValB, time_zone);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 11);
   k_double64 dval = field->ValReal();
@@ -241,7 +230,6 @@ TEST_F(TestFieldFunc, TestFieldTimeBucketFunc) {
   args.push_back(FieldConstValB);
   args.push_back(FieldConstValA);
   FieldFuncTimeBucket *field = KNEW FieldFuncTimeBucket(args, 8);
-  field->set_offset_in_template(-1);
 
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1690600200000);
@@ -263,7 +251,6 @@ TEST_F(TestFieldFunc, TestFieldCoalesceFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncCoalesce *field = KNEW FieldFuncCoalesce(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1365781921080);
   k_double64 dval = field->ValReal();
@@ -286,7 +273,6 @@ TEST_F(TestFieldFunc, TestFieldCrc32CFunc) {
   args.push_back(FieldConstValB);
   FieldFuncCrc32C *field = KNEW FieldFuncCrc32C(args);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 26154185);
   k_double64 dval = field->ValReal();
@@ -310,7 +296,6 @@ TEST_F(TestFieldFunc, TestFieldCrc32IFunc) {
   args.push_back(FieldConstValB);
   FieldFuncCrc32I *field = KNEW FieldFuncCrc32I(args);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 3473062748);
   k_double64 dval = field->ValReal();
@@ -334,7 +319,6 @@ TEST_F(TestFieldFunc, TestFieldFnv32Func) {
   args.push_back(FieldConstValB);
   FieldFuncFnv32 *field = KNEW FieldFuncFnv32(args);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 3613024805);
   k_double64 dval = field->ValReal();
@@ -357,7 +341,6 @@ TEST_F(TestFieldFunc, TestFieldFnv32aFunc) {
   args.push_back(FieldConstValB);
   FieldFuncFnv32a *field = KNEW FieldFuncFnv32a(args);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 951228933);
   k_double64 dval = field->ValReal();
@@ -380,7 +363,6 @@ TEST_F(TestFieldFunc, TestFieldFnv64Func) {
   args.push_back(FieldConstValB);
   FieldFuncFnv64 *field = KNEW FieldFuncFnv64(args);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2635828873713441413);
   k_double64 dval = field->ValReal();
@@ -403,7 +385,6 @@ TEST_F(TestFieldFunc, TestFieldFnv64aFunc) {
   args.push_back(FieldConstValB);
   FieldFuncFnv64a *field = KNEW FieldFuncFnv64a(args);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 7119243511811735397);
   k_double64 dval = field->ValReal();
@@ -424,7 +405,6 @@ TEST_F(TestFieldFunc, TestFieldLeftShiftFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncLeftShift *field = KNEW FieldFuncLeftShift(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 8);
   k_double64 dval = field->ValReal();
@@ -444,7 +424,6 @@ TEST_F(TestFieldFunc, TestFieldRightShiftFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncRightShift *field = KNEW FieldFuncRightShift(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
   k_double64 dval = field->ValReal();
@@ -474,7 +453,6 @@ TEST_F(TestFieldFunc, TestFieldWidthBucketFunc) {
   args.push_back(FieldConstValD);
 
   FieldFuncWidthBucket *field = KNEW FieldFuncWidthBucket(args);
-  field->set_offset_in_template(-1);
 
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 2);
@@ -495,7 +473,6 @@ TEST_F(TestFieldFunc, TestFieldAndCalFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncAndCal *field = KNEW FieldFuncAndCal(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1);
   k_double64 dval = field->ValReal();
@@ -515,7 +492,6 @@ TEST_F(TestFieldFunc, TestFieldOrCalFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncOrCal *field = KNEW FieldFuncOrCal(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, 1);
   k_double64 dval = field->ValReal();
@@ -535,7 +511,6 @@ TEST_F(TestFieldFunc, TestFieldNotCalFunc) {
   FieldConstInt *FieldConstValB = KNEW FieldConstInt(roachpb::DataType::BIGINT, b, sizeof(k_int64));
   FieldFuncNotCal *field = KNEW FieldFuncNotCal(FieldConstValA, FieldConstValB);
 
-  field->set_offset_in_template(-1);
   k_int64 ival = field->ValInt();
   EXPECT_EQ(ival, -2);
   k_double64 dval = field->ValReal();

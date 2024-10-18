@@ -1093,6 +1093,12 @@ define NthValue {
     Nth ScalarExpr
 }
 
+# DiffValue returns the difference between the current row and the previous row
+[Scalar, Window]
+define Diff {
+    Value ScalarExpr
+}
+
 # KVOptions is a set of KVOptionItems that specify arbitrary keys and values
 # that are used as modifiers for various statements (see tree.KVOptions). The
 # key is a constant string but the value can be a scalar expression.
