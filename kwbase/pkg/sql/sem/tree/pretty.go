@@ -975,6 +975,14 @@ func (node *NameList) doc(p *PrettyCfg) pretty.Doc {
 	return p.commaSeparated(d...)
 }
 
+func (node *NoSchemaNameList) doc(p *PrettyCfg) pretty.Doc {
+	d := make([]pretty.Doc, len(*node))
+	for i, n := range *node {
+		d[i] = p.Doc(&n)
+	}
+	return p.commaSeparated(d...)
+}
+
 func (node *CastExpr) doc(p *PrettyCfg) pretty.Doc {
 	typ := pretty.Text(node.Type.SQLString())
 

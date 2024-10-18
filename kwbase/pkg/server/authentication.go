@@ -589,8 +589,8 @@ func (rm *restAuthMux) getIdentifier(
 	// parse input.
 	// case1: Authority.
 	// case 1: from authorization
-	tokenWithBaseAu := rm.server.server.restful.authorization
-	tokenFromHeader := header.Get("Authorization")
+	tokenFromHeader := rm.server.server.restful.authorization
+	tokenWithBaseAu := header.Get("Authorization")
 
 	tokenFinal := ""
 	if tokenWithBaseAu != "" {

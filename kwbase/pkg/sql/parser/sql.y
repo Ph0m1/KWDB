@@ -151,6 +151,13 @@ func (u *sqlSymUnion) tableIndexName() tree.TableIndexName {
 func (u *sqlSymUnion) newTableIndexNames() tree.TableIndexNames {
     return u.val.(tree.TableIndexNames)
 }
+func (u *sqlSymUnion) noSchemaName() tree.NoSchemaName {
+    tn := u.val.(tree.NoSchemaName)
+    return tn
+}
+func (u *sqlSymUnion) noSchemaNames() tree.NoSchemaNameList {
+    return u.val.(tree.NoSchemaNameList)
+}
 func (u *sqlSymUnion) shardedIndexDef() *tree.ShardedIndexDef {
   return u.val.(*tree.ShardedIndexDef)
 }
@@ -987,6 +994,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 
 %type <*tree.TableIndexName> table_index_name
 %type <tree.TableIndexNames> table_index_name_list
+%type <tree.NoSchemaName> insert_no_schema_item
 
 %type <tree.Operator> math_op
 
@@ -1020,6 +1028,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <bool> distinct_clause
 %type <tree.DistinctOn> distinct_on_clause
 %type <tree.NameList> opt_column_list insert_column_list opt_stats_columns
+%type <tree.NoSchemaNameList> insert_no_schema_list
 %type <tree.OrderBy> sort_clause opt_sort_clause
 %type <[]*tree.Order> sortby_list
 %type <tree.IndexElemList> index_params create_as_params
@@ -7224,6 +7233,13 @@ insert_stmt:
     $$.val.(*tree.Insert).OnConflict = $6.onConflict()
     $$.val.(*tree.Insert).Returning = $7.retClause()
   }
+| opt_with_clause INSERT WITHOUT SCHEMA INTO insert_target insert_rest returning_clause
+  {
+		$$.val = $7.stmt()
+		$$.val.(*tree.Insert).With = $1.with()
+		$$.val.(*tree.Insert).Table = $6.tblExpr()
+		$$.val.(*tree.Insert).Returning = $8.retClause()
+  }
 | opt_with_clause INSERT error // SHOW HELP: INSERT
 
 // %Help: UPSERT - create or replace rows in a table
@@ -7300,9 +7316,41 @@ insert_rest:
   {
     $$.val = &tree.Insert{Columns: $2.nameList(), Rows: $4.slct()}
   }
+| '(' insert_no_schema_list ')' select_stmt
+  {
+    $$.val = &tree.Insert{NoSchemaColumns: $2.noSchemaNames(), Rows: $4.slct(), IsNoSchema: true}
+  }
 | DEFAULT VALUES
   {
     $$.val = &tree.Insert{Rows: &tree.Select{}}
+  }
+
+insert_no_schema_list:
+	insert_no_schema_item
+	{
+		$$.val = tree.NoSchemaNameList{$1.noSchemaName()}
+	}
+| insert_no_schema_list ',' insert_no_schema_item
+	{
+		$$.val = append($1.noSchemaNames(), $3.noSchemaName())
+	}
+
+insert_no_schema_item:
+	column_name typename COLUMN
+	{
+		$$.val = tree.NoSchemaName{
+			Name: tree.Name($1),
+			Type: $2.colType(),
+			IsTag: false,
+		}
+	}
+|	column_name typename TAG
+  {
+  	$$.val = tree.NoSchemaName{
+			Name: tree.Name($1),
+			Type: $2.colType(),
+			IsTag: true,
+		}
   }
 
 insert_column_list:

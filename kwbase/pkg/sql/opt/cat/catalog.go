@@ -154,4 +154,10 @@ type Catalog interface {
 
 	// GetCurrentDatabase return name of current database.
 	GetCurrentDatabase(ctx context.Context) string
+
+	// ReleaseTables releases all table leases for the current session.
+	ReleaseTables(ctx context.Context)
+
+	// ResetTxn resets the txn of the current session.
+	ResetTxn(ctx context.Context)
 }

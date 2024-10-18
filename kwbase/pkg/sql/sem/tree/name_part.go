@@ -24,7 +24,10 @@
 
 package tree
 
-import "gitee.com/kwbasedb/kwbase/pkg/sql/lex"
+import (
+	"gitee.com/kwbasedb/kwbase/pkg/sql/lex"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+)
 
 // A Name is an SQL identifier.
 //
@@ -118,6 +121,26 @@ func (l NameList) ToStrings() []string {
 // A NameList is a list of identifiers.
 type NameList []Name
 
+// NoSchemaName stores the name and type of a column/tag.
+// It is used to automatically add columns that do not exist when inserting data.
+type NoSchemaName struct {
+	Name  Name
+	Type  *types.T
+	IsTag bool
+}
+
+// NoSchemaNameList is a list of NoSchemaName.
+type NoSchemaNameList []NoSchemaName
+
+// GetNameList returns column names.
+func (nsn *NoSchemaNameList) GetNameList() NameList {
+	var ret NameList
+	for _, noSchemaName := range *nsn {
+		ret = append(ret, noSchemaName.Name)
+	}
+	return ret
+}
+
 // A ColumnIDList is a list of columns id.
 type ColumnIDList []int32
 
@@ -128,6 +151,29 @@ func (l *NameList) Format(ctx *FmtCtx) {
 			ctx.WriteString(", ")
 		}
 		ctx.FormatNode(&(*l)[i])
+	}
+}
+
+// Format implements the NodeFormatter interface.
+func (nsn *NoSchemaNameList) Format(ctx *FmtCtx) {
+	for i := range *nsn {
+		if i > 0 {
+			ctx.WriteString(", ")
+		}
+		ctx.FormatNode(&(*nsn)[i])
+	}
+}
+
+// Format implements the NodeFormatter interface.
+func (n *NoSchemaName) Format(ctx *FmtCtx) {
+	ctx.FormatNode(&n.Name)
+	ctx.WriteByte(' ')
+	ctx.WriteString(n.Type.SQLString())
+	ctx.WriteByte(' ')
+	if n.IsTag {
+		ctx.WriteString("TAG")
+	} else {
+		ctx.WriteString("COLUMN")
 	}
 }
 

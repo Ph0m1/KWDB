@@ -2092,6 +2092,7 @@ func (s *Server) Start(ctx context.Context) error {
 	restfulAuthHandler.Handle("/restapi/insert", http.HandlerFunc(s.restful.handleInsert))
 	restfulAuthHandler.Handle("/restapi/query", http.HandlerFunc(s.restful.handleQuery))
 	restfulAuthHandler.Handle("/restapi/telegraf", http.HandlerFunc(s.restful.handleTelegraf))
+	restfulAuthHandler.Handle("/restapi/influxdb", http.HandlerFunc(s.restful.handleInfluxDB))
 	restfulAuthHandler.Handle("/restapi/session", http.HandlerFunc(s.restful.handleSession))
 
 	// Register debugging endpoints.

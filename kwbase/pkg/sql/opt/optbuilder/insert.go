@@ -27,6 +27,8 @@ package optbuilder
 import (
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -39,6 +41,9 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
+	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
+	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
 	"github.com/cockroachdb/errors"
 )
 
@@ -197,6 +202,50 @@ func (b *Builder) buildInsert(ins *tree.Insert, inScope *scope) (outScope *scope
 	// insert into template table error
 	if tblTyp == tree.TemplateTable && !opt.CheckTsProperty(b.TSInfo.TSProp, TSPropInsertCreateTable) {
 		panic(pgerror.New(pgcode.FeatureNotSupported, "cannot insert into a TEMPLATE table"))
+	}
+
+	if ins.IsNoSchema {
+		// INSERT NO SCHEMA is a special syntax.
+		// When data is inserted using this syntax,
+		// columns that do not exist are automatically added
+		ins.Columns = ins.NoSchemaColumns.GetNameList()
+		added, err := b.maybeAddNonExistsColumn(tab, ins, alias)
+		if err != nil {
+			panic(err)
+		}
+		if added {
+			// Columns were added using InternalExecutor.
+			// So we need to reset the txn so that it can resolve the new columns.
+			retryOpt := retry.Options{
+				InitialBackoff: 50 * time.Millisecond,
+				MaxBackoff:     1 * time.Second,
+				Multiplier:     2,
+				MaxRetries:     60, // about 5 minutes
+			}
+			for r := retry.Start(retryOpt); r.Next(); {
+				allGet := true
+				//b.catalog.ResetTxn(b.ctx)
+				clock := hlc.NewClock(hlc.UnixNano, time.Nanosecond)
+				b.evalCtx.Txn.SetFixedTimestamp(b.ctx, clock.Now())
+				tab, depName, alias, refColumns = b.resolveTableForMutation(ins.Table, privilege.INSERT)
+				cols := getColumnDescs(tab)
+				for idx := range ins.NoSchemaColumns {
+					colDef := ins.NoSchemaColumns[idx]
+					_, err = getTSColumnByName(colDef.Name, cols)
+					if err == nil {
+						continue
+					} else {
+						allGet = false
+						break
+					}
+				}
+				if allGet {
+					break
+				} else {
+					b.catalog.ReleaseTables(b.ctx)
+				}
+			}
+		}
 	}
 	// handle INSERT INTO ts_table VALUES...
 	if _, ok := ins.Rows.Select.(*tree.ValuesClause); ok {
@@ -428,6 +477,7 @@ func buildColsForTsInsert(
 	columnMap := make(opt.ColsMap, 0)
 	var resCols opt.ColList
 	var colIdxs opt.ColIdxs
+
 	if ins.Columns != nil {
 		inColName := make(map[tree.Name]bool)
 		// constructs the map of the metadata column to the input value based on the user-specified column name
@@ -1527,4 +1577,113 @@ func analysisTmplTableTag(b *Builder, table cat.Table, ct *tree.CreateTable) {
 			}
 		}
 	}
+}
+
+// maybeAddNonExistsColumn can automatically add columns that do not exist.
+func (b *Builder) maybeAddNonExistsColumn(
+	tab cat.Table, ins *tree.Insert, name tree.TableName,
+) (bool, error) {
+	addStmts, err := constructAutoAddStmts(tab, ins, name)
+	if err != nil {
+		return false, err
+	}
+	if len(addStmts) != 0 {
+		// ALTER statements will be blocked by table leases held by DML statements.
+		// So release the table leases.
+		b.catalog.ReleaseTables(b.ctx)
+	}
+	retryOpt := retry.Options{
+		InitialBackoff: 20 * time.Millisecond,
+		MaxBackoff:     1 * time.Second,
+		Multiplier:     2,
+		MaxRetries:     60, // about 5 minutes
+	}
+	for i := range addStmts {
+		// Retry while execution returns error.
+		for r := retry.Start(retryOpt); r.Next(); {
+			_, err := b.evalCtx.InternalExecutor.Query(b.evalCtx.Context, "auto add column", nil, addStmts[i])
+			if err != nil {
+				if isInsertNoSchemaRetryableError(err) {
+					log.Warningf(b.ctx, "auto alter add failed: %s, err: %s\n", addStmts[i], err.Error())
+				} else if strings.Contains(err.Error(), "schema version") {
+					return false, err
+				} else {
+					break
+				}
+			} else {
+				log.Infof(b.ctx, "auto alter add success: %s\n", addStmts[i])
+				break
+			}
+		}
+	}
+	return len(addStmts) != 0, nil
+}
+
+// constructAutoAddStmts checks whether columns are exist and generate alter table stmt if necessary
+func constructAutoAddStmts(tab cat.Table, ins *tree.Insert, name tree.TableName) ([]string, error) {
+	cols := getColumnDescs(tab)
+	const alterStmt = `ALTER TABLE %s ADD %s %s %s`
+	const alterColumnTypeStmt = `ALTER TABLE %s ALTER COLUMN %s TYPE %s`
+	const alterTagTypeStmt = `ALTER TABLE %s ALTER TAG %s TYPE %s`
+	var addStmts []string
+	inColName := make(map[tree.Name]bool)
+
+	// constructs the map of the metadata column to the input value based on the user-specified column name
+	for idx := range ins.NoSchemaColumns {
+		colDef := ins.NoSchemaColumns[idx]
+		// check if duplicate columns are input.
+		if _, ok := inColName[colDef.Name]; !ok {
+			inColName[colDef.Name] = true
+		} else {
+			return []string{}, pgerror.Newf(pgcode.DuplicateColumn, "multiple assignments to the same column \"%s\"", string(colDef.Name))
+		}
+		typ := `COLUMN`
+		if colDef.IsTag {
+			typ = `TAG`
+		}
+		targetCol, err := getTSColumnByName(colDef.Name, cols)
+		if err != nil {
+			if pgerror.GetPGCode(err) == pgcode.UndefinedColumn {
+				// If the column does not exist, generate a ALTER ... ADD ... statement.
+				addStmts = append(addStmts, fmt.Sprintf(alterStmt, name.String(), typ, colDef.Name.String(), colDef.Type.SQLString()))
+			} else {
+				return []string{}, err
+			}
+		} else {
+			if targetCol.IsTagCol() != colDef.IsTag {
+				return []string{}, pgerror.Newf(pgcode.DuplicateColumn, "duplicate %s name: %q", typ, colDef.Name)
+			}
+			if targetCol.Type.Width() < ins.NoSchemaColumns[idx].Type.Width() {
+				if ins.NoSchemaColumns[idx].IsTag {
+					addStmts = append(addStmts, fmt.Sprintf(alterTagTypeStmt, name.String(), colDef.Name.String(), colDef.Type.SQLString()))
+				} else {
+					addStmts = append(addStmts, fmt.Sprintf(alterColumnTypeStmt, name.String(), colDef.Name.String(), colDef.Type.SQLString()))
+				}
+			}
+		}
+
+		// instance table does not support specifying tag column
+		if targetCol != nil && targetCol.IsTagCol() && (tab.GetTableType() == tree.InstanceTable ||
+			tab.GetTableType() == tree.TemplateTable) {
+			return []string{}, pgerror.Newf(pgcode.FeatureNotSupported, "cannot insert tag column: \"%s\" for INSTANCE table", targetCol.Name)
+		}
+	}
+	return addStmts, nil
+}
+
+func getColumnDescs(tab cat.Table) []*sqlbase.ColumnDescriptor {
+	colCount := tab.ColumnCount()
+	var cols []*sqlbase.ColumnDescriptor
+	for i := 0; i < colCount; i++ {
+		cols = append(cols, tab.Column(i).(*sqlbase.ColumnDescriptor))
+	}
+	return cols
+}
+
+// isInsertNoSchemaRetryableError returns true if error contains 'wait for success'.
+func isInsertNoSchemaRetryableError(err error) bool {
+	if strings.Contains(err.Error(), "Please wait for success") {
+		return true
+	}
+	return false
 }

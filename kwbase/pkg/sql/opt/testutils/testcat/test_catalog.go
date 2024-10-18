@@ -114,6 +114,12 @@ func (tc *Catalog) ResolveSchema(
 	return tc.resolveSchema(&toResolve)
 }
 
+// ReleaseTables is part of the cat.Catalog interface.
+func (tc *Catalog) ReleaseTables(_ context.Context) {}
+
+// ResetTxn is part of the cat.Catalog interface.
+func (tc *Catalog) ResetTxn(ctx context.Context) {}
+
 // ResolveDataSource is part of the cat.Catalog interface.
 func (tc *Catalog) ResolveDataSource(
 	_ context.Context, _ cat.Flags, name *cat.DataSourceName,

@@ -1847,3 +1847,5 @@ func (node PartitionMinVal) String() string   { return AsString(node) }
 func (v *Placeholder) String() string         { return AsString(v) }
 func (node dNull) String() string             { return AsString(node) }
 func (list *NameList) String() string         { return AsString(list) }
+func (list *NoSchemaNameList) String() string { return AsString(list) }
+func (list *NoSchemaName) String() string     { return AsString(list) }

@@ -27,12 +27,14 @@ package tree
 
 // Insert represents an INSERT statement.
 type Insert struct {
-	With       *With
-	Table      TableExpr
-	Columns    NameList
-	Rows       *Select
-	OnConflict *OnConflict
-	Returning  ReturningClause
+	With            *With
+	Table           TableExpr
+	Columns         NameList
+	Rows            *Select
+	OnConflict      *OnConflict
+	Returning       ReturningClause
+	NoSchemaColumns NoSchemaNameList
+	IsNoSchema      bool
 }
 
 // Format implements the NodeFormatter interface.
@@ -42,12 +44,19 @@ func (node *Insert) Format(ctx *FmtCtx) {
 		ctx.WriteString("UPSERT")
 	} else {
 		ctx.WriteString("INSERT")
+		if node.IsNoSchema {
+			ctx.WriteString(" WITHOUT SCHEMA ")
+		}
 	}
 	ctx.WriteString(" INTO ")
 	ctx.FormatNode(node.Table)
 	if node.Columns != nil {
 		ctx.WriteByte('(')
 		ctx.FormatNode(&node.Columns)
+		ctx.WriteByte(')')
+	} else if node.IsNoSchema {
+		ctx.WriteByte('(')
+		ctx.FormatNode(&node.NoSchemaColumns)
 		ctx.WriteByte(')')
 	}
 	if node.DefaultValues() {

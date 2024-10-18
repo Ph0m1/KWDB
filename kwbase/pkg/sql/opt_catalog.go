@@ -190,6 +190,17 @@ func (oc *optCatalog) ResolveSchema(
 	}, oc.tn.TableNamePrefix, nil
 }
 
+// ReleaseTables is part of the cat.Catalog interface.
+func (oc *optCatalog) ReleaseTables(ctx context.Context) {
+	oc.planner.Tables().releaseLeases(ctx)
+}
+
+// ResetTxn is part of the cat.Catalog interface.
+func (oc *optCatalog) ResetTxn(ctx context.Context) {
+	newTxn := kv.NewTxn(ctx, oc.planner.execCfg.DB, oc.planner.execCfg.NodeID.Get())
+	*oc.planner.txn = *newTxn
+}
+
 // ResolveDataSource is part of the cat.Catalog interface.
 func (oc *optCatalog) ResolveDataSource(
 	ctx context.Context, flags cat.Flags, name *cat.DataSourceName,

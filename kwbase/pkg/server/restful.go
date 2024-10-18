@@ -14,6 +14,7 @@ package server
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	gosql "database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -23,6 +24,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +89,12 @@ const (
 	insertTypeStrLowercase = "insert into"
 	//ddl_exclude_str = "SHOW CREATE"
 	ddlExcludeStrLowercase = "show create"
+	//without schema
+	insertWithoutSchema = "insert without schema into"
+	// maxtimes of retry
+	maxRetries = 10
+	// varchar length
+	varcharlen = 254
 )
 
 type colMetaInfo struct {
@@ -1040,8 +1049,6 @@ func (s *restfulServer) sendJSONResponse(
 			return
 		}
 	}
-	// clean the authorization
-	s.authorization = ""
 }
 
 // generateKey generates token by username and time when login
@@ -1295,8 +1302,8 @@ func parseDesc(desc string) string {
 func (s *restfulServer) getUserWIthPass(
 	r *http.Request,
 ) (userName string, passWd string, err error) {
-	tokenWithBaseAu := s.server.restful.authorization
-	tokenFromHeader := r.Header.Get("Authorization")
+	tokenFromHeader := s.server.restful.authorization
+	tokenWithBaseAu := r.Header.Get("Authorization")
 
 	tokenStr := ""
 	if tokenWithBaseAu != "" {
@@ -1326,6 +1333,294 @@ func (s *restfulServer) getUserWIthPass(
 		return "", "", fmt.Errorf("wrong username or password, please check")
 	}
 	return slice[0], slice[1], nil
+}
+
+// determineType returns the corresponding type based on the input string
+func determineType(input string) (string, string) {
+	input = strings.TrimSpace(input)
+
+	// Regular expression matching for numbers
+	isFloat := regexp.MustCompile(`^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$`)
+	isNumericWithU := regexp.MustCompile(`^[-+]?[0-9]+u$`)
+	isNumericWithI := regexp.MustCompile(`^[-+]?[0-9]+i$`)
+
+	isBool := map[string]bool{
+		"true":  true,
+		"t":     true,
+		"T":     true,
+		"True":  true,
+		"TRUE":  true,
+		"false": false,
+		"f":     false,
+		"F":     false,
+		"False": false,
+		"FALSE": false,
+	}
+
+	if val, ok := isBool[input]; ok {
+		return fmt.Sprintf("%t", val), "bool"
+	}
+
+	switch {
+	case len(input) > 1 && input[0] == '"' && input[len(input)-1] == '"':
+		length := len(input) - 2
+		if length > varcharlen {
+			return "'" + input[1:len(input)-1] + "'", "varchar" + "(" + strconv.Itoa(length) + ")"
+		}
+		return "'" + input[1:len(input)-1] + "'", "varchar"
+	case isNumericWithU.MatchString(input), isNumericWithI.MatchString(input):
+		input = input[:len(input)-1]
+		return input, "int8"
+	case isFloat.MatchString(input):
+		return input, "float8"
+	default:
+		return "", "UNKNOWN"
+	}
+}
+
+// makeInfluxDBStmt makes insert statement when telegraf.
+func makeInfluxDBStmt(stmtOriginal string) (teleInsertStmt string, teleCreateStmt string) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("invalid data for Influxdb protocol, please check the format.")
+		}
+	}()
+
+	slice := strings.Split(stmtOriginal, " ")
+	attribute := strings.Split(slice[0], ",")
+	tblName := attribute[0]
+
+	var colKey, colValue, coltagName, coltagType, colvalueType, colvalueName, hashtag []string
+
+	for index, keyWithValue := range attribute {
+		if index >= 1 {
+			hashtag = append(hashtag, keyWithValue)
+			initObj := strings.Split(keyWithValue, "=")
+			colKey = append(colKey, initObj[0])
+			coltagName = append(coltagName, initObj[0])
+			if len(initObj[1]) > varcharlen {
+				typ := "varchar" + "(" + strconv.Itoa(len(initObj[1])) + ")"
+				coltagType = append(coltagType, typ)
+			} else {
+				coltagType = append(coltagType, "varchar")
+			}
+			initObj[1] = "'" + initObj[1] + "'"
+			colValue = append(colValue, initObj[1])
+		}
+	}
+	tagNum := len(coltagType)
+	createTagStmt := "(primary_tag varchar not null"
+	for index, createKey := range coltagName {
+		createTagStmt += ","
+		createTagStmt += createKey
+		createTagStmt += " "
+		createTagStmt += coltagType[index]
+	}
+	createTagStmt += ")"
+
+	colkeyValue := strings.Split(slice[1], ",")
+	for _, keyValue := range colkeyValue {
+		obj := strings.Split(keyValue, "=")
+		colKey = append(colKey, obj[0])
+		colvalueName = append(colvalueName, obj[0])
+		value, col := determineType(obj[1])
+		if col == "UNKNOWN" {
+			return "", ""
+		}
+		colValue = append(colValue, value)
+		colvalueType = append(colvalueType, col)
+		coltagType = append(coltagType, col)
+	}
+
+	timeStamp := "now()"
+	if len(slice) >= 3 {
+		timeStamp = slice[2]
+		if len(timeStamp) > 13 {
+			timeStamp = timeStamp[0:13]
+		}
+	}
+
+	createColStmt := "(k_timestamp timestamptz not null"
+	for index, createKey := range colvalueName {
+		createColStmt += ","
+		createColStmt += createKey
+		createColStmt += " "
+		createColStmt += colvalueType[index]
+	}
+	createColStmt += ")"
+
+	insertKeyStmt := "(primary_tag varchar tag,k_timestamp timestamptz column,"
+	for index, insertKey := range colKey {
+		if index < tagNum {
+			insertKeyStmt += insertKey
+			insertKeyStmt += " "
+			insertKeyStmt += coltagType[index]
+			insertKeyStmt += " tag"
+			insertKeyStmt += ","
+		} else {
+			insertKeyStmt += insertKey
+			insertKeyStmt += " "
+			insertKeyStmt += coltagType[index]
+			insertKeyStmt += " column"
+			insertKeyStmt += ","
+		}
+
+	}
+	// insertKeyStmt += hostKey
+	insertKeyStmt = strings.TrimRight(insertKeyStmt, ",")
+	insertKeyStmt += ")"
+
+	// insert values
+	insertValueStmt := "("
+	insertValueStmt += "'" + generateHashString(hashtag) + "'"
+	insertValueStmt += ","
+	insertValueStmt += timeStamp
+	for _, insertValue := range colValue {
+		insertValueStmt += ","
+		insertValueStmt += insertValue
+	}
+	insertValueStmt += ")"
+	stmtRet := "insert without schema into " + tblName + insertKeyStmt + " values" + insertValueStmt
+	createRet := "create table " + tblName + createColStmt + "tags" + createTagStmt + "primary tags(primary_tag)"
+	return stmtRet, createRet
+}
+
+// handleTelegraf handle telegraf interface
+func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	code := 0
+	desc := ""
+
+	restTelegraph, err := s.checkFormat(ctx, w, r, "POST")
+	if err != nil {
+		return
+	}
+
+	connCache, db, err := s.checkConn(ctx, w, r)
+	if err != nil {
+		return
+	}
+
+	var rowsAffected int64
+	rowsAffected = 0
+	var teleResult gosql.Result
+	// Calculate the execution time if needed
+	executionTime := float64(0)
+	// the program will get a batch of data at once, so it needs to handle it first
+	statements := strings.Split(strings.ReplaceAll(restTelegraph, "\r\n", "\n"), "\n")
+	numOfStmts := len(statements)
+
+	for i := 0; i < numOfStmts; i++ {
+		insertTelegraphStmt, createTelegrafStmt := makeInfluxDBStmt(statements[i])
+		TeleInsertStartTime := timeutil.Now()
+
+		if insertTelegraphStmt == "" {
+			desc += "wrong influxdb insert statement and please check" + ";"
+			code = -1
+			continue
+		}
+
+		insertflag := strings.Contains(strings.ToLower(insertTelegraphStmt), insertWithoutSchema)
+		if !insertflag {
+			desc += "can not find insert statement and please check" + ";"
+			code = -1
+			continue
+		}
+
+		teleStmtCount := strings.Count(insertTelegraphStmt, ";")
+		if teleStmtCount > 1 {
+			desc += "only support single statement for each influxdb interface and please check" + ";"
+			code = -1
+			continue
+		}
+
+		teleResult, err = s.executeWithRetry(db, insertTelegraphStmt, createTelegrafStmt)
+		if err != nil {
+			desc += err.Error() + ";"
+			code = -1
+			continue
+		}
+
+		curRowsAffected, err := teleResult.RowsAffected()
+		if err != nil {
+			desc += err.Error() + ";"
+			code = -1
+			curRowsAffected = 0
+			continue
+		}
+
+		duration := timeutil.Now().Sub(TeleInsertStartTime)
+		executionTime = float64(duration) / float64(time.Second)
+		desc += "success" + ";"
+		rowsAffected += curRowsAffected
+	}
+
+	response := teleInsertResponse{
+		baseResponse: &baseResponse{
+			Code: code,
+			Desc: desc,
+			Time: executionTime,
+		},
+		Rows: rowsAffected,
+	}
+
+	s.sendJSONResponse(ctx, w, 0, response, desc)
+	connCache.lastLoginTime = timeutil.Now().Unix()
+	clear(ctx, db)
+}
+
+func (s *restfulServer) executeWithRetry(
+	db *gosql.DB, insertStmt, createStmt string,
+) (gosql.Result, error) {
+	var result gosql.Result
+	var err error
+	retryDelay := 1 * time.Second
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		result, err = db.Exec(insertStmt)
+		if err == nil {
+			return result, nil
+		}
+
+		influxdbErr := err.Error()
+		noExist := `^pq: relation .* does not exist$`
+		reNoExist, _ := regexp.Compile(noExist)
+		waitForSuc := `^pq:.* Please wait for success$`
+		rewaitForSuc, _ := regexp.Compile(waitForSuc)
+
+		if !reNoExist.MatchString(influxdbErr) && !rewaitForSuc.MatchString(influxdbErr) {
+			return nil, err
+		}
+		if reNoExist.MatchString(influxdbErr) {
+			_, err = db.Exec(createStmt)
+			if err != nil {
+				createTableErr := err.Error()
+				alExist := `^pq: relation .* already exists$`
+				reAlExist, _ := regexp.Compile(alExist)
+				reWaitForSuccess, _ := regexp.Compile(waitForSuc)
+				if !reAlExist.MatchString(createTableErr) && !reWaitForSuccess.MatchString(createTableErr) {
+					return nil, err
+				}
+			}
+		}
+
+		time.Sleep(retryDelay)
+		retryDelay *= 2
+	}
+
+	return nil, err
+}
+
+// generateHashString generate hash byte(64)
+func generateHashString(hashtag []string) string {
+	sort.Strings(hashtag)
+
+	hash := sha256.New()
+	for _, str := range hashtag {
+		hash.Write([]byte(str))
+	}
+	hashSum := hash.Sum(nil)
+	return fmt.Sprintf("%x", hashSum)
 }
 
 // startsWithKeywords check key words
