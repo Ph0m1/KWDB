@@ -2,6 +2,65 @@
 # groupby.opt contains normalization rules for the GroupBy operator.
 # =============================================================================
 
+# OptimizeTSTableScanTypeSelect change ts table scan type to only scan tag table,
+# TS table optimize need on top
+# eg:
+# select distinct ptag where ptag = 100 from tstable;
+# select ptag, tag1 from tstable where ptag = 100 group by ptag, tag1;
+# select ptag, tag1 from tstable where tag1 = 1000 group by ptag, tag1;
+[OptimizeTSTableScanTypeSelect, Normalize]
+(DistinctOn | GroupBy
+    $input:(Select $childInput:(TSScan $tsScanPrivate:*))
+    $aggregations:*
+    $groupingPrivate:* &
+        (HasOnlyTagColumn $tsScanPrivate $aggregations $groupingPrivate)
+)
+=>
+((OpName)
+    (ChangeTSTableScanTypeForSelect $input)
+    $aggregations
+    $groupingPrivate
+)
+
+# OptimizeTSTableScanTypeProjectTSScan change ts table scan type to only scan tag table,
+# TS table optimize need on top
+# eg:
+# select sum(tag1+1) from tstable group by ptag;
+# select sum(tag1+tag2) from tstable group by ptag;
+[OptimizeTSTableScanTypeProjectTSScan, Normalize]
+(DistinctOn | GroupBy
+    $input:(Project $childInput:(TSScan $tsScanPrivate:*))
+    $aggregations:*
+    $groupingPrivate:* &
+        (HasOnlyTagColumn $tsScanPrivate $aggregations $groupingPrivate)
+)
+=>
+((OpName)
+    (ChangeTSTableScanTypeForProject $input)
+    $aggregations
+    $groupingPrivate
+)
+
+
+# OptimizeTSTableScanTypeProjectSelectTSScan change ts table scan type to only scan tag table,
+# TS table optimize need on top
+# eg:
+# select sum(tag1+1) from tstable where ptag = 100 group by ptag;
+# select sum(tag1+tag2) from tstable where ptag = 100 and tag1 > 10 group by ptag;
+[OptimizeTSTableScanTypeProjectSelectTSScan, Normalize]
+(DistinctOn | GroupBy
+    $input:(Project $childInput:(Select $childInput1:(TSScan $tsScanPrivate:*)))
+    $aggregations:*
+    $groupingPrivate:* &
+        (HasOnlyTagColumn $tsScanPrivate $aggregations $groupingPrivate)
+)
+=>
+((OpName)
+    (ChangeTSTableScanTypeForProject $input)
+    $aggregations
+    $groupingPrivate
+)
+
 # ConvertGroupByToDistinct converts a GroupBy operator that has no aggregations
 # to an equivalent DistinctOn operator.
 [ConvertGroupByToDistinct, Normalize]
@@ -245,3 +304,21 @@
 )
 =>
 (ConstructNewGroupBy $newExpr)
+
+# OptimizeTSTableScanType change ts table scan type to only scan tag table
+# eg:
+# select distinct ptag from tstable;
+# select ptag, tag1 from tstable group by ptag, tag1;
+[OptimizeTSTableScanType, Normalize]
+(DistinctOn | GroupBy
+    $input:(TSScan $tsScanPrivate:*)
+    $aggregations:*
+    $groupingPrivate:* &
+        (HasOnlyTagColumn $tsScanPrivate $aggregations $groupingPrivate)
+)
+=>
+((OpName)
+    (ChangeTSTableScanType $tsScanPrivate)
+    $aggregations
+    $groupingPrivate
+)

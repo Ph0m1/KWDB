@@ -956,7 +956,7 @@ ORDER BY
                        └── synchronizer |                    |
                             └── ts scan |                    |
                                         | ts-table           | t_point
-                                        | access mode        | hashRelScan
+                                        | access mode        | hashTagScan
 (40 rows)
 > SELECT li.pipeline_name,
        t.measure_type,
@@ -1039,7 +1039,7 @@ ORDER BY
                        └── synchronizer |                   |
                             └── ts scan |                   |
                                         | ts-table          | t_point
-                                        | access mode       | hashRelScan
+                                        | access mode       | hashTagScan
 (34 rows)
 > set enable_multimodel=false;
 SET

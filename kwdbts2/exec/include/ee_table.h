@@ -94,6 +94,7 @@ class TABLE {
   std::vector<pair<k_uint32, k_uint32>>& GetRelTagJoinColumnIndexes();
   // get scan tags for multiple model processing
   std::vector<k_uint32>& GetScanTags();
+  void SetOnlyTag(bool only_tag) { only_tag_ = only_tag; }
 
  private:
   KStatus InitField(kwdbContext_p ctx, const TSCol &col, k_uint32 index,
@@ -124,6 +125,7 @@ class TABLE {
                              // remain align
   k_uint32 table_version_{0};
   bool is_reverse_{0};
+  bool only_tag_{false};
   k_int32 ptag_size_{0};
   bool ordered_scan_{false};
 

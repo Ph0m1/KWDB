@@ -208,6 +208,7 @@ class SpecBase {
   virtual void initTagReaderSpec(TSTagReaderSpec& spec) {
     // timestamp column
     spec.set_tableversion(1);
+    spec.set_only_tag(false);
     auto ts_col = spec.add_colmetas();
     ts_col->set_storage_type(roachpb::DataType::TIMESTAMP);
     ts_col->set_storage_len(8);
@@ -565,6 +566,7 @@ class HashTagScanSpec : public SpecBase {
   void initTagReaderSpec(TSTagReaderSpec& spec) {
     // timestamp column
     spec.set_tableversion(1);
+    spec.set_only_tag(false);
     auto ts_col = spec.add_colmetas();
     ts_col->set_storage_type(roachpb::DataType::TIMESTAMP);
     ts_col->set_storage_len(8);

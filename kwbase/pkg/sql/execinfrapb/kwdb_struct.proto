@@ -136,10 +136,9 @@ enum TSTableReadMode {
   tagIndexTable = 1;
   tableTableMeta = 2;
   metaTable = 3;
-  onlyTag = 4;
-  hashTagScan = 5;
-  primaryHashTagScan = 6;
-  hashRelScan = 7;
+  hashTagScan = 4;
+  primaryHashTagScan = 5;
+  hashRelScan = 6;
 }
 
 // TSReaderSpec table reader
@@ -227,6 +226,7 @@ message TSTagReaderSpec {
   repeated sqlbase.TSCol  relationalCols = 7 [(gogoproto.nullable) = false];
   repeated uint32 probeColids = 8;
   repeated uint32 hashColids = 9;
+  required bool only_tag = 10 [(gogoproto.nullable) = false];
 }
 
 enum SketchMethod {

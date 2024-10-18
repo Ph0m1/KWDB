@@ -285,6 +285,9 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 			} else if n.orderedType == opt.SortAfterScan {
 				v.observer.attr(name, "ordered type", "sort after scan")
 			}
+			if n.HintType.OnlyTag() {
+				v.observer.attr(name, "only tag", "true")
+			}
 			v.observer.attr(name, "access mode", n.AccessMode.String())
 			if len(n.ScanAggArray) != 0 {
 				for i := 0; i < 5 && i < len(n.ScanAggArray); i++ {

@@ -2672,12 +2672,8 @@ func (c *CustomFuncs) GenerateTagTSScans(
 		return
 	}
 	private.TagFilter = tagFilters
-	// hint control for can not use primary tag index
-	if private.HintType == keys.TagOnlyHint {
-		private.TagFilter = append(private.TagFilter, primaryTagFilters...)
-	} else {
-		private.PrimaryTagFilter = primaryTagFilters
-	}
+	private.PrimaryTagFilter = primaryTagFilters
+
 	// get ts table access mode through tag filter and primary tag value
 	// only primary tag value --- tag index
 	// primary tag value and tag filter ----- tag index table

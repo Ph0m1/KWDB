@@ -585,3 +585,8 @@ func (s ScanMethodHintType) String() string {
 		return "None"
 	}
 }
+
+// OnlyTag check hint is only tag
+func (s ScanMethodHintType) OnlyTag() bool {
+	return s == TagOnlyHint
+}

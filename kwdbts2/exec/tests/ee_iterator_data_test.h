@@ -18,6 +18,7 @@ namespace kwdbts {
 void CreateTagReaderSpec(TSTagReaderSpec **spec, k_uint64 table_id) {
   *spec = KNEW TSTagReaderSpec();
   (*spec)->set_tableversion(1);
+  (*spec)->set_only_tag(false);
   TSCol *col0 = (*spec)->add_colmetas();
   col0->set_storage_type(roachpb::DataType::BIGINT);
   col0->set_storage_len(8);

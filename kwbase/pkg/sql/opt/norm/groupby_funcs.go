@@ -25,6 +25,7 @@
 package norm
 
 import (
+	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
@@ -589,4 +590,114 @@ func (c *CustomFuncs) getEngineMode(src opt.ScalarExpr, m *modeHelper) {
 		m.setMode(relMode)
 		m.setMode(tsMode)
 	}
+}
+
+// HasOnlyTagColumn check has only tag column from aggs and grouping colset
+func (c *CustomFuncs) HasOnlyTagColumn(
+	tsScan *memo.TSScanPrivate, aggs memo.AggregationsExpr, private *memo.GroupingPrivate,
+) bool {
+	if tsScan.HintType.OnlyTag() {
+		return false
+	}
+
+	for _, agg := range aggs {
+		switch agg.Agg.(type) {
+		case *memo.CountRowsExpr:
+			return false
+		}
+	}
+
+	meta := c.mem.Metadata()
+
+	allTag := true
+	tsScan.Cols.ForEach(func(col opt.ColumnID) {
+		if !meta.ColumnMeta(col).IsTag() {
+			allTag = false
+		}
+	})
+
+	if !allTag {
+		return false
+	}
+
+	// check primary tag
+	primaryTagCount := 0
+	tableMeta := meta.TableMeta(tsScan.Table)
+	private.GroupingCols.ForEach(func(col opt.ColumnID) {
+		if meta.ColumnMeta(col).IsPrimaryTag() {
+			primaryTagCount++
+		}
+	})
+
+	return allTag && primaryTagCount == tableMeta.PrimaryTagCount
+}
+
+func onlyTagPrivateTSScan(tsScan *memo.TSScanExpr) *memo.TSScanPrivate {
+	return &memo.TSScanPrivate{
+		Table:            tsScan.Table,
+		Cols:             tsScan.Cols,
+		AccessMode:       tsScan.AccessMode,
+		ScanAggs:         tsScan.ScanAggs,
+		TagFilter:        tsScan.TagFilter,
+		PrimaryTagFilter: tsScan.PrimaryTagFilter,
+		PrimaryTagValues: tsScan.PrimaryTagValues,
+		HintType:         keys.TagOnlyHint,
+	}
+}
+
+// ChangeTSTableScanType change ts table scan mode
+func (c *CustomFuncs) ChangeTSTableScanType(tsScan *memo.TSScanPrivate) memo.RelExpr {
+	return c.f.ConstructTSScan(&memo.TSScanPrivate{
+		Table:            tsScan.Table,
+		Cols:             tsScan.Cols,
+		AccessMode:       tsScan.AccessMode,
+		ScanAggs:         tsScan.ScanAggs,
+		TagFilter:        tsScan.TagFilter,
+		PrimaryTagFilter: tsScan.PrimaryTagFilter,
+		PrimaryTagValues: tsScan.PrimaryTagValues,
+		HintType:         keys.TagOnlyHint,
+	})
+}
+
+// ChangeTSTableScanTypeForSelect change ts table scan mode
+func (c *CustomFuncs) ChangeTSTableScanTypeForSelect(selectExpr memo.RelExpr) memo.RelExpr {
+	expr, ok := selectExpr.(*memo.SelectExpr)
+	if !ok {
+		return selectExpr
+	}
+
+	tsScan, ok1 := expr.Input.(*memo.TSScanExpr)
+	if !ok1 {
+		return selectExpr
+	}
+
+	newScan := c.f.ConstructTSScan(onlyTagPrivateTSScan(tsScan))
+
+	return c.f.ConstructSelect(newScan, expr.Filters)
+}
+
+// ChangeTSTableScanTypeForProject change ts table scan mode
+func (c *CustomFuncs) ChangeTSTableScanTypeForProject(projectExpr memo.RelExpr) memo.RelExpr {
+	expr, ok := projectExpr.(*memo.ProjectExpr)
+	if !ok {
+		return projectExpr
+	}
+
+	switch t := expr.Input.(type) {
+	case *memo.TSScanExpr:
+		newScan := c.f.ConstructTSScan(onlyTagPrivateTSScan(t))
+		return c.f.ConstructProject(newScan, expr.Projections, expr.Passthrough)
+	case *memo.SelectExpr:
+		tsScan, ok1 := t.Input.(*memo.TSScanExpr)
+		if !ok1 {
+			return projectExpr
+		}
+
+		newScan := c.f.ConstructTSScan(onlyTagPrivateTSScan(tsScan))
+
+		newSelect := c.f.ConstructSelect(newScan, t.Filters)
+
+		return c.f.ConstructProject(newSelect, expr.Projections, expr.Passthrough)
+	}
+	return projectExpr
 }

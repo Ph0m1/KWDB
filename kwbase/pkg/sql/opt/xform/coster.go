@@ -30,7 +30,6 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
@@ -463,9 +462,6 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 		// TagFilter cannot affect talbeCountFactor, default to 0.5
 		// The cost should be smaller than a full table scan
 		cost = memo.Cost(fullScanTagTblCost + 0.5*fullScanTblCost)
-	} else if tsScan.AccessMode == int(execinfrapb.TSTableReadMode_onlyTag) {
-		// case: TagOnly
-		cost = memo.Cost(tableScanCostUnit * pTagRowCount * float64(tagColsWith))
 	} else {
 		// case: TsMetadate, need scan all tag table when there are tag columns in query
 		cost = memo.Cost(fullScanTagTblCost + fullScanTblCost)

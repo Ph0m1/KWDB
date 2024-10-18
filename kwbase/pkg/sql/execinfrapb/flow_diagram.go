@@ -301,6 +301,9 @@ func (tr *TSTagReaderSpec) summary() (string, []string) {
 	var res []string
 	res = append(res, fmt.Sprintf("TableID: %v", tr.TableID))
 	res = append(res, fmt.Sprintf("mode: %v", tr.AccessMode.String()))
+	if tr.OnlyTag {
+		res = append(res, "OnlyScanTag")
+	}
 	for _, val := range tr.PrimaryTags {
 		res = append(res, fmt.Sprintf("ptag [%v]: %v", val.Colid, val.TagValues))
 	}

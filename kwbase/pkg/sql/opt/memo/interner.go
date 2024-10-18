@@ -707,10 +707,12 @@ func (h *hasher) HashExprs(val opt.Exprs) {
 }
 
 func (h *hasher) HashPTagValues(val PTagValues) {
-	for k, val := range val {
-		h.HashInt(int(k))
-		for _, v := range val {
-			h.HashString(v)
+	if val != nil {
+		for k, val := range val {
+			h.HashInt(int(k))
+			for _, v := range val {
+				h.HashString(v)
+			}
 		}
 	}
 }

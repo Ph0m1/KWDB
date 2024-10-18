@@ -687,7 +687,12 @@ func (sb *statisticsBuilder) buildTSScan(scan *TSScanExpr, relProps *props.Relat
 	s.Available = sb.availabilityFromInput(scan)
 
 	inputStats := sb.makeTableStatistics(scan.Table)
-	s.RowCount = inputStats.RowCount
+	if scan.HintType.OnlyTag() {
+		s.RowCount = inputStats.PTagCount
+	} else {
+		s.RowCount = inputStats.RowCount
+	}
+
 	s.PTagCount = inputStats.PTagCount
 	if inputStats.SortDistribution != nil {
 		if !inputStats.SortDistribution.Filtered {
@@ -2812,7 +2817,7 @@ const (
 	unknownTSRowCount = 100000
 
 	// This is an arbitrary row count used in the absence of any real statistics.
-	defaultPTagCount = 0
+	defaultPTagCount = 1
 	// This is the ratio of distinct column values to number of rows, which is
 	// used in the absence of any real statistics for non-key columns.
 	// TODO(rytaft): See if there is an industry standard value for this.

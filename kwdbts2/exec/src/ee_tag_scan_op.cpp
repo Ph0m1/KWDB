@@ -40,6 +40,7 @@ TagScanOperator::TagScanOperator(TsFetcherCollection *collection, TSTagReaderSpe
     table->ptag_size_ = spec->primarytags_size();
     object_id_ = spec->tableid();
     table->SetTableVersion(spec->tableversion());
+    table->SetOnlyTag(spec->only_tag());
   }
 }
 
@@ -70,7 +71,7 @@ EEIteratorErrCode TagScanOperator::Init(kwdbContext_p ctx) {
         break;
       }
       // resolve render output type
-      if (table_->GetAccessMode() == TSTableReadMode::onlyTag) {
+      if (table_->only_tag_) {
         param_.ResolveOutputType(ctx, renders_, num_);
       }
       // Output Fields
@@ -108,8 +109,7 @@ EEIteratorErrCode TagScanOperator::Start(kwdbContext_p ctx) {
       break;
     }
     case TSTableReadMode::tableTableMeta:
-    case TSTableReadMode::metaTable:
-    case TSTableReadMode::onlyTag: {
+    case TSTableReadMode::metaTable: {
       handler_->SetReadMode((TSTableReadMode) access_mode);
       start_code_ = handler_->NewTagIterator(ctx);
       if (start_code_ != EE_OK) {

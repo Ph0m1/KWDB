@@ -1146,7 +1146,8 @@ func (m *Memo) tsScanFillStatistic(
 		allColsPrimary = allColsPrimary && colMeta.IsPrimaryTag()
 	})
 	tableMeta := m.Metadata().TableMeta(tsScan.Table)
-	if !allColsPrimary || (gp.GroupingCols.Len() != 0 && gp.GroupingCols.Len() != tableMeta.PrimaryTagCount) || tsScan.HintType == keys.TagOnlyHint {
+	if !allColsPrimary || (gp.GroupingCols.Len() != 0 && gp.GroupingCols.Len() != tableMeta.PrimaryTagCount) ||
+		tsScan.HintType.OnlyTag() {
 		return
 	}
 
@@ -1763,10 +1764,11 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 		}
 		m.AddColumn(colID, colMeta.Alias, ExprTypCol, ExprPosNone, 0, false)
 	})
+	onlyTag := source.HintType.OnlyTag()
 	ret.err = nil
 	ret.canTimeBucketOptimize = true
-	if source.HintType == keys.TagOnlyHint && hasNotTag {
-		ret.hasAddSynchronizer = source.HintType == keys.TagOnlyHint
+	if onlyTag && hasNotTag {
+		ret.hasAddSynchronizer = onlyTag
 		ret.err = pgerror.New(pgcode.FeatureNotSupported, "TAG_ONLY can only query tag columns")
 	} else {
 		// when the tagFilter has a subquery, it needs to Walk to check whether it can execute in ts engine.
@@ -1776,10 +1778,10 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 		}
 		source.SetEngineTS()
 		// only tag mode should not add synchronizer, so param2 will be true.
-		ret.hasAddSynchronizer = source.HintType == keys.TagOnlyHint || source.OrderedScanType == opt.SortAfterScan
+		ret.hasAddSynchronizer = onlyTag || source.OrderedScanType == opt.SortAfterScan
 	}
 
-	if source.HintType == keys.TagOnlyHint || len(source.PrimaryTagValues) == 0 {
+	if onlyTag || len(source.PrimaryTagValues) == 0 {
 		source.OrderedScanType = opt.NoOrdered
 	} else {
 		for _, v := range source.PrimaryTagValues {

@@ -1892,8 +1892,9 @@ func (p *PhysicalPlan) buildPhyPlanForTagReaders(
 	p.Processors = make([]physicalplan.Processor, 0, len(*rangeSpans))
 
 	// when the tag filter not push to TagFilterArray of tsScanNode, need to deal with filter.
-	if n.HintType == keys.TagOnlyHint && n.filter != nil {
+	if n.HintType.OnlyTag() && n.filter != nil {
 		n.TagFilterArray = append(n.TagFilterArray, n.filter)
+		n.filter = nil
 	}
 
 	// deal tag filter
@@ -1918,6 +1919,7 @@ func (p *PhysicalPlan) buildPhyPlanForTagReaders(
 						PrimaryTags:  ptagFilter,
 						TableVersion: n.Table.GetTSVersion(),
 						RangeSpans:   (*rangeSpans)[nodeID],
+						OnlyTag:      n.HintType.OnlyTag(),
 					},
 				},
 				Output: []execinfrapb.OutputRouterSpec{{
@@ -1950,7 +1952,7 @@ func (p *PhysicalPlan) buildPhyPlanForTagReaders(
 	// add output types for last ts engine processor
 	p.addTSOutputType(true)
 
-	if n.HintType == keys.TagOnlyHint {
+	if n.HintType.OnlyTag() {
 		p.PlanToStreamColMap = getPlanToStreamColMapForReader(outCols, n.resultColumns, descColumnIDs)
 	}
 
@@ -2425,7 +2427,7 @@ func (dsp *DistSQLPlanner) createTSReaders(
 		if err != nil {
 			return PhysicalPlan{}, err
 		}
-		if n.HintType == keys.TagOnlyHint {
+		if n.HintType.OnlyTag() {
 			return p, nil
 		}
 
@@ -2446,7 +2448,7 @@ func (dsp *DistSQLPlanner) createTSReaders(
 		if err != nil {
 			return PhysicalPlan{}, err
 		}
-		if n.HintType == keys.TagOnlyHint {
+		if n.HintType.OnlyTag() {
 			return p, nil
 		}
 
@@ -2461,7 +2463,7 @@ func (dsp *DistSQLPlanner) createTSReaders(
 		if err != nil {
 			return PhysicalPlan{}, err
 		}
-		if n.HintType == keys.TagOnlyHint {
+		if n.HintType.OnlyTag() {
 			return p, nil
 		}
 

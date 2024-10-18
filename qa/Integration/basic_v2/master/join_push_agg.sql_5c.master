@@ -443,28 +443,28 @@ INSERT 1
    10
 (1 row)
 > explain select max(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
-                tree               |       field        |  description
------------------------------------+--------------------+-----------------
-                                   | distributed        | true
-                                   | vectorized         | false
-  group                            |                    |
-   │                               | aggregate 0        | max(e1)
-   │                               | scalar             |
-   └── render                      |                    |
-        │                          | e1                 | e1
-        └── hash-join              |                    |
-             │                     | type               | inner
-             │                     | equality           | (e1) = (tag1)
-             │                     | right cols are key |
-             ├── scan              |                    |
-             │                     | table              | re1@primary
-             │                     | spans              | FULL SCAN
-             └── distinct          |                    |
-                  │                | distinct on        | tag1
-                  └── synchronizer |                    |
-                       └── ts scan |                    |
-                                   | ts-table           | ts1
-                                   | access mode        | tableTableMeta
+             tree             |       field        |  description
+------------------------------+--------------------+-----------------
+                              | distributed        | true
+                              | vectorized         | false
+  group                       |                    |
+   │                          | aggregate 0        | max(e1)
+   │                          | scalar             |
+   └── render                 |                    |
+        │                     | e1                 | e1
+        └── hash-join         |                    |
+             │                | type               | inner
+             │                | equality           | (e1) = (tag1)
+             │                | right cols are key |
+             ├── scan         |                    |
+             │                | table              | re1@primary
+             │                | spans              | FULL SCAN
+             └── distinct     |                    |
+                  │           | distinct on        | tag1
+                  └── ts scan |                    |
+                              | ts-table           | ts1
+                              | only tag           | true
+                              | access mode        | tableTableMeta
 (20 rows)
 > select min(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
@@ -472,28 +472,28 @@ INSERT 1
    10
 (1 row)
 > explain select min(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
-                tree               |       field        |  description
------------------------------------+--------------------+-----------------
-                                   | distributed        | true
-                                   | vectorized         | false
-  group                            |                    |
-   │                               | aggregate 0        | min(e1)
-   │                               | scalar             |
-   └── render                      |                    |
-        │                          | e1                 | e1
-        └── hash-join              |                    |
-             │                     | type               | inner
-             │                     | equality           | (e1) = (tag1)
-             │                     | right cols are key |
-             ├── scan              |                    |
-             │                     | table              | re1@primary
-             │                     | spans              | FULL SCAN
-             └── distinct          |                    |
-                  │                | distinct on        | tag1
-                  └── synchronizer |                    |
-                       └── ts scan |                    |
-                                   | ts-table           | ts1
-                                   | access mode        | tableTableMeta
+             tree             |       field        |  description
+------------------------------+--------------------+-----------------
+                              | distributed        | true
+                              | vectorized         | false
+  group                       |                    |
+   │                          | aggregate 0        | min(e1)
+   │                          | scalar             |
+   └── render                 |                    |
+        │                     | e1                 | e1
+        └── hash-join         |                    |
+             │                | type               | inner
+             │                | equality           | (e1) = (tag1)
+             │                | right cols are key |
+             ├── scan         |                    |
+             │                | table              | re1@primary
+             │                | spans              | FULL SCAN
+             └── distinct     |                    |
+                  │           | distinct on        | tag1
+                  └── ts scan |                    |
+                              | ts-table           | ts1
+                              | only tag           | true
+                              | access mode        | tableTableMeta
 (20 rows)
 > select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   max
@@ -501,28 +501,28 @@ INSERT 1
    30
 (1 row)
 > explain select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
-                tree               |       field        |  description
------------------------------------+--------------------+-----------------
-                                   | distributed        | true
-                                   | vectorized         | false
-  group                            |                    |
-   │                               | aggregate 0        | max(e1 + e2)
-   │                               | scalar             |
-   └── render                      |                    |
-        │                          | e1 + e2            | e1 + e2
-        └── hash-join              |                    |
-             │                     | type               | inner
-             │                     | equality           | (e1) = (tag1)
-             │                     | right cols are key |
-             ├── scan              |                    |
-             │                     | table              | re1@primary
-             │                     | spans              | FULL SCAN
-             └── distinct          |                    |
-                  │                | distinct on        | tag1
-                  └── synchronizer |                    |
-                       └── ts scan |                    |
-                                   | ts-table           | ts1
-                                   | access mode        | tableTableMeta
+             tree             |       field        |  description
+------------------------------+--------------------+-----------------
+                              | distributed        | true
+                              | vectorized         | false
+  group                       |                    |
+   │                          | aggregate 0        | max(e1 + e2)
+   │                          | scalar             |
+   └── render                 |                    |
+        │                     | e1 + e2            | e1 + e2
+        └── hash-join         |                    |
+             │                | type               | inner
+             │                | equality           | (e1) = (tag1)
+             │                | right cols are key |
+             ├── scan         |                    |
+             │                | table              | re1@primary
+             │                | spans              | FULL SCAN
+             └── distinct     |                    |
+                  │           | distinct on        | tag1
+                  └── ts scan |                    |
+                              | ts-table           | ts1
+                              | only tag           | true
+                              | access mode        | tableTableMeta
 (20 rows)
 > select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
@@ -530,28 +530,28 @@ INSERT 1
    30
 (1 row)
 > explain select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
-                tree               |       field        |  description
------------------------------------+--------------------+-----------------
-                                   | distributed        | true
-                                   | vectorized         | false
-  group                            |                    |
-   │                               | aggregate 0        | min(e1 + e2)
-   │                               | scalar             |
-   └── render                      |                    |
-        │                          | e1 + e2            | e1 + e2
-        └── hash-join              |                    |
-             │                     | type               | inner
-             │                     | equality           | (e1) = (tag1)
-             │                     | right cols are key |
-             ├── scan              |                    |
-             │                     | table              | re1@primary
-             │                     | spans              | FULL SCAN
-             └── distinct          |                    |
-                  │                | distinct on        | tag1
-                  └── synchronizer |                    |
-                       └── ts scan |                    |
-                                   | ts-table           | ts1
-                                   | access mode        | tableTableMeta
+             tree             |       field        |  description
+------------------------------+--------------------+-----------------
+                              | distributed        | true
+                              | vectorized         | false
+  group                       |                    |
+   │                          | aggregate 0        | min(e1 + e2)
+   │                          | scalar             |
+   └── render                 |                    |
+        │                     | e1 + e2            | e1 + e2
+        └── hash-join         |                    |
+             │                | type               | inner
+             │                | equality           | (e1) = (tag1)
+             │                | right cols are key |
+             ├── scan         |                    |
+             │                | table              | re1@primary
+             │                | spans              | FULL SCAN
+             └── distinct     |                    |
+                  │           | distinct on        | tag1
+                  └── ts scan |                    |
+                              | ts-table           | ts1
+                              | only tag           | true
+                              | access mode        | tableTableMeta
 (20 rows)
 > select max(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by r.e1;
   max
@@ -994,31 +994,31 @@ INSERT 1
    10
 (1 row)
 > explain select max(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
-                  tree                  |       field        |  description
-----------------------------------------+--------------------+-----------------
-                                        | distributed        | true
-                                        | vectorized         | false
-  render                                |                    |
-   │                                    | max                | max
-   └── group                            |                    |
-        │                               | aggregate 0        | e1
-        │                               | aggregate 1        | max(e1)
-        │                               | group by           | e1
-        └── render                      |                    |
-             │                          | e1                 | e1
-             └── hash-join              |                    |
-                  │                     | type               | inner
-                  │                     | equality           | (e1) = (tag1)
-                  │                     | right cols are key |
-                  ├── scan              |                    |
-                  │                     | table              | re1@primary
-                  │                     | spans              | FULL SCAN
-                  └── distinct          |                    |
-                       │                | distinct on        | tag1
-                       └── synchronizer |                    |
-                            └── ts scan |                    |
-                                        | ts-table           | ts1
-                                        | access mode        | tableTableMeta
+                tree               |       field        |  description
+-----------------------------------+--------------------+-----------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  render                           |                    |
+   │                               | max                | max
+   └── group                       |                    |
+        │                          | aggregate 0        | e1
+        │                          | aggregate 1        | max(e1)
+        │                          | group by           | e1
+        └── render                 |                    |
+             │                     | e1                 | e1
+             └── hash-join         |                    |
+                  │                | type               | inner
+                  │                | equality           | (e1) = (tag1)
+                  │                | right cols are key |
+                  ├── scan         |                    |
+                  │                | table              | re1@primary
+                  │                | spans              | FULL SCAN
+                  └── distinct     |                    |
+                       │           | distinct on        | tag1
+                       └── ts scan |                    |
+                                   | ts-table           | ts1
+                                   | only tag           | true
+                                   | access mode        | tableTableMeta
 (23 rows)
 > select min(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
   min
@@ -1026,31 +1026,31 @@ INSERT 1
    10
 (1 row)
 > explain select min(r.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
-                  tree                  |       field        |  description
-----------------------------------------+--------------------+-----------------
-                                        | distributed        | true
-                                        | vectorized         | false
-  render                                |                    |
-   │                                    | min                | min
-   └── group                            |                    |
-        │                               | aggregate 0        | e1
-        │                               | aggregate 1        | min(e1)
-        │                               | group by           | e1
-        └── render                      |                    |
-             │                          | e1                 | e1
-             └── hash-join              |                    |
-                  │                     | type               | inner
-                  │                     | equality           | (e1) = (tag1)
-                  │                     | right cols are key |
-                  ├── scan              |                    |
-                  │                     | table              | re1@primary
-                  │                     | spans              | FULL SCAN
-                  └── distinct          |                    |
-                       │                | distinct on        | tag1
-                       └── synchronizer |                    |
-                            └── ts scan |                    |
-                                        | ts-table           | ts1
-                                        | access mode        | tableTableMeta
+                tree               |       field        |  description
+-----------------------------------+--------------------+-----------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  render                           |                    |
+   │                               | min                | min
+   └── group                       |                    |
+        │                          | aggregate 0        | e1
+        │                          | aggregate 1        | min(e1)
+        │                          | group by           | e1
+        └── render                 |                    |
+             │                     | e1                 | e1
+             └── hash-join         |                    |
+                  │                | type               | inner
+                  │                | equality           | (e1) = (tag1)
+                  │                | right cols are key |
+                  ├── scan         |                    |
+                  │                | table              | re1@primary
+                  │                | spans              | FULL SCAN
+                  └── distinct     |                    |
+                       │           | distinct on        | tag1
+                       └── ts scan |                    |
+                                   | ts-table           | ts1
+                                   | only tag           | true
+                                   | access mode        | tableTableMeta
 (23 rows)
 > select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
   max
@@ -1058,32 +1058,32 @@ INSERT 1
    30
 (1 row)
 > explain select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
-                  tree                  |       field        |  description
-----------------------------------------+--------------------+-----------------
-                                        | distributed        | true
-                                        | vectorized         | false
-  render                                |                    |
-   │                                    | max                | max
-   └── group                            |                    |
-        │                               | aggregate 0        | e1
-        │                               | aggregate 1        | max(e1 + e2)
-        │                               | group by           | e1
-        └── render                      |                    |
-             │                          | e1 + e2            | e1 + e2
-             │                          | e1                 | e1
-             └── hash-join              |                    |
-                  │                     | type               | inner
-                  │                     | equality           | (e1) = (tag1)
-                  │                     | right cols are key |
-                  ├── scan              |                    |
-                  │                     | table              | re1@primary
-                  │                     | spans              | FULL SCAN
-                  └── distinct          |                    |
-                       │                | distinct on        | tag1
-                       └── synchronizer |                    |
-                            └── ts scan |                    |
-                                        | ts-table           | ts1
-                                        | access mode        | tableTableMeta
+                tree               |       field        |  description
+-----------------------------------+--------------------+-----------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  render                           |                    |
+   │                               | max                | max
+   └── group                       |                    |
+        │                          | aggregate 0        | e1
+        │                          | aggregate 1        | max(e1 + e2)
+        │                          | group by           | e1
+        └── render                 |                    |
+             │                     | e1 + e2            | e1 + e2
+             │                     | e1                 | e1
+             └── hash-join         |                    |
+                  │                | type               | inner
+                  │                | equality           | (e1) = (tag1)
+                  │                | right cols are key |
+                  ├── scan         |                    |
+                  │                | table              | re1@primary
+                  │                | spans              | FULL SCAN
+                  └── distinct     |                    |
+                       │           | distinct on        | tag1
+                       └── ts scan |                    |
+                                   | ts-table           | ts1
+                                   | only tag           | true
+                                   | access mode        | tableTableMeta
 (24 rows)
 > select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
   min
@@ -1091,32 +1091,32 @@ INSERT 1
    30
 (1 row)
 > explain select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
-                  tree                  |       field        |  description
-----------------------------------------+--------------------+-----------------
-                                        | distributed        | true
-                                        | vectorized         | false
-  render                                |                    |
-   │                                    | min                | min
-   └── group                            |                    |
-        │                               | aggregate 0        | e1
-        │                               | aggregate 1        | min(e1 + e2)
-        │                               | group by           | e1
-        └── render                      |                    |
-             │                          | e1 + e2            | e1 + e2
-             │                          | e1                 | e1
-             └── hash-join              |                    |
-                  │                     | type               | inner
-                  │                     | equality           | (e1) = (tag1)
-                  │                     | right cols are key |
-                  ├── scan              |                    |
-                  │                     | table              | re1@primary
-                  │                     | spans              | FULL SCAN
-                  └── distinct          |                    |
-                       │                | distinct on        | tag1
-                       └── synchronizer |                    |
-                            └── ts scan |                    |
-                                        | ts-table           | ts1
-                                        | access mode        | tableTableMeta
+                tree               |       field        |  description
+-----------------------------------+--------------------+-----------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  render                           |                    |
+   │                               | min                | min
+   └── group                       |                    |
+        │                          | aggregate 0        | e1
+        │                          | aggregate 1        | min(e1 + e2)
+        │                          | group by           | e1
+        └── render                 |                    |
+             │                     | e1 + e2            | e1 + e2
+             │                     | e1                 | e1
+             └── hash-join         |                    |
+                  │                | type               | inner
+                  │                | equality           | (e1) = (tag1)
+                  │                | right cols are key |
+                  ├── scan         |                    |
+                  │                | table              | re1@primary
+                  │                | spans              | FULL SCAN
+                  └── distinct     |                    |
+                       │           | distinct on        | tag1
+                       └── ts scan |                    |
+                                   | ts-table           | ts1
+                                   | only tag           | true
+                                   | access mode        | tableTableMeta
 (24 rows)
 > select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 and ts.tag2=r.e2 and ts.tag3=r.e3 group by ts.tag1, r.e1;
   max
@@ -1124,32 +1124,32 @@ INSERT 1
    30
 (1 row)
 > explain select max(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 and ts.tag2=r.e2 and ts.tag3=r.e3 group by ts.tag1, r.e1;
-                  tree                  |       field       |            description
-----------------------------------------+-------------------+------------------------------------
-                                        | distributed       | true
-                                        | vectorized        | false
-  render                                |                   |
-   │                                    | max               | max
-   └── group                            |                   |
-        │                               | aggregate 0       | e1
-        │                               | aggregate 1       | max(e1 + e2)
-        │                               | group by          | e1
-        └── render                      |                   |
-             │                          | e1 + e2           | e1 + e2
-             │                          | e1                | e1
-             └── hash-join              |                   |
-                  │                     | type              | inner
-                  │                     | equality          | (tag1, tag2, tag3) = (e1, e2, e3)
-                  │                     | left cols are key |
-                  ├── distinct          |                   |
-                  │    │                | distinct on       | tag1, tag2, tag3
-                  │    └── synchronizer |                   |
-                  │         └── ts scan |                   |
-                  │                     | ts-table          | ts1
-                  │                     | access mode       | tableTableMeta
-                  └── scan              |                   |
-                                        | table             | re1@primary
-                                        | spans             | FULL SCAN
+                tree               |       field        |            description
+-----------------------------------+--------------------+------------------------------------
+                                   | distributed        | true
+                                   | vectorized         | false
+  render                           |                    |
+   │                               | max                | max
+   └── group                       |                    |
+        │                          | aggregate 0        | e1
+        │                          | aggregate 1        | max(e1 + e2)
+        │                          | group by           | e1
+        └── render                 |                    |
+             │                     | e1 + e2            | e1 + e2
+             │                     | e1                 | e1
+             └── hash-join         |                    |
+                  │                | type               | inner
+                  │                | equality           | (e1, e2, e3) = (tag1, tag2, tag3)
+                  │                | right cols are key |
+                  ├── scan         |                    |
+                  │                | table              | re1@primary
+                  │                | spans              | FULL SCAN
+                  └── distinct     |                    |
+                       │           | distinct on        | tag1, tag2, tag3
+                       └── ts scan |                    |
+                                   | ts-table           | ts1
+                                   | only tag           | true
+                                   | access mode        | tableTableMeta
 (24 rows)
 > select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 and ts.tag2=r.e2 and ts.tag3=r.e3;
   min
@@ -1157,28 +1157,28 @@ INSERT 1
    30
 (1 row)
 > explain select min(r.e1+r.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 and ts.tag2=r.e2 and ts.tag3=r.e3;
-                tree               |       field       |            description
------------------------------------+-------------------+------------------------------------
-                                   | distributed       | true
-                                   | vectorized        | false
-  group                            |                   |
-   │                               | aggregate 0       | min(e1 + e2)
-   │                               | scalar            |
-   └── render                      |                   |
-        │                          | e1 + e2           | e1 + e2
-        └── hash-join              |                   |
-             │                     | type              | inner
-             │                     | equality          | (tag1, tag2, tag3) = (e1, e2, e3)
-             │                     | left cols are key |
-             ├── distinct          |                   |
-             │    │                | distinct on       | tag1, tag2, tag3
-             │    └── synchronizer |                   |
-             │         └── ts scan |                   |
-             │                     | ts-table          | ts1
-             │                     | access mode       | tableTableMeta
-             └── scan              |                   |
-                                   | table             | re1@primary
-                                   | spans             | FULL SCAN
+             tree             |       field        |            description
+------------------------------+--------------------+------------------------------------
+                              | distributed        | true
+                              | vectorized         | false
+  group                       |                    |
+   │                          | aggregate 0        | min(e1 + e2)
+   │                          | scalar             |
+   └── render                 |                    |
+        │                     | e1 + e2            | e1 + e2
+        └── hash-join         |                    |
+             │                | type               | inner
+             │                | equality           | (e1, e2, e3) = (tag1, tag2, tag3)
+             │                | right cols are key |
+             ├── scan         |                    |
+             │                | table              | re1@primary
+             │                | spans              | FULL SCAN
+             └── distinct     |                    |
+                  │           | distinct on        | tag1, tag2, tag3
+                  └── ts scan |                    |
+                              | ts-table           | ts1
+                              | only tag           | true
+                              | access mode        | tableTableMeta
 (20 rows)
 > select min(ts.e1+ts.e2) from redb.re1 r join (select * from tsdb.ts1 where tsdb.ts1.e1 > 0) ts on ts.tag1=r.e1 and ts.tag2=r.e2 group by r.e1;
   min

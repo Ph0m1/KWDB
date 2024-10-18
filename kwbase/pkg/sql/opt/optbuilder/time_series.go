@@ -14,8 +14,6 @@ package optbuilder
 import (
 	"strings"
 
-	"gitee.com/kwbasedb/kwbase/pkg/keys"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
@@ -74,9 +72,6 @@ func (b *Builder) buildTimeSeriesScan(
 	if indexFlags != nil {
 		if indexFlags.FromHintTree {
 			private.HintType = indexFlags.HintType
-			if indexFlags.HintType == keys.TagOnlyHint {
-				private.AccessMode = int(execinfrapb.TSTableReadMode_onlyTag)
-			}
 		}
 	}
 
