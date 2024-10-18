@@ -4,7 +4,7 @@
 
 ## 了解 KWDB
 
-KWDB 是一款 **面向 AIoT 场景的分布式多模数据库** 产品，支持在同一实例同时建立时序库和关系库并融合处理多模数据，具备千万级设备接入、百万级数据秒级写入、亿级数据秒级读取等时序数据高效处理能力，具有稳定安全、高可用、易运维等特点。
+KWDB 是一款**面向 AIoT 场景的分布式多模数据库**产品，支持在同一实例同时建立时序库和关系库并融合处理多模数据，具备千万级设备接入、百万级数据秒级写入、亿级数据秒级读取等时序数据高效处理能力，具有稳定安全、高可用、易运维等特点。
 
 ![img](./static/arch.png)
 
@@ -231,7 +231,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
    ./kwbase start-single-node --insecure --listen-addr=:26257 --background
    ```
 
-4. 数据库启动后即可通过 KaiwuDB 开发者中心或 JDBC 等连接器连接和使用 KWDB，具体连接和使用内容见[使用 KaiwuDB 开发者中心连接 KWDB ](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-kdc.md)和[使用 JDBC 连接 KWDB](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-jdbc.md)。
+4. 数据库启动后即可通过 kwbase CLI 工具、KaiwuDB 开发者中心或 JDBC 等连接器连接和使用 KWDB，具体连接和使用内容见[使用 kwbase CLI 工具连接 KWDB](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-cli.md)、[使用 KaiwuDB 开发者中心连接 KWDB ](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-kdc.md)和[使用 JDBC 连接 KWDB](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-jdbc.md)。
 
 ## 社区
 

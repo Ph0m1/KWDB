@@ -244,7 +244,7 @@ Download the code from the [KWDB code repository](https://gitee.com/kwdb/kwdb) a
    ./kwbase start-single-node --insecure --listen-addr=:26257 --background
    ```
 
-4. After the database starts, it can be connected and used via the KaiwuDB Developer Center or connectors like KaiwuDB JDBC driver. For detailed instructions, see [Connecting to KWDB using KaiwuDB Developer Center](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-kdc.md) and [Connecting to KWDB using JDBC](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-jdbc.md).
+4. After the database starts, you can connect and use it via the kwbase CLI tool, KaiwuDB Developer Center, or connectors like the KaiwuDB JDBC driver. For detailed instructions, see [Connecting to KWDB using kwbase CLI tool](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-cli.md), [Connecting to KWDB using KaiwuDB Developer Center](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-kdc.md) and [Connecting to KWDB using JDBC](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-jdbc.md).
 
 ## Community
 
