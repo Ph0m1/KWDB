@@ -979,7 +979,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			return nil
 
 		case *tree.AlterTablePartitionBy:
-			if n.tableDesc.IsTSTable() {
+			if n.tableDesc.IsTSTable() && t.HashPoint == nil {
 				return pgerror.New(pgcode.WrongObjectType, "can not partition ts table")
 			}
 			partitioning, err := CreatePartitioning(

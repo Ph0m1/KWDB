@@ -515,6 +515,11 @@ func (desc *PartitioningDescriptor) FindPartitionByName(name string) *Partitioni
 			return desc
 		}
 	}
+	for _, r := range desc.HashPoint {
+		if r.Name == name {
+			return desc
+		}
+	}
 	return nil
 
 }
@@ -4198,6 +4203,9 @@ func (desc *PartitioningDescriptor) PartitionNames() []string {
 		names = append(names, l.Subpartitioning.PartitionNames()...)
 	}
 	for _, r := range desc.Range {
+		names = append(names, r.Name)
+	}
+	for _, r := range desc.HashPoint {
 		names = append(names, r.Name)
 	}
 	return names

@@ -367,7 +367,7 @@ func (n *Node) start(
 	initializedEngines, emptyEngines []storage.Engine,
 	clusterName string,
 	attrs roachpb.Attributes,
-	locality roachpb.Locality,
+	locality *roachpb.Locality,
 	cv clusterversion.ClusterVersion,
 	localityAddress []roachpb.LocalityAddress,
 	nodeDescriptorCallback func(descriptor roachpb.NodeDescriptor),
@@ -410,13 +410,19 @@ func (n *Node) start(
 	// Inform the RPC context of the node ID.
 	n.storeCfg.RPCContext.NodeID.Set(ctx, nodeID)
 
+	if locality.Size() == 0 {
+		locality.Tiers = append(locality.Tiers, roachpb.Tier{
+			Key:   "region",
+			Value: "NODE" + nodeID.String(),
+		})
+	}
 	n.startedAt = n.storeCfg.Clock.Now().WallTime
 	n.Descriptor = roachpb.NodeDescriptor{
 		NodeID:          nodeID,
 		Address:         util.MakeUnresolvedAddr(addr.Network(), addr.String()),
 		SQLAddress:      util.MakeUnresolvedAddr(sqlAddr.Network(), sqlAddr.String()),
 		Attrs:           attrs,
-		Locality:        locality,
+		Locality:        *locality,
 		LocalityAddress: localityAddress,
 		ClusterName:     clusterName,
 		ServerVersion:   n.storeCfg.Settings.Version.BinaryVersion(),

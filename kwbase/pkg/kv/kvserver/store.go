@@ -1845,7 +1845,13 @@ func (s *Store) systemGossipUpdate(sysCfg *config.SystemConfig) {
 	now := s.cfg.Clock.Now()
 	newStoreReplicaVisitor(s).Visit(func(repl *Replica) bool {
 		key := repl.Desc().StartKey
-		zone, err := sysCfg.GetZoneConfigForKey(key)
+		var zone *zonepb.ZoneConfig
+		var err error
+		if repl.Desc().GetRangeType() == roachpb.TS_RANGE {
+			zone, err = sysCfg.GetZoneConfigForTSKey(key)
+		} else {
+			zone, err = sysCfg.GetZoneConfigForKey(key)
+		}
 		if err != nil {
 			if log.V(1) {
 				log.Infof(context.TODO(), "failed to get zone config for key %s", key)

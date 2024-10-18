@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gitee.com/kwbasedb/kwbase/pkg/config/zonepb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/raftentry"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/rditer"
@@ -886,7 +887,13 @@ func (r *Replica) updateRangeInfo(desc *roachpb.RangeDescriptor) error {
 	}
 
 	// Find zone config for this range.
-	zone, err := cfg.GetZoneConfigForKey(desc.StartKey)
+	var zone *zonepb.ZoneConfig
+	var err error
+	if desc.GetRangeType() == roachpb.TS_RANGE {
+		zone, err = cfg.GetZoneConfigForTSKey(desc.StartKey)
+	} else {
+		zone, err = cfg.GetZoneConfigForKey(desc.StartKey)
+	}
 	if err != nil {
 		return errors.Errorf("%s: failed to lookup zone config: %s", r, err)
 	}

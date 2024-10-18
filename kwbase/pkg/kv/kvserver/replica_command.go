@@ -36,6 +36,7 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
+	"gitee.com/kwbasedb/kwbase/pkg/config/zonepb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
@@ -2026,6 +2027,7 @@ func getNewNodeIDs(src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
 // ReplicaPlaceholder for details.
 //
 // SendTSSnap process:
+//
 //	(LH)CreateSnapshotForRead
 //	(LH)GetSnapshotData
 //	--GRPC--
@@ -2047,6 +2049,7 @@ func (r *Replica) sendTSSnapshot(
 	}()
 
 	// get TS snapshot
+	start := timeutil.Now()
 	snap, err := r.GetTSSnapshot(ctx, snapType, recipient.StoreID, needTSSnapshotData)
 	defer func() {
 		if snap != nil && snap.TSSnapshotID != 0 {
@@ -2063,6 +2066,8 @@ func (r *Replica) sendTSSnapshot(
 	}
 	defer snap.Close()
 	log.Event(ctx, "generated TS snapshot")
+	durGenerate := timeutil.Since(start)
+	log.Infof(ctx, "generated TS snapshot in %.2fs", durGenerate.Seconds())
 
 	sender, err := r.GetReplicaDescriptor()
 	if err != nil {
@@ -2756,7 +2761,13 @@ func (s *Store) relocateOne(
 	if sysCfg == nil {
 		return nil, nil, fmt.Errorf("no system config available, unable to perform RelocateRange")
 	}
-	zone, err := sysCfg.GetZoneConfigForKey(desc.StartKey)
+	var zone *zonepb.ZoneConfig
+	var err error
+	if desc.GetRangeType() == roachpb.TS_RANGE {
+		zone, err = sysCfg.GetZoneConfigForTSKey(desc.StartKey)
+	} else {
+		zone, err = sysCfg.GetZoneConfigForKey(desc.StartKey)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

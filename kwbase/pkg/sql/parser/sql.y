@@ -518,6 +518,18 @@ func (u *sqlSymUnion) rangePartition() tree.RangePartition {
 func (u *sqlSymUnion) rangePartitions() []tree.RangePartition {
     return u.val.([]tree.RangePartition)
 }
+func (u *sqlSymUnion) hashPointPartition() tree.HashPointPartition {
+    return u.val.(tree.HashPointPartition)
+}
+func (u *sqlSymUnion) hashPointPartitions() []tree.HashPointPartition {
+    return u.val.([]tree.HashPointPartition)
+}
+func (u *sqlSymUnion) iconst32() int32 {
+    return u.val.(int32)
+}
+func (u *sqlSymUnion) iconst32s() []int32 {
+    return u.val.([]int32)
+}
 func (u *sqlSymUnion) setZoneConfig() *tree.SetZoneConfig {
     return u.val.(*tree.SetZoneConfig)
 }
@@ -652,7 +664,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 
 %token <str> GB GEOMETRY GLOBAL GRANT GRANTS GREATEST GROUP GROUPING GROUPS
 
-%token <str> H HAVING HASH HIGH HISTOGRAM HOUR SORT_HISTOGRAM
+%token <str> H HAVING HASH HASHPOINT HIGH HISTOGRAM HOUR SORT_HISTOGRAM
 
 %token <str> IF IFERROR IFNULL IGNORE_FOREIGN_KEYS ILIKE IMMEDIATE IMPORT IN INCLUDE INCREMENT INCREMENTAL
 %token <str> INET INET_CONTAINED_BY_OR_EQUALS
@@ -1024,6 +1036,9 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %type <[]tree.ListPartition> list_partitions
 %type <tree.RangePartition> range_partition
 %type <[]tree.RangePartition> range_partitions
+%type <tree.HashPointPartition> hash_point_partition
+%type <[]tree.HashPointPartition> hash_point_partitions
+%type <[]int32> iconst32_list
 %type <empty> opt_all_clause
 %type <bool> distinct_clause
 %type <tree.DistinctOn> distinct_on_clause
@@ -5474,6 +5489,12 @@ partition_by:
       Range: $8.rangePartitions(),
     }
   }
+| PARTITION BY HASHPOINT '(' hash_point_partitions ')'
+  {
+    $$.val = &tree.PartitionBy{
+      HashPoint: $5.hashPointPartitions(),
+    }
+  }
 | PARTITION BY NOTHING
   {
     $$.val = (*tree.PartitionBy)(nil)
@@ -5520,6 +5541,42 @@ range_partition:
     }
   }
 
+hash_point_partitions:
+  hash_point_partition
+  {
+    $$.val = []tree.HashPointPartition{$1.hashPointPartition()}
+  }
+| hash_point_partitions ',' hash_point_partition
+  {
+    $$.val = append($1.hashPointPartitions(), $3.hashPointPartition())
+  }
+
+iconst32_list:
+  iconst32
+  {
+    $$.val = []int32{$1.iconst32()}
+  }
+| iconst32_list ',' iconst32
+  {
+    $$.val = append($1.iconst32s(), $3.iconst32())
+  }
+
+hash_point_partition:
+  partition VALUES IN '[' iconst32_list ']'
+  {
+    $$.val = tree.HashPointPartition{
+      Name: tree.UnrestrictedName($1),
+      HashPoints: $5.iconst32s(),
+    }
+  }
+| partition VALUES FROM '(' iconst32 ')' TO '(' iconst32 ')'
+  {
+    $$.val = tree.HashPointPartition{
+      Name: tree.UnrestrictedName($1),
+      From: $5.iconst32(),
+      To: $9.iconst32(),
+    }
+  }
 // Treat SERIAL pseudo-types as separate case so that types.T does not have to
 // support them as first-class types (e.g. they should not be supported as CAST
 // target types).
@@ -11890,6 +11947,7 @@ unreserved_keyword:
 | GROUPS
 | H
 | HASH
+| HASHPOINT
 | HIGH
 | HISTOGRAM
 | SORT_HISTOGRAM

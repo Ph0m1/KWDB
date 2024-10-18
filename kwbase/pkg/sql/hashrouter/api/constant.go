@@ -42,7 +42,7 @@ type EntityRangeGroupID uint32
 const HashParam = 65535
 
 // HashParamV2 is the const of 10
-const HashParamV2 = 20
+const HashParamV2 = 2000
 
 // HashPoint is the hashID
 type HashPoint uint16

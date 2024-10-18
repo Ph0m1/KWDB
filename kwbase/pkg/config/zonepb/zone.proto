@@ -128,7 +128,7 @@ message ZoneConfig {
   // most preferred to lease preferred. The first preference that an existing
   // replica of a range matches will take priority.
   repeated LeasePreference lease_preferences = 9 [(gogoproto.nullable) = false,
-           (gogoproto.moretags) = "yaml:\"lease_preferences,flow\""];
+    (gogoproto.moretags) = "yaml:\"lease_preferences,flow\""];
 
   // InheritedLeasePreferences specifies if the value in the LeasePreferences field
   // was inherited from the zone's parent or specified explicitly by the user.
@@ -162,9 +162,11 @@ message Subzone {
   // represents. It is empty when the subzone represents the entire index.
   optional string partition_name = 2 [(gogoproto.nullable) = false];
 
+  repeated int32 hash_points = 3 ;
+
   // Config stores the ZoneConfig that applies to this Subzone. It never
   // contains nested subzones.
-  optional ZoneConfig config = 3 [(gogoproto.nullable) = false];
+  optional ZoneConfig config = 4 [(gogoproto.nullable) = false];
 }
 
 message SubzoneSpan {

@@ -921,8 +921,6 @@ char* GenPayloadDataWithNull(kwdbContext_p ctx, k_uint32 count, k_uint32& payloa
   return value;
 }
 
-#define HASHPOINT_RANGE 20
-
 void make_hashpoint(std::vector<k_uint32> *hps) {
   for (uint32_t i=0; i<HASHPOINT_RANGE; i++) {
     hps->push_back(i);

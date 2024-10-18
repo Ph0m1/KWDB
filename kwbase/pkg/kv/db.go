@@ -27,6 +27,7 @@ package kv
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/base"
@@ -574,6 +575,7 @@ func (db *DB) SplitAndScatter(
 		RequestHeader:   roachpb.RequestHeaderFromSpan(roachpb.Span{Key: key, EndKey: key.Next()}),
 		RandomizeLeases: true,
 	}
+	log.Infof(ctx, "send AdminScatterRequest to [%v, %v]", key, key.Next())
 	if _, pErr := SendWrapped(ctx, db.NonTransactionalSender(), scatterReq); pErr != nil {
 		return pErr.GoError()
 	}
@@ -608,6 +610,7 @@ func (db *DB) AdminTransferLease(
 ) error {
 	b := &Batch{}
 	b.adminTransferLease(key, target)
+	log.Infof(ctx, "will AdminTransferLease %+v: %s", b.reqs[0].GetAdminTransferLease(), debug.Stack())
 	return getOneErr(db.Run(ctx, b), b)
 }
 

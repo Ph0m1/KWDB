@@ -1917,7 +1917,7 @@ func (s *Server) Start(ctx context.Context) error {
 		bootstrappedEngines, emptyEngines,
 		s.cfg.ClusterName,
 		s.cfg.NodeAttributes,
-		s.cfg.Locality,
+		&s.cfg.Locality,
 		cv,
 		s.cfg.LocalityAddresses,
 		s.execCfg.DistSQLPlanner.SetNodeDesc,

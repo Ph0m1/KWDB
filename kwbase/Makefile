@@ -235,7 +235,7 @@ LDFLAGS := $(LDFLAGS) -L$(KWDB_LIB_DIR) -Wl,-rpath,$(KWDB_LIB_DIR),-rpath,$$ORIG
 # toolchain.
 #override LINKFLAGS = -X gitee.com/kwbasedb/kwbase/pkg/build.typ=$(BUILDTYPE) -linkmode "external" -extldflags "$(LDFLAGS) -lasan"
 
-WITH_ASAN ?= 
+WITH_ASAN ?=
 ifeq ($(WITH_ASAN), ON)
 WITH_ASAN_LINK = -X gitee.com/kwbasedb/kwbase/pkg/build.typ=$(BUILDTYPE) -extldflags "$(LDFLAGS) -lasan"
 export LD_PRELOAD = $(shell $(CC) -print-file-name=libasan.so)
@@ -487,7 +487,7 @@ C_LIBS_COMMON = \
 	$(if $(target-is-windows),,$(LIBEDIT)) \
 	$(LIBPROTOBUF) $(LIBSNAPPY) $(LIBROCKSDB) \
 	$(if $(findstring aarch64,$(TARGET_TRIPLE)),,$(LIBUNWIND))
-C_LIBS_OSS = $(C_LIBS_COMMON) $(LIBROACH) 
+C_LIBS_OSS = $(C_LIBS_COMMON) $(LIBROACH)
 C_LIBS = $(C_LIBS_COMMON) $(LIBROACH)
 
 # Go does not permit dashes in build tags. This is undocumented.
@@ -584,7 +584,7 @@ $(LIBUNWIND_SRC_DIR)/configure: $(LIBUNWIND_SRC_DIR)/configure.ac
 $(LIBUNWIND_DIR)/Makefile: $(C_DEPS_DIR)/libunwind-rebuild $(LIBUNWIND_SRC_DIR)/configure
 	rm -rf $(LIBUNWIND_DIR)
 	mkdir -p $(LIBUNWIND_DIR)
-	cd $(LIBUNWIND_DIR) && $(LIBUNWIND_SRC_DIR)/configure --enable-static --disable-shared 
+	cd $(LIBUNWIND_DIR) && $(LIBUNWIND_SRC_DIR)/configure --enable-static --disable-shared
 endif
 
 $(JEMALLOC_SRC_DIR)/configure.ac: | bin/.submodules-initialized
@@ -686,7 +686,7 @@ $(LIBCRYPTOPP): $(CRYPTOPP_DIR)/Makefile bin/uptodate .ALWAYS_REBUILD
 
 ifneq ($(findstring aarch64,$(TARGET_TRIPLE)),aarch64)
 $(LIBUNWIND): $(LIBUNWIND_DIR)/Makefile bin/uptodate .ALWAYS_REBUILD
-	@uptodate $@ $(LIBUNWIND_SRC_DIR) || $(MAKE) --no-print-directory -C $(LIBUNWIND_DIR) 
+	@uptodate $@ $(LIBUNWIND_SRC_DIR) || $(MAKE) --no-print-directory -C $(LIBUNWIND_DIR)
 endif
 
 $(LIBJEMALLOC): $(JEMALLOC_DIR)/Makefile bin/uptodate .ALWAYS_REBUILD

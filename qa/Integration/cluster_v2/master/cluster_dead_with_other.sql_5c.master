@@ -4,6 +4,8 @@ SET CLUSTER SETTING
 SET CLUSTER SETTING
 > SET CLUSTER SETTING server.time_until_store_dead = '1min15s'; 
 SET CLUSTER SETTING
+> SET CLUSTER SETTING kv.allocator.ts_consider_rebalance.enabled = true;
+SET CLUSTER SETTING
 > import database csv data ("nodelocal://1/tsdb1");
   job_id |  status   | fraction_completed |  rows  | abandon_rows | reject_rows
 ---------+-----------+--------------------+--------+--------------+--------------
@@ -54,7 +56,7 @@ SET CLUSTER SETTING
 ----------
   250000
 (1 row)
-> SELECT COUNT(1) FROM tsdb1.ts_t3; 
+> SELECT COUNT(1) FROM tsdb1.ts_t3;
   count
 ----------
   250000

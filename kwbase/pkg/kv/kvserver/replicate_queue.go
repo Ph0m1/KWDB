@@ -74,6 +74,18 @@ var minLeaseTransferInterval = settings.RegisterNonNegativeDurationSetting(
 	1*time.Second,
 )
 
+var leaseholderModeSettings = settings.RegisterIntSetting(
+	"kv.kvserver.ts_leaseholder_transfer_strict.mode",
+	"if set to 1, leaseholder will be more difficult to rebalance, if set to 2, behindhand followers cannot acquire lease",
+	0,
+)
+
+var considerRebalanceSettings = settings.RegisterBoolSetting(
+	"kv.allocator.ts_consider_rebalance.enabled",
+	"if set to true, ts range will be rebalanced background",
+	true,
+)
+
 var (
 	metaReplicateQueueAddReplicaCount = metric.Metadata{
 		Name:        "queue.replicate.addreplica",
@@ -226,7 +238,7 @@ func newReplicateQueue(store *Store, g *gossip.Gossip, allocator Allocator) *rep
 func (rq *replicateQueue) shouldQueue(
 	ctx context.Context, now hlc.Timestamp, repl *Replica, sysCfg *config.SystemConfig,
 ) (shouldQ bool, priority float64) {
-	if api.MppMode && repl.isTs() {
+	if api.MppMode {
 		return false, 0
 	}
 	desc, zone := repl.DescAndZone()
@@ -246,6 +258,11 @@ func (rq *replicateQueue) shouldQueue(
 	} else if action != AllocatorConsiderRebalance {
 		log.VEventf(ctx, 2, "repair needed (%s), enqueuing", action)
 		return true, priority
+	}
+
+	if action == AllocatorConsiderRebalance && !considerRebalanceSettings.Get(&rq.store.cfg.Settings.SV) && desc.GetRangeType() == roachpb.TS_RANGE {
+		log.Infof(ctx, "replica is not need rebalanced", action)
+		return false, 0
 	}
 
 	if !rq.store.TestingKnobs().DisableReplicaRebalancing {
@@ -950,12 +967,6 @@ type transferLeaseOptions struct {
 	dryRun                   bool
 }
 
-var leaseholderModeSettings = settings.RegisterBoolSetting(
-	"kv.kvserver.ts_leaseholder_transfer_strict.enabled",
-	"if set to true, leaseholder will be more difficult to transfer",
-	false,
-)
-
 func (rq *replicateQueue) findTargetAndTransferLease(
 	ctx context.Context,
 	repl *Replica,
@@ -984,21 +995,6 @@ func (rq *replicateQueue) findTargetAndTransferLease(
 		log.VEventf(ctx, 1, "transferring lease to s%d", target.StoreID)
 		return false, nil
 	}
-	sv := rq.store.ClusterSettings()
-	tsLeaseholderMode := leaseholderModeSettings.Get(&sv.SV)
-	if target.GetTag() == roachpb.TS_REPLICA && tsLeaseholderMode {
-		// For TS ranges, only allow transfer lease to the replica with almost all raft logs.
-		var replStatus CollectReplicaStatusResponse
-		var err error
-		if replStatus, err = repl.collectStatusFromReplica(ctx, target); err != nil {
-			return false, nil
-		}
-		const tsMaxNewLeaseHolderLackRaftLog uint64 = 100
-		if replStatus.ReplicaStatus.ApplyIndex+tsMaxNewLeaseHolderLackRaftLog < repl.mu.state.RaftAppliedIndex {
-			return false, nil
-		}
-	}
-
 	avgQPS, qpsMeasurementDur := repl.leaseholderStats.avgQPS()
 	if qpsMeasurementDur < MinStatsDuration {
 		avgQPS = 0
@@ -1007,11 +1003,33 @@ func (rq *replicateQueue) findTargetAndTransferLease(
 	return err == nil, err
 }
 
+func (rq *replicateQueue) canTransferLeseTo(
+	ctx context.Context, repl *Replica, target roachpb.ReplicaDescriptor,
+) error {
+	sv := rq.store.ClusterSettings()
+	tsLeaseholderMode := leaseholderModeSettings.Get(&sv.SV)
+	if tsLeaseholderMode > 0 && target.GetTag() == roachpb.TS_REPLICA {
+		// For TS ranges, only allow transfer lease to the replica with almost all raft logs.
+		var replStatus CollectReplicaStatusResponse
+		var err error
+		if replStatus, err = repl.collectStatusFromReplica(ctx, target); err != nil {
+			return errors.Newf("cannot transfer to [n%d, s%d] due to unknown status", target.NodeID, target.StoreID)
+		}
+		if replStatus.ReplicaStatus.ApplyIndex+tsMaxNewLeaseHolderLackRaftLog < repl.mu.state.RaftAppliedIndex {
+			return errors.Newf("cannot transfer to [n%d, s%d] due to behindhand status", target.NodeID, target.StoreID)
+		}
+	}
+	return nil
+}
+
 func (rq *replicateQueue) transferLease(
 	ctx context.Context, repl *Replica, target roachpb.ReplicaDescriptor, rangeQPS float64,
 ) error {
 	rq.metrics.TransferLeaseCount.Inc(1)
 	log.VEventf(ctx, 1, "transferring lease to s%d", target.StoreID)
+	if err := rq.canTransferLeseTo(ctx, repl, target); err != nil {
+		return err
+	}
 	if err := repl.AdminTransferLease(ctx, target.StoreID); err != nil {
 		return errors.Wrapf(err, "%s: unable to transfer lease to s%d", repl, target.StoreID)
 	}

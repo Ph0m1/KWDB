@@ -83,6 +83,40 @@ def get_nums(node_str: str):
     return int(num)
 
 
+def get_create_table_arg(node_str: str):
+    strs = node_str.split(':')
+    if len(strs) < 2:
+        return None
+    args = strs[1]
+    args = re.sub(' ', '', args)
+    args = args.split(',')
+    ids = []
+    ts = False
+    rel = False
+    num = 0
+    for arg in args:
+        if re.match('\d+', arg):
+            num = int(re.sub('c', '', arg))
+        elif re.match('rel', arg):
+            rel = True
+        elif re.match('ts', arg):
+            ts = True
+
+    if ts == False and rel == False:
+        ts = True
+
+    return num, rel, ts
+
+
+def get_nums(node_str: str):
+    strs = node_str.split(':')
+    if len(strs) < 2:
+        return None
+    num = strs[1]
+    num = re.sub(' ', '', num)
+    return int(num)
+
+
 def get_url_from_node_id(node_id: int):
     return node_id_map[str(node_id)]
 
@@ -430,7 +464,6 @@ if __name__ == "__main__":
                             'code8 char(128) NOT NULL,code9 char(254),code10 char(60),code11 char(254),code12 char(60),' \
                             'code13 char(2),code14 char(1023) NOT NULL,code15 char(1),code16 char(254) NOT NULL);'.format(
                     i)
-
                 if create_ts == True and create_rel == False:
                     create_stmts.append(ts_table)
                 elif create_rel == True and create_ts == False:

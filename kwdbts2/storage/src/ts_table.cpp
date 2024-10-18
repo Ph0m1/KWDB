@@ -1161,8 +1161,7 @@ uint32_t TsTable::GetConsistentHashId(const char* data, size_t length) {
     hash_val *= prime;
     hash_val ^= b;
   }
-  uint32_t range_num = 20;
-  return hash_val % range_num;
+  return hash_val % HASHPOINT_RANGE;
 }
 
 MMapRootTableManager* TsTable::CreateMMapRootTableManager(string& db_path, string& tbl_sub_path, KTableKey table_id,

@@ -266,6 +266,34 @@ func (s *SystemConfig) GetZoneConfigForKey(key roachpb.RKey) (*zonepb.ZoneConfig
 	return s.getZoneConfigForKey(DecodeKeyIntoZoneIDAndSuffix(key))
 }
 
+// GetZoneConfigForTSKey looks up the zone config for the ts table
+func (s *SystemConfig) GetZoneConfigForTSKey(key roachpb.RKey) (*zonepb.ZoneConfig, error) {
+	tableID, hashPoint, _, err := sqlbase.DecodeTsRangeKey(key, true)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := s.getZoneEntry(uint32(tableID))
+	if err != nil {
+		return nil, err
+	}
+	if entry.zone != nil {
+		if entry.placeholder != nil {
+			for _, subZone := range entry.placeholder.Subzones {
+				if subZone.HashPoints != nil {
+					for _, point := range subZone.HashPoints {
+						if uint64(point) == hashPoint {
+							subZone.Config.InheritFromParent(entry.zone)
+							return &subZone.Config, nil
+						}
+					}
+				}
+			}
+		}
+		return entry.zone, nil
+	}
+	return s.DefaultZoneConfig, nil
+}
+
 // DecodeKeyIntoZoneIDAndSuffix figures out the zone that the key belongs to.
 func DecodeKeyIntoZoneIDAndSuffix(key roachpb.RKey) (id uint32, keySuffix []byte) {
 	objectID, keySuffix, ok := DecodeObjectID(key)

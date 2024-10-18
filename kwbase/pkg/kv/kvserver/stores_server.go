@@ -101,8 +101,8 @@ func (is Server) CollectReplicaStatus(
 			if err != nil {
 				return err
 			}
-			resp.ReplicaStatus.StartKey = r.Desc().StartKey
-			curLease, _ := r.GetLease()
+			resp.ReplicaStatus.StartKey = r.mu.state.Desc.StartKey
+			curLease, _ := r.getLeaseRLocked()
 			resp.ReplicaStatus.StoreID = s.StoreID()
 			resp.ReplicaStatus.NodeID = s.nodeDesc.NodeID
 			if r.mu.leaderID == r.mu.replicaID {

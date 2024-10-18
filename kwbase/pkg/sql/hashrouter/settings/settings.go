@@ -29,7 +29,7 @@ import "gitee.com/kwbasedb/kwbase/pkg/settings"
 var DefaultPartitionCoefficient = settings.RegisterIntSetting(
 	"sql.hashrouter.partition_coefficient_num",
 	"the ts range count in the cluster",
-	4,
+	2000/5,
 )
 
 // DefaultEntityRangeReplicaNum is the default replica number

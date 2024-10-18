@@ -508,6 +508,16 @@ func (kvSS *kvBatchSnapshotStrategy) SendTS(
 
 			if len(tsData) == 0 {
 				log.VEventf(ctx, 3, "TsEngine.sendTSByte end r%v, %v, %v, %v, %v, %v", rangeID, snap.tableID, snap.TSSnapshotID, totalSize, timeutil.Since(start).String(), err)
+				durSent := timeutil.Since(start)
+				log.Infof(
+					ctx,
+					"sendTSByte streamed %s to %s in %.2fs @ %s/s: %s",
+					snap,
+					header.RaftMessageRequest.ToReplica,
+					durSent.Seconds(),
+					humanizeutil.IBytes(int64(float64(totalSize)/durSent.Seconds())),
+					kvSS.Status(),
+				)
 				// If it is an empty snapshot, skip sendTSByte
 				break
 			}

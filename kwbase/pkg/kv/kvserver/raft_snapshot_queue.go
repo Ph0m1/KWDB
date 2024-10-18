@@ -58,7 +58,8 @@ func newRaftSnapshotQueue(store *Store, g *gossip.Gossip) *raftSnapshotQueue {
 	rq.baseQueue = newBaseQueue(
 		"raftsnapshot", rq, store, g,
 		queueConfig{
-			maxSize: defaultQueueMaxSize,
+			maxSize:        defaultQueueMaxSize,
+			maxConcurrency: 10,
 			// The Raft leader (which sends Raft snapshots) may not be the
 			// leaseholder. Operating on a replica without holding the lease is the
 			// reason Raft snapshots cannot be performed by the replicateQueue.

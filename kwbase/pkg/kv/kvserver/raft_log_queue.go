@@ -58,6 +58,8 @@ const (
 	// when Raft log truncation usually occurs when using the number of entries
 	// as the sole criteria.
 	RaftLogQueueStaleSize = 64 << 10
+	// RaftLogQueueTsStaleSize is the minimum size with 5 GB. Ts Range is not split by size.
+	RaftLogQueueTsStaleSize = 5 << 30
 	// Allow a limited number of Raft log truncations to be processed
 	// concurrently.
 	raftLogQueueConcurrency = 4
@@ -185,7 +187,11 @@ func newTruncateDecision(ctx context.Context, r *Replica) (truncateDecision, err
 	if targetSize > *r.mu.zone.RangeMaxBytes {
 		targetSize = *r.mu.zone.RangeMaxBytes
 	}
-
+	if Desc, err := r.getReplicaDescriptorRLocked(); err == nil {
+		if Desc.GetTag() == roachpb.TS_REPLICA {
+			targetSize = 10 << 30 // 10 GB
+		}
+	}
 	raftStatus := r.raftStatusRLocked()
 
 	firstIndex, err := r.raftFirstIndexLocked()
@@ -241,6 +247,9 @@ func newTruncateDecision(ctx context.Context, r *Replica) (truncateDecision, err
 	}
 
 	decision := computeTruncateDecision(input)
+	if r.isTs() {
+		decision.IsTs = true
+	}
 	return decision, nil
 }
 
@@ -298,6 +307,7 @@ type truncateDecision struct {
 
 	NewFirstIndex uint64 // first index of the resulting log after truncation
 	ChosenVia     string
+	IsTs          bool // ts range flag
 }
 
 func (td *truncateDecision) raftSnapshotsForIndex(index uint64) int {
@@ -369,6 +379,10 @@ func (td *truncateDecision) NumTruncatableIndexes() int {
 
 func (td *truncateDecision) ShouldTruncate() bool {
 	n := td.NumTruncatableIndexes()
+	if td.IsTs {
+		return n >= RaftLogQueueStaleThreshold ||
+			(n > 0 && td.Input.LogSize >= RaftLogQueueTsStaleSize)
+	}
 	return n >= RaftLogQueueStaleThreshold ||
 		(n > 0 && td.Input.LogSize >= RaftLogQueueStaleSize)
 }
@@ -543,22 +557,39 @@ func (rlq *raftLogQueue) process(ctx context.Context, r *Replica, _ *config.Syst
 		// We need to hold raftMu both to access the sideloaded storage and to
 		// make sure concurrent Raft activity doesn't foul up our update to the
 		// cached in-memory values.
-		r.raftMu.Lock()
-		n, err := ComputeRaftLogSize(ctx, r.RangeID, r.Engine(), r.raftMu.sideloaded)
-		if err == nil {
-			r.mu.Lock()
-			r.mu.raftLogSize = n
-			r.mu.raftLogLastCheckSize = n
-			r.mu.raftLogSizeTrusted = true
-			r.mu.Unlock()
+		if r.isTs() {
+			// TODO by fyx: for ts range log maybe large, compute raft log size is too slow,
+			// so temp not raftMu lock because ts log size is not very important
+			n, err := ComputeRaftLogSize(ctx, r.RangeID, r.Engine(), r.raftMu.sideloaded)
+			r.raftMu.Lock()
+			if err == nil {
+				r.mu.Lock()
+				r.mu.raftLogSize = n
+				r.mu.raftLogLastCheckSize = n
+				r.mu.raftLogSizeTrusted = true
+				r.mu.Unlock()
+			}
+			r.raftMu.Unlock()
+			if err != nil {
+				return errors.Wrap(err, "ts recomputing raft log size")
+			}
+			log.VEventf(ctx, 2, "ts recomputed raft log size to %s", humanizeutil.IBytes(n))
+		} else {
+			r.raftMu.Lock()
+			n, err := ComputeRaftLogSize(ctx, r.RangeID, r.Engine(), r.raftMu.sideloaded)
+			if err == nil {
+				r.mu.Lock()
+				r.mu.raftLogSize = n
+				r.mu.raftLogLastCheckSize = n
+				r.mu.raftLogSizeTrusted = true
+				r.mu.Unlock()
+			}
+			r.raftMu.Unlock()
+			if err != nil {
+				return errors.Wrap(err, "recomputing raft log size")
+			}
+			log.VEventf(ctx, 2, "recomputed raft log size to %s", humanizeutil.IBytes(n))
 		}
-		r.raftMu.Unlock()
-
-		if err != nil {
-			return errors.Wrap(err, "recomputing raft log size")
-		}
-
-		log.VEventf(ctx, 2, "recomputed raft log size to %s", humanizeutil.IBytes(n))
 
 		// Override the decision, now that an accurate log size is available.
 		decision, err = newTruncateDecision(ctx, r)

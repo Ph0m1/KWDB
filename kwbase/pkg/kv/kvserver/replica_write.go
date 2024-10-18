@@ -493,7 +493,7 @@ Raft Status: %+v
 
 and a copy of https://yourhost:8080/#/reports/range/%d
 
-If you are using KWBaseDB Enterprise, reach out through your
+If you are using KWDB Enterprise, reach out through your
 support contract. Otherwise, please open an issue at:
 
   https://gitee.com/kwbasedb/kwbase/issues/new/choose

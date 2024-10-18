@@ -27,7 +27,6 @@ package sql
 import (
 	"bytes"
 
-	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/config/zonepb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
@@ -89,13 +88,13 @@ func GenerateSubzoneSpans(
 	hasNewSubzones bool,
 ) ([]zonepb.SubzoneSpan, error) {
 	// Removing zone configs does not require a valid license.
-	if hasNewSubzones {
-		org := ClusterOrganization.Get(&st.SV)
-		if err := base.CheckEnterpriseEnabled(st, clusterID, org,
-			"replication zones on indexes or partitions"); err != nil {
-			return nil, err
-		}
-	}
+	//if hasNewSubzones {
+	//	org := ClusterOrganization.Get(&st.SV)
+	//	if err := base.CheckEnterpriseEnabled(st, clusterID, org,
+	//		"replication zones on indexes or partitions"); err != nil {
+	//		return nil, err
+	//	}
+	//}
 
 	a := &sqlbase.DatumAlloc{}
 

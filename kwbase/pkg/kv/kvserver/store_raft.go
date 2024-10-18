@@ -355,13 +355,7 @@ func (s *Store) processRaftSnapshotRequest(
 		} else {
 			_, expl, err = r.handleRaftReadyRaftMuLocked(ctx, inSnap)
 		}
-		if !r.IsInitialized() {
-			log.Warningf(ctx, "current range %d is not initialized, inSnap.IsTSSnapshot:%v \n", r.RangeID, inSnap.IsTSSnapshot)
-		}
 		maybeFatalOnRaftReadyErr(ctx, expl, err)
-		if inSnap.IsTSSnapshot && !r.IsInitialized() {
-			return roachpb.NewError(kwdberrors.Errorf("apply ts snapshot failed, replica %d is uninitialized.", r.RangeID))
-		}
 		removePlaceholder = false
 		return nil
 	})

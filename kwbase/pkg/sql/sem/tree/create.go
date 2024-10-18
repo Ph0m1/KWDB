@@ -1029,8 +1029,9 @@ const (
 type PartitionBy struct {
 	Fields NameList
 	// Exactly one of List or Range is required to be non-empty.
-	List  []ListPartition
-	Range []RangePartition
+	List      []ListPartition
+	Range     []RangePartition
+	HashPoint []HashPointPartition
 }
 
 // Format implements the NodeFormatter interface.
@@ -1100,6 +1101,21 @@ func (node *RangePartition) Format(ctx *FmtCtx) {
 	if node.Subpartition != nil {
 		ctx.FormatNode(node.Subpartition)
 	}
+}
+
+// HashPointPartition represents a PARTITION definition within a PARTITION BY RANGE.
+type HashPointPartition struct {
+	Name       UnrestrictedName
+	HashPoints []int32
+	From       int32
+	To         int32
+}
+
+// Format implements the NodeFormatter interface.
+func (node *HashPointPartition) Format(ctx *FmtCtx) {
+	ctx.WriteString(`PARTITION `)
+	ctx.FormatNode(&node.Name)
+	ctx.WriteString(fmt.Sprintf("HashPoint VALUES  %+v", node.HashPoints))
 }
 
 // StorageParam is a key-value parameter for table storage.
