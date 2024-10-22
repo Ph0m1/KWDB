@@ -45,6 +45,7 @@ class ParallelGroup : public ExecTask {
   KWThdContext *thd_{nullptr};
   k_int32 repeat_{0};
   k_int32 index_{0};
+  k_int8 timezone_;
 
  public:
   ParallelGroup() {}

@@ -149,7 +149,7 @@ KStatus TsSamplerOperator::setup(const TSSamplerSpec* tsInfo) {
     sketchCol_ = total_columns + 4;
     bucketIDCol_ = total_columns + 5;
     bucketNumRowsCol_ = total_columns + 6;
-    LOG_DEBUG("tsSamplerOperator setup success and table id is %ld in create statistics", input_->table()->object_id_);
+    LOG_DEBUG("tsSamplerOperator setup success and table id is %lu in create statistics", input_->table()->object_id_);
     code = SUCCESS;
   }
   return code;
@@ -357,7 +357,7 @@ EEIteratorErrCode TsSamplerOperator::mainLoop<SortedHistogram>(kwdbContext_p ctx
 
 void TsSamplerOperator::AddData(const vector<optional<DataVariant>>& row_data, DataChunkPtr& chunk) {
   if (row_data.size() != chunk->ColumnNum()) {
-    LOG_ERROR("out row size exceeds elements with table %ld during getting sample result in create statistics",
+    LOG_ERROR("out row size exceeds elements with table %lu during getting sample result in create statistics",
               input_->table()->object_id_)
     return;
   }
@@ -506,10 +506,11 @@ EEIteratorErrCode TsSamplerOperator::Start(kwdbContext_p ctx) {
 
 EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
-  LOG_DEBUG("start collecting timeseries table %ld statistics", input_->table()->object_id_);
+  LOG_DEBUG("start collecting timeseries table %lu statistics", input_->table()->object_id_);
   LOG_DEBUG("normal columns num: %zu; primary key columns num: %zu", normalCol_sketches_.size(),
              primary_tag_sketches_.size());
-  if (!current_thd) {
+  KWThdContext *thd = current_thd;
+  if (!thd) {
     Return(EE_ERROR)
   }
 
@@ -547,9 +548,9 @@ EEIteratorErrCode TsSamplerOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
   if (ret != SUCCESS) {
     Return(EE_ERROR);
   }
-
+  OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
   is_done_ = true;
-  LOG_DEBUG("complete collecting timeseries table %ld statistics", input_->table()->object_id_);
+  LOG_DEBUG("complete collecting timeseries table %lu statistics", input_->table()->object_id_);
   Return(EE_OK);
 }
 
@@ -620,7 +621,7 @@ KStatus TsSamplerOperator::ProcessSketches(kwdbContext_p ctx, const std::vector<
     sketchVal = sk.sketch->MarshalBinary();
     if (sketchVal.size() > MAX_SKETCH_LEN) {
       // Avoid over length
-      LOG_ERROR("sketch column over length when scanning table %ld", input_->table()->object_id_)
+      LOG_ERROR("sketch column over length when scanning table %lu", input_->table()->object_id_)
       char buffer[256];
       snprintf(buffer, sizeof(buffer), "sketch column %u over length during statistics collection. ", sk.sketchIdx);
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, buffer);

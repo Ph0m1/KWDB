@@ -68,7 +68,7 @@ TableScanOperator::TableScanOperator(TsFetcherCollection* collection, TSReaderSp
 }
 
 TableScanOperator::TableScanOperator(const TableScanOperator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       post_(other.post_),
       schema_id_(other.schema_id_),
       object_id_(other.object_id_),
@@ -344,13 +344,14 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
 
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     output_queue_.pop();
     auto end = std::chrono::high_resolution_clock::now();
     fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
     if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
-      Return(EEIteratorErrCode::EE_OK)
+      Return(EEIteratorErrCode::EE_OK);
     } else {
-      Return(code)
+      Return(code);
     }
   } else {
     auto end = std::chrono::high_resolution_clock::now();
@@ -358,7 +359,7 @@ EEIteratorErrCode TableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk
     if (is_done_) {
       Return(EEIteratorErrCode::EE_END_OF_RECORD);
     } else {
-      Return(code)
+      Return(code);
     }
   }
 }

@@ -51,6 +51,16 @@ class BaseOperator {
     }
   }
 
+  explicit BaseOperator(const BaseOperator& other)
+      : table_(other.table_),
+        processor_id_(other.processor_id_),
+        output_encoding_(other.output_encoding_),
+        collection_(other.collection_) {
+    if (nullptr != collection_) {
+      collection_->emplace(processor_id_, &fetcher_);
+    }
+  }
+
   virtual ~BaseOperator() {
     if (num_ > 0 && renders_) {
       free(renders_);
@@ -63,8 +73,6 @@ class BaseOperator {
     num_ = 0;
     renders_ = nullptr;
   }
-
-  BaseOperator(const BaseOperator&) = delete;
 
   BaseOperator& operator=(const BaseOperator&) = delete;
 
@@ -117,6 +125,8 @@ class BaseOperator {
 
   static const k_uint64 DEFAULT_MAX_MEM_BUFFER_SIZE = 268435456;  // 256M
 
+  void SetOutputEncoding(bool encode) { output_encoding_ = encode; }
+
  protected:
   inline void constructDataChunk(k_uint32 capacity = 0) {
     current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_, capacity);
@@ -150,6 +160,7 @@ class BaseOperator {
   k_bool is_done_{false};
 
   bool is_clone_{false};
+  bool output_encoding_{false};
 
  public:
   DataChunkPtr temporary_data_chunk_;

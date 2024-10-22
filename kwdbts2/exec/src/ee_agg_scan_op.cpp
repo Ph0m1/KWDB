@@ -232,6 +232,7 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
     } else {
       chunk = std::move(output_queue_.front());
     }
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     output_queue_.pop();
     auto end = std::chrono::high_resolution_clock::now();
     fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);

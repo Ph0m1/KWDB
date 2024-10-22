@@ -43,6 +43,7 @@ class Processors {
                                      BaseOperator **iterator, TABLE **table);
   inline EEIteratorErrCode EncodeDataChunk(kwdbContext_p ctx, DataChunk *chunk,
                                     EE_StringInfo msgBuffer, k_bool is_pg);
+  inline void FindTopProcessorId(k_uint32 processor_id);
 
  public:
   Processors()
@@ -67,7 +68,7 @@ class Processors {
    */
   KStatus Init(kwdbContext_p ctx, const TSFlowSpec *fspec);
 
-  KStatus InitIterator(kwdbContext_p ctx);
+  KStatus InitIterator(kwdbContext_p ctx, bool isPG);
   KStatus CloseIterator(kwdbContext_p ctx);
   /**
    * @brief Execute processors and encode
@@ -77,7 +78,7 @@ class Processors {
    * @return KStatus
    */
   KStatus RunWithEncoding(kwdbContext_p ctx, char **buffer, k_uint32 *length,
-                          k_uint32 *count, k_bool *is_last_record, k_bool is_pg = KFALSE);
+                          k_uint32 *count, k_bool *is_last_record);
 
   BaseOperator *GetRootIterator() { return root_iterator_; }
 
@@ -95,7 +96,8 @@ class Processors {
   std::list<BaseOperator *> iter_list_;
   // limit, for pgwire encoding
   k_int64 command_limit_{0};
-  k_int64 count_for_limit_{0};
+  std::atomic<k_int64> count_for_limit_{0};
   TsFetcherCollection collection_;
+  k_uint32 top_process_id_{0};
 };
 }  // namespace kwdbts

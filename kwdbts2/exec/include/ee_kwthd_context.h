@@ -24,6 +24,9 @@ class KWThdContext {
   ParallelGroup* parallel_group_{nullptr};
   k_uint64 thd_id_{0};
   IChunk* data_chunk_{nullptr};
+  bool is_pg_encode_{false};
+  k_int64 *command_limit_{nullptr};
+  std::atomic<k_int64> *count_for_limit_{nullptr};
 
  public:
   KWThdContext() { thd_id_ = pthread_self(); }
@@ -49,6 +52,14 @@ class KWThdContext {
   k_uint64 GetThdID() { return thd_id_; }
   void SetDataChunk(IChunk *ptr) { data_chunk_ = ptr; }
   IChunk* GetDataChunk() { return data_chunk_; }
+  void SetPgEncode(bool pg) { is_pg_encode_ = pg; }
+  bool GetPgEncode() { return is_pg_encode_; }
+  k_int64* GetCommandLimit() { return command_limit_; }
+  void SetCommandLimit(k_int64* limit) { command_limit_ = limit; }
+  std::atomic<k_int64>* GetCountForLimit() { return count_for_limit_; }
+  void SetCountForLimit(std::atomic<k_int64>* count_for_limit) {
+    count_for_limit_ = count_for_limit;
+  }
 
  public:
   static thread_local KWThdContext *thd_;

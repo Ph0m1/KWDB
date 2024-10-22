@@ -29,13 +29,13 @@ NoopOperator::NoopOperator(TsFetcherCollection* collection, BaseOperator *input,
 
 NoopOperator::NoopOperator(const NoopOperator &other, BaseOperator *input,
                            int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       limit_(other.limit_),
       offset_(other.offset_),
       param_(input, other.post_, other.table_),
       post_(other.post_),
       input_{input} {
-  is_done_ = true;
+  is_clone_ = true;
 }
 
 Field *NoopOperator::GetRender(int i) {
@@ -98,6 +98,7 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr &chunk) {
   if (limit_ && examined_rows_ >= limit_) {
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
+  KWThdContext *thd = current_thd;
   std::chrono::_V2::system_clock::time_point start;
   do {
     DataChunkPtr data_batch = nullptr;
@@ -107,10 +108,8 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr &chunk) {
       break;
     }
 
-    KWThdContext *kwthd = current_thd;
-
     DataChunk *input_chunk = data_batch.get();
-    current_thd->SetDataChunk(input_chunk);
+    thd->SetDataChunk(input_chunk);
     input_chunk->ResetLine();
     k_uint32 count = input_chunk->Count();
 
@@ -141,6 +140,7 @@ EEIteratorErrCode NoopOperator::Next(kwdbContext_p ctx, DataChunkPtr &chunk) {
 
   auto end = std::chrono::high_resolution_clock::now();
   if (chunk != nullptr) {
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
   } else {
     fetcher_.Update(0, (end - start).count(), 0, 0, 0, 0);

@@ -88,7 +88,6 @@ class NoopOperator : public BaseOperator {
   NoopPostResolve param_;
   TSPostProcessSpec *post_{nullptr};
   Field *filter_{nullptr};
-  k_bool is_done_{false};
   k_uint32 examined_rows_{0};
 };
 

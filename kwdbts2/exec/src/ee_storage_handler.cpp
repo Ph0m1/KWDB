@@ -41,7 +41,7 @@ EEIteratorErrCode StorageHandler::Init(kwdbContext_p ctx) {
   if (ret == KStatus::FAIL) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
                                   "scanning column data fail when getting ts table");
-    LOG_ERROR("GetTsTable Failed, table id: lu%.", table_->object_id_);
+    LOG_ERROR("GetTsTable Failed, table id: %lu", table_->object_id_);
     Return(EEIteratorErrCode::EE_ERROR);
   }
   Return(EEIteratorErrCode::EE_OK);

@@ -32,7 +32,7 @@ SortOperator::SortOperator(TsFetcherCollection* collection, BaseOperator* input,
       input_fields_{input->OutputFields()} {}
 
 SortOperator::SortOperator(const SortOperator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       spec_(other.spec_),
       post_(other.post_),
       param_(input, other.spec_, other.post_, other.table_),
@@ -191,7 +191,7 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
 EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-
+  KWThdContext *thd = current_thd;
   if (is_done_) {
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
@@ -212,7 +212,7 @@ EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
       Return(EEIteratorErrCode::EE_ERROR);
     }
   }
-  current_thd->SetDataChunk(container_.get());
+  thd->SetDataChunk(container_.get());
   k_uint32 BATCH_SIZE = chunk->Capacity();
   // record location in current result batch.
   k_uint32 location = 0;
@@ -248,6 +248,7 @@ EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   if (scanned_rows_ == container_->Count()) {
     is_done_ = true;
   }
+  OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
   auto end = std::chrono::high_resolution_clock::now();
   fetcher_.Update(0, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);
   Return(EEIteratorErrCode::EE_OK);

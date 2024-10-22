@@ -17,6 +17,7 @@
 
 #include "cm_fault_injection.h"
 #include "ee_cancel_checker.h"
+#include "ee_kwthd_context.h"
 #include "ee_op_factory.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_pg_result.h"
@@ -49,9 +50,8 @@ KStatus Processors::InitProcessorsOptimization(kwdbContext_p ctx,
     TSInputSyncSpec input = procSpec.input(0);
     if (input.streams_size() > 0) {
       TSStreamEndpointSpec stream = input.streams(0);
-      processor_id--;
-      if (KStatus::SUCCESS != InitProcessorsOptimization(
-          ctx, processor_id, &child, table)) {
+      k_uint32 child_id = processor_id - 1;
+      if (KStatus::SUCCESS != InitProcessorsOptimization(ctx, child_id, &child, table)) {
         Return(KStatus::FAIL);
       }
     }
@@ -63,9 +63,20 @@ KStatus Processors::InitProcessorsOptimization(kwdbContext_p ctx,
   if (ret != SUCCESS) {
     Return(ret);
   }
+  if (processor_id == top_process_id_) {
+    (*iterator)->SetOutputEncoding(true);
+  }
   command_limit_ = post.commandlimit();
   iter_list_.push_back(*iterator);
   Return(ret);
+}
+
+void Processors::FindTopProcessorId(k_uint32 processor_id) {
+  const TSProcessorCoreUnion& core = fspec_->processors(processor_id).core();
+  top_process_id_ = processor_id;
+  if (core.has_synchronizer()) {
+    top_process_id_ = processor_id - 1;
+  }
 }
 
 // Init processors
@@ -79,6 +90,7 @@ KStatus Processors::Init(kwdbContext_p ctx, const TSFlowSpec* fspec) {
   }
 
   k_int32 processor_id = fspec_->processors_size() - 1;
+  FindTopProcessorId(processor_id);
   // New operator
   KStatus ret = InitProcessorsOptimization(ctx, processor_id, &root_iterator_, &table_);
   if (KStatus::SUCCESS != ret) {
@@ -113,7 +125,7 @@ void Processors::Reset() {
   }
 }
 
-KStatus Processors::InitIterator(kwdbContext_p ctx) {
+KStatus Processors::InitIterator(kwdbContext_p ctx, bool isPG) {
   EnterFunc();
   if (!b_init_) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Can't init operators again");
@@ -121,6 +133,10 @@ KStatus Processors::InitIterator(kwdbContext_p ctx) {
   }
   AssertNotNull(root_iterator_);
   EEPgErrorInfo::ResetPgErrorInfo();
+  KWThdContext * thd = current_thd;
+  thd->SetPgEncode(isPG);
+  thd->SetCommandLimit(&command_limit_);
+  thd->SetCountForLimit(&count_for_limit_);
   // Init operators
   EEIteratorErrCode code = root_iterator_->Start(ctx);
   if (EEIteratorErrCode::EE_OK != code) {
@@ -192,11 +208,9 @@ EEIteratorErrCode Processors::EncodeDataChunk(kwdbContext_p ctx,
 // Run processors
 KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
                                     k_uint32* length, k_uint32* count,
-                                    k_bool* is_last_record, k_bool is_pg) {
+                                    k_bool* is_last_record) {
   EnterFunc();
   AssertNotNull(root_iterator_);
-
-  EE_StringInfo msgBuffer = nullptr;
   *count = 0;
   EEIteratorErrCode ret;
   do {
@@ -217,26 +231,8 @@ KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
       continue;
     }
 
-    *count = *count + chunk->Count();
-    if (msgBuffer == nullptr) {
-      msgBuffer = ee_makeStringInfo();
-      if (msgBuffer == nullptr) {
-        ret = EEIteratorErrCode::EE_ERROR;
-        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-        break;
-      }
-    }
-
-    ret = EncodeDataChunk(ctx, chunk.get(), msgBuffer, is_pg);
-    if (ret == EEIteratorErrCode::EE_ERROR || ret == EEIteratorErrCode::EE_END_OF_RECORD) {
-      break;
-    }
-
-#ifdef TSSCAN_RS_MULTILINE_SEND
-    if (msgBuffer->len > TSSCAN_RS_SIZE_LIMIT) {
-      break;
-    }
-#endif
+    chunk->GetEncodingBuffer(buffer, length, count);
+    break;
   } while (true);
 
   if (ret != EEIteratorErrCode::EE_OK) {
@@ -248,17 +244,8 @@ KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
       ret = EEIteratorErrCode::EE_ERROR;
     }
     if (ret == EEIteratorErrCode::EE_ERROR) {
-      if (msgBuffer) {
-        free(msgBuffer->data);
-        delete msgBuffer;
-      }
       Return(KStatus::FAIL);
     }
-  }
-  if (msgBuffer) {
-    *buffer = msgBuffer->data;
-    *length = msgBuffer->len;
-    delete msgBuffer;
   }
   Return(KStatus::SUCCESS);
 }

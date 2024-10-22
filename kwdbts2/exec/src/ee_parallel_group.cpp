@@ -30,12 +30,17 @@ KStatus ParallelGroup::Init(kwdbContext_p ctx) {
   fetcher_ = ctx->fetcher;
   is_parallel_pg_ = false;
   relation_ctx_ = ctx->relation_ctx;
+  timezone_ = ctx->timezone;
+  KWThdContext *main_thd = current_thd;
   thd_ = KNEW KWThdContext();
   if (!thd_) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     LOG_ERROR("New KWThd failed.");
     Return(FAIL);
   }
+  thd_->SetPgEncode(main_thd->GetPgEncode());
+  thd_->SetCommandLimit(main_thd->GetCommandLimit());
+  thd_->SetCountForLimit(main_thd->GetCountForLimit());
   ps_ = PS_TASK_INIT;
   Return(SUCCESS);
 }
@@ -45,6 +50,7 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
   ctx->ts_engine = ts_engine_;
   ctx->relation_ctx = relation_ctx_;
   ctx->fetcher = fetcher_;
+  ctx->timezone = timezone_;
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   current_thd = thd_;
   thd_->SetParallelGroup(this);

@@ -267,7 +267,7 @@ KStatus DmlExec::InnerNext(kwdbContext_p ctx, TsScan *tsScan, bool isPG,
     // init operators.
     if (!tsScan->is_init_pr) {
       tsScan->is_init_pr = KTRUE;
-      ret = tsScan->processors->InitIterator(ctx);
+      ret = tsScan->processors->InitIterator(ctx, isPG);
       if (KStatus::SUCCESS != ret) {
         break;
       }
@@ -279,14 +279,8 @@ KStatus DmlExec::InnerNext(kwdbContext_p ctx, TsScan *tsScan, bool isPG,
     k_uint32 count = 0;
     k_uint32 length = 0;
     k_bool is_last_record = KFALSE;
-    if (!isPG) {
-      ret = tsScan->processors->RunWithEncoding(ctx, &result, &length, &count,
+    ret = tsScan->processors->RunWithEncoding(ctx, &result, &length, &count,
                                                 &is_last_record);
-    } else {
-      ret = tsScan->processors->RunWithEncoding(ctx, &result, &length,
-                                              &count, &is_last_record, KTRUE);
-    }
-
     if (ret != KStatus::SUCCESS) {
       break;
     }

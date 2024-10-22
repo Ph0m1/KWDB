@@ -61,7 +61,6 @@ KStatus InitServerKWDBContext(kwdbContext_p ctx) {
   ctx->thread_id = 0;
   ctx->connection_id = 0;
   ctx->logNestCount = 0;
-  ctx->quit = false;
   return KStatus::SUCCESS;
 }
 

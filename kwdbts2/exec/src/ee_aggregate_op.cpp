@@ -12,6 +12,7 @@
 #include <variant>
 #include <chrono>
 #include "ee_aggregate_op.h"
+#include "ee_kwthd_context.h"
 #include "cm_func.h"
 #include "ee_pb_plan.pb.h"
 #include "lg_api.h"
@@ -36,7 +37,7 @@ BaseAggregator::BaseAggregator(TsFetcherCollection* collection, BaseOperator* in
 }
 
 BaseAggregator::BaseAggregator(const BaseAggregator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       spec_(other.spec_),
       post_(other.post_),
       param_(input, other.spec_, other.post_, other.table_, this),
@@ -683,6 +684,7 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
     fetcher_.Update(0, 0, 0, ht_->Capacity() * ht_->tupleSize(), 0, 0);
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
+  KWThdContext *thd = current_thd;
   auto start = std::chrono::high_resolution_clock::now();
   if (nullptr == chunk) {
     // init data chunk
@@ -705,6 +707,7 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
   if (getAggResults(ctx, chunk) != KStatus::SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
+  OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
   auto end = std::chrono::high_resolution_clock::now();
   fetcher_.Update(0, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, chunk->Count());
 
@@ -950,6 +953,7 @@ EEIteratorErrCode OrderedAggregateOperator::Start(kwdbContext_p ctx) {
 EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc()
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  KWThdContext *thd = current_thd;
   int64_t duration = 0;
   int64_t read_row_num = 0;
   std::chrono::_V2::system_clock::time_point start;
@@ -1029,6 +1033,7 @@ EEIteratorErrCode OrderedAggregateOperator::Next(kwdbContext_p ctx, DataChunkPtr
 
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     output_queue_.pop();
     auto end = std::chrono::high_resolution_clock::now();
     fetcher_.Update(read_row_num, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, chunk->Count());

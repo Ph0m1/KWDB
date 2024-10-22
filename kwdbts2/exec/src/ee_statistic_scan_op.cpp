@@ -52,7 +52,7 @@ TableStatisticScanOperator::TableStatisticScanOperator(TsFetcherCollection* coll
 TableStatisticScanOperator::TableStatisticScanOperator(
     const TableStatisticScanOperator& other, BaseOperator* input,
     int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       post_(other.post_),
       schema_id_(other.schema_id_),
       object_id_(other.object_id_),
@@ -196,6 +196,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
     Return(EEIteratorErrCode::EE_ERROR);
   }
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  KWThdContext *thd = current_thd;
   k_int64 counter = 0;
   do {
     code = InitScanRowBatch(ctx, &row_batch_);
@@ -255,6 +256,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
 
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     output_queue_.pop();
     auto end = std::chrono::high_resolution_clock::now();
     fetcher_.Update(chunk->Count(), (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, 0);

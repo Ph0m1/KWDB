@@ -162,7 +162,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx) {
 EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_END_OF_RECORD;
-
+  KWThdContext *thd = current_thd;
   k_uint32 access_mode = table_->GetAccessMode();
   auto start = std::chrono::high_resolution_clock::now();
   do {
@@ -185,7 +185,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
       }
     }
     total_read_row_ += tag_rowbatch_->count_;
-    current_thd->SetRowBatch(tag_rowbatch_.get());
+    thd->SetRowBatch(tag_rowbatch_.get());
 
     // reset
     tag_rowbatch_->ResetLine();
@@ -215,6 +215,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
   } while (0);
   auto end = std::chrono::high_resolution_clock::now();
   if (chunk != nullptr) {
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     fetcher_.Update(chunk->Count(), (end - start).count(), 0, 0, 0, 0);
   }
 

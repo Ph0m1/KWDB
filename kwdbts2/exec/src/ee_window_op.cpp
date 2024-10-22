@@ -46,7 +46,7 @@ WindowOperator::WindowOperator(TsFetcherCollection* collection,
 
 WindowOperator::WindowOperator(const WindowOperator& other, BaseOperator* input,
                                int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       spec_{other.spec_},
       post_{other.post_},
       limit_{other.limit_},
@@ -58,9 +58,13 @@ WindowOperator::WindowOperator(const WindowOperator& other, BaseOperator* input,
     k_uint32 part_col = spec_->partitionby(i);
     partition_cols_.push_back(part_col);
   }
+  is_clone_ = true;
 }
 
 WindowOperator::~WindowOperator() {
+  if (is_clone_) {
+    delete input_;
+  }
   for (auto field : win_func_output_fields_) {
     SafeDeletePointer(field);
   }
@@ -295,6 +299,7 @@ void WindowOperator::ResolveWindowsFuncs(kwdbContext_p ctx) {}
 EEIteratorErrCode WindowOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+  KWThdContext *thd = current_thd;
   do {
     RowBatch* row_batch_ = nullptr;
     while (!is_done_) {
@@ -374,6 +379,7 @@ EEIteratorErrCode WindowOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
 
   if (!output_queue_.empty()) {
     chunk = std::move(output_queue_.front());
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     output_queue_.pop();
     if (code == EEIteratorErrCode::EE_END_OF_RECORD) {
       Return(EEIteratorErrCode::EE_OK)

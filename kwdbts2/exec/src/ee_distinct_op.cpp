@@ -30,7 +30,7 @@ DistinctOperator::DistinctOperator(TsFetcherCollection* collection, BaseOperator
 }
 
 DistinctOperator::DistinctOperator(const DistinctOperator& other, BaseOperator* input, int32_t processor_id)
-    : BaseOperator(other.collection_, other.table_, processor_id),
+    : BaseOperator(other),
       spec_(other.spec_),
       post_(other.post_),
       param_(input, other.spec_, other.post_, other.table_),
@@ -118,7 +118,7 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   std::chrono::_V2::system_clock::time_point start;
   int64_t read_row_num = 0;
-
+  KWThdContext *thd = current_thd;
   do {
     // read a batch of data
     DataChunkPtr data_chunk = nullptr;
@@ -150,7 +150,7 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
       }
     }
 
-    current_thd->SetDataChunk(data_chunk.get());
+    thd->SetDataChunk(data_chunk.get());
 
     // Distinct
     k_uint32 i = 0;
@@ -198,6 +198,7 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
   auto end = std::chrono::high_resolution_clock::now();
 
   if (chunk != nullptr && chunk->Count() > 0) {
+    OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
     fetcher_.Update(read_row_num, (end - start).count(), chunk->Count() * chunk->RowSize(), 0, 0, chunk->Count());
     Return(EEIteratorErrCode::EE_OK)
   }

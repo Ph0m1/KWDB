@@ -80,9 +80,6 @@ typedef struct _kwdbContext_t: public _KContext_t {
   KwdbErrorStack err_stack;
   ContextOwner owner;        // indicating the main category
   ThreadLabel label;         // indicating associated thread category
-  bool isSimpleLastQuery = false;   // whether the query is a simple LAST query
-  bool quit{false};
-  k_int32 sql_status;
   void *ts_engine{nullptr};
   void *fetcher{nullptr};
   DmlExec* dml_exec_handle{nullptr}; // handle in DmlExec for multiple model processing

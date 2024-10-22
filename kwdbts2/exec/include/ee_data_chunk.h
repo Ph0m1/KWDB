@@ -248,7 +248,8 @@ class DataChunk : public IChunk {
                           Field** renders, bool batch_copy = false);
 
   ////////////////   Encoding func  ///////////////////
-
+  KStatus Encoding(kwdbContext_p ctx, bool is_pg, k_int64* command_limit,
+                   std::atomic<k_int64>* count_for_limit);
   /**
    * @brief Encode data at coordinate location (row, col) using kwbase protocol.
    * @param[in] ctx
@@ -267,14 +268,6 @@ class DataChunk : public IChunk {
    */
   KStatus PgResultData(kwdbContext_p ctx, k_uint32 row,
                        const EE_StringInfo& info);
-
-  // add data of analyse to chunk
-  KStatus AddAnalyse(kwdbContext_p ctx, int32_t processor_id, int64_t duration,
-                     int64_t read_row_num, int64_t bytes_read,
-                     int64_t max_allocated_mem, int64_t max_allocated_disk);
-
-  // get data of analyse from chunk
-  KStatus GetAnalyse(kwdbContext_p ctx);
 
   void ResetDataPtr(char *data_ptr, k_int32 data_count) {
     data_ = data_ptr;
@@ -370,6 +363,12 @@ class DataChunk : public IChunk {
   static k_uint32 ComputeRowSize(vector<ColumnInfo>& column_info);
 
   KStatus ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data);
+  void GetEncodingBuffer(char** buf, k_uint32* len, k_uint32* count) {
+    *buf = encoding_buf_;
+    *len = encoding_len_;
+    *count = count_;
+    is_buf_owner_ = false;
+  }
 
  protected:
   bool is_data_owner_{true};
@@ -385,6 +384,9 @@ class DataChunk : public IChunk {
   k_bits32 col_num_{0};      // the number of col
 
   k_int32 current_line_{-1};  // current row
+  char* encoding_buf_{nullptr};
+  k_uint32 encoding_len_{0};
+  bool is_buf_owner_{true};
 
  private:
   bool disorder_{false};

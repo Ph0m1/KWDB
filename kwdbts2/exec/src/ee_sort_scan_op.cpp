@@ -123,12 +123,13 @@ EEIteratorErrCode SortScanOperator::Next(kwdbContext_p ctx,
                                          DataChunkPtr& chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-
+  KWThdContext *thd = current_thd;
   if (is_done_) {
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
 
   chunk = std::move(data_chunk_);
+  OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
   is_done_ = true;
 
   Return(EEIteratorErrCode::EE_OK);

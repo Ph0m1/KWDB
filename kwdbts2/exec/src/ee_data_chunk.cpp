@@ -32,6 +32,10 @@ DataChunk::~DataChunk() {
   bitmap_offset_.clear();
   if (is_data_owner_) {
     kwdbts::EE_MemPoolFree(g_pstBufferPoolInfo, data_);
+    data_ = nullptr;
+  }
+  if (is_buf_owner_) {
+    SafeFreePointer(encoding_buf_);
   }
 }
 
@@ -406,6 +410,62 @@ KStatus DataChunk::Append(DataChunk* chunk, k_uint32 begin_row, k_uint32 end_row
 
   count_ += row_num;
   return SUCCESS;
+}
+
+// Encode datachunk
+KStatus DataChunk::Encoding(kwdbContext_p ctx, bool is_pg,
+                            k_int64* command_limit,
+                            std::atomic<k_int64>* count_for_limit) {
+  KStatus st = KStatus::SUCCESS;
+  EE_StringInfo msgBuffer = ee_makeStringInfo();
+  if (msgBuffer == nullptr) {
+    return KStatus::FAIL;
+  }
+  if (is_pg) {
+    k_uint32 row = 0;
+    for (; row < Count(); ++row) {
+      if (*command_limit > 0) {
+        k_int64 current_value = count_for_limit->load();
+        while (current_value < (*command_limit) &&
+               !count_for_limit->compare_exchange_weak(current_value,
+                                                       current_value + 1)) {
+          current_value = count_for_limit->load();
+        }
+        if (current_value >= (*command_limit)) {
+          break;
+        }
+      }
+      st = PgResultData(ctx, row, msgBuffer);
+      if (st != SUCCESS) {
+        break;
+      }
+    }
+    count_ = row;
+  } else {
+    for (k_uint32 row = 0; row < Count(); ++row) {
+      for (k_uint32 col = 0; col < ColumnNum(); ++col) {
+        st = EncodingValue(ctx, row, col, msgBuffer);
+        if (st != SUCCESS) {
+          break;
+        }
+      }
+      if (st != SUCCESS) {
+        break;
+      }
+    }
+  }
+  if (st == SUCCESS) {
+    encoding_buf_ = msgBuffer->data;
+    encoding_len_ = msgBuffer->len;
+  } else {
+    free(msgBuffer->data);
+  }
+  delete msgBuffer;
+  if (is_data_owner_) {
+    kwdbts::EE_MemPoolFree(g_pstBufferPoolInfo, data_);
+    data_ = nullptr;
+  }
+  return st;
 }
 
 KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, const EE_StringInfo& info) {
