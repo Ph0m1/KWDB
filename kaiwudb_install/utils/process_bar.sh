@@ -16,7 +16,7 @@ function process_bar() {
     do
       b+='#'
     done
-    printf "%-35s: [%-50s] %d%%\r" "${array[0]//#/ }" $b ${array[1]}
+    printf "%-25s: [%-50s] %d%%\r" "${array[0]//#/ }" $b ${array[1]}
     if [ ${array[1]} -eq 100 ];then
       break
     fi

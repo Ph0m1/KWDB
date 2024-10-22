@@ -1,40 +1,39 @@
 #! /bin/bash
 
 function kw_start() {
+  if [ "$REMOTE" = "ON" ];then
+    prefix=$node_cmd_prefix
+  else
+    prefix=$local_cmd_prefix
+  fi
   local count=0
-  eval $kw_cmd_prefix systemctl daemon-reload
-  eval $kw_cmd_prefix systemctl start kaiwudb >/dev/null 2>&1
+  eval $prefix systemctl daemon-reload
+  eval $prefix systemctl start kaiwudb >/dev/null 2>&1
   if [ $? -ne 0 ];then
+    echo "Start KaiwuDB failed. For more information, check system log(journactl -u kaiwudb)."
     return 1
   fi
-  if [ "$1" == "bare" ];then
-    sudo systemctl status kaiwudb >/dev/null 2>&1
+  sleep 3
+  until [ $count -gt 60 ];do
+    kw_status >/dev/null 2>&1
     if [ $? -eq 0 ];then
       return 0
-    else
-      return 1
-    fi
-  fi
-  until [ $count -gt 60 ]
-  do
-    sleep 2
-    local stat=`docker ps -a --filter name=kaiwudb-container --format {{.Status}} | awk '{if($0~/^(Up).*/){print "yes";}else if($0~/^(Exited).*/){print "failed";}else{print "no";}}'`
-    if [ "$stat" == "yes" ];then
-      break
-    elif [ "$stat" == "failed" ];then
-      return 1
     fi
     ((count++));
+    sleep 2
   done
-  if [ $count -gt 60 ];then
-    return 1
-  fi
-  return 0
+  echo "Start KaiwuDB failed. For more information, check kwbase's log."
+  return 1
 }
 
 function kw_stop() {
-  eval $kw_cmd_prefix systemctl daemon-reload
-  eval $kw_cmd_prefix systemctl stop kaiwudb >/dev/null 2>&1
+  if [ "$REMOTE" = "ON" ];then
+    prefix=$node_cmd_prefix
+  else
+    prefix=$local_cmd_prefix
+  fi
+  eval $prefix systemctl daemon-reload
+  eval $prefix systemctl stop kaiwudb >/dev/null 2>&1
   if [ $? -ne 0 ];then
     return 1
   fi
@@ -42,33 +41,24 @@ function kw_stop() {
 }
 
 function kw_restart() {
+  if [ "$REMOTE" = "ON" ];then
+    prefix=$node_cmd_prefix
+  else
+    prefix=$local_cmd_prefix
+  fi
   local count=0
-  eval $kw_cmd_prefix systemctl daemon-reload
-  eval $kw_cmd_prefix systemctl restart kaiwudb >/dev/null 2>&1
+  eval $prefix systemctl daemon-reload
+  eval $prefix systemctl restart kaiwudb >/dev/null 2>&1
   if [ $? -ne 0 ];then
     return 1
   fi
-  if [ "$1" == "bare" ];then
-    sudo systemctl status kaiwudb >/dev/null 2>&1
+  until [ $count -gt 60 ];do
+    kw_status >/dev/null 2>&1
     if [ $? -eq 0 ];then
       return 0
-    else
-      return 1
-    fi
-  fi
-  until [ $count -gt 60 ]
-  do
-    sleep 2
-    local stat=`docker ps -a --filter name=kaiwudb-container --format {{.Status}} | awk '{if($0~/^(Up).*/){print "yes";}else if($0~/^(Exited).*/){print "failed";}else{print "no";}}'`
-    if [ "$stat" == "yes" ];then
-      break
-    elif [ "$stat" == "failed" ];then
-      return 1
     fi
     ((count++));
+    sleep 2
   done
-  if [ $count -gt 60 ];then
-    return 1
-  fi
-  return 0
+  return 1
 }
