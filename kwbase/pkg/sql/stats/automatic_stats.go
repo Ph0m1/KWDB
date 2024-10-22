@@ -401,7 +401,9 @@ func (r *Refresher) Start(
 						}
 						timer.Reset(refreshInterval)
 					}); err != nil {
-					log.Errorf(ctx, "failed to refresh stats: %v", err)
+					if log.V(2) {
+						log.Warning(ctx, "refresher task failed to start: %v", err)
+					}
 				}
 				r.mutationCounts = make(map[sqlbase.ID]Affected, len(r.mutationCounts))
 

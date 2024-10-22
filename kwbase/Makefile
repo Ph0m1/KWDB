@@ -121,6 +121,13 @@ BENCHES :=
 ## Space delimited list of logic test files to run, for make testlogic/testoptlogic.
 FILES :=
 
+## Include test server log in test output mapped to -show-logs option, for make testlogic/testoptlogic.
+ifdef SHOWLOGS
+ifeq "$(strip $(findstring $(SHOWLOGS),1 2 3 4))" ""
+$(error SHOWLOGS parameter is invalid.  It's supposed to be one of 1, 2, 3, or 4.)
+endif
+endif
+
 ## Name of a logic test configuration to run, for make testlogic/testoptlogic.
 ## (default: all configs. It's not possible yet to specify multiple configs in this way.)
 TESTCONFIG :=
@@ -133,7 +140,7 @@ SUBTESTS :=
 LINTTIMEOUT := 20m
 
 ## Test timeout to use for regular tests.
-TESTTIMEOUT := 30m
+TESTTIMEOUT ?= 30m
 
 ## Test timeout to use for race tests.
 RACETIMEOUT := 30m
@@ -979,7 +986,7 @@ testoptlogic: TESTS := TestExecBuild/$(logic-test-selector)
 # does not prevent loading and initializing every default config in
 # turn (including setting up the test clusters, etc.). By specifying
 # -config, the extra initialization overhead is averted.
-testbaselogic testoptlogic: TESTFLAGS := -test.v $(if $(FILES),-show-sql) $(if $(TESTCONFIG),-config $(TESTCONFIG))
+testbaselogic testoptlogic: TESTFLAGS := -test.v $(if $(FILES),-show-sql) $(if $(SHOWLOGS),-show-logs $(SHOWLOGS)) $(if $(TESTCONFIG),-config $(TESTCONFIG))
 testbaselogic testoptlogic:
 	cd $($(<F)-package) && $(<F) -test.run "$(TESTS)" -test.timeout $(TESTTIMEOUT) $(TESTFLAGS)
 

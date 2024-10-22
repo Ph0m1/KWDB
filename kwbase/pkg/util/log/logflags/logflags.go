@@ -88,7 +88,7 @@ const (
 func InitFlags(
 	noRedirectStderr *bool,
 	logDir flag.Value,
-	showLogs *bool,
+	showLogs *int64,
 	nocolor *bool,
 	vmodule flag.Value,
 	logFileMaxSize, logFilesCombinedMaxSize *int64,
@@ -97,7 +97,7 @@ func InitFlags(
 	flag.BoolVar(noRedirectStderr, NoRedirectStderrName, *noRedirectStderr, "disable redirect of stderr to the log file")
 	flag.Var(vmodule, VModuleName, "comma-separated list of pattern=N settings for file-filtered logging (significantly hurts performance)")
 	flag.Var(logDir, LogDirName, "if non-empty, write log files in this directory")
-	flag.BoolVar(showLogs, ShowLogsName, *showLogs, "print logs instead of saving them in files")
+	flag.Var(humanizeutil.NewBytesValue(showLogs), ShowLogsName, "print logs instead of saving them in files")
 	flag.Var(humanizeutil.NewBytesValue(logFileMaxSize), LogFileMaxSizeName, "maximum size of each log file")
 	flag.Var(humanizeutil.NewBytesValue(logFilesCombinedMaxSize), LogFilesCombinedMaxSizeName, "maximum combined size of all log files")
 }

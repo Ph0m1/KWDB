@@ -1119,7 +1119,7 @@ func (r *Replica) changeReplicasImpl(
 	}
 
 	if adds := chgs.Additions(); len(adds) > 0 {
-		log.Errorf(ctx, "TsEngine.TSIsTsTableExist r%v, desc.TableId %v,  %v", desc.RangeID, desc.TableId, err)
+		log.Infof(ctx, "TsEngine.TSIsTsTableExist r%v, desc.TableId %v,  %v", desc.RangeID, desc.TableId, err)
 		if desc.GetRangeType() == roachpb.TS_RANGE && r.store.TsEngine != nil && desc.TableId != 0 {
 			exist, err := r.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
 			log.VEventf(ctx, 3, "TsEngine.TSIsTsTableExist r%v, %v, %v, %v", desc.RangeID, desc.TableId, exist, err)

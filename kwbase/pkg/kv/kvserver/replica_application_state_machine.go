@@ -1372,7 +1372,7 @@ func (sm *replicaStateMachine) ApplySideEffects(
 	// Note that this must happen after committing (the engine.Batch), but
 	// before notifying a potentially waiting client.
 	if cmd.replicatedResult().Split != nil {
-		log.Errorf(ctx, "%v", cmd)
+		log.Infof(ctx, "%v", cmd)
 	}
 	clearTrivialReplicatedEvalResultFields(cmd.replicatedResult())
 	if !cmd.IsTrivial() {

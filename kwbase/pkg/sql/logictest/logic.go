@@ -2148,7 +2148,7 @@ func (t *logicTest) execStatement(stmt logicStatement) (bool, error) {
 		t.outf("%s;", stmt.sql)
 	}
 	execSQL, changed := mutations.ApplyString(t.rng, stmt.sql, mutations.ColumnFamilyMutator)
-	if changed {
+	if changed && *showSQL {
 		t.outf("rewrote:\n%s\n", execSQL)
 	}
 	res, err := t.db.Exec(execSQL)

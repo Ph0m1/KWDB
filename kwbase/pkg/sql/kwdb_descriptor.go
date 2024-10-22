@@ -2604,10 +2604,14 @@ func InitScheduleForKWDB(ctx context.Context, db *kv.DB, ie sqlutil.InternalExec
 		if err != nil {
 			return err
 		}
-		for _, row := range rows {
-			delete(Schedules, string(tree.MustBeDString(row[0])))
+		sches := make(map[string]ScheduleDetail, len(Schedules))
+		for name, sch := range Schedules {
+			sches[name] = sch
 		}
-		for _, sched := range Schedules {
+		for _, row := range rows {
+			delete(sches, string(tree.MustBeDString(row[0])))
+		}
+		for _, sched := range sches {
 			schedule := jobs.NewScheduledJob(scheduledjobs.ProdJobSchedulerEnv)
 			schedule.SetScheduleLabel(sched.Name)
 			schedule.SetOwner(security.NodeUser)

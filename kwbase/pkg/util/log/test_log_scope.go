@@ -58,13 +58,20 @@ type tShim interface {
 }
 
 // showLogs is used for testing
-var showLogs bool
+var showLogs int64
 
 // Scope creates a TestLogScope which corresponds to the lifetime of a logging
 // directory. The logging directory is named after the calling test. It also
 // disables logging to stderr.
 func Scope(t tShim) *TestLogScope {
-	if showLogs {
+	intToSeverityMap := map[int64]Severity{
+		1: Severity_INFO,
+		2: Severity_WARNING,
+		3: Severity_ERROR,
+		4: Severity_FATAL,
+	}
+	if sev, ok := intToSeverityMap[showLogs]; ok {
+		logging.stderrThreshold = sev
 		return (*TestLogScope)(nil)
 	}
 
