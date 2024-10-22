@@ -1196,7 +1196,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             free(bitmap);
           }
         } else {
-          if (scan_agg_types_[i] == SUM && cur_block->is_overflow) {
+          if (scan_agg_types_[i] == Sumfunctype::SUM && cur_block->is_overflow) {
             // If a type overflow is identified, the SUM result needs to be recalculated and cannot be read directly.
             AggCalculator agg_cal(segment_tbl->columnAddr(first_real_row, col_idx),
                                   col_blk_bitmaps_.GetColBitMapAddr(i), first_row,
@@ -1206,15 +1206,21 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             b = CreateAggBatch(sum, nullptr);
             b->is_new = true;
             b->is_overflow = is_overflow;
-          } else if (scan_agg_types_[i] == SUM) {
+          } else if (scan_agg_types_[i] == Sumfunctype::SUM) {
             // Convert the obtained SUM result to the type agreed upon with the execution layer.
             void* new_sum_base;
             void* sum_base = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
             bool is_new = ChangeSumType(DATATYPE(attrs_[col_idx].type), sum_base, &new_sum_base);
             b = CreateAggBatch(new_sum_base, nullptr);
             b->is_new = is_new;
+          } else if (scan_agg_types_[i] == Sumfunctype::COUNT) {
+            void* agg_res = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
+            void* new_agg_res = malloc(sizeof(uint64_t));
+            *static_cast<uint64_t*>(new_agg_res) = *static_cast<uint16_t*>(agg_res);
+            b = CreateAggBatch(new_agg_res, nullptr);
+            b->is_new = true;
           } else {
-            if (!isVarLenType(attrs_[col_idx].type) || scan_agg_types_[i] == COUNT) {
+            if (!isVarLenType(attrs_[col_idx].type)) {
               void* agg_res = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
               void* new_agg_res = malloc(attrs_[col_idx].size);
               memcpy(new_agg_res, agg_res, attrs_[col_idx].size);
