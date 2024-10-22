@@ -101,6 +101,9 @@ func (is Server) CollectReplicaStatus(
 			if err != nil {
 				return err
 			}
+			if !r.isInitializedRLocked() {
+				return roachpb.NewRangeNotFoundError(req.RangeID, s.StoreID())
+			}
 			resp.ReplicaStatus.StartKey = r.mu.state.Desc.StartKey
 			curLease, _ := r.getLeaseRLocked()
 			resp.ReplicaStatus.StoreID = s.StoreID()
