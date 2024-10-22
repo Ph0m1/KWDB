@@ -25,9 +25,6 @@
 package sql
 
 import (
-	"context"
-
-	"gitee.com/kwbasedb/kwbase/pkg/server/serverpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/rowexec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"github.com/cockroachdb/errors"
@@ -62,18 +59,4 @@ func (p *planner) EvalSubquery(expr *tree.Subquery) (result tree.Datum, err erro
 		return nil, errors.AssertionFailedf("subquery %d (%q) not started prior to evaluation", expr.Idx, expr)
 	}
 	return s.result, nil
-}
-
-// IsMultiNode is part of the tree.EvalPlanner interface.
-// TODO: renyanzheng, check the recent global vars for a replacement of this function
-func (p *planner) IsMultiNode(ctx context.Context) bool {
-	if p.extendedEvalCtx.ExecCfg != nil && p.extendedEvalCtx.ExecCfg.StatusServer != nil {
-		nodes, err := p.extendedEvalCtx.ExecCfg.StatusServer.Nodes(ctx, &serverpb.NodesRequest{})
-		if err != nil {
-			return true
-		}
-		return len(nodes.Nodes) > 1
-	}
-
-	return true
 }

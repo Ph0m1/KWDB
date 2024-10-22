@@ -216,8 +216,8 @@ type GroupOptType uint64
 
 // GroupOptType
 const (
-	// PushLocalAggToScan represents push local agg to scan compute
-	PushLocalAggToScan = 1 << 0
+	// TimeBucketPushAgg represents push local agg to scan compute
+	TimeBucketPushAgg = 1 << 0
 	// PruneLocalAgg represents prune local agg
 	PruneLocalAgg = 1 << 1
 	// PruneFinalAgg represents prune final agg
@@ -225,11 +225,18 @@ const (
 	// ScalarGroupByWithSumInt is set when scalarGroupBy with sum_Int agg in inside_out case,
 	// it must return 0 when the table is empty, because sum_int is the twice agg of count.
 	ScalarGroupByWithSumInt = 1 << 3
+	// UseStatistic represents push local agg to scan and use statistic scan
+	UseStatistic = 1 << 4
 )
 
-// PushLocalAggToScanOpt return true if has PushLocalAggToScan opt
+// TimeBucketOpt return true if has TimeBucketPushAgg opt
+func (v GroupOptType) TimeBucketOpt() bool {
+	return v&TimeBucketPushAgg > 0
+}
+
+// PushLocalAggToScanOpt return true if has TimeBucketPushAgg opt
 func (v GroupOptType) PushLocalAggToScanOpt() bool {
-	return v&PushLocalAggToScan > 0
+	return v&TimeBucketPushAgg > 0 || v&UseStatistic > 0
 }
 
 // PruneLocalAggOpt return true if has PruneLocalAgg opt
@@ -245,4 +252,9 @@ func (v GroupOptType) PruneFinalAggOpt() bool {
 // WithSumInt return true if scalarGroupBy with sum_Int agg in inside_out case.
 func (v GroupOptType) WithSumInt() bool {
 	return v&ScalarGroupByWithSumInt > 0
+}
+
+// UseStatisticOpt return true that has UseStatistic opt
+func (v GroupOptType) UseStatisticOpt() bool {
+	return v&UseStatistic > 0
 }

@@ -1548,76 +1548,12 @@ func (dsp *DistSQLPlanner) createTableReaders(
 	return p, nil
 }
 
-func makeResultTypeForAggFuncs(aggTyps [][]types.T, aggFns []int32) ([]types.T, error) {
-	outTyps := make([]types.T, len(aggFns))
-
-	for i := range aggFns {
-		// Set the output type of the aggregate.
-		switch execinfrapb.AggregatorSpec_Func(aggFns[i]) {
-		case execinfrapb.AggregatorSpec_COUNT_ROWS, execinfrapb.AggregatorSpec_COUNT:
-			// TODO(jordan): this is a somewhat of a hack. The aggregate functions
-			// should come with their own output types, somehow.
-			outTyps[i] = *types.Int
-		case
-			execinfrapb.AggregatorSpec_ANY_NOT_NULL,
-			execinfrapb.AggregatorSpec_AVG,
-			execinfrapb.AggregatorSpec_SUM,
-			execinfrapb.AggregatorSpec_SUM_INT,
-			execinfrapb.AggregatorSpec_MIN,
-			execinfrapb.AggregatorSpec_MAX,
-			execinfrapb.AggregatorSpec_BOOL_AND,
-			execinfrapb.AggregatorSpec_FIRST,
-			execinfrapb.AggregatorSpec_LAST,
-			execinfrapb.AggregatorSpec_LAST_ROW,
-			execinfrapb.AggregatorSpec_FIRST_ROW,
-			execinfrapb.AggregatorSpec_BOOL_OR:
-			// Output types are the input types for now.
-			outTyps[i] = aggTyps[i][0]
-		case
-			execinfrapb.AggregatorSpec_LASTTS,
-			execinfrapb.AggregatorSpec_FIRSTTS,
-			execinfrapb.AggregatorSpec_LAST_ROW_TS,
-			execinfrapb.AggregatorSpec_FIRST_ROW_TS:
-			outTyps[i] = *types.TimestampTZ
-		default:
-			return nil, errors.Errorf("unsupported columnar aggregate function %s", execinfrapb.AggregatorSpec_Func(aggFns[i]).String())
-		}
-	}
-
-	return outTyps, nil
-}
-
 // add tsColIndex in add-delete columns, init in createReaders,
 // record indexs of column after add of delete columns
 type tsColIndex struct {
 	idx          int                // index of column
 	internalType types.T            // internal type of column
 	colType      sqlbase.ColumnType // type of column ( data,tag,ptag)
-}
-
-// buildTSStatisticColsAndTSColMap build tsCols and tsColMap by cols
-//
-// Parameters:
-// - n: ts scan node
-// - columnIDSet: column id set
-//
-// Returns:
-// - ts column meta
-// - ts column index map, key is column id(logical id)
-// - statistic scan output column index array
-// - scan output column id array
-// - err: Description of the error, if any
-func buildTSStatisticColsAndTSColMap(
-	n *tsScanNode, columnIDSet opt.ColSet,
-) ([]sqlbase.TSCol, map[sqlbase.ColumnID]tsColIndex, []int, []int) {
-	tsCols, tsColMap, resColsOld := buildTSColsAndTSColMap(n, columnIDSet)
-
-	resCols := make([]int, 0)
-	for i := 0; i < len(n.ScanAggArray); i++ {
-		resCols = append(resCols, i+1)
-	}
-
-	return tsCols, tsColMap, resCols, resColsOld
 }
 
 // build tsCols and tsColMap by cols
@@ -1790,7 +1726,7 @@ func (p *PhysicalPlan) initPhyPlanForTsReaders(
 	return nil
 }
 
-// init PhysicalPlan for statistic reader
+// initPhyPlanForStatisticReaders init PhysicalPlan for statistic reader
 func (p *PhysicalPlan) initPhyPlanForStatisticReaders(
 	spec execinfrapb.TSStatisticReaderSpec,
 ) error {
@@ -1947,10 +1883,10 @@ func (p *PhysicalPlan) buildPhyPlanForTagReaders(
 
 	post.Projection = true
 	p.SetLastStageTSPost(post, typs)
-	p.AddTSProjection(outCols, false, true)
+	p.AddTSProjection(outCols)
 
 	// add output types for last ts engine processor
-	p.addTSOutputType(true)
+	p.AddTSOutputType(true)
 
 	if n.HintType.OnlyTag() {
 		p.PlanToStreamColMap = getPlanToStreamColMapForReader(outCols, n.resultColumns, descColumnIDs)
@@ -2061,25 +1997,13 @@ func (p *PhysicalPlan) buildPhyPlanForHashTagReaders(
 	p.AddHashTSProjection(outCols, false, true, n.resultColumns, len(*n.RelInfo.RelationalCols))
 
 	// add output types for last ts engine processor
-	p.addTSOutputType(true)
+	p.AddTSOutputType(true)
 
 	if n.HintType == keys.TagOnlyHint {
 		p.PlanToStreamColMap = getPlanToStreamColMapForReader(outCols, n.resultColumns, descColumnIDs)
 	}
 
 	return nil
-}
-
-// addTSOutputType add output types for ts processor
-func (p *PhysicalPlan) addTSOutputType(force bool) {
-	for _, idx := range p.ResultRouters {
-		if force || p.Processors[idx].ExecInTSEngine {
-			p.Processors[idx].TSSpec.Post.OutputTypes = make([]types.Family, len(p.ResultTypes))
-			for i, typ := range p.ResultTypes {
-				p.Processors[idx].TSSpec.Post.OutputTypes[i] = typ.InternalType.Family
-			}
-		}
-	}
 }
 
 // getPlanToStreamColMapForReader add plan to stream col map
@@ -2122,96 +2046,6 @@ func getPlanToStreamColMapForReaderHash(
 	return planToStreamColMap
 }
 
-// buildPhyPlanForTSStatisticReaders construct TSTagReadera and add to Proceccor.
-// tableID is the id of table that needs to be scanned.
-//
-// Parameters:
-// - planCtx: context
-// - n: ts scan node
-// - colMetas: ts column meta
-// - resCols: scan output column id array
-// - typs: column output types
-// - tsColMap: ts column index and type map, key is ts column id
-//
-// Returns:
-// - err: Description of the error, if any
-func (p *PhysicalPlan) buildPhyPlanForTSStatisticReaders(
-	planCtx *PlanningCtx,
-	n *tsScanNode,
-	colMetas []sqlbase.TSCol,
-	resCols []int,
-	typs []types.T,
-	tsColMap map[sqlbase.ColumnID]tsColIndex,
-) error {
-	scanCols := make([]execinfrapb.TSStatisticReaderSpec_Params, len(n.ScanAggArray))
-	scanAgg := make([]int32, len(n.ScanAggArray))
-	for i, agg := range n.ScanAggArray {
-		infos := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(agg.Params.Param))
-		for j := range agg.Params.Param {
-			infos[j].Typ = agg.Params.Param[j].Typ
-			if agg.Params.Param[j].Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
-				if tsColIndex1, ok := tsColMap[sqlbase.ColumnID(agg.Params.Param[j].Value)]; ok {
-					infos[j].Value = int64(tsColIndex1.idx)
-				}
-			} else {
-				infos[j].Value = agg.Params.Param[j].Value
-			}
-		}
-
-		scanCols[i].Param = infos
-		scanAgg[i] = int32(n.ScanAggArray[i].AggTyp)
-	}
-
-	tr := execinfrapb.TSStatisticReaderSpec{
-		TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, ParamIdx: scanCols, AggTypes: scanAgg, TsCols: colMetas,
-		TableVersion: n.Table.GetTSVersion()}
-
-	//construct TSReaderSpec
-	err := p.initPhyPlanForStatisticReaders(tr)
-	if err != nil {
-		return err
-	}
-
-	post, err1 := initPostSpecForTSReaders(planCtx, n, resCols)
-	if err1 != nil {
-		return err1
-	}
-
-	planToStreamColMap := make([]int, len(n.ScanAggArray))
-	post.Renders = make([]string, len(n.ScanAggArray))
-	// new output cols type
-	argTypeArray := make([][]types.T, len(n.ScanAggArray))
-	// agg func type
-	funcType := make([]int32, len(n.ScanAggArray))
-	// new output cols
-	outCols := make([]uint32, len(n.ScanAggArray))
-	for i := range n.ScanAggArray {
-		planToStreamColMap[i] = i
-		for _, pa := range n.ScanAggArray[i].Params.Param {
-			if pa.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
-				typ1 := tsColMap[sqlbase.ColumnID(pa.Value)].internalType
-				argTypeArray[i] = append(argTypeArray[i], typ1)
-			} else {
-				argTypeArray[i] = append(argTypeArray[i], *types.TimestampTZ)
-			}
-		}
-
-		funcType[i] = int32(n.ScanAggArray[i].AggTyp)
-		outCols[i] = uint32(i)
-		post.Renders[i] = fmt.Sprintf("@%d", i+1)
-	}
-	outTypes, typErr := makeResultTypeForAggFuncs(argTypeArray, funcType)
-	if typErr != nil {
-		panic(typErr)
-	}
-	post.Projection = false
-	p.SetLastStageTSPost(post, outTypes)
-
-	p.AddTSProjection(outCols, true, false)
-	p.PlanToStreamColMap = planToStreamColMap
-	return nil
-}
-
 // buildPhyPlanForTSReaders construct TSTagReadera and add to Proceccor.
 // tableID is the id of table that needs to be scanned.
 //
@@ -2237,11 +2071,19 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 	typs []types.T,
 	descColumnIDs []sqlbase.ColumnID,
 ) error {
-	useStatistic := len(n.ScanAggArray) > 0
 	//construct TSReaderSpec
-	err := p.initPhyPlanForTsReaders(planCtx, colMetas, n, rangeSpans)
-	if err != nil {
-		return err
+	if n.ScanAggArray {
+		tr := execinfrapb.TSStatisticReaderSpec{TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, TsCols: colMetas,
+			TableVersion: n.Table.GetTSVersion()}
+		err := p.initPhyPlanForStatisticReaders(tr)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := p.initPhyPlanForTsReaders(planCtx, colMetas, n, rangeSpans)
+		if err != nil {
+			return err
+		}
 	}
 
 	post, err1 := initPostSpecForTSReaders(planCtx, n, resCols)
@@ -2252,7 +2094,7 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 		outCols, planToStreamColMap, outTypes := buildPostSpecForTSReadersHash(n, typs, descColumnIDs, tsColMap, &post, true)
 		p.SetLastStageTSPost(post, outTypes)
 
-		p.AddHashTSProjection(outCols, useStatistic, false, n.resultColumns, len(*n.RelInfo.RelationalCols))
+		p.AddHashTSProjection(outCols, false, false, n.resultColumns, len(*n.RelInfo.RelationalCols))
 		p.PlanToStreamColMap = planToStreamColMap
 		return nil
 	}
@@ -2260,7 +2102,7 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 	outCols, planToStreamColMap, outTypes := buildPostSpecForTSReaders(n, typs, descColumnIDs, tsColMap, &post)
 	p.SetLastStageTSPost(post, outTypes)
 
-	p.AddTSProjection(outCols, useStatistic, false)
+	p.AddTSProjection(outCols)
 	p.PlanToStreamColMap = planToStreamColMap
 	return nil
 }
@@ -2292,7 +2134,6 @@ func (p *PhysicalPlan) buildPhyPlanForTSReadersHash(
 	typs []types.T,
 	descColumnIDs []sqlbase.ColumnID,
 ) error {
-	useStatistic := len(n.ScanAggArray) > 0
 	//construct TSReaderSpec
 	err := p.initPhyPlanForTsReaders(planCtx, colMetas, n, rangeSpans)
 	if err != nil {
@@ -2306,7 +2147,7 @@ func (p *PhysicalPlan) buildPhyPlanForTSReadersHash(
 
 	outCols, planToStreamColMap, outTypes := buildPostSpecForTSReadersHash(n, typs, descColumnIDs, tsColMap, &post, true)
 	p.SetLastStageTSPost(post, outTypes)
-	p.AddHashTSProjection(outCols, useStatistic, false, n.resultColumns, len(*n.RelInfo.RelationalCols))
+	p.AddHashTSProjection(outCols, false, false, n.resultColumns, len(*n.RelInfo.RelationalCols))
 	p.PlanToStreamColMap = planToStreamColMap
 	return nil
 }
@@ -2417,26 +2258,6 @@ func (dsp *DistSQLPlanner) createTSReaders(
 
 	if len(rangeSpans) == 0 {
 		return PhysicalPlan{}, pgerror.New(pgcode.Warning, "get spans error, length of spans is 0")
-	}
-	// statistic reader exists
-	if len(n.ScanAggArray) > 0 {
-		tsColMetas, tsColMap, resCols, resColsOld := buildTSStatisticColsAndTSColMap(n, columnIDSet)
-
-		//construct TSTagReaderSpec
-		err = p.buildPhyPlanForTagReaders(planCtx, n, &rangeSpans, tsColMetas, tsColMap, resColsOld, typs, descColumnIDs)
-		if err != nil {
-			return PhysicalPlan{}, err
-		}
-		if n.HintType.OnlyTag() {
-			return p, nil
-		}
-
-		//construct TSStatisticReader
-		err = p.buildPhyPlanForTSStatisticReaders(planCtx, n, tsColMetas, resCols, typs, tsColMap)
-		if err != nil {
-			return PhysicalPlan{}, err
-		}
-		return p, nil
 	}
 
 	// construct TSTagReaderSpec
@@ -2968,33 +2789,27 @@ func checkHas(
 // Parameters:
 // - aggregations: array of AggregatorSpec
 // - localAggs: [out] all local agg
-// - tsFinalAggs: [out] all ts engine final agg for parallel
 // - finalAggs: [out] all final agg
 // - inputTypes: child processor output column type
 // - needRender: need render flag
 // - finalIdxMap: final column index map
 // - finalPreRenderTypes: [out] if need render, this is render column type
 // - intermediateTypes: [out] local agg column type
-// - tsFinalTypes: [out] ts engine final agg column type
-// - statisticIndex: agg use statistic column index, statistic reader output sum(a), count(a) as single column
 //
 // Returns:
 // - err if has error
 func getFinalAggFuncAndType(
 	aggregations []execinfrapb.AggregatorSpec_Aggregation,
 	localAggs *[]execinfrapb.AggregatorSpec_Aggregation,
-	tsFinalAggs *[]execinfrapb.AggregatorSpec_Aggregation,
 	finalAggs *[]execinfrapb.AggregatorSpec_Aggregation,
 	inputTypes []types.T,
 	needRender bool,
 	finalIdxMap *[]uint32,
 	finalPreRenderTypes *[]*types.T,
 	intermediateTypes *[]types.T,
-	tsFinalTypes *[]types.T,
-	statisticIndex opt.StatisticIndex,
 ) error {
 	finalIdx := 0
-	for k, e := range aggregations {
+	for _, e := range aggregations {
 		info := physicalplan.DistAggregationTable[e.Func]
 
 		// relToAbsLocalIdx maps each local stage for the given aggregation e to its final index in localAggs.
@@ -3004,125 +2819,284 @@ func getFinalAggFuncAndType(
 		// We use a slice here instead of a map because we have a small, bounded domain to map and runtime hash
 		// operations are relatively expensive.
 		relToAbsLocalIdx := make([]uint32, len(info.LocalStage))
-		var relToAbsTSFinalIdx []uint32
-		if tsFinalAggs != nil && tsFinalTypes != nil {
-			relToAbsTSFinalIdx = make([]uint32, len(info.MiddleStage))
+
+		if err := dealWithLocal(&info, e, inputTypes, localAggs, intermediateTypes, &relToAbsLocalIdx); err != nil {
+			return err
 		}
 
-		// Note the planNode first feeds the input (inputTypes) into the local aggregators.
-		for i, localFunc := range info.LocalStage {
-			localAgg := execinfrapb.AggregatorSpec_Aggregation{
-				Func: localFunc, FilterColIdx: e.FilterColIdx,
-			}
-			//use statistic , local need use final agg
-			if len(statisticIndex) > 0 {
-				info1 := physicalplan.DistAggregationTable[localFunc]
-				localAgg.Func = info1.FinalStage[0].Fn
-				localFunc = info1.FinalStage[0].Fn
-				if localFunc == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
-					constColIndex := len(statisticIndex[k]) - 1
-					localAgg.ColIdx = []uint32{statisticIndex[k][constColIndex]}
-					e.ColIdx = []uint32{statisticIndex[k][constColIndex]}
-				} else {
-					localAgg.ColIdx = statisticIndex[k]
-					e.ColIdx = statisticIndex[k]
-				}
-			} else {
-				if localFunc == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
-					constColIndex := len(e.ColIdx) - 1
-					localAgg.ColIdx = []uint32{e.ColIdx[constColIndex]}
-					e.ColIdx = []uint32{e.ColIdx[constColIndex]}
-				} else {
-					localAgg.ColIdx = e.ColIdx
-				}
-			}
-
-			if !checkHas(localAgg, *localAggs, &relToAbsLocalIdx[i]) {
-				// Append the new local aggregation and map to its index in localAggs.
-				relToAbsLocalIdx[i] = uint32(len(*localAggs))
-				*localAggs = append(*localAggs, localAgg)
-
-				// Keep track of the new local aggregation's output type.
-				argTypes := make([]types.T, len(e.ColIdx))
-				for j, c := range localAgg.ColIdx {
-					argTypes[j] = inputTypes[c]
-				}
-
-				_, outputType, err := execinfrapb.GetAggregateInfo(localFunc, argTypes...)
-				if err != nil {
-					return err
-				}
-				*intermediateTypes = append(*intermediateTypes, *outputType)
-			}
-		}
-
-		if tsFinalAggs != nil && tsFinalTypes != nil {
-			for i, tsFinalInfo := range info.MiddleStage {
-				// The input of the final aggregators is specified as the relative indices of the local aggregation values.
-				// We need to map these to the corresponding absolute indices in localAggs.
-				// argIdxs consists of the absolute indices in localAggs.
-				argIdxs := make([]uint32, len(tsFinalInfo.LocalIdxs))
-				for m, relIdx := range tsFinalInfo.LocalIdxs {
-					argIdxs[m] = relToAbsLocalIdx[relIdx]
-				}
-
-				tsFinalAgg := execinfrapb.AggregatorSpec_Aggregation{Func: tsFinalInfo.Fn, ColIdx: argIdxs}
-
-				if !checkHas(tsFinalAgg, *tsFinalAggs, &relToAbsTSFinalIdx[i]) {
-					// Append the new local aggregation and map to its index in localAggs.
-					relToAbsTSFinalIdx[i] = uint32(len(*tsFinalAggs))
-					*tsFinalAggs = append(*tsFinalAggs, tsFinalAgg)
-
-					// Keep track of the new local aggregation's output type.
-					argTypes := make([]types.T, len(argIdxs))
-					for j, c := range tsFinalAgg.ColIdx {
-						argTypes[j] = (*intermediateTypes)[c]
-					}
-
-					_, outputType, err := execinfrapb.GetAggregateInfo(tsFinalAgg.Func, argTypes...)
-					if err != nil {
-						return err
-					}
-					*tsFinalTypes = append(*tsFinalTypes, *outputType)
-				}
-			}
-		} else {
-			relToAbsTSFinalIdx = relToAbsLocalIdx
-		}
-
-		for _, finalInfo := range info.FinalStage {
-			// The input of the final aggregators is specified as the relative indices of the local aggregation values.
-			// We need to map these to the corresponding absolute indices in localAggs.
-			// argIdxs consists of the absolute indices in localAggs.
-			argIdxs := make([]uint32, len(finalInfo.LocalIdxs))
-			for i, relIdx := range finalInfo.LocalIdxs {
-				argIdxs[i] = relToAbsTSFinalIdx[relIdx]
-			}
-
-			finalAgg := execinfrapb.AggregatorSpec_Aggregation{Func: finalInfo.Fn, ColIdx: argIdxs}
-
-			// Append the final agg if there is no existing equivalent.
-			if !checkHas(finalAgg, *finalAggs, &(*finalIdxMap)[finalIdx]) {
-				(*finalIdxMap)[finalIdx] = uint32(len(*finalAggs))
-				*finalAggs = append(*finalAggs, finalAgg)
-
-				if needRender {
-					argTypes := make([]types.T, len(finalInfo.LocalIdxs))
-					for i := range finalInfo.LocalIdxs {
-						// Map the corresponding local aggregation output types for the current aggregation e.
-						argTypes[i] = (*intermediateTypes)[argIdxs[i]]
-					}
-					_, outputType, err := execinfrapb.GetAggregateInfo(finalInfo.Fn, argTypes...)
-					if err != nil {
-						return err
-					}
-					*finalPreRenderTypes = append(*finalPreRenderTypes, outputType)
-				}
-			}
-			finalIdx++
+		if err := dealWithFinalAgg(&info, *intermediateTypes, &relToAbsLocalIdx, needRender, finalAggs, finalPreRenderTypes,
+			finalIdxMap, &finalIdx); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// dealWithLocal get local agg function and type
+// Each aggregation can have multiple aggregations in the local stages. We concatenate all these into outputAggArray.
+// Parameters:
+// - distAggInfo: distribute agg info struct
+// - inputAgg: origin AggregatorSpec
+// - inputTypes: child processor output column type
+// - outputAggArray[out]: all output local agg
+// - outputTypes[out]: local agg column type
+// - relToAbsLocalIdx[out]: maps each local stage for the given aggregation e to its final index in localAggs
+//
+// Returns:
+// - err if has error
+func dealWithLocal(
+	distAggInfo *physicalplan.DistAggregationInfo,
+	inputAgg execinfrapb.AggregatorSpec_Aggregation,
+	inputTypes []types.T,
+	outputAggArray *[]execinfrapb.AggregatorSpec_Aggregation,
+	outputTypes *[]types.T,
+	relToAbsLocalIdx *[]uint32,
+) error {
+	for i, localFunc := range distAggInfo.LocalStage {
+		localAgg := execinfrapb.AggregatorSpec_Aggregation{
+			Func: localFunc, FilterColIdx: inputAgg.FilterColIdx,
+		}
+
+		if localFunc == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
+			constColIndex := len(inputAgg.ColIdx) - 1
+			localAgg.ColIdx = []uint32{inputAgg.ColIdx[constColIndex]}
+			inputAgg.ColIdx = localAgg.ColIdx
+		} else {
+			localAgg.ColIdx = inputAgg.ColIdx
+		}
+
+		if !checkHas(localAgg, *outputAggArray, &(*relToAbsLocalIdx)[i]) {
+			// Append the new local aggregation and map to its index in localAggs.
+			(*relToAbsLocalIdx)[i] = uint32(len(*outputAggArray))
+			*outputAggArray = append(*outputAggArray, localAgg)
+
+			// Keep track of the new local aggregation's output type.
+			argTypes := make([]types.T, len(localAgg.ColIdx))
+			for j, c := range localAgg.ColIdx {
+				argTypes[j] = inputTypes[c]
+			}
+
+			_, outputType, err := execinfrapb.GetAggregateInfo(localFunc, argTypes...)
+			if err != nil {
+				return err
+			}
+			*outputTypes = append(*outputTypes, *outputType)
+		}
+	}
+
+	return nil
+}
+
+func getResultType(outputTypes interface{}, returnType *types.T) error {
+	switch src := outputTypes.(type) {
+	case *[]types.T:
+		*src = append(*src, *returnType)
+	case *[]*types.T:
+		*src = append(*src, returnType)
+	default:
+		return pgerror.Newf(pgcode.Internal, "result type struct is invalid %v", outputTypes)
+	}
+
+	return nil
+}
+
+// dealWithFinalAgg get final agg function and type
+// Each aggregation can have multiple aggregations in the final stages. We concatenate all these into finalAggs.
+// finalIdx is the index of the final aggregation with respect to all final aggregations.
+// Parameters:
+// - distAggInfo: distribute agg info struct
+// - inputTypes: child processor output column type
+// - needRender: need render for avg ...
+// - outputAggArray[out]: all output local agg
+// - outputTypes[out]: local agg column type
+// - finalIdxMap[out]: maps each final stage for the given aggregation
+// - finalIdx: final index
+//
+// Returns:
+// - err if has error
+func dealWithFinalAgg(
+	distAggInfo *physicalplan.DistAggregationInfo,
+	inputTypes []types.T,
+	relToAbsLocalIdx *[]uint32,
+	needRender bool,
+	outputAggArray *[]execinfrapb.AggregatorSpec_Aggregation,
+	outputTypes interface{},
+	finalIdxMap *[]uint32,
+	finalIdx *int,
+) error {
+	for _, finalInfo := range distAggInfo.FinalStage {
+		// The input of the final aggregators is specified as the relative indices of the local aggregation values.
+		// We need to map these to the corresponding absolute indices in localAggs.
+		// argIdxs consists of the absolute indices in localAggs.
+		argIdxs := make([]uint32, len(finalInfo.LocalIdxs))
+		for i, relIdx := range finalInfo.LocalIdxs {
+			argIdxs[i] = (*relToAbsLocalIdx)[relIdx]
+		}
+
+		finalAgg := execinfrapb.AggregatorSpec_Aggregation{Func: finalInfo.Fn, ColIdx: argIdxs}
+
+		// Append the final agg if there is no existing equivalent.
+		if !checkHas(finalAgg, *outputAggArray, &(*finalIdxMap)[*finalIdx]) {
+			(*finalIdxMap)[*finalIdx] = uint32(len(*outputAggArray))
+			*outputAggArray = append(*outputAggArray, finalAgg)
+
+			if needRender {
+				argTypes := make([]types.T, len(finalInfo.LocalIdxs))
+				for i := range finalInfo.LocalIdxs {
+					// Map the corresponding local aggregation output types for the current aggregation e.
+					argTypes[i] = inputTypes[argIdxs[i]]
+				}
+				_, outputType, err := execinfrapb.GetAggregateInfo(finalInfo.Fn, argTypes...)
+				if err != nil {
+					return err
+				}
+				if err = getResultType(outputTypes, outputType); err != nil {
+					return err
+				}
+			}
+		}
+		*finalIdx++
+	}
+
+	return nil
+}
+
+// getLocalAggAndType get local agg function and type
+// Each aggregation can have multiple aggregations in the local/final stages. We concatenate all these into
+// localAggs/middleAggs/finalAggs. finalIdx is the index of the final aggregation with respect to all final aggregations.
+// Parameters:
+// - aggregations: array of AggregatorSpec
+// - inputTypes: child processor output column type
+// - aggs: all local agg
+//
+// Returns:
+// - local agg column type
+// - local agg col index , 2D array , 1D is agg index, 2D is col index , start from 0. last(a) -> last(a)[0], last(ts)[1]
+// - err if has error
+func getLocalAggAndType(
+	aggregations []execinfrapb.AggregatorSpec_Aggregation,
+	inputTypes []types.T,
+	aggs *[]execinfrapb.AggregatorSpec_Aggregation,
+) (outputTypes []types.T, colIndex opt.StatisticIndex, err error) {
+	for _, e := range aggregations {
+		info := physicalplan.DistAggregationTable[e.Func]
+
+		// relToAbsLocalIdx maps each local stage for the given aggregation e to its final index in localAggs.
+		// This is necessary since we de-duplicate equivalent local aggregations and need to correspond the
+		// one copy of local aggregation required by the final stage to its input, which is specified as a
+		// relative local stage index (see `Aggregations` in aggregators_func.go).
+		// We use a slice here instead of a map because we have a small, bounded domain to map and runtime hash
+		// operations are relatively expensive.
+		relToAbsLocalIdx := make([]uint32, len(info.LocalStage))
+
+		if err = dealWithLocal(&info, e, inputTypes, aggs, &outputTypes, &relToAbsLocalIdx); err != nil {
+			return outputTypes, colIndex, err
+		}
+
+		colIndex = append(colIndex, relToAbsLocalIdx)
+	}
+	return outputTypes, colIndex, err
+}
+
+// getMiddleAggAndType get middle agg function and type, that is after synchronizer
+// Each aggregation can have multiple aggregations in the local/final stages. We concatenate all these into
+// localAggs/middleAggs/finalAggs. finalIdx is the index of the final aggregation with respect to all final aggregations.
+// Parameters:
+//   - aggregations: array of AggregatorSpec
+//   - inputTypes: child agg output column type
+//   - localColIndex: child agg col index , 2D array , 1D is agg index, 2D is col index , start from 0.
+//     eg:last(a) -> last(a)[0], last(ts)[1]
+//   - aggs: all middle agg
+//
+// Returns:
+// - middle agg column type
+// - middle agg col index , 2D array , 1D is agg index, 2D is col index , start from 0. last(a) -> last(a)[0], last(ts)[1]
+// - err if has error
+func getMiddleAggAndType(
+	aggregations []execinfrapb.AggregatorSpec_Aggregation,
+	inputTypes []types.T,
+	localColIndex opt.StatisticIndex,
+	aggs *[]execinfrapb.AggregatorSpec_Aggregation,
+) (outputTypes []types.T, colIndex opt.StatisticIndex, err error) {
+	for k, e := range aggregations {
+		info := physicalplan.DistAggregationTable[e.Func]
+
+		// relToAbsLocalIdx maps each local stage for the given aggregation e to its final index in localAggs.
+		// This is necessary since we de-duplicate equivalent local aggregations and need to correspond the
+		// one copy of local aggregation required by the final stage to its input, which is specified as a
+		// relative local stage index (see `Aggregations` in aggregators_func.go).
+		// We use a slice here instead of a map because we have a small, bounded domain to map and runtime hash
+		// operations are relatively expensive.
+		relToAbsLocalIdx := make([]uint32, len(info.MiddleStage))
+
+		// Note the planNode first feeds the input (inputTypes) into the local aggregators.
+		for i, stageInfo := range info.MiddleStage {
+			// The input of the final aggregators is specified as the relative indices of the local aggregation values.
+			// We need to map these to the corresponding absolute indices in localAggs.
+			// argIdxs consists of the absolute indices in localAggs.
+			argIdxs := make([]uint32, len(stageInfo.LocalIdxs))
+			for l, relIdx := range stageInfo.LocalIdxs {
+				argIdxs[l] = localColIndex[k][relIdx]
+			}
+
+			agg := execinfrapb.AggregatorSpec_Aggregation{Func: stageInfo.Fn, ColIdx: argIdxs}
+
+			if !checkHas(agg, *aggs, &relToAbsLocalIdx[i]) {
+				// Append the new local aggregation and map to its index in localAggs.
+				relToAbsLocalIdx[i] = uint32(len(*aggs))
+				*aggs = append(*aggs, agg)
+
+				// Keep track of the new local aggregation's output type.
+				argTypes := make([]types.T, len(stageInfo.LocalIdxs))
+				for j := range stageInfo.LocalIdxs {
+					argTypes[j] = inputTypes[argIdxs[j]]
+				}
+
+				_, outputType, err1 := execinfrapb.GetAggregateInfo(agg.Func, argTypes...)
+				if err1 != nil {
+					return outputTypes, colIndex, err1
+				}
+				outputTypes = append(outputTypes, *outputType)
+			}
+		}
+		colIndex = append(colIndex, relToAbsLocalIdx)
+	}
+	return outputTypes, colIndex, err
+}
+
+// getFinalFuncAndType get final agg function and type
+// Each aggregation can have multiple aggregations in the local/final stages. We concatenate all these into
+// localAggs/middleAggs/finalAggs. finalIdx is the index of the final aggregation with respect to all final aggregations.
+// Parameters:
+//   - aggregations: array of AggregatorSpec
+//   - inputTypes: child agg output column type
+//   - localColIndex: child agg col index , 2D array , 1D is agg index, 2D is col index , start from 0.
+//     eg:last(a) -> last(a)[0], last(ts)[1]
+//   - needRender: need render for avg ...
+//   - finalIdxMap: pre render agg col index
+//
+// Returns:
+// - all middle agg
+// - final agg column type
+// - err if has error
+func getFinalFuncAndType(
+	aggregations []execinfrapb.AggregatorSpec_Aggregation,
+	inputTypes []types.T,
+	localColIndex opt.StatisticIndex,
+	needRender bool,
+	finalIdxMap *[]uint32,
+) ([]execinfrapb.AggregatorSpec_Aggregation, []*types.T, error) {
+	var finalAggs []execinfrapb.AggregatorSpec_Aggregation
+	var outputTypes []*types.T
+	finalIdx := 0
+	for k, e := range aggregations {
+		info := physicalplan.DistAggregationTable[e.Func]
+		if err := dealWithFinalAgg(&info, inputTypes, &localColIndex[k], needRender, &finalAggs, &outputTypes, finalIdxMap,
+			&finalIdx); err != nil {
+			return finalAggs, outputTypes, err
+		}
+	}
+	return finalAggs, outputTypes, nil
 }
 
 // getTwoStageAggCount get local agg  final agg and need render
@@ -3262,36 +3236,26 @@ func addSynchronizerForAgg(
 	ordCols []execinfrapb.Ordering_Column,
 	post *execinfrapb.TSPostProcessSpec,
 ) {
-	// construct Synchronizer spec
-	localAggsSpec := execinfrapb.TSSynchronizerSpec{
-		Degree: planCtx.GetTsDop(),
-	}
-
+	tsPost := execinfrapb.TSPostProcessSpec{}
 	if post == nil {
-		// construct Synchronizer post spec
-		tsPost := execinfrapb.TSPostProcessSpec{}
-
 		// add ts post spec output type from intermediateTypes
 		tsPost.OutputTypes = make([]types.Family, len(intermediateTypes))
 		for i, typ := range intermediateTypes {
 			tsPost.OutputTypes[i] = typ.InternalType.Family
 		}
-		// add Synchronizer spec for all node
-		p.AddTSNoGroupingStage(
-			execinfrapb.TSProcessorCoreUnion{Synchronizer: &localAggsSpec},
-			tsPost,
-			intermediateTypes,
-			execinfrapb.Ordering{Columns: ordCols},
-		)
 	} else {
-		// add Synchronizer spec for all node
-		p.AddTSNoGroupingStage(
-			execinfrapb.TSProcessorCoreUnion{Synchronizer: &localAggsSpec},
-			*post,
-			intermediateTypes,
-			execinfrapb.Ordering{Columns: ordCols},
-		)
+		tsPost = *post
 	}
+
+	p.SynchronizerChildRouters = append(p.SynchronizerChildRouters, p.ResultRouters...)
+
+	// add Synchronizer spec for all node
+	p.AddTSNoGroupingStage(
+		execinfrapb.TSProcessorCoreUnion{Synchronizer: &execinfrapb.TSSynchronizerSpec{Degree: planCtx.GetTsDop()}},
+		tsPost,
+		intermediateTypes,
+		execinfrapb.Ordering{Columns: ordCols},
+	)
 }
 
 // setupChildDistributionStrategy setup child distribution strategy
@@ -3325,7 +3289,6 @@ func (dsp *DistSQLPlanner) addTwiceAggregators(
 	oldGroupCols []int,
 	orderedGroupCols []uint32,
 	orderedGroupColSet util.FastIntSet,
-	statisticIndex opt.StatisticIndex,
 ) (execinfrapb.AggregatorSpec, execinfrapb.PostProcessSpec, error) {
 	var finalAggsSpec execinfrapb.AggregatorSpec
 	var finalAggsPost execinfrapb.PostProcessSpec
@@ -3352,8 +3315,8 @@ func (dsp *DistSQLPlanner) addTwiceAggregators(
 		finalPreRenderTypes = make([]*types.T, 0, nFinalAgg)
 	}
 
-	if err := getFinalAggFuncAndType(aggregations, &localAggs, nil, &finalAggs, p.ResultTypes, needRender,
-		&finalIdxMap, &finalPreRenderTypes, &intermediateTypes, nil, statisticIndex); err != nil {
+	if err := getFinalAggFuncAndType(aggregations, &localAggs, &finalAggs, p.ResultTypes, needRender,
+		&finalIdxMap, &finalPreRenderTypes, &intermediateTypes); err != nil {
 		return finalAggsSpec, finalAggsPost, err
 	}
 
@@ -3474,14 +3437,23 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		finalPreRenderTypes = make([]*types.T, 0, nFinalAgg)
 	}
 
+	var colIndex opt.StatisticIndex
+	var err error
+	if intermediateTypes, colIndex, err = getLocalAggAndType(aggregations, p.ResultTypes, &localAggs); err != nil {
+		return finalAggsSpec, finalAggsPost, err
+	}
+
+	preType := intermediateTypes
 	if addTSTwiceAgg {
-		if err := getFinalAggFuncAndType(aggregations, &localAggs, &tsFinalAggs, &finalAggs, p.ResultTypes, needRender,
-			&finalIdxMap, &finalPreRenderTypes, &intermediateTypes, &tsAggsTypes, n.statisticIndex); err != nil {
+		if tsAggsTypes, colIndex, err = getMiddleAggAndType(aggregations, intermediateTypes, colIndex, &tsFinalAggs); err != nil {
 			return finalAggsSpec, finalAggsPost, err
 		}
-	} else {
-		if err := getFinalAggFuncAndType(aggregations, &localAggs, nil, &finalAggs, p.ResultTypes, needRender,
-			&finalIdxMap, &finalPreRenderTypes, &intermediateTypes, nil, n.statisticIndex); err != nil {
+		preType = tsAggsTypes
+	}
+
+	if !secOpt {
+		if finalAggs, finalPreRenderTypes, err = getFinalFuncAndType(aggregations, preType, colIndex, needRender,
+			&finalIdxMap); err != nil {
 			return finalAggsSpec, finalAggsPost, err
 		}
 	}
@@ -3512,7 +3484,7 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		Aggregations:     localAggs,
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
-		AggPushDown:      n.optType.PushLocalAggToScanOpt(),
+		AggPushDown:      n.optType.TimeBucketOpt(),
 	}
 
 	// construct Synchronizer post spec
@@ -3523,13 +3495,14 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		tsPost.OutputTypes[i] = typ.InternalType.Family
 	}
 
-	if localAggsSpec.AggPushDown {
-		for _, idx := range p.ResultRouters {
-			pushAggToScan(p, idx, &localAggsSpec, &tsPost, n.optType.PruneLocalAggOpt())
+	addLocalAgg := !n.optType.UseStatisticOpt() && (addTSTwiceAgg || !n.optType.PruneLocalAggOpt())
+	if n.optType.PushLocalAggToScanOpt() {
+		if err = pushAggToScan(p, &localAggsSpec, &tsPost, intermediateTypes, !addLocalAgg, n); err != nil {
+			return finalAggsSpec, finalAggsPost, err
 		}
 	}
 
-	if !n.optType.PruneLocalAggOpt() {
+	if addLocalAgg {
 		// add ts local agg
 		p.AddTSNoGroupingStage(
 			execinfrapb.TSProcessorCoreUnion{Aggregator: &localAggsSpec},
@@ -3537,6 +3510,12 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 			intermediateTypes,
 			execinfrapb.Ordering{Columns: ordCols},
 		)
+	} else {
+		intermediateTypes = p.ResultTypes
+		tsPost.OutputTypes = make([]types.Family, len(p.ResultTypes))
+		for i, typ := range p.ResultTypes {
+			tsPost.OutputTypes[i] = typ.InternalType.Family
+		}
 	}
 
 	if !secOpt || len(p.ResultRouters) > 1 {
@@ -3588,21 +3567,38 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 	return finalAggsSpec, finalAggsPost, nil
 }
 
+// pushAggToScan push agg to scan
 func pushAggToScan(
 	p *PhysicalPlan,
-	idx physicalplan.ProcessorIdx,
-	localAggsSpec *execinfrapb.AggregatorSpec,
+	aggSpecs *execinfrapb.AggregatorSpec,
 	tsPost *execinfrapb.TSPostProcessSpec,
+	aggResTypes []types.T,
 	pruneLocalAgg bool,
-) {
-	if p.Processors[idx].TSSpec.Core.TableReader != nil {
-		r := p.Processors[idx].TSSpec.Core.TableReader
-		r.Aggregator = localAggsSpec
-		if pruneLocalAgg {
-			r.OrderedScan = true
-		}
-		r.AggregatorPost = tsPost
+	n *groupNode,
+) error {
+	resultRouters := p.ResultRouters
+	if p.ChildIsTSParallelProcessor() {
+		resultRouters = p.SynchronizerChildRouters
 	}
+	for _, idx := range resultRouters {
+		if n.optType.UseStatisticOpt() {
+			var constValues []int64
+			if v, ok := n.plan.(*renderNode); ok {
+				constValues = make([]int64, len(v.render))
+				for i, val := range v.render {
+					if ti, ok1 := val.(*tree.DTimestampTZ); ok1 {
+						constValues[i] = ti.UnixMilli()
+					}
+				}
+			}
+			if err := p.PushAggToStatisticReader(idx, aggSpecs, tsPost, aggResTypes, constValues); err != nil {
+				return err
+			}
+		} else {
+			p.PushAggToTableReader(idx, aggSpecs, tsPost, pruneLocalAgg)
+		}
+	}
+	return nil
 }
 
 // getAggFuncAndType get plan agg function and type
@@ -3625,7 +3621,6 @@ func getAggFuncAndType(
 	aggFuncs *opt.AggFuncNames,
 	planToStreamColMap []int,
 	canLocal bool,
-	statisticIndex opt.StatisticIndex,
 ) ([]execinfrapb.AggregatorSpec_Aggregation, [][]types.T, bool, error) {
 	aggCount := len(funcs) + len(*aggFuncs)
 	aggs := make([]execinfrapb.AggregatorSpec_Aggregation, aggCount)
@@ -3635,33 +3630,15 @@ func getAggFuncAndType(
 	for i, fholder := range funcs {
 		i = position
 		position++
-		// Convert the aggregate function to the enum value with the same string representation.
-		replaceCountRows := false
 		funcStr := strings.ToUpper(fholder.funcName)
-		// use ts engine statistic reader need change count_rows to count(ts)
-		if len(statisticIndex) > 0 && funcStr == "COUNT_ROWS" {
-			funcStr = "COUNT"
-			replaceCountRows = true
-		}
 		funcIdx, ok := execinfrapb.AggregatorSpec_Func_value[funcStr]
 		if !ok {
 			return aggs, aggColTyps, false, errors.Errorf("unknown aggregate %s", funcStr)
 		}
 		aggs[i].Func = execinfrapb.AggregatorSpec_Func(funcIdx)
 		aggs[i].Distinct = fholder.isDistinct()
-		if len(statisticIndex) > 0 {
-			if replaceCountRows { // this agg function is count_row that has no param
-				// count_row covert to count (ts), so force add ts column that in the head
-				aggs[i].ColIdx = append(aggs[i].ColIdx, statisticIndex[i][0])
-			} else {
-				for j := range fholder.argRenderIdxs {
-					aggs[i].ColIdx = append(aggs[i].ColIdx, statisticIndex[i][j])
-				}
-			}
-		} else {
-			for _, renderIdx := range fholder.argRenderIdxs {
-				aggs[i].ColIdx = append(aggs[i].ColIdx, uint32(planToStreamColMap[renderIdx]))
-			}
+		for _, renderIdx := range fholder.argRenderIdxs {
+			aggs[i].ColIdx = append(aggs[i].ColIdx, uint32(planToStreamColMap[renderIdx]))
 		}
 
 		if fholder.hasFilter() {
@@ -4029,16 +4006,10 @@ func (dsp *DistSQLPlanner) addSingleGroupState(
 }
 
 // getPhysicalGroupCols get physical group cols from logical group cols
-func getPhysicalGroupCols(
-	p *PhysicalPlan, groupCols []int, statisticIndex opt.StatisticIndex,
-) []uint32 {
+func getPhysicalGroupCols(p *PhysicalPlan, groupCols []int) []uint32 {
 	dstGroupCols := make([]uint32, len(groupCols))
 	for i, idx := range groupCols {
-		if len(statisticIndex) > 0 {
-			dstGroupCols[i] = statisticIndex[i][0]
-		} else {
-			dstGroupCols[i] = uint32(p.PlanToStreamColMap[idx])
-		}
+		dstGroupCols[i] = uint32(p.PlanToStreamColMap[idx])
 	}
 
 	return dstGroupCols
@@ -4084,7 +4055,7 @@ func (dsp *DistSQLPlanner) addAggregators(
 
 	// get agg spec
 	aggregations, aggregationsColumnTypes, canNotDist, err := getAggFuncAndType(planCtx, n.funcs, n.aggFuncs,
-		p.PlanToStreamColMap, !(n.engine == tree.EngineTypeTimeseries) && len(p.ResultRouters) == 1, opt.StatisticIndex{})
+		p.PlanToStreamColMap, !(n.engine == tree.EngineTypeTimeseries) && len(p.ResultRouters) == 1)
 	if err != nil {
 		return err
 	}
@@ -4100,7 +4071,7 @@ func (dsp *DistSQLPlanner) addAggregators(
 		aggType = execinfrapb.AggregatorSpec_SCALAR
 	}
 
-	groupCols := getPhysicalGroupCols(p, n.groupCols, opt.StatisticIndex{})
+	groupCols := getPhysicalGroupCols(p, n.groupCols)
 	orderedGroupCols, orderedGroupColSet := getPhysicalOrderedGroupColsAndMap(p, n.groupColOrdering)
 
 	// We can have a local stage of distinct processors if all aggregation
@@ -4131,7 +4102,7 @@ func (dsp *DistSQLPlanner) addAggregators(
 		}
 	} else {
 		finalAggsSpec, finalAggsPost, err = dsp.addTwiceAggregators(planCtx, p, aggType, n.groupColOrdering, aggregations,
-			groupCols, n.groupCols, orderedGroupCols, orderedGroupColSet, opt.StatisticIndex{})
+			groupCols, n.groupCols, orderedGroupCols, orderedGroupColSet)
 		if err != nil {
 			return err
 		}
@@ -4196,7 +4167,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 ) (bool, error) {
 	// get agg spec and agg column type
 	aggregations, aggregationsColumnTypes, _, err := getAggFuncAndType(planCtx, n.funcs, n.aggFuncs,
-		p.PlanToStreamColMap, false, n.statisticIndex)
+		p.PlanToStreamColMap, false)
 	if err != nil {
 		return true, err
 	}
@@ -4212,7 +4183,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 		aggType = execinfrapb.AggregatorSpec_SCALAR
 	}
 
-	groupCols := getPhysicalGroupCols(p, n.groupCols, n.statisticIndex)
+	groupCols := getPhysicalGroupCols(p, n.groupCols)
 	orderedGroupCols, orderedGroupColSet := getPhysicalOrderedGroupColsAndMap(p, n.groupColOrdering)
 
 	// Check if the previous stage is all on one node.
@@ -4226,7 +4197,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 		Aggregations:     aggregations,
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
-		AggPushDown:      n.optType.PushLocalAggToScanOpt(),
+		AggPushDown:      n.optType.TimeBucketOpt(),
 	}}
 
 	// Set up the final stage.
@@ -4237,27 +4208,18 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 
 	addOutPutType := true
 	if len(p.ResultRouters) == 1 {
-		if n.optType.PushLocalAggToScanOpt() && secOpt {
-			resultRouters := p.ResultRouters
-			if p.ChildIsTSParallelProcessor() {
-				resultRouters = p.SynchronizerChildRouters
-			}
+		if (n.optType.PushLocalAggToScanOpt() && n.optType.PruneLocalAggOpt() && secOpt) ||
+			(n.optType.UseStatisticOpt() && secOpt) {
+
 			tsPost := execinfrapb.TSPostProcessSpec{}
 			for _, v := range finalOutTypes {
 				tsPost.OutputTypes = append(tsPost.OutputTypes, v.InternalType.Family)
 			}
-			for _, idx := range resultRouters {
-				if p.Processors[idx].TSSpec.Core.TableReader != nil {
-					pushAggToScan(p, idx, coreUnion.Aggregator, &tsPost, n.optType.PruneLocalAggOpt())
-					addOutPutType = false
-				} else if p.Processors[idx].TSSpec.Core.StatisticReader != nil {
-					p.Processors[idx].TSSpec.Post.Renders = make([]string, len(aggregations))
-					for i, agg := range aggregations {
-						p.Processors[idx].TSSpec.Post.Renders[i] = fmt.Sprintf("@%d", agg.ColIdx[0]+1)
-					}
-					addOutPutType = true
-				}
+
+			if err = pushAggToScan(p, coreUnion.Aggregator, &tsPost, finalOutTypes, n.optType.PruneLocalAggOpt(), n); err != nil {
+				return true, err
 			}
+			addOutPutType = false
 
 			if addSync {
 				addSynchronizerForAgg(planCtx, p, finalOutTypes, []execinfrapb.Ordering_Column{}, &tsPost)
@@ -4266,7 +4228,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 			p.ResultTypes = finalOutTypes
 		} else {
 			// add synchronizer need parallel execute, so need local agg and finial agg
-			if addSync {
+			if addSync || n.optType.UseStatisticOpt() {
 				// add local agg
 				finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType, aggregations, groupCols,
 					orderedGroupCols, orderedGroupColSet, n, false, secOpt, addSync)
@@ -4274,21 +4236,29 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 					return addOutPutType, err
 				}
 
-				// add twice agg for ts engine
-				var tsFinalAggsPost execinfrapb.TSPostProcessSpec
-				for _, val := range finalAggsPost.RenderExprs {
-					tsFinalAggsPost.Renders = append(tsFinalAggsPost.Renders, val.String())
+				if !secOpt {
+					// add twice agg for ts engine
+					var tsFinalAggsPost execinfrapb.TSPostProcessSpec
+					for _, val := range finalAggsPost.RenderExprs {
+						tsFinalAggsPost.Renders = append(tsFinalAggsPost.Renders, val.String())
+					}
+					tsFinalAggsPost.Projection = finalAggsPost.Projection
+					tsFinalAggsPost.OutputColumns = finalAggsPost.OutputColumns
+					dsp.addSingleGroupStateForTS(p, prevStageNode, execinfrapb.TSProcessorCoreUnion{Aggregator: &finalAggsSpec},
+						tsFinalAggsPost, finalOutTypes)
+				} else {
+					post := p.GetLastStageTSPost()
+					for i := range finalAggsPost.RenderExprs {
+						post.Renders = append(post.Renders, finalAggsPost.RenderExprs[i].String())
+					}
+					p.SetLastStageTSPost(post, finalOutTypes)
 				}
-				tsFinalAggsPost.Projection = finalAggsPost.Projection
-				tsFinalAggsPost.OutputColumns = finalAggsPost.OutputColumns
-				dsp.addSingleGroupStateForTS(p, prevStageNode, execinfrapb.TSProcessorCoreUnion{Aggregator: &finalAggsSpec},
-					tsFinalAggsPost, finalOutTypes)
 			} else {
 				// No GROUP BY, or we have a single stream. Use a single final aggregator.
 				// If the previous stage was all on a single node, put the final
 				// aggregator there. Otherwise, bring the results back on this node.
 				dsp.addSingleGroupStateForTS(p, prevStageNode, coreUnion, execinfrapb.TSPostProcessSpec{}, finalOutTypes)
-				pushDownProcessorToTSReader(p, n.optType.PushLocalAggToScanOpt(), true)
+				pushDownProcessorToTSReader(p, n.optType.TimeBucketOpt(), true)
 			}
 		}
 	} else {
@@ -4304,14 +4274,22 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 			return addOutPutType, err
 		}
 
-		p.AddTSTableReader()
+		if !secOpt {
+			p.AddTSTableReader()
 
-		// get all data to gateway node compute agg
-		if 0 == len(finalAggsSpec.GroupCols) {
-			dsp.addSingleGroupState(p, prevStageNode, finalAggsSpec, finalAggsPost, finalOutTypes)
+			// get all data to gateway node compute agg
+			if 0 == len(finalAggsSpec.GroupCols) {
+				dsp.addSingleGroupState(p, prevStageNode, finalAggsSpec, finalAggsPost, finalOutTypes)
+			} else {
+				// ts engine compute twice agg , relational engine compute third agg
+				dsp.setupMultiAggFinalState(planCtx, p, finalOutTypes, &n.reqOrdering, finalAggsSpec, finalAggsPost)
+			}
 		} else {
-			// ts engine compute twice agg , relational engine compute third agg
-			dsp.setupMultiAggFinalState(planCtx, p, finalOutTypes, &n.reqOrdering, finalAggsSpec, finalAggsPost)
+			post := p.GetLastStageTSPost()
+			for i := range finalAggsPost.RenderExprs {
+				post.Renders = append(post.Renders, finalAggsPost.RenderExprs[i].String())
+			}
+			p.SetLastStageTSPost(post, finalOutTypes)
 		}
 	}
 
@@ -4654,11 +4632,8 @@ func (dsp *DistSQLPlanner) createPlanForGroup(
 				addSynchronizer = true
 			}
 		}
-		if !pruneFinalAgg || n.statisticIndex.Empty() {
-			addOutPutType, err = dsp.addTSAggregators(planCtx, &plan, n, pruneFinalAgg, addSynchronizer)
-		} else if addSynchronizer {
-			addSynchronizerForAgg(planCtx, &plan, plan.ResultTypes, []execinfrapb.Ordering_Column{}, &execinfrapb.TSPostProcessSpec{})
-		}
+
+		addOutPutType, err = dsp.addTSAggregators(planCtx, &plan, n, pruneFinalAgg, addSynchronizer)
 	} else {
 		err = dsp.addAggregators(planCtx, &plan, n)
 	}
@@ -5029,12 +5004,9 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 			return PhysicalPlan{}, err
 		}
 
-		// use statistic reader
-		if v, ok := n.source.plan.(*tsScanNode); !ok || len(v.ScanAggArray) == 0 {
-			err = dsp.selectRenders(&plan, n, planCtx)
-			if err != nil {
-				return PhysicalPlan{}, err
-			}
+		err = dsp.selectRenders(&plan, n, planCtx)
+		if err != nil {
+			return PhysicalPlan{}, err
 		}
 
 	case *scanNode:
@@ -5059,7 +5031,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 
 			if n.orderedType == opt.SortAfterScan {
 				// add output types
-				plan.addTSOutputType(false)
+				plan.AddTSOutputType(false)
 				kwdbordering := execinfrapb.GetTSColMappedSpecOrdering(plan.PlanToStreamColMap)
 				plan.AddTSNoGroupingStage(
 					execinfrapb.TSProcessorCoreUnion{
@@ -5074,7 +5046,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 				)
 
 				// add output types
-				plan.addTSOutputType(false)
+				plan.AddTSOutputType(false)
 
 				plan.AddTSNoGroupingStage(
 					execinfrapb.TSProcessorCoreUnion{
@@ -5091,7 +5063,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 
 			if planCtx.IsLocal() {
 				// add output types
-				plan.addTSOutputType(false)
+				plan.AddTSOutputType(false)
 
 				// add synchronizer
 				if err = dsp.addSynchronizerForTS(&plan, planCtx.GetTsDop()); err != nil {
@@ -5099,7 +5071,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 				}
 
 				// add output types
-				plan.addTSOutputType(false)
+				plan.AddTSOutputType(false)
 
 				// add noop for gateway node to collect all data from all node
 				plan.AddNoopToTsProcessors(dsp.nodeDesc.NodeID, true, false)
@@ -5197,7 +5169,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 
 	// add output types for ts processor
 	if addOutPutType {
-		plan.addTSOutputType(false)
+		plan.AddTSOutputType(false)
 	}
 
 	if dsp.shouldPlanTestMetadata() {
@@ -5547,7 +5519,7 @@ func (dsp *DistSQLPlanner) createPlanForDistinct(
 			execinfrapb.TSPostProcessSpec{}, plan.ResultTypes, plan.MergeOrdering)
 		if len(plan.ResultRouters) > 1 {
 			// add output types for ts processor
-			plan.addTSOutputType(false)
+			plan.AddTSOutputType(false)
 
 			// add ts engine data receiver
 			plan.AddTSTableReader()
@@ -6694,16 +6666,12 @@ func addHashPointMap(
 //     Similar to the first example, if c1 and c2 are all PTAGs, this function would also return false
 //     for the same reason: the grouping covers all primary tag columns.
 func needsTSTwiceAggregation(n *groupNode, planCtx *PlanningCtx) (bool, error) {
-	if n.optType.PushLocalAggToScanOpt() {
+	// No grouping by condition requires two aggregates
+	if n.optType.TimeBucketOpt() || len(n.groupCols) == 0 {
 		return true, nil
 	}
-	var primaryTagColIDs, groupColIDs util.FastIntSet
-	needsTSTwiceAgg := true
 
-	// No grouping by condition requires two aggregates
-	if len(n.groupCols) == 0 {
-		return needsTSTwiceAgg, nil
-	}
+	var primaryTagColIDs, groupColIDs util.FastIntSet
 	// Get grouping columns physical id
 	inputCols := planColumns(n.plan)
 	for _, colIdx := range n.groupCols {
@@ -6728,13 +6696,13 @@ func needsTSTwiceAggregation(n *groupNode, planCtx *PlanningCtx) (bool, error) {
 			col := inputCols[colIdx]
 			// Grouping columns have relational expression
 			if col.TableID == sqlbase.InvalidID {
-				return needsTSTwiceAgg, nil
+				return true, nil
 			}
 			tabID = col.TableID
 		}
 		tableDesc, err := sqlbase.GetTableDescFromID(planCtx.ctx, planCtx.ExtendedEvalCtx.Txn, tabID)
 		if err != nil {
-			return needsTSTwiceAgg, err
+			return true, err
 		}
 		for _, col := range tableDesc.Columns {
 			if col.IsPrimaryTagCol() {
@@ -6744,10 +6712,8 @@ func needsTSTwiceAggregation(n *groupNode, planCtx *PlanningCtx) (bool, error) {
 		return !primaryTagColIDs.Equals(groupColIDs), nil
 	default:
 		// Other cases don't come to mind temporarily, so return needsTSTwiceAgg
-		return needsTSTwiceAgg, nil
+		return true, nil
 	}
-
-	return needsTSTwiceAgg, nil
 }
 
 // parsePtagValue parse the value of a string into the corresponding type of value and add it to the payload.

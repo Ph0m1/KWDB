@@ -430,7 +430,6 @@ func (opc *optPlanningCtx) InitTS(ctx context.Context) {
 
 	// init CheckHelper
 	m.InitCheckHelper(opc.p.ExecCfg().TSWhiteListMap)
-	m.InitCheckHelper(memo.CheckMultiNode(opc.p.IsMultiNode))
 	m.InitCheckHelper(ctx)
 }
 

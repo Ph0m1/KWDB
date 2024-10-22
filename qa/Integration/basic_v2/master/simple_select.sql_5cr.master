@@ -137,5 +137,10 @@ INSERT 1
         44
         55
 (2 rows)
+> SELECT variance(LE)//10 FROM (SELECT max(a) LE FROM tsdb.t1 GROUP BY a);
+  ?column?
+------------
+         6
+(1 row)
 > drop database tsdb cascade;
 DROP DATABASE

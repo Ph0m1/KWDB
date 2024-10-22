@@ -1135,7 +1135,20 @@ func (t *logicTest) setUser(user string) func() {
 	// 0. However, lib/pq by default configures this to 2 during
 	// connection initialization, so we need to set it back to 0 before
 	// we run anything.
-	if _, err := db.Exec("SET extra_float_digits = 0"); err != nil {
+	count := 1
+	for {
+		if count > 3 {
+			break
+		}
+		if _, err = db.Exec("SET extra_float_digits = 0"); err != nil {
+			count++
+			time.Sleep(time.Second)
+			continue
+		} else {
+			break
+		}
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.clients[user] = db

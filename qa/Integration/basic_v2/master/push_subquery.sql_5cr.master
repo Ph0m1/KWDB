@@ -143,47 +143,49 @@ LIMIT 1;
         ORDER BY
             abnormal_point_count DESC
             LIMIT 1;
-                  tree                  |      field       |                                                        description
-----------------------------------------+------------------+----------------------------------------------------------------------------------------------------------------------------
-                                        | distributed      | true
-                                        | vectorized       | false
-  root                                  |                  |
-   ├── limit                            |                  |
-   │    │                               | count            | 1
-   │    └── sort                        |                  |
-   │         │                          | order            | -abnormal_point_count
-   │         └── group                  |                  |
-   │              │                     | aggregate 0      | station_sn
-   │              │                     | aggregate 1      | count(DISTINCT point_sn)
-   │              │                     | group by         | station_sn
-   │              └── render            |                  |
-   │                   │                | point_sn         | point_sn
-   │                   │                | station_sn       | station_sn
-   │                   └── synchronizer |                  |
-   │                        └── ts scan |                  |
-   │                                    | ts-table         | t_point
-   │                                    | access mode      | tableTableMeta
-   │                                    | filter           | ((k_timestamp >= '2024-08-25 10:00:00+00:00') AND (k_timestamp <= '2024-08-30 10:00:00+00:00')) AND (measure_value < @S1)
-   │                                    | tag filter[0]    | measure_type = 4
-   │                                    | tag filter[1]    | pipeline_sn = 'e1'
-   └── subquery                         |                  |
-        │                               | id               | @S1
-        │                               | original sql     | (SELECT avg(measure_value) FROM db_pipec.t_point WHERE (pipeline_sn = 'e1') AND (measure_type = 4))
-        │                               | exec mode        | one row
-        └── group                       |                  |
-             │                          | engine type      | time series
-             │                          | aggregate 0      | avg(measure_value)
-             │                          | scalar           |
-             │                          | addSynchronizer  | true
-             └── render                 |                  |
-                  │                     | engine type      | time series
-                  │                     | measure_value    | measure_value
-                  └── ts scan           |                  |
-                                        | ts-table         | t_point
-                                        | access mode      | tableTableMeta
-                                        | tag filter[0]    | measure_type = 4
-                                        | tag filter[1]    | pipeline_sn = 'e1'
-(38 rows)
+                  tree                  |        field        |                                                        description
+----------------------------------------+---------------------+----------------------------------------------------------------------------------------------------------------------------
+                                        | distributed         | true
+                                        | vectorized          | false
+  root                                  |                     |
+   ├── limit                            |                     |
+   │    │                               | count               | 1
+   │    └── sort                        |                     |
+   │         │                          | order               | -abnormal_point_count
+   │         └── group                  |                     |
+   │              │                     | aggregate 0         | station_sn
+   │              │                     | aggregate 1         | count(DISTINCT point_sn)
+   │              │                     | group by            | station_sn
+   │              └── render            |                     |
+   │                   │                | point_sn            | point_sn
+   │                   │                | station_sn          | station_sn
+   │                   └── synchronizer |                     |
+   │                        └── ts scan |                     |
+   │                                    | ts-table            | t_point
+   │                                    | access mode         | tableTableMeta
+   │                                    | filter              | ((k_timestamp >= '2024-08-25 10:00:00+00:00') AND (k_timestamp <= '2024-08-30 10:00:00+00:00')) AND (measure_value < @S1)
+   │                                    | tag filter[0]       | measure_type = 4
+   │                                    | tag filter[1]       | pipeline_sn = 'e1'
+   └── subquery                         |                     |
+        │                               | id                  | @S1
+        │                               | original sql        | (SELECT avg(measure_value) FROM db_pipec.t_point WHERE (pipeline_sn = 'e1') AND (measure_type = 4))
+        │                               | exec mode           | one row
+        └── group                       |                     |
+             │                          | engine type         | time series
+             │                          | aggregate 0         | avg(measure_value)
+             │                          | scalar              |
+             │                          | pushLocalAggToScan  | true
+             │                          | addSynchronizer     | true
+             └── render                 |                     |
+                  │                     | engine type         | time series
+                  │                     | measure_value       | measure_value
+                  └── ts scan           |                     |
+                                        | ts-table            | t_point
+                                        | access mode         | tableTableMeta
+                                        | use statistic       | true
+                                        | tag filter[0]       | measure_type = 4
+                                        | tag filter[1]       | pipeline_sn = 'e1'
+(40 rows)
 > SELECT COUNT(*) AS max_sample_count,
 AVG(t.measure_value) AS avg_value,
 t.measure_value AS first_n_max_value
@@ -291,40 +293,41 @@ ORDER BY t.measure_value DESC LIMIT 10;
            11.5 | a7       |   true
 (8 rows)
 > explain select measure_value, point_sn,point_sn in (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
-                tree               |      field       |                         description
------------------------------------+------------------+--------------------------------------------------------------
-                                   | distributed      | true
-                                   | vectorized       | false
-  root                             |                  |
-   ├── render                      |                  |
-   │    │                          | measure_value    | measure_value
-   │    │                          | point_sn         | point_sn
-   │    │                          | ?column?         | "?column?"
-   │    └── sort                   |                  |
-   │         │                     | order            | +point_sn
-   │         └── synchronizer      |                  |
-   │              └── render       |                  |
-   │                   │           | engine type      | time series
-   │                   │           | ?column?         | point_sn = ANY (SELECT max(point_sn) FROM db_pipec.t_point)
-   │                   │           | measure_value    | measure_value
-   │                   │           | point_sn         | point_sn
-   │                   └── ts scan |                  |
-   │                               | ts-table         | t_point
-   │                               | access mode      | tableTableMeta
-   └── subquery                    |                  |
-        │                          | id               | @S1
-        │                          | original sql     | (SELECT max(point_sn) FROM db_pipec.t_point)
-        │                          | exec mode        | all rows normalized
-        └── group                  |                  |
-             │                     | engine type      | time series
-             │                     | aggregate 0      | max(point_sn)
-             │                     | scalar           |
-             │                     | addSynchronizer  | true
-             └── ts scan           |                  |
-                                   | ts-table         | t_point
-                                   | access mode      | tableTableMeta
-                                   | scan agg 0       | MAX(point_sn)
-(31 rows)
+                tree               |        field        |                         description
+-----------------------------------+---------------------+--------------------------------------------------------------
+                                   | distributed         | true
+                                   | vectorized          | false
+  root                             |                     |
+   ├── render                      |                     |
+   │    │                          | measure_value       | measure_value
+   │    │                          | point_sn            | point_sn
+   │    │                          | ?column?            | "?column?"
+   │    └── sort                   |                     |
+   │         │                     | order               | +point_sn
+   │         └── synchronizer      |                     |
+   │              └── render       |                     |
+   │                   │           | engine type         | time series
+   │                   │           | ?column?            | point_sn = ANY (SELECT max(point_sn) FROM db_pipec.t_point)
+   │                   │           | measure_value       | measure_value
+   │                   │           | point_sn            | point_sn
+   │                   └── ts scan |                     |
+   │                               | ts-table            | t_point
+   │                               | access mode         | tableTableMeta
+   └── subquery                    |                     |
+        │                          | id                  | @S1
+        │                          | original sql        | (SELECT max(point_sn) FROM db_pipec.t_point)
+        │                          | exec mode           | all rows normalized
+        └── group                  |                     |
+             │                     | engine type         | time series
+             │                     | aggregate 0         | max(point_sn)
+             │                     | scalar              |
+             │                     | pushLocalAggToScan  | true
+             │                     | addSynchronizer     | true
+             └── ts scan           |                     |
+                                   | ts-table            | t_point
+                                   | access mode         | tableTableMeta
+                                   | use statistic       | true
+(32 rows)
 > select measure_value, point_sn, exists (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
   measure_value | point_sn | exists
 ----------------+----------+---------
@@ -338,40 +341,41 @@ ORDER BY t.measure_value DESC LIMIT 10;
            11.5 | a7       |  true
 (8 rows)
 > explain select measure_value, point_sn, exists (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
-                tree               |      field       |                     description
------------------------------------+------------------+------------------------------------------------------
-                                   | distributed      | true
-                                   | vectorized       | false
-  root                             |                  |
-   ├── render                      |                  |
-   │    │                          | measure_value    | measure_value
-   │    │                          | point_sn         | point_sn
-   │    │                          | exists           | "exists"
-   │    └── sort                   |                  |
-   │         │                     | order            | +point_sn
-   │         └── synchronizer      |                  |
-   │              └── render       |                  |
-   │                   │           | engine type      | time series
-   │                   │           | exists           | EXISTS (SELECT max(point_sn) FROM db_pipec.t_point)
-   │                   │           | measure_value    | measure_value
-   │                   │           | point_sn         | point_sn
-   │                   └── ts scan |                  |
-   │                               | ts-table         | t_point
-   │                               | access mode      | tableTableMeta
-   └── subquery                    |                  |
-        │                          | id               | @S1
-        │                          | original sql     | EXISTS (SELECT max(point_sn) FROM db_pipec.t_point)
-        │                          | exec mode        | exists
-        └── group                  |                  |
-             │                     | engine type      | time series
-             │                     | aggregate 0      | max(point_sn)
-             │                     | scalar           |
-             │                     | addSynchronizer  | true
-             └── ts scan           |                  |
-                                   | ts-table         | t_point
-                                   | access mode      | tableTableMeta
-                                   | scan agg 0       | MAX(point_sn)
-(31 rows)
+                tree               |        field        |                     description
+-----------------------------------+---------------------+------------------------------------------------------
+                                   | distributed         | true
+                                   | vectorized          | false
+  root                             |                     |
+   ├── render                      |                     |
+   │    │                          | measure_value       | measure_value
+   │    │                          | point_sn            | point_sn
+   │    │                          | exists              | "exists"
+   │    └── sort                   |                     |
+   │         │                     | order               | +point_sn
+   │         └── synchronizer      |                     |
+   │              └── render       |                     |
+   │                   │           | engine type         | time series
+   │                   │           | exists              | EXISTS (SELECT max(point_sn) FROM db_pipec.t_point)
+   │                   │           | measure_value       | measure_value
+   │                   │           | point_sn            | point_sn
+   │                   └── ts scan |                     |
+   │                               | ts-table            | t_point
+   │                               | access mode         | tableTableMeta
+   └── subquery                    |                     |
+        │                          | id                  | @S1
+        │                          | original sql        | EXISTS (SELECT max(point_sn) FROM db_pipec.t_point)
+        │                          | exec mode           | exists
+        └── group                  |                     |
+             │                     | engine type         | time series
+             │                     | aggregate 0         | max(point_sn)
+             │                     | scalar              |
+             │                     | pushLocalAggToScan  | true
+             │                     | addSynchronizer     | true
+             └── ts scan           |                     |
+                                   | ts-table            | t_point
+                                   | access mode         | tableTableMeta
+                                   | use statistic       | true
+(32 rows)
 > select measure_value, point_sn, (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
   measure_value | point_sn | max
 ----------------+----------+------
@@ -385,40 +389,41 @@ ORDER BY t.measure_value DESC LIMIT 10;
            11.5 | a7       | a7
 (8 rows)
 > explain select measure_value, point_sn,  (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
-                tree               |      field       |                 description
------------------------------------+------------------+-----------------------------------------------
-                                   | distributed      | true
-                                   | vectorized       | false
-  root                             |                  |
-   ├── render                      |                  |
-   │    │                          | measure_value    | measure_value
-   │    │                          | point_sn         | point_sn
-   │    │                          | max              | max
-   │    └── sort                   |                  |
-   │         │                     | order            | +point_sn
-   │         └── synchronizer      |                  |
-   │              └── render       |                  |
-   │                   │           | engine type      | time series
-   │                   │           | max              | (SELECT max(point_sn) FROM db_pipec.t_point)
-   │                   │           | measure_value    | measure_value
-   │                   │           | point_sn         | point_sn
-   │                   └── ts scan |                  |
-   │                               | ts-table         | t_point
-   │                               | access mode      | tableTableMeta
-   └── subquery                    |                  |
-        │                          | id               | @S1
-        │                          | original sql     | (SELECT max(point_sn) FROM db_pipec.t_point)
-        │                          | exec mode        | one row
-        └── group                  |                  |
-             │                     | engine type      | time series
-             │                     | aggregate 0      | max(point_sn)
-             │                     | scalar           |
-             │                     | addSynchronizer  | true
-             └── ts scan           |                  |
-                                   | ts-table         | t_point
-                                   | access mode      | tableTableMeta
-                                   | scan agg 0       | MAX(point_sn)
-(31 rows)
+                tree               |        field        |                 description
+-----------------------------------+---------------------+-----------------------------------------------
+                                   | distributed         | true
+                                   | vectorized          | false
+  root                             |                     |
+   ├── render                      |                     |
+   │    │                          | measure_value       | measure_value
+   │    │                          | point_sn            | point_sn
+   │    │                          | max                 | max
+   │    └── sort                   |                     |
+   │         │                     | order               | +point_sn
+   │         └── synchronizer      |                     |
+   │              └── render       |                     |
+   │                   │           | engine type         | time series
+   │                   │           | max                 | (SELECT max(point_sn) FROM db_pipec.t_point)
+   │                   │           | measure_value       | measure_value
+   │                   │           | point_sn            | point_sn
+   │                   └── ts scan |                     |
+   │                               | ts-table            | t_point
+   │                               | access mode         | tableTableMeta
+   └── subquery                    |                     |
+        │                          | id                  | @S1
+        │                          | original sql        | (SELECT max(point_sn) FROM db_pipec.t_point)
+        │                          | exec mode           | one row
+        └── group                  |                     |
+             │                     | engine type         | time series
+             │                     | aggregate 0         | max(point_sn)
+             │                     | scalar              |
+             │                     | pushLocalAggToScan  | true
+             │                     | addSynchronizer     | true
+             └── ts scan           |                     |
+                                   | ts-table            | t_point
+                                   | access mode         | tableTableMeta
+                                   | use statistic       | true
+(32 rows)
 > select measure_value,point_sn, array (select point_sn from db_pipec.t_point order by point_sn) from db_pipec.t_point order by point_sn;
   measure_value | point_sn |          array
 ----------------+----------+---------------------------
@@ -468,32 +473,33 @@ ORDER BY t.measure_value DESC LIMIT 10;
            11.5 | a7
 (1 row)
 > explain select measure_value, point_sn from db_pipec.t_point where point_sn = (select max(point_sn) from db_pipec.t_point) order by point_sn;
-           tree          |      field       |                 description
--------------------------+------------------+-----------------------------------------------
-                         | distributed      | true
-                         | vectorized       | false
-  root                   |                  |
-   ├── sort              |                  |
-   │    │                | order            | +point_sn
-   │    └── synchronizer |                  |
-   │         └── ts scan |                  |
-   │                     | ts-table         | t_point
-   │                     | access mode      | tableTableMeta
-   │                     | tag filter[0]    | point_sn = @S1
-   └── subquery          |                  |
-        │                | id               | @S1
-        │                | original sql     | (SELECT max(point_sn) FROM db_pipec.t_point)
-        │                | exec mode        | one row
-        └── group        |                  |
-             │           | engine type      | time series
-             │           | aggregate 0      | max(point_sn)
-             │           | scalar           |
-             │           | addSynchronizer  | true
-             └── ts scan |                  |
-                         | ts-table         | t_point
-                         | access mode      | tableTableMeta
-                         | scan agg 0       | MAX(point_sn)
-(23 rows)
+           tree          |        field        |                 description
+-------------------------+---------------------+-----------------------------------------------
+                         | distributed         | true
+                         | vectorized          | false
+  root                   |                     |
+   ├── sort              |                     |
+   │    │                | order               | +point_sn
+   │    └── synchronizer |                     |
+   │         └── ts scan |                     |
+   │                     | ts-table            | t_point
+   │                     | access mode         | tableTableMeta
+   │                     | tag filter[0]       | point_sn = @S1
+   └── subquery          |                     |
+        │                | id                  | @S1
+        │                | original sql        | (SELECT max(point_sn) FROM db_pipec.t_point)
+        │                | exec mode           | one row
+        └── group        |                     |
+             │           | engine type         | time series
+             │           | aggregate 0         | max(point_sn)
+             │           | scalar              |
+             │           | pushLocalAggToScan  | true
+             │           | addSynchronizer     | true
+             └── ts scan |                     |
+                         | ts-table            | t_point
+                         | access mode         | tableTableMeta
+                         | use statistic       | true
+(24 rows)
 > select measure_value, point_sn from db_pipec.t_point where  exists (select max(point_sn) from db_pipec.t_point) order by point_sn;
   measure_value | point_sn
 ----------------+-----------
@@ -507,32 +513,33 @@ ORDER BY t.measure_value DESC LIMIT 10;
            11.5 | a7
 (8 rows)
 > explain select measure_value, point_sn from db_pipec.t_point where  exists (select max(point_sn) from db_pipec.t_point) order by point_sn;
-           tree          |      field       |                     description
--------------------------+------------------+------------------------------------------------------
-                         | distributed      | true
-                         | vectorized       | false
-  root                   |                  |
-   ├── sort              |                  |
-   │    │                | order            | +point_sn
-   │    └── synchronizer |                  |
-   │         └── ts scan |                  |
-   │                     | ts-table         | t_point
-   │                     | access mode      | tableTableMeta
-   │                     | filter           | @S1
-   └── subquery          |                  |
-        │                | id               | @S1
-        │                | original sql     | EXISTS (SELECT max(point_sn) FROM db_pipec.t_point)
-        │                | exec mode        | exists
-        └── group        |                  |
-             │           | engine type      | time series
-             │           | aggregate 0      | max(point_sn)
-             │           | scalar           |
-             │           | addSynchronizer  | true
-             └── ts scan |                  |
-                         | ts-table         | t_point
-                         | access mode      | tableTableMeta
-                         | scan agg 0       | MAX(point_sn)
-(23 rows)
+           tree          |        field        |                     description
+-------------------------+---------------------+------------------------------------------------------
+                         | distributed         | true
+                         | vectorized          | false
+  root                   |                     |
+   ├── sort              |                     |
+   │    │                | order               | +point_sn
+   │    └── synchronizer |                     |
+   │         └── ts scan |                     |
+   │                     | ts-table            | t_point
+   │                     | access mode         | tableTableMeta
+   │                     | filter              | @S1
+   └── subquery          |                     |
+        │                | id                  | @S1
+        │                | original sql        | EXISTS (SELECT max(point_sn) FROM db_pipec.t_point)
+        │                | exec mode           | exists
+        └── group        |                     |
+             │           | engine type         | time series
+             │           | aggregate 0         | max(point_sn)
+             │           | scalar              |
+             │           | pushLocalAggToScan  | true
+             │           | addSynchronizer     | true
+             └── ts scan |                     |
+                         | ts-table            | t_point
+                         | access mode         | tableTableMeta
+                         | use statistic       | true
+(24 rows)
 > select measure_value, t.point_sn from db_pipec.t_point t, pipec_r.point_info p where t.point_sn = (select max(point_sn) from pipec_r.point_info) order by point_sn;
   measure_value | point_sn
 ----------------+-----------
@@ -625,20 +632,20 @@ ORDER BY t.measure_value DESC LIMIT 10;
   15.5 | a
 (1 row)
 > explain select max(measure_value), min(t.point_sn) from db_pipec.t_point t  group by  (select max(point_sn) from pipec_r.point_info);
-      tree     |      field       |    description
----------------+------------------+---------------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | max(measure_value)
-   │           | aggregate 1      | min(point_sn)
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | t_point
-               | access mode      | tableTableMeta
-               | scan agg 0       | MAX(measure_value)
-               | scan agg 1       | MIN(point_sn)
+      tree     |        field        |    description
+---------------+---------------------+---------------------
+               | distributed         | true
+               | vectorized          | false
+  group        |                     |
+   │           | engine type         | time series
+   │           | aggregate 0         | max(measure_value)
+   │           | aggregate 1         | min(point_sn)
+   │           | pushLocalAggToScan  | true
+   │           | addSynchronizer     | true
+   └── ts scan |                     |
+               | ts-table            | t_point
+               | access mode         | tableTableMeta
+               | use statistic       | true
 (12 rows)
 > select max(measure_value), min(t.point_sn) from db_pipec.t_point t  group by  (select max(point_sn) from pipec_r.point_info) order by (select max(point_sn) from pipec_r.point_info);
   max  | min
@@ -646,20 +653,20 @@ ORDER BY t.measure_value DESC LIMIT 10;
   15.5 | a
 (1 row)
 > explain select max(measure_value), min(t.point_sn) from db_pipec.t_point t  group by  (select max(point_sn) from pipec_r.point_info) order by (select max(point_sn) from pipec_r.point_info);
-      tree     |      field       |    description
----------------+------------------+---------------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | max(measure_value)
-   │           | aggregate 1      | min(point_sn)
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | t_point
-               | access mode      | tableTableMeta
-               | scan agg 0       | MAX(measure_value)
-               | scan agg 1       | MIN(point_sn)
+      tree     |        field        |    description
+---------------+---------------------+---------------------
+               | distributed         | true
+               | vectorized          | false
+  group        |                     |
+   │           | engine type         | time series
+   │           | aggregate 0         | max(measure_value)
+   │           | aggregate 1         | min(point_sn)
+   │           | pushLocalAggToScan  | true
+   │           | addSynchronizer     | true
+   └── ts scan |                     |
+               | ts-table            | t_point
+               | access mode         | tableTableMeta
+               | use statistic       | true
 (12 rows)
 > drop database pipec_r cascade;
 DROP DATABASE

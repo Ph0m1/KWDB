@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -144,33 +143,6 @@ func (v *planVisitor) visitConcrete(plan planNode) {
 
 	name := nodeName(plan)
 	v.visitInternal(plan, name)
-}
-
-// printScanAgg print ScanAgg
-func printScanAgg(buf *bytes.Buffer, agg *ScanAgg, resultColumns *sqlbase.ResultColumns) {
-	buf.WriteString(agg.AggTyp.String())
-	buf.WriteString("(")
-	for idx, v := range agg.Params.Param {
-		if idx > 0 {
-			buf.WriteString(",")
-		}
-		if v.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
-			if len(*resultColumns) == 0 {
-				buf.WriteString("*")
-			} else {
-				for i := range *resultColumns {
-					if sqlbase.ColumnID(v.Value) == (*resultColumns)[i].PGAttributeNum {
-						buf.WriteString((*resultColumns)[i].Name)
-						break
-					}
-				}
-			}
-		} else {
-			buf.WriteString(fmt.Sprintf("%v", v.Value))
-		}
-	}
-
-	buf.WriteString(")")
 }
 
 const (
@@ -289,16 +261,8 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 				v.observer.attr(name, "only tag", "true")
 			}
 			v.observer.attr(name, "access mode", n.AccessMode.String())
-			if len(n.ScanAggArray) != 0 {
-				for i := 0; i < 5 && i < len(n.ScanAggArray); i++ {
-					buf := bytes.Buffer{}
-					printScanAgg(&buf, &n.ScanAggArray[i], &n.resultColumns)
-					v.observer.attr(name, fmt.Sprintf("scan agg %d", i), buf.String())
-				}
-
-				if len(n.ScanAggArray) > 5 {
-					v.observer.attr(name, "scan agg ...", fmt.Sprintf("leave(%d)", len(n.ScanAggArray)-5))
-				}
+			if n.ScanAggArray {
+				v.observer.attr(name, "use statistic", "true")
 			}
 			//timeTmp1 and timeTmp2 need to synchronize changes due to tsspan conversion to zero zone time
 			if nil != n.tsSpans {

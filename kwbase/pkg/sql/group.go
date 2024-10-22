@@ -67,9 +67,6 @@ type groupNode struct {
 	// engine is a bit set that indicates which engine to exec.
 	engine tree.EngineType
 
-	// the column index of agg func used from statistic reader
-	statisticIndex opt.StatisticIndex
-
 	// ts engine parallel execute flag and degree
 	addSynchronizer bool
 

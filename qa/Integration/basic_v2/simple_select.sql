@@ -40,4 +40,6 @@ select a+tag1 from tsdb.t1 where tag1=33;
 -- select a+tag1 from tsdb.t1 where tag1<34 and tag2 = 44;
 select a+tag1 from tsdb.t1 where a<1012;
 
+SELECT variance(LE)//10 FROM (SELECT max(a) LE FROM tsdb.t1 GROUP BY a);
+
 drop database tsdb cascade; 

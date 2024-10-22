@@ -189,25 +189,8 @@ func (ef *execFactory) ConstructTSScan(
 	tsScan.resultColumns = resultCols
 	tsScan.AccessMode = execinfrapb.TSTableReadMode(private.AccessMode)
 	tsScan.HintType = private.HintType
-	tsScan.ScanAggArray = make([]ScanAgg, len(private.ScanAggs))
 	tsScan.orderedType = private.OrderedScanType
-
-	// Convert logical column ID  in ScanAggs of memo.TSScanExpr into physical column ID and bind them to tsScanNode.
-	for funcIdx, v := range private.ScanAggs {
-		tsScan.ScanAggArray[funcIdx].AggTyp = v.AggTyp
-		tsScan.ScanAggArray[funcIdx].Params.Param = make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(v.Params.Param))
-		for paramIdx, v1 := range v.Params.Param {
-			tsScan.ScanAggArray[funcIdx].Params.Param[paramIdx].Typ = v1.Typ
-			if v1.Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_colID {
-				physicsIdx := private.Table.ColumnOrdinal(opt.ColumnID(v1.Value))
-				physicsID := int(table.Column(physicsIdx).ColID())
-
-				tsScan.ScanAggArray[funcIdx].Params.Param[paramIdx].Value = int64(physicsID)
-			} else {
-				tsScan.ScanAggArray[funcIdx].Params.Param[paramIdx].Value = v1.Value
-			}
-		}
-	}
+	tsScan.ScanAggArray = private.ScanAggs
 
 	// bind tag filter and primary filter to tsScanNode.
 	bindFilter := func(filters []tree.TypedExpr, primaryTag bool) bool {
@@ -652,7 +635,6 @@ func (ef *execFactory) ConstructScalarGroupBy(
 		aggFuncs:        funcs,
 		engine:          engine,
 		addSynchronizer: addSynchronizer,
-		statisticIndex:  private.AggIndex,
 		optType:         private.OptFlags,
 	}
 	if err := ef.addAggregations(n, aggregations); err != nil {
@@ -688,9 +670,9 @@ func (ef *execFactory) ConstructGroupBy(
 		reqOrdering:      ReqOrdering(reqOrdering),
 		aggFuncs:         funcs,
 		engine:           engine,
-		statisticIndex:   private.AggIndex,
-		addSynchronizer:  addSynchronizer,
-		optType:          private.OptFlags,
+		//statisticIndex:   private.AggIndex,
+		addSynchronizer: addSynchronizer,
+		optType:         private.OptFlags,
 	}
 	inputCols := planColumns(n.plan)
 	for i := range groupCols {

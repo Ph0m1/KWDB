@@ -31,10 +31,14 @@ package physicalplan
 import (
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
@@ -1004,7 +1008,7 @@ func (p *PhysicalPlan) AddProjection(columns []uint32) {
 //
 // Note: the columns slice is relinquished to this function, which can modify it
 // or use it directly in specs.
-func (p *PhysicalPlan) AddTSProjection(columns []uint32, useStatistic bool, isTag bool) {
+func (p *PhysicalPlan) AddTSProjection(columns []uint32) {
 	// If the projection we are trying to apply projects every column, don't
 	// update the spec.
 	if isIdentityProjection(columns, len(p.ResultTypes)) && len(columns) != 0 {
@@ -1034,27 +1038,25 @@ func (p *PhysicalPlan) AddTSProjection(columns []uint32, useStatistic bool, isTa
 		p.MergeOrdering.Columns = newOrdering
 	}
 
-	if !useStatistic {
-		newResultTypes := make([]types.T, len(columns))
+	newResultTypes := make([]types.T, len(columns))
 
-		for i, c := range columns {
-			newResultTypes[i] = p.ResultTypes[c]
-		}
-
-		post := p.GetLastStageTSPost()
-
-		if post.Renders != nil {
-			// Apply the projection to the existing rendering; in other words, keep
-			// only the renders needed by the new output columns, and reorder them
-			// accordingly.
-			oldRenders := post.Renders
-			post.Renders = make([]string, len(columns))
-			for i, c := range columns {
-				post.Renders[i] = oldRenders[c]
-			}
-		}
-		p.SetLastStageTSPost(post, newResultTypes)
+	for i, c := range columns {
+		newResultTypes[i] = p.ResultTypes[c]
 	}
+
+	post := p.GetLastStageTSPost()
+
+	if post.Renders != nil {
+		// Apply the projection to the existing rendering; in other words, keep
+		// only the renders needed by the new output columns, and reorder them
+		// accordingly.
+		oldRenders := post.Renders
+		post.Renders = make([]string, len(columns))
+		for i, c := range columns {
+			post.Renders[i] = oldRenders[c]
+		}
+	}
+	p.SetLastStageTSPost(post, newResultTypes)
 }
 
 // AddHashTSProjection applies a projection to a plan. The new plan outputs the
@@ -2324,5 +2326,195 @@ func (p *PhysicalPlan) SetTSEngineReturnEncode() {
 
 	if p.AllProcessorsExecInTSEngine {
 		p.Closes = len(p.ResultRouters)
+	}
+}
+
+// AddTSOutputType add output types for ts processor
+func (p *PhysicalPlan) AddTSOutputType(force bool) {
+	for _, idx := range p.ResultRouters {
+		if force || p.Processors[idx].ExecInTSEngine {
+			p.Processors[idx].TSSpec.Post.OutputTypes = make([]types.Family, len(p.ResultTypes))
+			for i, typ := range p.ResultTypes {
+				p.Processors[idx].TSSpec.Post.OutputTypes[i] = typ.InternalType.Family
+			}
+		}
+	}
+}
+
+func getTableOutPutInfoFromPost(
+	scanPost *execinfrapb.TSPostProcessSpec, constValues []int64,
+) []execinfrapb.TSStatisticReaderSpec_ParamInfo {
+	scanOutput := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, 0)
+	if len(scanPost.Renders) != 0 {
+		for i, v := range scanPost.Renders {
+			if v[0] != '@' { //const value
+				constVal := constValues[i]
+				scanOutput = append(scanOutput, execinfrapb.TSStatisticReaderSpec_ParamInfo{
+					Typ:   execinfrapb.TSStatisticReaderSpec_ParamInfo_const,
+					Value: constVal,
+				})
+			} else {
+				str := strings.Replace(scanPost.Renders[i], "@", "", -1)
+				val, err := strconv.Atoi(str)
+				if err != nil {
+					val = 0
+				}
+				scanOutput = append(scanOutput, execinfrapb.TSStatisticReaderSpec_ParamInfo{
+					Typ:   execinfrapb.TSStatisticReaderSpec_ParamInfo_colID,
+					Value: int64(scanPost.OutputColumns[val-1]),
+				})
+			}
+		}
+	} else {
+		scanOutput = make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(scanPost.OutputColumns))
+		for i, v := range scanPost.OutputColumns {
+			scanOutput[i].Typ = execinfrapb.TSStatisticReaderSpec_ParamInfo_colID
+			scanOutput[i].Value = int64(v)
+		}
+	}
+
+	return scanOutput
+}
+
+// PushAggToStatisticReader push Agg to statistic reader
+func (p *PhysicalPlan) PushAggToStatisticReader(
+	idx ProcessorIdx,
+	aggSpecs *execinfrapb.AggregatorSpec,
+	tsPostSpec *execinfrapb.TSPostProcessSpec,
+	aggResTypes []types.T,
+	constValues []int64,
+) error {
+	if p.Processors[idx].TSSpec.Core.StatisticReader != nil {
+		tr := p.Processors[idx].TSSpec.Core.StatisticReader
+		scanPost := &p.Processors[idx].TSSpec.Post
+		//get render col index and const value
+		scanOutPut := getTableOutPutInfoFromPost(scanPost, constValues)
+
+		scanCols := make([]execinfrapb.TSStatisticReaderSpec_Params, 0)
+		scanAgg := make([]int32, 0)
+		sumMap := make(map[int64]int)
+		countMap := make(map[int64]int)
+		inputColTypeArray := make([]*types.T, len(p.ResultTypes))
+		for i := range p.ResultTypes {
+			inputColTypeArray[i] = &p.ResultTypes[i]
+		}
+		colIndex := 0
+
+		var addMap = func(key int64, value int, destMap map[int64]int) {
+			if _, ok := destMap[key]; !ok {
+				destMap[key] = value
+			}
+		}
+
+		addStatScan := func(
+			params []uint32, typ execinfrapb.AggregatorSpec_Func,
+		) error {
+			infos := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(params))
+			for j, v := range params {
+				if v >= uint32(len(scanOutPut)) {
+					return pgerror.Newf(pgcode.Internal, "statistic table could not find col")
+				}
+				infos[j] = scanOutPut[v]
+			}
+
+			if len(params) == 0 && typ == execinfrapb.AggregatorSpec_COUNT_ROWS {
+				scanCols = append(scanCols, execinfrapb.TSStatisticReaderSpec_Params{
+					Param: []execinfrapb.TSStatisticReaderSpec_ParamInfo{
+						{
+							Typ:   execinfrapb.TSStatisticReaderSpec_ParamInfo_colID,
+							Value: 0,
+						},
+					}})
+				scanAgg = append(scanAgg, int32(execinfrapb.AggregatorSpec_COUNT))
+			} else {
+				scanCols = append(scanCols, execinfrapb.TSStatisticReaderSpec_Params{Param: infos})
+				scanAgg = append(scanAgg, int32(typ))
+			}
+
+			if typ == execinfrapb.AggregatorSpec_SUM {
+				addMap(infos[0].Value, colIndex, sumMap)
+			} else if typ == execinfrapb.AggregatorSpec_COUNT {
+				addMap(infos[0].Value, colIndex, countMap)
+			}
+			colIndex++
+			return nil
+		}
+
+		for _, agg := range aggSpecs.Aggregations {
+			if agg.Func == execinfrapb.AggregatorSpec_AVG {
+				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_SUM); err != nil {
+					return err
+				}
+
+				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_COUNT); err != nil {
+					return err
+				}
+			} else {
+				if err := addStatScan(agg.ColIdx, agg.Func); err != nil {
+					return err
+				}
+			}
+		}
+
+		tr.AggTypes = scanAgg
+		tr.ParamIdx = scanCols
+
+		scanPost.Renders = make([]string, len(scanAgg))
+
+		for i, agg := range aggSpecs.Aggregations {
+			if agg.Func == execinfrapb.AggregatorSpec_AVG {
+				varIdxs := make([]int, 2)
+				v, ok := sumMap[int64(agg.ColIdx[0])]
+				if !ok {
+					return pgerror.New(pgcode.Internal, "statistic table could not find sum col")
+				}
+				varIdxs[0] = int(scanCols[v].Param[0].Value)
+				v1, ok1 := countMap[int64(agg.ColIdx[0])]
+				if !ok1 {
+					return pgerror.New(pgcode.Internal, "statistic table could not find count col")
+				}
+				varIdxs[1] = int(scanCols[v1].Param[0].Value)
+
+				// create dev render for avg
+				h := tree.MakeTypesOnlyIndexedVarHelper(inputColTypeArray)
+				render, err2 := GetAvgRender(&h, varIdxs)
+				if err2 != nil {
+					return err2
+				}
+				scanPost.Renders[i] = render.String()
+			} else {
+				scanPost.Renders[i] = fmt.Sprintf("@%d", i+1)
+			}
+		}
+
+		// update reader post renders and outputTypes for local agg
+		p.Processors[idx].TSSpec.Post.OutputTypes = tsPostSpec.OutputTypes
+		p.Processors[idx].TSSpec.Post.OutputColumns = nil
+		p.Processors[idx].TSSpec.Post.Projection = false
+		p.ResultTypes = aggResTypes
+	} else {
+		return pgerror.New(pgcode.Internal, " statistic table could not find sum col")
+	}
+
+	return nil
+}
+
+// PushAggToTableReader push Agg to table reader
+func (p *PhysicalPlan) PushAggToTableReader(
+	idx ProcessorIdx,
+	localAggsSpec *execinfrapb.AggregatorSpec,
+	tsPost *execinfrapb.TSPostProcessSpec,
+	pruneLocalAgg bool,
+) {
+	if p.Processors[idx].TSSpec.Core.TableReader != nil {
+		r := p.Processors[idx].TSSpec.Core.TableReader
+		r.Aggregator = localAggsSpec
+		if pruneLocalAgg {
+			r.OrderedScan = true
+		}
+		r.AggregatorPost = tsPost
+	} else {
+		str := fmt.Sprintf("PushAggToTableReader table reader is not exists, sub is %v", p.Processors[idx].TSSpec.Core)
+		panic(str)
 	}
 }

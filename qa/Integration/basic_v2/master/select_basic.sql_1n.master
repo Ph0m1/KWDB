@@ -365,43 +365,51 @@ INSERT 1
       5
 (1 row)
 > explain select count(e1) from test_filter where k_timestamp > '2020-11-06 08:10:23';
-      tree     |      field       |            description
----------------+------------------+------------------------------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | count(e1)
-   │           | scalar           |
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | test_filter
-               | access mode      | metaTable
-               | scan agg 0       | COUNT(e1)
-               | spans:fromTime   | 2020-11-06 08:10:23.001 +0000 UTC
-               | spans:toTime     | 2970-01-01 00:00:00 +0000 UTC
-(13 rows)
+        tree        |        field        |            description
+--------------------+---------------------+------------------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | count(e1)
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | e1                  | e1
+        └── ts scan |                     |
+                    | ts-table            | test_filter
+                    | access mode         | metaTable
+                    | use statistic       | true
+                    | spans:fromTime      | 2020-11-06 08:10:23.001 +0000 UTC
+                    | spans:toTime        | 2970-01-01 00:00:00 +0000 UTC
+(17 rows)
 > select count(*) from test_filter where k_timestamp > '2020-11-06 08:10:23+08';
   count
 ---------
       7
 (1 row)
 > explain select count(e1) from test_filter where k_timestamp > '2020-11-06 08:10:23+08';
-      tree     |      field       |            description
----------------+------------------+------------------------------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | count(e1)
-   │           | scalar           |
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | test_filter
-               | access mode      | metaTable
-               | scan agg 0       | COUNT(e1)
-               | spans:fromTime   | 2020-11-06 00:10:23.001 +0000 UTC
-               | spans:toTime     | 2970-01-01 00:00:00 +0000 UTC
-(13 rows)
+        tree        |        field        |            description
+--------------------+---------------------+------------------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | count(e1)
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | e1                  | e1
+        └── ts scan |                     |
+                    | ts-table            | test_filter
+                    | access mode         | metaTable
+                    | use statistic       | true
+                    | spans:fromTime      | 2020-11-06 00:10:23.001 +0000 UTC
+                    | spans:toTime        | 2970-01-01 00:00:00 +0000 UTC
+(17 rows)
 > drop database test_ts cascade;
 DROP DATABASE

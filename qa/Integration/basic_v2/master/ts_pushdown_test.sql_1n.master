@@ -27,36 +27,40 @@ INSERT 1
 > insert into benchmark.cpu (hostname, region, datacenter, rack, os, arch, team, service, service_version, service_environment) values ('host_2','sa-east-1','sa-east-1a','89','Ubuntu16.04LTS','x86','LON','13','0','staging');
 INSERT 1
 > explain select count(*) from cpu where hostname = 'host_0';
-      tree     |      field       |     description
----------------+------------------+----------------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | count_rows()
-   │           | scalar           |
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | cpu
-               | access mode      | tagIndex
-               | scan agg 0       | COUNT()
-               | ptag filter[0]   | hostname = 'host_0'
-(12 rows)
+        tree        |        field        |     description
+--------------------+---------------------+----------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | count_rows()
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        └── ts scan |                     |
+                    | ts-table            | cpu
+                    | access mode         | tagIndex
+                    | use statistic       | true
+                    | ptag filter[0]      | hostname = 'host_0'
+(15 rows)
 > explain select count(*) from cpu;
-      tree     |      field       | description
----------------+------------------+---------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | count_rows()
-   │           | scalar           |
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | cpu
-               | access mode      | metaTable
-               | scan agg 0       | COUNT(*)
-(11 rows)
+      tree     |        field        | description
+---------------+---------------------+---------------
+               | distributed         | true
+               | vectorized          | false
+  group        |                     |
+   │           | engine type         | time series
+   │           | aggregate 0         | count_rows()
+   │           | scalar              |
+   │           | pushLocalAggToScan  | true
+   │           | addSynchronizer     | true
+   └── ts scan |                     |
+               | ts-table            | cpu
+               | access mode         | metaTable
+               | use statistic       | true
+(12 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where hostname = 'host_0' and ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
              tree             |     field      |                        description
 ------------------------------+----------------+-------------------------------------------------------------
@@ -231,100 +235,113 @@ INSERT 1
                               | filter      | usage_system > 2000
 (16 rows)
 > explain select max(usage_user) from cpu where ts>'2022-2-1 0:0:0' and ts<'2022-2-2 0:0:0' group by hostname;
-        tree        |      field       |            description
---------------------+------------------+------------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | engine type      | time series
-   │                | max              | max
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | hostname
-        │           | aggregate 1      | max(usage_user)
-        │           | group by         | hostname
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | cpu
-                    | access mode      | tableTableMeta
-                    | scan agg 0       | ANY_NOT_NULL(hostname)
-                    | scan agg 1       | MAX(usage_user)
-                    | spans:fromTime   | 2022-02-01 00:00:00.001 +0000 UTC
-                    | spans:toTime     | 2022-02-01 23:59:59.999 +0000 UTC
-(18 rows)
+             tree             |        field        |            description
+------------------------------+---------------------+------------------------------------
+                              | distributed         | true
+                              | vectorized          | false
+  synchronizer                |                     |
+   └── render                 |                     |
+        │                     | engine type         | time series
+        │                     | max                 | max
+        └── group             |                     |
+             │                | engine type         | time series
+             │                | aggregate 0         | hostname
+             │                | aggregate 1         | max(usage_user)
+             │                | group by            | hostname
+             │                | pushLocalAggToScan  | true
+             │                | pruneFinalAgg       | true
+             └── render       |                     |
+                  │           | engine type         | time series
+                  │           | usage_user          | usage_user
+                  │           | hostname            | hostname
+                  └── ts scan |                     |
+                              | ts-table            | cpu
+                              | access mode         | tableTableMeta
+                              | use statistic       | true
+                              | spans:fromTime      | 2022-02-01 00:00:00.001 +0000 UTC
+                              | spans:toTime        | 2022-02-01 23:59:59.999 +0000 UTC
+(23 rows)
 > explain select first(usage_user) as first,avg(usage_system) as pac from cpu  where ts>'2022-2-1 0:0:0' and ts<'2022-2-8 0:0:0' group by hostname;
-        tree        |      field       |            description
---------------------+------------------+------------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | engine type      | time series
-   │                | first            | first
-   │                | pac              | avg
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | hostname
-        │           | aggregate 1      | first(usage_user, ts)
-        │           | aggregate 2      | avg(usage_system)
-        │           | group by         | hostname
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | cpu
-                    | access mode      | tableTableMeta
-                    | spans:fromTime   | 2022-02-01 00:00:00.001 +0000 UTC
-                    | spans:toTime     | 2022-02-07 23:59:59.999 +0000 UTC
-(18 rows)
+           tree          |        field        |            description
+-------------------------+---------------------+------------------------------------
+                         | distributed         | true
+                         | vectorized          | false
+  synchronizer           |                     |
+   └── render            |                     |
+        │                | engine type         | time series
+        │                | first               | first
+        │                | pac                 | avg
+        └── group        |                     |
+             │           | engine type         | time series
+             │           | aggregate 0         | hostname
+             │           | aggregate 1         | first(usage_user, ts)
+             │           | aggregate 2         | avg(usage_system)
+             │           | group by            | hostname
+             │           | pushLocalAggToScan  | true
+             │           | pruneFinalAgg       | true
+             └── ts scan |                     |
+                         | ts-table            | cpu
+                         | access mode         | tableTableMeta
+                         | use statistic       | true
+                         | spans:fromTime      | 2022-02-01 00:00:00.001 +0000 UTC
+                         | spans:toTime        | 2022-02-07 23:59:59.999 +0000 UTC
+(21 rows)
 > explain select count(*) from cpu where hostname = 'host_0';
-      tree     |      field       |     description
----------------+------------------+----------------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | count_rows()
-   │           | scalar           |
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | cpu
-               | access mode      | tagIndex
-               | scan agg 0       | COUNT()
-               | ptag filter[0]   | hostname = 'host_0'
-(12 rows)
+        tree        |        field        |     description
+--------------------+---------------------+----------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | count_rows()
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        └── ts scan |                     |
+                    | ts-table            | cpu
+                    | access mode         | tagIndex
+                    | use statistic       | true
+                    | ptag filter[0]      | hostname = 'host_0'
+(15 rows)
 > explain select count(*) from cpu;
-      tree     |      field       | description
----------------+------------------+---------------
-               | distributed      | true
-               | vectorized       | false
-  group        |                  |
-   │           | engine type      | time series
-   │           | aggregate 0      | count_rows()
-   │           | scalar           |
-   │           | addSynchronizer  | true
-   └── ts scan |                  |
-               | ts-table         | cpu
-               | access mode      | metaTable
-               | scan agg 0       | COUNT(*)
-(11 rows)
+      tree     |        field        | description
+---------------+---------------------+---------------
+               | distributed         | true
+               | vectorized          | false
+  group        |                     |
+   │           | engine type         | time series
+   │           | aggregate 0         | count_rows()
+   │           | scalar              |
+   │           | pushLocalAggToScan  | true
+   │           | addSynchronizer     | true
+   └── ts scan |                     |
+               | ts-table            | cpu
+               | access mode         | metaTable
+               | use statistic       | true
+(12 rows)
 > explain select count(*) from cpu group by hostname;
-        tree        |      field       |      description
---------------------+------------------+-------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | engine type      | time series
-   │                | count            | count_rows
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | hostname
-        │           | aggregate 1      | count_rows()
-        │           | group by         | hostname
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | cpu
-                    | access mode      | tableTableMeta
-                    | scan agg 0       | ANY_NOT_NULL(hostname)
-                    | scan agg 1       | COUNT()
-(16 rows)
+           tree          |        field        |  description
+-------------------------+---------------------+-----------------
+                         | distributed         | true
+                         | vectorized          | false
+  synchronizer           |                     |
+   └── render            |                     |
+        │                | engine type         | time series
+        │                | count               | count_rows
+        └── group        |                     |
+             │           | engine type         | time series
+             │           | aggregate 0         | hostname
+             │           | aggregate 1         | count_rows()
+             │           | group by            | hostname
+             │           | pushLocalAggToScan  | true
+             │           | pruneFinalAgg       | true
+             └── ts scan |                     |
+                         | ts-table            | cpu
+                         | access mode         | tableTableMeta
+                         | use statistic       | true
+(17 rows)
 > explain select  time_bucket(ts, '3600s') as date, count(distinct usage_system) as nums from cpu where hostname = 'host_0' and ts >= date_trunc('week', '2023-10-30 12:12:12'::timestamp) and ts < '2023-10-30 12:12:12' and usage_system = 1 group by date order by date;
              tree             |     field      |                        description
 ------------------------------+----------------+-------------------------------------------------------------
@@ -494,49 +511,57 @@ INSERT 1
                               | filter      | usage_system > 2000
 (16 rows)
 > explain select max(usage_user) from cpu where ts>'2022-2-1 0:0:0' and ts<'2022-2-2 0:0:0' group by hostname;
-        tree        |      field       |            description
---------------------+------------------+------------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | engine type      | time series
-   │                | max              | max
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | hostname
-        │           | aggregate 1      | max(usage_user)
-        │           | group by         | hostname
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | cpu
-                    | access mode      | tableTableMeta
-                    | scan agg 0       | ANY_NOT_NULL(hostname)
-                    | scan agg 1       | MAX(usage_user)
-                    | spans:fromTime   | 2022-02-01 00:00:00.001 +0000 UTC
-                    | spans:toTime     | 2022-02-01 23:59:59.999 +0000 UTC
-(18 rows)
+             tree             |        field        |            description
+------------------------------+---------------------+------------------------------------
+                              | distributed         | true
+                              | vectorized          | false
+  synchronizer                |                     |
+   └── render                 |                     |
+        │                     | engine type         | time series
+        │                     | max                 | max
+        └── group             |                     |
+             │                | engine type         | time series
+             │                | aggregate 0         | hostname
+             │                | aggregate 1         | max(usage_user)
+             │                | group by            | hostname
+             │                | pushLocalAggToScan  | true
+             │                | pruneFinalAgg       | true
+             └── render       |                     |
+                  │           | engine type         | time series
+                  │           | usage_user          | usage_user
+                  │           | hostname            | hostname
+                  └── ts scan |                     |
+                              | ts-table            | cpu
+                              | access mode         | tableTableMeta
+                              | use statistic       | true
+                              | spans:fromTime      | 2022-02-01 00:00:00.001 +0000 UTC
+                              | spans:toTime        | 2022-02-01 23:59:59.999 +0000 UTC
+(23 rows)
 > explain select first(usage_user) as first,avg(usage_system) as pac from cpu  where ts>'2022-2-1 0:0:0' and ts<'2022-2-8 0:0:0' group by hostname;
-        tree        |      field       |            description
---------------------+------------------+------------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | engine type      | time series
-   │                | first            | first
-   │                | pac              | avg
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | hostname
-        │           | aggregate 1      | first(usage_user, ts)
-        │           | aggregate 2      | avg(usage_system)
-        │           | group by         | hostname
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | cpu
-                    | access mode      | tableTableMeta
-                    | spans:fromTime   | 2022-02-01 00:00:00.001 +0000 UTC
-                    | spans:toTime     | 2022-02-07 23:59:59.999 +0000 UTC
-(18 rows)
+           tree          |        field        |            description
+-------------------------+---------------------+------------------------------------
+                         | distributed         | true
+                         | vectorized          | false
+  synchronizer           |                     |
+   └── render            |                     |
+        │                | engine type         | time series
+        │                | first               | first
+        │                | pac                 | avg
+        └── group        |                     |
+             │           | engine type         | time series
+             │           | aggregate 0         | hostname
+             │           | aggregate 1         | first(usage_user, ts)
+             │           | aggregate 2         | avg(usage_system)
+             │           | group by            | hostname
+             │           | pushLocalAggToScan  | true
+             │           | pruneFinalAgg       | true
+             └── ts scan |                     |
+                         | ts-table            | cpu
+                         | access mode         | tableTableMeta
+                         | use statistic       | true
+                         | spans:fromTime      | 2022-02-01 00:00:00.001 +0000 UTC
+                         | spans:toTime        | 2022-02-07 23:59:59.999 +0000 UTC
+(21 rows)
 > drop database benchmark cascade;
 DROP DATABASE
 > CREATE TS DATABASE  ts_db;

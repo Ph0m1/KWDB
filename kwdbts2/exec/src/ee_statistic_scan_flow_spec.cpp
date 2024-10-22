@@ -162,7 +162,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
       if (agg_type == Sumfunctype::LAST) {
         tag_last_size++;
         is_contain_last_point = true;
-        tmp_tag_points_.push_back(point);
+        tmp_tag_points_.push_back(params.param(2).value());
       }
     }
 
@@ -176,6 +176,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
       table_->scan_cols_.push_back(field->get_num());
       table_->scan_real_agg_types_.push_back((Sumfunctype)agg_type);
       if (agg_type == Sumfunctype::LAST || agg_type == Sumfunctype::LASTTS) {
+          point = params.param(2).value();
         if (point != INT64_MAX) {
           is_contain_last_point = true;
         }

@@ -516,9 +516,6 @@ define GroupingPrivate {
     ErrorOnDup bool
     Func AggregateFuncs
 
-    # for split statistic
-    AggIndex StatisticIndex
-
     # must add sort to group when having time_bucket_gapFill.
     TimeBucketGapFillColId ColumnID
     TimeBucketGapFillColIdOrdinal ColumnID
@@ -991,22 +988,22 @@ define TSScanPrivate {
     Cols ColSet
 
     # AccessMode table read mode
-    AccessMode     int
+    AccessMode int
 
     # ScanAggs statistic cols
-    ScanAggs       ScanAggArray
+    ScanAggs bool
 
     # TagFilter tag col filter exprs
-    TagFilter  Exprs
+    TagFilter Exprs
 
     # PrimaryTagFilter primary tag col filter exprs
-    PrimaryTagFilter  Exprs
+    PrimaryTagFilter Exprs
 
     # PrimaryTagValues primary tag col and value map
     PrimaryTagValues PTagValues
 
     # HintType select hint type for control plan
-    HintType  TSHintType
+    HintType TSHintType
 
     # ExploreOrderedScan is a flag for order by ts scan ts table
     ExploreOrderedScan bool

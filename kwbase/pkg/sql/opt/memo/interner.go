@@ -680,12 +680,6 @@ func (h *hasher) HashPointer(val unsafe.Pointer) {
 	h.HashUint64(uint64(uintptr(val)))
 }
 
-func (h *hasher) HashScanAggArray(val ScanAggArray) {
-	for i := range val {
-		h.HashAggTypes(val[i])
-	}
-}
-
 func (h *hasher) HashStatisticIndex(val opt.StatisticIndex) {
 	for i := range val {
 		for j := range val[i] {
@@ -719,18 +713,6 @@ func (h *hasher) HashPTagValues(val PTagValues) {
 
 func (h *hasher) HashTSHintType(val keys.ScanMethodHintType) {
 	h.HashInt(int(val))
-}
-
-func (h *hasher) HashParams(val execinfrapb.TSStatisticReaderSpec_Params) {
-	for v := range val.Param {
-		h.HashUint64(uint64(val.Param[v].Typ))
-		h.HashInt(int(val.Param[v].Value))
-	}
-}
-
-func (h *hasher) HashAggTypes(val ScanAgg) {
-	h.HashParams(val.Params)
-	h.HashInt(int(val.AggTyp))
 }
 
 func (h *hasher) HashTSTableReadMode(val execinfrapb.TSTableReadMode) {
@@ -1151,30 +1133,6 @@ func (h *hasher) IsPresentationEqual(l, r physical.Presentation) bool {
 
 func (h *hasher) IsOpaqueMetadataEqual(l, r opt.OpaqueMetadata) bool {
 	return l == r
-}
-
-func (h *hasher) IsParamsEqual(l, r execinfrapb.TSStatisticReaderSpec_Params) bool {
-	if len(l.Param) != len(r.Param) {
-		return false
-	}
-	for i := range l.Param {
-		if l.Param[i].Typ != r.Param[i].Typ || l.Param[i].Value != r.Param[i].Value {
-			return false
-		}
-	}
-	return true
-}
-
-func (h *hasher) IsScanAggArrayEqual(l, r ScanAggArray) bool {
-	if len(l) != len(r) {
-		return false
-	}
-	for i := range l {
-		if !h.IsParamsEqual(l[i].Params, r[i].Params) || l[i].AggTyp != r[i].AggTyp {
-			return false
-		}
-	}
-	return true
 }
 
 func (h *hasher) IsStatisticIndexEqual(l, r opt.StatisticIndex) bool {

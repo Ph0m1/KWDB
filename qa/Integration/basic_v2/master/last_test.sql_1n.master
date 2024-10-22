@@ -116,128 +116,125 @@ CREATE TABLE
   value5 varchar(10)) ATTRIBUTES (machine_code varchar(64) NOT NULL, op_group varchar(64) NOT NULL, brand varchar(64) NOT NULL, number_of_molds int) PRIMARY TAGS(machine_code, op_group);
 CREATE TABLE
 > explain SELECT last_row(*) FROM db_shig.t_electmeter where 1=1 group by machine_code;
-        tree        |          field          |             description
---------------------+-------------------------+---------------------------------------
-                    | distributed             | true
-                    | vectorized              | false
-  render            |                         |
-   │                | engine type             | time series
-   │                | last_row(k_timestamp)   | last_row
-   │                | last_row(elect_name)    | last_row
-   │                | last_row(vol_a)         | last_row
-   │                | last_row(cur_a)         | last_row
-   │                | last_row(powerf_a)      | last_row
-   │                | last_row(allenergy_a)   | last_row
-   │                | last_row(pallenergy_a)  | last_row
-   │                | last_row(rallenergy_a)  | last_row
-   │                | last_row(allrenergy1_a) | last_row
-   │                | last_row(allrenergy2_a) | last_row
-   │                | last_row(powera_a)      | last_row
-   │                | last_row(powerr_a)      | last_row
-   │                | last_row(powerl_a)      | last_row
-   │                | last_row(vol_b)         | last_row
-   │                | last_row(cur_b)         | last_row
-   │                | last_row(powerf_b)      | last_row
-   │                | last_row(allenergy_b)   | last_row
-   │                | last_row(pallenergy_b)  | last_row
-   │                | last_row(rallenergy_b)  | last_row
-   │                | last_row(allrenergy1_b) | last_row
-   │                | last_row(allrenergy2_b) | last_row
-   │                | last_row(powera_b)      | last_row
-   │                | last_row(powerr_b)      | last_row
-   │                | last_row(powerl_b)      | last_row
-   │                | last_row(vol_c)         | last_row
-   │                | last_row(cur_c)         | last_row
-   │                | last_row(powerf_c)      | last_row
-   │                | last_row(allenergy_c)   | last_row
-   │                | last_row(pallenergy_c)  | last_row
-   │                | last_row(rallenergy_c)  | last_row
-   │                | last_row(allrenergy1_c) | last_row
-   │                | last_row(allrenergy2_c) | last_row
-   │                | last_row(powera_c)      | last_row
-   │                | last_row(powerr_c)      | last_row
-   │                | last_row(powerl_c)      | last_row
-   │                | last_row(vol_ab)        | last_row
-   │                | last_row(vol_bc)        | last_row
-   │                | last_row(vol_ca)        | last_row
-   │                | last_row(infre)         | last_row
-   │                | last_row(powerf)        | last_row
-   │                | last_row(allpower)      | last_row
-   │                | last_row(pallpower)     | last_row
-   │                | last_row(rallpower)     | last_row
-   │                | last_row(powerr)        | last_row
-   │                | last_row(powerl)        | last_row
-   │                | last_row(allrenergy1)   | last_row
-   │                | last_row(allrenergy2)   | last_row
-   │                | last_row(machine_code)  | last_row
-   │                | last_row(op_group)      | last_row
-   │                | last_row(location)      | last_row
-   │                | last_row(cnc_number)    | last_row
-   └── group        |                         |
-        │           | engine type             | time series
-        │           | aggregate 0             | machine_code
-        │           | aggregate 1             | last_row(k_timestamp, k_timestamp)
-        │           | aggregate 2             | last_row(elect_name, k_timestamp)
-        │           | aggregate 3             | last_row(vol_a, k_timestamp)
-        │           | aggregate 4             | last_row(cur_a, k_timestamp)
-        │           | aggregate 5             | last_row(powerf_a, k_timestamp)
-        │           | aggregate 6             | last_row(allenergy_a, k_timestamp)
-        │           | aggregate 7             | last_row(pallenergy_a, k_timestamp)
-        │           | aggregate 8             | last_row(rallenergy_a, k_timestamp)
-        │           | aggregate 9             | last_row(allrenergy1_a, k_timestamp)
-        │           | aggregate 10            | last_row(allrenergy2_a, k_timestamp)
-        │           | aggregate 11            | last_row(powera_a, k_timestamp)
-        │           | aggregate 12            | last_row(powerr_a, k_timestamp)
-        │           | aggregate 13            | last_row(powerl_a, k_timestamp)
-        │           | aggregate 14            | last_row(vol_b, k_timestamp)
-        │           | aggregate 15            | last_row(cur_b, k_timestamp)
-        │           | aggregate 16            | last_row(powerf_b, k_timestamp)
-        │           | aggregate 17            | last_row(allenergy_b, k_timestamp)
-        │           | aggregate 18            | last_row(pallenergy_b, k_timestamp)
-        │           | aggregate 19            | last_row(rallenergy_b, k_timestamp)
-        │           | aggregate 20            | last_row(allrenergy1_b, k_timestamp)
-        │           | aggregate 21            | last_row(allrenergy2_b, k_timestamp)
-        │           | aggregate 22            | last_row(powera_b, k_timestamp)
-        │           | aggregate 23            | last_row(powerr_b, k_timestamp)
-        │           | aggregate 24            | last_row(powerl_b, k_timestamp)
-        │           | aggregate 25            | last_row(vol_c, k_timestamp)
-        │           | aggregate 26            | last_row(cur_c, k_timestamp)
-        │           | aggregate 27            | last_row(powerf_c, k_timestamp)
-        │           | aggregate 28            | last_row(allenergy_c, k_timestamp)
-        │           | aggregate 29            | last_row(pallenergy_c, k_timestamp)
-        │           | aggregate 30            | last_row(rallenergy_c, k_timestamp)
-        │           | aggregate 31            | last_row(allrenergy1_c, k_timestamp)
-        │           | aggregate 32            | last_row(allrenergy2_c, k_timestamp)
-        │           | aggregate 33            | last_row(powera_c, k_timestamp)
-        │           | aggregate 34            | last_row(powerr_c, k_timestamp)
-        │           | aggregate 35            | last_row(powerl_c, k_timestamp)
-        │           | aggregate 36            | last_row(vol_ab, k_timestamp)
-        │           | aggregate 37            | last_row(vol_bc, k_timestamp)
-        │           | aggregate 38            | last_row(vol_ca, k_timestamp)
-        │           | aggregate 39            | last_row(infre, k_timestamp)
-        │           | aggregate 40            | last_row(powerf, k_timestamp)
-        │           | aggregate 41            | last_row(allpower, k_timestamp)
-        │           | aggregate 42            | last_row(pallpower, k_timestamp)
-        │           | aggregate 43            | last_row(rallpower, k_timestamp)
-        │           | aggregate 44            | last_row(powerr, k_timestamp)
-        │           | aggregate 45            | last_row(powerl, k_timestamp)
-        │           | aggregate 46            | last_row(allrenergy1, k_timestamp)
-        │           | aggregate 47            | last_row(allrenergy2, k_timestamp)
-        │           | aggregate 48            | last_row(machine_code, k_timestamp)
-        │           | aggregate 49            | last_row(op_group, k_timestamp)
-        │           | aggregate 50            | last_row(location, k_timestamp)
-        │           | aggregate 51            | last_row(cnc_number, k_timestamp)
-        │           | group by                | machine_code
-        │           | addSynchronizer         | true
-        └── ts scan |                         |
-                    | ts-table                | t_electmeter
-                    | access mode             | tableTableMeta
-                    | scan agg 0              | ANY_NOT_NULL(machine_code)
-                    | scan agg 1              | LAST_ROW(k_timestamp,k_timestamp)
-                    | scan agg 2              | LAST_ROW_TS(k_timestamp,k_timestamp)
-                    | scan agg 3              | LAST_ROW(elect_name,k_timestamp)
-                    | scan agg 4              | LAST_ROW_TS(elect_name,k_timestamp)
-                    | scan agg ...            | leave(98)
-(120 rows)
+           tree          |          field          |             description
+-------------------------+-------------------------+---------------------------------------
+                         | distributed             | true
+                         | vectorized              | false
+  synchronizer           |                         |
+   └── render            |                         |
+        │                | engine type             | time series
+        │                | last_row(k_timestamp)   | last_row
+        │                | last_row(elect_name)    | last_row
+        │                | last_row(vol_a)         | last_row
+        │                | last_row(cur_a)         | last_row
+        │                | last_row(powerf_a)      | last_row
+        │                | last_row(allenergy_a)   | last_row
+        │                | last_row(pallenergy_a)  | last_row
+        │                | last_row(rallenergy_a)  | last_row
+        │                | last_row(allrenergy1_a) | last_row
+        │                | last_row(allrenergy2_a) | last_row
+        │                | last_row(powera_a)      | last_row
+        │                | last_row(powerr_a)      | last_row
+        │                | last_row(powerl_a)      | last_row
+        │                | last_row(vol_b)         | last_row
+        │                | last_row(cur_b)         | last_row
+        │                | last_row(powerf_b)      | last_row
+        │                | last_row(allenergy_b)   | last_row
+        │                | last_row(pallenergy_b)  | last_row
+        │                | last_row(rallenergy_b)  | last_row
+        │                | last_row(allrenergy1_b) | last_row
+        │                | last_row(allrenergy2_b) | last_row
+        │                | last_row(powera_b)      | last_row
+        │                | last_row(powerr_b)      | last_row
+        │                | last_row(powerl_b)      | last_row
+        │                | last_row(vol_c)         | last_row
+        │                | last_row(cur_c)         | last_row
+        │                | last_row(powerf_c)      | last_row
+        │                | last_row(allenergy_c)   | last_row
+        │                | last_row(pallenergy_c)  | last_row
+        │                | last_row(rallenergy_c)  | last_row
+        │                | last_row(allrenergy1_c) | last_row
+        │                | last_row(allrenergy2_c) | last_row
+        │                | last_row(powera_c)      | last_row
+        │                | last_row(powerr_c)      | last_row
+        │                | last_row(powerl_c)      | last_row
+        │                | last_row(vol_ab)        | last_row
+        │                | last_row(vol_bc)        | last_row
+        │                | last_row(vol_ca)        | last_row
+        │                | last_row(infre)         | last_row
+        │                | last_row(powerf)        | last_row
+        │                | last_row(allpower)      | last_row
+        │                | last_row(pallpower)     | last_row
+        │                | last_row(rallpower)     | last_row
+        │                | last_row(powerr)        | last_row
+        │                | last_row(powerl)        | last_row
+        │                | last_row(allrenergy1)   | last_row
+        │                | last_row(allrenergy2)   | last_row
+        │                | last_row(machine_code)  | last_row
+        │                | last_row(op_group)      | last_row
+        │                | last_row(location)      | last_row
+        │                | last_row(cnc_number)    | last_row
+        └── group        |                         |
+             │           | engine type             | time series
+             │           | aggregate 0             | machine_code
+             │           | aggregate 1             | last_row(k_timestamp, k_timestamp)
+             │           | aggregate 2             | last_row(elect_name, k_timestamp)
+             │           | aggregate 3             | last_row(vol_a, k_timestamp)
+             │           | aggregate 4             | last_row(cur_a, k_timestamp)
+             │           | aggregate 5             | last_row(powerf_a, k_timestamp)
+             │           | aggregate 6             | last_row(allenergy_a, k_timestamp)
+             │           | aggregate 7             | last_row(pallenergy_a, k_timestamp)
+             │           | aggregate 8             | last_row(rallenergy_a, k_timestamp)
+             │           | aggregate 9             | last_row(allrenergy1_a, k_timestamp)
+             │           | aggregate 10            | last_row(allrenergy2_a, k_timestamp)
+             │           | aggregate 11            | last_row(powera_a, k_timestamp)
+             │           | aggregate 12            | last_row(powerr_a, k_timestamp)
+             │           | aggregate 13            | last_row(powerl_a, k_timestamp)
+             │           | aggregate 14            | last_row(vol_b, k_timestamp)
+             │           | aggregate 15            | last_row(cur_b, k_timestamp)
+             │           | aggregate 16            | last_row(powerf_b, k_timestamp)
+             │           | aggregate 17            | last_row(allenergy_b, k_timestamp)
+             │           | aggregate 18            | last_row(pallenergy_b, k_timestamp)
+             │           | aggregate 19            | last_row(rallenergy_b, k_timestamp)
+             │           | aggregate 20            | last_row(allrenergy1_b, k_timestamp)
+             │           | aggregate 21            | last_row(allrenergy2_b, k_timestamp)
+             │           | aggregate 22            | last_row(powera_b, k_timestamp)
+             │           | aggregate 23            | last_row(powerr_b, k_timestamp)
+             │           | aggregate 24            | last_row(powerl_b, k_timestamp)
+             │           | aggregate 25            | last_row(vol_c, k_timestamp)
+             │           | aggregate 26            | last_row(cur_c, k_timestamp)
+             │           | aggregate 27            | last_row(powerf_c, k_timestamp)
+             │           | aggregate 28            | last_row(allenergy_c, k_timestamp)
+             │           | aggregate 29            | last_row(pallenergy_c, k_timestamp)
+             │           | aggregate 30            | last_row(rallenergy_c, k_timestamp)
+             │           | aggregate 31            | last_row(allrenergy1_c, k_timestamp)
+             │           | aggregate 32            | last_row(allrenergy2_c, k_timestamp)
+             │           | aggregate 33            | last_row(powera_c, k_timestamp)
+             │           | aggregate 34            | last_row(powerr_c, k_timestamp)
+             │           | aggregate 35            | last_row(powerl_c, k_timestamp)
+             │           | aggregate 36            | last_row(vol_ab, k_timestamp)
+             │           | aggregate 37            | last_row(vol_bc, k_timestamp)
+             │           | aggregate 38            | last_row(vol_ca, k_timestamp)
+             │           | aggregate 39            | last_row(infre, k_timestamp)
+             │           | aggregate 40            | last_row(powerf, k_timestamp)
+             │           | aggregate 41            | last_row(allpower, k_timestamp)
+             │           | aggregate 42            | last_row(pallpower, k_timestamp)
+             │           | aggregate 43            | last_row(rallpower, k_timestamp)
+             │           | aggregate 44            | last_row(powerr, k_timestamp)
+             │           | aggregate 45            | last_row(powerl, k_timestamp)
+             │           | aggregate 46            | last_row(allrenergy1, k_timestamp)
+             │           | aggregate 47            | last_row(allrenergy2, k_timestamp)
+             │           | aggregate 48            | last_row(machine_code, k_timestamp)
+             │           | aggregate 49            | last_row(op_group, k_timestamp)
+             │           | aggregate 50            | last_row(location, k_timestamp)
+             │           | aggregate 51            | last_row(cnc_number, k_timestamp)
+             │           | group by                | machine_code
+             │           | pushLocalAggToScan      | true
+             │           | pruneFinalAgg           | true
+             └── ts scan |                         |
+                         | ts-table                | t_electmeter
+                         | access mode             | tableTableMeta
+                         | use statistic           | true
+(117 rows)
 > drop database db_shig cascade;
 DROP DATABASE

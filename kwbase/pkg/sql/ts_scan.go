@@ -63,8 +63,8 @@ type tsScanNode struct {
 	// AccessMode is table-read mode
 	AccessMode execinfrapb.TSTableReadMode
 
-	// ScanAggArray is statistic cols and agg type
-	ScanAggArray []ScanAgg
+	// ScanAggArray is flag for use statistic reader
+	ScanAggArray bool
 
 	// Filter conditions for regular tag columns
 	TagFilterArray []tree.TypedExpr
@@ -95,12 +95,6 @@ type RelationalInfo struct {
 
 	// hashtag side column ids
 	HashColIds *[]uint32
-}
-
-// ScanAgg records scan agg col and agg type
-type ScanAgg struct {
-	Params execinfrapb.TSStatisticReaderSpec_Params
-	AggTyp execinfrapb.AggregatorSpec_Func
 }
 
 // scanNode implements tree.IndexedVarContainer.

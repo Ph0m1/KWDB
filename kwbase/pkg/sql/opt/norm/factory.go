@@ -598,7 +598,7 @@ func (f *Factory) CheckWhiteListAndSetEngine(src *memo.RelExpr) bool {
 		childCanPush, canMerge, isDistinct := f.checkGroupByExpr(&e.Input, &e.Aggregations, &e.GroupingPrivate)
 		if childCanPush && canMerge {
 			// distinct should not twice agg. single node can push distinct.
-			if !isDistinct || !f.evalCtx.Planner.IsMultiNode(f.evalCtx.Context) {
+			if !isDistinct || f.Memo().CheckFlag(opt.SingleMode) {
 				e.SetEngineTS()
 			}
 		}
@@ -608,7 +608,7 @@ func (f *Factory) CheckWhiteListAndSetEngine(src *memo.RelExpr) bool {
 		childCanPush, canMerge, isDistinct := f.checkGroupByExpr(&e.Input, &e.Aggregations, &e.GroupingPrivate)
 		if childCanPush && canMerge {
 			// distinct should not twice agg. single node can push distinct.
-			if !isDistinct || !f.evalCtx.Planner.IsMultiNode(f.evalCtx.Context) {
+			if !isDistinct || f.Memo().CheckFlag(opt.SingleMode) {
 				e.SetEngineTS()
 			}
 		}

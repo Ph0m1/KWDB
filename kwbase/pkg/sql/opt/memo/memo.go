@@ -29,8 +29,6 @@ import (
 	"math"
 	"runtime"
 	"sort"
-	"strings"
-	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -232,9 +230,6 @@ type TSCheckHelper struct {
 	// PushHelper check expr can be pushed to ts engine
 	PushHelper PushHelper
 
-	// function to check if we run in multi node mode
-	checkMultiNode CheckMultiNode
-
 	// ctx, check multi node function param, context
 	ctx context.Context
 
@@ -256,16 +251,8 @@ type TSCheckHelper struct {
 // init inits the TSCheckHelper
 func (m *TSCheckHelper) init() {
 	m.flags = 0
-	m.PushHelper.MetaMap = make(MetaInfoMap, 0)
+	m.PushHelper.MetaMap = make(MetaInfoMap)
 	m.GroupHint = keys.NoGroupHint
-}
-
-// isSingleNode check if the query is executed in single node.
-func (m *TSCheckHelper) isSingleNode() bool {
-	if m.checkMultiNode != nil {
-		return !m.checkMultiNode(m.ctx)
-	}
-	return false
 }
 
 // MultimodelHelper is a helper struct designed to assist in setting
@@ -384,9 +371,6 @@ func (r MultiModelResetReason) String() string {
 	}
 }
 
-// CheckMultiNode check multi node function
-type CheckMultiNode func(ctx context.Context) bool
-
 // Init initializes a new empty memo instance, or resets existing state so it
 // can be reused. It must be called before use (or reuse). The memo collects
 // information about the context in which it is compiled from the evalContext
@@ -439,8 +423,6 @@ func (m *Memo) InitCheckHelper(param interface{}) {
 	switch t := param.(type) {
 	case *sqlbase.WhiteListMap:
 		m.CheckHelper.whiteList = t
-	case CheckMultiNode:
-		m.CheckHelper.checkMultiNode = t
 	case context.Context:
 		m.CheckHelper.ctx = t
 	case keys.GroupHintType:
@@ -975,7 +957,7 @@ func checkOptPruneFinalAgg(gp *GroupingPrivate, meta *opt.Metadata, onlyOnePTagV
 
 		if tableID != 0 && PrimaryTagCount != 0 {
 			tableMeta := meta.TableMeta(tableID)
-			if PrimaryTagCount == tableMeta.PrimaryTagCount && gp.AggIndex.Empty() {
+			if PrimaryTagCount == tableMeta.PrimaryTagCount && !gp.OptFlags.UseStatisticOpt() {
 				gp.OptFlags |= opt.PruneFinalAgg
 			}
 		}
@@ -1016,7 +998,7 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 	// case: agg with distinct
 	if ret.hasDistinct {
 		// multi node, agg with distinct can not execute in ts engine.
-		if !(m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode()) {
+		if !(m.CheckFlag(opt.SingleMode)) {
 			if !ret.commonRet.hasAddSynchronizer {
 				m.setSynchronizerForChild(child, &ret.commonRet.hasAddSynchronizer)
 			}
@@ -1027,12 +1009,12 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 	src.SetEngineTS()
 
 	// fill statistics
-	m.fillStatistic(&child, aggs, gp)
+	m.checkStatisticOpt(&child, aggs, gp)
 
 	if ret.commonRet.canTimeBucketOptimize {
 		checkOptPruneFinalAgg(gp, m.Metadata(), m.CheckHelper.onlyOnePTagValue)
 
-		gp.OptFlags |= opt.PushLocalAggToScan
+		gp.OptFlags |= opt.TimeBucketPushAgg
 
 		// single device can prune local agg
 		if m.CheckHelper.onlyOnePTagValue || gp.OptFlags.PruneFinalAggOpt() {
@@ -1063,7 +1045,7 @@ func setOrderedForce(expr *TSScanExpr) {
 func (m *Memo) dealWithOrderBy(sort *SortExpr, ret *CrossEngCheckResults, props *bestProps) {
 	if ret.execInTSEngine {
 		// only single node, order by can exec in ts engine.
-		if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
+		if m.CheckFlag(opt.SingleMode) {
 			sort.SetEngineTS()
 		}
 
@@ -1077,20 +1059,20 @@ func (m *Memo) dealWithOrderBy(sort *SortExpr, ret *CrossEngCheckResults, props 
 	}
 }
 
-// fillStatistic fill statistics for the child of group by if group by can execute
-// in ts engine and the agg can use statistics collected by storage engine.
+// checkStatisticOpt check can use statistics collected by storage engine.
 // child is the Input of (memo.GroupByExpr / memo.ScalarGroupByExpr).
 // aggs is the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
 // gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-func (m *Memo) fillStatistic(child *RelExpr, aggs []AggregationsItem, gp *GroupingPrivate) {
+func (m *Memo) checkStatisticOpt(child *RelExpr, aggs []AggregationsItem, gp *GroupingPrivate) {
 	if !m.checkAggStatisticUsable(aggs) {
 		return
 	}
+
 	switch src := (*child).(type) {
 	case *TSScanExpr:
-		m.tsScanFillStatistic(src, aggs, gp)
+		m.tsScanFillStatistic(src, gp)
 	case *SelectExpr:
-		m.selectExprFillStatistic(src, aggs, gp)
+		m.selectExprFillStatistic(src, gp)
 	case *ProjectExpr:
 		m.projectExprFillStatistic(src, aggs, gp)
 	}
@@ -1102,7 +1084,6 @@ func (m *Memo) fillStatistic(child *RelExpr, aggs []AggregationsItem, gp *Groupi
 func (m *Memo) projectExprFillStatistic(
 	project *ProjectExpr, aggs []AggregationsItem, gp *GroupingPrivate,
 ) {
-
 	for _, val := range project.Projections {
 		switch val.Element.(type) {
 		case *NullExpr, *ConstExpr:
@@ -1130,63 +1111,40 @@ func (m *Memo) projectExprFillStatistic(
 	child := project.Input
 	switch src := (child).(type) {
 	case *TSScanExpr:
-		m.tsScanFillStatistic(src, aggs, gp)
+		m.tsScanFillStatistic(src, gp)
 	case *SelectExpr:
-		m.selectExprFillStatistic(src, aggs, gp)
+		m.selectExprFillStatistic(src, gp)
 	}
-	return
 }
 
 // tsScanFillStatistic fill tsScan's statistics.
 // tsScan is memo.TSScanExpr.
-// aggs is the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
 // gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-func (m *Memo) tsScanFillStatistic(
-	tsScan *TSScanExpr, aggs []AggregationsItem, gp *GroupingPrivate,
-) {
+func (m *Memo) tsScanFillStatistic(tsScan *TSScanExpr, gp *GroupingPrivate) {
 	allColsPrimary := true
 	gp.GroupingCols.ForEach(func(colID opt.ColumnID) {
 		colMeta := m.Metadata().ColumnMeta(colID)
 		allColsPrimary = allColsPrimary && colMeta.IsPrimaryTag()
 	})
+
 	tableMeta := m.Metadata().TableMeta(tsScan.Table)
 	if !allColsPrimary || (gp.GroupingCols.Len() != 0 && gp.GroupingCols.Len() != tableMeta.PrimaryTagCount) ||
 		tsScan.HintType.OnlyTag() {
 		return
 	}
 
-	if tsScan.OrderedScanType != opt.NoOrdered && gp.GroupingCols.Len() > 0 {
+	if m.CheckFlag(opt.SingleMode) && gp.GroupingCols.Len() > 0 {
 		gp.OptFlags |= opt.PruneFinalAgg
 	}
 
-	gp.GroupingCols.ForEach(func(colID opt.ColumnID) {
-		gp.AggIndex = append(gp.AggIndex, []uint32{uint32(len(tsScan.ScanAggs))})
-		tsScan.ScanAggs = append(tsScan.ScanAggs, ScanAgg{Params: execinfrapb.TSStatisticReaderSpec_Params{
-			Param: []execinfrapb.TSStatisticReaderSpec_ParamInfo{
-				{Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(colID)},
-			},
-		}, AggTyp: execinfrapb.AggregatorSpec_ANY_NOT_NULL})
-	})
-
-	if gp.OptFlags.PruneFinalAggOpt() && m.CheckFlag(opt.SingleMode) {
-		for i := range aggs {
-			m.addScanAggsForNoSecondAgg(aggs[i].Agg, &tsScan.ScanAggs, gp, tsScan.Table.ColumnID(0))
-		}
-	} else {
-		for i := range aggs {
-			m.addScanAggs(aggs[i].Agg, &tsScan.ScanAggs, gp, tsScan.Table.ColumnID(0))
-		}
-	}
+	tsScan.ScanAggs = true
+	gp.OptFlags |= opt.UseStatistic
 }
 
 // tsScanFillStatistic fill filter's statistics.
 // selectExpr is memo.SelectExpr.
-// aggs is the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
 // gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-func (m *Memo) selectExprFillStatistic(
-	selectExpr *SelectExpr, aggs []AggregationsItem, gp *GroupingPrivate,
-) {
-
+func (m *Memo) selectExprFillStatistic(selectExpr *SelectExpr, gp *GroupingPrivate) {
 	for _, filter := range selectExpr.Filters {
 		if !m.checkFiltersStatisticUsable(filter.Condition) {
 			return
@@ -1194,7 +1152,7 @@ func (m *Memo) selectExprFillStatistic(
 	}
 
 	if tsScanExpr, ok := selectExpr.Input.(*TSScanExpr); ok {
-		m.tsScanFillStatistic(tsScanExpr, aggs, gp)
+		m.tsScanFillStatistic(tsScanExpr, gp)
 	}
 }
 
@@ -1270,7 +1228,7 @@ func (m *Memo) checkAggStatisticUsable(aggs []AggregationsItem) bool {
 	}
 	for i := range aggs {
 		switch aggs[i].Agg.(type) {
-		case *SumExpr, *MinExpr, *MaxExpr, *CountExpr, *FirstExpr, *FirstTimeStampExpr, *FirstRowExpr,
+		case *SumExpr, *MinExpr, *MaxExpr, *CountExpr, *FirstExpr, *FirstTimeStampExpr, *FirstRowExpr, *AvgExpr,
 			*FirstRowTimeStampExpr, *LastExpr, *LastTimeStampExpr, *LastRowExpr, *LastRowTimeStampExpr, *CountRowsExpr:
 		default:
 			return false
@@ -1278,234 +1236,6 @@ func (m *Memo) checkAggStatisticUsable(aggs []AggregationsItem) bool {
 	}
 
 	return true
-}
-
-// statisticAgg is the aggregate function which can use statistic.
-type statisticAgg struct {
-	LocalStage []execinfrapb.AggregatorSpec_Func
-}
-
-// StatisticAggTable is a map of the aggregate functions which can use statistic.
-var StatisticAggTable = map[opt.Operator]statisticAgg{
-	opt.SumOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_SUM},
-	},
-	opt.MinOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_MIN},
-	},
-	opt.MaxOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_MAX},
-	},
-	opt.AvgOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_SUM, execinfrapb.AggregatorSpec_COUNT},
-	},
-	opt.CountOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_COUNT},
-	},
-	opt.CountRowsOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_COUNT},
-	},
-	opt.FirstOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_FIRST, execinfrapb.AggregatorSpec_FIRSTTS},
-	},
-	opt.FirstTimeStampOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_FIRST, execinfrapb.AggregatorSpec_FIRSTTS},
-	},
-	opt.FirstRowOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_FIRST_ROW, execinfrapb.AggregatorSpec_FIRST_ROW_TS},
-	},
-	opt.FirstRowTimeStampOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_FIRST_ROW, execinfrapb.AggregatorSpec_FIRST_ROW_TS},
-	},
-	opt.LastOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_ANY_NOT_NULL, execinfrapb.AggregatorSpec_LASTTS, execinfrapb.AggregatorSpec_LAST},
-	},
-	opt.LastTimeStampOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_ANY_NOT_NULL, execinfrapb.AggregatorSpec_LASTTS, execinfrapb.AggregatorSpec_LAST},
-	},
-	opt.LastRowOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_LAST_ROW, execinfrapb.AggregatorSpec_LAST_ROW_TS},
-	},
-	opt.LastRowTimeStampOp: {
-		LocalStage: []execinfrapb.AggregatorSpec_Func{execinfrapb.AggregatorSpec_LAST_ROW, execinfrapb.AggregatorSpec_LAST_ROW_TS},
-	},
-}
-
-// opToSpecFuncTable  op convert to spec function table
-var opToSpecFuncTable = map[opt.Operator]execinfrapb.AggregatorSpec_Func{
-	opt.SumOp:               execinfrapb.AggregatorSpec_SUM,
-	opt.MinOp:               execinfrapb.AggregatorSpec_MIN,
-	opt.MaxOp:               execinfrapb.AggregatorSpec_MAX,
-	opt.AvgOp:               execinfrapb.AggregatorSpec_AVG,
-	opt.CountOp:             execinfrapb.AggregatorSpec_COUNT,
-	opt.CountRowsOp:         execinfrapb.AggregatorSpec_COUNT,
-	opt.FirstOp:             execinfrapb.AggregatorSpec_FIRST,
-	opt.FirstTimeStampOp:    execinfrapb.AggregatorSpec_FIRSTTS,
-	opt.FirstRowOp:          execinfrapb.AggregatorSpec_FIRST_ROW,
-	opt.FirstRowTimeStampOp: execinfrapb.AggregatorSpec_FIRST_ROW_TS,
-	opt.LastOp:              execinfrapb.AggregatorSpec_LAST,
-	opt.LastTimeStampOp:     execinfrapb.AggregatorSpec_LASTTS,
-	opt.LastRowOp:           execinfrapb.AggregatorSpec_LAST_ROW,
-	opt.LastRowTimeStampOp:  execinfrapb.AggregatorSpec_LAST_ROW_TS,
-}
-
-// addScanAggs adds scan Aggs to tsExpr.ScanAggs.
-// agg is the one of the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-// scanAggs is ScanAggs of memo.TSScanExpr.
-// gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-// tsCol is the logical column ID of the timestamp colimn of the ts table.
-func (m *Memo) addScanAggs(
-	agg opt.ScalarExpr, scanAggs *ScanAggArray, gp *GroupingPrivate, tsCol opt.ColumnID,
-) {
-	if val, ok := StatisticAggTable[agg.Op()]; ok {
-		colID := tsCol
-		if agg.ChildCount() > 0 {
-			colID = m.getArgColID(agg.Child(0).(opt.ScalarExpr))
-		}
-
-		Param := []execinfrapb.TSStatisticReaderSpec_ParamInfo{
-			{Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(colID)}}
-		var ConstParam execinfrapb.TSStatisticReaderSpec_ParamInfo
-		for i := 1; i < agg.ChildCount(); i++ {
-			switch src := agg.Child(i).(type) {
-			case *VariableExpr:
-				// is not table col, null
-				if 0 == m.metadata.ColumnMeta(src.Col).Table {
-					var constVal int64
-					constVal = math.MaxInt64
-					maxBoundaryStr := tree.TsMaxTimestampString + "::TIMESTAMPTZ"
-					boundaryStr := m.metadata.ColumnMeta(src.Col).Alias
-					boundaryStr = strings.Replace(boundaryStr, "'", "", -1)
-					if boundaryStr != maxBoundaryStr {
-						constVal = parseTZ(boundaryStr)
-					}
-					ConstParam = execinfrapb.TSStatisticReaderSpec_ParamInfo{
-						Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_const, Value: constVal}
-					Param = append(Param, ConstParam)
-				} else {
-					Param = append(Param, execinfrapb.TSStatisticReaderSpec_ParamInfo{
-						Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(src.Col)})
-				}
-			}
-		}
-
-		var index []uint32
-		var tmpParam []execinfrapb.TSStatisticReaderSpec_ParamInfo
-		for _, v := range val.LocalStage {
-			if v == execinfrapb.AggregatorSpec_ANY_NOT_NULL {
-				tmpParam = []execinfrapb.TSStatisticReaderSpec_ParamInfo{ConstParam}
-			} else {
-				tmpParam = Param
-			}
-			// exists agg , use it
-			if idx := m.fillScanAggs(scanAggs, tmpParam, v); idx != -1 {
-				index = append(index, uint32(idx))
-			} else {
-				index = append(index, uint32(len(*scanAggs)-1))
-			}
-		}
-		// We need to adjust the order of last's arguments so that
-		// the first parameter is the column to query,
-		// the second parameter is the k_timestamp column,
-		// and the third parameter is the deadline
-		if len(index) == 3 {
-			newIndex := make([]uint32, 0)
-			newIndex = append(newIndex, index[2], index[1], index[0])
-			gp.AggIndex = append(gp.AggIndex, newIndex)
-		} else {
-			gp.AggIndex = append(gp.AggIndex, index)
-		}
-	}
-	return
-}
-
-// addScanAggsForNoSecondAgg adds scan Aggs to tsExpr.ScanAggs for second agg optimize
-// agg is the one of the Aggregations of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-// scanAggs is ScanAggs of memo.TSScanExpr.
-// gp is the GroupingPrivate of (memo.GroupByExpr / memo.ScalarGroupByExpr).
-// tsCol is the logical column ID of the timestamp colimn of the ts table.
-func (m *Memo) addScanAggsForNoSecondAgg(
-	agg opt.ScalarExpr, scanAggs *ScanAggArray, gp *GroupingPrivate, tsCol opt.ColumnID,
-) {
-	if val, ok := opToSpecFuncTable[agg.Op()]; ok {
-		colID := tsCol
-		if agg.ChildCount() > 0 {
-			colID = m.getArgColID(agg.Child(0).(opt.ScalarExpr))
-		}
-
-		var index []uint32
-		Param := []execinfrapb.TSStatisticReaderSpec_ParamInfo{
-			{Typ: execinfrapb.TSStatisticReaderSpec_ParamInfo_colID, Value: int64(colID)}}
-		// exists agg , use it
-		if idx := m.fillScanAggs(scanAggs, Param, val); idx != -1 {
-			index = append(index, uint32(idx))
-		} else {
-			index = append(index, uint32(len(*scanAggs)-1))
-		}
-		gp.AggIndex = append(gp.AggIndex, index)
-	}
-	return
-}
-
-// parseTZ converts a string timestamp value to an integer timestamp value.
-func parseTZ(boundaryStr string) int64 {
-	d, err := tree.ParseDTimestampTZ(nil, boundaryStr, time.Millisecond)
-	if err != nil {
-		panic(pgerror.Newf(pgcode.DatatypeMismatch, "could not parse %s as TIMESTAMPTZ", boundaryStr))
-	}
-	nanosecond := d.Time.Nanosecond()
-	second := d.Time.Unix()
-	timeNew := second*1000 + int64(nanosecond/1000000)
-	return timeNew
-}
-
-// getArgColID return the column ID of the parameter of the agg function.
-// expr is the parameter of the agg function.
-func (m *Memo) getArgColID(expr opt.ScalarExpr) opt.ColumnID {
-	if arg, ok := expr.(*VariableExpr); ok {
-		return arg.Col
-	}
-	return 1
-}
-
-// fillScanAggs adds the column id of argument of agg and
-// the spec type of agg to the tsScan.ScanAggs.
-// scanAggs is ScanAggs of memo.TSScanExpr.
-// colID is the column ID of the parameter of the agg function.
-// aggTyp is one of StatisticAggTable.
-func (m *Memo) fillScanAggs(
-	scanAggs *ScanAggArray,
-	params []execinfrapb.TSStatisticReaderSpec_ParamInfo,
-	aggTyp execinfrapb.AggregatorSpec_Func,
-) int {
-	var agg ScanAgg
-	agg.Params.Param = params
-	agg.AggTyp = aggTyp
-	return addDistinctScanAgg(scanAggs, &agg)
-}
-
-// addDistinctScanAgg append distinct ScanAgg to tsScan.ScanAggs
-// scanAggs is ScanAggs of memo.TSScanExpr.
-func addDistinctScanAgg(scanAggs *ScanAggArray, scanAgg *ScanAgg) int {
-	for i, v := range *scanAggs {
-		if len(v.Params.Param) != len(scanAgg.Params.Param) {
-			break
-		}
-		sameColID := true
-		for j := range v.Params.Param {
-			if v.Params.Param[j].Typ != scanAgg.Params.Param[j].Typ ||
-				v.Params.Param[j].Typ != execinfrapb.TSStatisticReaderSpec_ParamInfo_colID ||
-				v.Params.Param[j].Value != scanAgg.Params.Param[j].Value {
-				sameColID = false
-				break
-			}
-		}
-		if sameColID && v.AggTyp == scanAgg.AggTyp {
-			return i
-		}
-	}
-	*scanAggs = append(*scanAggs, *scanAgg)
-	return -1
 }
 
 // CrossEngCheckResults includes various flags and an error status related to the optimization and execution checks in ts engine.
@@ -1578,10 +1308,10 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		return retTmp.disableExecInTSEngine()
 	case *GroupByExpr:
 		input := source.Input
-		sort, ok := (*src).Child(0).(*SortExpr)
+		sortExpr, ok := (*src).Child(0).(*SortExpr)
 		if ok {
 			m.SetFlag(opt.OrderGroupBy)
-			input = sort.Input
+			input = sortExpr.Input
 		}
 		retAgg := m.checkGroupBy(input, &source.Aggregations, &source.GroupingPrivate)
 		if retAgg.commonRet.err != nil {
@@ -1592,10 +1322,10 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 			if retAgg.commonRet.execInTSEngine {
 				// swap the positions of GroupByExpr and OrderExpr, when GroupByExpr exec
 				// in ts engine and there is the OrderGroupBy.
-				source.Input = sort.Input
-				sort.Input = source
-				m.dealWithOrderBy(sort, &retAgg.commonRet, source.bestProps())
-				*src = sort
+				source.Input = sortExpr.Input
+				sortExpr.Input = source
+				m.dealWithOrderBy(sortExpr, &retAgg.commonRet, source.bestProps())
+				*src = sortExpr
 			} else {
 				// group by can not exec in ts engine, clear flag and not need set root.
 				m.ClearFlag(opt.OrderGroupBy)
@@ -1625,7 +1355,7 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 	case *LookupJoinExpr:
 		return m.checkLookupJoin(source)
 	case *DistinctOnExpr:
-		sort, ok := (*src).Child(0).(*SortExpr)
+		sortExpr, ok := (*src).Child(0).(*SortExpr)
 		if ok {
 			m.SetFlag(opt.OrderGroupBy)
 		}
@@ -1636,7 +1366,7 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		}
 
 		if retAgg.commonRet.execInTSEngine {
-			if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
+			if m.CheckFlag(opt.SingleMode) {
 				source.SetEngineTS()
 				m.SetFlag(opt.DiffNotExecInAE)
 			} else {
@@ -1649,12 +1379,12 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 				} else {
 					// swap the positions of DistinctOnExpr and OrderExpr, when DistinctOnExpr can exec
 					// in ts engine and there is the OrderGroupBy.
-					sort.Input.SetAddSynchronizer()
+					sortExpr.Input.SetAddSynchronizer()
 					retAgg.commonRet.hasAddSynchronizer = true
-					source.Input = sort.Input
-					sort.Input = source
-					m.dealWithOrderBy(sort, &retAgg.commonRet, source.bestProps())
-					*src = sort
+					source.Input = sortExpr.Input
+					sortExpr.Input = source
+					m.dealWithOrderBy(sortExpr, &retAgg.commonRet, source.bestProps())
+					*src = sortExpr
 				}
 			}
 		} else {
@@ -1769,7 +1499,7 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		}
 
 		if ret.execInTSEngine {
-			if isPushDown && (m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode()) {
+			if isPushDown && m.CheckFlag(opt.SingleMode) {
 				if m.CheckFlag(opt.HasDiff) {
 					panic(pgerror.Newf(pgcode.Syntax, "multiple diff functions are not supported"))
 				}
@@ -2194,7 +1924,7 @@ func (m *Memo) setSynchronizerForChild(child RelExpr, hasSynchronizer *bool) {
 	if _, ok := child.(*SortExpr); ok {
 		// case: OrderGroupBy, set sortExpr to ts engine when single node and set AddSynchronizer of child of sort.
 		// only single node, order by can exec in ts engine.
-		if m.CheckFlag(opt.SingleMode) || m.CheckHelper.isSingleNode() {
+		if m.CheckFlag(opt.SingleMode) {
 			child.SetEngineTS()
 		}
 		child.Child(0).(RelExpr).SetAddSynchronizer()
@@ -2340,8 +2070,8 @@ func (m *Memo) checkOptTimeBucketFlag(input RelExpr, optTimeBucket *bool) {
 	}
 	if project, ok := input.(*ProjectExpr); ok {
 		checkProject(project)
-	} else if sort, ok := input.(*SortExpr); ok {
-		if project, ok := sort.Input.(*ProjectExpr); ok {
+	} else if sort, ok1 := input.(*SortExpr); ok1 {
+		if project, ok = sort.Input.(*ProjectExpr); ok {
 			checkProject(project)
 		} else {
 			*optTimeBucket = false

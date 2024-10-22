@@ -31,7 +31,6 @@ import (
 	"strings"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props"
@@ -755,16 +754,6 @@ func ExprIsNeverNull(e opt.ScalarExpr, notNullCols opt.ColSet) bool {
 		return false
 	}
 }
-
-// ScanAgg records the column id of argument of agg and
-// the spec type of agg which can use statistic.
-type ScanAgg struct {
-	Params execinfrapb.TSStatisticReaderSpec_Params
-	AggTyp execinfrapb.AggregatorSpec_Func
-}
-
-// ScanAggArray used to transmit statistics
-type ScanAggArray []ScanAgg
 
 // PTagValues primary tag values
 type PTagValues map[uint32][]string

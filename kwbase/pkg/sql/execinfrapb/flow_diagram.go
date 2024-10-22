@@ -650,6 +650,7 @@ func (post *TSPostProcessSpec) summary() []string {
 		}
 		res = append(res, buf.String())
 	}
+
 	for _, val := range post.OutputTypes {
 		res = append(res, fmt.Sprintf("outtype: %s", val.String()))
 	}
@@ -840,7 +841,7 @@ func (d diagramData) ToURL() (string, url.URL, error) {
 	return encodeJSONToURL(buf)
 }
 
-// MakeAnalyzeJson construct json in explain analyze
+// MakeDistsqlJSON construct json in explain analyze
 func (d diagramData) MakeDistsqlJSON(url string) (string, error) {
 	da := diagramDataDist{d.SQL, d.NodeNames, d.Processors, d.Edges, d.flowID, url}
 	json, err := json.MarshalIndent(da, "\n", "  ")

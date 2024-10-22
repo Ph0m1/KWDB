@@ -40,6 +40,7 @@ INSERT 1
    │                | aggregate 8                 | last(code3, k_timestamp, '1970-01-01 00:00:00+00:00')
    │                | aggregate 9                 | last(code4, k_timestamp, '1970-01-01 00:00:00+00:00')
    │                | scalar                      |
+   │                | pushLocalAggToScan          | true
    │                | addSynchronizer             | true
    └── render       |                             |
         │           | engine type                 | time series
@@ -57,13 +58,8 @@ INSERT 1
         └── ts scan |                             |
                     | ts-table                    | testlastnew
                     | access mode                 | tableTableMeta
-                    | scan agg 0                  | ANY_NOT_NULL(0)
-                    | scan agg 1                  | LASTTS(k_timestamp,k_timestamp,0)
-                    | scan agg 2                  | LAST(k_timestamp,k_timestamp,0)
-                    | scan agg 3                  | ANY_NOT_NULL(0)
-                    | scan agg 4                  | LASTTS(id,k_timestamp,0)
-                    | scan agg ...                | leave(25)
-(38 rows)
+                    | use statistic               | true
+(34 rows)
 > SELECT last(*,'1970-01-01 00:00:00.000') FROM test_select_last_add.testlastnew ;
   last(k_timestamp) | last(id) | last(e1) | last(e2) | last(e3) | last(e4) | last(idp) | last(code1) | last(code3) | last(code4)
 --------------------+----------+----------+----------+----------+----------+-----------+-------------+-------------+--------------

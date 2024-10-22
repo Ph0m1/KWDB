@@ -1615,16 +1615,6 @@ func (b *Builder) buildGroupByInput(groupBy memo.RelExpr) (execPlan, error) {
 		neededCols.Add(c.ID())
 	}
 
-	if val, ok := groupByInput.(*memo.TSScanExpr); ok && len(val.ScanAggs) > 0 {
-		// All columns produced by the input are used.
-		return input, nil
-	} else if val1, ok1 := groupByInput.(*memo.SelectExpr); ok1 {
-		if val2, ok2 := val1.Input.(*memo.TSScanExpr); ok2 && len(val2.ScanAggs) > 0 {
-			// All columns produced by the input are used.
-			return input, nil
-		}
-	}
-
 	if neededCols.Equals(groupByInput.Relational().OutputCols) {
 		// All columns produced by the input are used.
 		return input, nil

@@ -131,11 +131,6 @@ func (ep *DummyEvalPlanner) EvalSubquery(expr *tree.Subquery) (tree.Datum, error
 	return nil, errors.WithStack(errEvalPlanner)
 }
 
-// IsMultiNode is part of the tree.EvalPlanner interface.
-func (ep *DummyEvalPlanner) IsMultiNode(ctx context.Context) bool {
-	return false
-}
-
 // ExecutorConfig is part of the Planner interface.
 func (*DummyEvalPlanner) ExecutorConfig() interface{} {
 	return nil

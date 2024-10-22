@@ -26,6 +26,8 @@ package physicalplan
 
 import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 )
@@ -94,6 +96,33 @@ type DistAggregationInfo struct {
 // function in each of the LocalStage and FinalStage. Otherwise, specify the explicit
 // index corresponding to the local stage.
 var passThroughLocalIdxs = []uint32{0}
+
+// GetAvgRender get avg render expression
+func GetAvgRender(h *tree.IndexedVarHelper, varIdxs []int) (tree.TypedExpr, error) {
+	if len(varIdxs) < 2 {
+		panic(pgerror.New(pgcode.Internal, "fewer than two final aggregation values passed into final render"))
+	}
+	sum := h.IndexedVar(varIdxs[0])
+	count := h.IndexedVar(varIdxs[1])
+
+	expr := &tree.BinaryExpr{
+		Operator: tree.Div,
+		Left:     sum,
+		Right:    count,
+	}
+
+	// There is no "FLOAT / INT" operator; cast the denominator to float in
+	// this case. Note that there is a "DECIMAL / INT" operator, so we don't
+	// need the same handling for that case.
+	if sum.ResolvedType().Family() == types.FloatFamily {
+		expr.Right = &tree.CastExpr{
+			Expr: count,
+			Type: types.Float,
+		}
+	}
+	ctx := &tree.SemaContext{IVarContainer: h.Container()}
+	return expr.TypeCheck(ctx, types.Any)
+}
 
 // DistAggregationTable is DistAggregationInfo look-up table. Functions that
 // don't have an entry in the table are not optimized with a local stage.
@@ -306,31 +335,7 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 				LocalIdxs: []uint32{1},
 			},
 		},
-		FinalRendering: func(h *tree.IndexedVarHelper, varIdxs []int) (tree.TypedExpr, error) {
-			if len(varIdxs) < 2 {
-				panic("fewer than two final aggregation values passed into final render")
-			}
-			sum := h.IndexedVar(varIdxs[0])
-			count := h.IndexedVar(varIdxs[1])
-
-			expr := &tree.BinaryExpr{
-				Operator: tree.Div,
-				Left:     sum,
-				Right:    count,
-			}
-
-			// There is no "FLOAT / INT" operator; cast the denominator to float in
-			// this case. Note that there is a "DECIMAL / INT" operator, so we don't
-			// need the same handling for that case.
-			if sum.ResolvedType().Family() == types.FloatFamily {
-				expr.Right = &tree.CastExpr{
-					Expr: count,
-					Type: types.Float,
-				}
-			}
-			ctx := &tree.SemaContext{IVarContainer: h.Container()}
-			return expr.TypeCheck(ctx, types.Any)
-		},
+		FinalRendering: GetAvgRender,
 	},
 
 	// For VARIANCE/STDDEV the local stage consists of three aggregations,
@@ -427,23 +432,28 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 
 	execinfrapb.AggregatorSpec_LASTTS: {
 		LocalStage: []execinfrapb.AggregatorSpec_Func{
+			execinfrapb.AggregatorSpec_LAST,
 			execinfrapb.AggregatorSpec_LASTTS,
 			execinfrapb.AggregatorSpec_ANY_NOT_NULL,
 		},
 		MiddleStage: []FinalStageInfo{
 			{
+				Fn:        execinfrapb.AggregatorSpec_LAST,
+				LocalIdxs: []uint32{0, 1, 2},
+			},
+			{
 				Fn:        execinfrapb.AggregatorSpec_LASTTS,
-				LocalIdxs: []uint32{0, 0, 1},
+				LocalIdxs: []uint32{0, 1, 2},
 			},
 			{
 				Fn:        execinfrapb.AggregatorSpec_ANY_NOT_NULL,
-				LocalIdxs: []uint32{1},
+				LocalIdxs: []uint32{2},
 			},
 		},
 		FinalStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_LASTTS,
-				LocalIdxs: []uint32{0, 0, 1},
+				LocalIdxs: []uint32{0, 1, 2},
 			},
 		},
 	},
@@ -473,18 +483,23 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 
 	execinfrapb.AggregatorSpec_LAST_ROW_TS: {
 		LocalStage: []execinfrapb.AggregatorSpec_Func{
+			execinfrapb.AggregatorSpec_LAST_ROW,
 			execinfrapb.AggregatorSpec_LAST_ROW_TS,
 		},
 		MiddleStage: []FinalStageInfo{
 			{
+				Fn:        execinfrapb.AggregatorSpec_LAST_ROW,
+				LocalIdxs: []uint32{0, 1},
+			},
+			{
 				Fn:        execinfrapb.AggregatorSpec_LAST_ROW_TS,
-				LocalIdxs: []uint32{0, 0},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 		FinalStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_LAST_ROW_TS,
-				LocalIdxs: []uint32{0, 0},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 	},
@@ -514,18 +529,23 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 
 	execinfrapb.AggregatorSpec_FIRSTTS: {
 		LocalStage: []execinfrapb.AggregatorSpec_Func{
+			execinfrapb.AggregatorSpec_FIRST,
 			execinfrapb.AggregatorSpec_FIRSTTS,
 		},
 		MiddleStage: []FinalStageInfo{
 			{
+				Fn:        execinfrapb.AggregatorSpec_FIRST,
+				LocalIdxs: []uint32{0, 1},
+			},
+			{
 				Fn:        execinfrapb.AggregatorSpec_FIRSTTS,
-				LocalIdxs: []uint32{0, 0},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 		FinalStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_FIRSTTS,
-				LocalIdxs: []uint32{0, 0},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 	},
@@ -555,18 +575,23 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 
 	execinfrapb.AggregatorSpec_FIRST_ROW_TS: {
 		LocalStage: []execinfrapb.AggregatorSpec_Func{
+			execinfrapb.AggregatorSpec_FIRST_ROW,
 			execinfrapb.AggregatorSpec_FIRST_ROW_TS,
 		},
 		MiddleStage: []FinalStageInfo{
 			{
+				Fn:        execinfrapb.AggregatorSpec_FIRST_ROW,
+				LocalIdxs: []uint32{0, 1},
+			},
+			{
 				Fn:        execinfrapb.AggregatorSpec_FIRST_ROW_TS,
-				LocalIdxs: []uint32{0, 0},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 		FinalStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_FIRST_ROW_TS,
-				LocalIdxs: []uint32{0, 0},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 	},

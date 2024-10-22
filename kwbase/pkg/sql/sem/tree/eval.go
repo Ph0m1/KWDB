@@ -2888,9 +2888,6 @@ type EvalPlanner interface {
 	// EvalSubquery returns the Datum for the given subquery node.
 	EvalSubquery(expr *Subquery) (Datum, error)
 
-	// IsMultiNode return true when there are multi nodes.
-	IsMultiNode(ctx context.Context) bool
-
 	// MakeNewPlanAndRunForTsInsert create an internal planner as the planner and run
 	MakeNewPlanAndRunForTsInsert(ctx context.Context, evalCtx *EvalContext, param TSInsertSelectParam) (int, error)
 }
