@@ -1180,8 +1180,8 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
                   ++notnull_count;
                 }
               }
-              b = new AggBatch(malloc(BLOCK_AGG_COUNT_SIZE), 1, nullptr);
-              *static_cast<uint16_t*>(b->mem) = notnull_count;
+              b = new AggBatch(malloc(sizeof(uint64_t)), 1, nullptr);
+              *static_cast<uint64_t*>(b->mem) = notnull_count;
               b->is_new = true;
               break;
             }
@@ -1447,7 +1447,7 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
         KWDB_DURATION(StStatistics::Get().agg_count);
         k_uint64 total_count = 0;
         for (auto it : result.data[i]) {
-          total_count += *static_cast<k_uint16*>(it->mem);
+          total_count += *static_cast<k_uint64*>(it->mem);
         }
         auto* b = new AggBatch(malloc(sizeof(k_uint64)), 1, nullptr);
         b->is_new = true;

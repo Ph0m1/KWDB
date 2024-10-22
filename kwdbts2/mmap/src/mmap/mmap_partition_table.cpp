@@ -853,9 +853,11 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
       (*count)++;
       delete_num++;
     }
-    entity_item_latch->Lock(entity_id);
-    entity_item->row_written -= delete_num;
-    entity_item_latch->Unlock(entity_id);
+    if (!evaluate_del) {
+      entity_item_latch->Lock(entity_id);
+      entity_item->row_written -= delete_num;
+      entity_item_latch->Unlock(entity_id);
+    }
     if (evaluate_del && delete_rows) {
       row_span.blockitem_id = block_item_id;
       delete_rows->emplace_back(row_span);

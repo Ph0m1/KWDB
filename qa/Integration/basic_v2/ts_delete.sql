@@ -695,3 +695,60 @@ select ac10 from tsdb2.t3 where k_timestamp<='2024-06-01 01:00:03.000';
 select count(ac10),max(ac10),min(ac10),first(ac10),last(ac10),first_row(ac10),last_row(ac10) from tsdb2.t3 where k_timestamp<='2024-06-01 01:00:03.000';
 
 USE defaultdb;DROP DATABASE IF EXISTS tsdb2 CASCADE;
+
+-- bug ZDP-42366
+-- case 1
+DROP DATABASE IF EXISTS tsdba CASCADE;
+create ts database tsdba;
+create table tsdba.t1 (k_timestamp timestamp not null,e1 int2  not null,e2 int,e3 int8 not null,e4 float4,e5 float8 not null,e6 bool,e7 double not null) TAGS (code1 int2 not null)primary tags(code1);
+
+insert into tsdba.t1 values('2021-03-01 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+select count(*) from tsdba.t1;
+delete from tsdba.t1 where 1=1;
+select count(*) from tsdba.t1;
+
+--case 2
+create table tsdba.t2 (k_timestamp timestamp not null,e1 int2  not null,e2 int,e3 int8 not null,e4 float4,e5 float8 not null,e6 bool,e7 double not null) TAGS (code1 int2 not null)primary tags(code1);
+
+insert into tsdba.t2 values('2021-03-01 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+insert into tsdba.t2 values('2021-03-02 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+insert into tsdba.t2 values('2021-03-03 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+insert into tsdba.t2 values('2021-03-04 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+
+insert into tsdba.t2 values('2021-03-02 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+insert into tsdba.t2 values('2021-03-03 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+insert into tsdba.t2 values('2021-03-04 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+insert into tsdba.t2 values('2021-03-05 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+
+insert into tsdba.t2 values('2021-03-03 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+insert into tsdba.t2 values('2021-03-04 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+insert into tsdba.t2 values('2021-03-05 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+insert into tsdba.t2 values('2021-03-06 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+
+select count(*) from tsdba.t2;
+delete from tsdba.t2 where code1 = 1;
+select count(*) from tsdba.t2;
+
+--case 3
+create table tsdba.t3 (k_timestamp timestamp not null,e1 int2  not null,e2 int,e3 int8 not null,e4 float4,e5 float8 not null,e6 bool,e7 double not null) TAGS (code1 int2 not null)primary tags(code1);
+
+insert into tsdba.t3 values('2021-03-01 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+insert into tsdba.t3 values('2021-03-02 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+insert into tsdba.t3 values('2021-03-03 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+insert into tsdba.t3 values('2021-03-04 15:00:00',1,2,3,1.1,1.2,true,3.33333,1);
+
+insert into tsdba.t3 values('2021-03-02 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+insert into tsdba.t3 values('2021-03-03 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+insert into tsdba.t3 values('2021-03-04 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+insert into tsdba.t3 values('2021-03-05 15:00:00',1,2,3,1.1,1.2,true,3.33333,2);
+
+insert into tsdba.t3 values('2021-03-03 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+insert into tsdba.t3 values('2021-03-04 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+insert into tsdba.t3 values('2021-03-05 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+insert into tsdba.t3 values('2021-03-06 15:00:00',1,2,3,1.1,1.2,true,3.33333,3);
+
+select count(*) from tsdba.t3;
+delete from tsdba.t3 where k_timestamp <= '2021-03-03 15:00:00';
+select count(*) from tsdba.t3;
+
+USE defaultdb;DROP DATABASE IF EXISTS tsdba CASCADE;
