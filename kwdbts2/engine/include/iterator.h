@@ -273,8 +273,13 @@ class TsIterator {
   bool IsDisordered() {
     TsSubGroupPTIterator cur_iter(partition_table_iter_.get());
     cur_iter.Reset();
-    TsTimePartition* cur_pt;
-    while (cur_iter.Next(&cur_pt) && cur_pt != nullptr) {
+    while (true) {
+      TsTimePartition* cur_pt = nullptr;
+      // TODO(zqh): Next() return Status
+      cur_iter.Next(&cur_pt);
+      if (cur_pt == nullptr) {
+        break;
+      }
       EntityItem* entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
       if (entity_item->is_disordered) {
         return true;
@@ -320,7 +325,7 @@ class TsIterator {
   vector<AttributeInfo> attrs_;
     // table version
   uint32_t table_version_;
-  TsTimePartition* cur_partiton_table_;
+  TsTimePartition* cur_partition_table_ = nullptr;
   std::shared_ptr<TsSubGroupPTIterator> partition_table_iter_;
   // save all BlockItem objects in the partition table being queried
   std::deque<BlockItem*> block_item_queue_;
@@ -362,9 +367,9 @@ class TsSortedRowDataIterator : public TsIterator {
   TsSortedRowDataIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                           vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
                           std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
-                          uint32_t table_version, SortOrder order_type = ASC, bool compaction = false) :
+                          uint32_t table_version, SortOrder order_type = ASC) :
       TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
-                 kw_scan_cols, ts_scan_cols, table_version), order_type_(order_type), compaction_(compaction) {}
+                 kw_scan_cols, ts_scan_cols, table_version), order_type_(order_type) {}
 
   KStatus Init(bool is_reversed) override;
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
@@ -379,7 +384,6 @@ class TsSortedRowDataIterator : public TsIterator {
   std::deque<BlockSpan> block_spans_;
   BlockSpan cur_block_span_;
   SortOrder order_type_ = SortOrder::ASC;
-  bool compaction_ = false;
 };
 
 // used for aggregate queries

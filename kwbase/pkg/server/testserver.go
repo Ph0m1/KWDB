@@ -120,7 +120,6 @@ func makeTestConfig(st *cluster.Settings) Config {
 
 	// Enable web session authentication.
 	cfg.EnableWebSessionAuthentication = true
-	cfg.StartVacuum = false
 	return cfg
 }
 

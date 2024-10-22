@@ -280,8 +280,9 @@ int SubEntityGroupManager::DropAll(bool is_force, ErrorInfo& err_info) {
   return 0;
 }
 
-void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info) {
-  std::vector<TsTimePartition*> compress_tables;
+void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts, bool enable_vacuum,
+                                     uint32_t ts_version, ErrorInfo& err_info) {
+  std::unordered_map<TsTimePartition*, TsSubEntityGroup*> compress_tables;
   // Gets all the compressible partitions in the [INT64_MIN, ts] time range under subgroup
   rdLock();
   for (auto & subgroup : subgroups_) {
@@ -290,18 +291,42 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
       LOG_ERROR("SubEntityGroupManager GetPartitionTable error : %s", err_info.errmsg.c_str());
       break;
     }
-    compress_tables.insert(compress_tables.end(), p_tables.begin(), p_tables.end());
+    for (auto p_table : p_tables) {
+      compress_tables.insert({p_table, subgroup.second});
+    }
   }
   unLock();
 
   bool compress_error = false;
-  for (auto p_table : compress_tables) {
+  for (auto it = compress_tables.begin(); it != compress_tables.end();) {
     // detect ctrl+C first
     if (ctx->relation_ctx != 0 && isCanceledCtx(ctx->relation_ctx)) {
       err_info.setError(KWEOTHER, "interrupted");
       return;
     }
+    TsTimePartition* p_table = it->first;
+    auto subgroup = it->second;
     if (p_table != nullptr && !compress_error) {
+      if (enable_vacuum) {
+        // data vacuum
+        std::string partition_path = p_table->GetPath();
+        LOG_INFO("Start vacuum in partition %s", partition_path.c_str());
+        bool drop_partition = false;
+        KStatus s = p_table->ProcessVacuum(compress_ts, ts_version, drop_partition);
+        if (s != SUCCESS) {
+          LOG_ERROR("Process vacuum failed.");
+        }
+        if (drop_partition) {
+          auto ts = p_table->minTimestamp();
+          ReleasePartitionTable(p_table);
+          p_table = nullptr;
+          subgroup->RemovePartitionTable(ts, err_info);
+          it = compress_tables.erase(it);
+          LOG_INFO("Finish vacuum in partition %s, partition is empty and removed.", partition_path.c_str());
+          continue;
+        }
+        LOG_INFO("Finish vacuum in partition %s", partition_path.c_str());
+      }
       p_table->Compress(compress_ts, err_info);
       if (err_info.errcode < 0) {
         LOG_ERROR("MMapPartitionTable[%s] compress error : %s", p_table->path().c_str(), err_info.errmsg.c_str());
@@ -309,6 +334,7 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
       }
     }
     ReleaseTable(p_table);
+    it++;
   }
 
   // Call partition table lru cache to eliminate after compression
@@ -341,11 +367,6 @@ int SubEntityGroupManager::AllocateEntity(std::string& primary_tags, uint64_t ta
     if (err_info.errcode < 0) {
       return err_info.errcode;
     }
-
-    if (!g_bt->IsAvailable()) {
-      find_group++;
-      continue;
-    }
     // Call the MMapEntityBigTable method to query whether there are any free entity IDs in g_bt
     // If 0 is returned, it means that this group has no available entity
     find_entity = g_bt->AllocateEntityID(primary_tags, err_info);
@@ -359,34 +380,6 @@ int SubEntityGroupManager::AllocateEntity(std::string& primary_tags, uint64_t ta
 
   *group_id = find_group;
   *entity_id = find_entity;
-  return 0;
-}
-
-int SubEntityGroupManager::AllocateNewSubgroups(const int& count, vector<SubGroupID>* subgroups) {
-  SubGroupID find_group = max_active_subgroup_id_ + 1;
-  int size = count;
-  wrLock();
-  Defer defer{[&]() { unLock(); }};
-  while (find_group && size > 0) {
-    auto it = subgroups_.find(find_group);
-    if (it == subgroups_.end()) {
-      subgroups->push_back(find_group);
-      // create new subgroup
-      ErrorInfo err_info;
-      TsSubEntityGroup* sub_group = openSubGroup(find_group, err_info, true);
-      if (err_info.errcode < 0) {
-        LOG_ERROR("AllocateNewID: Create subgroup failed, id: %u", find_group);
-        return err_info.errcode;
-      }
-      if (find_group > max_subgroup_id_) {
-        max_subgroup_id_ = find_group;
-      }
-      sub_group->SetUnavailable();
-      subgroups_[find_group] = sub_group;
-      size--;
-    }
-    find_group++;
-  }
   return 0;
 }
 
@@ -410,18 +403,4 @@ void SubEntityGroupManager::sync(int flags) {
     it->second->sync(flags);
   }
 }
-
-void SubEntityGroupManager::SetSubgroupAvailable() {
-  wrLock();
-  Defer defer{[&]() { unLock(); }};
-  for (auto& subgroup : subgroups_) {
-    if (!subgroup.second->IsAvailable()) {
-      subgroup.second->SetAvailable();
-      if (max_active_subgroup_id_ > subgroup.first) {
-        max_active_subgroup_id_ = subgroup.first;  // Update after migrating the snapshot
-      }
-    }
-  }
-}
-
 }  // namespace kwdbts

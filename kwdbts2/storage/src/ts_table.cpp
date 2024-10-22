@@ -22,7 +22,6 @@
 #include "mmap/mmap_metrics_table.h"
 #include "mmap/mmap_tag_column_table.h"
 #include "mmap/mmap_tag_column_table_aux.h"
-#include "ts_snapshot.h"
 #include "ts_table.h"
 #include "perf_stat.h"
 #include "sys_utils.h"
@@ -671,10 +670,11 @@ KStatus TsEntityGroup::Drop(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo &err_info) {
+KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
+                                uint32_t ts_version, ErrorInfo& err_info) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  ebt_manager_->Compress(ctx, ts, err_info);
+  ebt_manager_->Compress(ctx, ts, enable_vacuum, ts_version, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("TsEntityGroup::Compress error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
@@ -687,7 +687,7 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
                                    std::vector<k_uint32> ts_scan_cols, std::vector<Sumfunctype> scan_agg_types,
                                    uint32_t table_version, TsIterator** iter,
                                    std::shared_ptr<TsEntityGroup> entity_group,
-                                   std::vector<timestamp64> ts_points, bool reverse, bool sorted, bool compaction) {
+                                   std::vector<timestamp64> ts_points, bool reverse, bool sorted) {
   // TODO(liuwei) update to use read_lsn to fetch Metrics data optimistically.
   // if the read_lsn is 0, ignore the read lsn checking and return all data (it's no WAL support case).
   // TS_LSN read_lsn = GetOptimisticReadLsn();
@@ -695,7 +695,7 @@ KStatus TsEntityGroup::GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id, v
   if (scan_agg_types.empty()) {
     if (sorted) {
       ts_iter = new TsSortedRowDataIterator(entity_group, range_.range_group_id, sub_group_id, entity_ids,
-                                            ts_spans, scan_cols, ts_scan_cols, table_version, ASC, compaction);
+                                            ts_spans, scan_cols, ts_scan_cols, table_version, ASC);
     } else {
       ts_iter = new TsRawDataIterator(entity_group, range_.range_group_id, sub_group_id,
                                       entity_ids, ts_spans, scan_cols, ts_scan_cols, table_version);
@@ -1688,7 +1688,8 @@ KStatus TsTable::DropAll(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info) {
+KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
+                          uint32_t ts_version, ErrorInfo& err_info) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     err_info.setError(KWENOOBJ, "table not created");
@@ -1733,7 +1734,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& er
     if (!entity_group) {
       continue;
     }
-    s = entity_group->Compress(ctx, ts, err_info);
+    s = entity_group->Compress(ctx, ts, enable_vacuum, ts_version, err_info);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("TsTableRange compress failed : %s", tbl_sub_path_.c_str());
       break;
@@ -1958,7 +1959,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
       for (auto& partition : partitions) {
         uint64_t partition_time = cur_sub_group->PartitionTime(partition->minTimestamp(), max_pt_time);
         TsPartitonIteratorParams param{entity_grp.first, sub_grp.first, sub_grp.second, {ts_span}, {0}, {0}, data_schema};
-        TsPartitonIterator pt_iter(partition, param);
+        TsPartitionIterator pt_iter(partition, param);
         uint32_t partition_row_count = 0;
         while (true) {
           ResultSet res(1);
@@ -2241,7 +2242,7 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
       TsIterator* ts_iter;
       s = entity_group->GetIterator(ctx, sub_group_iter.first, sub_group_iter.second, ts_spans,
                                     scan_cols, ts_scan_cols, scan_agg_types, table_version,
-                                    &ts_iter, entity_group, ts_points, reverse, sorted, false);
+                                    &ts_iter, entity_group, ts_points, reverse, sorted);
       if (s != KStatus::SUCCESS) {
         LOG_ERROR("cannot create iterator for entitygroup[%lu], subgroup[%u]", group_iter.first, sub_group_iter.first);
         return s;
@@ -2267,10 +2268,10 @@ KStatus TsTable::GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span,
 // for multimodel processing, the entity ids have to be in the original order, hence,
 // use the following way to get the iterator instead of ordering by entity group
 KStatus TsTable::GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
-                             std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
-                             std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
-                             TsTableIterator** iter, std::vector<timestamp64> ts_points,
-                             bool reverse, bool sorted) {
+                                    std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
+                                    std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
+                                    TsTableIterator** iter, std::vector<timestamp64> ts_points,
+                                    bool reverse, bool sorted) {
   KWDB_DURATION(StStatistics::Get().get_iterator);
   if (scan_cols.empty()) {
     // LOG_ERROR("TsTable::GetIterator Error : no column");
@@ -2310,10 +2311,10 @@ KStatus TsTable::GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityR
       if (s == FAIL) return s;
     }
     if (entity.entityGroupId != entity_group_id || entity.subGroupId != subgroup_id) {
-       TsIterator* ts_iter;
+      TsIterator* ts_iter;
       s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
                                     scan_cols, ts_scan_cols, scan_agg_types, table_version, &ts_iter, entity_group,
-                                    ts_points, reverse, sorted, false);
+                                    ts_points, reverse, sorted);
       if (s == FAIL) return s;
       ts_table_iterator->AddEntityIterator(ts_iter);
 
@@ -2332,248 +2333,12 @@ KStatus TsTable::GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityR
     TsIterator* ts_iter;
     s = entity_group->GetIterator(ctx, subgroup_id, entities, ts_spans,
                                   scan_cols, ts_scan_cols, scan_agg_types, table_version, &ts_iter, entity_group,
-                                  ts_points, reverse, sorted, false);
+                                  ts_points, reverse, sorted);
     if (s == FAIL) return s;
     ts_table_iterator->AddEntityIterator(ts_iter);
   }
 
   (*iter) = ts_table_iterator;
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTable::CreateSnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t begin_hash, uint64_t end_hash,
-                                uint64_t* snapshot_id) {
-  LOG_INFO("CreateSnapshot begin! [Snapshot ID:%lu, Ranggroup ID: %lu]", *snapshot_id, range_group_id);
-  std::shared_ptr<TsEntityGroup> entity_group_src;
-  KStatus s = GetEntityGroup(ctx, range_group_id, &entity_group_src);
-  if (s == KStatus::FAIL || entity_group_src == nullptr) {
-    // Add error messages
-    LOG_ERROR("GetEntityGroup failed during CreateSnapshot, range_group_id=%lu, snapshot_id=%lu",
-              range_group_id, *snapshot_id);
-    return KStatus::FAIL;
-  }
-
-  SnapshotInfo ts_snapshot_info{};
-  ts_snapshot_info.begin_hash = begin_hash;
-  ts_snapshot_info.end_hash = end_hash;
-  ts_snapshot_info.type = 0;
-  // type = 0, source node build snapshot, need to generate snapshot id
-  auto now = std::chrono::system_clock::now();
-  // Converts time to milliseconds that have elapsed since January 1, 1970
-  auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-  ts_snapshot_info.id = timestamp;
-  std::shared_ptr<TsTableSnapshot> ts_snapshot_table =
-      std::make_shared<TsTableSnapshot>(db_path_, table_id_, tbl_sub_path_, entity_group_src,
-                                        entity_bt_manager_, ts_snapshot_info);
-  s = ts_snapshot_table->Init(ctx);
-  if (s != KStatus::SUCCESS) {
-    LOG_ERROR("Init Snapshot table failed, range_group_id=%lu, snapshot_id=%lu", range_group_id, *snapshot_id);
-    return KStatus::FAIL;
-  }
-  *snapshot_id = ts_snapshot_table->GetSnapshotId();
-  snapshot_manage_pool_[ts_snapshot_table->GetSnapshotId()] = ts_snapshot_table;
-  LOG_INFO("CreateSnapshot success! [Snapshot ID:%lu, Ranggroup ID: %lu]", *snapshot_id, range_group_id);
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTable::DropSnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t snapshot_id) {
-  TsTableSnapshot* ts_snapshot_table = nullptr;
-  MUTEX_LOCK(snapshot_manage_mtx_);
-  if (snapshot_manage_pool_.find(snapshot_id) != snapshot_manage_pool_.end()) {
-    ts_snapshot_table = snapshot_manage_pool_[snapshot_id].get();
-  } else {
-    LOG_ERROR("Snapshot table not found, range_group_id=%lu, snapshot_id=%lu", range_group_id, snapshot_id);
-    MUTEX_UNLOCK(snapshot_manage_mtx_);
-    return KStatus::FAIL;
-  }
-
-  if (ts_snapshot_table == nullptr) {
-    LOG_ERROR("Snapshot table not found, range_group_id=%lu, snapshot_id=%lu", range_group_id, snapshot_id);
-    MUTEX_UNLOCK(snapshot_manage_mtx_);
-    return KStatus::FAIL;
-  }
-
-  KStatus s = ts_snapshot_table->DropAll();
-  if (s == KStatus::FAIL) {
-    LOG_ERROR("DropAll Snapshot, range_group_id=%lu, snapshot_id=%lu", range_group_id, snapshot_id);
-    MUTEX_UNLOCK(snapshot_manage_mtx_);
-    return KStatus::FAIL;
-  }
-  snapshot_manage_pool_.erase(snapshot_id);
-  MUTEX_UNLOCK(snapshot_manage_mtx_);
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTable::GetSnapshotData(kwdbContext_p ctx, uint64_t range_group_id, uint64_t snapshot_id,
-                                 size_t offset, size_t limit, TSSlice* data, size_t* total) {
-  LOG_INFO("GetSnapshotData begin! snapshot_id:%ld, range_group_id: %ld", snapshot_id, range_group_id);
-  if (snapshot_manage_pool_.find(snapshot_id) == snapshot_manage_pool_.end()) {
-    LOG_ERROR("GetSnapshotData failed, range_group_id=%lu, snapshot_id=%ld", range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-  std::shared_ptr<TsTableSnapshot> snap_shot = snapshot_manage_pool_.find(snapshot_id)->second;
-  KStatus s = KStatus::FAIL;
-  if (snapshot_get_size_pool_.find(snapshot_id) == snapshot_get_size_pool_.end()) {
-    // todo(lfl): LSN needs to be added in the future
-    TS_LSN lsn = 9999999999999;
-    s = snap_shot->BuildSnapshot(ctx, lsn);
-    if (s != KStatus::SUCCESS) {
-      LOG_ERROR("BuildSnapshot failed, range_group_id=%lu, snapshot_id=%lu", range_group_id, snapshot_id);
-      return s;
-    }
-    s = snap_shot->CompressSnapshot(ctx, total);
-    if (s == KStatus::FAIL) {
-      LOG_ERROR("CompressSnapshot failed during GetSnapshotData, range_group_id=%lu, snapshot_id=%ld",
-                range_group_id, snapshot_id);
-      return KStatus::FAIL;
-    }
-    snapshot_get_size_pool_[snapshot_id] = std::move(*total);
-  }
-
-  TsEntityGroup* snap_shot_gp = snap_shot->GetSnapshotEntityGroup();
-  if (snap_shot_gp->GetSubEntityGroupTagbt()->size() == 0) {
-    *total = 0;
-    return KStatus::SUCCESS;
-  }
-  *total = snapshot_get_size_pool_[snapshot_id];
-  s = snap_shot->GetSnapshotData(ctx, range_group_id, offset, limit, data, total);
-  if (s == KStatus::FAIL) {
-    LOG_ERROR("GetSnapshotData failed, range_group_id=%lu, snapshot_id=%ld",
-              range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-  LOG_INFO("GetSnapshotData success! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTable::WriteSnapshotData(kwdbContext_p ctx, const uint64_t range_group_id, uint64_t snapshot_id,
-                                   size_t offset, TSSlice data, bool finished) {
-  LOG_INFO("WriteSnapshotData begin! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
-  std::shared_ptr<TsEntityGroup> entity_group_src;
-  KStatus s = GetEntityGroup(ctx, range_group_id, &entity_group_src);
-  if (s == KStatus::FAIL || entity_group_src == nullptr) {
-    LOG_ERROR("GetEntityGroup failed during WriteSnapshotData, range_group_id=%lu, snapshot_id=%lu",
-              range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-
-#ifndef WITH_TESTS
-  // The original leader role of the node does not allow snapshot data to be written
-  if (entity_group_src->HashRange().typ == 0) {
-    LOG_ERROR("The leader role of the original EntityGroup on the node is not allowed to write data, "
-              "range_group_id=%lu, snapshot_id=%lu", range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-#endif
-
-  string tbl_sub_path = to_string(range_group_id) + "_" + to_string(snapshot_id);
-  string range_tbl_sub_path = db_path_ + tbl_sub_path_;
-  KString dir_path = range_tbl_sub_path + tbl_sub_path;
-  KString file_name = dir_path + ".sqfs";
-
-#ifndef WITH_TESTS
-  std::ofstream write_data_handle(file_name, std::ios::binary | std::ios::app);
-  if (!write_data_handle.is_open()) {
-    LOG_ERROR("Open file failed during InitWrite, range_group_id[%ld], snapshot_id=%ld.",
-              range_group_id, snapshot_id)
-    return KStatus::FAIL;
-  }
-  write_data_handle.write(data.data, data.len);
-  if (write_data_handle.fail()) {
-    LOG_ERROR("Write compressed file failed, range_group_id=%lu, snapshot_id=%ld", range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-  if (finished) {
-    write_data_handle.close();
-  }
-#endif
-
-  LOG_INFO("Write compressed file data range during WriteSnapshotData[snapshotId:%ld], start address:%ld, end address=%ld",
-           snapshot_id, offset, offset + data.len - 1);
-
-  if (finished) {
-    KString cmd = "unsquashfs -q -n -d " + dir_path + " " + file_name;
-    LOG_INFO("%s", cmd.c_str());
-    int result = std::system(cmd.c_str());
-    if (result == -1) {
-      LOG_ERROR("Uncompressed file failed, range_group_id=%lu", range_group_id);
-      return KStatus::FAIL;
-    }
-
-    KString rm_cmd = "rm -rf  " + file_name;
-    result = std::system(rm_cmd.c_str());
-    if (result == -1) {
-      LOG_ERROR("Remove compressed file failed, range_group_id=%lu", range_group_id);
-      return KStatus::FAIL;
-    }
-    s = ApplySnapshot(ctx, range_group_id, snapshot_id, true);
-    if (s != KStatus::SUCCESS) {
-      return s;
-    }
-  }
-  LOG_INFO("WriteSnapshotData success! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTable::ApplySnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t snapshot_id, bool delete_after_apply) {
-  LOG_INFO("ApplySnapshot begin! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
-  std::shared_ptr<TsEntityGroup> entity_group_src;
-  KStatus s = GetEntityGroup(ctx, range_group_id, &entity_group_src);
-  if (s == KStatus::FAIL || entity_group_src == nullptr) {
-    LOG_ERROR("GetEntityGroup failed during ApplySnapshot, range_group_id=%lu, snapshot_id=%lu",
-              range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-
-  RW_LATCH_S_LOCK(entity_groups_mtx_);
-  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
-  SnapshotInfo ts_snapshot_info{};
-  ts_snapshot_info.begin_hash = 0;
-  ts_snapshot_info.end_hash = UINT64_MAX;
-  ts_snapshot_info.type = 1;
-  ts_snapshot_info.id = snapshot_id;
-
-  std::shared_ptr<TsTableSnapshot> ts_snapshot_table =
-      std::make_shared<TsTableSnapshot>(db_path_, table_id_, tbl_sub_path_, entity_group_src,
-                                        entity_bt_manager_, ts_snapshot_info);
-  s = ts_snapshot_table->Init(ctx);
-  if (s == KStatus::FAIL) {
-    LOG_ERROR("Apply Snapshot failed, range_group_id=%lu", range_group_id);
-    return KStatus::FAIL;
-  }
-
-  s = ts_snapshot_table->Apply();
-  if (s == KStatus::FAIL) {
-    LOG_ERROR("Apply Snapshot failed, range_group_id=%lu", range_group_id);
-    return KStatus::FAIL;
-  }
-  snapshot_id = ts_snapshot_table->GetSnapshotId();
-  snapshot_manage_pool_[snapshot_id] = ts_snapshot_table;
-
-  if (delete_after_apply) {
-    s = ts_snapshot_table->DropAll();
-    if (s == KStatus::FAIL) {
-      LOG_ERROR("Drop Snapshot table failed, range_group_id=%lu", range_group_id);
-      return KStatus::FAIL;
-    }
-    snapshot_manage_pool_.erase(snapshot_id);
-  }
-  LOG_INFO("ApplySnapshot success! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTable::EnableSnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t snapshot_id) {
-  LOG_INFO("EnableSnapshot begin! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
-  std::shared_ptr<TsEntityGroup> entity_group;
-  KStatus s = GetEntityGroup(ctx, range_group_id, &entity_group);
-  if (s == KStatus::FAIL || entity_group == nullptr) {
-    LOG_ERROR("GetEntityGroup failed during ApplySnapshot, range_group_id=%lu, snapshot_id=%lu",
-              range_group_id, snapshot_id);
-    return KStatus::FAIL;
-  }
-  // set subgroup available
-  entity_group->SetAllSubgroupAvailable();
-  LOG_INFO("EnableSnapshot success! [Snapshot ID:%ld, Ranggroup ID: %ld]", snapshot_id, range_group_id);
   return KStatus::SUCCESS;
 }
 
@@ -3083,122 +2848,6 @@ uint64_t endOfDay(uint64_t timestamp) {
   return beginOfDay(timestamp) + day_ms;
 }
 
-KStatus TsTable::CompactData(kwdbContext_p ctx, uint64_t range_group_id, const KwTsSpan& ts_span) {
-  // refer to CreateSnapshot
-  EnterFunc()
-  KStatus s = KStatus::FAIL;
-  LOG_INFO("CompactData begin! [Range group ID: %ld]", range_group_id);
-  std::shared_ptr<TsEntityGroup> entity_group_src;
-
-  s = GetEntityGroup(ctx, range_group_id, &entity_group_src);
-  if (s == KStatus::FAIL || entity_group_src == nullptr) {
-    // Add error messages
-    LOG_ERROR("GetEntityGroup failed during CompactData, range_group_id=%lu", range_group_id);
-    Return(KStatus::FAIL);
-  }
-
-  KwTsSpan ts_span_slot;
-  // Assuming that the partition time is 1 day, if the incoming time range is from 8:00 on 1st to 5:00 on 4th,
-  // the data of 2nd and 3rd will be reorganized, but the data of 1st and 4th will not be reorganized
-  ts_span_slot.begin = endOfDay(ts_span.begin);
-  ts_span_slot.end = beginOfDay(ts_span.end);
-  if (ts_span_slot.begin >= ts_span_slot.end) {
-    LOG_ERROR("ts_span range is invalid after conversion: %lu~%lu, range_group_id=%lu",
-              ts_span_slot.begin, ts_span_slot.end, range_group_id);
-    Return(s);
-  }
-
-  SnapshotInfo ts_snapshot_info;
-  // Tips: type = 0, source node build snapshot, need to generate snapshot id
-  auto now = std::chrono::system_clock::now();
-  // Converts time to milliseconds that have elapsed since January 1, 1970
-  auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-  ts_snapshot_info.id = timestamp;
-
-  ts_snapshot_info.begin_hash = 0;
-  ts_snapshot_info.end_hash = UINT64_MAX;
-  ts_snapshot_info.type = 0;  // Build a new EntityGroup(snapshot) at source node
-  ts_snapshot_info.reorder = true;
-  ts_snapshot_info.partition_ts = ts_span_slot;
-  std::shared_ptr<TsTableSnapshot> ts_snapshot_table =
-      std::make_shared<TsTableSnapshot>(db_path_, table_id_, tbl_sub_path_,
-                                        entity_group_src, entity_bt_manager_, ts_snapshot_info);
-  s = ts_snapshot_table->Init(ctx);
-  if (s != KStatus::SUCCESS) {
-    LOG_ERROR("Init Snapshot table failed, range_group_id=%lu", range_group_id);
-    Return(KStatus::FAIL)
-  }
-  std::map<SubGroupID, std::vector<uint32_t>> subgroup_row;  // for genMigratePayloadByBuilder
-
-  // map[subgroup_id][partition_ts][entity_id]block_id, records each entity's max block_id when data reorganization
-  std::map<SubGroupID, std::map<timestamp64, std::map<uint32_t, BLOCK_ID>>> obsolete_max_block;
-
-  // map[subgroup_id][partition_ts] {segment_id...}, records segment_ids from source table that will be reorganized
-  std::map<SubGroupID, std::map<timestamp64, std::vector<BLOCK_ID>>> obsolete_segment_ids;
-
-  // map[subgroup_id]{KwTsSpan...}, records all the partitions of each subgroup that will be reorganized,
-  // and convert them to KwTsSpan for BuildCompactData
-  std::map<SubGroupID, std::vector<KwTsSpan>> subgroup_ts_span;
-  ts_snapshot_table->PrepareCompactData(ctx, obsolete_max_block, obsolete_segment_ids, subgroup_row, subgroup_ts_span);
-
-//  if obsolete_max_block.size() > 0 or subgroup_row.size() > 0 represents that there is data that needs to be reorganized,
-//  and if obsolete_segment_ids.size() > 0, represents that there are segments that needs to be dropped,
-//  If there is data that needs to be reorganized, then there must be segments that need to be deleted.
-//  But not vice versa, because the data of the segments may have been all deleted.
-//  That is to say, subgroup_ids of `obsolete_segment_ids` must contain subgroup_ids of `obsolete_max_block`,
-//  so we need to loop obsolete_segment_ids.
-
-  if (obsolete_segment_ids.empty()) {
-    s = ts_snapshot_table->DropAll();
-    if (s != KStatus::SUCCESS) {
-      LOG_INFO("snapshot DropAll ! [Snapshot ID:%ld, Range group ID: %ld]",
-               ts_snapshot_table->GetSnapshotId(), range_group_id);
-      Return(KStatus::FAIL)
-    }
-    Return(KStatus::SUCCESS)
-  }
-  for (auto it = obsolete_segment_ids.begin(); it != obsolete_segment_ids.end(); it++) {
-    SubGroupID subgroup_id = it->first;
-    if (subgroup_row.find(subgroup_id) != subgroup_row.end()) {
-      LOG_INFO("BuildCompactData start! [Snapshot ID:%ld, Range group ID: %ld]",
-               ts_snapshot_table->GetSnapshotId(), range_group_id);
-      s = ts_snapshot_table->BuildCompactData(ctx, subgroup_row[subgroup_id], subgroup_ts_span[subgroup_id]);
-      if (s != KStatus::SUCCESS) {
-        LOG_ERROR("BuildCompactData failed, range_group_id=%lu", range_group_id);
-        ts_snapshot_table->DropAll();
-        Return(s);
-      }
-      LOG_INFO("BuildCompactData success! [Snapshot ID:%ld, Range group ID: %ld]",
-               ts_snapshot_table->GetSnapshotId(), range_group_id);
-    }
-
-    RW_LATCH_X_LOCK(entity_groups_mtx_);
-    LOG_INFO("ApplyCompactData start! [Snapshot ID:%ld, Range group ID: %ld]",
-             ts_snapshot_table->GetSnapshotId(), range_group_id);
-    // entity_ids of different tags may belong to one subgroup_id, when applying all reorganized partitions
-    // under a subgroup, it also includes all entity_ids within the time range, so each subgroup only needs
-    // to select one entity_id to apply and all entities in the same group will be processed.
-
-    s = ts_snapshot_table->ApplyCompactData(ctx, subgroup_id, obsolete_max_block[subgroup_id], it->second);
-    if (s != KStatus::SUCCESS) {
-      RW_LATCH_UNLOCK(entity_groups_mtx_);
-      LOG_ERROR("ApplyCompactData failed, range_group_id=%lu", range_group_id);
-      ts_snapshot_table->DropAll();
-      Return(KStatus::FAIL)
-    }
-    LOG_INFO("ApplyCompactData success! [Snapshot ID:%ld, Range group ID: %ld]",
-             ts_snapshot_table->GetSnapshotId(), range_group_id);
-    RW_LATCH_UNLOCK(entity_groups_mtx_);
-  }
-  s = ts_snapshot_table->DropAll();
-  if (s != KStatus::SUCCESS) {
-    LOG_INFO("snapshot DropAll ! [Snapshot ID:%ld, Range group ID: %ld]",
-             ts_snapshot_table->GetSnapshotId(), range_group_id);
-    Return(KStatus::FAIL)
-  }
-  Return(KStatus::SUCCESS)
-}
-
 KStatus TsTable::GetEntityNum(kwdbContext_p ctx, uint64_t* entity_num) {
   *entity_num = 0;
   if (entity_bt_manager_ == nullptr) {
@@ -3246,11 +2895,6 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
       if (!subgroup) {
         err_info.clear();
         continue;
-      }
-      if (subgroup && !subgroup->IsAvailable()) {
-        err_info.setError(KWEOTHER, "subgroup[" + std::to_string(sub_group_id) + "] is unavailable");
-        LOG_ERROR("subgroup is unavailable");
-        break;
       }
       auto partition_tables = subgroup->GetPartitionTables(p_span, err_info);
       if (err_info.errcode < 0) {

@@ -165,7 +165,7 @@ TEST_F(TestPartitionBigTable, disorder) {
   // Validate the number of rows inserted for the given entity ID
   EXPECT_EQ(mt_table->size(entity_id), row_num);
   // Retrieve and validate properties of the first block item
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_num);
 
   // Fetch associated Segment Table and ensure it's not null
@@ -216,7 +216,7 @@ TEST_F(TestPartitionBigTable, override) {
 
   // Validate the size of data for the entity and block item details
   EXPECT_EQ(mt_table->size(entity_id), row_count);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_count);
 
   // Fetch and validate the segment table associated with the block
@@ -290,7 +290,7 @@ TEST_F(TestPartitionBigTable, reject) {
   EXPECT_EQ(mt_table->size(entity_id), row_num);  // Correct number of rows inserted
 
   // Further validations on block structure and content
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_num);  // Row count matches in block item
 
   // Validate segment table existence and properties
@@ -362,7 +362,7 @@ TEST_F(TestPartitionBigTable, discard) {
 
   // Validate table size and block item details post-insertion
   EXPECT_EQ(mt_table->size(entity_id), row_num);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_num);
 
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
@@ -409,7 +409,7 @@ TEST_F(TestPartitionBigTable, merge) {
 
   // Validate that the table size matches the number of inserted rows for the given entity ID.
   EXPECT_EQ(mt_table->size(entity_id), row_num);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_num);
 
   // Retrieve the associated segment table and confirm it is not a null pointer.
@@ -464,7 +464,7 @@ TEST_F(TestPartitionBigTable, varColumnMerge) {
   initData2(ctx_, mt_table, entity_id, ts_now, row_num, &dedup_result, kwdbts::DedupRule::MERGE);
 
   EXPECT_EQ(mt_table->size(entity_id), row_num);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_num);
 
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
@@ -519,7 +519,7 @@ TEST_F(TestPartitionBigTable, keepToMerge) {
   // Validate that 10 rows have been written for the specified entity ID
   EXPECT_EQ(mt_table->size(entity_id), row_num);
   // Retrieve block information and validate its publish row count
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, row_num);
   // Obtain the segment table and ensure it's not null
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
@@ -569,7 +569,7 @@ TEST_F(TestPartitionBigTable, bigdata) {
   initData2(ctx_, mt_table, entity_id, ts_now, count, &dedup_result);
 
   EXPECT_EQ(mt_table->size(entity_id), count);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, 1000);
   ASSERT_EQ(block_item->is_agg_res_available, true);
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
@@ -626,7 +626,7 @@ TEST_F(TestPartitionBigTable, undoPut) {
   // Verify whether the data is written correctly
   ASSERT_EQ(mt_table->size(entity_id), row_num + 100);
   auto entity_item = mt_table->getEntityItem(entity_id);
-  auto block_item = mt_table->getBlockItem(entity_item->cur_block_id);
+  auto block_item = mt_table->GetBlockItem(entity_item->cur_block_id);
 
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
   ASSERT_NE(segment_tbl, nullptr);
@@ -706,7 +706,7 @@ TEST_F(TestPartitionBigTable, redoPut) {
   }
   ASSERT_EQ(mt_table->size(entity_id), row_num + 100);
   auto entity_item = mt_table->getEntityItem(entity_id);
-  auto block_item = mt_table->getBlockItem(entity_item->cur_block_id);
+  auto block_item = mt_table->GetBlockItem(entity_item->cur_block_id);
 
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
   ASSERT_NE(segment_tbl, nullptr);
@@ -765,7 +765,7 @@ TEST_F(TestPartitionBigTable, aggUpdate) {
   initData2(ctx_, mt_table, entity_id, ts_now, count, &dedup_result, kwdbts::DedupRule::OVERRIDE);
 
   EXPECT_EQ(mt_table->size(entity_id), count);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, 100);
   ASSERT_EQ(block_item->is_agg_res_available, false);
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
@@ -796,7 +796,7 @@ TEST_F(TestPartitionBigTable, aggUpdate) {
   memcpy(aa, (char*)var_data.get() + sizeof(uint16_t), 27);
   ASSERT_EQ(strcmp(aa, test_str.data()), 0);
 
-  auto block_item2 = mt_table->getBlockItem(2);
+  auto block_item2 = mt_table->GetBlockItem(2);
   ASSERT_EQ(block_item2->publish_row_count, 100);
   ASSERT_EQ(block_item2->is_agg_res_available, false);
   ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(2, 0, kwdbts::Sumfunctype::COUNT)), 100);
@@ -888,7 +888,7 @@ TEST_F(TestPartitionBigTable, aggUpdateNull) {
   initDataWithNull(ctx_, mt_table, entity_id, ts_now, count, &dedup_result, kwdbts::DedupRule::OVERRIDE);
 
   EXPECT_EQ(mt_table->size(entity_id), count);
-  auto block_item = mt_table->getBlockItem(1);
+  auto block_item = mt_table->GetBlockItem(1);
   ASSERT_EQ(block_item->publish_row_count, 10);
   ASSERT_EQ(block_item->is_agg_res_available, false);
   std::shared_ptr<MMapSegmentTable> segment_tbl = mt_table->getSegmentTable(block_item->block_id);
@@ -906,7 +906,7 @@ TEST_F(TestPartitionBigTable, aggUpdateNull) {
   ASSERT_EQ(block_item->publish_row_count, 10);
   ASSERT_EQ(block_item->is_agg_res_available, false);
 
-  auto block_item2 = mt_table->getBlockItem(2);
+  auto block_item2 = mt_table->GetBlockItem(2);
   ASSERT_EQ(block_item2->publish_row_count, 10);
   ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(2, 0, kwdbts::Sumfunctype::COUNT)), 10);
   ASSERT_EQ(KInt16(segment_tbl->columnAggAddr(2, 1, kwdbts::Sumfunctype::COUNT)), 10);

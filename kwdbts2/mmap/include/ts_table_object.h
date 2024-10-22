@@ -139,6 +139,10 @@ class TsTableObject {
 
   int initMetaData();
 
+ const vector<uint32_t>& getIdxForValidCols() const {
+  return idx_for_valid_cols_;
+ }
+
   /**
    * @brief	obtain the physical address of based on the offset.
    *

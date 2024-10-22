@@ -31,13 +31,11 @@
 #include "st_group_manager.h"
 #include "st_wal_internal_log_structure.h"
 #include "lt_rw_latch.h"
-#include "ts_snapshot.h"
 #include "ts_table_snapshot.h"
 
 namespace kwdbts {
 
 class TsEntityGroup;
-class TsTableSnapshot;
 class TsIterator;
 
 // in distributed Verison2, every ts table has just one entitygroup
@@ -223,12 +221,14 @@ class TsTable {
   /**
    * @brief Compress the segment whose maximum timestamp in the time series entity group is less than ts
    * @param[in] ctx Database Context
-   * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX, 
+   * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX,
    *            all segments will be compressed, including the current one.
+   * @param[in] enable_vacuum Whether to start vacuum
    *
    * @return KStatus
    */
-  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo &err_info);
+  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
+                           uint32_t ts_version, ErrorInfo& err_info);
 
 
   std::string GetStoreDirectory() {
@@ -294,88 +294,6 @@ class TsTable {
    */
   KStatus GetRangeRowCount(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,
                             KwTsSpan ts_span, uint64_t* count);
-
-  /**
-   * @brief Create a temporary snapshot of range_group in the local temporary directory, usually used for data migration.
-   * @param[in] range_group_id RangeGroupID
-   * @param[in] begin_hash,end_hash Entity primary tag hashID
-   * @param[out] snapshot_id
-   *
-   * @return KStatus
-   */
-  KStatus CreateSnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t begin_hash, uint64_t end_hash,
-                                 uint64_t* snapshot_id);
-
-  /**
-   * @brief Drop the temporary snapshot of range_group in the local temporary directory after data migration finished.
-   *        This function is called to drop snapshot at source node usually, because destination node's snapshot data
-   *        which get from source node will delete automatically after snapshot applied successfully.
-   * @param[in] range_group_id RangeGroupID
-   * @param[in] snapshot_id Temporary snapshot id
-   * @return KStatus
-   */
-  KStatus DropSnapshot(kwdbContext_p ctx, uint64_t range_group_id, uint64_t snapshot_id);
-
-  /**
-   * @brief Get snapshot data from source node and send to destination node, snapshot will be built and compressed
-   *        when the function called at first time. And since the snapshot may be relatively large,
-   *        the size of the snapshot data block taken at a time is limited,
-   *        therefore, getting a full snapshot may call this function multiple times.
-   * @param[in] range_group_id The range group ID of snapshot
-   * @param[in] snapshot_id ID of snapshot
-   * @param[in] offset The offset of the snapshot data taken by this call
-   * @param[in] limit The size limit of the data block to be taken by this call
-   * @param[out] data The data block taken by this call
-   * @param[in] total total size of compressed file
-   * @return KStatus
-   */
-  KStatus GetSnapshotData(kwdbContext_p ctx, uint64_t range_group_id, uint64_t snapshot_id,
-                                  size_t offset, size_t limit, TSSlice* data, size_t* total);
-
-  /**
-   * @brief Since `GetSnapshotData` take a limited size data block at a time, each time `WriteSnapshotData` get
-   *        data block appended to the snapshot file according to the offset, when the transfer is completed,
-   *        the data is decompressed and the snapshot data is written to the destination node.
-   * @param[in] range_group_id The range group ID of snapshot
-   * @param[in] snapshot_id ID of snapshot
-   * @param[in] offset The offset of the snapshot data obtained by this call
-   * @param[in] data The data block obtained by this call
-   * @param[in] finished The flag of transfer completed
-   * @return KStatus
-   */
-  KStatus WriteSnapshotData(kwdbContext_p ctx, const uint64_t range_group_id, uint64_t snapshot_id,
-                            size_t offset, TSSlice data, bool finished);
-
-  /**
-   * @brief After the data is received, the snapshot data is written by `ApplySnapshot`.
-   * @param[in] range_group_id The range group ID of snapshot
-   * @param[in] snapshot_id ID of snapshot
-   * @param[in] delete_after_apply Whether to delete the received compressed snapshot data.
-   * @return KStatus
-   */
-  KStatus ApplySnapshot(kwdbContext_p ctx,  uint64_t range_group_id, uint64_t snapshot_id, bool delete_after_apply  = true);
-
-  /**
-   * @brief  `EnableSnapshot` takes effect on the written snapshot.
-   * @param[in] range_group_id The range group ID of snapshot
-   * @param[in] snapshot_id ID of snapshot
-   * @return
-   */
-  KStatus EnableSnapshot(kwdbContext_p ctx,  uint64_t range_group_id, uint64_t snapshot_id);
-
-  /**
-    * @brief Perform data reorganization on partitioned data within a specified time range.
-    * @param[in] range_group_id RangeGroupID
-     * @param[in] ts_span  metrics time span
-               Explanation: The data reorganization logic is executed on a time partition basis,
-               and time data that cannot cover the complete time partition will not undergo reorganization logic.
-               For example, if the time partition unit is 1 day and the [start, end] condition passed in is
-               [8pm on the 1st, 5pm on the 4th], the data in the [2,3] day partition will be reorganized,
-               while the data in the [1] day and [4] day partitions will not be reorganized.
-    *
-    * @return KStatus
-    */
-  KStatus CompactData(kwdbContext_p ctx, uint64_t range_group_id, const KwTsSpan& ts_span);
 
   /**
    * @brief Delete data within a hash range, usually used for data migration.
@@ -568,10 +486,6 @@ class TsTable {
   void UpdateTagTsVersion(uint32_t new_version);
 
  public:
-  // Save the correspondence between snapshot ID and snapshot table under this table
-  std::unordered_map<uint64_t, std::shared_ptr<TsTableSnapshot>>  snapshot_manage_pool_;
-  std::unordered_map<uint64_t, size_t>  snapshot_get_size_pool_;
-
   // TODO(lfl): 此hash算法和GO层一致，后续修改为此算法
   static uint32_t GetConsistentHashId(const char* data, size_t length);
 
@@ -643,12 +557,14 @@ class TsEntityGroup {
   /**
    * @brief Compress the segment whose maximum timestamp in the time series entity group is less than ts
    * @param[in] ctx Database Context
-   * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX, 
+   * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX,
    *            all segments will be compressed, including the current one.
+   * @param[in] enable_vacuum Whether to start vacuum
    *
    * @return KStatus
    */
-  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo &err_info);
+  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
+                           uint32_t ts_version, ErrorInfo& err_info);
 
   /**
    * @brief Write entity tags values and support tag value modification.
@@ -812,7 +728,7 @@ class TsEntityGroup {
                               uint32_t table_version, TsIterator** iter,
                               std::shared_ptr<TsEntityGroup> entity_group,
                               std::vector<timestamp64> ts_points,
-                              bool reverse, bool sorted, bool compaction);
+                              bool reverse, bool sorted);
 
   virtual KStatus GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats);
 
@@ -902,10 +818,6 @@ class TsEntityGroup {
    * @return KStatus
    */
   static KStatus GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roachpb::KWDBKTSColumn& col);
-
-  virtual void SetAllSubgroupAvailable() {
-    ebt_manager_->SetSubgroupAvailable();
-  }
 
   // for test
   inline SubEntityGroupManager* GetSubEntityGroupManager() {

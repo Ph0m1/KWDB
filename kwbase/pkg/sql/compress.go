@@ -67,11 +67,11 @@ func (p *planner) CompressData(ctx context.Context, n *tree.Compress) (planNode,
 		if err != nil {
 			return nil, err
 		}
-
+		existRelationalTable := false
 		for i := range allDesc {
 			tab, ok := allDesc[i].(*sqlbase.TableDescriptor)
 			if ok && (n.Typ == tree.CompressTypeAll || (n.Typ == tree.CompressTypeDB && dbDesc.ID == tab.ParentID)) {
-				if tab.IsTSTable() {
+				if tab.IsTSTable() || !existRelationalTable {
 					tableDescs = append(tableDescs, *tab)
 				}
 			}

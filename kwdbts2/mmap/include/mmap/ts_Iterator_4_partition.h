@@ -33,12 +33,12 @@ struct TsPartitonIteratorParams {
  * @brief iterator used for scan all data in segment.
  *        we will scan block by block, and return generated batch object 
 */
-class TsPartitonIterator {
+class TsPartitionIterator {
  public:
-  TsPartitonIterator(TsTimePartition* p_table, const TsPartitonIteratorParams& params) :
+  TsPartitionIterator(TsTimePartition* p_table, const TsPartitonIteratorParams& params) :
         partition_(p_table), params_(params) {}
   
-  ~TsPartitonIterator() {
+  ~TsPartitionIterator() {
     if (segment_iter_ != nullptr) {
       delete segment_iter_;
       segment_iter_ = nullptr;
@@ -65,7 +65,7 @@ class TsPartitonIterator {
   }
 
  private:
-  TsTimePartition* partition_;
+  TsTimePartition* partition_{nullptr};
   TsPartitonIteratorParams params_;
   // save all BlockItem objects of current enitity in the partition being queried
   std::deque<BlockItem*> block_item_queue_;

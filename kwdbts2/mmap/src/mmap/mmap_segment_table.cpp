@@ -148,9 +148,17 @@ MMapSegmentTable::~MMapSegmentTable() {
 impl_latch_virtual_func(MMapSegmentTable, &rw_latch_)
 
 int MMapSegmentTable::create(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema,
-                             const uint32_t& table_version, int encoding, ErrorInfo& err_info) {
+  const uint32_t& table_version, int encoding, ErrorInfo& err_info, uint32_t max_rows_per_block,
+  uint32_t max_blocks_per_segment) {
   if (init(meta_manager, schema, encoding, err_info) < 0)
     return err_info.errcode;
+
+  if (max_rows_per_block != 0 && max_blocks_per_segment != 0) {
+    max_rows_per_block_ = max_rows_per_block;
+    max_blocks_per_segment_ = max_blocks_per_segment;
+    meta_data_->max_rows_per_block = max_rows_per_block;
+    meta_data_->max_blocks_per_segment = max_blocks_per_segment;
+  }
 
   meta_data_->magic = magic();
   meta_data_->struct_type |= (ST_COLUMN_TABLE);
@@ -281,8 +289,8 @@ int MMapSegmentTable::open_(int char_code, const string& file_path, const std::s
 }
 
 int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segment_id, const string& file_path,
-                           const std::string& db_path, const string& tbl_sub_path,
-                           int flags, bool lazy_open, ErrorInfo& err_info) {
+                           const std::string& db_path, const string& tbl_sub_path, int flags, bool lazy_open,
+                           ErrorInfo& err_info) {
   mutexLock();
   Defer defer([&](){
     mutexUnlock();

@@ -869,8 +869,15 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		}
 		for _, table := range allDesc {
 			tableDesc, ok := table.(*sqlbase.TableDescriptor)
-			if ok && tableDesc.IsTSTable() && tableDesc.State == sqlbase.TableDescriptor_PUBLIC {
-				desc = append(desc, *tableDesc)
+			// can not compress table if table has mutations
+			if d.Type == compress {
+				if ok && tableDesc.IsTSTable() && tableDesc.State == sqlbase.TableDescriptor_PUBLIC && len(tableDesc.Mutations) == 0 {
+					desc = append(desc, *tableDesc)
+				}
+			} else {
+				if ok && tableDesc.IsTSTable() && tableDesc.State == sqlbase.TableDescriptor_PUBLIC {
+					desc = append(desc, *tableDesc)
+				}
 			}
 		}
 		if len(desc) == 0 {

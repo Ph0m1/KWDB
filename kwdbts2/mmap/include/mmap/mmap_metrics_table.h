@@ -63,10 +63,6 @@ class MMapMetricsTable : public TSObject, public TsTableObject {
     return cols_info_exclude_dropped_;
   }
 
-  const vector<uint32_t>& getIdxForValidCols() const {
-    return idx_for_valid_cols_;
-  }
-
   inline uint32_t GetVersionNUm() {
     return meta_data_->schema_version;
   }

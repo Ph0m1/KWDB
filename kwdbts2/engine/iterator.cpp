@@ -92,7 +92,7 @@ TsIterator::~TsIterator() {
 }
 
 void TsIterator::fetchBlockItems(k_uint32 entity_id) {
-  cur_partiton_table_->GetAllBlockItems(entity_id, block_item_queue_);
+  cur_partition_table_->GetAllBlockItems(entity_id, block_item_queue_);
 }
 
 KStatus TsIterator::Init(bool is_reversed) {
@@ -109,7 +109,7 @@ KStatus TsIterator::Init(bool is_reversed) {
               entity_group_id_, err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  partition_table_iter_ = sub_grp->GetPTIteartor(ts_spans_);
+  partition_table_iter_ = sub_grp->GetPTIterator(ts_spans_);
   partition_table_iter_->Reset(is_reversed_);
   return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
@@ -130,12 +130,12 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
         delete segment_iter_;
         segment_iter_ = nullptr;
       }
-      KStatus s = partition_table_iter_->Next(&cur_partiton_table_);
+      KStatus s = partition_table_iter_->Next(&cur_partition_table_);
       if (s != KStatus::SUCCESS) {
         LOG_ERROR("failed get next partition at entityid[%u] entitygroup [%lu]", entity_id, entity_group_id_);
         return NextBlkStatus::error;
       }
-      if (cur_partiton_table_ == nullptr) {
+      if (cur_partition_table_ == nullptr) {
         // all partition table scan over.
         return NextBlkStatus::scan_over;
       }
@@ -232,7 +232,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
       }
       continue;
     }
-    TsTimePartition* cur_pt = cur_partiton_table_;
+    TsTimePartition* cur_pt = cur_partition_table_;
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         // At this time, if no data smaller than ts exists, -1 is returned directly, and the query is ended
@@ -247,10 +247,10 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     uint32_t first_row = 1;
     MetricRowID first_real_row = cur_block_item_->getRowID(first_row);
 
-    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partiton_table_->getSegmentTable(cur_block_item_->block_id);
+    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partition_table_->getSegmentTable(cur_block_item_->block_id);
     if (segment_tbl == nullptr) {
       LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                cur_block_item_->block_id, cur_partiton_table_->GetPath().c_str());
+                cur_block_item_->block_id, cur_partition_table_->GetPath().c_str());
       return FAIL;
     }
     if (segment_tbl->schemaVersion() > table_version_) {
@@ -652,9 +652,10 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
   if (hasFoundFirstAggData()) {
     return KStatus::SUCCESS;
   }
-  TsTimePartition* cur_pt = nullptr;
   partition_table_iter_->Reset();
-  while (partition_table_iter_->Next(&cur_pt)) {
+  while (true) {
+    TsTimePartition* cur_pt = nullptr;
+    partition_table_iter_->Next(&cur_pt);
     block_item_queue_.clear();
     if (cur_pt == nullptr) {
       // all partition scan over.
@@ -667,6 +668,7 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
         break;
       }
     }
+
     cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
     auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
     // Obtain the minimum timestamp for the current query entity.
@@ -770,9 +772,10 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
   if (hasFoundLastAggData()) {
     return KStatus::SUCCESS;
   }
-  TsTimePartition* cur_pt = nullptr;
   partition_table_iter_->Reset(true);
-  while (partition_table_iter_->Next(&cur_pt)) {
+  while (true) {
+    TsTimePartition* cur_pt = nullptr;
+    partition_table_iter_->Next(&cur_pt);
     block_item_queue_.clear();
     if (cur_pt == nullptr) {
       // all partition scan over.
@@ -785,6 +788,7 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
         break;
       }
     }
+
     cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
     auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
     // Obtain the maximum timestamp of the current query entity.
@@ -943,21 +947,21 @@ KStatus TsAggIterator::countDataUseStatitics(ResultSet* res, k_uint32* count, ti
   partition_table_iter_->Reset();
   std::vector<timestamp64> partition_need_traverse;
   while (partition_table_iter_->Valid()) {
-    KStatus s = partition_table_iter_->Next(&cur_partiton_table_);
+    KStatus s = partition_table_iter_->Next(&cur_partition_table_);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("countDataUseStatitics failed. next partition at entitygroup [%lu]", entity_group_id_);
       return KStatus::FAIL;
     }
-    if (cur_partiton_table_ == nullptr) {
+    if (cur_partition_table_ == nullptr) {
       // all partition table scan over.
       break;
     }
     if (!isTimestampWithinSpans(ts_spans_,
-                                cur_partiton_table_->minTimestamp() * 1000,
-                                cur_partiton_table_->maxTimestamp() * 1000)) {
-      partition_need_traverse.push_back(cur_partiton_table_->minTimestamp());
+                                cur_partition_table_->minTimestamp() * 1000,
+                                cur_partition_table_->maxTimestamp() * 1000)) {
+      partition_need_traverse.push_back(cur_partition_table_->minTimestamp());
     } else {
-      auto entity_item = cur_partiton_table_->getEntityItem(entity_ids_[cur_entity_idx_]);
+      auto entity_item = cur_partition_table_->getEntityItem(entity_ids_[cur_entity_idx_]);
       auto* b = new AggBatch(malloc(sizeof(k_uint64)), 1, nullptr);
       b->is_new = true;
       *static_cast<k_uint64*>(b->mem) = entity_item->row_written;
@@ -1029,7 +1033,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
       continue;
     }
     BlockItem* cur_block = cur_block_item_;
-    TsTimePartition* cur_pt = cur_partiton_table_;
+    TsTimePartition* cur_pt = cur_partition_table_;
     if (ts != INVALID_TS) {
       if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
         return SUCCESS;
@@ -1037,10 +1041,10 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
         return SUCCESS;
       }
     }
-    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partiton_table_->getSegmentTable(cur_block->block_id);
+    std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partition_table_->getSegmentTable(cur_block->block_id);
     if (segment_tbl == nullptr) {
       LOG_ERROR("Can not find segment use block [%d], in path [%s]",
-                cur_block->block_id, cur_partiton_table_->GetPath().c_str());
+                cur_block->block_id, cur_partition_table_->GetPath().c_str());
       return KStatus::FAIL;
     }
     if (segment_tbl->schemaVersion() > table_version_) {
@@ -1060,8 +1064,8 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
         MetricRowID real_row = cur_block->getRowID(first_row + i);
         timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(real_row , 0));
         // Continuously updating member variables that record first/last/first_row/last_row results during data traversal.
-        first_last_row_.UpdateFirstRow(cur_ts, real_row, cur_partiton_table_, segment_tbl, col_blk_bitmaps_);
-        first_last_row_.UpdateLastRow(cur_ts, real_row, cur_partiton_table_, segment_tbl, col_blk_bitmaps_);
+        first_last_row_.UpdateFirstRow(cur_ts, real_row, cur_partition_table_, segment_tbl, col_blk_bitmaps_);
+        first_last_row_.UpdateLastRow(cur_ts, real_row, cur_partition_table_, segment_tbl, col_blk_bitmaps_);
       }
     }
     // If qualified data is obtained, further obtain the aggregation result of this continuous data
@@ -1508,7 +1512,7 @@ KStatus TsTableIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
 }
 
 void TsSortedRowDataIterator::fetchBlockSpans(k_uint32 entity_id) {
-  cur_partiton_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, compaction_, is_reversed_);
+  cur_partition_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, INT64_MAX, is_reversed_);
 }
 
 int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {
@@ -1519,12 +1523,12 @@ int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {
         delete segment_iter_;
         segment_iter_ = nullptr;
       }
-      KStatus s = partition_table_iter_->Next(&cur_partiton_table_);
+      KStatus s = partition_table_iter_->Next(&cur_partition_table_);
       if (s != KStatus::SUCCESS) {
         LOG_ERROR("failed get next partition at entityid[%u] entitygroup [%lu]", entity_id, entity_group_id_);
         return -2;
       }
-      if (cur_partiton_table_ == nullptr) {
+      if (cur_partition_table_ == nullptr) {
         // all partition table scan over.
         return -1;
       }
@@ -1556,7 +1560,7 @@ KStatus TsSortedRowDataIterator::Init(bool is_reversed) {
               entity_group_id_, err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  partition_table_iter_ = sub_grp->GetPTIteartor(ts_spans_);
+  partition_table_iter_ = sub_grp->GetPTIterator(ts_spans_);
   partition_table_iter_->Reset(is_reversed_);
   return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
@@ -1660,7 +1664,7 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
       }
       continue;
     }
-    TsTimePartition* cur_pt = cur_partiton_table_;
+    TsTimePartition* cur_pt = cur_partition_table_;
     BlockItem* cur_block_item = cur_block_span_.block_item;
     std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(cur_block_item->block_id);
     if (segment_tbl == nullptr) {

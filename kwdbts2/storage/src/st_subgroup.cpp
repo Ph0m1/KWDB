@@ -104,76 +104,6 @@ int TsSubEntityGroup::ErasePartitionCache(timestamp64 pt_ts) {
   return 0;
 }
 
-int TsSubEntityGroup::ApplyCompactData(std::map<timestamp64, std::map<uint32_t, BLOCK_ID>> &obsolete_max_block,
-                               std::map<timestamp64, std::vector<BLOCK_ID>> &obsolete_segment_ids,
-                               std::map<timestamp64, std::map<uint32_t, std::deque<BlockItem*>>> &compacted_block_items,
-                               string snapshot_dir) {
-  wrLock();
-  Defer defer{[&]() {
-    unLock();
-  }};
-
-  ErrorInfo err_info;
-  for (auto & it : obsolete_segment_ids) {
-    timestamp64 pt_ts = it.first;
-    std::vector<BLOCK_ID> &obsolete_segment_id = it.second;
-    int err_code = 0;
-    TsTimePartition* p_bt = getPartitionTable(pt_ts, 0, err_info);
-    if (err_info.errcode < 0) {
-      LOG_ERROR("getPartitionTable fail, subgroup %d, pt_ts %ld, msg: %s", subgroup_id_, pt_ts, err_info.errmsg.c_str());
-      return err_info.errcode;
-    }
-
-    if (p_bt->isUsedWithCache()) {
-      LOG_WARN("Partition %s is being used, couldn't be reorganized.", (db_path_ + partitionTblSubPath(pt_ts)).c_str());
-      ReleaseTable(p_bt);
-      continue;
-    }
-    p_bt->setObjectStatus(OBJ_READY_TO_CHANGE);
-    err_code = p_bt->DropSegmentDir(obsolete_segment_id);
-    if (err_code < 0) {
-      // These segment_id have already been reorganized and stored in the snapshot, so you can delete them first,
-      // and then copy them from the snapshot.
-      ReleaseTable(p_bt);
-      LOG_ERROR("DropSegmentDir fail, subgroup %d, pt_ts %ld", subgroup_id_, pt_ts);
-      return err_code;
-    }
-
-    ReleaseTable(p_bt);
-
-    // compact_dir: ./test_db/1007/101_1711693218324/1007_1
-    // ./test_db/1007/101/1007_1/timestamp
-    string entity_group_part_dir = db_path_ + tbl_sub_path_ + "/" + std::to_string(pt_ts);
-    // find ./test_db/1007/101_1711693218324/1007_1/timestamp -mindepth 1 -maxdepth 1 -type d -exec
-    //        mv {} ./test_db/1007/101/1007_1/timestamp
-    string cmd2 = "find " + snapshot_dir + "/" + std::to_string(pt_ts) + " -mindepth 1 -maxdepth 1 -type d -exec "
-                  + "mv -t " + entity_group_part_dir + " {} +";
-    if (system(cmd2.c_str()) == -1) {
-      LOG_ERROR("cmd fail: %s", cmd2.c_str());
-      return -1;
-    }
-
-    p_bt = getPartitionTable(pt_ts, 0, err_info);
-    if (err_info.errcode < 0) {
-      ReleaseTable(p_bt);
-      LOG_ERROR("getPartitionTable fail, subgroup %d, pt_ts %ld, msg: %s", subgroup_id_, pt_ts, err_info.errmsg.c_str());
-      return err_info.errcode;
-    }
-
-    // Modify meta so that the un-reorganized block items will connect to the reorganized blocks
-    err_code = p_bt->UpdateCompactMeta(obsolete_max_block[pt_ts], compacted_block_items[pt_ts]);
-    if (err_code < 0) {
-      ReleaseTable(p_bt);
-      return err_code;
-    }
-    p_bt->setObjectStatus(OBJ_READY);
-    ReleaseTable(p_bt);
-    ErasePartitionCache(pt_ts);
-  }
-
-  return 0;
-}
-
 int TsSubEntityGroup::ReOpenInit(ErrorInfo& err_info) {
   uint16_t max_entities_per_subgroup = GetMaxEntitiesPerSubgroup();
   if (entity_block_meta_ != nullptr) {
@@ -416,7 +346,7 @@ vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts
   return std::move(results);
 }
 
-std::shared_ptr<TsSubGroupPTIterator> TsSubEntityGroup::GetPTIteartor(const std::vector<KwTsSpan>& ts_spans) {
+std::shared_ptr<TsSubGroupPTIterator> TsSubEntityGroup::GetPTIterator(const std::vector<KwTsSpan>& ts_spans) {
   std::vector<timestamp64> p_times;
   {
     // filter all partition time that match ts_spans.
@@ -442,6 +372,7 @@ KStatus TsSubGroupPTIterator::Next(TsTimePartition** p_table) {
   *p_table = nullptr;
   while (true) {
     if (cur_p_table_ != nullptr) {
+      cur_p_table_->unLock();
       ReleaseTable(cur_p_table_);
       cur_p_table_ = nullptr;
     }
@@ -473,6 +404,7 @@ KStatus TsSubGroupPTIterator::Next(TsTimePartition** p_table) {
     break;
   }
   *p_table = cur_p_table_;
+  cur_p_table_->rdLock();
   return KStatus::SUCCESS;
 }
 
@@ -578,11 +510,13 @@ TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path,
   return mt_table;
 }
 
-int TsSubEntityGroup::RemovePartitionTable(timestamp64 ts, ErrorInfo& err_info, bool skip_busy) {
+int TsSubEntityGroup::RemovePartitionTable(timestamp64 ts, ErrorInfo& err_info, bool skip_busy, bool with_lock) {
   timestamp64 max_ts;
   timestamp64 p_time = PartitionTime(ts, max_ts);
-  wrLock();
-  Defer defer{[&]() { unLock(); }};
+  if (with_lock) {
+    wrLock();
+  }
+  Defer defer{[&]() { if (with_lock) { unLock(); } }};
   if (!skip_busy && partitions_ts_.find(p_time) == partitions_ts_.end()) {
     // If the skip_busy is set to true, when the p_time is deleted for the first time,
     // if it is skipped, the p_time will be deleted in the partitions_ts_,

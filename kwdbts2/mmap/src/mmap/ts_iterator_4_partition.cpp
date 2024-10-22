@@ -12,7 +12,7 @@
 #include "mmap/ts_Iterator_4_partition.h"
 
 // return -1 means partition tables scan over.
-int TsPartitonIterator::nextBlockItem() {
+int TsPartitionIterator::nextBlockItem() {
   cur_block_item_ = nullptr;
   while (true) {
     if (block_item_queue_.empty()) {
@@ -32,7 +32,7 @@ int TsPartitonIterator::nextBlockItem() {
   }
 }
 
-KStatus TsPartitonIterator::Next(ResultSet* res, k_uint32* count, bool full_block, TsBlockFullData* block_data) {
+KStatus TsPartitionIterator::Next(ResultSet* res, k_uint32* count, bool full_block, TsBlockFullData* block_data) {
   *count = 0;
   while (true) {
     if (cur_block_item_ == nullptr) {
@@ -90,7 +90,7 @@ KStatus TsPartitonIterator::Next(ResultSet* res, k_uint32* count, bool full_bloc
   return KStatus::FAIL;
 }
 
-KStatus TsPartitonIterator::fillblockItemData(BlockItem* block_item, TsBlockFullData* block_data, bool* ignored) {
+KStatus TsPartitionIterator::fillblockItemData(BlockItem* block_item, TsBlockFullData* block_data, bool* ignored) {
   std::shared_ptr<MMapSegmentTable> segment_tbl = partition_->getSegmentTable(cur_block_item_->block_id);
   if (segment_tbl == nullptr) {
     LOG_ERROR("Can not find segment use block [%d], in path [%s]",
@@ -120,7 +120,7 @@ KStatus TsPartitonIterator::fillblockItemData(BlockItem* block_item, TsBlockFull
   return KStatus::SUCCESS;
 }
 
-KStatus TsPartitonIterator::blockItemNext(ResultSet* res, k_uint32* count) {
+KStatus TsPartitionIterator::blockItemNext(ResultSet* res, k_uint32* count) {
   uint32_t first_row = 1;
   MetricRowID first_real_row = cur_block_item_->getRowID(first_row);
   std::shared_ptr<MMapSegmentTable> segment_tbl = partition_->getSegmentTable(cur_block_item_->block_id);

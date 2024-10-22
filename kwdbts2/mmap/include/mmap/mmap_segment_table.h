@@ -38,6 +38,14 @@ struct TsBlockFullData {
   }
 };
 
+// store agg result address of certain block and certain column
+struct AggDataAddresses {
+  void* count;
+  void* min;
+  void* max;
+  void* sum;
+};
+
 class MMapSegmentTable : public TSObject, public TsTableObject {
  private:
   KRWLatch rw_latch_;
@@ -55,6 +63,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   vector<size_t> col_block_size_;
   // varchar or varbinary values store in stringfile, which can remap size.
   MMapStringColumn* m_str_file_{nullptr};
+  // pointer of partition's meta_manger
   EntityBlockMetaManager* meta_manager_{nullptr};
   // is this segment compressed.
   bool is_compressed_ = false;
@@ -162,6 +171,8 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     size_t block_size = (header_size + 63) / 64 * 64 + col_size * max_rows_per_block;
     return (block_size + 63) / 64 * 64;
   }
+
+  MMapStringColumn* GetStringFile() { return m_str_file_; }
 
   size_t GetColBlockHeaderSize(size_t col_size) {
     return GetBlockHeaderSize(max_rows_per_block_, col_size);
@@ -306,14 +317,6 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
   }
 
-  // store agg result address of certain block and certain column
-  struct AggDataAddresses {
-    void* count;
-    void* min;
-    void* max;
-    void* sum;
-  };
-
   inline void calculateAggAddr(BLOCK_ID data_block_id, size_t c, AggDataAddresses& addresses) {
     size_t offset = getBlockBitmapSize();
     addresses.count = reinterpret_cast<void*>((intptr_t) getBlockHeader(data_block_id, c) + offset);
@@ -400,10 +403,11 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
 
   virtual int create(EntityBlockMetaManager* meta_manager, const vector<AttributeInfo>& schema,
-                     const uint32_t& table_version, int encoding, ErrorInfo& err_info);
+    const uint32_t& table_version, int encoding, ErrorInfo& err_info, uint32_t max_rows_per_block = 0,
+    uint32_t max_blocks_per_segment = 0);
 
   virtual int open(EntityBlockMetaManager* meta_manager, BLOCK_ID segment_id, const string& file_path,
-                   const std::string& db_path, const string& tbl_sub_path, int flags, bool lazy_open, ErrorInfo& err_info);
+    const std::string& db_path, const string& tbl_sub_path, int flags, bool lazy_open, ErrorInfo& err_info);
 
   virtual int close(ErrorInfo& err_info);
 
@@ -533,6 +537,10 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
 
   inline uint32_t GetColType(size_t c) const {
     return cols_info_include_dropped_[c].type;
+  }
+
+  inline std::vector<AttributeInfo> GetColsInfoWithoutHidden() const {
+    return cols_info_exclude_dropped_;
   }
 
   // check if current segment can writing data

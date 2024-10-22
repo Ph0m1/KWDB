@@ -379,7 +379,7 @@ TEST_F(TestEngine, DeleteEntities) {
   TsIterator* iter1;
   SubGroupID group_id = 1;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
-             1, &iter1, tbl_range, {}, false, false, false), KStatus::SUCCESS);
+             1, &iter1, tbl_range, {}, false, false), KStatus::SUCCESS);
 
   ResultSet res{(k_uint32)scan_cols.size()};
   k_uint32 ret_cnt;
@@ -394,7 +394,7 @@ TEST_F(TestEngine, DeleteEntities) {
   entity_id = 2;
   is_finished = false;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
-              1, &iter1, tbl_range, {}, false, false, false), KStatus::SUCCESS);
+              1, &iter1, tbl_range, {}, false, false), KStatus::SUCCESS);
   ASSERT_EQ(iter1->Next(&res, &ret_cnt, &is_finished), KStatus::SUCCESS);
   EXPECT_EQ(ret_cnt, row_num_);
   delete iter1;
@@ -457,7 +457,7 @@ TEST_F(TestEngine, DeleteData) {
   TsIterator* iter1;
   SubGroupID group_id = 1;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
-              1, &iter1, tbl_range, {}, false, false, false), KStatus::SUCCESS);
+              1, &iter1, tbl_range, {}, false, false), KStatus::SUCCESS);
   uint64_t count = 0;
   uint64_t total = 0;
   bool is_finished = false;
@@ -481,7 +481,7 @@ TEST_F(TestEngine, DeleteData) {
   TsIterator* iter2;
   ResultSet res2{(k_uint32)scan_cols.size()};
   is_finished = false;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter2, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter2, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   ASSERT_EQ(iter2->Next(&res2, reinterpret_cast<k_uint32*>(&count), &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, row_num_ - 2);  // left 3 rows
@@ -533,7 +533,7 @@ TEST_F(TestEngine, DeleteExpiredData) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false), KStatus::SUCCESS);
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false), KStatus::SUCCESS);
 
   k_uint32 count;
   ResultSet res{(k_uint32)scan_cols.size()};
@@ -546,7 +546,7 @@ TEST_F(TestEngine, DeleteExpiredData) {
   // delete expired data
   ASSERT_EQ(ts_table->DeleteExpiredData(ctx_, 2.5 * kwdbts::EngineOptions::iot_interval), KStatus::SUCCESS);
 
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
@@ -605,10 +605,10 @@ TEST_F(TestEngine, CompressTsTable) {
 
   // Compress the partition of 360000
   ErrorInfo err_info;
-  ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
   // Due to not being fully written, it will not be truly compressed until the second schedule
   g_compression.compression_type = kwdbts::CompressionType::LZ4;
-  ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 2 * kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
 
   // Close the table and reopen it to verify the mount function
   tbl_range.reset();
@@ -625,15 +625,15 @@ TEST_F(TestEngine, CompressTsTable) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, write_count * partition_num, scan_cols.size()));
   delete iter;
 
   // Actual uncompressed partition
-  ASSERT_EQ(ts_table->Compress(ctx_, 2.5 * kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 2.5 * kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
   // Data check
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, write_count * partition_num, scan_cols.size()));
   delete iter;
@@ -644,7 +644,7 @@ TEST_F(TestEngine, CompressTsTable) {
   ASSERT_EQ(s, KStatus::SUCCESS);
   EXPECT_EQ(del_cnt, write_count * partition_num);
   // Data check
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 0, scan_cols.size()));
   delete iter;
@@ -662,10 +662,10 @@ TEST_F(TestEngine, CompressTsTable) {
   // Compress 360000 and 720000 partitions
   g_compression.compression_type = kwdbts::CompressionType::ZSTD;
   g_compression.compression_level = kwdbts::CompressionLevel::LOW;
-  ASSERT_EQ(ts_table->Compress(ctx_, 3 * kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, 3 * kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
   // Data check
   entity_id = 2;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, write_count * partition_num, scan_cols.size()));
   delete iter;
@@ -675,7 +675,7 @@ TEST_F(TestEngine, CompressTsTable) {
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(del_cnt, write_count * partition_num);
   // Data check
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 0, scan_cols.size()));
   delete iter;
@@ -778,9 +778,9 @@ TEST_F(TestEngine, LazyMount) {
   ErrorInfo err_info;
   g_compression.compression_type = kwdbts::CompressionType::GZIP;
   g_compression.compression_level = kwdbts::CompressionLevel::LOW;
-  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
   // Due to not being fully written, it will not be truly compressed until the second schedule
-  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
 
   // Close the table and reopen it to verify the mount function
   tbl_range.reset();
@@ -796,14 +796,14 @@ TEST_F(TestEngine, LazyMount) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, write_count * partition_num, scan_cols.size()));
   delete iter;
 
   // Compress all partitions and trigger lruchache elimination
   g_compression.compression_type = kwdbts::CompressionType::LZO;
-  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, (partition_num+1)*kwdbts::EngineOptions::iot_interval, false, 1, err_info), KStatus::SUCCESS);
 
   // Verify the number of mounted partitions
   string cmd = "cat /proc/mounts | grep $(pwd)/test_db | wc -l";
@@ -872,7 +872,7 @@ TEST_F(TestEngine, partition_interval) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, write_count * 2, scan_cols.size()));
   delete iter;
@@ -911,7 +911,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = 0;
   ts_span = {start_ts, 16400 * 1000};
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3, scan_cols.size()));
   delete iter;
@@ -953,7 +953,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = -1 * 22400 * 1000;
   ts_span = {start_ts, 22400 * 1000};
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3 + 16 * 3, scan_cols.size()));
   delete iter;
@@ -968,7 +968,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = -1 * 22400 * 1000;
   ts_span = {start_ts, 22400 * 1000};
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3 + 16 * 3, scan_cols.size()));
   delete iter;
@@ -1002,7 +1002,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = -1 * 22400 * 1000;
   ts_span = {start_ts, 22400 * 1000};
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3 + 16 * 3 + 1 * 2, scan_cols.size()));
   delete iter;
@@ -1089,9 +1089,9 @@ TEST_F(TestEngine, ClusterSetting) {
 
   ErrorInfo err_info;
   // Compress the current partition
-  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, false, 1, err_info), KStatus::SUCCESS);
   // Due to the first segment not being filled to 90%, it will not be compressed
-  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, false, 1, err_info), KStatus::SUCCESS);
 
   // Check the number of compressed files
   string cmd = "ls -lR | grep sqfs | wc -l";
@@ -1113,11 +1113,11 @@ TEST_F(TestEngine, ClusterSetting) {
 
   // Compress the current partition
   g_compression.compression_type = kwdbts::CompressionType::LZMA;
-  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, false, 1, err_info), KStatus::SUCCESS);
   // Due to the first segment being 90% full, it will be compressed
   // The second segment is not filled to 90% and will not be compressed
   g_compression.compression_type = kwdbts::CompressionType::XZ;
-  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, err_info), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->Compress(ctx_, kwdbts::EngineOptions::iot_interval + 1, false, 1, err_info), KStatus::SUCCESS);
 
   // Check query results
   k_uint32 entity_id = 1;
@@ -1126,7 +1126,7 @@ TEST_F(TestEngine, ClusterSetting) {
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 30, scan_cols.size()));
   delete iter;
@@ -1181,7 +1181,7 @@ TEST_F(TestEngine, ClusterSetting) {
   }
 
   ts_span = {0, 3 * 3600 * 1000};
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false, false),
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 55, scan_cols.size()));
   delete iter;

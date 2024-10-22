@@ -15,6 +15,7 @@
 #include <utility>
 #include <queue>
 #include <vector>
+#include <atomic>
 #include "cm_kwdb_context.h"
 #include "utils/date_time_util.h"
 #include "big_table.h"
@@ -31,10 +32,12 @@
 #include "lt_cond.h"
 #include "TSLockfreeOrderList.h"
 #include "entity_block_meta_manager.h"
+#include "sys_utils.h"
 
 #define ENTITY_ITEM_LATCH_BUCKET_NUM 10
 
 bool ReachMetaMaxBlock(BLOCK_ID cur_block_id);
+
 
 class TsTimePartition : public TSObject {
  public:
@@ -46,10 +49,12 @@ class TsTimePartition : public TSObject {
   using TsTimePartitionRWLatch = KRWLatch;
   using TsTimePartitionLatch = KLatch;
 
-  TsTimePartitionRWLatch* rw_latch_;
-  TsTimePartitionLatch* segments_lock_;  // data_segments lock
-  TsTimePartitionLatch* partition_table_latch_;  // partition table object latch
+  TsTimePartitionRWLatch* vacuum_query_lock_;
+
+  TsTimePartitionLatch* vacuum_insert_lock_;
+  TsTimePartitionLatch* active_segment_lock_;
   TsHashLatch entity_item_latch_;  // control entity item row written
+
 
   // collect all segments with status ActiveSegment and ImmuSegment
   std::vector<std::shared_ptr<MMapSegmentTable>> GetAllSegmentsForCompressing();
@@ -63,6 +68,7 @@ class TsTimePartition : public TSObject {
   string db_path_;
   string tbl_sub_path_;
   string file_path_;
+  bool need_revacuum_ = false;
 
   // root table with schema info in table root directory
   MMapRootTableManager*& root_table_manager_;
@@ -72,6 +78,7 @@ class TsTimePartition : public TSObject {
   TSLockfreeOrderList<BLOCK_ID, std::shared_ptr<MMapSegmentTable>> data_segments_;
   // current allocating space segment object.
   std::shared_ptr<MMapSegmentTable> active_segment_{nullptr};
+
   // segment sub path
   inline std::string segment_tbl_sub_path(BLOCK_ID segment) {
     return tbl_sub_path_ + std::to_string(segment) + "/";
@@ -98,11 +105,11 @@ class TsTimePartition : public TSObject {
     TSObject(), root_table_manager_(root_table_manager),
     entity_item_latch_(ENTITY_ITEM_LATCH_BUCKET_NUM, LATCH_ID_ENTITY_ITEM_MUTEX) {
     meta_manager_.max_entities_per_subgroup = config_subgroup_entities;
-    rw_latch_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
-    segments_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
+    vacuum_query_lock_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
+    active_segment_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
+    vacuum_insert_lock_ = new TsTimePartitionLatch(LATCH_ID_PARTITION_VACUUM_WRITE_MUTEX);
     m_ref_cnt_mtx_ = new TsTimePartitionCntMutex(LATCH_ID_PARTITION_REF_COUNT_MUTEX);
     m_ref_cnt_cv_ = new TsTimePartitionCondVal(COND_ID_PARTITION_REF_COUNT_COND);
-    partition_table_latch_ = new TsTimePartitionLatch(LATCH_ID_PARTITION_TABLE_MUTEX);
   }
 
   virtual ~TsTimePartition();
@@ -119,6 +126,16 @@ class TsTimePartition : public TSObject {
 
   int refMutexUnlock() override {
     return MUTEX_UNLOCK(m_ref_cnt_mtx_);
+  }
+
+  void vacuumLock() {
+    wrLock();
+    MUTEX_LOCK(vacuum_insert_lock_);
+  }
+
+  void vacuumUnlock() {
+    unLock();
+    MUTEX_UNLOCK(vacuum_insert_lock_);
   }
 
   inline static void GetBlkMinMaxTs(BlockItem* cur_block, MMapSegmentTable* segment_tbl,
@@ -251,10 +268,12 @@ class TsTimePartition : public TSObject {
    *
    * @param segment_id The unique identifier for the segment which the table is to be created for.
    * @param err_info A reference to an ErrorInfo object.
+   * @param max_rows_per_block, max_blocks_per_segment used for vacuum
    *
    * @return A pointer to the newly created MMapSegmentTable on success, or nullptr if an error occurs.
    */
-  MMapSegmentTable* createSegmentTable(BLOCK_ID segment_id, uint32_t table_version, ErrorInfo& err_info);
+  MMapSegmentTable* createSegmentTable(BLOCK_ID segment_id, uint32_t table_version, ErrorInfo& err_info,
+    uint32_t max_rows_per_block = 0, uint32_t max_blocks_per_segment = 0);
 
   inline bool GetBlockMinMaxTS(BlockItem* block, timestamp64* min_ts, timestamp64* max_ts) {
     std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block->block_id);
@@ -273,13 +292,17 @@ class TsTimePartition : public TSObject {
     meta_manager_.deleteEntity(entity_id);
   }
 
-  inline BlockItem* getBlockItem(uint item_id) {
+  inline BlockItem* GetBlockItem(uint item_id) {
     return meta_manager_.GetBlockItem(item_id);
   }
+
   inline TsHashLatch* GetEntityItemLatch() {
     return &entity_item_latch_;
   }
 
+  inline uint32_t GetCurrentVersion() {
+    return root_table_manager_->GetCurrentTableVersion();
+  }
 /**
  * @brief push_back_payload function is utilized for writing data into a partitioned table.
  * The function initially verifies the validity of the partition table, allocates data space,
@@ -431,9 +454,7 @@ class TsTimePartition : public TSObject {
   int GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse = false);
 
   int GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>& ts_spans, std::deque<BlockSpan>& block_spans,
-                       bool compaction = false, bool reverse = false);
-
-  BlockItem* GetBlockItem(BLOCK_ID item_id);
+                       uint32_t max_block_id = INT32_MAX, bool reverse = false);
 
   /**
    * @brief	Allocates some free space within a block.
@@ -601,23 +622,91 @@ class TsTimePartition : public TSObject {
   // and the table instance that called to delete
   inline bool isUsedWithCache() const { return ref_count_ > 2; }
 
-  // set deleted flag, iterator will not query this partition later
   bool& DeleteFlag() {
-    return meta_manager_.getEntityHeader()->deleted;
-  };
+    return meta_manager_.getEntityHeader()->partition_deleted;
+  }
 
-  // Modify segment status according to max_blocks taken from entity_ids and get all the segment_id,
-  // so that it can be dropped after reorganization
-  int CompactingStatus(std::map<uint32_t, BLOCK_ID> &obsolete_max_block, std::vector<BLOCK_ID> &obsolete_segment_ids);
+  // Set partition need to be reorganization.
+  inline void SetDisordered() {
+    meta_manager_.getEntityHeader()->data_disordered = true;
+    need_revacuum_ = true;
+  }
+
+  inline void SetDeleted() {
+    meta_manager_.getEntityHeader()->data_deleted = true;
+    need_revacuum_ = true;
+  }
+
+  inline void ResetVacuumFlags() {
+    meta_manager_.getEntityHeader()->data_disordered = false;
+    meta_manager_.getEntityHeader()->data_deleted = false;
+  }
+
+  bool ShouldVacuum() {
+    return meta_manager_.getEntityHeader()->data_disordered || meta_manager_.getEntityHeader()->data_deleted;
+  }
+
+  // Check if there have been any recent modifications to the partition
+  bool IsModifiedRecent(const timestamp64& compress_ts) {
+    if (nullptr == active_segment_) {
+      return false;
+    }
+    string ts_file_path = db_path_ + active_segment_->tbl_sub_path() + name_ + ".0";
+    int64_t modify_time = ModifyTime(ts_file_path);
+    if (modify_time <= now() - g_compress_interval || modify_time <= compress_ts) {
+      return false;
+    }
+    return true;
+  }
+
+  // Evaluate the partition can be vacuumed or not.
+  bool EvaluateVacuum(const timestamp64& ts, uint32_t ts_version);
+
+  /**
+   * Create a temporary partition using specified parameters and version
+   */
+  KStatus PrepareTempPartition(uint32_t max_rows_per_block, uint32_t max_blocks_pre_seg,
+                               uint32_t ts_version, TsTimePartition** dest_pt);
+
+  KStatus ReOrderSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables, uint32_t max_segment_id,
+    uint32_t max_dest_block_id, const std::string& partition_path, const std::string& dest_path, uint32_t* offset);
+
+  /**
+   * Using ts_version to vacuum data, read ordered data from original partition and write into new tempory partition,
+   * then use the tempory to replace the original.
+   * @param ts_version which version of data need to be vacuum
+   * @param [out] drop_partition if all the data of partition has been deleted, drop this partition.
+   * @return KStatus
+   */
+  KStatus ProcessVacuum(const timestamp64& ts, uint32_t ts_version, bool& drop_partition);
+
+  /**
+   * Read partial data from the block item of the specified segment and convert it into ResultSet.
+   * @param segment_tbl Get data from this segment tabl
+   * @param cur_block_item Get data from this block item
+   * @param block_start_row Get data from this row of block item
+   * @param row_count How many rows get from block item
+   * @param ts_version Which version of data to get
+   * @param res Get data and store in the ResultSet
+   * @return KStatus
+   */
+  KStatus GetVacuumData(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
+                        size_t block_start_row, k_uint32 row_count, uint32_t ts_version, ResultSet* res);
+
+  /**
+   * Write the ResultSet data to the specified entity of the corresponding partition
+   * @param dest_pt Write to which partition
+   * @param entity_id Which entity does the written data belong to
+   * @param res ResultSet data to be written
+   * @param row_count Number of data rows to be written
+   * @return
+   */
+  KStatus WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, ResultSet* res, uint32_t row_count);
+
+  // Modify segment status
+  void ChangeSegmentStatus();
 
   int DropSegmentDir(std::vector<BLOCK_ID> segment_ids);
-
-  int UpdateCompactMeta(std::map<uint32_t, BLOCK_ID> &obsolete_max_block,
-                        std::map<uint32_t, std::deque<BlockItem*>> &compacted_block_items) {
-    return meta_manager_.updateCompactMeta(obsolete_max_block, compacted_block_items);
-  };
-
-  bool NeedCompaction(uint32_t entity_id);
 
   std::vector<uint32_t> GetEntities() { return meta_manager_.getEntities(); }
 

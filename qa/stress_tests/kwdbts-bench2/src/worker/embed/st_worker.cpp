@@ -204,7 +204,7 @@ KBStatus StScanWorker::do_work(KTimestamp  new_ts) {
 
   vector<uint32_t> entity_ids = {entity_index};
   stat = tbl_range->GetIterator(ctx, group_id, entity_ids, ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range,
-                      {}, false, false, false);
+                      {}, false, false);
   s = dump_zstatus("GetIterator", ctx, stat);
   if (s.isNotOK()) {
     return s;
@@ -348,7 +348,7 @@ KBStatus StCompressWorker::do_work(KTimestamp  new_ts) {
   KWDB_START();
 
   KBStatus s;
-  auto stat = st_inst_->GetTSEngine()->CompressTsTable(ctx, r_table, new_ts);
+  auto stat = st_inst_->GetTSEngine()->CompressTsTable(ctx, r_table, new_ts, true, 1);
   s = dump_zstatus("CompressTsTable", ctx, stat);
   if (s.isNotOK()) {
     return s;

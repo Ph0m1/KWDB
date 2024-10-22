@@ -94,7 +94,7 @@ TEST_F(TestEngineSnapshotTable, CreateSnapshot) {
   TsIterator* iter1;
   SubGroupID group_id = 1;
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scancols, scancols, scanaggtypes, 1, &iter1,
-            tbl_range, {}, false, false, false),
+            tbl_range, {}, false, false),
             KStatus::SUCCESS);
   ResultSet res(scancols.size());
   k_uint32 count;

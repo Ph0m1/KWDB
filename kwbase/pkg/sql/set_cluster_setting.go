@@ -191,9 +191,9 @@ func checkTsRowsPerBlockLimit(encodedValue string) error {
 	return nil
 }
 
-func checkTsAutovacuumInterval(encodedValue string) error {
-	if encodedValue[:1] == "-" {
-		return errors.New("invalid value, the value of ts.autovacuum.interval can't be set to a negative number")
+func checkTsCompressVacuum(encodedValue string) error {
+	if encodedValue != "true" && encodedValue != "false" {
+		return errors.New("invalid value, the value of ts.compression.vacuum.enabled must be true or false")
 	}
 	return nil
 }
@@ -249,7 +249,7 @@ var CheckClusterSetting = map[string]CheckOperation{
 	"ts.entities_per_subgroup.max_limit":          checkTsEntitiesPerSubgroupLimit,
 	"ts.blocks_per_segment.max_limit":             checkTsBlocksPerSegmentLimit,
 	"ts.rows_per_block.max_limit":                 checkTsRowsPerBlockLimit,
-	"ts.autovacuum.interval":                      checkTsAutovacuumInterval,
+	"ts.compression.vacuum.enabled":               checkTsCompressVacuum,
 	"ts.compression.type":                         checkTsCompressType,
 	"ts.compression.level":                        checkTsCompressLevel,
 	"immediate_compression.threads":               checkTsCompressThreads,

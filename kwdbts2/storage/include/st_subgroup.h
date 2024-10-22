@@ -165,7 +165,7 @@ class TsSubEntityGroup : public TSObject {
    *
    * @return
    */
-  std::shared_ptr<TsSubGroupPTIterator> GetPTIteartor(const std::vector<KwTsSpan>& ts_spans);
+  std::shared_ptr<TsSubGroupPTIterator> GetPTIterator(const std::vector<KwTsSpan>& ts_spans);
 
 
   /**
@@ -183,7 +183,7 @@ class TsSubEntityGroup : public TSObject {
  *                      scheduling when partition is busy, default false
  * @return error code
  */
-  int RemovePartitionTable(timestamp64 ts, ErrorInfo& err_info, bool skip_busy = false);
+  int RemovePartitionTable(timestamp64 ts, ErrorInfo& err_info, bool skip_busy = false, bool with_lock = true);
 
 /**
  * @brief Delete expired partition data
@@ -220,32 +220,11 @@ class TsSubEntityGroup : public TSObject {
 
   inline void MutexUnLockEntity(int32_t entity_id) { MUTEX_UNLOCK(entity_mutexes_[entity_id]); }
 
-  inline void SetUnavailable() { available_ = false; }
-
-  inline void SetAvailable() { available_ = true; }
-
-  inline bool IsAvailable() { return available_; }
-
   int ReOpenInit(ErrorInfo& err_info);
 
   std::vector <timestamp64> GetPartitionTsInSpan(KwTsSpan ts_span);
   int ClearPartitionCache();
   int ErasePartitionCache(timestamp64 pt_ts);
-
-  /**
-   * @brief Apply the reorganization result to the subgroup, and the ongoing subgroup cannot be read or written
-   * @param[in] obsolete_max_block: map[partition_ts][entity_id]block_id, record the latest block_id of the entity
-   *            at the time of reorganization initiation, which is used to concatenate metas
-   * @param[in] obsolete_segment_ids: map[partition_ts]{segment_id...}, record the segment_id under the partition when the
-   *            reorganization starts, and these segments will be deleted
-   * @param[in] compacted_block_items: map[partition_ts][entity_id]{BlockItem...}, the reorganized BlockItems in snapshot
-   *            will replace blockItems in the source meta
-   * @param[in] compact_dir: Snapshot path for moving reorganized files
-  */
-  int ApplyCompactData(std::map<timestamp64, std::map<uint32_t, BLOCK_ID>> &obsolete_max_block,
-                       std::map<timestamp64, std::vector<BLOCK_ID>> &obsolete_segment_ids,
-                       std::map<timestamp64, std::map<uint32_t, std::deque<BlockItem*>>> &compacted_block_items,
-                       string compact_dir);
 
  private:
   std::string db_path_;
@@ -273,8 +252,6 @@ class TsSubEntityGroup : public TSObject {
 
   using TsSubEntityGroupRWLatch = KRWLatch;
   TsSubEntityGroupRWLatch* sub_entity_group_rwlock_;
-
-  bool available_ = true;
 
   inline void partitionTime(timestamp64 target_ts, timestamp64 begin_ts, timestamp64 interval,
                             timestamp64& min_ts, timestamp64& max_ts);
@@ -350,6 +327,7 @@ class TsSubGroupPTIterator {
 
   ~TsSubGroupPTIterator() {
     if (cur_p_table_ != nullptr) {
+      cur_p_table_->unLock();
       ReleaseTable(cur_p_table_);
       cur_p_table_ = nullptr;
     }
@@ -359,6 +337,7 @@ class TsSubGroupPTIterator {
 
   void Reset(bool reverse_traverse = false) {
     if (cur_p_table_ != nullptr) {
+      cur_p_table_->unLock();
       ReleaseTable(cur_p_table_);
       cur_p_table_ = nullptr;
     }

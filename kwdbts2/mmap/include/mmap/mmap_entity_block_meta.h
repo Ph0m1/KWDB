@@ -120,8 +120,10 @@ struct EntityHeader {
   int64_t minTimestamp;              // max ts and min ts in current partition.
   int64_t maxTimestamp;
   uint32_t max_blocks_per_segment;   // configure item
-  bool deleted = false;
-  char user_defined[31];  // < reserved for user-defined information.
+  bool partition_deleted = false;
+  bool data_disordered = false;
+  bool data_deleted = false;
+  char user_defined[29];  // < reserved for user-defined information.
 
   ostream& to_string(ostream& os) {
     std::cout << "EntityHeader:"
@@ -142,7 +144,7 @@ struct EntityHeader {
  *  
  */
 struct EntityItem {
-  uint64_t cloumns_varchar_offset;  // .s file writing offset. all columns use one .s file.
+  uint64_t columns_varchar_offset;  // .s file writing offset. all columns use one .s file.
   uint64_t row_allocated;           // allocated row num for writing.
   int64_t row_written;             // row num that has writen into file.
   uint64_t lasted_checkpoint;       // WAL check point.
@@ -153,15 +155,13 @@ struct EntityItem {
   int64_t min_ts;                   // min ts of current entity in this Partition
   bool is_deleted;                  // entity delete flag.
   bool is_disordered = false;
-  BLOCK_ID max_compacting_block;
-  bool need_compact = true;
-  char user_defined[27];  // reserved for user-defined information.
+  char user_defined[32];  // reserved for user-defined information.
 
   ostream& to_string(ostream& os) {
     os << " entity_id:" << entity_id
        << " block_count:" << block_count
        << " cur_block_id:" << cur_block_id
-       << " cloumns_varchar_offset:" << cloumns_varchar_offset
+       << " cloumns_varchar_offset:" << columns_varchar_offset
        << " row_written:" << row_written
        << " lasted_checkpoint:" << lasted_checkpoint
        << std::endl;
@@ -367,7 +367,6 @@ class MMapEntityBlockMeta : public MMapFile {
   void deleteEntity(uint32_t entity_id) {
     EntityItem* entity_item = getEntityItem(entity_id);
     entity_item->is_deleted = true;
-    entity_item->is_disordered = true;
   }
 
   std::vector<uint32_t> getEntities() {

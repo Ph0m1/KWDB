@@ -194,10 +194,10 @@ var (
 		"the maximum number of rows that can be held in a block item",
 		1000)
 
-	autovacuumInterval = settings.RegisterPublicDurationSetting(
-		"ts.autovacuum.interval",
-		"data compaction interval (sec)",
-		0)
+	tsCompressionVacuum = settings.RegisterPublicBoolSetting(
+		"ts.compression.vacuum.enabled",
+		"enable vacuum before compression",
+		true)
 
 	tsCompressionType = settings.RegisterPublicStringSetting(
 		"ts.compression.type",
@@ -669,7 +669,6 @@ func NewServer(cfg Config, stopper *stop.Stopper) (*Server, error) {
 		ExternalStorage:         externalStorage,
 		ExternalStorageFromURI:  externalStorageFromURI,
 		ProtectedTimestampCache: s.protectedtsProvider,
-		StartVacuum:             s.cfg.StartVacuum,
 	}
 
 	if storeTestingKnobs := s.cfg.TestingKnobs.Store; storeTestingKnobs != nil {

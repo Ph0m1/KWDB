@@ -132,11 +132,13 @@ class SubEntityGroupManager : public TSObject {
   /**
    * @brief Compress the segment whose maximum timestamp is smaller than ts in all subgroups of entity group
    * @param[in] ts A timestamp that needs to be compressed
+   * @param[in] Whether to start vacuum
    * @param[out] err_info error info
    *
    * @return void
    */
-  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info);
+  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, bool enable_vacuum,
+                uint32_t ts_version, ErrorInfo& err_info);
 
   void ReleasePartitionTable(TsTimePartition* e_bt, bool is_force = false);
 
@@ -147,14 +149,6 @@ class SubEntityGroupManager : public TSObject {
    * @param[out] entity_id Available entity id
    */
   int AllocateEntity(std::string& primary_tags, uint64_t tag_hash, SubGroupID* group_id, EntityID* entity_id);
-
-  /**
-  * @brief Create a batch of subgroups, which set unavailable
-  * @param[in] count batch size
-  * @param[out] subgroups new subgroups
-  */
-  int AllocateNewSubgroups(const int& count, vector<SubGroupID>* subgroups);
-
 
   /**
   * @brief Recycle and reuse entity id
@@ -173,8 +167,6 @@ class SubEntityGroupManager : public TSObject {
   }
 
   void sync(int flags) override;
-
-  void SetSubgroupAvailable();
 
  private:
   std::string db_path_;

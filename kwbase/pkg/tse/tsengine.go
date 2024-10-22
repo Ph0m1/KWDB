@@ -104,7 +104,6 @@ type TsEngineConfig struct {
 	Settings       *cluster.Settings
 	LogCfg         log.Config
 	ExtraOptions   []byte
-	StartVacuum    bool
 	IsSingleNode   bool
 }
 
@@ -295,7 +294,6 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 				task_queue_size:   C.uint16_t(uint16(r.cfg.TaskQueueSize)),
 				buffer_pool_size:  C.uint32_t(uint32(r.cfg.BufferPoolSize)),
 				lg_opts:           optLog,
-				start_vacuum:      C.bool(r.cfg.StartVacuum),
 				is_single_node:    C.bool(r.cfg.IsSingleNode),
 			},
 			nil,
@@ -323,7 +321,6 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 				task_queue_size:   C.uint16_t(uint16(r.cfg.TaskQueueSize)),
 				buffer_pool_size:  C.uint32_t(uint32(r.cfg.BufferPoolSize)),
 				lg_opts:           optLog,
-				start_vacuum:      C.bool(r.cfg.StartVacuum),
 				is_single_node:    C.bool(r.cfg.IsSingleNode),
 			},
 			&appliedRangeIndex[0],
@@ -906,8 +903,8 @@ func (r *TsEngine) DeleteData(
 }
 
 // CompressTsTable compress partitions with maximum time<=ts
-func (r *TsEngine) CompressTsTable(tableID uint64, ts int64) error {
-	status := C.TSCompressTsTable(r.tdb, C.TSTableID(tableID), C.int64_t(ts))
+func (r *TsEngine) CompressTsTable(tableID uint64, ts int64, tsVersion uint32) error {
+	status := C.TSCompressTsTable(r.tdb, C.TSTableID(tableID), C.int64_t(ts), C.uint32_t(tsVersion))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to compress ts table")
 	}
@@ -915,9 +912,11 @@ func (r *TsEngine) CompressTsTable(tableID uint64, ts int64) error {
 }
 
 // CompressImmediately compress partitions immediately
-func (r *TsEngine) CompressImmediately(ctx context.Context, tableID uint64) error {
+func (r *TsEngine) CompressImmediately(
+	ctx context.Context, tableID uint64, tsVersion uint32,
+) error {
 	goCtxPtr := C.uint64_t(uintptr(unsafe.Pointer(&ctx)))
-	status := C.TSCompressImmediately(r.tdb, goCtxPtr, C.TSTableID(tableID))
+	status := C.TSCompressImmediately(r.tdb, goCtxPtr, C.TSTableID(tableID), C.uint32_t(tsVersion))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to compress ts table")
 	}

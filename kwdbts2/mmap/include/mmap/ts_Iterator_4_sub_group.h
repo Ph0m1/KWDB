@@ -29,7 +29,7 @@ class TsSubGroupIterator {
  public:
   TsSubGroupIterator(TsSubEntityGroup* sub_group, const TsPartitonIteratorParams& params) :
         sub_group_(sub_group), params_(params) {
-    partition_obj_iter_ = sub_group_->GetPTIteartor(params_.ts_spans);
+    partition_obj_iter_ = sub_group_->GetPTIterator(params_.ts_spans);
   }
 
   ~TsSubGroupIterator() {
@@ -68,7 +68,7 @@ class TsSubGroupIterator {
           *count = 0;
           return KStatus::SUCCESS;
         }
-        partition_data_iter_ = new TsPartitonIterator(cur_partition_table, params_);
+        partition_data_iter_ = new TsPartitionIterator(cur_partition_table, params_);
       }      
     }
     return KStatus::FAIL;
@@ -78,7 +78,7 @@ class TsSubGroupIterator {
   TsSubEntityGroup* sub_group_;
   TsPartitonIteratorParams params_;
   std::shared_ptr<TsSubGroupPTIterator> partition_obj_iter_{nullptr};
-  TsPartitonIterator* partition_data_iter_{nullptr};
+  TsPartitionIterator* partition_data_iter_{nullptr};
   int cur_entity_index_{-1};
   MMapSegmentTableIterator* segment_iter_{nullptr};
 };

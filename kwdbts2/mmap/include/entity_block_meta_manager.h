@@ -51,16 +51,6 @@ class EntityBlockMetaManager {
   // update  entity struct info with block item.
   void UpdateEntityItem(uint entity_id, BlockItem* blk_item);
 
-  /**
-    * @brief Update meta based on the reorganized blockItem
-    * @param[in] obsolete_max_block: map[entity_id]block_id, record the latest block_id of the entity at the time of
-    *           reorganization initiation, which is used to concatenate metas
-    * @param[in] compacted_block_items: map[entity_id]{BlockItem...}, the block items from snapshot will replace the
-    *           original block items
-   */
-  int updateCompactMeta(std::map<uint32_t, BLOCK_ID> &obsolete_max_block,
-                        std::map<uint32_t, std::deque<BlockItem*>> &compacted_block_items);
-
   // sync data to file.
   int sync(int flags);
 

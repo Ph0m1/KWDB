@@ -31,12 +31,7 @@ std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
 std::shared_mutex g_settings_mutex;
 bool g_engine_initialized = false;
-
-int64_t g_input_autovacuum_interval = 0;  // interval of compaction, 0: stop.
-std::thread g_db_threads;
-// inform SettingChangedSensor from TriggerSettingCallback that the setting is changed
-std::condition_variable g_setting_changed_cv;
-std::atomic<bool> g_setting_changed(false);
+bool g_vacuum_enabled = true;
 
 TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
                 AppliedRangeIndex* applied_indexes, size_t range_num) {
@@ -126,11 +121,6 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
     return ToTsStatus("OpenTSEngine Internal Error!");
   }
   *engine = ts_engine;
-  if (options.start_vacuum) {
-    g_db_threads = std::thread([ts_engine](){
-      ts_engine->SettingChangedSensor();
-    });
-  }
   g_engine_initialized = true;
   return kTsSuccess;
 }
@@ -285,7 +275,7 @@ TSStatus TSDropTsTable(TSEngine* engine, TSTableID table_id) {
   return kTsSuccess;
 }
 
-TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts) {
+TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts, uint32_t ts_version) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -300,7 +290,7 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts)
     return kTsSuccess;
   }
   ErrorInfo err_info;
-  s = table->Compress(ctx_p, ts, err_info);
+  s = table->Compress(ctx_p, ts, g_vacuum_enabled, ts_version, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("CompressTsTable Error!");
@@ -309,7 +299,7 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts)
   return kTsSuccess;
 }
 
-TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id) {
+TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id, uint32_t ts_version) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -326,7 +316,7 @@ TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID ta
     return kTsSuccess;
   }
   ErrorInfo err_info;
-  s = table->Compress(ctx_p, INT64_MAX, err_info);
+  s = table->Compress(ctx_p, INT64_MAX, g_vacuum_enabled, ts_version, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("compress error, reason: " + err_info.errmsg);
@@ -584,44 +574,6 @@ TSStatus TSxRollback(TSEngine* engine, TSTableID table_id, char* transaction_id)
   return kTsSuccess;
 }
 
-int64_t ParseInterval(const std::string& value) {
-  // ts.autovaccum.interval should be format like '1Y2M3W4D5h6m7s' or numeric like '36'
-  int64_t current_value = 0;
-  int64_t rtn = 0;
-  char t_unit[] = {'Y', 'M', 'W', 'D', 'h', 'm', 's'};  // 1Y2M3W4D5h6m7s
-  uint64_t to_sec[] = {31556926, 2592000, 604800, 86400, 3600, 60, 1};
-  int i = 0;
-  bool has_num = false;
-  for (char c : value) {
-    if (i == sizeof(t_unit)) {  // if there are other numbers after 's'
-      return -1;
-    }
-    if (std::isdigit(c)) {
-      has_num = true;
-      current_value = current_value * 10 + (c - '0');
-    } else {  // find non-numeric
-      bool valid = false;
-      for ( ; has_num && i < sizeof(t_unit); i++) {  // check if it is valid
-        if (c == t_unit[i]) {
-          rtn += current_value * to_sec[i];
-          current_value = 0;
-          i++;
-          valid = true;
-          has_num = false;
-          break;
-        }
-      }
-      if (!valid) {  // invalid
-        return -1;
-      }
-    }
-  }
-  if (i == 0) {  // numeric
-    rtn = current_value;
-  }
-  return rtn;
-}
-
 void TriggerSettingCallback(const std::string& key, const std::string& value) {
   if (TRACE_CONFIG_NAME == key) {
     TRACER.SetTraceConfigStr(value);
@@ -649,17 +601,6 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT = atoi(value.c_str());
   } else if ("ts.compress_interval" == key) {
     kwdbts::g_compress_interval = atoi(value.c_str());
-  } else if ("ts.autovacuum.interval" == key) {
-    // If ts.autovacuum.interval was set before shutting down,
-    // a set cluster command will be received immediately after rebooting to restore the setting.
-    int64_t new_interval = ParseInterval(value);
-    if (new_interval < 0) {
-      LOG_ERROR("Invalid time format");
-    } else {
-      g_input_autovacuum_interval = new_interval;
-      g_setting_changed.store(true);
-      g_setting_changed_cv.notify_one();  // inform SettingChangedSensor that the setting is changed.
-    }
   } else if ("ts.compression.type" == key) {
     CompressionType type = kwdbts::CompressionType::GZIP;
     if ("gzip" == value) {
@@ -700,7 +641,13 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
       compression.second.compression_level = level;
     }
     g_compression.compression_level = level;
-    } else if ("immediate_compression.threads" == key) {
+  } else if ("ts.compression.vacuum.enabled" == key) {
+    if ("false" == value) {
+      g_vacuum_enabled = false;
+    } else if ("true" == value) {
+      g_vacuum_enabled = true;
+    }
+  } else if ("immediate_compression.threads" == key) {
     g_mk_squashfs_option.processors_immediate = atoi(value.c_str());
   } else if ("ts.count.use_statistics.enabled" == key) {
     if ("true" == value) {
@@ -1083,10 +1030,6 @@ TSStatus TSClose(TSEngine* engine) {
     return ToTsStatus("InitServerKWDBContext Error!");
   }
   LOG_INFO("TSClose")
-  engine->CloseSettingChangedSensor();
-  if (g_db_threads.joinable()) {
-    g_db_threads.join();
-  }
   engine->CreateCheckpoint(ctx);
   delete engine;
   return TSStatus{nullptr, 0};

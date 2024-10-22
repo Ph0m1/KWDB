@@ -20,6 +20,8 @@
 #else
   #include <filesystem>
 #endif
+#include <st_config.h>
+
 #include "cm_func.h"
 #include "dirent.h"
 #include "ts_time_partition.h"
@@ -29,7 +31,7 @@
 #include "utils/compress_utils.h"
 #include "lg_api.h"
 #include "perf_stat.h"
-#include "sys_utils.h"
+
 
 void markDeleted(char* delete_flags, size_t row_index) {
   size_t byte = (row_index - 1) >> 3;
@@ -41,22 +43,22 @@ inline bool ReachMetaMaxBlock(BLOCK_ID cur_block_id) {
   return cur_block_id >= INT32_MAX;
 }
 
-impl_latch_virtual_func(TsTimePartition, rw_latch_)
+impl_latch_virtual_func(TsTimePartition, vacuum_query_lock_)
 
 TsTimePartition::~TsTimePartition() {
   meta_manager_.release();
   releaseSegments();
-  if (rw_latch_) {
-    delete rw_latch_;
-    rw_latch_ = nullptr;
+  if (vacuum_query_lock_) {
+    delete vacuum_query_lock_;
+    vacuum_query_lock_ = nullptr;
   }
-  if (segments_lock_) {
-    delete segments_lock_;
-    segments_lock_ = nullptr;
+  if (vacuum_insert_lock_) {
+    delete vacuum_insert_lock_;
+    vacuum_insert_lock_ = nullptr;
   }
-  if (partition_table_latch_) {
-    delete partition_table_latch_;
-    partition_table_latch_ = nullptr;
+  if (active_segment_lock_) {
+    delete active_segment_lock_;
+    active_segment_lock_ = nullptr;
   }
   delete m_ref_cnt_mtx_;
   delete m_ref_cnt_cv_;
@@ -192,7 +194,8 @@ int TsTimePartition::init(const vector<AttributeInfo>& schema, int encoding, boo
   return err_info.errcode;
 }
 
-MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint32_t table_version, ErrorInfo& err_info) {
+MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint32_t table_version, ErrorInfo& err_info,
+  uint32_t max_rows_per_block, uint32_t max_blocks_per_segment) {
   // Check if the metadata manager has a valid first meta entry.
   if (meta_manager_.GetFirstMeta() == nullptr) {
     err_info.setError(KWEINVALPATH, db_path_ + tbl_sub_path_ + " is not data path.");
@@ -219,8 +222,7 @@ MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint
   }};
   // Prepare file path and attempt to open the segment table with exclusive creation.
   string file_path = name_ + ".bt";
-  if (segment_tbl->open(&meta_manager_, segment_id, file_path, db_path_, segment_sand, MMAP_CREAT_EXCL, true,
-                        err_info) < 0) {
+  if (segment_tbl->open(&meta_manager_, segment_id, file_path, db_path_, segment_sand, MMAP_CREAT_EXCL, true, err_info) < 0) {
     return nullptr;
   }
 
@@ -230,7 +232,8 @@ MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint
   {
     std::vector<AttributeInfo> schema;
     root_table_manager_->GetSchemaInfoIncludeDropped(&schema, table_version);
-    if (segment_tbl->create(&meta_manager_, schema, table_version, encoding, err_info) < 0) {
+    int ret = segment_tbl->create(&meta_manager_, schema, table_version, encoding, err_info, max_rows_per_block, max_blocks_per_segment);
+    if (ret < 0) {
       return nullptr;
     }
   }
@@ -285,19 +288,19 @@ int TsTimePartition::remove(bool exclude_segment) {
 
 void TsTimePartition::sync(int flags) {
   meta_manager_.sync(flags);
-  MUTEX_LOCK(segments_lock_);
+  MUTEX_LOCK(active_segment_lock_);
   data_segments_.Traversal([flags](BLOCK_ID id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
     if (tbl->getObjectStatus() == OBJ_READY) {
       tbl->sync(flags);
     }
     return true;
   });
-  MUTEX_UNLOCK(segments_lock_);
+  MUTEX_UNLOCK(active_segment_lock_);
 }
 
 bool TsTimePartition::JoinOtherPartitionTable(TsTimePartition* other) {
-  MUTEX_LOCK(segments_lock_);
-  Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+  MUTEX_LOCK(active_segment_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(active_segment_lock_); }};
   // mark all segments cannot write. when joining, we cannot write rows.
   if (active_segment_ != nullptr) {
     active_segment_->setSegmentStatus(InActiveSegment);
@@ -340,14 +343,14 @@ bool TsTimePartition::JoinOtherPartitionTable(TsTimePartition* other) {
     }
     auto err_code = loadSegment(this_p_header->cur_block_id + other_segment_ids[i], err_info);
     if (err_code < 0) {
-      LOG_ERROR("loadSegment file faild. msg: %s.", err_info.errmsg.c_str());
+      LOG_ERROR("loadSegment file failed. msg: %s.", err_info.errmsg.c_str());
       return false;
     }
     current_file_id = this_p_header->cur_block_id + other_segment_ids[i];
   }
   BlockItem *new_blk;
   for (size_t i = 1; i <= other_p_header->cur_block_id; i++) {
-    auto blk_item = other->getBlockItem(i);
+    auto blk_item = other->GetBlockItem(i);
     this->meta_manager_.AddBlockItem(blk_item->entity_id, &new_blk);
     new_blk->CopyMetricMetaInfo(*blk_item);
     this->meta_manager_.UpdateEntityItem(blk_item->entity_id, new_blk);
@@ -383,6 +386,7 @@ int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start
           err_info.errmsg = "dedup_rule_ is reject, and payload has deduplicate ts.";
           return err_code;
         }
+        SetDeleted();
         span.block_item->setDeleted(span.start_row + i + 1);
         *deleted_rows += 1;
         if (dedup_result->discard_bitmap.len != 0) {
@@ -399,6 +403,7 @@ int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start
     if (kv.second.size() > 1) {
       for (int i = kv.second.size() - 2; i >= 0; i--) {
         if (kv.second[i] >= start_in_payload + count && kv.second[i] < start_in_payload + count + span.row_num) {
+          SetDeleted();
           span.block_item->setDeleted(span.start_row + (kv.second[i] - start_in_payload - count) + 1);
           *deleted_rows += 1;
           if (!(payload->dedup_rule_ == DedupRule::REJECT || payload->dedup_rule_ == DedupRule::DISCARD)
@@ -443,7 +448,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
   kwdbts::DedupInfo dedup_info;
   int deleted_rows = 0;
   {
-    MUTEX_LOCK(partition_table_latch_);
+    MUTEX_LOCK(vacuum_insert_lock_);
     // 2.Allocate data space for writing to the corresponding entity and save the allocation result to the passed in spans array.
     // If an error occurs during the allocation process, revert the space allocated before and return an error code.
     // If the current segment is full, switch to a new segment.
@@ -451,7 +456,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     if (err_code < 0) {
       err_info.errcode = err_code;
       err_info.errmsg = "AllocateSpace failed : " + string(strerror(errno));
-      MUTEX_UNLOCK(partition_table_latch_);
+      MUTEX_UNLOCK(vacuum_insert_lock_);
       return err_code;
     }
     EntityItem* entity_item = getEntityItem(entity_id);
@@ -471,6 +476,8 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     if (payload->IsDisordered(start_in_payload, num) ||
         (entity_item->max_ts != INVALID_TS && pl_min < entity_item->max_ts)) {
       entity_item->is_disordered = true;
+      // As long as there is data disorder in this partition, it needs to be reorganized
+      SetDisordered();
     }
     // Update the maximum and minimum timestamps of entity_items to prepare for subsequent payload deduplication.
     if (pl_max > entity_item->max_ts || entity_item->max_ts == INVALID_TS) {
@@ -479,7 +486,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     if (pl_min < entity_item->min_ts || entity_item->min_ts == INVALID_TS) {
       entity_item->min_ts = pl_min;
     }
-    MUTEX_UNLOCK(partition_table_latch_);
+    MUTEX_UNLOCK(vacuum_insert_lock_);
   }
 
   int dedup_rows_orgin = dedup_result->dedup_rows;
@@ -491,7 +498,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
       dedup_result->dedup_rows = dedup_rows_orgin + payload->GetRowCount();
     }
     std::vector<size_t> full_block_idx;
-    MUTEX_LOCK(partition_table_latch_);
+    MUTEX_LOCK(vacuum_insert_lock_);
     TsHashLatch* entity_item_latch = GetEntityItemLatch();
     entity_item_latch->Lock(entity_id);
     EntityItem* entity_item = getEntityItem(entity_id);
@@ -503,7 +510,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
         full_block_idx.push_back(i);
       }
     }
-    MUTEX_UNLOCK(partition_table_latch_);
+    MUTEX_UNLOCK(vacuum_insert_lock_);
     for (size_t i = 0; i < full_block_idx.size(); i++) {
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[full_block_idx[i]].block_item->block_id);
       if (tbl == nullptr) {
@@ -544,13 +551,6 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
       err_info.errmsg = "PushPayload failed : " + string(strerror(errno));
       return err_code;
     }
-    EntityItem* entity_item = getEntityItem(entity_id);
-    if (!entity_item->need_compact) {
-      // to trigger compaction
-      // TODO(qlp): Since the rules for determining the timing of reorganization triggering haven't yet been determined,
-      //  the entity currently will set the need_compact to true as long as there is data written
-      entity_item->need_compact = true;
-    }
     err_code = ProcessDuplicateData(payload, start_in_payload, count, span, dedup_info, dedup_result, err_info, &deleted_rows);
     if (err_code < 0) {
       return err_code;
@@ -567,6 +567,487 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
 
   err_info.errcode = err_code;
   return err_code;
+}
+
+bool TsTimePartition::EvaluateVacuum(const timestamp64& ts, uint32_t ts_version) {
+  std::vector<BLOCK_ID> segment_ids;
+  data_segments_.GetAllKey(&segment_ids);
+  if (segment_ids.size() > 2) {
+    return true;
+  }
+  if (IsModifiedRecent(ts)) {
+    return false;
+  }
+  // DDL
+  for (auto& seg_id : segment_ids) {
+    std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(seg_id);
+    if (segment_tbl == nullptr) {
+      continue;
+    }
+    auto segment_version = segment_tbl->schemaVersion();
+    if (segment_version != ts_version) {
+      return true;
+    }
+  }
+  return ShouldVacuum();
+}
+
+KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint32_t max_blocks_per_seg,
+                                              uint32_t ts_version, TsTimePartition** dest_pt) {
+  ErrorInfo err_info;
+  std::string tmp_dir = GetPath();
+  tmp_dir[tmp_dir.size() - 1] = '_';
+  // if tmp_dir exists, remove the garbage files left over from the last vacuum
+  if (IsExists(tmp_dir)) {
+    Remove(tmp_dir);
+  }
+  // Create a temporary partition and segment to store the data after vacuum
+  if (!MakeDirectory(tmp_dir, err_info)) {
+    LOG_ERROR("Compact partition[%s] failed, couldn't create temporary directory.", tmp_dir.c_str());
+    return FAIL;
+  }
+  *dest_pt = new TsTimePartition(root_table_manager_, meta_manager_.max_entities_per_subgroup);
+  std::string tmp_partition_sub_path = tbl_sub_path_ + "/";
+  tmp_partition_sub_path[tmp_partition_sub_path.size()-2] = '_';
+  (*dest_pt)->open(file_path_, db_path_, tmp_partition_sub_path, MMAP_CREAT_EXCL, err_info);
+  if (!err_info.isOK()) {
+    delete *dest_pt;
+    LOG_ERROR("Compact partition[%s] failed, couldn't open temporary table.", tmp_dir.c_str());
+    return FAIL;
+  }
+  // create segment use max_rows_per_block and max_blocks_per_seg
+  MMapSegmentTable* segment_tb = (*dest_pt)->createSegmentTable(1, ts_version, err_info,
+                                                                max_rows_per_block, max_blocks_per_seg);
+  if (segment_tb == nullptr || err_info.errcode < 0) {
+    delete *dest_pt;
+    LOG_ERROR("createSegmentTable error: %s", err_info.errmsg.c_str());
+    return FAIL;
+  }
+  // initialize segment
+  segment_tb->setSegmentStatus(ActiveSegment);
+  std::shared_ptr<MMapSegmentTable> segment_table(segment_tb);
+  (*dest_pt)->data_segments_.Insert(1, segment_table);
+
+  (*dest_pt)->active_segment_ = segment_table;
+  (*dest_pt)->meta_manager_.getEntityHeader()->cur_datafile_id = 1;
+  return SUCCESS;
+}
+
+KStatus TsTimePartition::GetVacuumData(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
+                                       size_t block_start_idx, k_uint32 row_count, uint32_t ts_version, ResultSet* res) {
+  std::vector<AttributeInfo> tb_schema;
+  KStatus s = root_table_manager_->GetSchemaInfoExcludeDropped(&tb_schema, ts_version);
+  if (s != SUCCESS) {
+    LOG_ERROR("Couldn't get schema info of version %d.", ts_version);
+    return s;
+  }
+  auto segment_schema = segment_tbl->getSchemaInfo();
+  std::vector<uint32_t> scan_cols = root_table_manager_->GetIdxForValidCols(ts_version);
+  Batch* b;
+  for (int i = 0; i < scan_cols.size(); i++) {
+    auto ts_col = scan_cols[i];
+    if (ts_col >= 0 && segment_tbl->isColExist(ts_col)) {
+      void* bitmap_addr = segment_tbl->getBlockHeader(cur_block_item->block_id, ts_col);
+      if (tb_schema[ts_col].type != VARSTRING && tb_schema[ts_col].type != VARBINARY) {
+        // not varlen column
+        if (segment_schema[ts_col].type != tb_schema[ts_col].type) {
+          // convert other types to fixed-length type
+          char* value = static_cast<char*>(malloc(tb_schema[ts_col].size * row_count));
+          memset(value, 0, tb_schema[ts_col].size * row_count);
+          bool need_free_bitmap = false;
+          s = ConvertToFixedLen(segment_tbl, value, cur_block_item->block_id,
+                                        static_cast<DATATYPE>(segment_schema[ts_col].type),
+                                        static_cast<DATATYPE>(tb_schema[ts_col].type),
+                                        tb_schema[ts_col].size, block_start_idx, row_count, ts_col, &bitmap_addr, need_free_bitmap);
+          if (s != KStatus::SUCCESS) {
+            free(value);
+            return s;
+          }
+          b = new Batch(static_cast<void *>(value), row_count, bitmap_addr, block_start_idx, segment_tbl);
+          b->is_new = true;
+          b->need_free_bitmap = need_free_bitmap;
+        } else {
+          if (segment_schema[ts_col].size != tb_schema[ts_col].size) {
+            // convert same fixed-length type to different length
+            char* value = static_cast<char*>(malloc(tb_schema[ts_col].size * row_count));
+            memset(value, 0, tb_schema[ts_col].size * row_count);
+            for (int idx = 0; idx < row_count; idx++) {
+              memcpy(value + idx * tb_schema[ts_col].size,
+                     segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx + idx - 1, ts_col),
+                     segment_schema[ts_col].size);
+            }
+            b = new Batch(static_cast<void *>(value), row_count, bitmap_addr, block_start_idx, segment_tbl);
+            b->is_new = true;
+          } else {
+            b = new Batch(segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx - 1, ts_col),
+                          row_count, bitmap_addr, block_start_idx, segment_tbl);
+          }
+        }
+      } else {
+        // varlen column
+        b = new VarColumnBatch(row_count, bitmap_addr, block_start_idx, segment_tbl);
+        for (k_uint32 j = 0; j < row_count; ++j) {
+          std::shared_ptr<void> data = nullptr;
+          bool is_null;
+          if (b->isNull(j, &is_null) != KStatus::SUCCESS) {
+            delete b;
+            b = nullptr;
+            return KStatus::FAIL;
+          }
+          if (is_null) {
+            data = nullptr;
+          } else {
+            if (segment_schema[ts_col].type != tb_schema[ts_col].type) {
+              // convert other types to variable length
+              data = ConvertToVarLen(segment_tbl, cur_block_item->block_id,
+                                     static_cast<DATATYPE>(segment_schema[ts_col].type),
+                                     static_cast<DATATYPE>(tb_schema[ts_col].type), block_start_idx + j - 1, ts_col);
+            } else {
+              data = segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, block_start_idx + j - 1, ts_col);
+            }
+          }
+          b->push_back(data);
+        }
+      }
+    } else {
+      void* bitmap = nullptr;  // column not exist in segment table. so return nullptr.
+      b = new Batch(bitmap, row_count, bitmap, block_start_idx, segment_tbl);
+    }
+    res->push_back(i, b);
+  }
+  return SUCCESS;
+}
+
+KStatus
+TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, ResultSet* res, uint32_t row_count) {
+  std::shared_ptr<MMapSegmentTable> dest_segment = dest_pt->getSegmentTable(1);
+  if (!dest_segment) {
+    LOG_ERROR("Get segment table[%d] failed.", 1);
+    return FAIL;
+  }
+  // allocate block item
+  std::vector<BlockSpan> dst_spans;
+  dest_pt->AllocateAllDataSpace(entity_id, row_count, &dst_spans, dest_segment->schemaVersion());
+  vector<uint32_t> cols_idx = dest_segment->getIdxForValidCols();
+  vector<AttributeInfo> cols_info = dest_segment->GetColsInfoWithoutHidden();
+  for (int i = 0; i < cols_idx.size(); ++i) {
+    uint32_t batch_row_idx = 0;
+    const Batch* batch = res->data[i][0];
+    if (!isVarLenType(cols_info[i].type)) {
+      // fixed length
+      uint32_t total_row = 0;
+      for (BlockSpan block_span : dst_spans) {
+        MetricRowID row_id{block_span.block_item->block_id, block_span.start_row + 1};
+        if (i) {  // timestamp col is not null
+          for (int j = 0; j < block_span.row_num; j++) {
+            bool is_null = false;
+            batch->isNull(batch_row_idx, &is_null);
+            if (is_null) {
+              dest_segment->setNullBitmap(row_id, cols_idx[i]);
+            }
+            batch_row_idx++;
+            row_id.offset_row++;
+          }
+        }
+        if (batch->mem != nullptr) {
+          row_id.offset_row = block_span.start_row + 1;  // reset row_id to first row of block span
+          memcpy(dest_segment->columnAddr(row_id, cols_idx[i]), (void*)((char*)batch->mem + total_row * cols_info[i].size),
+                 block_span.row_num * cols_info[i].size);
+          total_row += block_span.row_num;
+        }
+      }
+    } else {
+      int block_span_idx = 0;
+      size_t loc = 0;
+      int count = 0;
+      // var length data, write one by one
+      uint32_t cur_block_row = dst_spans[block_span_idx].start_row;
+      for (uint32_t row_idx = 0; row_idx < row_count; ++row_idx, ++cur_block_row) {
+        bool is_null = false;
+        batch->isNull(batch_row_idx, &is_null);
+        batch_row_idx++;
+        if (is_null) {
+          MetricRowID row_id{dst_spans[block_span_idx].block_item->block_id, cur_block_row + 1};
+          dest_segment->setNullBitmap(row_id, cols_idx[i]);
+          continue;
+        }
+        char* var_addr = (char*)batch->getVarColData(row_idx);
+        uint16_t var_c_len = batch->getVarColDataLen(row_idx);
+        MMapStringColumn* dest_str_file = dest_segment->GetStringFile();
+        // check string file size
+        if (var_c_len + dest_str_file->size() >= dest_str_file->fileLen()) {
+          int err_code = 0;
+          if (dest_str_file->fileLen() > 1024 * 1024 * 1024) {
+            size_t new_size = dest_str_file->size() / 2;
+            err_code = dest_str_file->reserve(dest_str_file->size(), 3 * new_size, 2);
+          } else {
+            err_code = dest_str_file->reserve(dest_str_file->size(), 2 * dest_str_file->fileLen(), 2);
+          }
+          if (err_code < 0) {
+            LOG_ERROR("MMapStringColumn[%s] reserve failed.", dest_str_file->strFile().realFilePath().c_str());
+            return FAIL;
+          }
+        }
+        // write data to string file
+        if (cols_info[i].type == VARSTRING) {
+          loc = dest_str_file->push_back(var_addr, var_c_len);
+        } else {
+          loc = dest_str_file->push_back_binary(var_addr, var_c_len);
+        }
+        if (loc == 0) {
+          LOG_ERROR("StringFile push bach failed.");
+          return FAIL;
+        }
+        if (dst_spans[block_span_idx].row_num == count) {
+          ++block_span_idx;
+          count = 0;
+          cur_block_row = dst_spans[block_span_idx].start_row;
+        }
+        // write string location to column file
+        MetricRowID row_id{dst_spans[block_span_idx].block_item->block_id, cur_block_row + 1};
+        memcpy(dest_segment->columnAddr(row_id, cols_idx[i]), &loc, cols_info[i].size);
+        ++count;
+      }
+    }
+  }
+  // update aggregate result
+  for (BlockSpan block_span : dst_spans) {
+    block_span.block_item->publish_row_count += block_span.row_num;
+    if (block_span.block_item->publish_row_count >= block_span.block_item->max_rows_in_block) {
+      dest_segment->updateAggregateResult(block_span, true);
+    } else {
+      AggDataAddresses addresses{};
+      MetricRowID row_id{block_span.block_item->block_id, block_span.start_row + 1};
+      dest_segment->columnAggCalculate(block_span, row_id, 0, addresses, block_span.row_num, false);
+      block_span.block_item->max_ts_in_block = KTimestamp(addresses.max);
+      block_span.block_item->min_ts_in_block = KTimestamp(addresses.min);
+      // Update the maximum and minimum timestamp information of the current segment,
+      // which will be used for subsequent compression and other operations
+      if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {
+        dest_segment->maxTimestamp() = KTimestamp(addresses.max);
+      }
+      if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
+        dest_segment->minTimestamp() = KTimestamp(addresses.min);
+      }
+    }
+  }
+  return SUCCESS;
+}
+
+KStatus TsTimePartition::ReOrderSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables,
+  uint32_t max_segment_id, uint32_t max_dest_block_id, const std::string& partition_path, const std::string& dest_path,
+  uint32_t* offset) {
+  bool first_loop = true;
+  BLOCK_ID new_segment_id =0;
+  // Segment IDs are arranged in descending order from largest to smallest
+  for (const auto& segment : segment_tables) {
+    if (segment->segment_id() <= max_segment_id) {
+      break;
+    }
+    if (first_loop) {
+      *offset = segment->segment_id() - max_dest_block_id - 1;
+      first_loop = false;
+    }
+    new_segment_id = segment->segment_id() - *offset;
+    std::string segment_dir_path = partition_path + std::to_string(segment->segment_id()) + '/';
+    std::string new_segment_dir_path = dest_path + std::to_string(new_segment_id) + '/';
+    std::string cmd = "cp -rf " + segment_dir_path + " " + new_segment_dir_path;
+    if (!System(cmd)) {
+      LOG_ERROR("Copy segment[%s] files failed, %s", segment_dir_path.c_str(), strerror(errno));
+      return FAIL;
+    }
+  }
+}
+
+KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version, bool& drop_partition) {
+  // Step 1: Change segment status and get the necessary information
+  vacuumLock();
+  if (!EvaluateVacuum(ts, ts_version)) {
+    vacuumUnlock();
+    return SUCCESS;
+  }
+  // set revacuum flag false, if the data written after unlocking is disordered or deleted, indicates that need to
+  // vacuum again, and the flag will be set to true
+  need_revacuum_ = false;
+  std::vector<BLOCK_ID> segment_ids;
+  data_segments_.GetAllKey(&segment_ids);
+  BLOCK_ID max_segment_id = 0;
+  if (active_segment_ == nullptr) {
+    if (segment_ids.empty()) {
+      vacuumUnlock();
+      return SUCCESS;
+    }
+    max_segment_id = segment_ids.front();
+  } else {
+    max_segment_id = active_segment_->segment_id();
+  }
+  BLOCK_ID max_block_id = meta_manager_.getEntityHeader()->cur_block_id;
+  auto entities = GetEntities();
+  ChangeSegmentStatus();
+  vacuumUnlock();
+
+  // Step 2: Read all valid data of the current entities and record the number of rows
+  std::unordered_map<uint32_t, std::deque<BlockSpan>> src_spans;
+  std::vector<KwTsSpan> ts_spans;
+  ts_spans.push_back({INT64_MIN, INT64_MAX});
+  uint32_t max_block_num = 0;
+  for (uint32_t entity_id : entities) {
+    std::deque<BlockSpan> block_spans;
+    uint32_t count = GetAllBlockSpans(entity_id, ts_spans, block_spans, max_block_id);
+    // calculate temporary partition's segment need how many blocks
+    max_block_num += (count + CLUSTER_SETTING_MAX_ROWS_PER_BLOCK - 1) / CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;
+    src_spans[entity_id] = block_spans;
+    LOG_INFO("Entity: %u, blocks: %lu, count: %d", entity_id, block_spans.size(), count);
+  }
+
+  if (max_block_num == 0) {
+    vacuumLock();
+    // All the data of segment_ids has been deleted, drop segments
+    if (DropSegmentDir(segment_ids) < 0) {
+      LOG_ERROR("Drop old segments failed.");
+      vacuumUnlock();
+      return FAIL;
+    }
+    ErrorInfo err_info;
+    loadSegments(err_info);
+    segment_ids.clear();
+    data_segments_.GetAllKey(&segment_ids);
+    if (segment_ids.empty()) {
+      drop_partition = true;
+      vacuumUnlock();
+      return SUCCESS;
+    }
+    vacuumUnlock();
+  }
+
+  // Step 3: Create temporary partition.
+  TsTimePartition* dest_pt = nullptr;
+  KStatus s = PrepareTempPartition(CLUSTER_SETTING_MAX_ROWS_PER_BLOCK, max_block_num, ts_version, &dest_pt);
+  if (s != SUCCESS) {
+    return s;
+  }
+  std::string partition_dir = GetPath();
+  std::string dest_path = dest_pt->GetPath();
+  Defer defer_delete{[&]() {
+    delete dest_pt;
+    dest_pt = nullptr;
+    Remove(dest_path);
+  }};
+
+  //Step 4: Traverse all read data and write to the temporary partition
+  if (max_block_num != 0) {
+    uint32_t num_col = root_table_manager_->GetIdxForValidCols(ts_version).size();
+    for (const auto& iter : src_spans) {
+      // Check if it is necessary to suspend this vacuum.
+      if (need_revacuum_) {
+        LOG_WARN("During the vacuum process, it was discovered that the partition needed to be revacuum,"
+                 " and this vacuum is now suspended");
+        return SUCCESS;
+      }
+      // Traverse every entity's data
+      uint32_t entity_id = iter.first;
+      auto block_spans = iter.second;
+      // Traverse every block span of this entity
+      for (auto block_span : block_spans) {
+        BlockItem* cur_block_item = block_span.block_item;
+        uint32_t block_start_row = block_span.start_row;
+        uint32_t row_count = block_span.row_num;
+        std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block_item->block_id);
+        if (segment_tbl == nullptr) {
+          LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item->block_id, partition_dir.c_str());
+          return FAIL;
+        }
+        ResultSet res{num_col};
+        // Step 4.1: Read data after vacuum
+        s = GetVacuumData(segment_tbl, cur_block_item, block_start_row + 1, row_count, ts_version, &res);
+        if (s != SUCCESS) {
+          LOG_ERROR("Get vacuum data failed.");
+          // Defer will clear data
+          return s;
+        }
+        // Step 4.2: Write into des_pt.
+        s = WriteVacuumData(dest_pt, entity_id, &res, row_count);
+        if (s != SUCCESS) {
+          LOG_ERROR("Get vacuum data failed.");
+          // Defer will clear data
+          return s;
+        }
+      }
+      EntityItem* entity_item = dest_pt->getEntityItem(entity_id);
+      entity_item->max_ts = getEntityItem(entity_id)->max_ts;
+      entity_item->min_ts = getEntityItem(entity_id)->min_ts;
+    }
+  }
+
+  // Step 5: Copy added segment files from original partition to the temporary and update status
+  dest_pt->minTimestamp() = minTimestamp();
+  dest_pt->maxTimestamp() = maxTimestamp();
+  std::shared_ptr<MMapSegmentTable> dest_segment = dest_pt->getSegmentTable(1);
+  dest_segment->setSegmentStatus(InActiveSegment);
+  // Copy added segment files
+  vacuumLock();
+  Defer defer{[&]() { vacuumUnlock(); }};
+  if (need_revacuum_) {
+    LOG_WARN("During the vacuum process, it was discovered that the partition needed to be revacuum,"
+         " and this vacuum is now suspended");
+    return SUCCESS;
+  }
+  std::vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
+  data_segments_.GetAllValue(&segment_tables);
+  BLOCK_ID offset = UINT32_MAX;
+  if (segment_tables.front()->segment_id() != max_segment_id) {
+    if (max_block_num == 0) {
+      s = ReOrderSegments(segment_tables, max_segment_id, 0, partition_dir, dest_path, &offset);
+    } else {
+      s = ReOrderSegments(segment_tables, max_segment_id, dest_pt->GetMaxBlockID(), partition_dir, dest_path, &offset);
+    }
+    if (s != SUCCESS) {
+      return s;
+    }
+  } else {
+    dest_segment->setSegmentStatus(ActiveSegment);
+  }
+  // Step 6: Rebuild added block_item
+  for (BLOCK_ID block_id = max_block_id + 1; block_id <= GetMaxBlockID(); ++block_id) {
+    BlockItem* block_item = GetBlockItem(block_id);
+    BlockItem* new_block_item;
+    dest_pt->meta_manager_.AddBlockItem(block_item->entity_id, &new_block_item);
+    assert(block_id - new_block_item->block_id == offset);
+    memcpy(&new_block_item->crc, &block_item->crc, sizeof(uint32_t) + 4 * sizeof(bool) + sizeof(BLOCK_ID));
+    memcpy(&new_block_item->publish_row_count, &block_item->publish_row_count, 3 * sizeof(uint32_t) + 128 + 28);
+  }
+
+  // Step 7: Drop partition's old segments and move vacuumed segments to original partition
+  segment_ids.clear();
+  data_segments_.GetAllKey(&segment_ids);
+  if (DropSegmentDir(segment_ids) < 0) {
+    LOG_ERROR("Drop old segments failed.");
+    return FAIL;
+  }
+  data_segments_.Clear();
+
+  std::string cmd = "mv " + dest_path + "* " + partition_dir;
+  if (!System(cmd)) {
+    LOG_ERROR("mv tmp partition dir failed");
+    // mv failed, still need to reload meta and segments, not return fail
+  }
+  // Step 8: Reload partition
+  // reopen meta.0
+  ErrorInfo err_info;
+  if (openBlockMeta(MMAP_OPEN_NORECURSIVE, err_info) < 0) {
+    LOG_ERROR("Reopen block meta failed, error: %s", err_info.errmsg.c_str());
+    return FAIL;
+  }
+  // reload segments
+  if (loadSegments(err_info) < 0) {
+    LOG_ERROR("Reload segments failed, error: %s", err_info.errmsg.c_str());
+    return FAIL;
+  }
+  if (root_table_manager_->GetTableVersionOfLatestData() < ts_version) {
+    root_table_manager_->UpdateTableVersionOfLastData(ts_version);
+  }
+  ResetVacuumFlags();
+  return SUCCESS;
 }
 
 // Get segments that require compression processing
@@ -602,17 +1083,16 @@ std::vector<std::shared_ptr<MMapSegmentTable>> TsTimePartition::GetAllSegmentsFo
 
 void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
   auto segment_tables = GetAllSegmentsForCompressing();
-
   int num_of_active_segments = 0;
   for (auto iSegmentTable : segment_tables) {
     if (iSegmentTable->getSegmentStatus() == ActiveSegment) {
       num_of_active_segments++;
       iSegmentTable->setSegmentStatus(InActiveSegment);
-      MUTEX_LOCK(segments_lock_);
-      Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+      MUTEX_LOCK(active_segment_lock_);
       if (active_segment_ && active_segment_->segment_id() == iSegmentTable->segment_id()) {
         active_segment_ = nullptr;
       }
+      MUTEX_UNLOCK(active_segment_lock_);
     }
   }
 
@@ -653,9 +1133,7 @@ void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
 }
 
 void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_info) {
-  
   auto segment_tables = GetAllSegmentsForCompressing();
-  
   // Traverse the segments that need to be processed
   // There are three types of processing for segments
   //   1.ActiveSegment/ActiveInWriteSegment
@@ -675,11 +1153,11 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_
           if (segment_tbl->maxTimestamp() / 1000 < compress_ts
               && segment_tbl->size() >= 0.9 * segment_tbl->getReservedRows()) {
             segment_tbl->setSegmentStatus(InActiveSegment);
-            MUTEX_LOCK(segments_lock_);
-            Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+            MUTEX_LOCK(active_segment_lock_);
             if (active_segment_ && active_segment_->segment_id() == segment_tbl->segment_id()) {
               active_segment_ = nullptr;
             }
+            MUTEX_UNLOCK(active_segment_lock_);
           }
         } else {
           // For segments in partitions with all data timestamps less than compress_ts,
@@ -690,11 +1168,11 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_
           int64_t modify_time = ModifyTime(ts_file_path);
           if (modify_time <= now() - g_compress_interval || modify_time <= compress_ts) {
             segment_tbl->setSegmentStatus(InActiveSegment);
-            MUTEX_LOCK(segments_lock_);
-            Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+            MUTEX_LOCK(active_segment_lock_);
             if (active_segment_ && active_segment_->segment_id() == segment_tbl->segment_id()) {
               active_segment_ = nullptr;
             }
+            MUTEX_UNLOCK(active_segment_lock_);
           }
         }
         break;
@@ -777,13 +1255,14 @@ int TsTimePartition::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64
   EntityItem* entity_item = getEntityItem(entity_id);
   if (entity_item->cur_block_id == 0) {
     deleteEntityItem(entity_id);
+    SetDeleted();
     return 0;
   }
   meta_manager_.lock();
   BLOCK_ID block_item_id = entity_item->cur_block_id;
   // Delete from current block in reverse order
   while (true) {
-    BlockItem* block_item = getBlockItem(block_item_id);
+    BlockItem* block_item = GetBlockItem(block_item_id);
     if (block_item->block_id == 0) {
       LOG_WARN("BlockItem[%d, %d] error: No space has been allocated", entity_id, block_item_id)
       continue;
@@ -801,6 +1280,8 @@ int TsTimePartition::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64
 
   // Mark the entity item deleted.
   deleteEntityItem(entity_id);
+  // As long as there is data deletion in this partition, it needs to be reorganized
+  SetDeleted();
   meta_manager_.unlock();
   return 0;
 }
@@ -814,7 +1295,7 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
   BLOCK_ID block_item_id = entity_item->cur_block_id;
 
   while (block_item_id != 0) {
-    BlockItem* block_item = getBlockItem(block_item_id);
+    BlockItem* block_item = GetBlockItem(block_item_id);
     std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block_item->block_id);
     if (segment_tbl == nullptr) {
       LOG_WARN("Segment [%s] is null", (db_path_ + segment_tbl_sub_path(block_item->block_id)).c_str());
@@ -852,6 +1333,8 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
       }
       (*count)++;
       delete_num++;
+      // As long as there is data deletion in this partition, it needs to be reorganized
+      SetDeleted();
     }
     if (!evaluate_del) {
       entity_item_latch->Lock(entity_id);
@@ -889,7 +1372,7 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
   // Iterate through all blocks and verify if there is matching data (with identical timestamp and LSN).
   // If such data is found, an undo operation is required to mark the data as deleted.
   while (block_item_id != 0 && p_count > 0) {
-    BlockItem* block_item = getBlockItem(block_item_id);
+    BlockItem* block_item = GetBlockItem(block_item_id);
     if (block_item == nullptr) {
       LOG_ERROR("BlockItem[%d, %d] error: block_item is null", entity_id, block_item_id);
       return KWENOOBJ;
@@ -939,6 +1422,7 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
       if (ts_lsn->lsn != lsn) {
         continue;
       }
+      SetDeleted();
       block_item->setDeleted(row_idx);
       block_item->is_agg_res_available = false;
       p_count--;
@@ -963,7 +1447,7 @@ int TsTimePartition::UndoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
      3. undo delete needs to change the bit corresponding to the row that was set to 1 during deletion back to 0
      */
   for (auto row_span : *rows) {
-    BlockItem* block_item = getBlockItem(row_span.blockitem_id);
+    BlockItem* block_item = GetBlockItem(row_span.blockitem_id);
     for (int i = 0; i < block_item->publish_row_count; i++) {
       if (isRowDeleted(row_span.delete_flags, i + 1)) {
         setRowValid(block_item->rows_delete_flags, i + 1);
@@ -1020,7 +1504,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
   kwdbts::DedupInfo dedup_info;
   int deleted_rows = 0;
   {
-    MUTEX_LOCK(partition_table_latch_);
+    MUTEX_LOCK(vacuum_insert_lock_);
     // 2.GetAndAllocateAllDataSpace finds the block corresponding to the data that has been written,
     // rolls it back, writes it to alloc_spans,
     // and then requests the block needed for the data that has not been written, and writes it to alloc_spans.
@@ -1029,7 +1513,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     if (err_code < 0) {
       err_info.errcode = err_code;
       err_info.errmsg = "AllocateSpace failed : " + string(strerror(errno));
-      MUTEX_UNLOCK(partition_table_latch_);
+      MUTEX_UNLOCK(vacuum_insert_lock_);
       return err_code;
     }
     EntityItem* entity_item = getEntityItem(entity_id);
@@ -1049,6 +1533,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     if (payload->IsDisordered(start_row, num) ||
         (entity_item->max_ts != INVALID_TS && pl_min <= entity_item->max_ts)) {
       entity_item->is_disordered = true;
+      SetDisordered();
     }
     // Update the maximum and minimum timestamps of entity_items to prepare for subsequent payload deduplication.
     if (pl_max > entity_item->max_ts || entity_item->max_ts == INVALID_TS) {
@@ -1057,14 +1542,14 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     if (pl_min < entity_item->min_ts || entity_item->min_ts == INVALID_TS) {
       entity_item->min_ts = pl_min;
     }
-    MUTEX_UNLOCK(partition_table_latch_);
+    MUTEX_UNLOCK(vacuum_insert_lock_);
   }
   DedupResult* dedup_result = new DedupResult();
   // before return, need publish inserted data and update meta datas.
   Defer defer{[&]() {
     delete dedup_result;
     std::vector<size_t> full_block_idx;
-    MUTEX_LOCK(partition_table_latch_);
+    MUTEX_LOCK(vacuum_insert_lock_);
     TsHashLatch* entity_item_latch = GetEntityItemLatch();
     entity_item_latch->Lock(entity_id);
     EntityItem* entity_item = getEntityItem(entity_id);
@@ -1080,7 +1565,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
       const BlockSpan& span = (*alloc_spans)[i];
       tbl->updateAggregateResult(span, true);
     }
-    MUTEX_UNLOCK(partition_table_latch_);
+    MUTEX_UNLOCK(vacuum_insert_lock_);
   }};
 
   // 3.Deduplication is performed and the payload is updated according
@@ -1138,7 +1623,7 @@ int TsTimePartition::RedoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
                                 const vector<DelRowSpan>* rows, ErrorInfo& err_info) {
   for (auto row_span : *rows) {
     // Retrieve the block item based on its ID
-    BlockItem* block_item = getBlockItem(row_span.blockitem_id);
+    BlockItem* block_item = GetBlockItem(row_span.blockitem_id);
     for (int i = 0; i < 128; ++i) {
       // Iterate through each bit in the delete flags
       if (row_span.delete_flags[i] == 0) {
@@ -1153,10 +1638,6 @@ int TsTimePartition::RedoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
 
 int TsTimePartition::GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse) {
   return meta_manager_.GetAllBlockItems(entity_id, block_items, reverse);
-}
-
-BlockItem* TsTimePartition::GetBlockItem(BLOCK_ID item_id) {
-  return meta_manager_.GetBlockItem(item_id);
 }
 
 int TsTimePartition::AllocateAllDataSpace(uint entity_id, size_t batch_num, std::vector<BlockSpan>* spans,
@@ -1288,7 +1769,7 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
   if (entity_item->cur_block_id == 0) {
     need_add_block_item = true;
   } else {
-    block_item = getBlockItem(entity_item->cur_block_id);
+    block_item = GetBlockItem(entity_item->cur_block_id);
     // If all the space in the current BlockItem has been allocated or is unavailable, then it is necessary to add a new BlockItem.
     if (isReadOnly(block_item, payload_table_version)) {
       need_add_block_item = true;
@@ -1301,8 +1782,8 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
     if (err_code < 0) return err_code;
 
     // Allocates a new data block.
-    MUTEX_LOCK(segments_lock_);
-    Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+    MUTEX_LOCK(active_segment_lock_);
+    Defer defer{[&]() { MUTEX_UNLOCK(active_segment_lock_); }};
     // Checks if the current segment is already full.
     BLOCK_ID segment_block_num = meta_manager_.getEntityHeader()->cur_block_id
                                  - meta_manager_.getEntityHeader()->cur_datafile_id;
@@ -1379,6 +1860,7 @@ void TsTimePartition::publish_payload_space(const std::vector<BlockSpan>& alloc_
         continue;
       }
       BlockItem* cur_blk_item = meta_manager_.GetBlockItem(delete_row.block_id);
+      SetDeleted();
       cur_blk_item->setDeleted(delete_row.offset_row);
       delete_num++;
     }
@@ -1608,6 +2090,7 @@ void TsTimePartition::waitBlockItemDataFilled(uint entity_id, BlockItem* block_i
     }
     // If the current row's waiting time exceeds 10 seconds, it is marked as deleted
     if (time(nullptr) - begin_time > 10) {  // check overtime, mark row deleted.
+      SetDeleted();
       block_item->setDeleted(cur_read_rownum);
       LOG_WARN("check lsn overtime, mark this row deleted. entity:%u, block:%u, row: %u", entity_id,
                real_row.block_id, real_row.offset_row);
@@ -1951,11 +2434,12 @@ int TsTimePartition::FindFirstBlockItem(uint32_t entity_id, kwdbts::TS_LSN lsn, 
 }
 
 int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>& ts_spans,
-                                         std::deque<BlockSpan>& block_spans, bool compaction, bool reverse) {
+                                         std::deque<BlockSpan>& block_spans, uint32_t max_block_id, bool reverse) {
   std::deque<BlockItem*> block_queue;
   GetAllBlockItems(entity_id, block_queue);
   EntityItem *entity = getEntityItem(entity_id);
 
+  uint32_t count = 0;
   if (!entity->is_disordered) {
     while (!block_queue.empty()) {
       BlockItem* block_item = block_queue.front();
@@ -1974,6 +2458,7 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
           if (i > first_row) {
             reverse ? block_spans.push_front({block_item, first_row - 1, i - first_row}) :
                       block_spans.push_back({block_item, first_row - 1, i - first_row});
+            count += i - first_row;
           }
           first_row = i + 1;
           continue;
@@ -1983,13 +2468,14 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
       if (first_row <= block_item->publish_row_count) {
         reverse ? block_spans.push_front({block_item, first_row - 1, block_item->publish_row_count - first_row + 1}) :
                   block_spans.push_back({block_item, first_row - 1, block_item->publish_row_count - first_row + 1});
+        count += block_item->publish_row_count - first_row + 1;
       }
     }
-    return 0;
+    return count;
   }
 
   vector<vector<timestamp64>> intervals;
-  map<pair<timestamp64, timestamp64>, BlockItem*> interval_block_map;
+  map<pair<timestamp64, timestamp64>, vector<BlockItem*>> interval_block_map;
   while (!block_queue.empty()) {
     BlockItem* cur_block = block_queue.front();
     block_queue.pop_front();
@@ -1997,8 +2483,10 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
     timestamp64 min_ts, max_ts;
     GetBlkMinMaxTs(cur_block, segment_tbl.get(), min_ts, max_ts);
     if (isTimestampInSpans(ts_spans, min_ts, max_ts) && cur_block->publish_row_count > 0) {
-      intervals.push_back({min_ts, max_ts});
-      interval_block_map[{min_ts, max_ts}] = cur_block;
+      if (!interval_block_map.count({min_ts, max_ts})) {
+        intervals.push_back({min_ts, max_ts});
+      }
+      interval_block_map[{min_ts, max_ts}].push_back(cur_block);
     }
   }
 
@@ -2011,7 +2499,9 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
       if (interval[1] > block_items.back().first.second) {
         block_items.back().first.second = interval[1];
       }
-      block_items.back().second.push_back(interval_block_map[{interval[0], interval[1]}]);
+      block_items.back().second.insert(block_items.back().second.end(),
+                                       interval_block_map[{interval[0], interval[1]}].begin(),
+                                       interval_block_map[{interval[0], interval[1]}].end());
     }
   }
   intervals.clear();
@@ -2022,18 +2512,13 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
     if (blocks.size() == 1 && !blocks[0]->unordered_flag) {
       BlockSpan block_span = BlockSpan{blocks[0], 0, blocks[0]->publish_row_count};
       reverse ? block_spans.push_front(block_span) : block_spans.push_back(block_span);
+      count += block_span.row_num;
     } else {
       std::multimap<timestamp64, MetricRowID> ts_order;  // Save every undeleted row_id under each timestamp
       for (auto block : blocks) {
-        if (compaction && block->block_id > entity->max_compacting_block) {
-          // Because TsTimePartition::CompactingStatus set that max_compacting_block must be the largest block of
-          // the segment to which it belongs, and the next block must be the next segment, the reorganization is only
-          // done for max_compacting_block to ensure that the segment being written will not be reorganized
-          // TODO(qlp): TsSortedRowDataIterator is not necessarily only for data reorganization, it is better
-          //  to write a class in the future that inherits TsSortedRowDataIterator and only for data reorganization
-          entity->max_compacting_block = 0;
-          // The purpose of limiting the read range of the iterator with max_compacting_block has been achieved,
-          // remember to reset to zero
+        if (block->block_id > max_block_id) {
+          // When vacuum calls this function, the max_block_id passed in indicates that the traversal is over
+          // at the end of the block, and the other time, max_block_id = INT32_MAX.
           break;
         }
         std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block->block_id);
@@ -2067,8 +2552,9 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
           // the data that has just been checked to be continuous is stored and the next check is started
           if (block_span.row_num > 0) {
             reverse ? block_spans.push_front(block_span) : block_spans.push_back(block_span);
+            count += block_span.row_num;
           }
-          block_span = BlockSpan{getBlockItem(cur_row_id.block_id), cur_row_id.offset_row - 1, 1};
+          block_span = BlockSpan{GetBlockItem(cur_row_id.block_id), cur_row_id.offset_row - 1, 1};
         } else {
           block_span.row_num++;
         }
@@ -2077,26 +2563,22 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
 
       if (block_span.row_num > 0) {
         reverse ? block_spans.push_front(block_span) : block_spans.push_back(block_span);
+        count += block_span.row_num;
       }
     }
   }
-
-  return 0;
+  return count;
 }
 
-
-int TsTimePartition::CompactingStatus(std::map<uint32_t, BLOCK_ID>& obsolete_max_block,
-                                         std::vector<BLOCK_ID>& obsolete_segment_ids) {
-  // Stop writing of the segment when CompactData
-  MUTEX_LOCK(segments_lock_);
-  Defer defer{[&]() { MUTEX_UNLOCK(segments_lock_); }};
+void TsTimePartition::ChangeSegmentStatus() {
+  // Stop writing of the segment when vacuum
+  MUTEX_LOCK(active_segment_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(active_segment_lock_); }};
 
   if (active_segment_ != nullptr) {
     active_segment_->setSegmentStatus(InActiveSegment);
     active_segment_ = nullptr;
   }
-
-  data_segments_.GetAllKey(&obsolete_segment_ids);
   // Set all the segments of this partition to InActiveSegment
   data_segments_.Traversal([&](BLOCK_ID s_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
     if (tbl->sqfsIsExists()) {
@@ -2117,23 +2599,8 @@ int TsTimePartition::CompactingStatus(std::map<uint32_t, BLOCK_ID>& obsolete_max
     if (tbl->getSegmentStatus() < InActiveSegment) {
       tbl->setSegmentStatus(InActiveSegment); // include original active_segment_
     }
-
     return true;
   });
-
-  std::vector<uint32_t> entity_ids = GetEntities();
-  for (uint32_t& entity_id : entity_ids) {
-    EntityItem* entity = getEntityItem(entity_id);
-    if (!entity->is_deleted) {
-      obsolete_max_block[entity_id] = entity->cur_block_id;
-      entity->max_compacting_block = entity->cur_block_id;
-    } else {
-      obsolete_max_block[entity_id] = 0;
-      // It is marked that entity has been removed, and need turn is_disordered back to false after apply
-      entity->max_compacting_block = 0;
-    }
-  }
-  return 0;
 }
 
 int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
@@ -2152,15 +2619,4 @@ int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
   }
   releaseSegments();
   return 0;
-}
-
-bool TsTimePartition::NeedCompaction(uint32_t entity_id) {
-  EntityItem* entity = getEntityItem(entity_id);
-  // Make sure that this entity has data in this Partition and set disordered,
-  // if the entity has been set deleted, the entity->is_disordered should be true,
-  // in order to be reorganized to release space.
-  if (entity && entity->cur_block_id > 0 && entity->need_compact) {
-    return true;
-  }
-  return false;
 }

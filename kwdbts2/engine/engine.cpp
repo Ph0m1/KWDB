@@ -32,55 +32,6 @@ extern std::map<std::string, std::string> g_cluster_settings;
 extern DedupRule g_dedup_rule;
 extern std::shared_mutex g_settings_mutex;
 
-std::thread compact_timer_thread;  // thread for timer of compaction
-std::thread compact_thread;  // thread for running compaction
-std::atomic<bool> compact_timer_running(false);  // compaction timer is running
-std::atomic<bool> compact_running(false);  // compaction is running
-std::condition_variable compact_timer_cv;  // to stop compactTimer
-std::mutex setting_changed_lock;
-std::mutex compact_mtx;
-
-void runCompact(kwdbts::kwdbContext_p ctx, TSEngineImpl *engine) {
-  compact_running.store(true);
-  auto now = std::chrono::system_clock::now();
-  auto t_c = std::chrono::system_clock::to_time_t(now);
-  auto ts1 = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-  LOG_INFO("Reorganization start at: %s, timestamp: %ld", std::ctime(&t_c), ts1);
-  engine->CompactData(ctx);
-  now = std::chrono::system_clock::now();
-  t_c = std::chrono::system_clock::to_time_t(now);
-  auto ts2 = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-  auto ts = ts2 - ts1;
-  LOG_INFO("Reorganization finish at: %s, timestamp: %ld", std::ctime(&t_c), ts2);
-  LOG_INFO("Time: %ld ms", ts);
-  compact_running.store(false);
-}
-
-void compactTimer(kwdbts::kwdbContext_p ctx, TSEngineImpl *engine, int64_t sec) {
-  while (true) {
-    if (compact_running.load()) {  // compaction is running, wait for the next time up
-      LOG_INFO("compaction is running, wait for the next time up");
-    } else {  // compaction is not running, then join the last run and start the next run
-      if (compact_thread.joinable()) {
-        compact_thread.join();
-      }
-      compact_thread = std::thread(runCompact, ctx, engine);
-    }
-
-    std::unique_lock<std::mutex> lock(compact_mtx);
-    // escape wait_for only when time up or compact_timer_running
-    compact_timer_cv.wait_for(lock, std::chrono::seconds(sec), [] { return !compact_timer_running.load(); });
-    if (!compact_timer_running.load()) {
-      LOG_INFO("%ld sec Timer stop", sec);
-      if (compact_thread.joinable()) {  // join thread and stop
-        compact_thread.join();
-      }
-      return;
-    }
-    LOG_INFO("%ld Timer is up!", sec);
-  }
-}
-
 namespace kwdbts {
 int32_t EngineOptions::iot_interval  = 864000;
 string EngineOptions::home_;  // NOLINT
@@ -208,7 +159,6 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
 
 KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) {
   LOG_INFO("start drop table %ld", table_id);
-  // Create TsTable in the database root directory
   {
     std::shared_ptr<TsTable> table;
     ErrorInfo err_info;
@@ -216,9 +166,9 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
     if (s == FAIL) {
       s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
       if (s == FAIL) {
-        LOG_INFO("drop table %ld failed", table_id);
+        LOG_ERROR("drop table [%ld] failed", table_id);
       } else {
-        LOG_INFO("drop table %ld succeeded", table_id);
+        LOG_INFO("drop table [%ld] succeeded", table_id);
       }
       return s;
     }
@@ -246,11 +196,12 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
 #ifndef KWBASE_OSS
   TsConfigAutonomy::RemoveTableStatisticInfo(table_id);
 #endif
-  LOG_INFO("drop table %ld succeeded", table_id);
+  LOG_INFO("drop table [%ld] succeeded", table_id);
   return SUCCESS;
 }
 
-KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) {
+KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts,
+                                      bool enable_vacuum, uint32_t ts_version) {
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == FAIL) {
@@ -259,7 +210,7 @@ KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_
   }
 
   ErrorInfo err_info;
-  s = table->Compress(ctx, ts, err_info);
+  s = table->Compress(ctx, ts, enable_vacuum, ts_version, err_info);
   if (s == KStatus::FAIL) {
     LOG_ERROR("table[%lu] compress failed", table_id);
   }
@@ -275,7 +226,7 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
     tags_table = table;
     return SUCCESS;
   } else if (table && table->IsDropped()) {
-    LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
+    err_info.setError(KWENOOBJ);
     return FAIL;
   }
 
@@ -288,7 +239,6 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
     tags_table = table;
     return SUCCESS;
   } else if (table && table->IsDropped()) {
-    LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
     return FAIL;
   }
 
@@ -1288,87 +1238,6 @@ KStatus TSEngineImpl::AlterColumnType(kwdbContext_p ctx, const KTableKey& table_
     return s;
   }
 
-  return KStatus::SUCCESS;
-}
-
-KStatus TSEngineImpl::SettingChangedSensor() {
-  while (wait_setting_) {  // false only when CloseSettingChangedSensor
-    std::unique_lock<std::mutex> lock(setting_changed_lock);
-    // waiting for the setting is changed
-    // wait() will release setting_changed_lock, and lock it back when waking up.
-    g_setting_changed_cv.wait(lock, [this] { return g_setting_changed.load() || !wait_setting_; } );
-    if (!wait_setting_) {
-      break;
-    }
-    g_setting_changed.store(false);
-
-    // check which setting is changed
-    if (engine_autovacuum_interval_ != g_input_autovacuum_interval) {
-      engine_autovacuum_interval_ = g_input_autovacuum_interval;
-      kwdbContext_t context;
-      kwdbContext_p ctx_p = &context;
-      resetCompactTimer(ctx_p);
-    }
-  }
-  return KStatus::SUCCESS;
-}
-
-KStatus TSEngineImpl::CloseSettingChangedSensor() {
-  {
-    std::unique_lock<std::mutex> lock(setting_changed_lock);
-    wait_setting_ = false;
-    g_setting_changed.store(true);
-  }
-  g_setting_changed_cv.notify_one();  // let SettingChangedSensor escape while loop
-  return KStatus::SUCCESS;
-}
-
-KStatus TSEngineImpl::resetCompactTimer(kwdbContext_p ctx) {
-  // Coming to this point indicates that engine_autovacuum_interval_ is different from the original
-  if (compact_timer_running.load()) {  // stop the running timer
-    compact_timer_running.store(false);
-    compact_timer_cv.notify_one();  // notify compactTimer to stop.
-    if (compact_timer_thread.joinable()) {
-      compact_timer_thread.join();
-    }
-  }
-
-  if (engine_autovacuum_interval_ > 0) {
-    compact_timer_running.store(true);
-    compact_timer_thread = std::thread(compactTimer, ctx, this, engine_autovacuum_interval_);
-  }
-  return KStatus::SUCCESS;
-}
-
-KStatus TSEngineImpl::CompactData(kwdbContext_p ctx) {
-  KwTsSpan ts_span = KwTsSpan{INT64_MIN, INT64_MAX};
-
-  std::vector<TSTableID> table_id_list;
-  GetTableIDList(ctx, table_id_list);
-  for (TSTableID table_id : table_id_list) {
-    std::shared_ptr<TsTable> table;
-    ErrorInfo err_info;
-
-    KStatus s = GetTsTable(ctx, table_id, table, err_info);
-    if (s != KStatus::SUCCESS) {
-      s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
-      return s;
-    }
-    RangeGroups groups;
-    Defer defer{[&]() {
-      free(groups.ranges);
-    }};
-    s = table->GetEntityGroups(ctx, &groups);
-    if (s != KStatus::SUCCESS) {
-      return s;
-    }
-    for (int i = 0; i < groups.len; i++) {
-      s = table->CompactData(ctx, groups.ranges[i].range_group_id, ts_span);
-      if (s != KStatus::SUCCESS) {
-        return s;
-      }
-    }
-  }
   return KStatus::SUCCESS;
 }
 

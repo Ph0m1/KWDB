@@ -31,11 +31,6 @@
 using namespace kwdbts; // NOLINT
 const TSStatus kTsSuccess = {NULL, 0};
 
-extern std::condition_variable g_setting_changed_cv;
-extern std::mutex setting_changed_lock;  // protect g_setting_changed_cv
-extern std::atomic<bool> g_setting_changed;
-extern int64_t g_input_autovacuum_interval;  // catch user's ts.autovaccum.interval input
-
 inline TSStatus ToTsStatus(const char* s, size_t len) {
   TSStatus result;
   result.len = len;
@@ -84,10 +79,12 @@ struct TSEngine {
    * @brief Compress the segment whose maximum timestamp in the time series table is less than ts
    * @param[in] table_id id of the time series table
    * @param[in] ts A timestamp that needs to be compressed
+   * @param[in] enable_vacuum Whether to start vacuum
    *
    * @return KStatus
    */
-  virtual KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) = 0;
+  virtual KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts,
+                                  bool enable_vacuum, uint32_t ts_version) = 0;
 
   /**
    * @brief get ts table object
@@ -470,12 +467,6 @@ struct TSEngine {
                                   TSSlice new_column, TSSlice origin_column,
                                   uint32_t cur_version, uint32_t new_version, string& msg) = 0;
 
-  virtual KStatus SettingChangedSensor() = 0;
-
-  virtual KStatus CloseSettingChangedSensor() = 0;
-
-  virtual KStatus CompactData(kwdbContext_p ctx) = 0;
-
   /**
    * @brief : Gets the number of remaining threads from the thread pool and
    *          available memory from system
@@ -513,7 +504,8 @@ class TSEngineImpl : public TSEngine {
 
   KStatus DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) override;
 
-  KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) override;
+  KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts,
+                          bool enable_vacuum, uint32_t ts_version) override;
 
   KStatus GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& ts_table,
                      ErrorInfo& err_info = getDummyErrorInfo()) override;
@@ -568,12 +560,6 @@ class TSEngineImpl : public TSEngine {
 
   KStatus WriteSnapshotSuccess(kwdbContext_p ctx, uint64_t snapshot_id) override;
   KStatus WriteSnapshotRollback(kwdbContext_p ctx, uint64_t snapshot_id) override;
-
-  KStatus SettingChangedSensor() override;  // detect if setting is changed, and take the setting's corresponding actions
-
-  KStatus CloseSettingChangedSensor() override;
-
-  KStatus CompactData(kwdbContext_p ctx) override;
 
   KStatus DeleteRangeEntities(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t& range_group_id,
                               const HashIdSpan& hash_span, uint64_t* count, uint64_t& mtr_id) override;
@@ -678,8 +664,6 @@ class TSEngineImpl : public TSEngine {
   WALMgr* wal_sys_{nullptr};
   TSxMgr* tsx_manager_sys_{nullptr};
   std::map<uint64_t, uint64_t> range_indexes_map_{};
-  uint64_t engine_autovacuum_interval_ = 0;  // compaction interval
-  bool wait_setting_ = true;  // SettingChangedSensor is waiting for setting to be changed
 
   KStatus parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,
                           std::vector<TagInfo>& tag_schema);
@@ -709,8 +693,6 @@ class TSEngineImpl : public TSEngine {
    * @return KStatus
   */
   KStatus checkpoint(kwdbContext_p ctx);
-
-  KStatus resetCompactTimer(kwdbContext_p ctx);  // let SettingChangedSensor control the compactTimer
 
   /**
    * @brief get wal mode desc string

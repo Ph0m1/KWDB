@@ -33,7 +33,6 @@ class TestDB : public ::testing::Test {
     opts_.thread_pool_size = 2;
     opts_.task_queue_size = 10;
     opts_.lg_opts = TsLogOptions{};
-    opts_.start_vacuum = true;
     opts_.is_single_node = true;
     opts_.buffer_pool_size = 1024;
     ts_db_ = nullptr;

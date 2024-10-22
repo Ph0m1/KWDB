@@ -437,7 +437,6 @@ type Store struct {
 	sstSnapshotStorage SSTSnapshotStorage
 	protectedtsCache   protectedts.Cache
 
-	startVacuum bool
 	// gossipRangeCountdown and leaseRangeCountdown are countdowns of
 	// changes to range and leaseholder counts, after which the store
 	// descriptor will be re-gossiped earlier than the normal periodic
@@ -750,8 +749,6 @@ type StoreConfig struct {
 	// subsystem. It is queried during the GC process and in the handling of
 	// AdminVerifyProtectedTimestampRequest.
 	ProtectedTimestampCache protectedts.Cache
-
-	StartVacuum bool
 }
 
 // ConsistencyTestingKnobs is a BatchEvalTestingKnobs struct used to control the
