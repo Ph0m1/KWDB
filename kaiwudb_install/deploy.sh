@@ -241,7 +241,7 @@ function cfg_check() {
   # secure_mode check
   push_back "g_secure_mode"
   g_secure_mode=$(read_config_value $g_deploy_path/deploy.cfg global secure_mode)
-  if [ -z "$g_secure_mode" ];then
+  if [ "$g_secure_mode" != "tls" ] && [ "$g_secure_mode" != "tlcp" ] && [ "$g_secure_mode" != "insecure" ];then
     log_err "secure_mode is missing in deploy.cfg."
     exit 1
   fi

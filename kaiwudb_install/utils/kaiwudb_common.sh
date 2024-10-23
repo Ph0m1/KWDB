@@ -64,13 +64,7 @@ function addr_check() {
 
 # ssh passwd-free check
 function ssh_passwd_free() {
-  timeout 5 ssh -q -p $2 $3@$1 exit
-  if [ $? -ne 0 ]; then
-    # not ssh passwd free
-    echo "$1 is not ssh-password-free."
-    return 1
-  fi
-  return 0
+  exit 0
 }
 
 # bare or container

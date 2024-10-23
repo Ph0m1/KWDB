@@ -269,14 +269,6 @@ function recover_node() {
       echo "Restart KaiwuDB failed. For more information, use 'journalctl -u kaiwudb' to view the system logs"
       return 1
     fi
-    sleep 5
-    docker-compose down >/dev/null 2>&1
-    sudo sed -iq 's/--upgrade-complete//' /etc/kaiwudb/script/docker-compose.yml
-    kw_start
-    if [ $? -ne 0 ];then
-      echo "Restart KaiwuDB failed. For more information, use 'journalctl -u kaiwudb' to view the system logs"
-      return 1
-    fi
     sudo rm -f /etc/kaiwudb/script/docker-compose.ymlq
   fi
   local secure=$(sed -n "8p" /etc/kaiwudb/info/MODE)
