@@ -87,6 +87,7 @@ func runTimeSeriesImport(
 	})
 	closeChan := make(chan struct{}, int(parallelNums))
 	g := ctxgroup.WithContext(ctx)
+	stopChan := make(chan bool, int(parallelNums))
 	// Read csv file, convert it to datums and split datums by p_tag.
 	g.GoCtx(func(ctx context.Context) error {
 		defer func() {
@@ -95,9 +96,10 @@ func runTimeSeriesImport(
 			for _, ch := range tsInfo.datumsCh {
 				close(ch)
 			}
+			close(stopChan)
 		}()
 		log.Infof(ctx, "[import] read from csv start")
-		return tsInfo.readAndConvertTimeSeriesFiles(ctx, spec, flowCtx)
+		return tsInfo.readAndConvertTimeSeriesFiles(ctx, spec, flowCtx, stopChan)
 	})
 	// Receive datums, generate Payload and flush it to ts engine.
 	g.GoCtx(func(ctx context.Context) error {
@@ -112,6 +114,10 @@ func runTimeSeriesImport(
 	log.Infof(ctx, "[import] close rejectedHandler")
 	close(tsInfo.rejectedHandler)
 	err = gr.Wait()
+	if tsInfo.hasSwap {
+		return nil, errors.Errorf("The CSV file contains line breaks, so the IMPORT failed this time. " +
+			"The imported database/table needs to be deleted and REIMPORT with thread_concurrency='1'")
+	}
 	return &roachpb.BulkOpSummary{TimeSeriesCounts: tsInfo.result.seq, RejectedCounts: tsInfo.RejectedCount, AbandonCounts: tsInfo.AbandonCount}, err
 }
 
@@ -198,6 +204,8 @@ type timeSeriesImportInfo struct {
 	// for fast type check while converting string to datums ts col which maybe int64 or string.
 	tsColTypeMap map[int]oid.Oid
 	m1           syncutil.RWMutex
+	// Does the CSV file contain line breaks
+	hasSwap bool
 }
 
 // datumsInfo channel passed datums between readAndConvert and buildPayloadAndSend. which canbe assaigned by priVal
@@ -335,7 +343,10 @@ func initPrettyColsAndComputeColumnSize(
 
 // readAndConvertTimeSeriesFiles concurrency worker maker
 func (t *timeSeriesImportInfo) readAndConvertTimeSeriesFiles(
-	ctx context.Context, spec *execinfrapb.ReadImportDataSpec, flowCtx *execinfra.FlowCtx,
+	ctx context.Context,
+	spec *execinfrapb.ReadImportDataSpec,
+	flowCtx *execinfra.FlowCtx,
+	stopChan chan bool,
 ) error {
 	dataFiles := spec.Uri
 	done := ctx.Done()
@@ -347,7 +358,7 @@ func (t *timeSeriesImportInfo) readAndConvertTimeSeriesFiles(
 		default:
 		}
 		if err := ctxgroup.GroupWorkers(ctx, len(t.fileSplitInfos[dataFileIdx]), func(ctx context.Context, id int) error {
-			return t.readAndConvertTimeSeriesFile(ctx, flowCtx, dataFile, t.fileSplitInfos[dataFileIdx][id], spec.Table.IntoCols)
+			return t.readAndConvertTimeSeriesFile(ctx, flowCtx, dataFile, t.fileSplitInfos[dataFileIdx][id], spec.Table.IntoCols, stopChan)
 		}); err != nil {
 			log.Infof(ctx, "[import] read file failed,file %s, errmsg %s", dataFile, err.Error())
 		}
@@ -515,6 +526,7 @@ func (t *timeSeriesImportInfo) readAndConvertTimeSeriesFile(
 	filename string,
 	pf partFileInfo,
 	intoCols []string,
+	stopChan chan bool,
 ) error {
 	var count int64
 	conf, err := cloud.ExternalStorageConfFromURI(filename)
@@ -547,7 +559,19 @@ func (t *timeSeriesImportInfo) readAndConvertTimeSeriesFile(
 		expectedColsLen = len(intoCols)
 	}
 	for {
+		select {
+		case <-stopChan:
+			return errors.Errorf("Other thread processed contains line breaks, stop all threads")
+		default:
+		}
 		record, err := csvReader.Read()
+		if csvReader.HasSwap {
+			log.Warningf(ctx, "The line being processed by the current thread [%d] contains line breaks. "+
+				"Stop all threads of IMPORT")
+			t.hasSwap = true
+			stopChan <- true
+			return errors.Errorf("The thread processed contains line breaks, stop all threads")
+		}
 		// file read finished
 		if err == io.EOF {
 			err = nil

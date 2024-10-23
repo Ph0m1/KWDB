@@ -217,6 +217,9 @@ type Reader struct {
 
 	// The charset of CSV
 	Charset string
+
+	// Does the line being processed by the current thread contain line breaks
+	HasSwap bool
 }
 
 // NewReader returns a new Reader that reads from r.
@@ -597,6 +600,7 @@ parseField:
 				if j := bytes.IndexByte(field, '"'); j >= 0 {
 					// but found another ", break for error
 					col := utf8.RuneCount(fullLine[:len(fullLine)-len(line[j:])])
+					r.HasSwap = true
 					err = &ParseError{StartLine: recLine, Line: r.numLine, Column: col, Err: ErrBareQuote}
 					break parseField
 				}
