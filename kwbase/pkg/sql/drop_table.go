@@ -66,8 +66,10 @@ func (p *planner) DropTable(ctx context.Context, n *tree.DropTable) (planNode, e
 	td := make(map[sqlbase.ID]toDelete, len(n.Names))
 	for i := range n.Names {
 		tn := &n.Names[i]
-		droppedDesc, err := p.prepareDrop(ctx, tn, !n.IfExists, ResolveRequireTableDesc)
+		droppedDesc, err := p.prepareDrop(ctx, tn, !n.IfExists, ResolveRequireTableDesc, n.DropBehavior == tree.DropCascade)
 		if err != nil {
+			//if strings.Contains(err.Error(), "")
+			fmt.Println(err.Error())
 			return nil, err
 		}
 		if droppedDesc == nil {
@@ -191,12 +193,29 @@ func (*dropTableNode) Close(context.Context)        {}
 // new leases for it and existing leases are released).
 // If the table does not exist, this function returns a nil descriptor.
 func (p *planner) prepareDrop(
-	ctx context.Context, name *tree.TableName, required bool, requiredType ResolveRequiredType,
+	ctx context.Context,
+	name *tree.TableName,
+	required bool,
+	requiredType ResolveRequiredType,
+	includeOffline bool,
 ) (*sqlbase.MutableTableDescriptor, error) {
-	tableDesc, err := p.ResolveMutableTableDescriptor(ctx, name, required, requiredType)
-	if err != nil {
+	//tableDesc, err := p.ResolveMutableTableDescriptor(ctx, name, required, requiredType)
+	//if err != nil {
+	//	return nil, err
+	//}
+	lookupFlags := tree.ObjectLookupFlags{
+		CommonLookupFlags: tree.CommonLookupFlags{Required: required},
+		RequireMutable:    true,
+		IncludeOffline:    includeOffline,
+	}
+	desc, err := resolveExistingObjectImpl(ctx, p, name, lookupFlags, requiredType)
+	if err != nil || desc == nil {
 		return nil, err
 	}
+	if _, ok := desc.(*MutableTableDescriptor); !ok {
+		return nil, pgerror.Newf(pgcode.WrongObjectType, "%s is not a valid relational object", name.TableName)
+	}
+	tableDesc := desc.(*MutableTableDescriptor)
 	if tableDesc == nil {
 		return nil, err
 	}

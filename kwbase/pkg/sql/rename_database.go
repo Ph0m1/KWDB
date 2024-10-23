@@ -29,6 +29,7 @@ import (
 	"fmt"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -133,7 +134,7 @@ func (n *renameDatabaseNode) startExec(params runParams) error {
 		lookupFlags.Required = false
 		for i := range tbNames {
 			objDesc, err := phyAccessor.GetObjectDesc(ctx, p.txn, p.ExecCfg().Settings,
-				&tbNames[i], tree.ObjectLookupFlags{CommonLookupFlags: lookupFlags})
+				&tbNames[i], tree.ObjectLookupFlags{CommonLookupFlags: lookupFlags, IncludeOffline: true})
 			if err != nil {
 				return err
 			}
@@ -141,6 +142,13 @@ func (n *renameDatabaseNode) startExec(params runParams) error {
 				continue
 			}
 			tbDesc := objDesc.TableDesc()
+			// check table state
+			if tbDesc.State == sqlbase.TableDescriptor_OFFLINE {
+				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+					"cannot rename a database with OFFLINE tables, ensure %s is"+
+						" dropped or made public before renaming database %s",
+					tbDesc.GetName(), tree.AsString((*tree.Name)(&dbDesc.Name)))
+			}
 			for _, dependedOn := range tbDesc.DependedOnBy {
 				dependentDesc, err := sqlbase.GetTableDescFromID(ctx, p.txn, dependedOn.ID)
 				if err != nil {

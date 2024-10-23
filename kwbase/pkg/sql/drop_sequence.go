@@ -46,7 +46,7 @@ func (p *planner) DropSequence(ctx context.Context, n *tree.DropSequence) (planN
 	td := make([]toDelete, 0, len(n.Names))
 	for i := range n.Names {
 		tn := &n.Names[i]
-		droppedDesc, err := p.prepareDrop(ctx, tn, !n.IfExists, ResolveRequireSequenceDesc)
+		droppedDesc, err := p.prepareDrop(ctx, tn, !n.IfExists, ResolveRequireSequenceDesc, false)
 		if err != nil {
 			return nil, err
 		}
