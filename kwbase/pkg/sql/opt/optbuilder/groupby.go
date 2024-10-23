@@ -762,10 +762,15 @@ func (b *Builder) buildAggregateFunction(
 					column.typ = agg.col.typ
 					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
 					f.Exprs[0] = column
-				} else if c, ok := col.Exprs[0].(*scopeColumn); ok {
-					c.typ = agg.col.typ
-					info.aggOfInterpolate = strings.ToLower(agg.def.Name)
-					f.Exprs[0] = col.Exprs[0]
+				} else if len(col.Exprs) > 0 {
+					if c, ok1 := col.Exprs[0].(*scopeColumn); ok1 {
+						c.typ = agg.col.typ
+						info.aggOfInterpolate = strings.ToLower(agg.def.Name)
+						f.Exprs[0] = col.Exprs[0]
+					} else {
+						panic(pgerror.New(pgcode.Warning,
+							"the aggregate function, as a parameter of the interpolate function, only supports columns as its parameters"))
+					}
 				} else { // other is not only scopeColumn
 					// TODO Subsequent versions will lift restrictions
 					panic(pgerror.New(pgcode.Warning,
