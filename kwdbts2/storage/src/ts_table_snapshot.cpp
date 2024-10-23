@@ -140,6 +140,7 @@ KStatus TsSnapshotProductor::Init(kwdbContext_p ctx, const TsSnapshotInfo& info)
     // maybe convert empty range from this node to other.
     LOG_DEBUG("cannot found any entity in table [%lu], moving empty range?", info.table->GetTableId());
     scan_over_ = true;
+    status_ = TsSnapshotStatus::SENDING_ALL_SCHEMAS;
     return KStatus::SUCCESS;
   }
   subgrp_iter_ = egrp_iter_->second.begin();

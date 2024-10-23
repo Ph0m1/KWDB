@@ -1781,7 +1781,7 @@ func execChangeReplicasTxn(
 		log.Infof(ctx, "change replicas (add %v remove %v): existing descriptor %s", crt.Added(), crt.Removed(), desc)
 
 		if desc.GetRangeType() == roachpb.TS_RANGE && desc.TableId > keys.MinNonPredefinedUserDescID {
-			nodeIDs := getNewNodeIDs(desc, crt.Desc)
+			nodeIDs := getNewNodeIDs(ctx, desc, crt.Desc)
 			if len(nodeIDs) != 0 {
 				// get table descriptor and check state
 				table, _, err := sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(desc.TableId))
@@ -1789,16 +1789,19 @@ func execChangeReplicasTxn(
 					return err
 				}
 				if len(table.Mutations) > 0 {
+					log.Warningf(ctx, "table %v is being altered", table.ID)
 					return kwdberrors.Newf("waiting for table %d to be altered", table.ID)
 				}
 
-				// check version
+				// check version between system metadata and remote node
 				for _, nodeID := range nodeIDs {
 					version, err := store.cfg.TseDB.AdminGetTsTableVersion(ctx, uint64(desc.TableId), nodeID)
 					if err != nil {
 						return err
 					}
 					if version < uint32(table.TsTable.TsVersion) {
+						log.Warningf(ctx, "table version not same between metadata[%d] and"+
+							" remote storage[%d] node %v", table.TsTable.TsVersion, version, nodeID)
 						return kwdberrors.Newf("wait for table %d to update version", desc.TableId)
 					}
 				}
@@ -1903,12 +1906,15 @@ func execChangeReplicasTxn(
 	return returnDesc, nil
 }
 
-func getNewNodeIDs(src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
+func getNewNodeIDs(ctx context.Context, src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
+	if tags := logtags.FromContext(ctx).Get(); len(tags) > 1 && tags[1].Key() == "split" {
+		return nil
+	}
 	var nodeIDs []roachpb.NodeID
 	for _, oldR := range src.InternalReplicas {
-		if oldR.GetType() == roachpb.VOTER_INCOMING || oldR.GetType() == roachpb.LEARNER {
+		if oldR.GetType() == roachpb.LEARNER {
 			for _, newR := range dst.InternalReplicas {
-				if newR.NodeID == oldR.NodeID && newR.GetType() == roachpb.VOTER_FULL {
+				if newR.NodeID == oldR.NodeID && (newR.GetType() == roachpb.VOTER_INCOMING || newR.GetType() == roachpb.VOTER_FULL) {
 					nodeIDs = append(nodeIDs, oldR.NodeID)
 				}
 			}

@@ -857,6 +857,7 @@ KStatus TsTimePartition::ReOrderSegments(const std::vector<std::shared_ptr<MMapS
       return FAIL;
     }
   }
+  return KStatus::SUCCESS;
 }
 
 KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version, bool& drop_partition) {

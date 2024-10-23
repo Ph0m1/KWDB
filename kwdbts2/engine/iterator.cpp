@@ -1518,7 +1518,7 @@ KStatus TsTableIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
 }
 
 void TsSortedRowDataIterator::fetchBlockSpans(k_uint32 entity_id) {
-  cur_partition_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, INT64_MAX, is_reversed_);
+  cur_partition_table_->GetAllBlockSpans(entity_id, ts_spans_, block_spans_, UINT32_MAX, is_reversed_);
 }
 
 int TsSortedRowDataIterator::nextBlockSpan(k_uint32 entity_id) {

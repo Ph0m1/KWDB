@@ -756,14 +756,9 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		// Get all healthy nodes.
 		var nodeList []roachpb.NodeID
 		var retErr error
-		if err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-			nodeList, retErr = api.GetTableNodeIDs(ctx, txn, uint32(d.SNTable.GetID()))
-			if retErr != nil {
-				return retErr
-			}
-			return nil
-		}); err != nil {
-			return err
+		nodeList, retErr = api.GetTableNodeIDs(ctx, sw.db, uint32(d.SNTable.GetID()))
+		if retErr != nil {
+			return retErr
 		}
 		sw.healthyNodes = nodeList
 		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
@@ -782,14 +777,9 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		// Get all healthy nodes.
 		var nodeList []roachpb.NodeID
 		var retErr error
-		if err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-			nodeList, retErr = api.GetTableNodeIDs(ctx, txn, uint32(d.SNTable.GetID()))
-			if retErr != nil {
-				return retErr
-			}
-			return nil
-		}); err != nil {
-			return err
+		nodeList, retErr = api.GetTableNodeIDs(ctx, sw.db, uint32(d.SNTable.GetID()))
+		if retErr != nil {
+			return retErr
 		}
 		log.Infof(ctx, "%s, jobID: %d, waitForOneVersion start", opType, sw.job.ID())
 		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(
@@ -813,14 +803,9 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 			opType, d.SNTable.Name, d.SNTable.ID, sw.job.ID())
 		var nodeList []roachpb.NodeID
 		var retErr error
-		if err := sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-			nodeList, retErr = api.GetTableNodeIDs(ctx, txn, uint32(d.SNTable.GetID()))
-			if retErr != nil {
-				return retErr
-			}
-			return nil
-		}); err != nil {
-			return err
+		nodeList, retErr = api.GetTableNodeIDs(ctx, sw.db, uint32(d.SNTable.GetID()))
+		if retErr != nil {
+			return retErr
 		}
 		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList}
 	//case dropKwdbInsTable:

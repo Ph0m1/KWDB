@@ -90,7 +90,10 @@ KStatus MMapRootTableManager::Init(ErrorInfo& err_info) {
 
 KStatus MMapRootTableManager::CreateRootTable(vector<AttributeInfo>& schema, uint32_t table_version,
                                               ErrorInfo& err_info, uint32_t cur_version) {
-  assert(table_version > 0);
+  if(table_version == 0) {
+    LOG_ERROR("cannot create version 0 table, table id [%u]", table_id_)
+    return KStatus::FAIL;
+  }
   wrLock();
   Defer defer([&]() { unLock(); });
   if (root_tables_.find(table_version) != root_tables_.end()) {
@@ -152,10 +155,14 @@ KStatus MMapRootTableManager::CreateRootTable(vector<AttributeInfo>& schema, uin
 
 KStatus MMapRootTableManager::AddRootTable(vector<AttributeInfo>& schema, uint32_t table_version,
                                               ErrorInfo& err_info) {
-  assert(table_version > 0);
+  if(table_version == 0) {
+    LOG_ERROR("cannot create version 0 table, table id [%u]", table_id_)
+    return KStatus::FAIL;
+  }
   wrLock();
   Defer defer([&]() { unLock(); });
   if (root_tables_.find(table_version) != root_tables_.end()) {
+    LOG_INFO("schema version [%u] already exists, table id [%u]", table_version, table_id_);
     return KStatus::SUCCESS;
   }
   for (auto& attr: schema) {

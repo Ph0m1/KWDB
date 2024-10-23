@@ -59,7 +59,7 @@ func GetHashPointByPrimaryTag(primaryTags ...[]byte) ([]HashPoint, error) {
 var GetHealthyNodeIDs func(ctx context.Context) ([]roachpb.NodeID, error)
 
 // GetTableNodeIDs get all healthy nodes
-var GetTableNodeIDs func(ctx context.Context, txn *kv.Txn, tableID uint32) ([]roachpb.NodeID, error)
+var GetTableNodeIDs func(ctx context.Context, db *kv.DB, tableID uint32) ([]roachpb.NodeID, error)
 
 // CreateTSTable ...
 var CreateTSTable func(ctx context.Context, tableID uint32, nodeID roachpb.NodeID, tsMeta []byte) error

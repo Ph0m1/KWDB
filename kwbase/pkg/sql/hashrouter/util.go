@@ -26,6 +26,7 @@ package hashrouter
 import (
 	"context"
 	"math"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
@@ -35,6 +36,9 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
+	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
+	"github.com/pkg/errors"
 )
 
 // GenerateUniqueEntityRangeGroupID ...
@@ -384,27 +388,52 @@ func getStoreIDByNodeID(
 }
 
 // GetTableNodeIDs gets nodeids
-func GetTableNodeIDs(ctx context.Context, txn *kv.Txn, tableID uint32) ([]roachpb.NodeID, error) {
+func GetTableNodeIDs(ctx context.Context, db *kv.DB, tableID uint32) ([]roachpb.NodeID, error) {
 	var nodeIDs []roachpb.NodeID
 	nodeIDList := make(map[roachpb.NodeID]struct{})
-	ranges, err := sql.ScanMetaKVs(ctx, txn, roachpb.Span{
-		Key:    sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), 0, math.MinInt64),
-		EndKey: sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), api.HashParamV2-1, math.MaxInt64),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(ranges) == 0 {
-		return nil, pgerror.Newf(pgcode.Warning, "can not get table : %v ranges.", tableID)
-	}
-	for _, r := range ranges {
-		var desc roachpb.RangeDescriptor
-		if err := r.ValueProto(&desc); err != nil {
-			return nil, err
+	var retErr error
+	// get range when replica is voter_incoming, because we will
+	// miss the node when alter the table on some node.
+	for r := retry.StartWithCtx(ctx, retry.Options{
+		InitialBackoff: 100 * time.Millisecond,
+		MaxBackoff:     4 * time.Second,
+		Multiplier:     2,
+		MaxRetries:     20,
+	}); r.Next(); {
+		if retErr = db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			ranges, err := sql.ScanMetaKVs(ctx, txn, roachpb.Span{
+				Key:    sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), 0, math.MinInt64),
+				EndKey: sqlbase.MakeTsRangeKey(sqlbase.ID(tableID), api.HashParamV2-1, math.MaxInt64),
+			})
+			if err != nil {
+				return err
+			}
+			if len(ranges) == 0 {
+				return pgerror.Newf(pgcode.Warning, "can not get table : %v ranges.", tableID)
+			}
+			for _, r := range ranges {
+				var desc roachpb.RangeDescriptor
+				if err := r.ValueProto(&desc); err != nil {
+					return err
+				}
+				for _, replica := range desc.InternalReplicas {
+					if replica.GetType() == roachpb.VOTER_INCOMING {
+						return errors.Errorf("replica %+v is not ready", replica)
+					}
+					if replica.GetType() == roachpb.VOTER_FULL {
+						nodeIDList[replica.NodeID] = struct{}{}
+					}
+				}
+			}
+			return nil
+		}); retErr != nil {
+			log.Warningf(ctx, "get table node id failed: %s", retErr.Error())
+			continue
 		}
-		for _, replica := range desc.InternalReplicas {
-			nodeIDList[replica.NodeID] = struct{}{}
-		}
+		break
+	}
+	if len(nodeIDList) == 0 {
+		return nil, retErr
 	}
 	for nodeID := range nodeIDList {
 		nodeIDs = append(nodeIDs, nodeID)
