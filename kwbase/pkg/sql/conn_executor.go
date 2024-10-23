@@ -1613,9 +1613,27 @@ func (ex *connExecutor) execCmd(ctx context.Context) error {
 			if !portal.Stmt.PrepareInsertDirect.EvalContext.StartSinglenode {
 				ex.planner.ExtendedEvalContext().StartDistributeMode = true
 			}
+			starttime := timeutil.Now()
+			ex.metrics.StartedStatementCounters.QueryCount.Inc()
+			ex.metrics.StartedStatementCounters.InsertCount.Inc()
 			ex.SendDirectTsInsert(ctx, &portal.Stmt.PrepareInsertDirect.EvalContext, portal.Stmt.PrepareInsertDirect.stmtRes, portal.Stmt.PrepareInsertDirect.payloadNodeMap)
 			err = portal.Stmt.Insertdirectstmt.ErrorInfo
 			stmtRes.IncrementRowsAffected(int(portal.Stmt.Insertdirectstmt.RowsAffected))
+
+			var tempStmt Statement
+			var flags planFlags
+			tempStmt.AST = portal.Stmt.AST
+			user := ex.sessionData.User
+			database := ex.sessionData.Database
+			ex.statsCollector.recordStatement(
+				&tempStmt, nil,
+				flags.IsSet(planFlagDistributed), flags.IsSet(planFlagImplicitTxn),
+				0, int(portal.Stmt.Insertdirectstmt.RowsAffected), nil,
+				0, 0, timeutil.Since(starttime).Seconds(), 0, 0, 0, 0,
+				user, database,
+			)
+			ex.metrics.ExecutedStatementCounters.QueryCount.Inc()
+			ex.metrics.ExecutedStatementCounters.InsertCount.Inc()
 		}
 
 		if stmtRes.IsLimit() && stmtRes.StmtType() != tree.Ack {
