@@ -143,19 +143,27 @@ function execute_regression_sql_distribute_v2() {
       mkdir -p $QA_DIR/TEST_integration/$dir/
       for sql_file_path in `cd $QA_DIR && find Integration/$dir -type f -name *.sql | sort`
         do
-          echo '==============================='
-          echo $sql_file_path
-          echo $SQL_FILTER
-          echo $dir
-          echo '==============================='
 
           ut_start_time=$(date +%s)
           sql_file=$(basename $sql_file_path)
           if [[ $sql_file != $SQL_FILTER && $sql_file != "aa_init_replication_service.sql" ]];then
             continue
           fi
+
+          echo '==============================='
+          echo $sql_file_path
+          echo $SQL_FILTER
+          echo $dir
+          echo '==============================='
+
           pkill -9 kwbase
           sleep 10s
+          echo 'before umount'
+          df -h | grep install/deploy | awk {'print $6'}
+          echo 'after umount'
+          df -h | grep install/deploy | awk {'print $6'}  | xargs umount
+          df -h | grep install/deploy | awk {'print $6'}
+
           rm -rf $QA_DIR/../install/deploy/
 
           ls -al $QA_DIR/../install/
