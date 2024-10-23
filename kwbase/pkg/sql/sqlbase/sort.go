@@ -237,3 +237,123 @@ func Sort(data sort.Interface, cancelChecker *CancelChecker) {
 	n := data.Len()
 	quickSort(data, 0, n, maxDepth(n), cancelChecker)
 }
+
+// StableSort sorts data with stable way.
+func StableSort(data sort.Interface) {
+	stable(data, data.Len())
+}
+
+func stable(data sort.Interface, n int) {
+	blockSize := 20
+	a, b := 0, blockSize
+	for b <= n {
+		insertionSort(data, a, b)
+		a = b
+		b += blockSize
+	}
+	insertionSort(data, a, n)
+
+	for blockSize < n {
+		a, b = 0, 2*blockSize
+		for b <= n {
+			symMerge(data, a, a+blockSize, b)
+			a = b
+			b += 2 * blockSize
+		}
+		if m := a + blockSize; m < n {
+			symMerge(data, a, m, n)
+		}
+		blockSize *= 2
+	}
+}
+
+func symMerge(data sort.Interface, a, m, b int) {
+	if m-a == 1 {
+		i := m
+		j := b
+		for i < j {
+			h := int(uint(i+j) >> 1)
+			if data.Less(h, a) {
+				i = h + 1
+			} else {
+				j = h
+			}
+		}
+		for k := a; k < i-1; k++ {
+			data.Swap(k, k+1)
+		}
+		return
+	}
+
+	if b-m == 1 {
+		i := a
+		j := m
+		for i < j {
+			h := int(uint(i+j) >> 1)
+			if !data.Less(m, h) {
+				i = h + 1
+			} else {
+				j = h
+			}
+		}
+		// Swap values until data[m] reaches the position i.
+		for k := m; k > i; k-- {
+			data.Swap(k, k-1)
+		}
+		return
+	}
+
+	mid := int(uint(a+b) >> 1)
+	n := mid + m
+	var start, r int
+	if m > mid {
+		start = n - b
+		r = mid
+	} else {
+		start = a
+		r = m
+	}
+	p := n - 1
+
+	for start < r {
+		c := int(uint(start+r) >> 1)
+		if !data.Less(p-c, c) {
+			start = c + 1
+		} else {
+			r = c
+		}
+	}
+
+	end := n - start
+	if start < m && m < end {
+		rotate(data, start, m, end)
+	}
+	if a < start && start < mid {
+		symMerge(data, a, start, mid)
+	}
+	if mid < end && end < b {
+		symMerge(data, mid, end, b)
+	}
+}
+
+func rotate(data sort.Interface, a, m, b int) {
+	i := m - a
+	j := b - m
+
+	for i != j {
+		if i > j {
+			swapRange(data, m-i, m, j)
+			i -= j
+		} else {
+			swapRange(data, m-i, m+j-i, i)
+			j -= i
+		}
+	}
+	swapRange(data, m-i, m, i)
+}
+
+func swapRange(data sort.Interface, a, b, n int) {
+	for i := 0; i < n; i++ {
+		data.Swap(a+i, b+i)
+	}
+}

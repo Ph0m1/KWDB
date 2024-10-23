@@ -993,6 +993,17 @@ func (h *HashDiskBackedRowContainer) Sort(ctx context.Context) {
 	}
 }
 
+// StableSort sorts the underlying row container based on stored equality columns
+// which forces all rows from the same hash bucket to be contiguous.
+func (h *HashDiskBackedRowContainer) StableSort(ctx context.Context) {
+	if !h.UsingDisk() && (len(h.storedEqCols) > 0 || len(h.orderForWindowFunc) > 0) {
+		// We need to explicitly sort only if we're using in-memory container since
+		// if we're using disk, the underlying sortedDiskMap will be sorted
+		// already.
+		h.hmrc.StableSort(ctx)
+	}
+}
+
 // AllRowsIterator iterates over all rows in HashDiskBackedRowContainer which
 // should be initialized to not do marking. This iterator will be recreated
 // in-place if the container spills to disk.

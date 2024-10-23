@@ -342,7 +342,22 @@ func (w *windower) accumulateRows() (
 			w.inputDone = true
 			// We need to sort all the rows based on partitionBy columns so that all
 			// rows belonging to the same hash bucket are contiguous.
-			w.allRowsPartitioned.Sort(w.PbCtx())
+			var isdiff bool
+			for _, builtin := range w.builtins {
+				if _, okInt := builtin.(*builtins.DiffWindowInt); okInt {
+					isdiff = true
+					break
+				} else if _, okFloat := builtin.(*builtins.DiffWindowFloat); okFloat {
+					isdiff = true
+					break
+				}
+			}
+			if isdiff {
+				w.allRowsPartitioned.StableSort(w.PbCtx())
+			} else {
+				w.allRowsPartitioned.Sort(w.PbCtx())
+			}
+
 			break
 		}
 
@@ -622,6 +637,7 @@ func (w *windower) processPartition(
 			return err
 		}
 		frameRun.CurRowPeerGroupNum = 0
+		diffFunction := isDiffFunction(builtin)
 
 		var prevRes tree.Datum
 		for frameRun.RowIdx < partition.Len() {
@@ -631,7 +647,7 @@ func (w *windower) processPartition(
 				if err := w.cancelChecker.Check(); err != nil {
 					return err
 				}
-				if isDiffFunction(builtin) {
+				if diffFunction {
 					first, err := frameRun.FrameStartIdx(ctx, evalCtx)
 					if err != nil {
 						return err
@@ -641,10 +657,6 @@ func (w *windower) processPartition(
 					}
 				}
 				res, err := builtin.Compute(ctx, evalCtx, frameRun)
-				if err != nil {
-					return err
-				}
-				row, err := frameRun.Rows.GetRow(ctx, frameRun.RowIdx)
 				if err != nil {
 					return err
 				}
@@ -659,8 +671,18 @@ func (w *windower) processPartition(
 						return err
 					}
 				}
-				w.windowValues[partitionIdx][windowFnIdx][row.GetIdx()] = res
-				prevRes = res
+
+				if diffFunction && len(windowFn.ordering.Columns) != 0 {
+					w.windowValues[partitionIdx][windowFnIdx][frameRun.RowIdx] = res
+					prevRes = res
+				} else {
+					row, err := frameRun.Rows.GetRow(ctx, frameRun.RowIdx)
+					if err != nil {
+						return err
+					}
+					w.windowValues[partitionIdx][windowFnIdx][row.GetIdx()] = res
+					prevRes = res
+				}
 			}
 			if err := frameRun.PeerHelper.Update(frameRun); err != nil {
 				return err

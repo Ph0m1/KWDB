@@ -51,6 +51,9 @@ type SortableRowContainer interface {
 	// at initialization or by the last call of Reorder() - if the container is
 	// ReorderableRowContainer).
 	Sort(context.Context)
+
+	// StableSort sorts the rows according to the current ordering with stable
+	StableSort(context.Context)
 	// NewIterator returns a RowIterator that can be used to iterate over
 	// the rows.
 	NewIterator(context.Context) RowIterator
@@ -99,20 +102,20 @@ type IndexedRowContainer interface {
 
 // RowIterator is a simple iterator used to iterate over sqlbase.EncDatumRows.
 // Example use:
-// 	var i RowIterator
-// 	for i.Rewind(); ; i.Next() {
-// 		if ok, err := i.Valid(); err != nil {
-// 			// Handle error.
-// 		} else if !ok {
+//
+//	var i RowIterator
+//	for i.Rewind(); ; i.Next() {
+//		if ok, err := i.Valid(); err != nil {
+//			// Handle error.
+//		} else if !ok {
 //			break
-// 		}
+//		}
 //		row, err := i.Row()
 //		if err != nil {
 //			// Handle error.
 //		}
 //		// Do something.
-// 	}
-//
+//	}
 type RowIterator interface {
 	// Rewind seeks to the first row.
 	Rewind()
@@ -221,6 +224,12 @@ func (mc *MemRowContainer) Sort(ctx context.Context) {
 	mc.invertSorting = false
 	cancelChecker := sqlbase.NewCancelChecker(ctx)
 	sqlbase.Sort(mc, cancelChecker)
+}
+
+// StableSort is part of the SortableRowContainer interface.
+func (mc *MemRowContainer) StableSort(ctx context.Context) {
+	mc.invertSorting = false
+	sqlbase.StableSort(mc)
 }
 
 // Reorder implements ReorderableRowContainer. We don't need to create a new
@@ -375,18 +384,18 @@ var _ ReorderableRowContainer = &DiskBackedRowContainer{}
 
 // Init initializes a DiskBackedRowContainer.
 // Arguments:
-//  - ordering is the output ordering; the order in which rows should be sorted.
-//  - types is the schema of rows that will be added to this container.
-//  - evalCtx defines the context in which to evaluate comparisons, only used
-//    when storing rows in memory.
-//  - engine is the store used for rows when spilling to disk.
-//  - memoryMonitor is used to monitor the DiskBackedRowContainer's memory usage.
-//    If this monitor denies an allocation, the DiskBackedRowContainer will
-//    spill to disk.
-//  - diskMonitor is used to monitor the DiskBackedRowContainer's disk usage if
-//    and when it spills to disk.
-//  - rowCapacity (if not 0) indicates the number of rows that the underlying
-//    in-memory container should be preallocated for.
+//   - ordering is the output ordering; the order in which rows should be sorted.
+//   - types is the schema of rows that will be added to this container.
+//   - evalCtx defines the context in which to evaluate comparisons, only used
+//     when storing rows in memory.
+//   - engine is the store used for rows when spilling to disk.
+//   - memoryMonitor is used to monitor the DiskBackedRowContainer's memory usage.
+//     If this monitor denies an allocation, the DiskBackedRowContainer will
+//     spill to disk.
+//   - diskMonitor is used to monitor the DiskBackedRowContainer's disk usage if
+//     and when it spills to disk.
+//   - rowCapacity (if not 0) indicates the number of rows that the underlying
+//     in-memory container should be preallocated for.
 func (f *DiskBackedRowContainer) Init(
 	ordering sqlbase.ColumnOrdering,
 	types []types.T,
@@ -428,6 +437,11 @@ func (f *DiskBackedRowContainer) AddRow(ctx context.Context, row sqlbase.EncDatu
 // Sort is part of the SortableRowContainer interface.
 func (f *DiskBackedRowContainer) Sort(ctx context.Context) {
 	f.src.Sort(ctx)
+}
+
+// StableSort is part of the SortableRowContainer interface.
+func (f *DiskBackedRowContainer) StableSort(ctx context.Context) {
+	f.src.StableSort(ctx)
 }
 
 // Reorder implements ReorderableRowContainer.
@@ -581,16 +595,16 @@ var _ IndexedRowContainer = &DiskBackedIndexedRowContainer{}
 // with the given engine as the underlying store that rows are stored on when
 // it spills to disk.
 // Arguments:
-//  - ordering is the output ordering; the order in which rows should be sorted.
-//  - types is the schema of rows that will be added to this container.
-//  - evalCtx defines the context in which to evaluate comparisons, only used
-//    when storing rows in memory.
-//  - engine is the underlying store that rows are stored on when the container
-//    spills to disk.
-//  - memoryMonitor is used to monitor this container's memory usage.
-//  - diskMonitor is used to monitor this container's disk usage.
-//  - rowCapacity (if not 0) specifies the number of rows in-memory container
-//    should be preallocated for.
+//   - ordering is the output ordering; the order in which rows should be sorted.
+//   - types is the schema of rows that will be added to this container.
+//   - evalCtx defines the context in which to evaluate comparisons, only used
+//     when storing rows in memory.
+//   - engine is the underlying store that rows are stored on when the container
+//     spills to disk.
+//   - memoryMonitor is used to monitor this container's memory usage.
+//   - diskMonitor is used to monitor this container's disk usage.
+//   - rowCapacity (if not 0) specifies the number of rows in-memory container
+//     should be preallocated for.
 func NewDiskBackedIndexedRowContainer(
 	ordering sqlbase.ColumnOrdering,
 	typs []types.T,
