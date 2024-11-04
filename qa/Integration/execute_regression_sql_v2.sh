@@ -208,6 +208,7 @@ function execute_regression_sql_distribute_v2() {
             cat $out_file > $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}/${sql_file}_${topology}_$folder.out
             cat $diff_file > $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}/${sql_file}_${topology}_$folder.diff
             # cat $diff_file
+            return 1
           else
             res='SUCC'
             mkdir -p $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}
@@ -325,6 +326,7 @@ function execute_regression_sql_distribute_open_source_v2() {
             cat $out_file > $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}/${sql_file}_${topology}_$folder.out
             cat $diff_file > $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}/${sql_file}_${topology}_$folder.diff
             # cat $diff_file
+            return 1
           else
             res='SUCC'
             mkdir -p $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}
