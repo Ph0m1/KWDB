@@ -166,7 +166,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
       }
     }
 
-    if (/*field->get_num() >= table_->min_tag_id_ &&*/
+    if (field->get_num() >= table_->min_tag_id_ &&
         (agg_type == Sumfunctype::SUM || agg_type == Sumfunctype::COUNT ||
          agg_type == Sumfunctype::COUNT_ROWS)) {
       is_contain_sum_count = true;

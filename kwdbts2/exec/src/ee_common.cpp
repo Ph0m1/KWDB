@@ -40,7 +40,7 @@ KStatus CreateAggField(k_int32 i, Field* input_field, BaseOperator *agg_op, Fiel
         case roachpb::DataType::TIMESTAMPTZ:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT:
-            *func_field = new FieldAggLonglong(i, roachpb::DataType::BIGINT, sizeof(k_int64), agg_op);
+            *func_field = new FieldAggLonglong(i, input_field->get_storage_type(), sizeof(k_int64), agg_op);
             break;
         case roachpb::DataType::FLOAT:
             *func_field = new FieldAggFloat(i, roachpb::DataType::FLOAT, sizeof(k_float32), agg_op);
