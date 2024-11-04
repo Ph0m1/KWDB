@@ -180,13 +180,13 @@ public:
   int RollbackPartitionTableVersion(TableVersion need_rollback_version, ErrorInfo& err_info);
 };
 
-TagTable* OpenTagTable_v2(const std::string& db_path, const std::string &dir_path,
+TagTable* OpenTagTable(const std::string& db_path, const std::string &dir_path,
                                 uint64_t table_id,  int32_t entity_group_id, ErrorInfo &err_info);
 
-TagTable* CreateTagTable_v2(const std::vector<TagInfo> &tag_schema,
+TagTable* CreateTagTable(const std::vector<TagInfo> &tag_schema,
                                    const std::string& db_path, const std::string &dir_path,
                                    uint64_t table_id, int32_t entity_group_id,
                                    uint32_t table_version, ErrorInfo &err_info);
 
-int DropTagTable_v2(TagTable* bt, ErrorInfo& err_info);
+int DropTagTable(TagTable* bt, ErrorInfo& err_info);
 

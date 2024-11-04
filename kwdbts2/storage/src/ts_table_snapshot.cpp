@@ -96,6 +96,12 @@ KStatus TsSnapshotProductor::getSchemaInfo(kwdbContext_p ctx, uint32_t schema_ve
   if (s != KStatus::SUCCESS) {
     return s;
   }
+#ifdef K_DEBUG
+  for (const auto& it : tag_schema_info) {
+    LOG_DEBUG("getSchemaInfo table_id: %lu version: %u tag_id: %u flag: %u",
+         snapshot_info_.table->GetTableId(), schema_version, it.m_id, it.m_flag);
+  }
+#endif
   // Use data schema and tag schema to construct meta.
   s = snapshot_info_.table->GenerateMetaSchema(ctx, &meta, data_schema, tag_schema_info);
   if (s == KStatus::FAIL) {
@@ -537,7 +543,7 @@ KStatus TsSnapshotConsumerByPayload::writeDataWithPayload(kwdbContext_p ctx, TSS
   uint32_t inc_unordered_cnt = 0;
   total_rows_ += Payload::GetRowCountFromPayload(&data);
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
-  LOG_INFO("writeDataWithPayload table_id: %lu ts_version: %u", Payload::GetTableIdFromPayload(&data),
+  LOG_DEBUG("writeDataWithPayload table_id: %lu ts_version: %u", snapshot_info_.table->GetTableId(),
             Payload::GetTsVersionFromPayload(&data));
   return snapshot_info_.table->PutDataWithoutWAL(ctx, cur_egrp_id , &data, 1, entity_grp_mtr_id_[cur_egrp_id],
                                                  &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, DedupRule::KEEP);

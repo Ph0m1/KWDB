@@ -291,9 +291,11 @@ std::pair<TableVersionID, TagPartitionTableRowID> MMapHashIndex::read_first(cons
   while (rownum) {
     // if (h_value->hash_val_ == rec[rownum].hash_val_) {
     if (this->compare(key, rownum)) {
+      TableVersionID tmp_version = row(rownum)->tb_version;
+      TagPartitionTableRowID tmp_part_rowid = row(rownum)->bt_row;
       dataUnlock();
       buckets_[bkt_ins_idx]->Unlock();
-      return std::make_pair(row(rownum)->tb_version, row(rownum)->bt_row);
+      return std::make_pair(tmp_version, tmp_part_rowid);
     }
     rownum = row(rownum)->next_row;
   }

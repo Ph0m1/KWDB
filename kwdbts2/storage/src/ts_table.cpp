@@ -65,7 +65,7 @@ KStatus TsEntityGroup::Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema, ui
   ErrorInfo err_info;
   MUTEX_LOCK(mutex_);
   Defer defer{[&]() { MUTEX_UNLOCK(mutex_); }};
-  new_tag_bt_ = CreateTagTable_v2(tag_schema, db_path_, tbl_sub_path_, table_id_, range_.range_group_id,
+  new_tag_bt_ = CreateTagTable(tag_schema, db_path_, tbl_sub_path_, table_id_, range_.range_group_id,
                                   ts_version, err_info);
   if (new_tag_bt_ == nullptr) {
     LOG_ERROR("TsTableRange create tag table error : %s", err_info.errmsg.c_str());
@@ -86,7 +86,7 @@ KStatus TsEntityGroup::OpenInit(kwdbContext_p ctx) {
 
   ErrorInfo err_info;
   // Open Tag table under the range directory
-  new_tag_bt_ = OpenTagTable_v2(db_path_, tbl_sub_path_, table_id_, range_.range_group_id, err_info);
+  new_tag_bt_ = OpenTagTable(db_path_, tbl_sub_path_, table_id_, range_.range_group_id, err_info);
   if (err_info.errcode < 0 || new_tag_bt_ == nullptr) {
     LOG_ERROR("TsTableRange OpenTagTable error :%s", err_info.errmsg.c_str());
     return KStatus::FAIL;
@@ -668,7 +668,7 @@ KStatus TsEntityGroup::Drop(kwdbContext_p ctx, bool is_force) {
     LOG_ERROR("getTagTable fail. error: %s ", err_info.errmsg.c_str());
     return KStatus::SUCCESS;
   }
-  DropTagTable_v2(new_tag_bt_, err_info);
+  DropTagTable(new_tag_bt_, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("dropTagTable : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
@@ -1024,6 +1024,9 @@ TsEntityGroup::GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roa
   col.set_storage_len(tag_info.m_length);
   col.set_column_id(tag_info.m_id);
   col.set_col_type((roachpb::KWDBKTSColumn_ColumnType)((ColumnFlag)tag_info.m_tag_type));
+  if (tag_info.isDropped()) {
+    col.set_dropped(true);
+  }
   switch (tag_info.m_data_type) {
     case DATATYPE::TIMESTAMP64_LSN:
       col.set_storage_type(roachpb::TIMESTAMPTZ);
@@ -2617,11 +2620,13 @@ KStatus TsTable::AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* met
     if (s != KStatus::SUCCESS) {
       return s;
     }
+    // TagInfo struct add member,set value
     if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
       tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
                                              static_cast<uint32_t>(col_var.length), 0,
                                              static_cast<uint32_t>(col_var.size),
-                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG}));
+                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG,
+                                             col_var.flag & AINFO_DROPPED}));
     } else {
       metric_schema.push_back(std::move(col_var));
     }
@@ -2637,6 +2642,12 @@ KStatus TsTable::AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* met
     return s;
   }
   *version_schema = entity_bt_manager_->GetRootTable(upper_version, true);
+#ifdef K_DEBUG
+  for (const auto& it : tag_schema) {
+    LOG_DEBUG("AddTagSchemaVersion table_id: %lu upper_version: %u tag_id: %u flag: %u",
+       table_id_, upper_version, it.m_id, it.m_flag);
+  }
+#endif
   s = AddTagSchemaVersion(tag_schema, upper_version);
   return s;
 }
@@ -2899,7 +2910,7 @@ uint32_t TsTable::GetCurrentTableVersion() {
 
 KStatus TsEntityGroup::getTagTable(ErrorInfo& err_info) {
   if (new_tag_bt_ == nullptr) {
-    new_tag_bt_ = OpenTagTable_v2(db_path_, tbl_sub_path_, table_id_, range_.range_group_id, err_info);
+    new_tag_bt_ = OpenTagTable(db_path_, tbl_sub_path_, table_id_, range_.range_group_id, err_info);
   }
   if (new_tag_bt_ == nullptr) {
     LOG_ERROR("open tag table error : %s", err_info.errmsg.c_str());

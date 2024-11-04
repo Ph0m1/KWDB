@@ -118,10 +118,6 @@ class Payload {
     return *reinterpret_cast<uint32_t*> (payload->data + ts_version_offset_);
   }
 
-  static int64_t GetTableIdFromPayload(TSSlice* payload) {
-    return *reinterpret_cast<int64_t*> (payload->data + Payload::table_id_offset_);
-  }
-
   // payload version
   uint32_t GetPayloadVersion() {
     return *reinterpret_cast<uint32_t*> (slice_.data + payload_version_offset_);

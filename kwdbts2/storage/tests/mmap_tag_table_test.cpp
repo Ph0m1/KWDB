@@ -40,13 +40,13 @@ TEST_F(TestTagTable, TEST_CREATE_DROP) {
       {2, DATATYPE::DOUBLE, 8, 0, 8, GENERAL_TAG}
   };
   ErrorInfo err_info;
-  TagTable *bt = CreateTagTable_v2(schema, db_path_, db_name_, 5, 1, 1, err_info);
+  TagTable *bt = CreateTagTable(schema, db_path_, db_name_, 5, 1, 1, err_info);
   EXPECT_NE(bt, nullptr);
   EXPECT_EQ(err_info.errcode, 0);
   // EXPECT_EQ(bt->remove(err_info), 0);
   delete bt;
 
-  bt = OpenTagTable_v2(db_path_, db_name_, 5, 1, err_info);
+  bt = OpenTagTable(db_path_, db_name_, 5, 1, err_info);
   EXPECT_NE(bt, nullptr);
   EXPECT_EQ(err_info.errcode, 0);
   EXPECT_EQ(bt->remove(err_info), 0);
