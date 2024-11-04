@@ -320,8 +320,8 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
           auto ts = p_table->minTimestamp();
           ReleasePartitionTable(p_table);
           p_table = nullptr;
-          subgroup->RemovePartitionTable(ts, err_info);
           it = compress_tables.erase(it);
+          subgroup->RemovePartitionTable(ts, err_info, true);
           LOG_INFO("Finish vacuum in partition %s, partition is empty and removed.", partition_path.c_str());
           continue;
         }
