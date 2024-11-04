@@ -508,7 +508,7 @@ func (f *stubFactory) ConstructExport(
 func (f *stubFactory) MakeTSSpans(e opt.Expr, n exec.Node, m *memo.Memo) (tight bool) { return false }
 
 // for multiple model processing.
-func (f *stubFactory) UpdatePlanColumns(input *exec.Node) {}
+func (f *stubFactory) UpdatePlanColumns(input *exec.Node) bool { return false }
 
 // for multiple model processing.
 func (f *stubFactory) UpdateGroupInput(input *exec.Node) exec.Node {
@@ -523,8 +523,8 @@ func (f *stubFactory) SetBljRightNode(blj, agg exec.Node) exec.Node {
 // for multiple model processing.
 func (f *stubFactory) ProcessTsScanNode(
 	node exec.Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol,
-) {
-
+) bool {
+	return false
 }
 
 // for multiple model processing.

@@ -1137,6 +1137,7 @@ func convertColumnOrdinalToUint32(colList []exec.ColumnOrdinal) []uint32 {
 
 // buildBatchLookUpJoin build the batchLookUpJoin node for multiple model processing.
 func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error) {
+	var fallBack bool
 	if f := join.Private().(*memo.JoinPrivate).Flags; !f.Has(memo.AllowHashJoinStoreRight) {
 		// We need to do a bit of reverse engineering here to determine what the
 		// hint was.
@@ -1235,14 +1236,8 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 		joinType,
 	)
 	if err != nil || filters.ChildCount() != len(leftEq) {
-		b.mem.QueryType = memo.Unset
+		fallBack = true
 		b.mem.MultimodelHelper.ResetReasons[memo.LeftJoinColsPositionMismatch] = struct{}{}
-		OriginalAccessMode := b.mem.MultimodelHelper.OriginalAccessMode
-		b.factory.ResetTsScanAccessMode(right.root, OriginalAccessMode)
-		if b.mem.MultimodelHelper.HasLastAgg {
-			panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-		}
-		return execPlan{}, true, err
 	}
 
 	tsCols := b.factory.ProcessBljLeftColumns(left.root, b.mem)
@@ -1271,7 +1266,11 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 	}
 
 	leftEqValue := convertColumnOrdinalToUint32(leftEqOrdinals)
-	b.factory.ProcessTsScanNode(right.root, &leftEqValue, &rightEqValue, &tsCols)
+	success := b.factory.ProcessTsScanNode(right.root, &leftEqValue, &rightEqValue, &tsCols)
+	if !success {
+		fallBack = true
+		b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedOperation] = struct{}{}
+	}
 
 	leftEqColsAreKey := leftExpr.Relational().FuncDeps.ColsAreStrictKey(leftEq.ToSet())
 	rightEqColsAreKey := rightExpr.Relational().FuncDeps.ColsAreStrictKey(rightEq.ToSet())
@@ -1287,7 +1286,21 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 		return execPlan{}, false, err
 	}
 
-	b.factory.UpdatePlanColumns(&ep.root)
+	update := b.factory.UpdatePlanColumns(&ep.root)
+	if !update {
+		fallBack = true
+		b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedOperation] = struct{}{}
+	}
+
+	if fallBack {
+		b.mem.QueryType = memo.Unset
+		OriginalAccessMode := b.mem.MultimodelHelper.OriginalAccessMode
+		b.factory.ResetTsScanAccessMode(right.root, OriginalAccessMode)
+		if b.mem.MultimodelHelper.HasLastAgg {
+			panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+		}
+		return execPlan{}, true, err
+	}
 
 	return ep, false, nil
 }

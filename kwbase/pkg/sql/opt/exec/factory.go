@@ -642,7 +642,7 @@ type Factory interface {
 
 	// updatePlanColumns updates the resultColumns for tsScanNode and synchronizerNode plans
 	// based on the columns of a given batchLookUpJoinNode for multiple model processing.
-	UpdatePlanColumns(blj *Node)
+	UpdatePlanColumns(blj *Node) bool
 
 	// UpdateGroupInput updates the input to build groupNode for multiple model processing.
 	UpdateGroupInput(input *Node) Node
@@ -652,7 +652,7 @@ type Factory interface {
 	SetBljRightNode(blj, agg Node) Node
 
 	// ProcessTsScanNode sets relationalInfo to a tsScanNode for multiple model processing.
-	ProcessTsScanNode(node Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol)
+	ProcessTsScanNode(node Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol) bool
 
 	// ResetTsScanAccessMode resets tsScanNode's accessMode when falling back
 	// to original plan for multiple model processing.

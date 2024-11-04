@@ -2621,20 +2621,39 @@ func walkSort(meta *opt.Metadata, expr memo.RelExpr) bool {
 
 // updatePlanColumns updates the resultColumns for tsScanNode and synchronizerNode plans
 // based on the columns of a given batchLookUpJoinNode for multiple model processing.
-func (ef *execFactory) UpdatePlanColumns(blj *exec.Node) {
+func (ef *execFactory) UpdatePlanColumns(blj *exec.Node) bool {
+	success := false
 	switch node := (*blj).(type) {
 	case *batchLookUpJoinNode:
 		if tsNode, ok := node.right.plan.(*tsScanNode); ok {
 			tsNode.resultColumns = node.columns
+			success = true
 		}
 
 		if syncNode, ok := node.right.plan.(*synchronizerNode); ok {
 			if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
 				syncNode.columns = node.columns
 				tsNode.resultColumns = node.columns
+				success = true
 			}
 		}
+		if filterNode, ok := node.right.plan.(*filterNode); ok {
+			filterNode.source.columns = node.columns
+			if tsNode, ok := filterNode.source.plan.(*tsScanNode); ok {
+				tsNode.resultColumns = node.columns
+				success = true
+			}
+			if syncNode, ok := filterNode.source.plan.(*synchronizerNode); ok {
+				if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
+					syncNode.columns = node.columns
+					tsNode.resultColumns = node.columns
+					success = true
+				}
+			}
+		}
+		node.right.columns = node.columns
 	}
+	return success
 }
 
 // UpdateGroupInput updates the input to build groupNode for multiple model processing.
@@ -2687,21 +2706,39 @@ func (ef *execFactory) SetBljRightNode(node1, node2 exec.Node) exec.Node {
 }
 
 // ProcessTsScanNode sets relationalInfo to a tsScanNode for multiple model processing.
+// for multiple model processing.
 func (ef *execFactory) ProcessTsScanNode(
 	node exec.Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol,
-) {
+) bool {
 	switch n := node.(type) {
 	case *tsScanNode:
 		n.RelInfo.RelationalCols = tsCols
 		n.RelInfo.ProbeColIds = leftEq
 		n.RelInfo.HashColIds = rightEq
+		return true
 	case *synchronizerNode:
 		if tsNode, ok := n.plan.(*tsScanNode); ok {
 			tsNode.RelInfo.RelationalCols = tsCols
 			tsNode.RelInfo.ProbeColIds = leftEq
 			tsNode.RelInfo.HashColIds = rightEq
+			return true
+		}
+	case *filterNode:
+		if tsNode, ok := n.source.plan.(*tsScanNode); ok {
+			tsNode.RelInfo.RelationalCols = tsCols
+			tsNode.RelInfo.ProbeColIds = leftEq
+			tsNode.RelInfo.HashColIds = rightEq
+			return true
+		} else if syncNode, ok := n.source.plan.(*synchronizerNode); ok {
+			if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
+				tsNode.RelInfo.RelationalCols = tsCols
+				tsNode.RelInfo.ProbeColIds = leftEq
+				tsNode.RelInfo.HashColIds = rightEq
+				return true
+			}
 		}
 	}
+	return false
 }
 
 // ResetTsScanAccessMode resets tsScanNode's accessMode when falling back

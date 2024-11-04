@@ -25,6 +25,9 @@ insert into db_pipec.t_point values('2024-08-29 10:00:00',15.5,'a5','b5','c5','d
 insert into db_pipec.t_point values('2024-08-28 11:00:00',10.5,'a6','b6','c6','d6','e6',4,'f6');
 insert into db_pipec.t_point values('2024-08-28 12:00:00',11.5,'a7','b7','c7','d7','e7',4,'f7');
 
+-- create stats
+CREATE STATISTICS _stats_ FROM db_pipec.t_point;
+
 -- relational table 
 CREATE DATABASE pipec_r;
 CREATE TABLE pipec_r.station_info (
@@ -44,6 +47,9 @@ insert into pipec_r.station_info values('d3','dd','c3','aa','b','bb');
 insert into pipec_r.station_info values('d4','dd','c4','aa','b','bb');
 insert into pipec_r.station_info values('d5','dd','c5','aa','b','bb');
 
+-- create stats
+CREATE STATISTICS _stats_ FROM pipec_r.station_info;
+
 CREATE TABLE pipec_r.pipeline_info (
     pipeline_sn varchar(16) PRIMARY KEY,
     pipeline_name varchar(60),
@@ -60,6 +66,9 @@ insert into pipec_r.pipeline_info values('e3','pipeline_3','a','aa','b');
 insert into pipec_r.pipeline_info values('e4','pipeline_4','a','aa','b');
 insert into pipec_r.pipeline_info values('e5','pipeline_5','a','aa','b');
 
+-- create stats
+CREATE STATISTICS _stats_ FROM pipec_r.pipeline_info;
+
 CREATE TABLE pipec_r.point_info (
     point_sn varchar(64) PRIMARY KEY,
     signal_code varchar(120),
@@ -75,6 +84,9 @@ insert into pipec_r.point_info values('a3','ee','a','aa','d3','e3');
 insert into pipec_r.point_info values('a4','ee','a','aa','d4','e4');
 insert into pipec_r.point_info values('a5','ee','a','aa','d5','e5');
 
+-- create stats
+CREATE STATISTICS _stats_ FROM pipec_r.point_info;
+
 CREATE TABLE pipec_r.workarea_info (
   work_area_sn varchar(16) PRIMARY KEY,
   work_area_name varchar(80),
@@ -89,7 +101,27 @@ insert into pipec_r.workarea_info values('c3','work_area_3','l3','aa');
 insert into pipec_r.workarea_info values('c4','work_area_4','l4','aa');
 insert into pipec_r.workarea_info values('c5','work_area_5','l5','aa');
 
+-- create stats
+CREATE STATISTICS _stats_ FROM pipec_r.workarea_info;
+
 set enable_multimodel=false;
+
+-- query library query 23
+-- partial fallback case, multimodel crash
+-- todo: add to multimodel true path once crash fixed
+SELECT COUNT(*),
+       AVG(t.measure_value)
+FROM db_pipec.t_point t,
+     pipec_r.station_info si
+WHERE si.station_sn = t.station_sn
+AND t.k_timestamp >= '2023-08-01 01:00:00'
+UNION ALL
+SELECT COUNT(*),
+       AVG(t.measure_value)
+FROM db_pipec.t_point t,
+     pipec_r.station_info si
+WHERE si.station_sn = t.station_sn
+AND t.k_timestamp >= '2023-07-01 01:00:00' ;
 
 -- query 2
 SELECT wi.work_area_name,
@@ -152,69 +184,43 @@ ORDER BY wi.work_area_name,
 
 -- query 1
 SELECT si.station_name,
-       COUNT(t.measure_value),
-       AVG(t.measure_value)
-FROM pipec_r.station_info si,              -- 436
-     pipec_r.workarea_info wi,             -- 41
-     db_pipec.t_point t                    -- 45M
-WHERE wi.work_area_name = 'work_area_1'    -- 1/41
-  AND wi.work_area_sn = si.work_area_sn    -- 41, 41
-  AND si.station_sn = t.station_sn         -- 436, 401
+       AVG(t.measure_value) AS avg_value,
+       COUNT(t.measure_value) AS number_of_values
+FROM db_pipec.t_point t,           
+     pipec_r.station_info si,
+     pipec_r.workarea_info wi, 
+     pipec_r.pipeline_info li,        
+     pipec_r.point_info pi         
+WHERE li.pipeline_sn = pi.pipeline_sn
+  AND pi.station_sn = si.station_sn
+  AND si.work_area_sn = wi.work_area_sn
+  AND t.point_sn = pi.point_sn
+  AND wi.work_area_name = 'work_area_1'
   AND t.measure_type = 1                   -- 1/17
   AND t.point_sn = 'a1'
 GROUP BY si.station_name
-HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
 
 explain SELECT si.station_name,
-       COUNT(t.measure_value),
-       AVG(t.measure_value)
-FROM pipec_r.station_info si,              -- 436
-     pipec_r.workarea_info wi,             -- 41
-     db_pipec.t_point t                    -- 45M
-WHERE wi.work_area_name = 'work_area_1'    -- 1/41
-  AND wi.work_area_sn = si.work_area_sn    -- 41, 41
-  AND si.station_sn = t.station_sn         -- 436, 401
+       AVG(t.measure_value) AS avg_value,
+       COUNT(t.measure_value) AS number_of_values
+FROM db_pipec.t_point t,           
+     pipec_r.station_info si,
+     pipec_r.workarea_info wi, 
+     pipec_r.pipeline_info li,        
+     pipec_r.point_info pi         
+WHERE li.pipeline_sn = pi.pipeline_sn
+  AND pi.station_sn = si.station_sn
+  AND si.work_area_sn = wi.work_area_sn
+  AND t.point_sn = pi.point_sn
+  AND wi.work_area_name = 'work_area_1'
   AND t.measure_type = 1                   -- 1/17
   AND t.point_sn = 'a1'
 GROUP BY si.station_name
-HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
 
 -- query 4
-SELECT li.pipeline_name,
-       li.pipe_start,
-       li.pipe_end,
-       station_name,
-       COUNT(t.measure_value)
-FROM pipec_r.pipeline_info li,        -- 26
-     pipec_r.station_info si,         -- 436
-     db_pipec.t_point t               -- 45M
-WHERE t.pipeline_sn = li.pipeline_sn  -- 21, 26
-  AND t.station_sn = si.station_sn    -- 401, 436
-  AND t.measure_value > 2             -- 44101363/45M = 0.98
-  AND t.measure_type = 2              -- 1/17
-  AND k_timestamp >= '2023-08-01 01:00:00'  -- 1/1 (all data passed)
-GROUP BY pipeline_name, pipe_start, pipe_end, station_name
-HAVING COUNT(t.measure_value) > 0
-ORDER BY pipeline_name DESC;
-
-explain SELECT li.pipeline_name,
-       li.pipe_start,
-       li.pipe_end,
-       station_name,
-       COUNT(t.measure_value)
-FROM pipec_r.pipeline_info li,        -- 26
-     pipec_r.station_info si,         -- 436
-     db_pipec.t_point t               -- 45M
-WHERE t.pipeline_sn = li.pipeline_sn  -- 21, 26
-  AND t.station_sn = si.station_sn    -- 401, 436
-  AND t.measure_value > 2             -- 44101363/45M = 0.98
-  AND t.measure_type = 2              -- 1/17
-  AND k_timestamp >= '2023-08-01 01:00:00'  -- 1/1 (all data passed)
-GROUP BY pipeline_name, pipe_start, pipe_end, station_name
-HAVING COUNT(t.measure_value) > 0
-ORDER BY pipeline_name DESC;
+-- fallback case, moved to fallback testcase
 
 -- query 5
 SELECT wi.work_area_name,
@@ -287,6 +293,111 @@ ORDER BY
     li.pipeline_name,
     t.measure_type,
     timebucket;
+
+-- query library query 4
+SELECT si.station_name,
+       COUNT(sub_company_sn),COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_type = 1
+  AND t.measure_value > 1
+GROUP BY si.station_name
+ORDER BY si.station_name;
+
+explain SELECT si.station_name,
+       COUNT(sub_company_sn),COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_type = 2
+  AND t.measure_value > 10
+GROUP BY si.station_name
+ORDER BY si.station_name;
+
+-- query library query 5
+SELECT t.measure_type,
+       COUNT(si.sub_company_sn),
+       COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_value > 10
+GROUP BY t.measure_type
+ORDER BY t.measure_type;
+
+explain SELECT t.measure_type,
+       COUNT(si.sub_company_sn),
+       COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_value > 10
+GROUP BY t.measure_type
+ORDER BY t.measure_type;
+
+-- query library Query 18
+SELECT
+    time_bucket(t.k_timestamp, '1h') AS timebucket,
+    s.work_area_sn,
+    w.work_area_name,
+    pinfo.pipeline_name,
+    COUNT(t.k_timestamp) AS measurement_count,
+    SUM(t.measure_value) AS total_measure_value,
+    AVG(t.measure_value) AS avg_measure_value
+FROM
+    db_pipec.t_point t,
+    pipec_r.station_info s,
+    pipec_r.workarea_info w,
+    pipec_r.pipeline_info pinfo
+WHERE
+    t.station_sn = s.station_sn
+    AND t.pipeline_sn = pinfo.pipeline_sn
+    AND s.work_area_sn = w.work_area_sn
+    AND t.k_timestamp BETWEEN '2024-08-27 1:30:00' AND '2024-08-28 1:31:00'
+GROUP BY
+    timebucket, s.work_area_sn, w.work_area_name, pinfo.pipeline_name
+ORDER BY
+    timebucket, s.work_area_sn;
+
+explain SELECT
+    time_bucket(t.k_timestamp, '1h') AS timebucket,
+    s.work_area_sn,
+    w.work_area_name,
+    pinfo.pipeline_name,
+    COUNT(t.k_timestamp) AS measurement_count,
+    SUM(t.measure_value) AS total_measure_value,
+    AVG(t.measure_value) AS avg_measure_value
+FROM
+    db_pipec.t_point t,
+    pipec_r.station_info s,
+    pipec_r.workarea_info w,
+    pipec_r.pipeline_info pinfo
+WHERE
+    t.station_sn = s.station_sn
+    AND t.pipeline_sn = pinfo.pipeline_sn
+    AND s.work_area_sn = w.work_area_sn
+    AND t.k_timestamp BETWEEN '2024-08-27 1:30:00' AND '2024-08-28 1:31:00'
+GROUP BY
+    timebucket, s.work_area_sn, w.work_area_name, pinfo.pipeline_name
+ORDER BY
+    timebucket, s.work_area_sn;
 
 set enable_multimodel=true;
 
@@ -351,69 +462,43 @@ ORDER BY wi.work_area_name,
 
 -- query 1
 SELECT si.station_name,
-       COUNT(t.measure_value),
-       AVG(t.measure_value)
-FROM pipec_r.station_info si,              -- 436
-     pipec_r.workarea_info wi,             -- 41
-     db_pipec.t_point t                    -- 45M
-WHERE wi.work_area_name = 'work_area_1'    -- 1/41
-  AND wi.work_area_sn = si.work_area_sn    -- 41, 41
-  AND si.station_sn = t.station_sn         -- 436, 401
+       AVG(t.measure_value) AS avg_value,
+       COUNT(t.measure_value) AS number_of_values
+FROM db_pipec.t_point t,           
+     pipec_r.station_info si,
+     pipec_r.workarea_info wi, 
+     pipec_r.pipeline_info li,        
+     pipec_r.point_info pi         
+WHERE li.pipeline_sn = pi.pipeline_sn
+  AND pi.station_sn = si.station_sn
+  AND si.work_area_sn = wi.work_area_sn
+  AND t.point_sn = pi.point_sn
+  AND wi.work_area_name = 'work_area_1'
   AND t.measure_type = 1                   -- 1/17
   AND t.point_sn = 'a1'
 GROUP BY si.station_name
-HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
 
 explain SELECT si.station_name,
-       COUNT(t.measure_value),
-       AVG(t.measure_value)
-FROM pipec_r.station_info si,              -- 436
-     pipec_r.workarea_info wi,             -- 41
-     db_pipec.t_point t                    -- 45M
-WHERE wi.work_area_name = 'work_area_1'    -- 1/41
-  AND wi.work_area_sn = si.work_area_sn    -- 41, 41
-  AND si.station_sn = t.station_sn         -- 436, 401
+       AVG(t.measure_value) AS avg_value,
+       COUNT(t.measure_value) AS number_of_values
+FROM db_pipec.t_point t,           
+     pipec_r.station_info si,
+     pipec_r.workarea_info wi, 
+     pipec_r.pipeline_info li,        
+     pipec_r.point_info pi         
+WHERE li.pipeline_sn = pi.pipeline_sn
+  AND pi.station_sn = si.station_sn
+  AND si.work_area_sn = wi.work_area_sn
+  AND t.point_sn = pi.point_sn
+  AND wi.work_area_name = 'work_area_1'
   AND t.measure_type = 1                   -- 1/17
   AND t.point_sn = 'a1'
 GROUP BY si.station_name
-HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
 
 -- query 4
-SELECT li.pipeline_name,
-       li.pipe_start,
-       li.pipe_end,
-       station_name,
-       COUNT(t.measure_value)
-FROM pipec_r.pipeline_info li,        -- 26
-     pipec_r.station_info si,         -- 436
-     db_pipec.t_point t               -- 45M
-WHERE t.pipeline_sn = li.pipeline_sn  -- 21, 26
-  AND t.station_sn = si.station_sn    -- 401, 436
-  AND t.measure_value > 2             -- 44101363/45M = 0.98
-  AND t.measure_type = 2              -- 1/17
-  AND k_timestamp >= '2023-08-01 01:00:00'  -- 1/1 (all data passed)
-GROUP BY pipeline_name, pipe_start, pipe_end, station_name
-HAVING COUNT(t.measure_value) > 0
-ORDER BY pipeline_name DESC;
-
-explain SELECT li.pipeline_name,
-       li.pipe_start,
-       li.pipe_end,
-       station_name,
-       COUNT(t.measure_value)
-FROM pipec_r.pipeline_info li,        -- 26
-     pipec_r.station_info si,         -- 436
-     db_pipec.t_point t               -- 45M
-WHERE t.pipeline_sn = li.pipeline_sn  -- 21, 26
-  AND t.station_sn = si.station_sn    -- 401, 436
-  AND t.measure_value > 2             -- 44101363/45M = 0.98
-  AND t.measure_type = 2              -- 1/17
-  AND k_timestamp >= '2023-08-01 01:00:00'  -- 1/1 (all data passed)
-GROUP BY pipeline_name, pipe_start, pipe_end, station_name
-HAVING COUNT(t.measure_value) > 0
-ORDER BY pipeline_name DESC;
+-- fall back case, moved this to fallback testcase
 
 -- query 5
 SELECT wi.work_area_name,
@@ -486,7 +571,112 @@ ORDER BY
     li.pipeline_name,
     t.measure_type,
     timebucket;
- 
+
+-- query library query 4
+SELECT si.station_name,
+       COUNT(sub_company_sn),COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_type = 1
+  AND t.measure_value > 10
+GROUP BY si.station_name
+ORDER BY si.station_name;
+
+explain SELECT si.station_name,
+       COUNT(sub_company_sn),COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_type = 1
+  AND t.measure_value > 1
+GROUP BY si.station_name
+ORDER BY si.station_name;
+
+-- query library query 5
+SELECT t.measure_type,
+       COUNT(si.sub_company_sn),
+       COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_value > 10
+GROUP BY t.measure_type
+ORDER BY t.measure_type;
+
+explain SELECT t.measure_type,
+       COUNT(si.sub_company_sn),
+       COUNT(t.measure_value),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,
+     pipec_r.workarea_info wi,
+     db_pipec.t_point t
+WHERE wi.work_area_name = 'work_area_1'
+  AND wi.work_area_sn = si.work_area_sn
+  AND si.station_sn = t.station_sn
+  AND t.measure_value > 10
+GROUP BY t.measure_type
+ORDER BY t.measure_type;
+
+-- query library Query 18
+SELECT
+    time_bucket(t.k_timestamp, '1h') AS timebucket,
+    s.work_area_sn,
+    w.work_area_name,
+    pinfo.pipeline_name,
+    COUNT(t.k_timestamp) AS measurement_count,
+    SUM(t.measure_value) AS total_measure_value,
+    AVG(t.measure_value) AS avg_measure_value
+FROM
+    db_pipec.t_point t,
+    pipec_r.station_info s,
+    pipec_r.workarea_info w,
+    pipec_r.pipeline_info pinfo
+WHERE
+    t.station_sn = s.station_sn
+    AND t.pipeline_sn = pinfo.pipeline_sn
+    AND s.work_area_sn = w.work_area_sn
+    AND t.k_timestamp BETWEEN '2024-08-27 1:30:00' AND '2024-08-28 1:31:00'
+GROUP BY
+    timebucket, s.work_area_sn, w.work_area_name, pinfo.pipeline_name
+ORDER BY
+    timebucket, s.work_area_sn;
+
+explain SELECT
+    time_bucket(t.k_timestamp, '1h') AS timebucket,
+    s.work_area_sn,
+    w.work_area_name,
+    pinfo.pipeline_name,
+    COUNT(t.k_timestamp) AS measurement_count,
+    SUM(t.measure_value) AS total_measure_value,
+    AVG(t.measure_value) AS avg_measure_value
+FROM
+    db_pipec.t_point t,
+    pipec_r.station_info s,
+    pipec_r.workarea_info w,
+    pipec_r.pipeline_info pinfo
+WHERE
+    t.station_sn = s.station_sn
+    AND t.pipeline_sn = pinfo.pipeline_sn
+    AND s.work_area_sn = w.work_area_sn
+    AND t.k_timestamp BETWEEN '2024-08-27 1:30:00' AND '2024-08-28 1:31:00'
+GROUP BY
+    timebucket, s.work_area_sn, w.work_area_name, pinfo.pipeline_name
+ORDER BY
+    timebucket, s.work_area_sn;
+
 set enable_multimodel=false;
 drop database pipec_r cascade;
 drop database db_pipec cascade;

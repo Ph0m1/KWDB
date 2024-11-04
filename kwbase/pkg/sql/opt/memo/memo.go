@@ -346,6 +346,10 @@ const (
 	// JoinColsTypeOrLengthMismatch indicates the reset reason is due to a mismatch
 	// in the type or length of join columns, which is necessary for processing in multi-model contexts.
 	JoinColsTypeOrLengthMismatch // 6
+
+	// UnsupportedOperation indicates the reset reason is due to an unsupported operation
+	// in a multi-model context.
+	UnsupportedOperation // 7
 )
 
 // String converts MultiModelResetReason to string
@@ -366,6 +370,8 @@ func (r MultiModelResetReason) String() string {
 		return "cast on tag column is not supported in multi-model"
 	case JoinColsTypeOrLengthMismatch:
 		return "mismatch in join columns' type or length"
+	case UnsupportedOperation:
+		return "unsupported operation in multi-model context"
 	default:
 		return "unknown"
 	}
