@@ -1,4 +1,3 @@
-set cluster setting sql.alter_tag.enabled=false;
 drop database if exists test_alter cascade;
 create ts database test_alter;
 
@@ -658,5 +657,3 @@ ALTER TABLE test.t1 DROP COLUMN e1;
 select first(e2), last(e2), first_row(e2), last_row(e2) from test.t1;
 
 drop database test cascade;
-
-set cluster setting sql.alter_tag.enabled=true;

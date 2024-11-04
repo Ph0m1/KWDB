@@ -32,11 +32,16 @@
 #include "st_wal_internal_log_structure.h"
 #include "lt_rw_latch.h"
 #include "ts_table_snapshot.h"
+#include "mmap/mmap_tag_table.h"
 
 namespace kwdbts {
 
 class TsEntityGroup;
 class TsIterator;
+class TagIterator;
+class MetaIterator;
+class EntityGroupTagIterator;
+class EntityGroupMetaIterator;
 
 // in distributed Verison2, every ts table has just one entitygroup
 const uint64_t default_entitygroup_id_in_dist_v2 = 1;
@@ -81,7 +86,7 @@ class TsTable {
    *
    * @return std::vector<AttributeInfo>
    */
-  KStatus GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagColumn*>* tag_schema);
+  KStatus GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagInfo>* tag_schema);
 
   // convert schema info to protobuf
   KStatus GenerateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,
@@ -382,7 +387,8 @@ class TsTable {
    */
   virtual KStatus
   GetEntityIdList(kwdbContext_p ctx, const std::vector<void*>& primary_tags, const std::vector<uint32_t>& scan_tags,
-                  std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, uint32_t* count);
+                  std::vector<EntityResultIndex>* entity_id_list, ResultSet* res,
+                  uint32_t* count, uint32_t table_version = 1);
 
 
   /**
@@ -483,7 +489,9 @@ class TsTable {
     *entity_group = std::move(t_range);
   }
 
-  void UpdateTagTsVersion(uint32_t new_version);
+  KStatus SyncTagTsVersion(uint32_t cur_version, uint32_t new_version);
+
+  KStatus AddTagSchemaVersion(const std::vector<TagInfo>& schema, uint32_t new_version);
 
  public:
   // TODO(lfl): 此hash算法和GO层一致，后续修改为此算法
@@ -542,7 +550,7 @@ class TsEntityGroup {
    *
    * @return KStatus
    */
-  virtual KStatus Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema);
+  virtual KStatus Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema, uint32_t ts_version = 1);
 
   /**
    * @brief Open and initialize TsTableRange
@@ -708,7 +716,8 @@ class TsEntityGroup {
    */
   virtual KStatus
   GetEntityIdList(kwdbContext_p ctx, const std::vector<void*>& primary_tags, const std::vector<uint32_t>& scan_tags,
-                  std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, uint32_t* count);
+                  std::vector<EntityResultIndex>* entity_id_list,
+                  ResultSet* res, uint32_t* count, uint32_t table_version = 1);
 
   /**
    * @brief Creating an Iterator for Timetable
@@ -737,8 +746,10 @@ class TsEntityGroup {
    * @param[in] scan_tags tag index
    * @param[out] TagIterator**
    */
-  virtual KStatus GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t>& scan_tags, EntityGroupTagIterator** iter);
-  virtual KStatus GetTagIterator(kwdbContext_p ctx, std::vector<k_uint32>& scan_tags, EntityGroupTagIterator** iter,
+  virtual KStatus GetTagIterator(kwdbContext_p ctx, std::shared_ptr<TsEntityGroup> entity_group,
+                                 std::vector<uint32_t>& scan_tags, uint32_t table_version, EntityGroupTagIterator** iter);
+  virtual KStatus GetTagIterator(kwdbContext_p ctx, std::shared_ptr<TsEntityGroup> entity_group,
+                                std::vector<k_uint32>& scan_tags, uint32_t table_version, EntityGroupTagIterator** iter,
                           const std::vector<uint32_t>& hps);
   /**
    * @brief create EntityGroupMetaIterator
@@ -767,8 +778,32 @@ class TsEntityGroup {
   /**
    * @brief Obtain metadata information for tags
    */
-  const std::vector<TagColumn*>& GetSchema() const {
-    return tag_bt_->getSchemaInfo();
+  KStatus GetTagSchemaExcludeDroppedByVersion(std::vector<TagInfo>* tag_schemas, TableVersion tbl_version) const {
+    auto tbl_version_obj = new_tag_bt_->GetTagTableVersionManager()->GetVersionObject(tbl_version);
+    if (nullptr == tbl_version_obj) {
+      return KStatus::FAIL;
+    }
+    *tag_schemas = tbl_version_obj->getExcludeDroppedSchemaInfos();
+    return KStatus::SUCCESS;
+  }
+
+  KStatus GetTagSchemaIncludeDroppedByVersion(std::vector<TagInfo>* tag_schemas, TableVersion tbl_version) const {
+    auto tbl_version_obj = new_tag_bt_->GetTagTableVersionManager()->GetVersionObject(tbl_version);
+    if (nullptr == tbl_version_obj) {
+      return KStatus::FAIL;
+    }
+    *tag_schemas = tbl_version_obj->getIncludeDroppedSchemaInfos();
+    return KStatus::SUCCESS;
+  }
+
+  KStatus GetCurrentTagSchemaExcludeDropped(std::vector<TagInfo>* tag_schemas) const {
+    auto tbl_version_obj = new_tag_bt_->GetTagTableVersionManager()->GetVersionObject(
+                             new_tag_bt_->GetTagTableVersionManager()->GetCurrentTableVersion());
+    if (nullptr == tbl_version_obj) {
+      return KStatus::FAIL;
+    }
+    *tag_schemas = tbl_version_obj->getExcludeDroppedSchemaInfos();
+    return KStatus::SUCCESS;
   }
 
   /**
@@ -778,20 +813,10 @@ class TsEntityGroup {
     */
   KStatus TSxClean(kwdbContext_p ctx);
 
-  virtual KStatus AlterTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema,
-                               ErrorInfo& err_info, uint32_t new_table_version = 1);
+  virtual KStatus AlterTableTag(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
+                               uint32_t cur_version, uint32_t new_version, ErrorInfo& err_info);
 
-  virtual KStatus AddTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema,
-                             ErrorInfo& err_info, uint32_t new_table_version = 1);
-
-  virtual KStatus DropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema,
-                              ErrorInfo& err_info, uint32_t new_table_version = 1);
-
-  virtual KStatus UndoAddTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, uint32_t new_table_version = 1);
-
-  virtual KStatus UndoDropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, uint32_t new_table_version = 1);
-
-  virtual KStatus UndoAlterTagInfo(kwdbContext_p ctx, TagInfo& origin_tag_schema, uint32_t new_table_version = 1);
+  virtual KStatus UndoAlterTableTag(kwdbContext_p ctx, uint32_t cur_version, uint32_t new_version, ErrorInfo& err_info);
 
   /**
    * @brief Convert roachpb::KWDBKTSColumn to attribute info.
@@ -824,8 +849,8 @@ class TsEntityGroup {
     return ebt_manager_;
   }
 
-  inline MMapTagColumnTable* GetSubEntityGroupTagbt() {
-    return tag_bt_;
+  inline TagTable* GetSubEntityGroupNewTagbt() {
+    return new_tag_bt_;
   }
 
   [[nodiscard]] uint64_t GetOptimisticReadLsn() const {
@@ -850,14 +875,33 @@ class TsEntityGroup {
     RW_LATCH_UNLOCK(drop_mutex_);
   }
 
-  void UpdateTagVersion(uint32_t table_version) {
-    tag_bt_->mutexLock();
-    tag_bt_->SetTableVersion(table_version);
-    tag_bt_->mutexUnlock();
+  int SyncTagVersion(uint32_t cur_version, uint32_t new_version) {
+    RW_LATCH_S_LOCK(drop_mutex_);
+    Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
+    return new_tag_bt_->GetTagTableVersionManager()->SyncFromMetricsTableVersion(cur_version, new_version);
+  }
+
+  int AddTagSchemaVersion(const std::vector<TagInfo>& schema, uint32_t new_version) {
+    RW_LATCH_S_LOCK(drop_mutex_);
+    Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
+    ErrorInfo err_info;
+    if (new_tag_bt_->AddNewPartitionVersion(schema, new_version, err_info) < 0) {
+      return -1;
+    }
+    new_tag_bt_->GetTagTableVersionManager()->SyncCurrentTableVersion();
+    return 0;
   }
 
   size_t GetTagCount() const  {
-    return tag_bt_->actual_size();
+    std::vector<TagPartitionTable*> all_tag_partition_tables;
+    TableVersion cur_tbl_version = new_tag_bt_->GetTagTableVersionManager()->GetCurrentTableVersion();
+    new_tag_bt_->GetTagPartitionTableManager()->GetAllPartitionTablesLessVersion(all_tag_partition_tables,
+                                                                              cur_tbl_version);
+    size_t ret = 0;
+    for (const auto& entity_tag_bt : all_tag_partition_tables) {
+      ret += entity_tag_bt->actual_size();
+    }  // end for
+    return ret;
   }
 
  protected:
@@ -866,8 +910,8 @@ class TsEntityGroup {
   RangeGroup range_;
   string tbl_sub_path_;
   SubEntityGroupManager* ebt_manager_ = nullptr;
-  MMapTagColumnTable* tag_bt_ = nullptr;
   uint32_t cur_subgroup_id_ = 0;
+  TagTable* new_tag_bt_{nullptr};
 
   std::atomic_uint64_t optimistic_read_lsn_{0};
 
@@ -931,8 +975,6 @@ class TsEntityGroup {
                        uint32_t entity_id, bool all_success);
 
   virtual KStatus putTagData(kwdbContext_p ctx, int32_t groupid, int32_t entity_id, Payload& payload);
-  virtual KStatus putTagDataHashed(kwdbContext_p ctx, int32_t groupid, int32_t entity_id,
-                                  uint32_t hashpoint, Payload& payload);
 
   /**
    * AllocateEntityGroupID assigns an entity group ID to an entity group

@@ -14,70 +14,57 @@
 #include "lt_cond.h"
 
 namespace kwdbts {
-EntityGroupTagIterator::~EntityGroupTagIterator() {
-  // TODO(zhuderun): tag table release
-}
 
-KStatus EntityGroupTagIterator::Init(MMapTagColumnTable* tag_bt) {
-  // TODO(zhuderun): add table ref
-  tag_bt_ = tag_bt;
-  tag_bt_->mutexLock();
-  cur_total_row_count_ = tag_bt_->actual_size();
-  tag_bt_->mutexUnlock();
-  return KStatus::SUCCESS;
-}
-bool in(kwdbts::k_uint32 hp, const std::vector<kwdbts::k_uint32>& hps) {
-  for (int i=0; i < hps.size(); i++) {
-    if (hps[i] == hp) {
-      return true;
-    }
-  }
-  return false;
-}
+bool in(kwdbts::k_uint32 hp, const std::vector<kwdbts::k_uint32>& hps);
 
-KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_list,
-                                     ResultSet* res, k_uint32* count) {
+KStatus TagPartitionIterator::Next(std::vector<EntityResultIndex>* entity_id_list,
+                                     ResultSet* res, k_uint32* count, bool* is_finish) {
   if  (cur_scan_rowid_ > cur_total_row_count_) {
     LOG_INFO("fetch tag table %s%s, "
       "cur_scan_rowid[%lu] > cur_total_row_count_[%lu], count: %u",
-      tag_bt_->sandbox().c_str(), tag_bt_->name().c_str(), cur_scan_rowid_,
+      m_tag_partition_table_->sandbox().c_str(), m_tag_partition_table_->name().c_str(), cur_scan_rowid_,
       cur_total_row_count_, *count);
+    *is_finish = true;
     return(KStatus::SUCCESS);
   }
-
+  *is_finish = false;
   uint32_t fetch_count = *count;
   bool has_data = false;
   size_t start_row = 0;
   size_t row_num = 0;
   ErrorInfo err_info;
-  tag_bt_->startRead();
+  m_tag_partition_table_->startRead();
   for (row_num = cur_scan_rowid_; row_num <= cur_total_row_count_; row_num++) {
     if (fetch_count >= ONE_FETCH_COUNT) {
       LOG_DEBUG("fetch_count[%u] >= ONECE_FETCH_COUNT[%u]", fetch_count,
         ONE_FETCH_COUNT);
       // m_cur_scan_rowid_=row_num;
       goto success_end;
-      // *count = fetch_count;
-      // return KStatus::SUCCESS;
     }
     bool needSkip = false;
     uint32_t hash_point;
-    if (version_ == TagIteratorType::TAG_IT_HASHED) {
-      tag_bt_->getHashpointByRowNum(row_num, &hash_point);
+    if (!EngineOptions::isSingleNode()) {
+      m_tag_partition_table_->getHashpointByRowNum(row_num, &hash_point);
       needSkip = !in(hash_point, hps_);
       LOG_DEBUG("row %lu hashpoint is %u %s in search list", row_num, hash_point, needSkip?"not":"");
     }
-    if (!tag_bt_->isValidRow(row_num) || needSkip) {
+    if (!m_tag_partition_table_->isValidRow(row_num) || needSkip) {
       if (has_data) {
-        for (int idx = 0; idx < scan_tags_.size(); idx++) {
-          // Batch* batch = new Batch(m_tag_bt_->GetColumnAddr(start_row, tagid),
-          // (row_num - start_row), m_tag_bt_->getBitmapAddr(start_row, tagid));
-          Batch* batch = GenTagBatchRecord(tag_bt_, start_row, row_num, scan_tags_[idx], err_info);
-          if (!batch) {
-            LOG_ERROR("failed to get batch from the tag table %s%s",
-              tag_bt_->sandbox().c_str(), tag_bt_->name().c_str());
-            tag_bt_->stopRead();
-            return (KStatus::FAIL);
+        for (int idx = 0; idx < src_version_scan_tags_.size(); idx++) {
+          // if (src_version_scan_tags_[idx] == INVALID_COL_IDX) {
+          //  continue;
+          // }
+          uint32_t col_idx = src_version_scan_tags_[idx];
+          Batch* batch = m_tag_partition_table_->GetTagBatchRecord(start_row, row_num, col_idx,
+                                                 result_version_tag_infos_[col_idx], err_info);
+          if (err_info.errcode < 0) {
+            delete batch;
+            LOG_ERROR("GetTagBatchRecord failed.");
+            return KStatus::FAIL;
+          }
+          if (UNLIKELY(batch == nullptr)) {
+            LOG_WARN("GetTagBatchRecord result is nullptr, skip this col[%u]", col_idx);
+            continue;
           }
           res->push_back(idx, batch);
         }
@@ -90,94 +77,214 @@ KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_l
       start_row = row_num;
       has_data = true;
     }
-    if (version_ == TagIteratorType::TAG_IT_HASHED) {
-      tag_bt_->getHashedEntityIdByRownum(row_num, hash_point, entity_id_list);
+    if (!EngineOptions::isSingleNode()) {
+      m_tag_partition_table_->getHashedEntityIdByRownum(row_num, hash_point, entity_id_list);
     } else {
-      tag_bt_->getEntityIdByRownum(row_num, entity_id_list);
+      m_tag_partition_table_->getEntityIdByRownum(row_num, entity_id_list);
     }
     fetch_count++;
   }  // end for
 if (fetch_count == *count) {
   LOG_WARN("no valid record in the tag table %s%s, cur_total_row_count_[%lu], "
       "cur_scan_rowid_[%lu]",
-      tag_bt_->sandbox().c_str(), tag_bt_->name().c_str(), cur_total_row_count_,
+      m_tag_partition_table_->sandbox().c_str(), m_tag_partition_table_->name().c_str(), cur_total_row_count_,
       cur_scan_rowid_);
-  tag_bt_->stopRead();
+  m_tag_partition_table_->stopRead();
+  *is_finish = true;
   return (KStatus::SUCCESS);
 }
 success_end:
   if (start_row < row_num) {
     // need start_row < end_row
-    for (int idx = 0; idx < scan_tags_.size(); idx++) {
-      Batch* batch = GenTagBatchRecord(tag_bt_, start_row, row_num, scan_tags_[idx], err_info);
-      if (!batch) {
-        LOG_ERROR("failed to get batch from the tag table %s%s",
-          tag_bt_->sandbox().c_str(), tag_bt_->name().c_str());
-        tag_bt_->stopRead();
-        return (KStatus::FAIL);
+    for (int idx = 0; idx < src_version_scan_tags_.size(); idx++) {
+      // if (src_version_scan_tags_[idx] == INVALID_COL_IDX) {
+      //  continue;
+      // }
+      uint32_t col_idx = src_version_scan_tags_[idx];
+      Batch* batch = m_tag_partition_table_->GetTagBatchRecord(start_row, row_num, col_idx,
+                                      result_version_tag_infos_[col_idx], err_info);
+      if (err_info.errcode < 0) {
+        delete batch;
+        LOG_ERROR("GetTagBatchRecord failed.");
+        return KStatus::FAIL;
+      }
+      if (UNLIKELY(batch == nullptr)) {
+        LOG_WARN("GetTagBatchRecord result is nullptr, skip this col[%u]", col_idx);
+        continue;
       }
       res->push_back(idx, batch);
     }
   } else {
-    LOG_INFO("not required to call GenTagBatchRecord on the tag table %s%s, "
+    LOG_INFO("not required to call GetTagBatchRecord on the tag table %s%s, "
       "fetch_count: %u, start_row[%lu] >= row_num[%lu]",
-      tag_bt_->sandbox().c_str(), tag_bt_->name().c_str(), fetch_count,
+      m_tag_partition_table_->sandbox().c_str(), m_tag_partition_table_->name().c_str(), fetch_count,
       start_row, row_num);
   }
-  tag_bt_->stopRead();
+  m_tag_partition_table_->stopRead();
   *count = fetch_count;
   LOG_DEBUG("fatch the tag table %s%s, fetch_count: %u",
-    tag_bt_->sandbox().c_str(), tag_bt_->name().c_str(), *count);
+    m_tag_partition_table_->sandbox().c_str(), m_tag_partition_table_->name().c_str(), *count);
   cur_scan_rowid_ = row_num;
+  *is_finish = (row_num > cur_total_row_count_) ? true : false;
   return (KStatus::SUCCESS);
 }
 
-KStatus EntityGroupTagIterator::Close() {
-  if (tag_bt_ != nullptr) {
-    int ref_cnt = tag_bt_->decRefCount();
-    if (ref_cnt <= 1) {
-      KW_COND_SIGNAL(tag_bt_->m_ref_cnt_cv_);
+void TagPartitionIterator::Init() {
+  m_tag_partition_table_->mutexLock();
+  cur_total_row_count_ = m_tag_partition_table_->actual_size();
+  m_tag_partition_table_->mutexUnlock();
+}
+
+EntityGroupTagIterator::EntityGroupTagIterator(std::shared_ptr<TsEntityGroup> entity_group, TagTable* tag_bt,
+                         uint32_t table_versioin, const std::vector<k_uint32>& scan_tags) :
+                         entity_group_(entity_group), tag_bt_(tag_bt),
+                         table_version_(table_versioin), scan_tags_(scan_tags) {
+    entity_group_->RdDropLock();
+}
+
+EntityGroupTagIterator::EntityGroupTagIterator(std::shared_ptr<TsEntityGroup> entity_group, TagTable* tag_bt,
+                         uint32_t table_versioin, const std::vector<k_uint32>& scan_tags,
+                         const std::vector<uint32_t>& hps) :
+                        entity_group_(entity_group), tag_bt_(tag_bt),
+                        table_version_(table_versioin), scan_tags_(scan_tags),
+                        hps_(hps) {
+    entity_group_->RdDropLock();
+    #ifdef K_DEBUG
+    for (int i =0; i< hps_.size(); i++) {
+      LOG_DEBUG("Init EntityGroupTagIterator hashpoints is %d", hps_.at(i));
+    }
+    #endif
+}
+
+EntityGroupTagIterator::~EntityGroupTagIterator() {
+  entity_group_->DropUnlock();
+  for (size_t idx = 0; idx < tag_partition_iters_.size(); ++idx) {
+    delete tag_partition_iters_[idx];
+    tag_partition_iters_[idx] = nullptr;
+  }
+}
+
+KStatus EntityGroupTagIterator::Init() {
+  // 1. get all partition tables
+  std::vector<TagPartitionTable*> all_part_tables;
+  tag_bt_->GetTagPartitionTableManager()->GetAllPartitionTablesLessVersion(all_part_tables, table_version_);
+  if (all_part_tables.empty()) {
+    LOG_ERROR("tag table version [%u]'s partition table is empty.", table_version_);
+    return FAIL;
+  }
+  // 2. init TagPartitionIterator
+  TagVersionObject* result_ver_obj = tag_bt_->GetTagTableVersionManager()->GetVersionObject(table_version_);
+  std::vector<uint32_t> result_scan_tags;
+  for (const auto& tag_idx : scan_tags_) {
+    result_scan_tags.emplace_back(result_ver_obj->getValidSchemaIdxs()[tag_idx]);
+  }
+  for (const auto& tag_part_ptr : all_part_tables) {
+    // get source scan tags
+    std::vector<uint32_t> src_scan_tags;
+    for (int idx = 0; idx < scan_tags_.size(); ++idx) {
+      if (result_scan_tags[idx] >= tag_part_ptr->getIncludeDroppedSchemaInfos().size()) {
+        src_scan_tags.push_back(INVALID_COL_IDX);
+      } else {
+        src_scan_tags.push_back(result_scan_tags[idx]);
+      }
+    }
+    // new TagPartitionIterator
+    TagPartitionIterator* tag_part_iter = KNEW TagPartitionIterator(tag_part_ptr, src_scan_tags,
+                                                  result_ver_obj->getIncludeDroppedSchemaInfos(), hps_);
+    if (nullptr == tag_part_iter) {
+      LOG_ERROR("KNEW TagPartitionIterator failed.");
+      return FAIL;
+    }
+    tag_part_iter->Init();
+    tag_partition_iters_.push_back(tag_part_iter);
+  }
+  cur_tag_part_idx_ = 0;
+  cur_tag_part_iter_ = tag_partition_iters_[cur_tag_part_idx_];
+  return KStatus::SUCCESS;
+}
+bool in(kwdbts::k_uint32 hp, const std::vector<kwdbts::k_uint32>& hps) {
+  for (int i=0; i < hps.size(); i++) {
+    if (hps[i] == hp) {
+      return true;
     }
   }
+  return false;
+}
+
+KStatus EntityGroupTagIterator::Next(std::vector<EntityResultIndex>* entity_id_list,
+                                     ResultSet* res, k_uint32* count, bool* is_finish) {
+  *is_finish = false;
+  uint32_t fetch_count = 0;
+  KStatus status = KStatus::SUCCESS;
+  bool part_iter_finish = false;
+  while (fetch_count < ONE_FETCH_COUNT && cur_tag_part_idx_ < tag_partition_iters_.size())  {
+    cur_tag_part_iter_ = tag_partition_iters_[cur_tag_part_idx_];
+    if (KStatus::SUCCESS != cur_tag_part_iter_->Next(entity_id_list, res, &fetch_count, &part_iter_finish)) {
+      LOG_ERROR("failed to get next batch");
+      return KStatus::FAIL;
+    }
+    // each partition is one batch
+    if (part_iter_finish) {
+      cur_tag_part_idx_++;
+      if (fetch_count == 0) {
+        // this partition is empty
+        continue;
+      }
+    }
+    break;
+  }
+  *count = fetch_count;
+  *is_finish = (cur_tag_part_idx_ >= tag_partition_iters_.size()) ? true : false;
+  return KStatus::SUCCESS;
+}
+
+KStatus EntityGroupTagIterator::Close() {
   return (KStatus::SUCCESS);
 }
 
 TagIterator::~TagIterator() {
-  for (uint32_t idx = 0; idx < entitygrp_iterator_.size(); idx++) {
-    entitygrp_iterator_[idx]->Close();
-    delete entitygrp_iterator_[idx];
-    entitygrp_iterator_[idx] = nullptr;
+  for (uint32_t idx = 0; idx < entitygrp_iters_.size(); idx++) {
+    entitygrp_iters_[idx]->Close();
+    delete entitygrp_iters_[idx];
+    entitygrp_iters_[idx] = nullptr;
   }
-  entitygrp_iterator_.clear();
+  entitygrp_iters_.clear();
 }
 
 KStatus TagIterator::Init() {
-  if (entitygrp_iterator_.empty()) {
+  if (entitygrp_iters_.empty()) {
     LOG_ERROR("invalid EntityGroupTagIterator");
     return (KStatus::FAIL);
   }
+  for (const auto& entitygrp_iter : entitygrp_iters_) {
+    if (KStatus::SUCCESS != entitygrp_iter->Init()) {
+      LOG_ERROR("EntityGroupTagIterator::Init failed.");
+      return KStatus::FAIL;
+    }
+  }
   cur_idx_ = 0;
-  cur_iterator_ = entitygrp_iterator_[cur_idx_];
+  cur_iterator_ = entitygrp_iters_[cur_idx_];
   return KStatus::SUCCESS;
 }
 
 KStatus TagIterator::Next(std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, k_uint32* count) {
-  if (cur_idx_ >= entitygrp_iterator_.size()) {
+  if (cur_idx_ >= entitygrp_iters_.size()) {
     *count = 0;
     return KStatus::SUCCESS;
   }
   uint32_t fetch_count = 0;
   KStatus status = KStatus::SUCCESS;
-  while (fetch_count < ONE_FETCH_COUNT && cur_idx_ < entitygrp_iterator_.size())  {
-    cur_iterator_ = entitygrp_iterator_[cur_idx_];
-    if (KStatus::SUCCESS != cur_iterator_->Next(entity_id_list, res, &fetch_count)) {
+  bool cur_iter_finish = false;
+  while (fetch_count < ONE_FETCH_COUNT && cur_idx_ < entitygrp_iters_.size())  {
+    cur_iterator_ = entitygrp_iters_[cur_idx_];
+    if (KStatus::SUCCESS != cur_iterator_->Next(entity_id_list, res, &fetch_count, &cur_iter_finish)) {
       LOG_ERROR("failed to get next batch");
       return KStatus::FAIL;
     }
-    if (fetch_count >= ONE_FETCH_COUNT) {
-      break;
+    if (cur_iter_finish) {
+      cur_idx_++;
     }
-    cur_idx_++;
+    break;
   }
   *count = fetch_count;
   return KStatus::SUCCESS;
@@ -185,12 +292,12 @@ KStatus TagIterator::Next(std::vector<EntityResultIndex>* entity_id_list, Result
 
 
 KStatus TagIterator::Close() {
-  for (uint32_t idx = 0; idx < entitygrp_iterator_.size(); idx++) {
-    entitygrp_iterator_[idx]->Close();
-    delete entitygrp_iterator_[idx];
-    entitygrp_iterator_[idx] = nullptr;
+  for (uint32_t idx = 0; idx < entitygrp_iters_.size(); idx++) {
+    entitygrp_iters_[idx]->Close();
+    delete entitygrp_iters_[idx];
+    entitygrp_iters_[idx] = nullptr;
   }
-  entitygrp_iterator_.clear();
+  entitygrp_iters_.clear();
   return KStatus::SUCCESS;
 }
 

@@ -438,30 +438,20 @@ int MMapTagColumnTable::initHashPointColumn(ErrorInfo& err_info) {
   return err_info.errcode;
 }
 
-int MMapTagColumnTable::initIndex(ErrorInfo& err_info) {
-  string index_name = m_name_ + ".ht";
-  m_index_ = new MMapHashIndex();
-  err_info.errcode = m_index_->open(index_name, m_db_path_, m_tbl_sub_path_, m_flags_, err_info);
-  if (err_info.errcode < 0) {
-    delete m_index_;
-    m_index_ = nullptr;
-    err_info.errmsg = "initIndex failed.";
-    LOG_ERROR("failed to open the tag hash index file %s%s, error: %s",
-              m_tbl_sub_path_.c_str(), index_name.c_str(), err_info.errmsg.c_str())
-    return err_info.errcode;
-  }
-  m_index_->init(m_meta_data_->m_primary_tag_size);
-  return err_info.errcode;
-}
-
 int MMapTagColumnTable::readTagInfo(ErrorInfo& err_info) {
   TagColumn* tag_col = nullptr;
   uint32_t store_offset = 0;
+  m_cols_.resize(m_meta_data_->m_column_count);
   TagInfo* cols = reinterpret_cast<TagInfo*>(static_cast<uint8_t*>(m_meta_file_->startAddr()) +
                                              m_meta_data_->m_column_info_offset);
   for (int idx = 0; idx < m_meta_data_->m_column_count; ++idx) {
     TagInfo ainfo;
     memcpy(&ainfo, &(cols[idx]), sizeof(TagInfo));
+    m_tag_info_include_dropped_.push_back(ainfo);
+    if (ainfo.isDropped()) {
+      m_cols_[idx] = nullptr;
+      continue;
+    }
     tag_col = new TagColumn(idx, ainfo);
     if (!tag_col) {
       LOG_ERROR("failed to new TagColumn object for the tag table %s%s",
@@ -473,24 +463,21 @@ int MMapTagColumnTable::readTagInfo(ErrorInfo& err_info) {
                                       m_db_path_, m_db_name_, m_flags_) < 0) {
 	    LOG_WARN("faild to open the tag %s%s%s(%u), retry open it after recovery",
                m_db_path_.c_str(), m_db_name_.c_str(), m_name_.c_str(), ainfo.m_id);
-	  delete tag_col;
-	  continue;
+	    delete tag_col;
+	    continue;
       }
     } else if (tag_col->attributeInfo().m_tag_type == PRIMARY_TAG) {
       tag_col->setPrimaryTag(true);
       tag_col->setStoreOffset(store_offset);
       store_offset += tag_col->attributeInfo().m_size;
     }
-    m_cols_.push_back(std::move(tag_col));
+    m_cols_[idx] = tag_col;
   }
   err_info.errcode = initBitMapColumn(err_info);
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
   }
-  err_info.errcode = initIndex(err_info);
-  if (err_info.errcode < 0) {
-    return err_info.setError(err_info.errcode);
-  }
+
   if (!EngineOptions::isSingleNode()) {
     err_info.errcode = initHashPointColumn(err_info);
     if (err_info.errcode < 0) {
@@ -502,13 +489,18 @@ int MMapTagColumnTable::readTagInfo(ErrorInfo& err_info) {
 
 int MMapTagColumnTable::initColumn(const std::vector<TagInfo>& schema, ErrorInfo& err_info) {
   uint32_t rec_size = 0;
-  m_cols_.reserve(schema.size());
+  m_cols_.resize(schema.size());
   TagColumn* tag_col = nullptr;
   int error_code;
   m_meta_data_->m_primary_tag_store_size = rec_size = k_entity_group_id_size;
   uint32_t col_offset = 0;
   uint32_t store_offset = 0;
+  uint32_t actual_col_cnt = 0;
   for (size_t idx = 0; idx < schema.size(); ++idx) {
+    if (schema[idx].isDropped()) {
+      m_cols_[idx] = nullptr;
+      continue;
+    }
     if (schema[idx].m_tag_type != GENERAL_TAG && schema[idx].m_tag_type != PRIMARY_TAG) {
       LOG_ERROR("invalid tag type, expect %d or %d, but %d in fact about the "
         " tag table %s%s",
@@ -547,12 +539,17 @@ int MMapTagColumnTable::initColumn(const std::vector<TagInfo>& schema, ErrorInfo
       }
     }
     tag_col->attributeInfo().m_offset = col_offset;
+    m_tag_info_include_dropped_[idx].m_offset = col_offset;
+    m_tag_info_include_dropped_[idx].m_size = tag_col->attributeInfo().m_size;
     rec_size += tag_col->attributeInfo().m_size;
     col_offset += tag_col->attributeInfo().m_size;
-    m_cols_.push_back(std::move(tag_col));
+    m_cols_[idx] = tag_col;
+    ++actual_col_cnt;
   }
   m_meta_data_->m_record_store_size = rec_size;
   m_meta_data_->m_record_size = (rec_size - k_entity_group_id_size);
+  m_meta_data_->m_header_size = 1 + ((actual_col_cnt + 7) / 8);  //  1 + [null bit map]
+  m_meta_data_->m_bitmap_size = ((actual_col_cnt + 7) / 8);
   return 0;
 }
 
@@ -582,22 +579,19 @@ int MMapTagColumnTable::writeTagInfo(uint64_t start_offset, const std::vector<Ta
 int MMapTagColumnTable::init(const vector<TagInfo>& schema, ErrorInfo& err_info) {
 
   // initColumn
+  m_tag_info_include_dropped_ = schema;
   err_info.errcode = initColumn(schema, err_info);
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
   }
-  m_meta_data_->m_header_size = 1 + ((m_cols_.size() + 7) / 8);  //  1 + [null bit map]
-  m_meta_data_->m_bitmap_size = ((m_cols_.size() + 7) / 8);
+  // m_meta_data_->m_header_size = 1 + ((m_cols_.size() + 7) / 8);  //  1 + [null bit map]
+  // m_meta_data_->m_bitmap_size = ((m_cols_.size() + 7) / 8);
   // initBitmap
   err_info.errcode = initBitMapColumn(err_info);
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
   }
-  // initIndex
-  err_info.errcode = initIndex(err_info);
-  if (err_info.errcode < 0) {
-    return err_info.setError(err_info.errcode);
-  }
+
   // initHashPointFile
   if (!EngineOptions::isSingleNode()) {
     err_info.errcode = initHashPointColumn(err_info);
@@ -612,11 +606,7 @@ int MMapTagColumnTable::init(const vector<TagInfo>& schema, ErrorInfo& err_info)
 
   m_meta_data_->m_column_info_offset = metaDataSize();  // sizeof(TagTableMetaData);
 
-  std::vector<TagInfo> tag_infos;
-  for (const auto it : m_cols_) {
-    tag_infos.push_back(it->attributeInfo());
-  }
-  err_info.errcode = writeTagInfo(m_meta_data_->m_column_info_offset, tag_infos);
+  err_info.errcode = writeTagInfo(m_meta_data_->m_column_info_offset, m_tag_info_include_dropped_);
   if (err_info.errcode < 0) {
     return err_info.setError(err_info.errcode);
   }
@@ -624,7 +614,7 @@ int MMapTagColumnTable::init(const vector<TagInfo>& schema, ErrorInfo& err_info)
   return err_info.errcode;
 }
 
-int MMapTagColumnTable::create(const vector<TagInfo>& schema, int32_t entity_group_id, ErrorInfo& err_info) {
+int MMapTagColumnTable::create(const vector<TagInfo>& schema, int32_t entity_group_id, uint32_t new_ts_version, ErrorInfo& err_info) {
   // 1. create mmap file
   if (init(schema, err_info) < 0) {
     LOG_ERROR("failed to init the tag table %s%s, error: %s",
@@ -635,7 +625,7 @@ int MMapTagColumnTable::create(const vector<TagInfo>& schema, int32_t entity_gro
   m_meta_data_->m_magic = *reinterpret_cast<const uint32_t*>("MMTT");
   m_meta_data_->m_record_start_offset = m_ptag_file_->fileLen();  // one page size
   m_meta_data_->m_entitygroup_id = entity_group_id;
-  m_meta_data_->m_ts_version = 1;
+  m_meta_data_->m_ts_version = new_ts_version;
   setObjectReady();
   err_info.errcode = reserve(1024, err_info);  // reserve space for row#0
 
@@ -666,6 +656,9 @@ int MMapTagColumnTable::remove() {
   }
 
   for (size_t i = 0; i < m_cols_.size(); ++i) {
+    if (!m_cols_[i]) {
+      continue;
+    }
     m_cols_[i]->remove();
     delete m_cols_[i];
     m_cols_[i] = nullptr;
@@ -674,12 +667,6 @@ int MMapTagColumnTable::remove() {
     m_bitmap_file_->remove();
     delete m_bitmap_file_;
     m_bitmap_file_ = nullptr;
-  }
-  if (m_index_) {
-    m_index_->setDrop();
-    m_index_->remove();
-    delete m_index_;
-    m_index_ = nullptr;
   }
   if (m_meta_file_) {
     m_meta_file_->remove();
@@ -711,56 +698,6 @@ int MMapTagColumnTable::extend(size_t new_record_count, ErrorInfo& err_info) {
   return err_code;
 }
 
-TagColumn* MMapTagColumnTable::cloneMetaData(ErrorInfo& err_info) {
-  std::string meta_file_name = m_name_ + ".mt" + ".bak";  // tempory file name
-  TagInfo ainfo = {0x00};
-  ainfo.m_offset = 0;
-  ainfo.m_size = kwdbts::EngineOptions::pageSize();
-  TagColumn* tmp_meta_file = new TagColumn(-1, ainfo);
-  err_info.errcode = tmp_meta_file->open(meta_file_name, m_db_path_, m_tbl_sub_path_, m_flags_ | MMAP_CREATTRUNC);
-  if (err_info.errcode < 0) {
-    err_info.errmsg = "initMetaData failed.";
-    LOG_ERROR("failed to open the tag meta file %s%s, error: %s",
-              m_tbl_sub_path_.c_str(), meta_file_name.c_str(), err_info.errmsg.c_str());
-    return nullptr;
-  }
-
-  // extend backup file
-  size_t new_row_count = m_meta_file_->fileLen() / kwdbts::EngineOptions::pageSize();
-  if ((err_info.errcode = tmp_meta_file->extend(0, new_row_count)) < 0) {
-    err_info.errmsg = "extend MetaData failed.";
-    LOG_ERROR("failed to extend the meta file %s%s, error: %s",
-              m_tbl_sub_path_.c_str(), meta_file_name.c_str(), err_info.errmsg.c_str());
-    tmp_meta_file->remove();
-    delete tmp_meta_file;
-    return nullptr;
-  }
-
-  // copy data
-  memmove(tmp_meta_file->memAddr(), m_meta_file_->memAddr(), m_meta_file_->fileLen());
-
-  return tmp_meta_file;
-}
-
-void MMapTagColumnTable::push_back_primary(size_t r, const char* data) {
-  // null bitmap
-  for (int i = 0; i < m_cols_.size(); ++i) {
-    if (m_cols_[i]->isPrimaryTag()) {
-      continue;
-    }
-    set_null_bitmap(reinterpret_cast<unsigned char*>(header_(r)) + 1, i);
-  }
-  // primary
-  for (size_t i = 0; i < m_cols_.size(); ++i) {
-    if (!m_cols_[i]->isPrimaryTag()) {
-      break;
-    }
-    memcpy(columnValueAddr(r, i),
-           offsetAddr(data, m_cols_[i]->attributeInfo().m_offset),
-           m_cols_[i]->attributeInfo().m_size);
-  }
-}
-
 int MMapTagColumnTable::reserve(size_t n, ErrorInfo& err_info) {
   int err_code = 0;
   if (m_meta_data_ == nullptr) {
@@ -785,20 +722,16 @@ int MMapTagColumnTable::reserve(size_t n, ErrorInfo& err_info) {
     stopWrite();
     return err_code;
   }
-  // hash index reserved
-  err_code = m_index_->reserve(n);
-  if (err_code < 0) {
-    LOG_ERROR("failed to extend index file for the tag table %s%s",
-      m_db_name_.c_str(), m_name_.c_str());
-    stopWrite();
-    return err_code;
-  }
+
   // hashpoint file extend
   if (m_hps_file_) {
    err_code = m_hps_file_->extend(m_hps_file_->fileLen(), n*sizeof(hashPointStorage));
   }
   // tagcolumn extend
   for (size_t i = 0; i < m_cols_.size(); ++i) {
+    if (!m_cols_[i]) {
+      continue;
+    }
     err_code = m_cols_[i]->extend(m_meta_data_->m_row_count, n);
     if (err_code < 0) {
       LOG_ERROR("failed to extend column file for the tag table %s%s(%u)",
@@ -823,10 +756,12 @@ int MMapTagColumnTable::reserve(size_t n, ErrorInfo& err_info) {
   return err_code;
 }
 
-int MMapTagColumnTable::insert(uint32_t entity_id, uint32_t subgroup_id, uint32_t hashpoint, const char* rec) {
-  size_t num_node;
+int MMapTagColumnTable::insert(uint32_t entity_id, uint32_t subgroup_id, uint32_t hashpoint,
+                               const char* rec, size_t* row_id) {
+  size_t row_no;
   int err_code = 0;
   ErrorInfo err_info;
+  *row_id = 0;
 
   if (!isValid()) {
     return KWENOOBJ;
@@ -849,63 +784,31 @@ int MMapTagColumnTable::insert(uint32_t entity_id, uint32_t subgroup_id, uint32_
 
   // ins_ref_cnt_++;
   ++m_meta_data_->m_row_count;
-  num_node = m_meta_data_->m_row_count;
+  row_no = m_meta_data_->m_row_count;
 
   startRead();
   mutexUnlock();
-
-  // if (resize_ref_cnt == 1) {
-  //   pthread_cond_broadcast(&obj_mtx_cv_);
-  // }
+  *row_id = row_no;
+  setDeleteMark(row_no);
 
   // put entity id
-  push_back_entityid(num_node, entity_id, subgroup_id);
+  push_back_entityid(row_no, entity_id, subgroup_id);
   if (!EngineOptions::isSingleNode()) {
-   LOG_DEBUG("%s/%s insert set row %ld hashpoint %d",m_db_name_.c_str(), m_name_.c_str(), num_node, hashpoint);
-   setHashPoint(num_node, {hashpoint});
+   LOG_DEBUG("%s/%s insert set row %ld hashpoint %d",m_db_name_.c_str(), m_name_.c_str(), row_no, hashpoint);
+   setHashPoint(row_no, {hashpoint});
   }
   // put tag table record
-  if ((push_back(num_node, rec)) < 0) {
+  if ((push_back(row_no, rec)) < 0) {
+    setDeleteMark(row_no);
     stopRead();
     return -1;
   }
-  
-  // put index record
-  err_code = m_index_->put(reinterpret_cast<char*>(record(num_node)),
-                           m_meta_data_->m_primary_tag_store_size - k_entity_group_id_size,
-                           num_node);
-  if (err_code < 0) {
-    stopRead();
-    return err_code;
-  }
+
   stopRead();
   mutexLock();
   ++m_meta_data_->m_valid_row_count;
   mutexUnlock();
   return err_code;
-}
-
-int MMapTagColumnTable::UpdateTagRecord(kwdbts::Payload &payload, int32_t sub_group_id, int32_t entity_id, ErrorInfo& err_info) {
-  TagTableRowID row = 0;
-  // 1. delete
-  TSSlice tmp_primary_tag = payload.GetPrimaryTag();
-  row = m_index_->delete_data(tmp_primary_tag.data, tmp_primary_tag.len);
-  if (row == 0) {
-    // not found
-    err_info.errmsg = "delete data not found";
-    err_info.errcode = -1;
-    return -1;
-  }
-  mutexLock();
-  setDeleteMark(row);
-  mutexUnlock();
-
-  // 2. insert
-  if ((err_info.errcode = InsertTagRecord(payload, sub_group_id, entity_id)) < 0 ) {
-    err_info.errmsg = "insert tag data fail";
-    return err_info.errcode;
-  }
-  return 0;
 }
 
 int MMapTagColumnTable::push_back(size_t r, const char* data) {
@@ -915,9 +818,12 @@ int MMapTagColumnTable::push_back(size_t r, const char* data) {
   // 2. write data
   const char* rec = (data + m_meta_data_->m_bitmap_size);
   int err_code = 0;
+  size_t payload_tag_idx = 0;
   for (size_t i = 0; i < m_cols_.size(); ++i) {
-    //if (IsNull(r, i)) {
-    if (get_null_bitmap(reinterpret_cast<uchar*>((intptr_t) data), i)) {
+    if (!m_cols_[i]) {
+      continue;
+    }
+    if (get_null_bitmap(reinterpret_cast<uchar*>((intptr_t) data), payload_tag_idx++)) {
       // col is NULL
       if (m_cols_[i]->isPrimaryTag()) {
         LOG_ERROR("the value to be written is null for primary tag of the tag "
@@ -956,85 +862,13 @@ int MMapTagColumnTable::push_back(size_t r, const char* data) {
   return 0;
 }
 
-int MMapTagColumnTable::getColumnValue(size_t row, size_t col,
-                                       void* data) const {
-  if (m_cols_[col]->isPrimaryTag()) {
-    memcpy(data, columnValueAddr(row, col), m_cols_[col]->attributeInfo().m_size);
-  } else {
-    m_cols_[col]->getColumnValue(row, data);
-  }
-  return 0;
-}
-
-void MMapTagColumnTable::setColumnValue(size_t row, size_t col, char* data) {
-  memcpy(columnValueAddr(row, col), data, m_cols_[col]->attributeInfo().m_size);
-}
-
-int MMapTagColumnTable::getEntityIdGroupId(const char* primary_tag_val, int len,
-                                           uint32_t& entity_id, uint32_t& group_id) {
-  TagTableRowID row;
-  // HashIndexData h_val;
-  row = m_index_->get(primary_tag_val, len);
-  if (row == 0) {
-    // not found
-    return -1;
-  }
+void MMapTagColumnTable::getEntityIdGroupId(TagTableRowID row, uint32_t& entity_id, uint32_t& group_id) {
   startRead();
   char* rec_ptr = entityIdStoreAddr(row);
   memcpy(&entity_id, rec_ptr, sizeof(uint32_t));
   memcpy(&group_id, rec_ptr + sizeof(entity_id), sizeof(uint32_t));
   stopRead();
-  return 0;
-}
-
-bool MMapTagColumnTable::hasPrimaryKey(const char* primary_tag_val, int len) {
-  TagTableRowID row;
-  row = m_index_->get(primary_tag_val, len);
-  if (row == 0) {
-    // not found
-    return false;
-  }
-  return true;
-}
-
-int MMapTagColumnTable::GetEntityIdList(const std::vector<void*>& primary_tags,
-                                        const std::vector<uint32_t>& scan_tags,
-                                        std::vector<kwdbts::EntityResultIndex>* entityIdList,
-                                        kwdbts::ResultSet* res, uint32_t* count) {
-  if (primary_tags.empty()) {
-    // tag table scan
-    return fullReadEntityId(scan_tags, entityIdList, res, count);
-  } else {
-    // primary tag list
-    TagTableRowID row;
-    uint32_t fetch_count = 0;
-    startRead();
-    for (int idx = 0; idx < primary_tags.size(); idx++) {
-      // HashIndexData h_val;
-      row = m_index_->get(reinterpret_cast<char*>(primary_tags[idx]), m_meta_data_->m_primary_tag_size);
-      if (row == 0) {
-        // not found
-        continue;
-      }
-      if (!EngineOptions::isSingleNode()) {
-        uint32_t hps;
-        getHashpointByRowNum(row, &hps);
-        getHashedEntityIdByRownum(row, hps, entityIdList);
-      }else {
-        getEntityIdByRownum(row, entityIdList);
-      }
-      // tag column
-      int err_code = 0;
-      if ((err_code = getColumnsByRownum(row, scan_tags, res)) < 0) {
-        stopRead();
-        return err_code;
-      }
-      fetch_count++;
-    }  // end for primary_tags
-    stopRead();
-    *count = fetch_count;
-  }
-  return 0;
+  return ;
 }
 
 int MMapTagColumnTable::getEntityIdByRownum(size_t row, std::vector<kwdbts::EntityResultIndex>* entityIdList) {
@@ -1056,7 +890,7 @@ void MMapTagColumnTable::getHashpointByRowNum(size_t row, uint32_t *hash_point) 
   char *hashptr = hashpoint_pos_(row);
   hashPointStorage *hps = reinterpret_cast<hashPointStorage*>(hashptr);
   *hash_point = hps->hash_point;
-  LOG_DEBUG("hashPoint: %d", *hash_point);
+  // LOG_DEBUG("hashPoint: %d", *hash_point);
   return ;
 }
 
@@ -1068,7 +902,7 @@ void MMapTagColumnTable::getHashedEntityIdByRownum(size_t row, uint32_t hps,
   record_ptr = entityIdStoreAddr(row);
   memcpy(&entity_id, record_ptr, sizeof(uint32_t));
   memcpy(&subgroup_id, record_ptr + sizeof(entity_id), sizeof(uint32_t));
-  LOG_DEBUG("entityid: %u, groupid: %u, hashid: %u", entity_id, subgroup_id, hps);
+  // LOG_DEBUG("entityid: %u, groupid: %u, hashid: %u", entity_id, subgroup_id, hps);
   entityIdList->emplace_back(std::move(kwdbts::EntityResultIndex{m_meta_data_->m_entitygroup_id,
                                                                  entity_id,
                                                                  subgroup_id, hps,
@@ -1077,808 +911,110 @@ void MMapTagColumnTable::getHashedEntityIdByRownum(size_t row, uint32_t hps,
   return ;
 }
 
-
-int MMapTagColumnTable::getColumnsByRownum(size_t row, const std::vector<uint32_t>& scan_tags, kwdbts::ResultSet* res) {
+int MMapTagColumnTable::getColumnsByRownum(size_t row, const std::vector<uint32_t>& src_scan_tags,
+                        const std::vector<TagInfo>& result_scan_tag_infos, kwdbts::ResultSet* res) {
   if (res == nullptr) {
     return 0;
   }
   ErrorInfo err_info;
-  res->setColumnNum(scan_tags.size());//TODO: make sure the scan_tags size
-  for (int idx = 0; idx < scan_tags.size(); idx++) {
-    // kwdbts::Batch* batch = new kwdbts::Batch(this->GetColumnAddr(row, tagid), 1, this->getBitmapAddr(row, tagid));
-    kwdbts::Batch* batch = GenTagBatchRecord(this, row, row + 1, scan_tags[idx], err_info);
-    if (!batch) {
-      LOG_ERROR("getColumnsByRownum out of memory for the tag table %s%s",
-        m_db_name_.c_str(), m_name_.c_str());
-      return -1;
+  res->setColumnNum(src_scan_tags.size());
+  for (int idx = 0; idx < src_scan_tags.size(); idx++) {
+    // if (src_scan_tags[idx] == INVALID_COL_IDX) {
+    //  continue;
+    // }
+    uint32_t col_idx = src_scan_tags[idx];
+    Batch* batch = this->GetTagBatchRecord(row, row + 1, col_idx,
+                                    result_scan_tag_infos[col_idx], err_info);
+    if (err_info.errcode < 0) {
+      delete batch;
+      LOG_ERROR("GetTagBatchRecord failed. error: %s ", err_info.errmsg.c_str());
+      return err_info.errcode;
+    }
+    if (UNLIKELY(batch == nullptr)) {
+      LOG_WARN("GetTagBatchRecord result is nullptr, skip this col[%u]", col_idx);
+      continue;
     }
     res->push_back(idx, batch);
-  }  // end fetch scan_tags
-  return 0;
-}
-
-int MMapTagColumnTable::fullReadEntityId(const std::vector<uint32_t>& scan_tags,
-                                         std::vector<kwdbts::EntityResultIndex>* entityIdList,
-                                         kwdbts::ResultSet* res, uint32_t* count) {
-  uint32_t fetch_count = 0;
-  mutexLock();
-  uint64_t full_count = actual_size();
-  mutexUnlock();
-  startRead();
-  for (size_t row = 1; row <= full_count; row++) {
-    if (!isValidRow(row)) {
-      // printRecord(row, row);
-      continue;
-    }
-    getEntityIdByRownum(row, entityIdList);
-    getColumnsByRownum(row, scan_tags, res);
-    fetch_count++;
-  }
-  stopRead();
-  *count = fetch_count;
-  return 0;
-}
-
-int MMapTagColumnTable::DeleteTagRecord(const char* primary, int len, ErrorInfo& err_info) {
-  TagTableRowID row = 0;
-  row = m_index_->delete_data(primary, len);
-  if (row == 0) {
-    // not found
-    return -1;
-  }
-  mutexLock();
-  setDeleteMark(row);
-  mutexUnlock();
-  return 0;
-}
-
-TagColumn* MMapTagColumnTable::addNewColumn(TagInfo& tag_schema, bool need_ext, ErrorInfo& err_info) {
-  // 1. add new tag column
-  TagColumn* tag_column;
-  int err_code;
-  tag_column = new TagColumn(tag_schema.m_id, tag_schema);
-  if (!tag_column) {
-    LOG_ERROR("failed to new TagColumn object");
-    return nullptr;
-  }
-  if (tag_column->attributeInfo().m_data_type == VARSTRING ||
-      tag_column->attributeInfo().m_data_type == VARBINARY) {
-    tag_column->attributeInfo().m_size = sizeof(intptr_t);
-  }
-  std::string col_file_name = m_name_ + "." + std::to_string(tag_schema.m_id);
-  if (need_ext) {
-    col_file_name += ".0000001";
-  }
-  if ((err_code = tag_column->open(col_file_name,
-                                   m_db_path_, m_db_name_, MMAP_CREAT_EXCL)) < 0) {
-    LOG_ERROR("failed to open the tag file %s, error_code: %d",
-      tag_column->filePath().c_str(), err_code);
-    return nullptr;
-  }
-
-  // 2. extend tag column
-  if ((err_code = tag_column->extend(0, reserveRowCount())) < 0) {
-    LOG_ERROR("failed to extend the tag file %s",
-      tag_column->filePath().c_str());
-    tag_column->remove();
-    delete tag_column;
-    return nullptr;
-  }
-
-  tag_column->setFlags(MMAP_OPEN);
-
-  return tag_column;
-}
-
-int MMapTagColumnTable::AddTagColumn(TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version) {
-  if (!isValid()) {
-    LOG_ERROR("adding new tag to an invalid tag table %s%s is not allowed",
-      m_db_name_.c_str(), m_name_.c_str());
-    err_info.errcode = KWENOOBJ;
-    return KWENOOBJ;
-  }
-  int err_code = 0;
-  mutexLock();    // mutex lock
-  // 1. add new tag
-  TagColumn* tag_col = addNewColumn(tag_schema, false, err_info);
-  if (!tag_col) {
-    mutexUnlock();
-    err_info.errmsg = "add new column file failed.";
-    return -1;
-  }
-  // 2. backup meta data
-  TagColumn* backup_meta_file = cloneMetaData(err_info);
-  if (backup_meta_file == nullptr) {
-    mutexUnlock();
-    err_info.errmsg = "backup meta data file failed.";
-    return -1;
-  }
-
-  // 3. set meta
-  startWrite();
-  tag_col->attributeInfo().m_offset = m_cols_.back()->attributeInfo().m_offset + m_cols_.back()->attributeInfo().m_size;
-  uint64_t start_offset = m_meta_data_->m_column_info_offset + m_meta_data_->m_column_count * sizeof(TagInfo);
-  std::vector<TagInfo> tag_schemas = {tag_col->attributeInfo()};
-  if ((err_code = writeTagInfo(start_offset, tag_schemas)) < 0) {
-    LOG_ERROR("faild to write tag info for the tag table %s%s, no space",
-      m_db_name_.c_str(), m_name_.c_str());
-    stopWrite();
-    mutexUnlock();
-    err_info.errmsg = "write tag info has no space";
-    return err_code;
-  }
-  m_meta_data_->m_record_store_size += tag_col->attributeInfo().m_size;
-  m_meta_data_->m_record_size += tag_col->attributeInfo().m_size;
-  m_meta_data_->m_column_count++;
-  m_cols_.push_back(std::move(tag_col));
-  uint16_t new_bitmap_size = (7 + m_cols_.size()) / 8;
-  if (new_bitmap_size != m_meta_data_->m_bitmap_size) {
-    m_meta_data_->m_bitmap_size += 1;
-    m_meta_data_->m_record_size += 1;
-  }
-  m_meta_data_->m_ts_version = new_table_version;
-  // 4. sync meta data
-  m_meta_file_->sync(MS_SYNC);
-
-  // 5. remove backup meta data file
-// After the wal is complete, switch to setDrop mode.
-#if 1
-  backup_meta_file->setDrop();
-#else
-  backup_meta_file->remove();
-#endif
-  delete backup_meta_file;
-  stopWrite();
-  mutexUnlock();
-  return 0;
-}
-
-int MMapTagColumnTable::DropTagColumn(TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version) {
-  if (!isValid()) {
-    LOG_ERROR("dropping tag to an invalid tag table %s%s is not allowed",
-      m_db_name_.c_str(), m_name_.c_str());
-    err_info.errcode = KWENOOBJ;
-    return KWENOOBJ;
-  }
-  int err_code = 0;
-  mutexLock();    // mutex lock
-  // 1. find tag col & change offset
-  TagColumn* tag_col = nullptr;
-  std::vector<TagInfo> new_cols;
-  uint32_t col_offset = 0;
-  std::vector<TagColumn*>::iterator pos;
-  for (std::vector<TagColumn*>::iterator it = m_cols_.begin(); it != m_cols_.end(); ++it) {
-    if ((*it)->attributeInfo().m_id == tag_schema.m_id) {
-      // found
-      tag_col = *it;
-      pos = it;
-      continue;
-    }
-    TagInfo tmp_tag_info = (*it)->attributeInfo();
-    tmp_tag_info.m_offset = col_offset;
-    col_offset += (*it)->attributeInfo().m_size;
-    new_cols.emplace_back(tmp_tag_info);
-  }
-  if (!tag_col) {
-    LOG_ERROR("failed to get tag %u in the tag table %s%s",
-      tag_schema.m_id, m_db_name_.c_str(), m_name_.c_str());
-    mutexUnlock();
-    err_info.errmsg = "tag schema is not exist";
-    return -1;
-  }
-
-  // 2. write column info
-  // 2.1 backup meta data
-  TagColumn* backup_meta_file = cloneMetaData(err_info);
-  if (nullptr == backup_meta_file) {
-    mutexUnlock();
-    err_info.errmsg = "backup meta data failed.";
-    return -1;
-  }
-  // 2.2 write data
-  uint64_t start_offset = m_meta_data_->m_column_info_offset;
-  if ((err_code = writeTagInfo(start_offset, new_cols)) < 0) {
-    LOG_ERROR("faild to write tag info for the tag table %s%s, no space",
-      m_db_name_.c_str(), m_name_.c_str());
-    mutexUnlock();
-    err_info.errmsg = "write tag info has no space.";
-    return err_code;
-  }
-
-  // 3. rename tag file
-  startWrite();
-  std::string new_file_name = tag_col->filePath() + ".bak";
-  if ((err_code = tag_col->rename(new_file_name)) < 0) {
-    LOG_ERROR("tag file rename failed, file name: %s", new_file_name.c_str());
-    stopWrite();
-    mutexUnlock();
-    err_info.errmsg = "tag file rename " +  new_file_name + " failed.";
-    return -1;
-  }
-
-  // 4. change metadata
-  m_cols_.erase(pos);
-  for (size_t idx = 0; idx < m_cols_.size(); ++idx) {
-    m_cols_[idx]->attributeInfo() = new_cols[idx];
-  }
-  m_meta_data_->m_record_store_size -= tag_col->attributeInfo().m_size;
-  m_meta_data_->m_record_size -= tag_col->attributeInfo().m_size;
-  m_meta_data_->m_column_count--;
-  uint16_t new_bitmap_size = (7 + m_cols_.size()) / 8;
-  if (new_bitmap_size != m_meta_data_->m_bitmap_size) {
-    m_meta_data_->m_bitmap_size -= 1;
-    m_meta_data_->m_record_size -= 1;
-  }
-  m_meta_data_->m_ts_version = new_table_version;
-  m_meta_file_->sync(MS_SYNC);
-  // 5. remove tag file
-// After the wal is complete, switch to setDrop mode.
-#if 1
-  tag_col->setDrop();
-  backup_meta_file->setDrop();
-#else
-  if ((err_code = tag_col->remove()) < 0) {
-    LOG_ERROR("failed to remote tag file %s in the tag table %s%s",
-      tag_col->realFilePath().c_str(), m_db_name_.c_str(), m_name_.c_str());
-  }
-  if ((err_code = backup_meta_file->remove()) < 0) {
-    LOG_ERROR("failed to remove tag meta file %s in the tag table %s%s",
-      backup_meta_file->realFilePath().c_str(),
-      m_db_name_.c_str(), m_name_.c_str());
-  }
-#endif
-
-  delete tag_col;
-  delete backup_meta_file;
-  stopWrite();
-  mutexUnlock();
-  return err_code;
-}
-
-int MMapTagColumnTable::convertData(int32_t col, TagColumn* new_tag_col, CONVERT_DATA_FUNC convert_data,
-                                    bool is_digit_data, ErrorInfo& err_info) {
-  size_t row_count = size();
-  TagColumn* old_tag_col = m_cols_[col];
-  char dst_data[new_tag_col->attributeInfo().m_length + 1] = {0x00};
-  char* rec_ptr = nullptr;
-  int data_len;
-  int err_code = 0;
-  for (size_t row = 1; row <= row_count; ++row) {
-    if (!isValidRow(row)) {
-      // deleted tag
-      continue;
-    }
-    if (old_tag_col->isNull(row)) {
-      // null tag data
-      new_tag_col->setNull(row);
-      if (new_tag_col->isVarTag()) {
-        new_tag_col->writeNullVarOffset(row);
-      }
-      continue;
-    }
-    new_tag_col->setNotNull(row);  // set not null
-    if (is_digit_data) {
-      data_len = err_code = convert_data(old_tag_col->rowAddrNoNullBitmap(row), dst_data, new_tag_col->attributeInfo().m_length);
-      if (err_code < 0) {
-        LOG_ERROR("failed to convert the tag column %u to new type %s "
-          "at row %lu in the tag table %s%s, error_code: %d, out of range",
-          new_tag_col->attributeInfo().m_id,
-          getDataTypeName(new_tag_col->attributeInfo().m_data_type).c_str(),
-          row, m_db_name_.c_str(), m_name_.c_str(), err_code);
-        err_info.errmsg = "Out of range value length, at row:" + std::to_string(row);
-        return err_code;
-      }
-      rec_ptr = dst_data;
-      // data_len = new_tag_col->attributeInfo().m_length;
-      // new_tag_col->writeValue(row, dst_data, new_tag_col->attributeInfo().m_length);
-    } else {
-      // string data,avoid copy
-      if (old_tag_col->isVarTag()) {
-        rec_ptr = old_tag_col->getVarValueAddr(row);
-        data_len = *reinterpret_cast<uint16_t*>(rec_ptr);
-        rec_ptr += MMapStringColumn::kStringLenLen;
-        // varchar convert to fix data
-        if (old_tag_col->attributeInfo().m_data_type == DATATYPE::VARSTRING &&
-            convert_data != nullptr) {
-          err_code = convert_data(rec_ptr, dst_data, data_len - 1);
-          if (err_code < 0) {
-            LOG_ERROR("failed to convert the tag column %u to new type %s "
-              "at row %lu in the tag table %s%s, error_code: %d, over defined length",
-              new_tag_col->attributeInfo().m_id,
-              getDataTypeName(new_tag_col->attributeInfo().m_data_type).c_str(),
-              row, m_db_name_.c_str(), m_name_.c_str(), err_code);
-            err_info.errmsg = "string convert to fixdata failed, at row: " + std::to_string(row);
-            return err_code;
-          }
-          rec_ptr = dst_data;
-          data_len = new_tag_col->attributeInfo().m_length;
-        }
-      } else {
-        rec_ptr = old_tag_col->rowAddrNoNullBitmap(row);
-        data_len = old_tag_col->attributeInfo().m_size;
-        // char convert to varchar use real size
-        if (old_tag_col->attributeInfo().m_data_type == DATATYPE::CHAR) {
-          data_len = std::min(old_tag_col->attributeInfo().m_size, static_cast<uint32_t>(strlen(rec_ptr)));
-        }
-      }
-    }
-    new_tag_col->writeValue(row, rec_ptr, data_len);
-    memset(dst_data, 0x00, new_tag_col->attributeInfo().m_length + 1);
   }
   return 0;
 }
 
-int MMapTagColumnTable::AlterTagType(TagInfo& old_tag_schema, TagInfo& new_tag_schema,
-                                    ErrorInfo& err_info, uint32_t new_table_version) {
-  if (!isValid()) {
-    LOG_ERROR("alter tag to an invalid tag table %s%s is not allowed",
-      m_db_name_.c_str(), m_name_.c_str());
-    err_info.errcode = KWENOOBJ;
-    return KWENOOBJ;
-  }
-  int err_code = 0;
-  // 1. check type
-  bool is_digit_data;
-  CONVERT_DATA_FUNC convert_data = getConvertFunc(old_tag_schema.m_data_type, new_tag_schema.m_data_type,
-                                                 new_tag_schema.m_length, is_digit_data, err_info);
-  if (err_info.errcode < 0) {
-    LOG_ERROR("conversion from type %s, length %u to type %s, length %u "
-      "is not supported in the tag table %s%s",
-      getDataTypeName(old_tag_schema.m_data_type).c_str(), old_tag_schema.m_length,
-      getDataTypeName(new_tag_schema.m_data_type).c_str(), new_tag_schema.m_length,
-      m_db_name_.c_str(), m_name_.c_str());
-    return -1;
-  }
-  mutexLock();    // mutex lock
-
-  // 2. found && open new tag file
-  TagColumn* old_tag_col = nullptr;
-  int32_t col_idx = 0;
-  for (const auto it : m_cols_) {
-    if (it->attributeInfo().m_id == old_tag_schema.m_id &&
-        it->attributeInfo().m_data_type == old_tag_schema.m_data_type) {
-      old_tag_col = it;
-      break;
-    }
-    ++col_idx;
-  }
-  if (!old_tag_col) {
-    LOG_ERROR("failed to get tag %u in the tag table %s%s",
-      old_tag_schema.m_id, m_db_name_.c_str(), m_name_.c_str());
-    mutexUnlock();
-    err_info.errmsg = "tag id is invalid";
-    return -1;
-  }
-  TagColumn* new_tag_col = addNewColumn(new_tag_schema, true, err_info);
-  if (!new_tag_col) {
-    LOG_ERROR("failed to add new column to the tag table %s%s",
-      m_db_name_.c_str(), m_name_.c_str());
-    mutexUnlock();
-    err_info.errmsg = "add new column failed";
-    return -1;
-  }
-
-  // 3. convert data && write data
-  if ((err_code = this->convertData(col_idx, new_tag_col, convert_data, is_digit_data, err_info)) < 0) {
-    LOG_ERROR("failed to convert data in the tag table %s%s",
-      m_db_name_.c_str(), m_name_.c_str());
-    if (new_tag_col->remove() < 0) {
-      LOG_WARN("failed to remove the tag file %s, please remove it manually",
-        new_tag_col->realFilePath().c_str());
-    }
-    mutexUnlock();
-    delete new_tag_col;
-    return -1;
-  }
-
-  /*
-    NOTE: previous operation failures do not need to do undo.
-    Please refer AlterAlterRU
-  */
-
-  // 4. backup meta data file
-  TagColumn* backup_meta_file = cloneMetaData(err_info);
-  if (nullptr == backup_meta_file) {
-    LOG_ERROR("failed to backup meta data of the tag table %s%s",
-      m_db_name_.c_str(), m_name_.c_str());
-    if (new_tag_col->remove() < 0) {
-      LOG_WARN("failed to remove the the tag file %s, please remove it manually",
-        new_tag_col->realFilePath().c_str());
-    }
-    delete new_tag_col;
-    mutexUnlock();
-    err_info.errmsg = "backup meta data failed";
-    return -1;
-  }
-
-  // 5. write column info
-  uint32_t col_offset = 0;
-  std::vector<TagInfo> tag_infos;
-  for (size_t idx = 0; idx < m_cols_.size(); ++idx) {
-    TagInfo tmp_tag_info = m_cols_[idx]->attributeInfo();
-    if (idx == col_idx) {
-      tmp_tag_info = new_tag_col->attributeInfo();
-    }
-    tmp_tag_info.m_offset = col_offset;
-    col_offset += tmp_tag_info.m_size;
-    tag_infos.emplace_back(std::move(tmp_tag_info));
-  }
-  uint64_t start_offset = m_meta_data_->m_column_info_offset;
-  if ((err_code = writeTagInfo(start_offset, tag_infos)) < 0) {
-    mutexUnlock();
-    err_info.errmsg = "write tag info has no space";
-    return err_code;
-  }
-
-  // 6. rename file old -> old.lsn , new->old
-  startWrite();
-  std::string old_tag_file_name = old_tag_col->filePath();
-  std::string old_tag_new_name = old_tag_file_name + ".bak";
-  if ((err_code = old_tag_col->rename(old_tag_new_name)) < 0) {
-    LOG_ERROR("failed to rename the tag file %s to %s ",
-      old_tag_file_name.c_str(), old_tag_new_name.c_str());
-    stopWrite();
-    mutexUnlock();
-    err_info.errmsg = "rename " + old_tag_file_name + " to " + old_tag_new_name + " failed.";
-    return -1;
-  }
-  std::string new_tag_file_name = new_tag_col->filePath();
-  if ((err_code = new_tag_col->rename(old_tag_file_name)) < 0) {
-    LOG_ERROR("failed to rename the tag file %s to %s",
-      new_tag_file_name.c_str(), old_tag_file_name.c_str());
-    stopWrite();
-    mutexUnlock();
-    err_info.errmsg = "rename " + new_tag_file_name + " to " + old_tag_file_name + " failed.";
-    return -1;
-  }
-
-  // 2) change meta data
-  m_cols_[col_idx] = new_tag_col;
-  for (size_t idx = 0; idx < m_cols_.size(); ++idx) {
-    m_cols_[idx]->attributeInfo() = tag_infos[idx];
-  }
-  m_meta_data_->m_record_size += (new_tag_col->attributeInfo().m_size - old_tag_col->attributeInfo().m_size);
-  m_meta_data_->m_record_store_size += (new_tag_col->attributeInfo().m_size - old_tag_col->attributeInfo().m_size);
-  m_meta_data_->m_ts_version = new_table_version;
-  m_meta_file_->sync(MS_SYNC);
-
-  // 7. drop backup file
-// After the wal is complete, switch to setDrop mode.
-#if 1
-  old_tag_col->setDrop();
-  backup_meta_file->setDrop();
-#else
-  if ((err_code = old_tag_col->remove()) < 0) {
-    LOG_WARN("failed to remove the the tag file %s, please remove it manually",
-      old_tag_col->realFilePath().c_str());
-  }
-  if ((err_code = backup_meta_file->remove()) < 0) {
-    LOG_WARN("failed to remove the tag meta file %s, please remove it manually",
-      backup_meta_file->realFilePath().c_str());
-  }
-#endif
-
-  delete old_tag_col;
-  delete backup_meta_file;
-  stopWrite();
-  mutexUnlock();
-  return err_code;
-}
-
-void toHexString(const char* rec_ptr, uint32_t len, std::string& ret_str) {
-  for (uint32_t idx = 0; idx < len; idx++) {
-    ret_str += std::to_string(rec_ptr[idx]);
-    ret_str += " ";
-  }
-}
-
-string MMapTagColumnTable::printRecord(size_t lhs, size_t rhs, bool with_header, bool sort_by_primary) {
-  if (lhs > size()) {
-    return "error: row(" + std::to_string(lhs) + ") out of range.";
-  }
-  // max width of output
-  vector<size_t> max_width(m_cols_.size());
-  for (size_t i = 0; i < m_cols_.size(); ++i) {
-    max_width[i] = 2;
-  }
-
-  vector<vector<string>> all;
-  for (auto row = lhs; row <= std::min(rhs, size()); ++row) {
-    if (!isValidRow(row)) {
-      continue;
-    }
-    vector<std::string> record;
-    for (size_t col = 0; col < m_cols_.size(); ++col) {
-      // check null
-      auto null = this->isNull(row, col);
-      if (null) {
-        record.emplace_back("NULL");
-        if (max_width[col] < 6) {
-          max_width[col] = 6;
-        }
-        continue;
-      }
-
-      // printable
-      switch (m_cols_[col]->attributeInfo().m_data_type) {
-        case DATATYPE::BOOL:
-          record.emplace_back(std::to_string(*reinterpret_cast<bool*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::BYTE:
-        case DATATYPE::BINARY: {
-          std::string tmp_str;
-          toHexString(columnValueAddr(row, col), m_cols_[col]->attributeInfo().m_length, tmp_str);
-          record.emplace_back(tmp_str);
-        }
-          break;
-        case DATATYPE::INT8:
-          record.emplace_back(std::to_string(*reinterpret_cast<uint8_t*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::INT16:
-          record.emplace_back(std::to_string(*reinterpret_cast<uint16_t*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::INT32:
-          record.emplace_back(std::to_string(*reinterpret_cast<uint32_t*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::INT64:
-          record.emplace_back(std::to_string(*reinterpret_cast<uint64_t*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::FLOAT:
-          record.emplace_back(std::to_string(*reinterpret_cast<float*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::DOUBLE:
-          record.emplace_back(std::to_string(*reinterpret_cast<double*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::CHAR:
-          record.emplace_back(reinterpret_cast<const char*>(columnValueAddr(row, col)));
-          break;
-        case DATATYPE::VARBINARY: {
-          std::string tmp_str;
-          char* var_ptr = m_cols_[col]->getVarValueAddr(row);
-          int16_t var_len = *reinterpret_cast<int16_t*>(var_ptr);
-          var_ptr += MMapStringColumn::kStringLenLen;
-          toHexString(var_ptr, var_len, tmp_str);
-          record.emplace_back(tmp_str);
-        }
-          break;
-        case DATATYPE::VARSTRING:
-          if (m_cols_[col]->isPrimaryTag()) {
-            auto str = reinterpret_cast<const char*>(columnValueAddr(row, col));
-            record.emplace_back(str,
-                                std::min(strlen(str), static_cast<size_t>(m_cols_[col]->attributeInfo().m_length)));
-          } else {
-            char* str = m_cols_[col]->getVarValueAddr(row);
-            str += MMapStringColumn::kStringLenLen;
-            record.emplace_back(str);
-          }
-          break;
-        case DATATYPE::TIMESTAMP:
-          record.emplace_back(std::to_string(*reinterpret_cast<uint32_t*>(columnValueAddr(row, col))));
-          break;
-        case DATATYPE::TIMESTAMP64:
-          record.emplace_back(std::to_string(*reinterpret_cast<uint64_t*>(columnValueAddr(row, col))));
-          break;
-        default:
-          record.emplace_back("unsupport type");
-      }
-      if (max_width[col] < record[col].length() + 2) {
-        max_width[col] = record[col].length() + 2;
-      }
-    }
-    all.emplace_back(std::move(record));
-  }
-
-  // sort by primary
-  if (sort_by_primary) {
-    vector<size_t> pri_idx;
-    for (size_t i = 0; i < m_cols_.size(); ++i) {
-      if (m_cols_[i]->isPrimaryTag()) {
-        pri_idx.emplace_back(i);
-      }
-    }
-    std::sort(all.begin(), all.end(), [&pri_idx, this](const vector<string>& lhs, const vector<string>& rhs) {
-      // find first element not equal
-      size_t idx = 0;
-      for (size_t i : pri_idx) {
-        idx = i;
-        if (lhs[i] != rhs[i]) {
-          break;
-        } else {
-          continue;
-        }
-      }
-      // compare with type
-      switch (this->m_cols_[idx]->attributeInfo().m_data_type) {
-        case DATATYPE::INT8:
-        case DATATYPE::INT16:
-        case DATATYPE::INT32:
-        case DATATYPE::INT64:
-        case DATATYPE::TIMESTAMP:
-        case DATATYPE::TIMESTAMP64: {
-          char* p_end = nullptr;
-          auto l = strtoll(lhs[idx].c_str(), &p_end, 10);
-          if (p_end == lhs[idx].c_str()) break;
-          auto r = strtoll(rhs[idx].c_str(), &p_end, 10);
-          if (p_end == rhs[idx].c_str()) break;
-          return l < r;
-        }
-        case DATATYPE::FLOAT:
-        case DATATYPE::DOUBLE: {
-          char* p_end = nullptr;
-          auto l = strtod(lhs[idx].c_str(), &p_end);
-          if (p_end == lhs[idx].c_str()) break;
-          auto r = strtod(rhs[idx].c_str(), &p_end);
-          if (p_end == rhs[idx].c_str()) break;
-          return l < r;
-        }
-      }
-      return lhs[idx] < rhs[idx];
-    });
-  }
-
-  // format result
-  string result("\n");
-
-  // data result
-  for (size_t i = 0; i < all.size(); ++i) {
-    for (size_t j = 0; j < all[i].size(); ++j) {
-      auto sz = max_width[j] - 1;
-      result.append("| ");
-      result.append(all[i][j]);
-      sz -= all[i][j].length();
-      for (; sz > 0; --sz) {
-        result.append(" ");
-      }
-    }
-    result.append("|\n");
-  }
-  return result;
-}
-
-MMapTagColumnTable* OpenTagTable(const std::string& db_path, const std::string& dir_path,
-                                 uint64_t table_id, ErrorInfo& err_info) {
-  // open tag table
-  MMapTagColumnTable* tmp_bt = new MMapTagColumnTable();
-  string table_name = nameToTagBigTablePath(std::to_string(table_id) + ".tag");
-  int err_code = tmp_bt->open(table_name, db_path, dir_path, MMAP_OPEN_NORECURSIVE, err_info);
-  if (err_info.errcode == KWENOOBJ) {
-    // table not exists.
-    LOG_WARN("the tag table %s%s does not exist", dir_path.c_str(), table_name.c_str());
-    err_info.clear();
-    delete tmp_bt;
-    return nullptr;
-  }
-  if (err_code < 0) {
-    // other errors
-    LOG_ERROR("failed to open the tag table %s%s, error: %s",
-      dir_path.c_str(), table_name.c_str(), err_info.errmsg.c_str());
-    delete tmp_bt;
-    return nullptr;
-  }
-  return tmp_bt;
-}
-
-MMapTagColumnTable* CreateTagTable(const std::vector<TagInfo>& tag_schema, const std::string& db_path,
-                                   const std::string& dir_path, uint64_t table_id,
-                                   int32_t entity_group_id, int flags, ErrorInfo& err_info) {
-  // create tag table
-  MMapTagColumnTable* tmp_bt = new MMapTagColumnTable();
-  string table_name = nameToTagBigTablePath(std::to_string(table_id) + ".tag");
-  if (tmp_bt->open(table_name, db_path, dir_path, MMAP_CREAT_EXCL, err_info) >= 0 ||
-      err_info.errcode == KWECORR) {
-    tmp_bt->create(tag_schema, entity_group_id, err_info);
-  }
-  if (err_info.errcode < 0) {
-    LOG_ERROR("failed to create the tag table %s%s, error: %s",
-        dir_path.c_str(), table_name.c_str(), err_info.errmsg.c_str());
-    tmp_bt->setObjectReady();
-    tmp_bt->remove();
-    delete tmp_bt;
-    tmp_bt = nullptr;
-  }
-  return tmp_bt;
-}
-
-int DropTagTable(MMapTagColumnTable* bt, ErrorInfo& err_info) {
-  if (bt == nullptr) {
-    err_info.setError(KWENOOBJ);
-    return err_info.errcode;
-  }
-  bt->mutexLock();
-  if ((reinterpret_cast<TSObject*>(bt))->getObjectStatus() == OBJ_READY) {
-    // from now, user cannot query this obj, so lock can be released
-    bt->setObjectStatus(OBJ_READY_TO_CHANGE);
-    bt->mutexUnlock();
-    // wait if object is used by other threads.
-    MUTEX_LOCK(bt->m_ref_cnt_mtx_);
-    while (bt->isUsed()) {
-      KW_COND_WAIT(bt->m_ref_cnt_cv_, bt->m_ref_cnt_mtx_);
-    }
-    MUTEX_UNLOCK(bt->m_ref_cnt_mtx_);
-    err_info.errcode = bt->remove();
-  } else {
-    bt->mutexUnlock();
-  }
-  return err_info.errcode;
-}
-
-kwdbts::Batch* GenTagBatchRecord(MMapTagColumnTable* bt, size_t start_row,
-                                 size_t end_row, size_t col, ErrorInfo& err_info) {
+kwdbts::Batch* MMapTagColumnTable::GetTagBatchRecordWithNoConvert(size_t start_row, size_t end_row, uint32_t col, ErrorInfo& err_info) {
   kwdbts::Batch* batch = nullptr;
   assert(end_row > start_row);
   // check tag index is valid
-  if (UNLIKELY(col >= bt->getSchemaInfo().size())) {
-    LOG_ERROR("failed to get tag(%lu) in the tag table %s%s, "
+  if (UNLIKELY(col >= this->getSchemaInfo().size())) {
+    LOG_ERROR("failed to get tag(%u) in the tag table %s%s, "
       "but the max tag index no is %lu",
-      col, bt->sandbox().c_str(), bt->name().c_str(), bt->getSchemaInfo().size());
+      col, this->sandbox().c_str(), this->name().c_str(), this->getSchemaInfo().size());
     err_info.errcode = -1;
     return nullptr;
   }
-  size_t total_size = bt->getColumnSize(col) * (end_row - start_row);
-  void* data = std::malloc(total_size);
-  void* var_data = nullptr;
-  if (UNLIKELY(data == nullptr)) {
-    LOG_ERROR("failed to allocate memory for fetching tag(%lu) from the tag "
-      "table %s%s, it takes about %lu bytes for %lu rows starting from %lu",
-      col, bt->sandbox().c_str(), bt->name().c_str(), total_size,
-      (end_row - start_row), start_row);
-    err_info.errcode = -4;
-    return nullptr;
-  }
-  std::memcpy(data, bt->getColumnAddr(start_row, col), total_size);
-  if (bt->isVarTag(col)) {
-    size_t var_start_offset = bt->getVarOffset(start_row, col);
-    if (UNLIKELY(var_start_offset < MMapStringColumn::startLoc())) {
-      if (bt->isNull(start_row, col)) {
-        var_start_offset = MMapStringColumn::startLoc();
+  uint32_t data_count = (end_row - start_row);
+  void* data = nullptr;
+  char* var_data = nullptr;
+  if (!isVarTag(col)) {
+    // fixed column data
+    uint32_t col_data_len = this->getColumnSize(col);
+    size_t total_size = col_data_len * data_count;
+    data = std::malloc(total_size);
+    if (UNLIKELY(data == nullptr)) {
+      LOG_ERROR("failed to allocate memory for fetching tag(%u) from the tag "
+        "table %s%s, it takes about %lu bytes for %u rows starting from %lu",
+        col, this->sandbox().c_str(), this->name().c_str(), total_size,
+        data_count, start_row);
+      err_info.errcode = -4;
+      return nullptr;
+    }
+    memset(data, 0x00, total_size);
+    std::memcpy(data, this->getColumnAddr(start_row, col), total_size);
+    batch = new(std::nothrow) kwdbts::TagBatch(col_data_len, data, data_count);
+    if (UNLIKELY(batch == nullptr)) {
+      LOG_ERROR("failed to new TagBatch for fetching tag(%u) from the tag table "
+        "%s%s, start_row: %lu end_row: %lu, row_count: %lu, actual_size: %lu",
+        col, this->sandbox().c_str(), this->name().c_str(), start_row, end_row,
+        this->size(), this->actual_size());
+        goto error_exit;
+    }
+  } else {
+    // var tag data
+    uint32_t var_total_len = std::max((m_cols_[col]->attributeInfo().m_length / 2 + 
+                                       MMapStringColumn::kStringLenLen) * data_count,
+                                       k_default_block_size);
+    var_data = reinterpret_cast<char*>(std::malloc(var_total_len));
+    memset(var_data, 0x00, var_total_len);
+    VarTagBatch* var_batch = KNEW kwdbts::VarTagBatch(var_total_len, var_data, data_count);
+    if (UNLIKELY(var_batch == nullptr)) {
+      LOG_ERROR("failed to new TagBatch for fetching tag(%u) from the tag table "
+        "%s%s, start_row: %lu end_row: %lu, row_count: %lu, actual_size: %lu",
+        col, this->sandbox().c_str(), this->name().c_str(), start_row, end_row,
+        this->size(), this->actual_size());
+        goto error_exit;
+    }
+    uint32_t row_idx = 0;
+    for(size_t row = start_row; row < end_row; ++row, ++row_idx) {
+      if (this->isNull(row, col)) {
+        var_batch->setNull(row_idx);
       } else {
-        LOG_ERROR("invalid start offset for tag(%lu) in the tag tagle %s%s, "
+        size_t var_start_offset = getVarOffset(row, col);
+        if (UNLIKELY(var_start_offset < MMapStringColumn::startLoc())) {
+          LOG_WARN("invalid start offset for tag(%u) in the tag tagle %s%s, "
           "start_offset: %lu, start_row: %lu, end_row: %lu, row_count: %lu, "
           "actual_size: %lu",
-          col, bt->sandbox().c_str(), bt->name().c_str(), var_start_offset,
-          start_row, end_row, bt->size(), bt->actual_size());
-        goto error_exit;
+          col, this->sandbox().c_str(), this->name().c_str(), var_start_offset,
+          row, end_row, this->size(), this->actual_size());
+          var_batch->setNull(row_idx);
+          continue;
+        }
+
+        m_cols_[col]->varRdLock();
+        char* var_data_ptr = m_cols_[col]->getVarValueAddrByOffset(var_start_offset);
+        uint16_t var_len = *reinterpret_cast<uint16_t*>(var_data_ptr);
+        var_batch->writeDataIncludeLen(row_idx, var_data_ptr, var_len + MMapStringColumn::kStringLenLen);
+        m_cols_[col]->varUnLock();
       }
-    }
-    size_t var_end_offset = bt->getVarOffset(end_row, col);
-    if (UNLIKELY(var_end_offset < var_start_offset)) {
-      //  multi-process  var_end_offset maybe 0, not correct.
-      if (var_end_offset == 0 && bt->isNull(end_row, col)) {
-        var_end_offset = var_start_offset;
-      } else if (end_row == (start_row + 1)) {
-        // multi-process  var_end_offset maybe < var_start_offset, not correct.
-        uint16_t var_str_len = bt->getColumnVarValueLenByOffset(col, var_start_offset);
-        var_end_offset = var_start_offset + var_str_len + MMapStringColumn::kStringLenLen;
-      } else {
-        LOG_ERROR("invalid end offset for tag(%lu) in the tag tagle %s%s, "
-          "start_offset: %lu, end_offset: %lu, start_row: %lu, end_row:%lu, "
-          "row_count: %lu actual_size: %lu ",
-          col, bt->sandbox().c_str(), bt->name().c_str(), var_start_offset,
-          var_end_offset, start_row, end_row, bt->size(), bt->actual_size());
-        goto error_exit;
-      }
-    }
-    size_t var_len = (var_end_offset - var_start_offset);
-    var_data = std::malloc(var_len + 1);  // avoid var_len == 0
-    if (UNLIKELY(var_data == nullptr)) {
-      LOG_ERROR("failed to allocate memory for fetching tag(%lu) from the tag "
-        "table %s%s, it takes about %lu bytes for %lu rows starting from %lu",
-        col, bt->sandbox().c_str(), bt->name().c_str(),
-        (var_end_offset - var_start_offset), (end_row - start_row), start_row);
-      goto error_exit;
-    }
-    // std::memcpy(var_data, bt->getColumnValueAddr(start_row, col), var_len);
-    std::memcpy(var_data, bt->getColumnVarValueAddrByOffset(col, var_start_offset), var_len);
-    batch = new(std::nothrow) kwdbts::TagBatch(data, (end_row - start_row), nullptr, var_start_offset, var_data);
-  } else {
-    batch = new(std::nothrow) kwdbts::TagBatch(data, (end_row - start_row), nullptr);
-  }
-  if (UNLIKELY(batch == nullptr)) {
-    LOG_ERROR("failed to new TagBatch for fetching tag(%lu) from the tag table "
-      "%s%s, start_row: %lu end_row: %lu, row_count: %lu, actual_size: %lu",
-      col, bt->sandbox().c_str(), bt->name().c_str(), start_row, end_row,
-      bt->size(), bt->actual_size());
-      goto error_exit;
+    }  // end for
+    batch = var_batch;
   }
   return batch;
 error_exit:
@@ -1890,4 +1026,243 @@ error_exit:
   }
   err_info.errcode = -4;
   return nullptr;
+}
+
+kwdbts::Batch* MMapTagColumnTable::convertToFixedLen(size_t start_row, size_t end_row, uint32_t col, const TagInfo& result_schema, ErrorInfo& err_info) {
+  int err_code = 0;
+  TagInfo old_tag_schema = m_cols_[col]->attributeInfo();
+  DATATYPE old_data_type = static_cast<DATATYPE>(old_tag_schema.m_data_type);
+  DATATYPE new_data_type = static_cast<DATATYPE>(result_schema.m_data_type);
+
+  uint32_t row_count = end_row - start_row;
+  uint32_t data_len = result_schema.m_size + k_per_null_bitmap_size;
+  void* data = std::malloc(data_len * row_count);
+  memset(data, 0x00, data_len * row_count);
+
+  TagBatch* batch = KNEW TagBatch(data_len, data, row_count);
+  if (UNLIKELY(batch == nullptr)) {
+    LOG_ERROR("malloc TagBatch failed, out of memory");
+    err_info.errcode = -4;
+    err_info.errmsg = "malloc TagBatch failed, out of memory";
+    return nullptr;
+  }
+  if (old_tag_schema.m_data_type != result_schema.m_data_type) {
+    if (!isVarLenType(old_data_type)) {
+      // fixed-len column type to fixed-len column type
+      uint32_t row_idx = 0;
+      for (size_t row = start_row; row < end_row; ++row, ++row_idx) {
+        if (this->isNull(row, col)) {
+          batch->setNull(row_idx);
+          continue;
+        }
+        batch->setNotNull(row_idx);
+        char* old_mem = m_cols_[col]->rowAddrNoNullBitmap(row);
+        if (new_data_type == DATATYPE::CHAR || new_data_type == DATATYPE::BINARY) {
+          err_code = convertFixedToStr(old_data_type, (char*) old_mem, batch->getRowAddr(row_idx), err_info);
+          if (err_code < 0) {
+            err_info.errcode = 0;
+            batch->setNull(row_idx);
+          }
+        } else {
+          if (convertFixedToNum(old_data_type, new_data_type, old_mem, batch->getRowAddr(row_idx), err_info) < 0) {
+            LOG_WARN("convert [%lu] value failed. %s", row, err_info.errmsg.c_str());
+            err_info.errcode = 0;
+            batch->setNull(row_idx);
+          }
+        }
+      } // end for
+    } else {
+      // variable-length column to fixed-len column type
+      uint32_t row_idx = 0;
+      for (size_t row = start_row; row < end_row; ++row, ++row_idx) {
+        if (this->isNull(row, col)) {
+          batch->setNull(row_idx);
+          continue;
+        }
+        batch->setNotNull(row_idx);
+        size_t var_offset = *(reinterpret_cast<size_t *>(m_cols_[col]->rowAddrNoNullBitmap(row)));
+        m_cols_[col]->varRdLock();
+        char* var_data_ptr = m_cols_[col]->getVarValueAddrByOffset(var_offset);
+        uint16_t var_len = *reinterpret_cast<uint16_t*>(var_data_ptr);
+        if (old_data_type == DATATYPE::VARSTRING) {
+          var_len -= MMapStringColumn::kEndCharacterLen;
+        }
+        var_data_ptr += MMapStringColumn::kStringLenLen;
+        if (convertStrToFixed(var_data_ptr, new_data_type, batch->getRowAddr(row_idx), var_len, err_info) < 0) {
+          LOG_WARN("convert [%lu] value failed. %s", row, err_info.errmsg.c_str());
+          err_info.errcode = 0;
+          batch->setNull(row_idx);
+        }
+        m_cols_[col]->varUnLock();
+      }
+    }
+  } else if (old_tag_schema.m_size <= result_schema.m_size) {
+    // fixed-len column type with diff len
+    uint32_t row_idx = 0;
+    for (size_t row = start_row; row < end_row; ++row, ++row_idx) {
+      batch->writeData(row_idx, m_cols_[col]->rowAddrHasNullBitmap(row), old_tag_schema.m_size + k_per_null_bitmap_size);
+    }
+  } else {
+    LOG_ERROR("conversion from type %s, length %u to type %s, length %u "
+    "is not supported in the tag table %s%s",
+    getDataTypeName(old_tag_schema.m_data_type).c_str(), old_tag_schema.m_length,
+    getDataTypeName(result_schema.m_data_type).c_str(), result_schema.m_length,
+    m_db_name_.c_str(), m_name_.c_str());
+    delete batch;
+    err_info.errcode = 0;
+    return nullptr;
+  }
+  return batch;
+}
+
+kwdbts::Batch* MMapTagColumnTable::convertToVarLen(size_t start_row, size_t end_row, uint32_t col, const TagInfo& result_schema, ErrorInfo& err_info) {
+
+  TagInfo old_tag_schema = m_cols_[col]->attributeInfo();
+  DATATYPE old_data_type = static_cast<DATATYPE>(old_tag_schema.m_data_type);
+  DATATYPE new_data_type = static_cast<DATATYPE>(result_schema.m_data_type);
+
+  uint32_t row_count = end_row - start_row;
+  uint32_t var_total_len = std::max((m_cols_[col]->attributeInfo().m_length / 2 + 
+                                       MMapStringColumn::kStringLenLen) * row_count,
+                                       k_default_block_size);
+  char* var_data = reinterpret_cast<char*>(std::malloc(var_total_len));
+  memset(var_data, 0x00, var_total_len);
+  VarTagBatch* var_batch = KNEW kwdbts::VarTagBatch(var_total_len, var_data, row_count);
+  if (UNLIKELY(var_batch == nullptr)) {
+    LOG_ERROR("malloc TagBatch failed, out of memory");
+    err_info.errcode = -4;
+    err_info.errmsg = "malloc TagBatch failed, out of memory";
+    return nullptr;
+  }
+  if (old_data_type != new_data_type) {
+    if (!isVarLenType(old_data_type)) {
+      // fixed-len column type to var-len column type
+      bool is_digit_data;
+      CONVERT_DATA_FUNC convert_data_func = getConvertFunc(old_data_type, new_data_type,
+                                                     result_schema.m_length, is_digit_data, err_info);
+      if (err_info.errcode < 0) {
+        LOG_ERROR("conversion from type %s, length %u to type %s, length %u "
+          "is not supported in the tag table %s%s",
+          getDataTypeName(old_data_type).c_str(), old_tag_schema.m_length,
+          getDataTypeName(new_data_type).c_str(), result_schema.m_length,
+          m_db_name_.c_str(), m_name_.c_str());
+        err_info.errcode = 0;
+        return nullptr;
+      }
+      char dest_data[result_schema.m_length + MMapStringColumn::kStringLenLen + 1] = {0x00};
+      uint32_t row_idx = 0;
+      int data_len = 0;
+      char* rec_ptr = nullptr;
+      for (size_t row = start_row; row < end_row; ++row,++row_idx) {
+        if (this->isNull(row, col)) {
+          var_batch->setNull(row_idx);
+          continue;
+        }
+        if (is_digit_data) {
+          data_len = convert_data_func(m_cols_[col]->rowAddrNoNullBitmap(row),
+                                          dest_data, result_schema.m_length);
+          rec_ptr = dest_data;
+        } else {
+          rec_ptr = m_cols_[col]->rowAddrNoNullBitmap(row);
+          data_len = old_tag_schema.m_size;
+          // char convert to varchar use real size
+          if (old_tag_schema.m_data_type == DATATYPE::CHAR) {
+            data_len = std::min(old_tag_schema.m_size, static_cast<uint32_t>(strlen(rec_ptr)));
+          }
+        }
+        var_batch->writeDataExcludeLen(row_idx, rec_ptr, data_len);
+        memset(dest_data, 0x00, sizeof(dest_data));
+      }
+    } else {
+      // var-len column type to var-len column type
+      uint32_t row_idx = 0;
+      for(size_t row = start_row; row < end_row; ++row, ++row_idx) {
+        if (this->isNull(row, col)) {
+          var_batch->setNull(row_idx);
+        } else {
+          size_t var_start_offset = getVarOffset(row, col);
+          if (UNLIKELY(var_start_offset < MMapStringColumn::startLoc())) {
+            LOG_WARN("invalid start offset for tag(%u) in the tag tagle %s%s, "
+            "start_offset: %lu, start_row: %lu, end_row: %lu, row_count: %lu, "
+            "actual_size: %lu",
+            col, this->sandbox().c_str(), this->name().c_str(), var_start_offset,
+            row, end_row, this->size(), this->actual_size());
+            var_batch->setNull(row_idx);
+            continue;
+          }
+  
+          m_cols_[col]->varRdLock();
+          char* var_data_ptr = m_cols_[col]->getVarValueAddrByOffset(var_start_offset);
+          uint16_t var_len = *reinterpret_cast<uint16_t*>(var_data_ptr);
+          var_batch->writeDataIncludeLen(row_idx, var_data_ptr, var_len + MMapStringColumn::kStringLenLen);
+          m_cols_[col]->varUnLock();
+        }
+      }  // end for
+    }
+  } else if (old_tag_schema.m_length <= result_schema.m_length) {
+    uint32_t row_idx = 0;
+    for(size_t row = start_row; row < end_row; ++row, ++row_idx) {
+      if (this->isNull(row, col)) {
+        var_batch->setNull(row_idx);
+      } else {
+        size_t var_start_offset = getVarOffset(row, col);
+        if (UNLIKELY(var_start_offset < MMapStringColumn::startLoc())) {
+          LOG_WARN("invalid start offset for tag(%u) in the tag tagle %s%s, "
+          "start_offset: %lu, start_row: %lu, end_row: %lu, row_count: %lu, "
+          "actual_size: %lu",
+          col, this->sandbox().c_str(), this->name().c_str(), var_start_offset,
+          row, end_row, this->size(), this->actual_size());
+          var_batch->setNull(row_idx);
+          continue;
+        }
+
+        m_cols_[col]->varRdLock();
+        char* var_data_ptr = m_cols_[col]->getVarValueAddrByOffset(var_start_offset);
+        uint16_t var_len = *reinterpret_cast<uint16_t*>(var_data_ptr);
+        var_batch->writeDataIncludeLen(row_idx, var_data_ptr, var_len + MMapStringColumn::kStringLenLen);
+        m_cols_[col]->varUnLock();
+      }
+    }  // end for
+  } else {
+    LOG_ERROR("conversion from type %s, length %u to type %s, length %u "
+    "is not supported in the tag table %s%s",
+    getDataTypeName(old_tag_schema.m_data_type).c_str(), old_tag_schema.m_length,
+    getDataTypeName(result_schema.m_data_type).c_str(), result_schema.m_length,
+    m_db_name_.c_str(), m_name_.c_str());
+    delete var_batch;
+    err_info.errcode = 0;
+    return nullptr;
+  }
+
+  return var_batch;
+}
+
+kwdbts::Batch* MMapTagColumnTable::GetTagBatchRecordByConverted(size_t start_row,
+                                                                size_t end_row,
+                                                                uint32_t col,
+                                                                const TagInfo& result_schema,
+                                                                ErrorInfo& err_info) {
+  // 1. check type
+  TagInfo old_tag_schema = m_cols_[col]->attributeInfo();
+  if (!isVarLenType(result_schema.m_data_type)) {
+    // result tag schema is fixed-len type
+    return this->convertToFixedLen(start_row, end_row, col, result_schema, err_info);
+  }
+  // result tag schema is var-len type
+  return this->convertToVarLen(start_row, end_row, col, result_schema, err_info);
+}
+
+kwdbts::Batch* MMapTagColumnTable::GetTagBatchRecord(size_t start_row, size_t end_row, uint32_t col, const TagInfo& result_schema, ErrorInfo& err_info) {
+  Batch* batch = nullptr;
+  if (col == INVALID_COL_IDX) {
+    batch = new(std::nothrow) kwdbts::TagBatch(0, nullptr, end_row - start_row);
+    return batch;
+  }
+  const TagInfo& src_tag_schema = m_cols_[col]->attributeInfo();
+  if (src_tag_schema.isEqual(result_schema)) {
+    batch = GetTagBatchRecordWithNoConvert(start_row, end_row, col, err_info);
+  } else {
+    batch = GetTagBatchRecordByConverted(start_row, end_row, col, result_schema, err_info);
+  }
+  return batch;
 }

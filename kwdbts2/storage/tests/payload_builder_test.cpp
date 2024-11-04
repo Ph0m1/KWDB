@@ -22,7 +22,7 @@ const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 
 class TestTsPayloadBuilder : public TestBigTableInstance {
  public:
-  std::vector<TagColumn*> tag_schema_;
+  std::vector<TagInfo> tag_schema_;
   std::vector<uint32_t> actual_cols_;
   std::vector<AttributeInfo> data_schema_;
   std::vector<uint32_t> hps_total_;
@@ -178,7 +178,7 @@ class TestTsPayloadBuilder : public TestBigTableInstance {
     PayloadBuilder pay_build(tag_schema_, data_schema_);
     for (size_t i = 0; i < tag_schema_.size(); i++) {
       KTimestamp cur_value = primary_tag + i;
-      if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+      if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
         string aa = intToString(cur_value);
         pay_build.SetTagValue(i, aa.data(), aa.length());
       } else {
@@ -294,13 +294,14 @@ TEST_F(TestTsPayloadBuilder, create_2) {
   for (size_t i = 0; i < tag_schema_.size(); i++) {
     KTimestamp cur_value = primary_tag + i;
     const Batch* batch = rs.data[i][0];
-    if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+    if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING ||
+        tag_schema_[i].m_data_type == DATATYPE::VARBINARY) {
       string value_str = intToString(cur_value);
       EXPECT_EQ(batch->getVarColDataLen(0), value_str.length() + 1);
       EXPECT_EQ(cur_value, atoi(reinterpret_cast<char*>(batch->getVarColData(0))));
     } else {
       char* col_addr = reinterpret_cast<char*>(batch->mem);
-      if (!tag_schema_[i]->isPrimaryTag()) {
+      if (!tag_schema_[i].isPrimaryTag()) {
         col_addr = col_addr + k_per_null_bitmap_size;
       }
       EXPECT_EQ(KTimestamp(col_addr), cur_value);
@@ -308,7 +309,6 @@ TEST_F(TestTsPayloadBuilder, create_2) {
   }
   delete iter;
 }
-
 
 // Test primary tag data with variable length type fields
 TEST_F(TestTsPayloadBuilder, create_3) {
@@ -348,8 +348,8 @@ TEST_F(TestTsPayloadBuilder, create_3) {
     KTimestamp cur_value = primary_tag + i;
     string value_str = intToString(cur_value);
     const Batch* batch = rs.data[i][0];
-    if (tag_schema_[i]->isPrimaryTag()) {
-      if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+    if (tag_schema_[i].isPrimaryTag()) {
+      if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
         // primary key store as  char[xxx]
         string a(reinterpret_cast<char*>(batch->mem));
         EXPECT_EQ(a, value_str);
@@ -357,7 +357,7 @@ TEST_F(TestTsPayloadBuilder, create_3) {
         EXPECT_EQ(KTimestamp(batch->mem), cur_value);
       }
     } else {
-      if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+      if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
         EXPECT_EQ(batch->getVarColDataLen(0), value_str.length() + 1);
         EXPECT_EQ(cur_value, atoi(reinterpret_cast<char*>(batch->getVarColData(0))));
       } else {
@@ -406,8 +406,8 @@ TEST_F(TestTsPayloadBuilder, create_4) {
     KTimestamp cur_value = primary_tag + i;
     string value_str = intToString(cur_value);
     const Batch* batch = rs.data[i][0];
-    if (tag_schema_[i]->isPrimaryTag()) {
-      if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+    if (tag_schema_[i].isPrimaryTag()) {
+      if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
         // primary key store as  char[xxx]
         string a(reinterpret_cast<char*>(batch->mem));
         EXPECT_EQ(a, value_str);
@@ -415,7 +415,7 @@ TEST_F(TestTsPayloadBuilder, create_4) {
         EXPECT_EQ(KTimestamp(batch->mem), cur_value);
       }
     } else {
-      if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+      if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
         EXPECT_EQ(batch->getVarColDataLen(0), value_str.length() + 1);
         EXPECT_EQ(cur_value, atoi(reinterpret_cast<char*>(batch->getVarColData(0))));
       } else {
@@ -439,7 +439,7 @@ TEST_F(TestTsPayloadBuilder, create_5) {
 
   int count = 10;
   KTimestamp primary_tag = 12345678;
-  int entity_num = 5;
+  int entity_num = 1;
   std::shared_ptr<TsEntityGroup> entity_grp;
   KStatus s = table_->GetEntityGroup(ctx_, 101, &entity_grp);
   EXPECT_EQ(s, KStatus::SUCCESS);
@@ -461,8 +461,8 @@ TEST_F(TestTsPayloadBuilder, create_5) {
   std::vector<EntityResultIndex> entity_id_list;
   k_uint32 count_1 = 0;
   s = iter->Next(&entity_id_list, &rs, &count_1);
-  EXPECT_EQ(entity_id_list.size(), 5);
-  EXPECT_EQ(count_1, 5);
+  EXPECT_EQ(entity_id_list.size(), entity_num);
+  EXPECT_EQ(count_1, entity_num);
   for (size_t i = 0; i < tag_schema_.size(); i++) {
     KTimestamp cur_value = primary_tag + i;
     string value_str = intToString(cur_value);
@@ -470,16 +470,16 @@ TEST_F(TestTsPayloadBuilder, create_5) {
     EXPECT_EQ(batch->count, entity_num);
     char* batch_mem = reinterpret_cast<char*>(batch->mem);
     for (size_t j = 0; j < entity_num; j++) {
-      if (tag_schema_[i]->isPrimaryTag()) {
-        if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+      if (tag_schema_[i].isPrimaryTag()) {
+        if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
           // primary key store as  char[xxx]
-          string a(batch_mem + j * (tag_schema_[i]->attributeInfo().m_size + 8));
+          string a(batch_mem + j * (tag_schema_[i].m_size + 8));
           EXPECT_EQ(a, value_str);
         } else {
           EXPECT_EQ(KTimestamp(batch_mem + j * 8), cur_value);
         }
       } else {
-        if (tag_schema_[i]->attributeInfo().m_data_type == DATATYPE::VARSTRING) {
+        if (tag_schema_[i].m_data_type == DATATYPE::VARSTRING) {
           EXPECT_EQ(batch->getVarColDataLen(0), value_str.length() + 1);
           EXPECT_EQ(cur_value, atoi(reinterpret_cast<char*>(batch->getVarColData(0))));
         } else {

@@ -85,12 +85,16 @@ KStatus TsSnapshotProductor::getSchemaInfo(kwdbContext_p ctx, uint32_t schema_ve
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  // todo(liangbo01): get tag schema of certain version.
-  std::vector<TagColumn*>& tag_schema = tag_attribute_info_;
-  // Convert TagColumn to TagInfo.
+
   std::vector<TagInfo> tag_schema_info;
-  for (int i = 0; i < tag_schema.size(); i++) {
-    tag_schema_info.push_back(tag_schema[i]->attributeInfo());
+  std::shared_ptr<TsEntityGroup> cur_entity_group;
+  s = snapshot_info_.table->GetEntityGroup(ctx, default_entitygroup_id_in_dist_v2, &cur_entity_group);
+  if (s != KStatus::SUCCESS) {
+    return s;
+  }
+  s = cur_entity_group->GetTagSchemaIncludeDroppedByVersion(&tag_schema_info, schema_version);
+  if (s != KStatus::SUCCESS) {
+    return s;
   }
   // Use data schema and tag schema to construct meta.
   s = snapshot_info_.table->GenerateMetaSchema(ctx, &meta, data_schema, tag_schema_info);
@@ -133,7 +137,8 @@ KStatus TsSnapshotProductor::Init(kwdbContext_p ctx, const TsSnapshotInfo& info)
     return s;
   }
   for (auto& item : entity_with_tag_rowid) {
-    entity_map_[item.second.entityGroupId][item.second.subGroupId].push_back({item.second.entityId, item.first});
+    entity_map_[item.second.entityGroupId][item.second.subGroupId].push_back(
+                          {item.second.entityId, std::move(TagRowNum{item.second.ts_version, uint32_t(item.first)})});
   }
   egrp_iter_ = entity_map_.begin();
   if (egrp_iter_ == entity_map_.end()) {
@@ -170,12 +175,17 @@ KStatus TsSnapshotProductor::Init(kwdbContext_p ctx, const TsSnapshotInfo& info)
     return s;
   }
   // todo(liangbo01) tag scheam version also need certain version.
-  cur_entity_group->GetSubEntityGroupTagbt()->startRead();
-  tag_attribute_info_ = cur_entity_group->GetSubEntityGroupTagbt()->getSchemaInfo();
-  for (int i = 0; i < tag_attribute_info_.size(); ++i) {
-    tag_schema_infos_.push_back(tag_attribute_info_[i]->attributeInfo());
+  auto result_tag_version_obj = cur_entity_group->GetSubEntityGroupNewTagbt()
+                         ->GetTagTableVersionManager()->GetVersionObject(using_storage_schema_version_);
+  if (nullptr == result_tag_version_obj) {
+    return KStatus::FAIL;
   }
-  cur_entity_group->GetSubEntityGroupTagbt()->stopRead();
+  tag_attribute_info_exclude_dropped_ = result_tag_version_obj->getExcludeDroppedSchemaInfos();
+  tag_schema_include_dropped_ = result_tag_version_obj->getIncludeDroppedSchemaInfos();
+  for (int tag_idx = 0; tag_idx < tag_attribute_info_exclude_dropped_.size(); ++tag_idx) {
+    result_scan_tag_idxs_.emplace_back(result_tag_version_obj->getValidSchemaIdxs()[tag_idx]);
+  }
+
   k_uint32 num_col = pl_metric_attribute_info_.size();
   auto actual_cols = root_bt->GetIdxForValidCols(using_storage_schema_version_);
   for (int i = 0; i < num_col; i++) {
@@ -513,6 +523,8 @@ KStatus TsSnapshotConsumerByPayload::writeDataWithPayload(kwdbContext_p ctx, TSS
   uint32_t inc_unordered_cnt = 0;
   total_rows_ += Payload::GetRowCountFromPayload(&data);
   DedupResult dedup_result{0, 0, 0, TSSlice {nullptr, 0}};
+  LOG_INFO("writeDataWithPayload table_id: %lu ts_version: %u", Payload::GetTableIdFromPayload(&data),
+            Payload::GetTsVersionFromPayload(&data));
   return snapshot_info_.table->PutDataWithoutWAL(ctx, cur_egrp_id , &data, 1, entity_grp_mtr_id_[cur_egrp_id],
                                                  &inc_entity_cnt, &inc_unordered_cnt, &dedup_result, DedupRule::KEEP);
 }
@@ -565,13 +577,13 @@ KStatus TsSnapshotConsumerByBlock::GenEmptyTagForPrimaryKey(kwdbContext_p ctx,
                                                             uint64_t entity_grp_id, TSSlice primary_key) {
   std::vector<AttributeInfo> data_schema;
   RangeGroup range{entity_grp_id, 1};
-  std::vector<TagColumn *> tag_schema;
+  std::vector<TagInfo > tag_schema;
   snapshot_info_.table->GetDataSchemaExcludeDropped(ctx, &data_schema);
   snapshot_info_.table->GetTagSchema(ctx, range, &tag_schema);
   PayloadBuilder pl_builder(tag_schema, data_schema);
   for (size_t i = 0; i < tag_schema.size(); i++) {
     // Different tags are stored differently in payload
-    if (tag_schema[i]->isPrimaryTag()) {
+    if (tag_schema[i].isPrimaryTag()) {
       pl_builder.SetTagValue(i, primary_key.data, primary_key.len);
       break;
     }
@@ -633,9 +645,9 @@ KStatus TsSnapshotConsumerByBlock::writeBlocks(kwdbContext_p ctx, TSSlice data) 
   snapshot_info_.table->GetEntityGroup(ctx, entity_grp_id, &entity_group);
   EntityID entity_id;
   SubGroupID sub_grp_id;
-  int ret = entity_group->GetSubEntityGroupTagbt()->getEntityIdGroupId(cur_data.primary_key.data,
+  bool ret = entity_group->GetSubEntityGroupNewTagbt()->hasPrimaryKey(cur_data.primary_key.data,
                                                             cur_data.primary_key.len, entity_id, sub_grp_id);
-  if (ret < 0) {
+  if (!ret) {
     // todo(liangbo01): just for test. when  tag range all over cluster, here will return fail.
     LOG_WARN("cannot found entitygroup for primary key [%s], we will create one with empty tag.",
               cur_data.primary_key.data);
@@ -644,9 +656,9 @@ KStatus TsSnapshotConsumerByBlock::writeBlocks(kwdbContext_p ctx, TSSlice data) 
       LOG_ERROR("GenEmptyTagForPrimaryKey failed.");
       return s;
     }
-    ret = entity_group->GetSubEntityGroupTagbt()->getEntityIdGroupId(cur_data.primary_key.data, cur_data.primary_key.len,
+    ret = entity_group->GetSubEntityGroupNewTagbt()->hasPrimaryKey(cur_data.primary_key.data, cur_data.primary_key.len,
                                                                     entity_id, sub_grp_id);
-    if (ret < 0) {
+    if (!ret) {
       LOG_ERROR("cannot found entity for primary key [%s].", cur_data.primary_key.data);
       return s;
     }

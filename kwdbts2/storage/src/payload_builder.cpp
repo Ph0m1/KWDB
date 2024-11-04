@@ -16,22 +16,22 @@ namespace kwdbts {
 
 #define IS_VAR_DATATYPE(type) ((type) == DATATYPE::VARSTRING || (type) == DATATYPE::VARBINARY)
 
-PayloadBuilder::PayloadBuilder(const std::vector<TagColumn*>& tag_schema,
+PayloadBuilder::PayloadBuilder(const std::vector<TagInfo>& tag_schema,
                                    const std::vector<AttributeInfo>& data_schema)
     : tag_schema_(tag_schema), data_schema_(data_schema) {
   tag_value_mem_bitmap_len_ = (tag_schema_.size() + 7) / 8;  // bitmap
   tag_value_mem_len_ = tag_value_mem_bitmap_len_;
-  for (auto tag : tag_schema_) {
-    if (IS_VAR_DATATYPE(tag->attributeInfo().m_data_type)) {
+  for (const auto tag : tag_schema_) {
+    if (IS_VAR_DATATYPE(tag.m_data_type)) {
       // not allocate space now. Then insert tag value, resize this tmp space.
-      if (tag->isPrimaryTag()) {
+      if (tag.m_tag_type == PRIMARY_TAG) {
         // primary tag all store in tuple.
-        tag_value_mem_len_ += tag->attributeInfo().m_size;
+        tag_value_mem_len_ += tag.m_length;
       } else {
         tag_value_mem_len_ += sizeof(intptr_t);
       }
     } else {
-      tag_value_mem_len_ += tag->attributeInfo().m_size;
+      tag_value_mem_len_ += tag.m_size;
     }
   }
   tag_value_mem_ = reinterpret_cast<char*>(std::malloc(tag_value_mem_len_));
@@ -48,13 +48,13 @@ bool PayloadBuilder::SetTagValue(int tag_idx, char* mem, int count) {
     return false;
   }
   auto tag_schema = tag_schema_[tag_idx];
-  int col_data_offset = tag_value_mem_bitmap_len_ + tag_schema->attributeInfo().m_offset;
-  if (tag_schema->isPrimaryTag()) {  // primary key store in tuple.
+  int col_data_offset = tag_value_mem_bitmap_len_ + tag_schema.m_offset;
+  if (tag_schema.isPrimaryTag()) {  // primary key store in tuple.
     memcpy(tag_value_mem_ + col_data_offset, mem, count);
     primary_tags_.push_back({col_data_offset, count});
   } else {
     // all types of tag all store same.
-    if (IS_VAR_DATATYPE(tag_schema->attributeInfo().m_data_type)) {  // re_alloc  var type data space.
+    if (IS_VAR_DATATYPE(tag_schema.m_data_type)) {  // re_alloc  var type data space.
       int cur_offset = tag_value_mem_len_;
       tag_value_mem_ = reinterpret_cast<char*>(std::realloc(tag_value_mem_, tag_value_mem_len_ + count + 2));
       tag_value_mem_len_ = tag_value_mem_len_ + count + 2;

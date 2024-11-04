@@ -1578,10 +1578,8 @@ TEST_F(TestIterator, tstable) {
   std::vector<Sumfunctype> scan_agg_types;
   TsTableIterator* iter1;
   std::vector<EntityResultIndex> entity_results;
-  std::vector<k_uint32> scan_tags;
-  std::vector<void*> primary_tags;
   k_uint32 count;
-  ASSERT_EQ(ts_table->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_results, nullptr, &count), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->GetEntityIndex(ctx_, 0, UINT64_MAX, entity_results), KStatus::SUCCESS);
   ASSERT_EQ(ts_table->GetIterator(ctx_, entity_results, {ts_span}, scan_cols, scan_agg_types, 1, &iter1, {}, false, false),
             KStatus::SUCCESS);
 
@@ -1665,10 +1663,8 @@ TEST_F(TestIterator, multi_thread) {
   std::vector<Sumfunctype> scan_agg_types;
   TsTableIterator* iter;
   std::vector<EntityResultIndex> entity_results;
-  std::vector<k_uint32> scan_tags;
-  std::vector<void*> primary_tags;
   k_uint32 count;
-  ASSERT_EQ(ts_table->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_results, nullptr, &count), KStatus::SUCCESS);
+  ASSERT_EQ(ts_table->GetEntityIndex(ctx_, 0, UINT64_MAX, entity_results), KStatus::SUCCESS);
   ASSERT_EQ(ts_table->GetIterator(ctx_, entity_results, {ts_span}, scan_cols, scan_agg_types, 1, &iter, {}, false, false), KStatus::SUCCESS);
 
   atomic<int> next_time{0};

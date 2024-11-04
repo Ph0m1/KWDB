@@ -36,7 +36,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/security"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
@@ -891,9 +890,6 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.InstanceTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not alter tag type on instance table")
 			}
-			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
-				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
-			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 
 			tagColumn, dropped, err := n.tableDesc.FindColumnByName(t.Tag)
@@ -938,7 +934,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return err
 			}
 
-			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+			//n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 			n.tableDesc.AddColumnMutation(alteringTag, sqlbase.DescriptorMutation_NONE)
 			mutationID := n.tableDesc.ClusterVersion.NextMutationID
 			// Create a Job to perform the second stage of ts DDL.
@@ -1079,9 +1075,6 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.InstanceTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not add tag on instance table")
 			}
-			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
-				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
-			}
 			if len(n.tableDesc.Columns)+1 > MaxTSDataColumns {
 				return pgerror.Newf(pgcode.TooManyColumns,
 					"the number of columns/tags exceeded the maximum value %d", MaxTSDataColumns)
@@ -1124,7 +1117,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				tagCol.ID = n.tableDesc.GetNextColumnID()
 				n.tableDesc.NextColumnID++
 			}
-			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+			//n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 			n.tableDesc.AddColumnMutation(tagCol, sqlbase.DescriptorMutation_ADD)
 			// Allocate IDs now, so new IDs are available to subsequent commands
 			if err := n.tableDesc.AllocateIDs(); err != nil {
@@ -1173,9 +1166,6 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.InstanceTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not drop tag on instance table")
 			}
-			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
-				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
-			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			tagColumn, _, err := n.tableDesc.FindColumnByName(t.TagName)
 			if err != nil {
@@ -1204,7 +1194,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 					return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only tag")
 				}
 			}
-			n.tableDesc.State = sqlbase.TableDescriptor_ALTER
+			//n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 			n.tableDesc.AddColumnMutation(tagColumn, sqlbase.DescriptorMutation_DROP)
 			mutationID := n.tableDesc.ClusterVersion.NextMutationID
 			// Create a Job to perform the second stage of ts DDL.
@@ -1246,9 +1236,6 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if n.tableDesc.TableType == tree.RelationalTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not rename tag on relational table")
 			}
-			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
-				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
-			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			const allowRenameOfShardColumn = false
 			descChanged, err := params.p.renameColumn(params.ctx, n.tableDesc,
@@ -1267,9 +1254,6 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 			if n.tableDesc.TableType == tree.TimeseriesTable {
 				return pgerror.New(pgcode.WrongObjectType, "can not set tag on time series table")
-			}
-			if params.ExecCfg().StartMode == StartMultiReplica && !settings.AlterTagEnabled.Get(&params.ExecCfg().Settings.SV) {
-				return pgerror.New(pgcode.FeatureNotSupported, "alter tag is not allowed in multi-replica mode")
 			}
 
 			// get instance table id

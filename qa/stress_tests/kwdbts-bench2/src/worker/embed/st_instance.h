@@ -29,7 +29,7 @@ void constructRoachpbTable(roachpb::CreateTsTable* meta, uint64_t table_id, cons
 TsTable* CreateTable(kwdbts::kwdbContext_p ctx, roachpb::CreateTsTable* meta,
                      std::string db_path, const std::vector<RangeGroup>& range_groups);
 
-void genPayloadData(std::vector<TagColumn*> tag_schema, std::vector<AttributeInfo> data_schema,
+void genPayloadData(std::vector<TagInfo> tag_schema, std::vector<AttributeInfo> data_schema,
                     int32_t primary_tag, KTimestamp start_ts, int count, int time_inc, TSSlice *payload);
 
 bool checkColValue(const std::vector<AttributeInfo>& data_schema, const ResultSet& res, int ret_cnt, int batch_offset);
@@ -71,7 +71,7 @@ class StInstance {
 
   uint32_t GetSnapShotTableId() { return snapshot_desc_table_id; }
 
-  KStatus GetSchemaInfo(kwdbContext_p ctx, uint32_t table_id, std::vector<TagColumn*>* tag_schema,
+  KStatus GetSchemaInfo(kwdbContext_p ctx, uint32_t table_id, std::vector<TagInfo>* tag_schema,
            std::vector<AttributeInfo>* data_schema);
 
   DedupRule GetDedupRule() {

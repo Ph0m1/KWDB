@@ -35,8 +35,9 @@ class TSEntityGroupWorker : public Worker {
     st_inst_->Init(params);
     ctx = &context;
     kwdbts::InitKWDBContext(ctx);
-    tag_schema_ = st_inst_->GetEntityGroup()->GetSchema();
-    KStatus s = st_inst_->GetTable()->GetDataSchemaExcludeDropped(ctx, &data_schema_);
+    KStatus s = st_inst_->GetEntityGroup()->GetCurrentTagSchemaExcludeDropped(&tag_schema_);
+    assert(s == KStatus::SUCCESS);
+    s = st_inst_->GetTable()->GetDataSchemaExcludeDropped(ctx, &data_schema_);
     assert(s == KStatus::SUCCESS);
     entity_group_ = st_inst_->GetEntityGroup();
   }
@@ -54,7 +55,7 @@ class TSEntityGroupWorker : public Worker {
   kwdbts::kwdbContext_t context;
   kwdbts::kwdbContext_p ctx;
   StEngityGroupInstance* st_inst_;
-  std::vector<TagColumn*> tag_schema_;
+  std::vector<TagInfo> tag_schema_;
   std::vector<AttributeInfo> data_schema_;
   std::shared_ptr<TsEntityGroup> entity_group_{nullptr};
 };

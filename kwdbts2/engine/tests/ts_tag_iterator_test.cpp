@@ -68,7 +68,7 @@ TEST_F(TestEngine, entityidlist) {
   ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
   std::shared_ptr<TsEntityGroup> tbl_range;
   ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
-  int cnt = 20;
+  int cnt = 2000;
   char* data_value = nullptr;
   for (int i = 0; i < cnt; i++) {
     data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts1 + i * 100, &meta, 10, 0, false);
@@ -116,6 +116,7 @@ TEST_F(TestEngine, entityidlist) {
   ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
 }
 
+
 TEST_F(TestEngine, tagiterator) {
   roachpb::CreateTsTable meta;
 
@@ -131,7 +132,7 @@ TEST_F(TestEngine, tagiterator) {
   ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
   std::shared_ptr<TsEntityGroup> tbl_range;
   ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
-  int cnt = 20;
+  int cnt = 1000;
   char* data_value = nullptr;
   for (int i = 0; i < cnt; i++) {
     k_uint32 p_len = 0;
@@ -272,4 +273,109 @@ TEST_F(TestEngine, updatetag) {
   delete iter;
 
   ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
+}
+
+TEST_F(TestEngine, altertag) {
+
+  roachpb::CreateTsTable meta;
+
+  KTableKey cur_table_id = 1000;
+  ConstructRoachpbTable(&meta, "tagiter4", cur_table_id);
+
+  std::vector<RangeGroup> ranges{kTestRange};
+  ASSERT_EQ(ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges), KStatus::SUCCESS);
+
+  KTimestamp start_ts1 = 3600;
+  // insert value
+  std::shared_ptr<TsTable> ts_table;
+  ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
+  std::shared_ptr<TsEntityGroup> tbl_range;
+  ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
+  int cnt = 2;
+  char* data_value = nullptr;
+  for (int i = 0; i < cnt; i++) {
+    k_uint32 p_len = 0;
+    data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts1 + i * 100, &meta, 10, 0, false);
+    TSSlice payload1{data_value, p_len};
+    ASSERT_EQ(tbl_range->PutData(ctx_, payload1), KStatus::SUCCESS);
+    delete[] data_value;
+  }
+  // add new tag column
+  std::string msg;
+  const int begin_column_id = 10;
+  int col_cnt = meta.k_column_size();
+  int begin_tag_idx = col_cnt - 3;
+  uint32_t cur_version = 1;
+  uint32_t new_version = cur_version + 1;
+  roachpb::KWDBKTSColumn* column = meta.mutable_k_column()->Add();
+  column->set_storage_type(roachpb::DataType::INT);
+  column->set_storage_len(sizeof(int32_t));
+  column->set_column_id(11);
+  column->set_col_type(::roachpb::KWDBKTSColumn_ColumnType::KWDBKTSColumn_ColumnType_TYPE_TAG);
+  column->set_name("tag" + std::to_string(begin_column_id));
+  ASSERT_EQ(ts_table->AlterTable(ctx_, kwdbts::AlterType::ADD_COLUMN, column, cur_version, new_version, msg), KStatus::SUCCESS);
+  // insert new data
+  for (int i = cnt; i < cnt + cnt; i++) {
+    k_uint32 p_len = 0;
+    data_value = GenSomePayloadData(ctx_, row_num_, p_len, start_ts1 + i * 100, &meta, 10, 0, false);
+    KUint32(data_value + Payload::ts_version_offset_) = new_version;
+    TSSlice payload1{data_value, p_len};
+    ASSERT_EQ(tbl_range->PutData(ctx_, payload1), KStatus::SUCCESS);
+    delete[] data_value;
+  }
+  cur_version = new_version;
+  new_version = cur_version + 1;
+
+  // tag iterator
+  std::vector<EntityResultIndex> entity_id_list;
+  std::vector<k_uint32> scan_tags = {1, 2, 3};
+  std::vector<k_uint32> hps;
+  make_hashpoint(&hps);
+  TagIterator *iter;
+  ASSERT_EQ(ts_table->GetTagIterator(ctx_, scan_tags,hps, &iter, cur_version), KStatus::SUCCESS);
+
+  ResultSet res{(k_uint32) scan_tags.size()};
+  k_uint32 fetch_total_count = 0;
+  k_uint64 ptag = 0;
+  k_uint32 count = 0;
+  k_uint32 all_idx = 0;
+  k_uint32 tag_val = 0;
+  do {
+    ASSERT_EQ(iter->Next(&entity_id_list, &res, &count), KStatus::SUCCESS);
+    if (count == 0) {
+      break;
+    }
+    // check entity id
+    for (int idx = 0; idx < entity_id_list.size(); idx++) {
+      ASSERT_EQ(entity_id_list[idx].mem != nullptr, true);
+      memcpy(&ptag, entity_id_list[idx].mem, sizeof(ptag));
+      ASSERT_EQ(ptag, start_ts1+(idx+fetch_total_count)*100);
+    }
+    // check tag column
+    for (int tag_idx = 0; tag_idx < scan_tags.size(); tag_idx++) {
+      if (fetch_total_count == 0 && scan_tags[tag_idx] == 3) {
+        // ASSERT_EQ(res.data[tag_idx].empty(), true);
+        continue;
+      }
+      for (int i = 0; i <  res.data[tag_idx][0]->count; i++) {
+        const auto& col = meta.k_column(begin_tag_idx + scan_tags[tag_idx]);
+        if (col.storage_type() != roachpb::DataType::VARCHAR) {
+          memcpy(&tag_val, res.data[tag_idx][0]->mem + i * (sizeof(k_uint32) + k_per_null_bitmap_size) + k_per_null_bitmap_size, sizeof(tag_val));
+          ASSERT_EQ(tag_val, start_ts1 + (i + fetch_total_count) * 100);
+        } else {
+          // var
+          char* rec_ptr = static_cast<char*>(res.data[tag_idx][0]->getVarColData(i));
+          ASSERT_EQ(rec_ptr, std::to_string(start_ts1+(i + fetch_total_count)*100));
+        }
+      }
+    }
+    fetch_total_count += count;
+    entity_id_list.clear();
+    res.clear();
+  }while(count);
+  ASSERT_EQ(fetch_total_count, cnt + cnt);
+  iter->Close();
+  delete iter;
+  // drop table
+  // ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
 }

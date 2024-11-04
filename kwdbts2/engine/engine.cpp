@@ -300,16 +300,11 @@ KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id, 
     return s;
   }
   // Get table tag schema.
-  std::vector<TagColumn*> tag_schema;
-  s = table->GetTagSchema(ctx, range, &tag_schema);
+  std::vector<TagInfo> tag_schema_info;
+  s = table->GetTagSchema(ctx, range, &tag_schema_info);
   if (s == KStatus::FAIL) {
     LOG_ERROR("GetTagSchema failed during GetMetaData, table id is %ld.", table_id)
     return s;
-  }
-  // Convert TagColumn to TagInfo.
-  std::vector<TagInfo> tag_schema_info;
-  for (int i = 0; i < tag_schema.size(); i++) {
-    tag_schema_info.push_back(tag_schema[i]->attributeInfo());
   }
   // Use data schema and tag schema to construct meta.
   s = table->GenerateMetaSchema(ctx, meta, data_schema, tag_schema_info);
@@ -356,7 +351,7 @@ KStatus TSEngineImpl::PutEntity(kwdbContext_p ctx, const KTableKey& table_id, ui
       return s;
     }
   }
-  LOG_INFO("PutEntity succeed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id);
+  LOG_DEBUG("PutEntity succeed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id);
   return KStatus::SUCCESS;
 }
 

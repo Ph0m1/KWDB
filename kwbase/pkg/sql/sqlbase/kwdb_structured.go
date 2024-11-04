@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/binary"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -28,7 +27,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/protoutil"
-	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
 	"github.com/cockroachdb/errors"
 )
 
@@ -593,31 +591,4 @@ func DatumToString(d tree.Datum) string {
 		res = val.String()
 	}
 	return res
-}
-
-// WaitTableAlterOk check table is available now.
-func WaitTableAlterOk(ctx context.Context, db *kv.DB, tableID uint32) {
-	opts := retry.Options{
-		InitialBackoff: 500 * time.Millisecond,
-		MaxBackoff:     10 * time.Second,
-		Multiplier:     2,
-	}
-	for r := retry.StartWithCtx(context.Background(), opts); r.Next(); {
-		isAltering := false
-		if err := db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-			table, _, err := GetTsTableDescFromID(ctx, txn, ID(tableID))
-			if err != nil {
-				return err
-			}
-			if table.State == TableDescriptor_ALTER {
-				isAltering = true
-			}
-			return nil
-		}); err != nil {
-			log.Errorf(ctx, "get table %v state failed: %v", tableID, err.Error())
-		}
-		if !isAltering {
-			return
-		}
-	}
 }

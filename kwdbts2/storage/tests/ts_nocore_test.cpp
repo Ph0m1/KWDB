@@ -78,9 +78,11 @@ class TestTsBLockItemMaxNoCore : public TestBigTableInstance {
   }
 
   void GenPayloadData(KTimestamp primary_tag, KTimestamp start_ts, int count, TSSlice *payload, int inc_step = 1) {
-    auto tag_schema = entity_group_leader_->GetSchema();
     std::vector<AttributeInfo> data_schema;
     KStatus s = table_->GetDataSchemaExcludeDropped(ctx_, &data_schema);
+    ASSERT_EQ(s, KStatus::SUCCESS);
+    std::vector<TagInfo> tag_schema;
+    s = entity_group_leader_->GetCurrentTagSchemaExcludeDropped(&tag_schema);
     ASSERT_EQ(s, KStatus::SUCCESS);
     int header_size = Payload::header_size_;
     k_uint32 header_len = header_size;
@@ -225,6 +227,8 @@ TEST_F(TestTsBLockItemMaxNoCore, mulitiInsert) {
     threads[i].join();
   }
   delete[] payload.data;
+  primary_tags.push_back(&primary_key);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 1);

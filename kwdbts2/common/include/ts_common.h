@@ -29,6 +29,7 @@
 #include "utils/compress_utils.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "lg_api.h"
+#include "mmap/mmap_string_column.h"
 
 class MMapSegmentTable;
 
@@ -152,28 +153,16 @@ struct Batch {
 };
 
 struct TagBatch : public Batch {
-  uint64_t start_offset;
-  void* var_data;
+  uint32_t data_length_;
 
-  TagBatch(void* m, k_uint32 c, void* b) : Batch(m, c, b, nullptr) {
-    start_offset = 0;
-    var_data = nullptr;
-  }
-
-  TagBatch(void* m, k_uint32 c, void* b, uint64_t offset, void* var)
-      : Batch(m, c, b, nullptr) {
-    start_offset = offset;
-    var_data = var;
+  TagBatch(uint32_t data_len, void* m, k_uint32 c) : Batch(m, c, nullptr, nullptr) {
+    data_length_ = data_len;
   }
 
   virtual ~TagBatch() {
-    if (var_data) {
-      free(var_data);
-      var_data = nullptr;
-    }
     if (mem) {
       free(mem);
-      var_data = nullptr;
+      mem = nullptr;
     }
     if (bitmap) {
       free(bitmap);
@@ -181,25 +170,152 @@ struct TagBatch : public Batch {
     }
   }
 
-  void* getVarColData(uint32_t row_idx) const {
-    // getoffset
-    if (!var_data) return nullptr;
-    size_t var_offset = *reinterpret_cast<size_t*>(
-        (intptr_t)mem + row_idx * (sizeof(size_t) + k_per_null_bitmap_size) +
-        k_per_null_bitmap_size);
-    return reinterpret_cast<void*>(
-        (intptr_t)var_data + (var_offset - start_offset) + sizeof(uint16_t));
+  void writeData(uint32_t row_idx, void* data, uint32_t data_len) {
+    memcpy(reinterpret_cast<void*>((intptr_t)mem + row_idx * data_length_),
+          data, data_len);
   }
 
-  uint16_t getVarColDataLen(k_uint32 row_idx) const {
-    if (!var_data) return 0;
-    size_t var_offset = *reinterpret_cast<size_t*>(
-        (intptr_t)mem + row_idx * (sizeof(size_t) + k_per_null_bitmap_size) +
-        k_per_null_bitmap_size);
-    return *reinterpret_cast<uint16_t*>((intptr_t)var_data +
-                                        (var_offset - start_offset));
+  KStatus isNull(k_uint32 row_idx, bool* is_null) const {
+    if (mem == nullptr || row_idx >= count) {
+      *is_null = true;
+      return KStatus::FAIL;
+    }
+    *is_null = *reinterpret_cast<char*>((intptr_t)mem + row_idx * data_length_) == 0;
+    return KStatus::SUCCESS;
+  }
+
+  KStatus setNull(uint32_t row_idx) {
+    if (row_idx >= count) {
+      return KStatus::FAIL;
+    }
+    *reinterpret_cast<char*>((intptr_t)mem + row_idx * data_length_) = 0;
+    return KStatus::SUCCESS;
+  }
+  KStatus setNotNull(uint32_t row_idx) {
+    if (row_idx >= count) {
+      return KStatus::FAIL;
+    }
+    *reinterpret_cast<char*>((intptr_t)mem + row_idx * data_length_) = 1;
+    return KStatus::SUCCESS;
+  }
+
+  char* getRowAddr(uint32_t row_idx) {
+    return reinterpret_cast<char*>((intptr_t)mem + row_idx * data_length_ + k_per_null_bitmap_size);
   }
 };
+
+struct VarTagBatch : public Batch {
+  char* var_data_;
+  char* var_end_;
+  char* next_record_ptr_;
+  uint32_t total_size_{0};
+  std::vector<void*> var_data_ptrs_;
+  std::vector<void*> m_blocks_;
+  VarTagBatch(uint32_t total_sz, char* var_data, uint32_t cnt) : Batch(nullptr, cnt, nullptr),
+              var_data_(var_data), total_size_(total_sz) {
+    var_end_ = var_data_ + total_sz;
+    next_record_ptr_ = var_data_;
+    var_data_ptrs_.resize(count);
+    m_blocks_.push_back(var_data_);
+  }
+  virtual ~VarTagBatch() {
+    if (mem) {
+      free(mem);
+      mem = nullptr;
+    }
+    if (bitmap) {
+      free(bitmap);
+      bitmap = nullptr;
+    }
+    for (auto& it : m_blocks_) {
+      if (it) {
+        free(it);
+      }
+      it = nullptr;
+    }
+    m_blocks_.clear();
+  }
+  int writeDataIncludeLen(uint32_t row_idx, void* data, uint16_t var_len) {
+    if (next_record_ptr_ + var_len > var_end_) {
+      size_t total_realloc_size = std::max(2 * total_size_, (uint32_t)var_len);
+      var_data_ = reinterpret_cast<char*>(std::malloc(total_realloc_size));
+      if (nullptr == var_data_) {
+        LOG_ERROR("VarTagBatch out of memory. total size: %u extend size: %lu", total_size_, total_realloc_size);
+        return -1;
+      }
+      next_record_ptr_ = var_data_;
+      var_end_ = var_data_ + total_realloc_size;
+      total_size_ = total_realloc_size;
+      m_blocks_.push_back(var_data_);
+    }
+    memcpy(next_record_ptr_, data, var_len);
+    var_data_ptrs_[row_idx] = next_record_ptr_;
+    next_record_ptr_ += var_len;
+    return 0;
+  }
+
+  int writeDataExcludeLen(uint32_t row_idx, void* data, uint16_t var_len) {
+    if (next_record_ptr_ + var_len + MMapStringColumn::kStringLenLen + MMapStringColumn::kEndCharacterLen > var_end_) {
+      size_t total_realloc_size = std::max(2 * total_size_, (uint32_t)var_len +
+                                                            MMapStringColumn::kStringLenLen +
+                                                            MMapStringColumn::kEndCharacterLen);
+      var_data_ = reinterpret_cast<char*>(std::malloc(total_realloc_size));
+      if (nullptr == var_data_) {
+        LOG_ERROR("VarTagBatch out of memory. total size: %u extend size: %lu", total_size_, total_realloc_size);
+        return -1;
+      }
+      next_record_ptr_ = var_data_;
+      var_end_ = var_data_ + total_realloc_size;
+      total_size_ = total_realloc_size;
+      m_blocks_.push_back(var_data_);
+    }
+    var_data_ptrs_[row_idx] = next_record_ptr_;
+
+    *reinterpret_cast<uint16_t*>(next_record_ptr_) = var_len + MMapStringColumn::kEndCharacterLen;
+    next_record_ptr_ += MMapStringColumn::kStringLenLen;
+
+    memcpy(next_record_ptr_, data, var_len);
+    next_record_ptr_ += var_len;
+
+    *next_record_ptr_ = 0x00;
+    next_record_ptr_ += MMapStringColumn::kEndCharacterLen;
+    return 0;
+  }
+
+  void* getVarColData(k_uint32 row_idx) const override {
+    if (var_data_ptrs_[row_idx] == nullptr) {
+      return nullptr;
+    }
+    return reinterpret_cast<void*>((intptr_t)var_data_ptrs_[row_idx] +
+                                   sizeof(uint16_t));
+  }
+
+  uint16_t getVarColDataLen(k_uint32 row_idx) const override {
+    if (var_data_ptrs_[row_idx] == nullptr) {
+      return 0;
+    }
+    return *reinterpret_cast<uint16_t*>((intptr_t)var_data_ptrs_[row_idx]);
+  }
+
+  KStatus isNull(k_uint32 row_idx, bool* is_null) const {
+    if (row_idx >= count) {
+      *is_null = true;
+      return KStatus::FAIL;
+    }
+    *is_null = var_data_ptrs_[row_idx] == nullptr;
+    return KStatus::SUCCESS;
+  }
+
+  KStatus setNull(uint32_t row_idx) {
+    if (row_idx >= count) {
+      return KStatus::FAIL;
+    }
+    var_data_ptrs_[row_idx] = nullptr;
+    return KStatus::SUCCESS;
+  }
+};
+
+const uint32_t k_default_block_size = 4 * 1024;  // 4K
 
 struct AggBatch : public Batch {
   AggBatch(void* m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t) : Batch(m, c, t) {}
@@ -267,6 +383,7 @@ struct EntityResultIndex {
   uint32_t subGroupId{0};
   uint32_t hash_point{0};
   uint32_t index{0};
+  uint32_t ts_version{0};
   void* mem{nullptr};  // primaryTags address
 
   bool equalsWithoutMem(const EntityResultIndex& entity_index) {

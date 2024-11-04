@@ -24,8 +24,13 @@
 #include "lt_rw_latch.h"
 
 typedef  uint32_t  HashIndexRowID;
-typedef  uint32_t  TagTableRowID;
+typedef  uint32_t  TagPartitionTableRowID;
 typedef  uint64_t  HashCode;
+typedef  uint32_t  TableVersionID;
+
+#define INVALID_TABLE_VERSION_ID 0
+
+using TagTableRowID = TagPartitionTableRowID;
 
 using TagHashIndexMutex = KLatch;
 
@@ -36,7 +41,8 @@ using TagHashBucketRWLock = KRWLatch;
 // data of index file
 struct HashIndexData {
   HashCode         hash_val;
-  TagTableRowID    bt_row;
+  TableVersionID   tb_version;
+  TagPartitionTableRowID    bt_row;
   HashIndexRowID   next_row;
 };
 
@@ -45,7 +51,6 @@ class  HashBucket {
  private:
   HashIndexRowID* m_mem_bucket_;
   TagHashBucketRWLock* m_bucket_rwlock_;
-  // pthread_rwlock_t  rwlock_;
   size_t m_bucket_count_;
 
  public:
@@ -90,17 +95,14 @@ typedef uint64_t (*HashFunc) (const char *data, int len);
 
 class MMapHashIndex: public MMapFile {
   const off_t kHashMetaDataSize = 1024;
+  const size_t k_Hash_Default_Row_Count = 1024;
 
  protected:
 
   TagHashIndexMutex*  m_rehash_mutex_;
-
   TagHashIndexRWLock* m_file_rwlock_;
-  // pthread_mutex_t rehash_mutex_;  // rehash
-  // RWLock   m_file_rwlock_;
   HashIndexData *mem_hash_;
   HashFunc hash_func_;
-  // MMapTagColumnTable*  m_bt_;
 
   std::vector<HashBucket* > buckets_;
   int    type_;
@@ -108,6 +110,7 @@ class MMapHashIndex: public MMapFile {
   size_t m_element_count_;
   size_t m_bucket_count_;
   int    m_key_len_;
+  size_t m_record_size_{0};
 
   void* addr(off_t offset) const
   { return reinterpret_cast<void*>((intptr_t) mem_ + offset); }
@@ -123,9 +126,9 @@ class MMapHashIndex: public MMapFile {
   }
   std::pair<bool, size_t> is_need_rehash();
 
-  void rehash(size_t new_size);
+  int rehash(size_t new_size);
 
-  int read_first(const char* key, int len);
+  std::pair<TableVersionID, TagPartitionTableRowID> read_first(const char* key, int len);
 
   void mutexLock() { MUTEX_LOCK(m_rehash_mutex_); }
 
@@ -156,13 +159,13 @@ class MMapHashIndex: public MMapFile {
   }
 
  public:
-  explicit MMapHashIndex(size_t bkt_instances = 1, size_t per_bkt_count = 8);
+  explicit MMapHashIndex(int key_len, size_t bkt_instances = 1, size_t per_bkt_count = 1024);
   virtual ~MMapHashIndex();
 
   IndexMetaData& metaData() const
   { return *(reinterpret_cast<IndexMetaData *>(mem_)); }
 
-  virtual int open(const string &path, const std::string &db_path, const string &tbl_sub_path, int flag,
+  int open(const string &path, const std::string &db_path, const string &tbl_sub_path, int flag,
                    ErrorInfo &err_info);
 
   inline uint8_t type() const  { return type_; }
@@ -173,14 +176,9 @@ class MMapHashIndex: public MMapFile {
 
   int keySize() const { return m_key_len_; }
 
-  int put(const char *s, int len, TagTableRowID tag_table_rowid);
+  int put(const char *s, int len, TableVersionID table_version, TagPartitionTableRowID tag_table_rowid);
 
-  int delete_data(const char *key, int len);
-
-  void init(int key_len) {
-    m_key_len_ = key_len;
-    metaData().m_record_size = m_key_len_ + sizeof(HashIndexData);
-  }
+  std::pair<TableVersionID, TagPartitionTableRowID>  delete_data(const char *key, int len);
 
   /**
    * @brief	find the value stored in hash table for a given key.
@@ -189,7 +187,7 @@ class MMapHashIndex: public MMapFile {
    * @param 	len			length of the key.
    * @return	the stored value in the hash table if key is found; 0 otherwise.
    */
-  uint32_t get(const char *s, int len);
+  std::pair<TableVersionID, TagPartitionTableRowID> get(const char *s, int len);
 
   int remove();
 

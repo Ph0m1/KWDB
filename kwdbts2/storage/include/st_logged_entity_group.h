@@ -32,7 +32,7 @@ class LoggedTsEntityGroup : public TsEntityGroup {
 
   ~LoggedTsEntityGroup() override;
 
-  KStatus Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema) override;
+  KStatus Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema, uint32_t ts_version = 1) override;
 
   KStatus OpenInit(kwdbContext_p ctx) override;
 

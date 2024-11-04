@@ -1075,7 +1075,7 @@ service Admin {
   // CreateTSTable create ts table
   rpc CreateTSTable(CreateTSTableRequest) returns (CreateTSTableResponse) {}
 
+
   // GetTsTableVersion get the table version from storage on other node.
-  rpc GetTsTableVersion(GetTsTableVersionRequest) returns (GetTsTableVersionResponse) {
-  }
+  rpc GetTsTableVersion(GetTsTableVersionRequest) returns (GetTsTableVersionResponse) {}
 }

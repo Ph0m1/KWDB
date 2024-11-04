@@ -19,7 +19,7 @@
 #include "ts_object_error.h"
 #include "lib/t1ha.h"
 
-extern void toHexString(const char *rec_ptr, uint32_t len, std::string& ret_str);
+// extern void toHexString(const char *rec_ptr, uint32_t len, std::string& ret_str);
 
 HashBucket::HashBucket(size_t  bucket_count) {
   // pthread_rwlock_init(&rwlock_, NULL);
@@ -48,12 +48,15 @@ void HashBucket::resize(size_t new_bucket_count) {
   m_mem_bucket_ = tmp_bucket;
 }
 
-MMapHashIndex::MMapHashIndex(size_t bkt_instances, size_t per_bkt_count) {
+MMapHashIndex::MMapHashIndex(int key_len, size_t bkt_instances, size_t per_bkt_count) : m_key_len_(key_len) {
+  m_record_size_ = m_key_len_ + sizeof(HashIndexData);
   mem_hash_ = nullptr;
   hash_func_ = t1ha1_le;
   // Ensure correct values
   n_bkt_instances_ = bkt_instances < 1 ? 1:bkt_instances;
-  m_bucket_count_ = n_bkt_instances_ * (per_bkt_count< 8 ? 8: per_bkt_count);
+  // m_bucket_count_ = n_bkt_instances_ * (per_bkt_count< 8 ? 8: per_bkt_count);
+  m_bucket_count_ = k_Hash_Default_Row_Count;
+  per_bkt_count = m_bucket_count_ / n_bkt_instances_;
   m_element_count_ = 0;
 
   for (size_t i = 0; i < n_bkt_instances_; ++i) {
@@ -136,8 +139,12 @@ void MMapHashIndex::resizeBucket(size_t  new_bucket_count) {
 
 int MMapHashIndex::open(const std::string &path, const std::string &db_path, const std::string &tbl_sub_path,
                         int flags, ErrorInfo &err_info) {
-  std::thread* thds[8];
-  err_info.errcode = MMapFile::open(path, db_path + tbl_sub_path + path, flags);
+  if (flags & O_CREAT) {
+    size_t new_file_size = (k_Hash_Default_Row_Count + 1) * m_record_size_ + kHashMetaDataSize;
+    err_info.errcode = MMapFile::open(path, db_path + tbl_sub_path + path, flags, new_file_size, err_info);
+  } else {
+    err_info.errcode = MMapFile::open(path, db_path + tbl_sub_path + path, flags);
+  }
   if (err_info.errcode < 0)
       return err_info.errcode;
   if (file_length_ < kHashMetaDataSize)
@@ -153,30 +160,44 @@ int MMapHashIndex::open(const std::string &path, const std::string &db_path, con
       }
   }
   metaData().m_bucket_count = m_bucket_count_;
+  metaData().m_record_size = m_record_size_;
   return err_info.errcode;
 }
 
 std::pair<bool, size_t> MMapHashIndex::is_need_rehash() {
-  if (m_element_count_ > m_bucket_count_) {
-    return std::make_pair(true, m_bucket_count_*2);
+  if (metaData().m_row_count + 2 > metaData().m_bucket_count) {
+    return std::make_pair(true, metaData().m_bucket_count * 2);
   }
   return std::make_pair(false, 0);
 }
 
-void MMapHashIndex::rehash(size_t new_size) {
+int MMapHashIndex::rehash(size_t new_size) {
   size_t new_bucket_count = new_size;
   if (new_bucket_count <= m_bucket_count_) {
     // do nothing
-    return;
+    return 0;
   }
   LOG_INFO("Hash Index %s rehash, new_size: %lu", filePath().c_str(), new_size);
   auto start = std::chrono::high_resolution_clock::now();
   bucketsWlock();
+  dataWlock();
+  // extend size
+  size_t new_file_size = (new_bucket_count + 1) * metaData().m_record_size + kHashMetaDataSize;
+  if (file_length_ < new_file_size) {
+    int err_code = mremap(new_file_size);
+    if (err_code < 0) {
+      dataUnlock();
+      bucketsUnlock();
+      return err_code;
+    }
+    mem_hash_ = addrHash();
+    metaData().m_file_size = new_file_size;
+  }
+  // resize buckets
   for (size_t idx = 0; idx < n_bkt_instances_; ++idx) {
     buckets_[idx]->resize(new_bucket_count / n_bkt_instances_);
   }
-  dataWlock();
-  // HashIndexData* rec = addrHash();
+  // rehash record
   int bkt_ins_idx = 0;
   int bkt_idx = 0;
   for (uint32_t rownum = 1; rownum <= metaData().m_row_count; ++rownum) {
@@ -185,13 +206,14 @@ void MMapHashIndex::rehash(size_t new_size) {
       row(rownum)->next_row = buckets_[bkt_ins_idx]->bucketValue(bkt_idx);
       buckets_[bkt_ins_idx]->bucketValue(bkt_idx) = rownum;
   }
-  dataUnlock();
-  bucketsUnlock();
   m_bucket_count_ = new_bucket_count;
   metaData().m_bucket_count = m_bucket_count_;
+  dataUnlock();
+  bucketsUnlock();
   auto end = std::chrono::high_resolution_clock::now();
   auto ins_dur = std::chrono::duration_cast<std::chrono::microseconds>(end - start)
           .count();
+  return 0;
 }
 
 int MMapHashIndex::size() const {
@@ -218,12 +240,13 @@ int MMapHashIndex::reserve(size_t n) {
 }
 
 
-int MMapHashIndex::put(const char *s, int len, TagTableRowID tag_table_rowid) {
+int MMapHashIndex::put(const char *s, int len, TableVersionID table_version, TagPartitionTableRowID tag_table_rowid) {
   HashCode hash_val = (*hash_func_)(s, len);
   mutexLock();
   std::pair<bool, size_t> do_rehash = is_need_rehash();
-  if (do_rehash.first) {
-    rehash(do_rehash.second);
+  if (do_rehash.first && rehash(do_rehash.second) < 0) {
+    LOG_ERROR("rehash failed.");
+    return -1;
   }
   // index remap need check here?
   size_t rownum = metaData().m_row_count + 1;  // change metaData
@@ -240,6 +263,7 @@ int MMapHashIndex::put(const char *s, int len, TagTableRowID tag_table_rowid) {
   // write to .ht file
   row(rownum)->hash_val = hash_val;
   row(rownum)->bt_row = tag_table_rowid;
+  row(rownum)->tb_version = table_version;
   memcpy(keyvalue(rownum), s, len);
 
   row(rownum)->next_row = buckets_[bkt_ins_idx]->bucketValue(bkt_idx);
@@ -255,7 +279,7 @@ void MMapHashIndex::getHashValue(const char *s, int len, size_t& hashcode) {
   hashcode = (*hash_func_)(s, len);
 }
 
-int MMapHashIndex::read_first(const char *key, int len) {
+std::pair<TableVersionID, TagPartitionTableRowID> MMapHashIndex::read_first(const char *key, int len) {
   HashCode hash_val = (*hash_func_)(key, len);
   size_t bkt_ins_idx = (hash_val >> 56) & (n_bkt_instances_ - 1);
   buckets_[bkt_ins_idx]->Rlock();
@@ -269,13 +293,13 @@ int MMapHashIndex::read_first(const char *key, int len) {
     if (this->compare(key, rownum)) {
       dataUnlock();
       buckets_[bkt_ins_idx]->Unlock();
-      return row(rownum)->bt_row;
+      return std::make_pair(row(rownum)->tb_version, row(rownum)->bt_row);
     }
     rownum = row(rownum)->next_row;
   }
   dataUnlock();
   buckets_[bkt_ins_idx]->Unlock();
-  return 0;
+  return std::make_pair(INVALID_TABLE_VERSION_ID, INVALID_TABLE_VERSION_ID);
 }
 
 int MMapHashIndex::remove() {
@@ -291,7 +315,7 @@ int MMapHashIndex::remove() {
   return MMapFile::remove();
 }
 
-int MMapHashIndex::delete_data(const char *key, int len) {
+std::pair<TableVersionID, TagPartitionTableRowID>  MMapHashIndex::delete_data(const char *key, int len) {
   size_t hash_val_ = (*hash_func_)(key, len);
   size_t bkt_ins_idx = (hash_val_ >> 56) & (n_bkt_instances_ - 1);
   buckets_[bkt_ins_idx]->Wlock();
@@ -302,12 +326,16 @@ int MMapHashIndex::delete_data(const char *key, int len) {
   // HashIndexData* rec = addrHash();
   size_t pre_rownum = 0;
   size_t tmp_rownum = 0;
+  TagPartitionTableRowID ret_row = INVALID_TABLE_VERSION_ID;
+  TableVersionID ret_tbl_version = INVALID_TABLE_VERSION_ID;
   size_t rownum = buckets_[bkt_ins_idx]->bucketValue(bkt_idx);
   if (rownum && (hash_val_ == row(rownum)->hash_val &&
                   this->compare(key, rownum))) {
     // matched bucketValue
     pre_rownum = rownum;
     buckets_[bkt_ins_idx]->bucketValue(bkt_idx) = row(rownum)->next_row;
+    ret_tbl_version = row(rownum)->tb_version;
+    ret_row = row(rownum)->bt_row;
     memset(row(rownum), 0x00, metaData().m_record_size);
     ++delete_count;
     goto end_success;
@@ -318,11 +346,11 @@ int MMapHashIndex::delete_data(const char *key, int len) {
     dataUnlock();
     buckets_[bkt_ins_idx]->Unlock();
     std::string key_str;
-    toHexString(key, len, key_str);
+    // toHexString(key, len, key_str);
     LOG_WARN("failed to delete key: %s, hash: %lu from hash index %s, "
         "not find the key",
         key_str.c_str(), hash_val_, filePath().c_str());
-    return 0;
+    return std::make_pair(INVALID_TABLE_VERSION_ID, INVALID_TABLE_VERSION_ID);
   }
   // found list node
   pre_rownum = rownum;
@@ -333,6 +361,8 @@ int MMapHashIndex::delete_data(const char *key, int len) {
         this->compare(key, rownum) ) {
       // match node
       row(pre_rownum)->next_row = row(rownum)->next_row;
+      ret_tbl_version = row(rownum)->tb_version;
+      ret_row = row(rownum)->bt_row;
       ++delete_count;
       memset(row(rownum), 0x00, metaData().m_record_size);
       break;
@@ -344,10 +374,10 @@ end_success:
   m_element_count_ -= delete_count;
   dataUnlock();
   buckets_[bkt_ins_idx]->Unlock();
-  return rownum;
+  return std::make_pair(ret_tbl_version, ret_row);
 }
 
-uint32_t MMapHashIndex::get(const char *s, int len) {
+std::pair<TableVersionID, TagPartitionTableRowID> MMapHashIndex::get(const char *s, int len) {
   return read_first(s, len);
 }
 

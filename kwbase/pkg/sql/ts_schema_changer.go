@@ -738,8 +738,8 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		log.Infof(ctx, "%s job start, name: %s, id: %d, column/tag name: %s, jobID: %d",
 			opType, d.SNTable.Name, d.SNTable.ID, d.AlterTag.Name, sw.job.ID())
 
-		needCheckReplica := d.Type == alterKwdbAddTag || d.Type == alterKwdbDropTag ||
-			d.Type == alterKwdbAlterTagType
+		//needCheckReplica := d.Type == alterKwdbAddTag || d.Type == alterKwdbDropTag ||
+		//	d.Type == alterKwdbAlterTagType
 
 		tableDesc, notFirst, err := sw.notFirstInLine(ctx)
 		if err != nil {
@@ -764,11 +764,11 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
 			return err
 		}
-		if needCheckReplica {
-			if err := sw.checkReplica(ctx, d.SNTable.ID); err != nil {
-				return err
-			}
-		}
+		//if needCheckReplica {
+		//	if err := sw.checkReplica(ctx, d.SNTable.ID); err != nil {
+		//		return err
+		//	}
+		//}
 		txnID := strconv.AppendInt([]byte{}, *sw.job.ID(), 10)
 		miniTxn := tsTxn{txnID: txnID, txnEvent: txnStart}
 		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList, tsTxn: miniTxn}
@@ -1105,7 +1105,7 @@ func (sw *TSSchemaChangeWorker) handleMutationForTSTable(
 				// the version.
 				return errDidntUpdateDescriptor
 			}
-			if d.AlterTag.IsTagCol() {
+			if d.AlterTag.IsTagCol() && tableDesc.State != sqlbase.TableDescriptor_PUBLIC {
 				tableDesc.State = sqlbase.TableDescriptor_PUBLIC
 			}
 			// Trim the executed mutations from the descriptor.
@@ -1153,7 +1153,7 @@ func (sw *TSSchemaChangeWorker) handleMutationForTSTable(
 				// the version.
 				return errDidntUpdateDescriptor
 			}
-			if d.AlterTag.IsTagCol() {
+			if d.AlterTag.IsTagCol() && tableDesc.State != sqlbase.TableDescriptor_PUBLIC {
 				tableDesc.State = sqlbase.TableDescriptor_PUBLIC
 			}
 			// Trim the executed mutations from the descriptor.

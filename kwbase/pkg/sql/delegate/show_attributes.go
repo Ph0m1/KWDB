@@ -90,7 +90,7 @@ func (d *delegator) delegateShowAttributes(n *tree.ShowTags) (tree.Statement, er
 // to select_stmt which returns the tags and values.
 func (d *delegator) delegateShowTagValues(n *tree.ShowTagValues) (tree.Statement, error) {
 	// resolve table name and get table metadata
-	flags := cat.Flags{AvoidDescriptorCaches: true, NoTableStats: true}
+	flags := cat.Flags{AvoidDescriptorCaches: false, NoTableStats: true}
 	tn := n.Table.ToTableName()
 	dataSource, resName, err := d.catalog.ResolveDataSource(d.ctx, flags, &tn)
 	if err != nil {

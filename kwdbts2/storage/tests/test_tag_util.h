@@ -114,8 +114,9 @@ class TagBtUtil {
     }
     ErrorInfo err_info(false);
     uint32_t hashpoint;
-    hashpoint = TsTable::GetConsistentHashId(rec, rec_size),
-    row_num = bt->insert(entity_id, group_id, hashpoint, rec);
+    hashpoint = TsTable::GetConsistentHashId(rec, rec_size);
+    size_t row_no = 0;
+    row_num = bt->insert(entity_id, group_id, hashpoint, rec, &row_no);
     if (row_num < 0) {  // $$ push_back is the function to write table in table
       fprintf(stderr, "Fail to insert TS table,error_code:%ld \n", row_num);
       err_info.errcode = row_num;

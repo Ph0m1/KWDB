@@ -50,13 +50,6 @@ var AllowAdvanceDistributeSetting = settings.RegisterBoolSetting(
 	false,
 )
 
-// AlterTagEnabled determines whether allow to alter tag in multi-replica mode.
-var AlterTagEnabled = settings.RegisterBoolSetting(
-	"sql.alter_tag.enabled",
-	"if enabled, alter tag is allowed in multi-replica mode",
-	true,
-)
-
 // TSRangeSplitModeName is the name of cluster setting server.ts_range_split_mod
 const TSRangeSplitModeName = "server.ts_range_split_mode"
 

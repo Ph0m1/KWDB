@@ -29,7 +29,7 @@ uint64_t StInstance::rangeGroup() {
 }
 
 KStatus StInstance::GetSchemaInfo(kwdbContext_p ctx, uint32_t table_id,
- std::vector<TagColumn*>* tag_schema, std::vector<AttributeInfo>* data_schema) {
+ std::vector<TagInfo>* tag_schema, std::vector<AttributeInfo>* data_schema) {
   std::shared_ptr<kwdbts::TsTable> tags_table;
   KStatus s = ts_engine_->GetTsTable(ctx, table_id, tags_table);
   if (s != KStatus::SUCCESS) {
@@ -483,14 +483,14 @@ TSSlice genValue4Col(DATATYPE type, int size, int store_value) {
   return TSSlice{addr, length};
 }
 
-void genPayloadData(std::vector<TagColumn*> tag_schema, std::vector<AttributeInfo> data_schema,
+void genPayloadData(std::vector<TagInfo> tag_schema, std::vector<AttributeInfo> data_schema,
  int32_t primary_tag, KTimestamp start_ts, int count, int time_inc, TSSlice *payload) {
   PayloadBuilder pay_build(tag_schema, data_schema);
-  TSSlice pri_val = genValue4Col((DATATYPE)tag_schema[0]->attributeInfo().m_data_type, tag_schema[0]->attributeInfo().m_size, primary_tag);
+  TSSlice pri_val = genValue4Col((DATATYPE)tag_schema[0].m_data_type, tag_schema[0].m_size, primary_tag);
   pay_build.SetTagValue(0, pri_val.data, pri_val.len);
   for (size_t i = 1; i < tag_schema.size(); i++) {
     int store_value = i + 10;
-    TSSlice val = genValue4Col((DATATYPE)tag_schema[i]->attributeInfo().m_data_type, tag_schema[i]->attributeInfo().m_size, store_value);
+    TSSlice val = genValue4Col((DATATYPE)tag_schema[i].m_data_type, tag_schema[i].m_size, store_value);
     if (val.data) {
       pay_build.SetTagValue(i, val.data, val.len);
       delete[] val.data;

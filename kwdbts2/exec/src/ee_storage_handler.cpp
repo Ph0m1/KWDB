@@ -333,7 +333,7 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
     }
     ret = ts_table_->GetEntityIdList(
         ctx, primary_tags, table_->scan_tags_, &tag_rowbatch_->entity_indexs_,
-        &tag_rowbatch_->res_, &tag_rowbatch_->count_);
+        &tag_rowbatch_->res_, &tag_rowbatch_->count_, table_->table_version_);
     if (ret != SUCCESS) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
                                   "scanning column data fail when getting ts entity list");

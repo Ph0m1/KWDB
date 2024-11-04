@@ -45,9 +45,6 @@ TsEntityGroup::~TsEntityGroup() {
     delete ebt_manager_;
     ebt_manager_ = nullptr;
   }
-  if (tag_bt_) {
-    delete tag_bt_;
-  }
   if (mutex_) {
     delete mutex_;
     mutex_ = nullptr;
@@ -56,23 +53,24 @@ TsEntityGroup::~TsEntityGroup() {
     delete drop_mutex_;
     drop_mutex_ = nullptr;
   }
+  delete new_tag_bt_;
+  new_tag_bt_ = nullptr;
 }
 
-KStatus TsEntityGroup::Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema) {
+KStatus TsEntityGroup::Create(kwdbContext_p ctx, vector<TagInfo>& tag_schema, uint32_t ts_version) {
   if (ebt_manager_ != nullptr) {
     LOG_ERROR("TsTableRange already OpenInit.")
     return KStatus::FAIL;
   }
   ErrorInfo err_info;
-  // TODO(jiadx): create individual Tag table under the range directory
   MUTEX_LOCK(mutex_);
-  tag_bt_ = CreateTagTable(tag_schema, db_path_, tbl_sub_path_, table_id_, range_.range_group_id, TAG_TABLE, err_info);
-  MUTEX_UNLOCK(mutex_);
-  if (tag_bt_ == nullptr) {
-    LOG_ERROR("TsTableRange create error : %s", err_info.errmsg.c_str());
+  Defer defer{[&]() { MUTEX_UNLOCK(mutex_); }};
+  new_tag_bt_ = CreateTagTable_v2(tag_schema, db_path_, tbl_sub_path_, table_id_, range_.range_group_id,
+                                  ts_version, err_info);
+  if (new_tag_bt_ == nullptr) {
+    LOG_ERROR("TsTableRange create tag table error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-
   ebt_manager_ = new SubEntityGroupManager(root_bt_manager_);
   ebt_manager_->OpenInit(db_path_, tbl_sub_path_, table_id_, err_info);
   return KStatus::SUCCESS;
@@ -88,9 +86,9 @@ KStatus TsEntityGroup::OpenInit(kwdbContext_p ctx) {
 
   ErrorInfo err_info;
   // Open Tag table under the range directory
-  tag_bt_ = OpenTagTable(db_path_, tbl_sub_path_, table_id_, err_info);
-  if (err_info.errcode < 0 || tag_bt_ == nullptr) {
-    LOG_ERROR("TsTableRange OpenInit error :%s", err_info.errmsg.c_str());
+  new_tag_bt_ = OpenTagTable_v2(db_path_, tbl_sub_path_, table_id_, range_.range_group_id, err_info);
+  if (err_info.errcode < 0 || new_tag_bt_ == nullptr) {
+    LOG_ERROR("TsTableRange OpenTagTable error :%s", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
 
@@ -111,9 +109,9 @@ KStatus TsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint64_t m
   // 1. query tag table
   TSSlice tmp_slice = pd.GetPrimaryTag();
   uint32_t entity_id, subgroup_id;
-  if (tag_bt_->getEntityIdGroupId(tmp_slice.data, tmp_slice.len, entity_id, subgroup_id) == 0) {
+  if (new_tag_bt_->hasPrimaryKey(tmp_slice.data, tmp_slice.len, entity_id, subgroup_id)) {
     // update
-    if (tag_bt_->UpdateTagRecord(pd, subgroup_id, entity_id, err_info) < 0) {
+    if (new_tag_bt_->UpdateTagRecord(pd, subgroup_id, entity_id, err_info) < 0) {
       LOG_ERROR("Update tag record failed. error: %s ", err_info.errmsg.c_str());
       releaseTagTable();
       return KStatus::FAIL;
@@ -206,23 +204,7 @@ KStatus TsEntityGroup::putTagData(kwdbContext_p ctx, int32_t groupid, int32_t en
   if (payload_data_flag == Payload::DATA_AND_TAG || payload_data_flag == Payload::TAG_ONLY) {
     // tag
     LOG_DEBUG("tag bt insert hashPoint=%d", payload.getHashPoint());
-    err_info.errcode = tag_bt_->insert(entity_id, groupid, payload.getHashPoint(), payload.GetTagAddr());
-  }
-  if (err_info.errcode < 0) {
-    return KStatus::FAIL;
-  }
-  return KStatus::SUCCESS;
-}
-
-KStatus TsEntityGroup::putTagDataHashed(kwdbContext_p ctx, int32_t groupid, int32_t entity_id,
-                                        uint32_t hashpoint, Payload& payload) {
-  KWDB_DURATION(StStatistics::Get().put_tag);
-  ErrorInfo err_info;
-  // 1.Write tag data
-  uint8_t payload_data_flag = payload.GetFlag();
-  if (payload_data_flag == Payload::DATA_AND_TAG || payload_data_flag == Payload::TAG_ONLY) {
-    // tag
-    err_info.errcode = tag_bt_->insert(entity_id, groupid, payload.getHashPoint(), payload.GetTagAddr());
+    err_info.errcode = new_tag_bt_->InsertTagRecord(payload, groupid, entity_id);
   }
   if (err_info.errcode < 0) {
     return KStatus::FAIL;
@@ -276,7 +258,7 @@ KStatus TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload
   // consistent hashID algorithm to allocate a new ID and write it to the tag table.
   TSSlice tmp_slice = payload.GetPrimaryTag();
   uint32_t entityid, groupid;
-  if (tag_bt_->getEntityIdGroupId(tmp_slice.data, tmp_slice.len, entityid, groupid) == 0) {
+  if (new_tag_bt_->hasPrimaryKey(tmp_slice.data, tmp_slice.len, entityid, groupid)) {
     *entity_id = entityid;
     *group_id = groupid;
     return KStatus::SUCCESS;
@@ -285,7 +267,7 @@ KStatus TsEntityGroup::allocateEntityGroupId(kwdbContext_p ctx, Payload& payload
     // Locking, concurrency control, and the putTagData operation must not be executed repeatedly
     MUTEX_LOCK(mutex_);
     Defer defer{[&]() { MUTEX_UNLOCK(mutex_); }};
-    if (tag_bt_->getEntityIdGroupId(tmp_slice.data, tmp_slice.len, entityid, groupid) == 0) {
+    if (new_tag_bt_->hasPrimaryKey(tmp_slice.data, tmp_slice.len, entityid, groupid)) {
       *entity_id = entityid;
       *group_id = groupid;
       return KStatus::SUCCESS;
@@ -448,18 +430,34 @@ KStatus TsEntityGroup::DeleteRangeData(kwdbContext_p ctx, const HashIdSpan& hash
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   // Based on the hash ID range, find all the rows of tag data that need to be deleted.
   vector<string> primary_tags;
-  tag_bt_->startRead();
-  for (size_t row = 1; row <= tag_bt_->size(); row++) {
-    if (!tag_bt_->isValidRow(row)) {
-      continue;
+  std::vector<TagPartitionTable*> all_tag_partition_tables;
+  auto tag_bt = GetSubEntityGroupNewTagbt();
+  TableVersion cur_tbl_version = tag_bt->GetTagTableVersionManager()->GetCurrentTableVersion();
+  tag_bt->GetTagPartitionTableManager()->GetAllPartitionTablesLessVersion(all_tag_partition_tables,
+                                                                            cur_tbl_version);
+  for (const auto& entity_tag_bt : all_tag_partition_tables) {
+    entity_tag_bt->startRead();
+    for (int rownum = 1; rownum <= entity_tag_bt->size(); rownum++) {
+      if (!entity_tag_bt->isValidRow(rownum)) {
+        continue;
+      }
+      if (!EngineOptions::isSingleNode()) {
+        uint32_t tag_hash;
+        entity_tag_bt->getHashpointByRowNum(rownum, &tag_hash);
+        string primary_tag(reinterpret_cast<char*>(entity_tag_bt->record(rownum)),
+                                                  entity_tag_bt->primaryTagSize());
+        if (hash_span.begin <= tag_hash && tag_hash <= hash_span.end) {
+          primary_tags.emplace_back(primary_tag);
+        }
+      } else {
+        string primary_tag(reinterpret_cast<char*>(entity_tag_bt->record(rownum)),
+                                                  entity_tag_bt->primaryTagSize());
+        primary_tags.emplace_back(primary_tag);
+      }
     }
-    string primary_tag(reinterpret_cast<char*>(tag_bt_->record(row)), tag_bt_->primaryTagSize());
-    uint64_t hash_id = TsTable::GetConsistentHashId(primary_tag.data(), primary_tag.size());
-    if (hash_id >= hash_span.begin && hash_id <= hash_span.end) {
-      primary_tags.emplace_back(primary_tag);
-    }
+    entity_tag_bt->stopRead();
   }
-  tag_bt_->stopRead();
+
   *count = 0;
   for (const auto& p_tags : primary_tags) {
     // Delete the data corresponding to the tag within the time range
@@ -488,9 +486,8 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
   uint32_t entity_id = 0;
   uint32_t subgroup_id = 0;
   // Get subgroup id and entity id based on the primary tag.
-  int ret = tag_bt_->getEntityIdGroupId(const_cast<char*>(primary_tag.c_str()),
-                                        primary_tag.size(), entity_id, subgroup_id);
-  if (ret < 0) {
+  if (false == new_tag_bt_->hasPrimaryKey(const_cast<char*>(primary_tag.c_str()),
+                                        primary_tag.size(), entity_id, subgroup_id)) {
     LOG_WARN("entity not exists, primary_tag: %s", primary_tag.c_str());
     return KStatus::SUCCESS;
   }
@@ -557,13 +554,12 @@ KStatus TsEntityGroup::DeleteEntity(kwdbContext_p ctx, const string& primary_tag
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   uint32_t sub_group_id, entity_id;
-  int ret = tag_bt_->getEntityIdGroupId(primary_tag.data(), primary_tag.size(), entity_id, sub_group_id);
-  if (ret < 0) {
+  if (!new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.size(), entity_id, sub_group_id)) {
     return KStatus::FAIL;
   }
   ErrorInfo err_info;
   // Delete tag and its index
-  tag_bt_->DeleteTagRecord(primary_tag.data(), primary_tag.size(), err_info);
+  new_tag_bt_->DeleteTagRecord(primary_tag.data(), primary_tag.size(), err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("delete_tag_record error, error msg: %s", err_info.errmsg.c_str())
     return KStatus::FAIL;
@@ -603,18 +599,33 @@ KStatus TsEntityGroup::DeleteRangeEntities(kwdbContext_p ctx, const HashIdSpan& 
   // 3. Invoke the `DeleteEntities` based on the primary tags to delete the entities.
   // 4. Remove the corresponding data and indexes from tag_bt.
   vector<string> primary_tags;
-  tag_bt_->startRead();
-  for (size_t row = 1; row <= tag_bt_->size(); row++) {
-    if (!tag_bt_->isValidRow(row)) {
-      continue;
+  std::vector<TagPartitionTable*> all_tag_partition_tables;
+  auto tag_bt = GetSubEntityGroupNewTagbt();
+  TableVersion cur_tbl_version = tag_bt->GetTagTableVersionManager()->GetCurrentTableVersion();
+  tag_bt->GetTagPartitionTableManager()->GetAllPartitionTablesLessVersion(all_tag_partition_tables,
+                                                                            cur_tbl_version);
+  for (const auto& entity_tag_bt : all_tag_partition_tables) {
+    entity_tag_bt->startRead();
+    for (int rownum = 1; rownum <= entity_tag_bt->size(); rownum++) {
+      if (!entity_tag_bt->isValidRow(rownum)) {
+        continue;
+      }
+      if (!EngineOptions::isSingleNode()) {
+        uint32_t tag_hash;
+        entity_tag_bt->getHashpointByRowNum(rownum, &tag_hash);
+        string primary_tag(reinterpret_cast<char*>(entity_tag_bt->record(rownum)),
+                                                  entity_tag_bt->primaryTagSize());
+        if (hash_span.begin <= tag_hash && tag_hash <= hash_span.end) {
+          primary_tags.emplace_back(primary_tag);
+        }
+      } else {
+        string primary_tag(reinterpret_cast<char*>(entity_tag_bt->record(rownum)),
+                                                  entity_tag_bt->primaryTagSize());
+        primary_tags.emplace_back(primary_tag);
+      }
     }
-    string primary_tag(reinterpret_cast<char*>(tag_bt_->record(row)), tag_bt_->primaryTagSize());
-    uint64_t hash_id = TsTable::GetConsistentHashId(primary_tag.data(), primary_tag.size());
-    if (hash_id >= hash_span.begin && hash_id <= hash_span.end) {
-      primary_tags.emplace_back(primary_tag);
-    }
+    entity_tag_bt->stopRead();
   }
-  tag_bt_->stopRead();
   if (DeleteEntities(ctx, primary_tags, count, mtr_id) == KStatus::FAIL) {
     LOG_ERROR("delete entities error")
     return KStatus::FAIL;
@@ -624,7 +635,8 @@ KStatus TsEntityGroup::DeleteRangeEntities(kwdbContext_p ctx, const HashIdSpan& 
 
 KStatus TsEntityGroup::GetEntityIdList(kwdbContext_p ctx, const std::vector<void*>& primary_tags,
                                        const std::vector<uint32_t>& scan_tags,
-                                       std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, uint32_t* count) {
+                                       std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, uint32_t* count,
+                                       uint32_t table_version) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   ErrorInfo err_info;
@@ -633,7 +645,7 @@ KStatus TsEntityGroup::GetEntityIdList(kwdbContext_p ctx, const std::vector<void
     LOG_ERROR("getTagTable error ");
     return KStatus::FAIL;
   }
-  if (tag_bt_->GetEntityIdList(primary_tags, scan_tags, entity_id_list, res, count) < 0) {
+  if (new_tag_bt_->GetEntityIdList(primary_tags, scan_tags, entity_id_list, res, count, table_version) < 0) {
     LOG_ERROR("GetEntityIdList error ");
     status = KStatus::FAIL;
   }
@@ -656,13 +668,13 @@ KStatus TsEntityGroup::Drop(kwdbContext_p ctx, bool is_force) {
     LOG_ERROR("getTagTable fail. error: %s ", err_info.errmsg.c_str());
     return KStatus::SUCCESS;
   }
-  DropTagTable(tag_bt_, err_info);
+  DropTagTable_v2(new_tag_bt_, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("dropTagTable : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  delete tag_bt_;
-  tag_bt_ = nullptr;
+  delete new_tag_bt_;
+  new_tag_bt_ = nullptr;
   // delete directory of entity_group
   string group_path = db_path_ + tbl_sub_path_;
   LOG_INFO("remove group %s", group_path.c_str());
@@ -772,26 +784,36 @@ KStatus TsEntityGroup::GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts
 }
 
 KStatus
-TsEntityGroup::GetTagIterator(kwdbContext_p ctx, std::vector<k_uint32>& scan_tags, EntityGroupTagIterator** iter) {
+TsEntityGroup::GetTagIterator(kwdbContext_p ctx,
+                              std::shared_ptr<TsEntityGroup> entity_group,
+                              std::vector<k_uint32>& scan_tags,
+                              uint32_t table_version,
+                              EntityGroupTagIterator** iter) {
   ErrorInfo err_info;
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     LOG_ERROR("getTagTable failed. error: %s ", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  EntityGroupTagIterator* entity_group_iter = new EntityGroupTagIterator(tag_bt_, scan_tags);
+  EntityGroupTagIterator* entity_group_iter = new EntityGroupTagIterator(entity_group, new_tag_bt_,
+                                                  table_version, scan_tags);
   *iter = entity_group_iter;
   return KStatus::SUCCESS;
 }
 
 KStatus
-TsEntityGroup::GetTagIterator(kwdbContext_p ctx, std::vector<k_uint32>& scan_tags, EntityGroupTagIterator** iter,
-                          const std::vector<uint32_t>& hps) {
+TsEntityGroup::GetTagIterator(kwdbContext_p ctx,
+                            std::shared_ptr<TsEntityGroup> entity_group,
+                            std::vector<k_uint32>& scan_tags,
+                            uint32_t table_version,
+                            EntityGroupTagIterator** iter,
+                            const std::vector<uint32_t>& hps) {
   ErrorInfo err_info;
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     LOG_ERROR("getTagTable failed. error: %s ", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  EntityGroupTagIterator* entitygroupIter = new EntityGroupTagIterator(tag_bt_, scan_tags, hps);
+  EntityGroupTagIterator* entitygroupIter = new EntityGroupTagIterator(entity_group, new_tag_bt_,
+                                                table_version, scan_tags, hps);
   *iter = entitygroupIter;
   return KStatus::SUCCESS;
 }
@@ -811,141 +833,43 @@ TsEntityGroup::GetMetaIterator(kwdbContext_p ctx, EntityGroupMetaIterator** iter
 }
 
 KStatus TsEntityGroup::TSxClean(kwdbContext_p ctx) {
-  CleanTagFiles(db_path_ + tbl_sub_path_, table_id_, -1);
+  ErrorInfo err_info;
+  if (getTagTable(err_info) != KStatus::SUCCESS) {
+    LOG_ERROR("getTagTable error %s ", err_info.errmsg.c_str());
+    return KStatus::FAIL;
+  }
+  new_tag_bt_->GetTagTableVersionManager()->SyncCurrentTableVersion();
   return KStatus::SUCCESS;
 }
 
-KStatus TsEntityGroup::AlterTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema,
-                                    ErrorInfo& err_info, uint32_t new_table_version) {
+KStatus TsEntityGroup::AlterTableTag(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
+                               uint32_t cur_version, uint32_t new_version, ErrorInfo& err_info) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  // 1.get bigtable
-  KStatus status = KStatus::SUCCESS;
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     LOG_ERROR("getTagTable error ");
     return KStatus::FAIL;
   }
-  // 2. construct old_tag_schema
-  TagInfo old_tag_schema;
-  bool is_found = false;
-  for (const auto it : tag_bt_->getSchemaInfo()) {
-    if (it->attributeInfo().m_id == new_tag_schema.m_id) {
-      old_tag_schema = it->attributeInfo();
-      is_found = true;
-      break;
-    }
-  }
-  if (!is_found) {
-    LOG_ERROR("tag id: %u was no found", new_tag_schema.m_id);
-    releaseTagTable();
+  if (new_tag_bt_->AlterTableTag(alter_type, attr_info, cur_version, new_version, err_info) < 0) {
+    LOG_ERROR("AlterTableTag failed. error: %s ", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  // 3. alter type
-  if (tag_bt_->AlterTagType(old_tag_schema, new_tag_schema, err_info) < 0) {
-    LOG_ERROR("AlterTagType failed. error: %s ", err_info.errmsg.c_str());
-    releaseTagTable();
-    return KStatus::FAIL;
-  }
-  releaseTagTable();
-  return status;
+  return KStatus::SUCCESS;
 }
 
-KStatus TsEntityGroup::AddTagInfo(kwdbContext_p ctx, TagInfo& new_tag_schema,
-                                  ErrorInfo& err_info, uint32_t new_table_version) {
+KStatus TsEntityGroup::UndoAlterTableTag(kwdbContext_p ctx, uint32_t cur_version,
+                                        uint32_t new_version, ErrorInfo& err_info) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  KStatus status = KStatus::SUCCESS;
-  if (getTagTable(err_info) != KStatus::SUCCESS) {
-    LOG_ERROR("getTagTable error ");
-    releaseTagTable();
-    return KStatus::FAIL;
-  }
-  if (tag_bt_->AddTagColumn(new_tag_schema, err_info) < 0) {
-    LOG_ERROR("AddTagColumn failed. error: %s ", err_info.errmsg.c_str());
-    releaseTagTable();
-    return KStatus::FAIL;
-  }
-  releaseTagTable();
-  return status;
-}
-
-KStatus TsEntityGroup::DropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, ErrorInfo& err_info, uint32_t new_table_version) {
-  RW_LATCH_S_LOCK(drop_mutex_);
-  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  KStatus status = KStatus::SUCCESS;
   if (getTagTable(err_info) != KStatus::SUCCESS) {
     LOG_ERROR("getTagTable error ");
     return KStatus::FAIL;
   }
-  if (tag_bt_->DropTagColumn(tag_schema, err_info) < 0) {
-    LOG_ERROR("DropTagColumn failed. error: %s ", err_info.errmsg.c_str());
-    releaseTagTable();
+  if (new_tag_bt_->undoAlterTagTable(cur_version, new_version, err_info) < 0) {
+    LOG_ERROR("AlterTableTag failed. error: %s ", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  releaseTagTable();
-  return status;
-}
-
-KStatus TsEntityGroup::UndoAddTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, uint32_t new_table_version) {
-  RW_LATCH_S_LOCK(drop_mutex_);
-  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  ErrorInfo err_info;
-  KStatus status = KStatus::SUCCESS;
-  if (getTagTable(err_info) != KStatus::SUCCESS) {
-    LOG_ERROR("getTagTable error ");
-    return KStatus::FAIL;
-  }
-  TagInfo old{};
-  if (tag_bt_->AlterTableForUndo(0, 0, old, tag_schema, 3) < 0) {
-    LOG_ERROR("AlterTableForUndo failed. error: %s ", err_info.errmsg.c_str());
-    return KStatus::FAIL;
-  }
-  tag_bt_->mutexLock();
-  tag_bt_->UpdateTagVersionForUndo(new_table_version);
-  tag_bt_->mutexUnlock();
-  releaseTagTable();
-  return status;
-}
-
-KStatus TsEntityGroup::UndoDropTagInfo(kwdbContext_p ctx, TagInfo& tag_schema, uint32_t new_table_version) {
-  RW_LATCH_S_LOCK(drop_mutex_);
-  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  ErrorInfo err_info;
-  KStatus status = KStatus::SUCCESS;
-  if (getTagTable(err_info) != KStatus::SUCCESS) {
-    LOG_ERROR("getTagTable error ");
-    return KStatus::FAIL;
-  }
-  TagInfo info{};
-  if (tag_bt_->AlterTableForUndo(0, 0, tag_schema, info, 4) < 0) {
-    LOG_ERROR("AlterTableForUndo failed. error: %s ", err_info.errmsg.c_str());
-    return KStatus::FAIL;
-  }
-  tag_bt_->mutexLock();
-  tag_bt_->UpdateTagVersionForUndo(new_table_version);
-  tag_bt_->mutexUnlock();
-  releaseTagTable();
-  return status;
-}
-
-KStatus TsEntityGroup::UndoAlterTagInfo(kwdbContext_p ctx, TagInfo& origin_tag_schema, uint32_t new_table_version) {
-  ErrorInfo err_info;
-  KStatus status = KStatus::SUCCESS;
-  if (getTagTable(err_info) != KStatus::SUCCESS) {
-    LOG_ERROR("getTagTable error ");
-    return KStatus::FAIL;
-  }
-  TagInfo info{};
-  info.m_id = origin_tag_schema.m_id;
-  if (tag_bt_->AlterTableForUndo(0, 0, origin_tag_schema, info, 2) < 0) {
-    LOG_ERROR("AlterTableForUndo failed. error: %s ", err_info.errmsg.c_str());
-    return KStatus::FAIL;
-  }
-  tag_bt_->mutexLock();
-  tag_bt_->UpdateTagVersionForUndo(new_table_version);
-  tag_bt_->mutexUnlock();
-  releaseTagTable();
-  return status;
+  return KStatus::SUCCESS;
 }
 
 KStatus
@@ -1340,7 +1264,7 @@ KStatus TsTable::GetDataSchemaExcludeDropped(kwdbContext_p ctx, std::vector<Attr
   return entity_bt_manager_->GetSchemaInfoExcludeDropped(data_schema);
 }
 
-KStatus TsTable::GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagColumn*>* tag_schema) {
+KStatus TsTable::GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagInfo>* tag_schema) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
@@ -1350,8 +1274,7 @@ KStatus TsTable::GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<T
   if (entity_groups_.find(range.range_group_id) == entity_groups_.end()) {
     return KStatus::FAIL;
   }
-  *tag_schema = entity_groups_[range.range_group_id]->GetSchema();
-  return KStatus::SUCCESS;
+  return entity_groups_[range.range_group_id]->GetCurrentTagSchemaExcludeDropped(tag_schema);
 }
 
 KStatus TsTable::GenerateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta,
@@ -1410,13 +1333,13 @@ KStatus TsTable::CreateEntityGroup(kwdbContext_p ctx, RangeGroup range, vector<T
   std::shared_ptr<TsEntityGroup> t_group;
   constructEntityGroup(ctx, range, range_tbl_sub_path, &t_group);
 
-  KStatus s = t_group->Create(ctx, tag_schema);
+  KStatus s = t_group->Create(ctx, tag_schema, entity_bt_manager_->GetCurrentTableVersion());
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("TsTableRange OpenInit error : %ld,%ld", table_id_, range.range_group_id);
     return KStatus::FAIL;
   }
   // init tag version
-  t_group->UpdateTagVersion(entity_bt_manager_->GetCurrentTableVersion());
+  // t_group->UpdateTagVersion(entity_bt_manager_->GetCurrentTableVersion());
   RW_LATCH_X_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   entity_groups_[range.range_group_id] = std::move(t_group);
@@ -1494,7 +1417,7 @@ KStatus TsTable::GetEntityGroupByPrimaryKey(kwdbContext_p ctx, const TSSlice& pr
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   // scan all tags in entitygroup to check if entity in existed entitygroup.
   for (auto& entity_grp : entity_groups_) {
-    if (entity_grp.second->GetSubEntityGroupTagbt()->hasPrimaryKey(primary_key.data, primary_key.len)) {
+    if (entity_grp.second->GetSubEntityGroupNewTagbt()->hasPrimaryKey(primary_key.data, primary_key.len)) {
       *entity_group = entity_grp.second;
       return KStatus::SUCCESS;
     }
@@ -1751,19 +1674,29 @@ KStatus TsTable::GetEntityIndex(kwdbContext_p ctx, uint64_t begin_hash, uint64_t
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto &p : entity_groups_) {
-    MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
-    entity_tag_bt->startRead();
-    for (int rownum = 1; rownum <= entity_tag_bt->size(); rownum++) {
-      if (!entity_tag_bt->isValidRow(rownum)) {
-        continue;
+    std::vector<TagPartitionTable*> all_tag_partition_tables;
+    auto tag_bt = p.second->GetSubEntityGroupNewTagbt();
+    TableVersion cur_tbl_version = tag_bt->GetTagTableVersionManager()->GetCurrentTableVersion();
+    tag_bt->GetTagPartitionTableManager()->GetAllPartitionTablesLessVersion(all_tag_partition_tables,
+                                                                            cur_tbl_version);
+    for (const auto& entity_tag_bt : all_tag_partition_tables) {
+      entity_tag_bt->startRead();
+      for (int rownum = 1; rownum <= entity_tag_bt->size(); rownum++) {
+        if (!entity_tag_bt->isValidRow(rownum)) {
+          continue;
+        }
+        if (!EngineOptions::isSingleNode()) {
+          uint32_t tag_hash;
+          entity_tag_bt->getHashpointByRowNum(rownum, &tag_hash);
+          if (begin_hash <= tag_hash && tag_hash <= end_hash) {
+            entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
+          }
+        } else {
+          entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
+        }
       }
-      uint32_t tag_hash = TsTable::GetConsistentHashId(
-                          reinterpret_cast<char*>(entity_tag_bt->record(rownum)), entity_tag_bt->primaryTagSize());
-      if (begin_hash <= tag_hash && tag_hash <= end_hash) {
-        entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
-      }
+      entity_tag_bt->stopRead();
     }
-    entity_tag_bt->stopRead();
   }
   return KStatus::SUCCESS;
 }
@@ -1773,7 +1706,7 @@ KStatus TsTable::GetEntityGrpByPriKey(kwdbContext_p ctx, const TSSlice& primary_
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto &p : entity_groups_) {
-    MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
+    auto* entity_tag_bt = p.second->GetSubEntityGroupNewTagbt();
     int entity_id;
     SubGroupID sub_grp_id;
     if (entity_tag_bt->hasPrimaryKey(primary_key.data, primary_key.len)) {
@@ -1791,21 +1724,35 @@ KStatus TsTable::GetEntityIndexWithRowNum(kwdbContext_p ctx, uint64_t begin_hash
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (auto &p : entity_groups_) {
-    MMapTagColumnTable* entity_tag_bt = p.second->GetSubEntityGroupTagbt();
-    entity_tag_bt->startRead();
-    for (int rownum = 1; rownum <= entity_tag_bt->actual_size(); rownum++) {
-      if (!entity_tag_bt->isValidRow(rownum)) {
-        continue;
+    std::vector<TagPartitionTable*> all_tag_partition_tables;
+    auto tag_bt = p.second->GetSubEntityGroupNewTagbt();
+    TableVersion cur_tbl_version = tag_bt->GetTagTableVersionManager()->GetCurrentTableVersion();
+    tag_bt->GetTagPartitionTableManager()->GetAllPartitionTablesLessVersion(all_tag_partition_tables,
+                                                                            cur_tbl_version);
+    for (const auto& entity_tag_bt : all_tag_partition_tables) {
+      entity_tag_bt->startRead();
+      for (int rownum = 1; rownum <= entity_tag_bt->actual_size(); rownum++) {
+        if (!entity_tag_bt->isValidRow(rownum)) {
+          continue;
+        }
+        if (!EngineOptions::isSingleNode()) {
+          std::vector<EntityResultIndex> entity_store;
+          uint32_t tag_hash;
+          entity_tag_bt->getHashpointByRowNum(rownum, &tag_hash);
+          if (begin_hash <= tag_hash && tag_hash <= end_hash) {
+            entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
+            entity_store[0].ts_version = entity_tag_bt->metaData().m_ts_version;
+            entity_tag.push_back(std::pair<int, EntityResultIndex>(rownum, entity_store[0]));
+          }
+        } else {
+          std::vector<EntityResultIndex> entity_store;
+          entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
+          entity_store[0].ts_version = entity_tag_bt->metaData().m_ts_version;
+          entity_tag.push_back(std::pair<int, EntityResultIndex>(rownum, entity_store[0]));
+        }
       }
-      std::vector<EntityResultIndex> entity_store;
-      uint32_t tag_hash = TsTable::GetConsistentHashId(
-                          reinterpret_cast<char*>(entity_tag_bt->record(rownum)), entity_tag_bt->primaryTagSize());
-      if (begin_hash <= tag_hash && tag_hash <= end_hash) {
-        entity_tag_bt->getEntityIdByRownum(rownum, &entity_store);
-        entity_tag.push_back(std::pair<int, EntityResultIndex>(rownum, entity_store[0]));
-      }
-    }
     entity_tag_bt->stopRead();
+    }
   }
   return KStatus::SUCCESS;
 }
@@ -2424,7 +2371,8 @@ KStatus TsTable::DeleteExpiredData(kwdbContext_p ctx, int64_t end_ts) {
 
 KStatus TsTable::GetEntityIdList(kwdbContext_p ctx, const std::vector<void*>& primary_tags,
                                  const std::vector<uint32_t>& scan_tags,
-                                 std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, uint32_t* count) {
+                                 std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, uint32_t* count,
+                                 uint32_t table_version) {
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (const auto tbl_range : entity_groups_) {
@@ -2440,7 +2388,7 @@ KStatus TsTable::GetEntityIdList(kwdbContext_p ctx, const std::vector<void*>& pr
     //   // not leader
     //   continue;
     // }
-    tbl_range.second->GetEntityIdList(ctx, primary_tags, scan_tags, entity_id_list, res, count);
+    tbl_range.second->GetEntityIdList(ctx, primary_tags, scan_tags, entity_id_list, res, count, table_version);
   }
   return KStatus::SUCCESS;
 }
@@ -2454,22 +2402,10 @@ KStatus TsTable::GetTagIterator(kwdbContext_p ctx, std::vector<uint32_t> scan_ta
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (const auto tbl_range : entity_groups_) {
-    // if (tbl_range.second->hashRange().typ == EntityGroupType::UNINITIALIZED) {
-    //   string err_msg = "table[" + std::to_string(table_id_) +
-    //                     "] range group[" + std::to_string(tbl_range.first) +
-    //                     "] is uninitialized";
-    //   EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_STATUS, err_msg.c_str());
-    //   LOG_ERROR("%s", err_msg.c_str());
-    //   return KStatus::FAIL;
-    // }
-    // if (tbl_range.second->hashRange().typ != EntityGroupType::LEADER) {
-    //   // not leader
-    //   continue;
-    // }
     if (!EngineOptions::isSingleNode()) {
-      tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter, hps);
+      tbl_range.second->GetTagIterator(ctx, tbl_range.second, scan_tags, table_version, &eg_tag_iter, hps);
     } else {
-      tbl_range.second->GetTagIterator(ctx, scan_tags, &eg_tag_iter);
+      tbl_range.second->GetTagIterator(ctx, tbl_range.second, scan_tags, table_version, &eg_tag_iter);
     }
 
     if (!eg_tag_iter) {
@@ -2538,10 +2474,22 @@ KStatus TsTable::TSxClean(kwdbContext_p ctx) {
   return SUCCESS;
 }
 
-void TsTable::UpdateTagTsVersion(uint32_t new_version) {
+KStatus TsTable::SyncTagTsVersion(uint32_t cur_version, uint32_t new_version) {
   for (auto& entity_group : entity_groups_) {
-    entity_group.second->UpdateTagVersion(new_version);
+    if (entity_group.second->SyncTagVersion(cur_version, new_version) < 0) {
+      return FAIL;
+    }
   }
+  return SUCCESS;
+}
+
+KStatus TsTable::AddTagSchemaVersion(const std::vector<TagInfo>& schema, uint32_t new_version) {
+  for (auto& entity_group : entity_groups_) {
+    if (entity_group.second->AddTagSchemaVersion(schema, new_version) < 0) {
+      return FAIL;
+    }
+  }
+  return SUCCESS;
 }
 
 KStatus TsTable::AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KWDBKTSColumn* column,
@@ -2552,6 +2500,7 @@ KStatus TsTable::AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KW
     msg = "Unknown column/tag type";
     return s;
   }
+  LOG_INFO("AlterTable begin. table_id: %lu alter_type: %d ", table_id_, alter_type);
   if (alter_type == AlterType::ALTER_COLUMN_TYPE) {
     getDataTypeSize(attr_info);  // update max_len
   }
@@ -2560,7 +2509,7 @@ KStatus TsTable::AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KW
   } else if (attr_info.isAttrType(COL_TS_DATA)) {
     s = AlterTableCol(ctx, alter_type, attr_info, cur_version, new_version, msg);
   }
-
+  LOG_INFO("AlterTable end. table_id: %lu alter_type: %d ", table_id_, alter_type);
   return s;
 }
 
@@ -2574,34 +2523,12 @@ KStatus TsTable::AlterTableTag(kwdbContext_p ctx, AlterType alter_type, const At
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (const auto& entity_group : entity_groups_) {
-    switch (alter_type) {
-      case ADD_COLUMN:
-        s = entity_group.second->AddTagInfo(ctx, tag_schema, err_info, new_version);
-        if (s != KStatus::SUCCESS) {
-          LOG_ERROR("add tag failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
-          msg = err_info.errmsg;
-          return s;
-        }
-        break;
-      case DROP_COLUMN:
-        s = entity_group.second->DropTagInfo(ctx, tag_schema, err_info, new_version);
-        if (s != KStatus::SUCCESS) {
-          LOG_ERROR("drop tag failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
-          msg = err_info.errmsg;
-          return s;
-        }
-        break;
-      case ALTER_COLUMN_TYPE:
-        s = entity_group.second->AlterTagInfo(ctx, tag_schema, err_info, new_version);
-        if (s != KStatus::SUCCESS) {
-          LOG_ERROR("alter tag type failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
-          msg = err_info.errmsg;
-          return s;
-        }
-        break;
-      default:
-        return KStatus::FAIL;
-    }
+     s = entity_group.second->AlterTableTag(ctx, alter_type, attr_info, cur_version, new_version, err_info);
+     if (s != KStatus::SUCCESS) {
+        LOG_ERROR("alter tag failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
+        msg = err_info.errmsg;
+        return s;
+     }
   }
   s = entity_bt_manager_->UpdateVersion(cur_version, new_version);
   if (s != KStatus::SUCCESS) {
@@ -2659,8 +2586,9 @@ KStatus TsTable::AlterTableCol(kwdbContext_p ctx, AlterType alter_type, const At
     LOG_ERROR("add new version schema failed for alter table: table id = %lu, new_version = %u",  table_id_, new_version);
     return s;
   }
-  UpdateTagTsVersion(new_version);
-  return SUCCESS;
+  s = SyncTagTsVersion(cur_version, new_version);
+
+  return s;
 }
 
 KStatus TsTable::AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* meta, MMapMetricsTable ** version_schema) {
@@ -2709,9 +2637,8 @@ KStatus TsTable::AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* met
     return s;
   }
   *version_schema = entity_bt_manager_->GetRootTable(upper_version, true);
-  // todo(liangbo01)  tag version change, also need upper tag schema.
-  UpdateTagTsVersion(upper_version);
-  return SUCCESS;
+  s = AddTagSchemaVersion(tag_schema, upper_version);
+  return s;
 }
 
 KStatus TsTable::UndoAlterTable(kwdbContext_p ctx, LogEntry* log) {
@@ -2772,31 +2699,17 @@ KStatus TsTable::undoAlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb
 KStatus TsTable::undoAlterTableTag(kwdbContext_p ctx, AlterType alter_type, const AttributeInfo& attr_info,
                                    uint32_t cur_version, uint32_t new_version) {
   KStatus s;
-  TagInfo tag_schema = {attr_info.id, attr_info.type,
-                        static_cast<uint32_t>(attr_info.length), 0,
-                        static_cast<uint32_t>(attr_info.size), GENERAL_TAG};
+  ErrorInfo err_info;
   RW_LATCH_S_LOCK(entity_groups_mtx_);
   Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
   for (const auto& entity_group : entity_groups_) {
     switch (alter_type) {
       case AlterType::ADD_COLUMN:
-        s = entity_group.second->UndoAddTagInfo(ctx, tag_schema, new_version);
+      case AlterType::DROP_COLUMN:
+      case AlterType::ALTER_COLUMN_TYPE:
+        s = entity_group.second->UndoAlterTableTag(ctx, cur_version, new_version, err_info);
         if (s != KStatus::SUCCESS) {
           LOG_ERROR("undo add tag failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
-          return s;
-        }
-        break;
-      case AlterType::DROP_COLUMN:
-        s = entity_group.second->UndoDropTagInfo(ctx, tag_schema, new_version);
-        if (s != KStatus::SUCCESS) {
-          LOG_ERROR("undo drop tag failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
-          return s;
-        }
-        break;
-      case AlterType::ALTER_COLUMN_TYPE:
-        s = entity_group.second->UndoAlterTagInfo(ctx, tag_schema, new_version);
-        if (s != KStatus::SUCCESS) {
-          LOG_ERROR("undo alter tag type failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
           return s;
         }
         break;
@@ -2808,6 +2721,7 @@ KStatus TsTable::undoAlterTableTag(kwdbContext_p ctx, AlterType alter_type, cons
     LOG_ERROR("undo alter tag failed: rollback metric table[%lu] version failed, new version[%d]", table_id_, new_version);
     return KStatus::FAIL;
   }
+  LOG_INFO("undoAlterTableTag end, table id= %lu cur_version: %u new_version: %u ", table_id_, cur_version, new_version);
   return KStatus::SUCCESS;
 }
 
@@ -2816,7 +2730,16 @@ KStatus TsTable::undoAlterTableCol(kwdbContext_p ctx, uint32_t cur_version, uint
   if (s != KStatus::SUCCESS) {
     return s;
   }
-  UpdateTagTsVersion(cur_version);
+  ErrorInfo err_info;
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  for (const auto& entity_group : entity_groups_) {
+    s = entity_group.second->UndoAlterTableTag(ctx, cur_version, new_version, err_info);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("undo add tag failed, table id= %lu, range_group_id = %lu", table_id_, entity_group.first);
+      return s;
+    }
+  }
   return KStatus::SUCCESS;
 }
 
@@ -2975,36 +2898,18 @@ uint32_t TsTable::GetCurrentTableVersion() {
 }
 
 KStatus TsEntityGroup::getTagTable(ErrorInfo& err_info) {
-  if (tag_bt_ == nullptr) {
-    tag_bt_ = OpenTagTable(db_path_, tbl_sub_path_, table_id_, err_info);
+  if (new_tag_bt_ == nullptr) {
+    new_tag_bt_ = OpenTagTable_v2(db_path_, tbl_sub_path_, table_id_, range_.range_group_id, err_info);
   }
-  if (tag_bt_ == nullptr) {
+  if (new_tag_bt_ == nullptr) {
     LOG_ERROR("open tag table error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
   }
-  tag_bt_->mutexLock();
-  bool is_valid = tag_bt_->isValid();
-  tag_bt_->mutexUnlock();
-  if (!is_valid) {
-    // avoid droping tag table
-    err_info.errcode = -2;
-    err_info.errmsg = "tag table status is invalid";
-    LOG_ERROR("tag table status is invalid");
-    return KStatus::FAIL;
-  }
-  tag_bt_->incRefCount();
   return KStatus::SUCCESS;
 }
 
 void TsEntityGroup::releaseTagTable() {
-  if (tag_bt_ == nullptr) {
-    LOG_WARN("release tag table object is nullptr.");
-    return;
-  }
-  int ref_cnt = tag_bt_->decRefCount();
-  if (ref_cnt <= 1) {
-    KW_COND_SIGNAL(tag_bt_->m_ref_cnt_cv_);
-  }
+  return;
 }
 
 bool TsEntityGroup::payloadNextSlice(TsSubEntityGroup* sub_group, Payload& payload, timestamp64 last_p_time, int start_row,

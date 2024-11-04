@@ -72,13 +72,15 @@ bool TagRowBatch::IsNull(k_uint32 tagIndex,
   if (res_.data[tagIndex].empty()) {
     return true;
   }
-  char* bitmap =
-      static_cast<char*>(res_.data[tagIndex][current_batch_no_]->mem) +
-      current_batch_line_ * (tag_offsets_[table_->scan_tags_[tagIndex]]);
-  if (bitmap[0] != 1) {
-    return true;
-  }
-  return false;
+  // char* bitmap =
+  //    static_cast<char*>(res_.data[tagIndex][current_batch_no_]->mem) +
+  //    current_batch_line_ * (tag_offsets_[table_->scan_tags_[tagIndex] + tag_col_offset_]);
+  // if (bitmap[0] != 1) {
+  //  return true;
+  // }
+  bool is_null = false;
+  res_.data[tagIndex][current_batch_no_]->isNull(current_batch_line_, &is_null);
+  return is_null;
 }
 
 k_int32 TagRowBatch::NextLine() {
@@ -166,11 +168,12 @@ KStatus TagRowBatch::GetCurrentTagData(TagData *tagData, void **bitmap) {
     if (type == roachpb::KWDBKTSColumn::TYPE_PTAG) {
       rawData.is_null = false;
     } else {
-      char *bitmap = static_cast<char *>(it[current_batch_no_]->mem) +
-                     current_batch_line_ * tag_offsets_[tag_index];
-
-      if (bitmap[0] != 1) {
+      if (it.empty()) {
         rawData.is_null = true;
+      } else {
+        bool tmp_is_null = false;
+        it[current_batch_no_]->isNull(current_batch_line_, &tmp_is_null);
+        rawData.is_null = tmp_is_null;
       }
     }
 
@@ -253,11 +256,18 @@ KStatus TagRowBatch::GetTagData(TagData *tagData, void **bitmap,
     if (type == roachpb::KWDBKTSColumn::TYPE_PTAG) {
       rawData.is_null = false;
     } else {
-      char *bitmap = static_cast<char *>(it[batch_no]->mem) +
-                     batch_line * tag_offsets_[tag_index];
-
-      if (bitmap[0] != 1) {
+      // char *bitmap = static_cast<char *>(it[batch_no]->mem) +
+      //               batch_line * tag_offsets_[index];
+      //
+      // if (bitmap[0] != 1) {
+      //   rawData.is_null = true;
+      // }
+      if (it.empty()) {
         rawData.is_null = true;
+      } else {
+        bool tmp_is_null = false;
+        it[batch_no]->isNull(batch_line, &tmp_is_null);
+        rawData.is_null = tmp_is_null;
       }
     }
 

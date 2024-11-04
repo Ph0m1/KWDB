@@ -535,6 +535,11 @@ TSSlice GenSomePayloadDataRowBased(kwdbContext_p ctx, k_uint32 count, KTimestamp
   ret.len = data_length;
 
   memset(value, 0, data_length);
+  k_uint32 ts_version = 1;
+  if (meta->ts_table().has_ts_version()) {
+    ts_version = meta->ts_table().ts_version();
+  }
+  KInt32(value + Payload::ts_version_offset_) = ts_version;
   KInt32(value + Payload::row_num_offset_) = count;
   // set primary_len_len
   KInt16(value + g_header_size) = primary_tag_len;

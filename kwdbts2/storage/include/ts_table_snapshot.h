@@ -171,6 +171,10 @@ class TsSnapshotProductor : public TsTableEntitiesSnapshot {
     SnapshotBlockDataInfo entity_first_batch{nullptr, 0};
     EntityResultIndex cur_block_entity_info;
   };
+  struct TagRowNum {
+    TableVersion  tag_version{0};
+    TagTableRowID tag_row_id{0};
+  };
 
  public:
   TsSnapshotProductor() {}
@@ -212,10 +216,11 @@ class TsSnapshotProductor : public TsTableEntitiesSnapshot {
 
  protected:
   // entity group --> sub entity group --> pair < entity_id, tag_row_id>
-  std::unordered_map<uint64_t, std::unordered_map<SubGroupID, std::vector<std::pair<EntityID, int>>>> entity_map_;
+  std::unordered_map<uint64_t, std::unordered_map<SubGroupID, std::vector<std::pair<EntityID, TagRowNum>>>> entity_map_;
   std::unordered_map<uint64_t, std::unordered_map<kwdbts::SubGroupID,
-                    std::vector<std::pair<kwdbts::EntityID, int>>>>::iterator egrp_iter_{nullptr};
-  std::unordered_map<kwdbts::SubGroupID, std::vector<std::pair<kwdbts::EntityID, int>>>::iterator subgrp_iter_{nullptr};
+                    std::vector<std::pair<kwdbts::EntityID, TagRowNum>>>>::iterator egrp_iter_{nullptr};
+  std::unordered_map<kwdbts::SubGroupID,
+                    std::vector<std::pair<kwdbts::EntityID, TagRowNum>>>::iterator subgrp_iter_{nullptr};
   SnapshotSubGroupContext subgrp_data_scan_ctx_;
   // used for iterator parameters.
   std::vector<Sumfunctype> scan_agg_types_;
@@ -226,9 +231,12 @@ class TsSnapshotProductor : public TsTableEntitiesSnapshot {
   uint32_t using_storage_schema_version_{0};
   vector<AttributeInfo> metrics_schema_include_dropped_;
   vector<AttributeInfo> pl_metric_attribute_info_;
-  std::vector<TagColumn*> tag_attribute_info_;
-  std::vector<TagInfo> tag_schema_infos_;
+  std::vector<TagInfo> tag_attribute_info_exclude_dropped_;
+  std::vector<TagInfo> tag_schema_include_dropped_;
+  std::vector<k_uint32> result_scan_tag_idxs_;
 
+  TableVersion    cur_tag_table_version_{0};
+  std::vector<k_uint32> cur_src_scan_tag_idxs_;
   // sending all schema using below
   std::vector<uint32_t> schema_versions_;
   size_t cur_schema_version_idx_{0};
@@ -343,7 +351,7 @@ class TsSnapshotProductorByPayload : public TsSnapshotProductor {
   // get payload builder using template pattern.
   PayloadBuilder* getPlBuilderTemplate(const EntityResultIndex& idx);
   // generate payload builder with tag info filled.
-  PayloadBuilder* genPayloadWithTag(int tag_row_id);
+  PayloadBuilder* genPayloadWithTag(const TagRowNum& tag_row);
 
  private:
   PayloadBuilder* cur_entity_pl_builder_{nullptr};

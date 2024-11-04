@@ -11,12 +11,15 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 #include "libkwdbts2.h"
 #include "kwdb_type.h"
 #include "ts_time_partition.h"
 #include "mmap/mmap_tag_column_table.h"
+#include "mmap/mmap_tag_table.h"
 #include "ts_common.h"
 #include "lg_api.h"
+#include "ts_table.h"
 
 namespace kwdbts {
 class SubEntityGroupManager;
@@ -27,56 +30,61 @@ class BaseEntityIterator {
   virtual KStatus Close() = 0;
   virtual ~BaseEntityIterator() = default;
 };
-enum TagIteratorType{
-  TAG_IT,
-  TAG_IT_HASHED
+
+class TagPartitionIterator {
+ public:
+  TagPartitionIterator() = delete;
+  explicit TagPartitionIterator(TagPartitionTable* tag_partition_table, const std::vector<k_uint32>& src_scan_tags,
+                                const std::vector<TagInfo>& result_tag_infos, const std::vector<uint32_t>& hps) :
+                                m_tag_partition_table_(tag_partition_table), src_version_scan_tags_(src_scan_tags),
+                                result_version_tag_infos_(result_tag_infos), hps_(hps) {}
+
+  KStatus Next(std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, k_uint32* count, bool* is_finish);
+
+  void Init();
+
+ private:
+  TagPartitionTable* m_tag_partition_table_{nullptr};
+  size_t cur_total_row_count_{0};
+  size_t cur_scan_rowid_{1};
+  std::vector<k_uint32> src_version_scan_tags_;
+  // std::vector<k_uint32> result_version_scan_tags_;
+  std::vector<TagInfo>  result_version_tag_infos_;
+  std::vector<uint32_t> hps_;
 };
+
+class TsEntityGroup;
+
 class EntityGroupTagIterator {
  public:
   EntityGroupTagIterator() = delete;
-  EntityGroupTagIterator(MMapTagColumnTable* tag_bt, const std::vector<k_uint32>& scan_tags) : scan_tags_(scan_tags) {
-    cur_total_row_count_ = 0;
-    cur_scan_rowid_ = 1;
-    version_ = TagIteratorType::TAG_IT;
-    tag_bt_ = tag_bt;
-    tag_bt_->mutexLock();
-    cur_total_row_count_ = tag_bt_->actual_size();
-    tag_bt_->mutexUnlock();
-  }
+  explicit EntityGroupTagIterator(std::shared_ptr<TsEntityGroup> entity_group, TagTable* tag_bt,
+                         uint32_t table_versioin, const std::vector<k_uint32>& scan_tags);
 
-  EntityGroupTagIterator(MMapTagColumnTable* tag_bt,
-   const std::vector<k_uint32>& scantags, const std::vector<uint32_t>& hps) : scan_tags_(scantags), hps_(hps) {
-    cur_total_row_count_ = 0;
-    cur_scan_rowid_ = 1;
-    version_ = TagIteratorType::TAG_IT_HASHED;
-    tag_bt_ = tag_bt;
-    tag_bt_->mutexLock();
-    cur_total_row_count_ = tag_bt_->actual_size();
-    tag_bt_->mutexUnlock();
-    #ifdef K_DEBUG
-    for (int i =0; i< hps_.size(); i++) {
-      LOG_DEBUG("Init EntityGroupTagIterator hashpoints is %d", hps_.at(i));
-    }
-    #endif
-  }
+  explicit EntityGroupTagIterator(std::shared_ptr<TsEntityGroup> entity_group, TagTable* tag_bt,
+                         uint32_t table_versioin, const std::vector<k_uint32>& scan_tags,
+                         const std::vector<uint32_t>& hps);
+
   virtual ~EntityGroupTagIterator();
 
-  KStatus Init(MMapTagColumnTable* tag_bt);
-  KStatus Next(std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, k_uint32* count);
+  KStatus Init();
+  KStatus Next(std::vector<EntityResultIndex>* entity_id_list, ResultSet* res, k_uint32* count, bool* is_finish);
   KStatus Close();
 
  private:
-  size_t cur_total_row_count_;
-  size_t cur_scan_rowid_;
   std::vector<k_uint32> scan_tags_;
   std::vector<uint32_t> hps_;
-  TagIteratorType version_;
-  MMapTagColumnTable* tag_bt_;
+  TagTable* tag_bt_;
+  std::shared_ptr<TsEntityGroup> entity_group_;
+  std::vector<TagPartitionIterator*> tag_partition_iters_;
+  uint32_t table_version_;
+  TagPartitionIterator* cur_tag_part_iter_ = nullptr;
+  uint32_t cur_tag_part_idx_{0};
 };
 
 class TagIterator : public BaseEntityIterator {
  public:
-  explicit TagIterator(std::vector<EntityGroupTagIterator*>& tag_grp_iters) : entitygrp_iterator_(tag_grp_iters) {}
+  explicit TagIterator(std::vector<EntityGroupTagIterator*>& tag_grp_iters) : entitygrp_iters_(tag_grp_iters) {}
   ~TagIterator() override;
 
   KStatus Init() override;
@@ -84,9 +92,9 @@ class TagIterator : public BaseEntityIterator {
   KStatus Close() override;
 
  private:
-  std::vector<EntityGroupTagIterator*> entitygrp_iterator_;
+  std::vector<EntityGroupTagIterator*> entitygrp_iters_;
   EntityGroupTagIterator* cur_iterator_ = nullptr;
-  uint32_t cur_idx_{};
+  uint32_t cur_idx_{0};
 };
 
 class EntityGroupMetaIterator {

@@ -96,10 +96,11 @@ class TestTsEntityGroup : public TestBigTableInstance {
   }
 
   void GenPayloadData(KTimestamp primary_tag, KTimestamp start_ts, int count, TSSlice* payload, int inc_step = 1) {
-    auto tag_schema = entity_group_leader_->GetSchema();
     std::vector<AttributeInfo> data_schema;
     KStatus s = table_->GetDataSchemaExcludeDropped(ctx_, &data_schema);
     ASSERT_EQ(s, KStatus::SUCCESS);
+    std::vector<TagInfo> tag_schema;
+    s = entity_group_leader_->GetCurrentTagSchemaExcludeDropped(&tag_schema);
     PayloadBuilder payload_gen(tag_schema, data_schema);
     // tag values are primarytag 
     for (int i = 0; i < tag_schema.size(); i++) {
@@ -294,7 +295,8 @@ TEST_F(TestTsEntityGroup, InsertSometimes) {
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
   free(payload.data);
-
+  primary_tags.push_back(&primary_key);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
@@ -335,7 +337,8 @@ TEST_F(TestTsEntityGroup, InsertCrossPartitionSometimes) {
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
   free(payload.data);
-
+  primary_tags.push_back(&primary_key);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
@@ -388,7 +391,8 @@ TEST_F(TestTsEntityGroup, mulitiInsert) {
     threads[i].join();
   }
   free(payload.data);
-
+  primary_tags.push_back(&primary_key);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
@@ -441,7 +445,8 @@ TEST_F(TestTsEntityGroup, mulitiInsertCrossPartition) {
     threads[i].join();
   }
   free(payload.data);
-
+  primary_tags.push_back(&primary_key);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 1);
@@ -522,7 +527,10 @@ TEST_F(TestTsEntityGroup, mulitiInsertMultiEntity) {
   }
   free(payload.data);
   free(payload1.data);
-
+  primary_tags.push_back(&primary_key);
+  KTimestamp primary_key1 = primary_key + 1;
+  primary_tags.push_back(&primary_key1);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2);
@@ -578,7 +586,8 @@ TEST_F(TestTsEntityGroup, InsertAndDel) {
     ASSERT_EQ(s, KStatus::SUCCESS);
   }
   free(payload.data);
-
+  primary_tags.push_back(&primary_key);
+  scan_tags.push_back(0);
   s = entity_group_leader_->GetEntityIdList(ctx_, primary_tags, scan_tags, &entity_id_list, &res, &count);
   EXPECT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 1);

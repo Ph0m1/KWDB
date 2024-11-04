@@ -66,7 +66,7 @@ KBStatus StWriteWorker::do_work(KTimestamp  new_ts) {
   TSSlice payload;
   {
     KWDB_START();
-    std::vector<TagColumn*> tag_schema;
+    std::vector<TagInfo> tag_schema;
     std::vector<AttributeInfo> data_schema;
     stat = st_inst_->GetSchemaInfo(ctx, w_table, &tag_schema, &data_schema);
     if (stat != KStatus::SUCCESS) {

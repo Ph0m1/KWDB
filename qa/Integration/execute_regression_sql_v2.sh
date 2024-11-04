@@ -27,9 +27,6 @@ function execute_regression_sql_basic_v2() {
       echo_err "setup ${topology} failed"
       return 1
     fi
-    if [ $topology == "5c" ]; then
-      sleep 30s
-    fi
     # rm -fr $QA_DIR/TEST_integration
     python3 $(dirname $0)/execute_regression_sql_v2.py -t ${topology} -d ${sqldirs[*]} -f $SQL_FILTER -s $SUMMARY_FILE
 

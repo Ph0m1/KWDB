@@ -182,18 +182,31 @@ KStatus TsSnapshotProductorByPayload::SerializeData(kwdbContext_p ctx,
   return KStatus::SUCCESS;
 }
 
-PayloadBuilder* TsSnapshotProductorByPayload::genPayloadWithTag(int tag_row_id) {
+PayloadBuilder* TsSnapshotProductorByPayload::genPayloadWithTag(const TagRowNum& tag_row) {
   int error_code;
-  ResultSet tag_res{(k_uint32)tag_attribute_info_.size()};
-  // MMapTagColumnTable* tag_bt = subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupTagbt();
-  error_code = subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupTagbt()->
-               GetColumnsByRownumLocked(tag_row_id, tag_schema_infos_, &tag_res);
+  ResultSet tag_res{(k_uint32)tag_attribute_info_exclude_dropped_.size()};
+  if (cur_tag_table_version_ != tag_row.tag_version) {
+    // need calc new scan idxs
+    error_code = subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupNewTagbt()->
+                 CalculateSchemaIdxs(tag_row.tag_version,
+                 result_scan_tag_idxs_,
+                 tag_schema_include_dropped_,
+                 &cur_src_scan_tag_idxs_);
+    if (error_code < 0) {
+      LOG_ERROR("CalculateSchemaIdxs failed.");
+      return nullptr;
+    }
+    cur_tag_table_version_ = tag_row.tag_version;
+  }
+  error_code = subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupNewTagbt()->
+                GetColumnsByRownumLocked(tag_row.tag_version, tag_row.tag_row_id,
+                                         cur_src_scan_tag_idxs_, tag_schema_include_dropped_, &tag_res);
   if (error_code < 0) {
-    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %d ", error_code, tag_row_id);
+    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %d ", error_code, tag_row.tag_row_id);
     return nullptr;
   }
-  auto cur_entity_pl_builder = new PayloadBuilder(tag_attribute_info_, pl_metric_attribute_info_);
-  for (size_t i = 0; i < tag_attribute_info_.size(); i++) {
+  auto cur_entity_pl_builder = new PayloadBuilder(tag_attribute_info_exclude_dropped_, pl_metric_attribute_info_);
+  for (size_t i = 0; i < tag_attribute_info_exclude_dropped_.size(); i++) {
     if (tag_res.data[i].size() == 0) {
       continue;
     }
@@ -201,23 +214,29 @@ PayloadBuilder* TsSnapshotProductorByPayload::genPayloadWithTag(int tag_row_id) 
     if (tag_col_batch == nullptr) {
       continue;
     }
-    TagColumn* tag_schema_ptr = tag_attribute_info_[i];
+    TagInfo* tag_schema_ptr = &tag_attribute_info_exclude_dropped_[i];
     char* value_addr = nullptr;
     int value_len = 0;
     // Different tags are stored differently in payload
     if (tag_schema_ptr->isPrimaryTag()) {
       value_addr = reinterpret_cast<char*>(tag_col_batch->mem);
-      value_len = tag_schema_ptr->attributeInfo().m_size;
+      value_len = tag_schema_ptr->m_size;
     } else {
-      if (tag_schema_ptr->isVarTag()) {
+      if (tag_schema_ptr->m_data_type == DATATYPE::VARSTRING ||
+          tag_schema_ptr->m_data_type == DATATYPE::VARBINARY) {
         value_addr = reinterpret_cast<char*>(tag_col_batch->getVarColData(0));
         value_len = tag_col_batch->getVarColDataLen(0);
       } else {
         value_addr = reinterpret_cast<char*>(tag_col_batch->mem) + 1;
-        value_len = tag_schema_ptr->attributeInfo().m_size;
+        value_len = tag_schema_ptr->m_size;
       }
     }
-    if (*reinterpret_cast<char*>(tag_col_batch->mem) == 0x01 || tag_schema_ptr->isPrimaryTag()) {  // null bitmap.
+    bool is_null_value = false;
+
+    if (tag_col_batch->isNull(0, &is_null_value) != KStatus::SUCCESS) {
+      continue;
+    }
+    if (!is_null_value || tag_schema_ptr->isPrimaryTag()) {  // null bitmap.
       cur_entity_pl_builder->SetTagValue(i, value_addr, value_len);
     }
   }
@@ -237,16 +256,16 @@ PayloadBuilder* TsSnapshotProductorByPayload::getPlBuilderTemplate(const EntityR
     cur_entity_pl_builder_ = nullptr;
   }
 
-  int tag_row_id = -1;
+  TagRowNum tag_row = {0, 0};
   for (auto& entity : entity_map_[idx.entityGroupId][idx.subGroupId]) {
     if (entity.first == idx.entityId) {
-      tag_row_id = entity.second;
+      tag_row = entity.second;
       break;
     }
   }
-  assert(tag_row_id >= 0);
+  assert(tag_row.tag_row_id >= 0);
   cur_pl_builder_entity_ = idx;
-  cur_entity_pl_builder_ = genPayloadWithTag(tag_row_id);
+  cur_entity_pl_builder_ = genPayloadWithTag(tag_row);
   return cur_entity_pl_builder_;
 }
 
@@ -399,24 +418,45 @@ TSSlice TsSnapshotProductorByBlock::getPrimaryKey(EntityResultIndex* entity_id) 
     cur_primary_key_ = {nullptr, 0};
   }
   // get tage row id of tag table.
-  int tag_row_id = -1;
+  TagRowNum tag_row = {0, 0};
   for (auto& entity : entity_map_[entity_id->entityGroupId][entity_id->subGroupId]) {
     if (entity.first == entity_id->entityId) {
-      tag_row_id = entity.second;
+      tag_row = entity.second;
       break;
     }
   }
-  assert(tag_row_id >= 0);
-  ResultSet tag_res{(k_uint32)tag_attribute_info_.size()};
-  subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupTagbt()->
-                      GetColumnsByRownumLocked(tag_row_id, tag_schema_infos_, &tag_res);
-  for (size_t i = 0; i < tag_attribute_info_.size(); i++) {
+  assert(tag_row.tag_row_id >= 0);
+  int error_code;
+  ResultSet tag_res{(k_uint32)tag_attribute_info_exclude_dropped_.size()};
+  // subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupNewTagbt()->
+  //                     GetColumnsByRownumLocked(tag_row_id, tag_schema_infos_, &tag_res);
+  if (cur_tag_table_version_ != tag_row.tag_version) {
+    // need calc new scan idxs
+    error_code = subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupNewTagbt()->
+                 CalculateSchemaIdxs(tag_row.tag_version,
+                 result_scan_tag_idxs_,
+                 tag_schema_include_dropped_,
+                 &cur_src_scan_tag_idxs_);
+    if (error_code < 0) {
+      LOG_ERROR("CalculateSchemaIdxs failed.");
+      return cur_primary_key_;
+    }
+    cur_tag_table_version_ = tag_row.tag_version;
+  }
+  error_code = subgrp_data_scan_ctx_.cur_entity_group->GetSubEntityGroupNewTagbt()->
+                GetColumnsByRownumLocked(tag_row.tag_version, tag_row.tag_row_id,
+                                         cur_src_scan_tag_idxs_, tag_schema_include_dropped_, &tag_res);
+  if (error_code < 0) {
+    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %d ", error_code, tag_row.tag_row_id);
+    return cur_primary_key_;
+  }
+  for (size_t i = 0; i < tag_attribute_info_exclude_dropped_.size(); i++) {
     const Batch* tag_col_batch = tag_res.data[i].at(0);
-    TagColumn* tag_schema_ptr = tag_attribute_info_[i];
+    TagInfo* tag_schema_ptr = &tag_attribute_info_exclude_dropped_[i];
     // Different tags are stored differently in payload
     if (tag_schema_ptr->isPrimaryTag()) {
       auto value_addr = reinterpret_cast<char*>(tag_col_batch->mem);
-      auto value_len = tag_schema_ptr->attributeInfo().m_size;
+      auto value_len = tag_schema_ptr->m_size;
       if (cur_primary_key_.data == nullptr) {
         cur_primary_key_.data = static_cast<char*>(malloc(value_len));
         cur_primary_key_.len = value_len;

@@ -50,7 +50,7 @@ class PayloadStTypeConvert {
 */
 class PayloadBuilder {
  private:
-  std::vector<TagColumn*> tag_schema_;
+  std::vector<TagInfo> tag_schema_;
   std::vector<AttributeInfo> data_schema_;
   // TSSlice primary_tag_{nullptr, 0};
   std::vector<int32_t> data_schema_offset_;
@@ -72,7 +72,7 @@ class PayloadBuilder {
   int tmp_var_type_mem_used_{0};
 
  public:
-  PayloadBuilder(const std::vector<TagColumn*>& tag_schema,
+  PayloadBuilder(const std::vector<TagInfo>& tag_schema,
                    const std::vector<AttributeInfo>& data_schema);
 
   // just copy other tag value info

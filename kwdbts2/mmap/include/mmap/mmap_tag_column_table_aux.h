@@ -23,7 +23,7 @@ enum TagTableFileType {
     TTFT_HASHPOINT = 6,
 };
 
-void CleanTagFiles(const string dirPath, uint64_t tableId, uint64_t cutoffLsn);
+// void CleanTagFiles(const string dirPath, uint64_t tableId, uint64_t cutoffLsn);
 
 class TagTuplePack
 {
@@ -88,7 +88,7 @@ private:
   void setFlag();
 
   void initFlag();
-  void setBitMap();
+  void setNullBitMap();
   void fillParimary(const char *val, size_t len, size_t defLen);
   void fillTag(const char *val, size_t len, size_t defLen, bool isVar);
 
@@ -111,7 +111,7 @@ private:
   size_t curTagOffset_ = 0;
   size_t curVarOffset_ = 0;
   size_t curTag_ = 0;
-private:
+public:
   static constexpr size_t versionOffset_ = 0;
   static constexpr size_t txnOffset_ = 4;
   static constexpr size_t dbIdOffset_ = 20;
