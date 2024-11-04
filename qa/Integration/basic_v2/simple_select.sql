@@ -14,8 +14,6 @@ select ts, tag1 from tsdb.t1;
 select a, tag2 from tsdb.t1;
 select * from tsdb.t1 where tag1<1012;
 select * from tsdb.t1 where tag1=33;
--- select * from tsdb.t1 where tag1=33 and tag2 = 44;
--- select * from tsdb.t1 where tag1<34 and tag2 = 44;
 select * from tsdb.t1 where a<1012;
 
 select a+tag2 from tsdb.t1;
@@ -23,23 +21,25 @@ select a from tsdb.t1 where tag1 > 10;
 
 select a from tsdb.t1 where tag1<1012;
 select a from tsdb.t1 where tag1=33;
--- select a from tsdb.t1 where tag1=33 and tag2 = 44;
--- select a from tsdb.t1 where tag1<34 and tag2 = 44;
 select a from tsdb.t1 where a<1012;
 
 
 select tag1 from tsdb.t1 where tag1<1012;
 select tag1 from tsdb.t1 where tag1=33;
--- select tag1 from tsdb.t1 where tag1=33 and tag2 = 44;
--- select tag1 from tsdb.t1 where tag1<34 and tag2 = 44;
 select tag1 from tsdb.t1 where a<1012;
 
 select a+tag1 from tsdb.t1 where tag1<1012;
 select a+tag1 from tsdb.t1 where tag1=33;
--- select a+tag1 from tsdb.t1 where tag1=33 and tag2 = 44;
--- select a+tag1 from tsdb.t1 where tag1<34 and tag2 = 44;
 select a+tag1 from tsdb.t1 where a<1012;
 
 SELECT variance(LE)//10 FROM (SELECT max(a) LE FROM tsdb.t1 GROUP BY a);
+
+explain select avg(a) from tsdb.t1;
+explain select avg(a) from tsdb.t1 where tag1 = 33;
+explain select avg(a) from tsdb.t1 group by tag1;
+
+select avg(a) from tsdb.t1;
+select avg(a) from tsdb.t1 where tag1 = 33;
+select avg(a) from tsdb.t1 group by tag1;
 
 drop database tsdb cascade; 

@@ -1635,7 +1635,7 @@ func (b *Builder) buildGroupByInput(groupBy memo.RelExpr) (execPlan, error) {
 	input.outputCols = newOutputCols
 	reqOrdering := input.reqOrdering(groupByInput)
 	input.root, err = b.factory.ConstructSimpleProject(
-		input.root, cols, nil /* colNames */, reqOrdering, groupBy.IsTSEngine(),
+		input.root, cols, nil /* colNames */, reqOrdering, groupByInput.IsTSEngine(),
 	)
 	if err != nil {
 		return execPlan{}, err

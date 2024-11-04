@@ -266,13 +266,14 @@ INSERT 10
   distinct          |               |
    │                | distinct on   | ptag1
    └── render       |               |
+        │           | engine type   | time series
         │           | ptag1         | ptag1
         └── ts scan |               |
                     | ts-table      | table1
                     | only tag      | true
                     | access mode   | tableTableMeta
                     | tag filter[0] | t1 > 1000
-(11 rows)
+(12 rows)
 > explain select ptag1, t1 from only_tag.table1 where t1 > 1000 group by ptag1, t1;
       tree     |     field     |  description
 ---------------+---------------+-----------------

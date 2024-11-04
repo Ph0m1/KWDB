@@ -1571,6 +1571,7 @@ CREATE TABLE
                   │              └── distinct                              |                    |
                   │                   │                                    | distinct on        | p_partkey
                   │                   └── render                           |                    |
+                  │                        │                               | engine type        | time series
                   │                        │                               | p_partkey          | p_partkey
                   │                        └── synchronizer                |                    |
                   │                             └── ts scan                |                    |
@@ -1582,7 +1583,7 @@ CREATE TABLE
                                                                            | ts-table           | nation
                                                                            | access mode        | metaTable
                                                                            | filter             | n_name = 'MOZAMBIQUE'
-(68 rows)
+(69 rows)
 > explain select
             s_name,
             count(*) as numwait

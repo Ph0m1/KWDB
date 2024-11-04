@@ -142,5 +142,76 @@ INSERT 1
 ------------
          6
 (1 row)
+> explain select avg(a) from tsdb.t1;
+      tree     |        field        | description
+---------------+---------------------+--------------
+               | distributed         | true
+               | vectorized          | false
+  group        |                     |
+   │           | engine type         | time series
+   │           | aggregate 0         | avg(a)
+   │           | scalar              |
+   │           | pushLocalAggToScan  | true
+   │           | addSynchronizer     | true
+   └── ts scan |                     |
+               | ts-table            | t1
+               | access mode         | metaTable
+               | use statistic       | true
+(12 rows)
+> explain select avg(a) from tsdb.t1 where tag1 = 33;
+        tree        |        field        | description
+--------------------+---------------------+--------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | avg(a)
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | a                   | a
+        └── ts scan |                     |
+                    | ts-table            | t1
+                    | access mode         | tagIndex
+                    | use statistic       | true
+                    | ptag filter[0]      | tag1 = 33
+(16 rows)
+> explain select avg(a) from tsdb.t1 group by tag1;
+        tree        |        field        |  description
+--------------------+---------------------+-----------------
+                    | distributed         | true
+                    | vectorized          | false
+  render            |                     |
+   │                | engine type         | time series
+   │                | avg                 | avg
+   └── group        |                     |
+        │           | engine type         | time series
+        │           | aggregate 0         | tag1
+        │           | aggregate 1         | avg(a)
+        │           | group by            | tag1
+        │           | pushLocalAggToScan  | true
+        │           | addSynchronizer     | true
+        └── ts scan |                     |
+                    | ts-table            | t1
+                    | access mode         | tableTableMeta
+                    | use statistic       | true
+(16 rows)
+> select avg(a) from tsdb.t1;
+  avg
+--------
+  16.5
+(1 row)
+> select avg(a) from tsdb.t1 where tag1 = 33;
+  avg
+--------
+  16.5
+(1 row)
+> select avg(a) from tsdb.t1 group by tag1;
+  avg
+--------
+  16.5
+(1 row)
 > drop database tsdb cascade;
 DROP DATABASE

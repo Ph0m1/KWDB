@@ -518,6 +518,15 @@ k_double64 FieldSumInt::ValReal() {
 }
 
 k_double64 FieldSumInt::ValReal(char *ptr) {
+  if (storage_type_ == roachpb::DataType::DECIMAL) {
+    if (is_over_flow()) {
+      k_double64 val = 0.0f;
+      memcpy(&val, ptr, storage_len_);
+      return val;
+    } else {
+      return ValInt(ptr);
+    }
+  }
   k_double64 val = 0.0f;
   memcpy(&val, ptr, storage_len_);
   return val;

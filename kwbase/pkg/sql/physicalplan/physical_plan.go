@@ -2376,6 +2376,27 @@ func getTableOutPutInfoFromPost(
 	return scanOutput
 }
 
+func checkRepeat(
+	mapAgg *map[execinfrapb.AggregatorSpec_Func][]uint32,
+	params []uint32,
+	typ execinfrapb.AggregatorSpec_Func,
+) bool {
+	if v, ok := (*mapAgg)[typ]; ok && len(v) == len(params) {
+		allSame := true
+		for i, idx := range params {
+			if idx != v[i] {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			return true
+		}
+	}
+	(*mapAgg)[typ] = params
+	return false
+}
+
 // PushAggToStatisticReader push Agg to statistic reader
 func (p *PhysicalPlan) PushAggToStatisticReader(
 	idx ProcessorIdx,
@@ -2392,23 +2413,26 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 
 		scanCols := make([]execinfrapb.TSStatisticReaderSpec_Params, 0)
 		scanAgg := make([]int32, 0)
-		sumMap := make(map[int64]int)
-		countMap := make(map[int64]int)
-		inputColTypeArray := make([]*types.T, len(p.ResultTypes))
-		for i := range p.ResultTypes {
-			inputColTypeArray[i] = &p.ResultTypes[i]
-		}
+		sumMap := make(map[uint32]int)
+		countMap := make(map[uint32]int)
+		// pre render column types
+		inputColTypeArray := make([]*types.T, 0)
 		colIndex := 0
 
-		var addMap = func(key int64, value int, destMap map[int64]int) {
+		var addMap = func(key uint32, value int, destMap map[uint32]int) {
 			if _, ok := destMap[key]; !ok {
 				destMap[key] = value
 			}
 		}
-
+		aggMap := make(map[execinfrapb.AggregatorSpec_Func][]uint32)
 		addStatScan := func(
-			params []uint32, typ execinfrapb.AggregatorSpec_Func,
+			params []uint32, typ execinfrapb.AggregatorSpec_Func, colType *types.T,
 		) error {
+			// prune repeat agg
+			if checkRepeat(&aggMap, params, typ) {
+				return nil
+			}
+
 			infos := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(params))
 			for j, v := range params {
 				if v >= uint32(len(scanOutPut)) {
@@ -2431,26 +2455,36 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 				scanAgg = append(scanAgg, int32(typ))
 			}
 
+			if colType != nil {
+				inputColTypeArray = append(inputColTypeArray, colType)
+			} else {
+				if typ == execinfrapb.AggregatorSpec_SUM {
+					inputColTypeArray = append(inputColTypeArray, types.Float)
+				} else if typ == execinfrapb.AggregatorSpec_COUNT {
+					inputColTypeArray = append(inputColTypeArray, types.Int4)
+				}
+			}
+
 			if typ == execinfrapb.AggregatorSpec_SUM {
-				addMap(infos[0].Value, colIndex, sumMap)
+				addMap(params[0], colIndex, sumMap)
 			} else if typ == execinfrapb.AggregatorSpec_COUNT {
-				addMap(infos[0].Value, colIndex, countMap)
+				addMap(params[0], colIndex, countMap)
 			}
 			colIndex++
 			return nil
 		}
 
-		for _, agg := range aggSpecs.Aggregations {
+		for i, agg := range aggSpecs.Aggregations {
 			if agg.Func == execinfrapb.AggregatorSpec_AVG {
-				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_SUM); err != nil {
+				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_SUM, nil); err != nil {
 					return err
 				}
 
-				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_COUNT); err != nil {
+				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_COUNT, nil); err != nil {
 					return err
 				}
 			} else {
-				if err := addStatScan(agg.ColIdx, agg.Func); err != nil {
+				if err := addStatScan(agg.ColIdx, agg.Func, &aggResTypes[i]); err != nil {
 					return err
 				}
 			}
@@ -2459,21 +2493,22 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 		tr.AggTypes = scanAgg
 		tr.ParamIdx = scanCols
 
-		scanPost.Renders = make([]string, len(scanAgg))
+		scanPost.Renders = make([]string, 0)
 
 		for i, agg := range aggSpecs.Aggregations {
 			if agg.Func == execinfrapb.AggregatorSpec_AVG {
 				varIdxs := make([]int, 2)
-				v, ok := sumMap[int64(agg.ColIdx[0])]
+				v, ok := sumMap[agg.ColIdx[0]]
 				if !ok {
 					return pgerror.New(pgcode.Internal, "statistic table could not find sum col")
 				}
-				varIdxs[0] = int(scanCols[v].Param[0].Value)
-				v1, ok1 := countMap[int64(agg.ColIdx[0])]
+				varIdxs[0] = v
+				v1, ok1 := countMap[agg.ColIdx[0]]
 				if !ok1 {
 					return pgerror.New(pgcode.Internal, "statistic table could not find count col")
 				}
-				varIdxs[1] = int(scanCols[v1].Param[0].Value)
+
+				varIdxs[1] = v1
 
 				// create dev render for avg
 				h := tree.MakeTypesOnlyIndexedVarHelper(inputColTypeArray)
@@ -2481,9 +2516,9 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 				if err2 != nil {
 					return err2
 				}
-				scanPost.Renders[i] = render.String()
+				scanPost.Renders = append(scanPost.Renders, render.String())
 			} else {
-				scanPost.Renders[i] = fmt.Sprintf("@%d", i+1)
+				scanPost.Renders = append(scanPost.Renders, fmt.Sprintf("@%d", i+1))
 			}
 		}
 

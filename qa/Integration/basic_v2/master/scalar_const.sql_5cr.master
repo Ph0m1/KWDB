@@ -466,13 +466,14 @@ INSERT 2
         └── distinct               |              |
              │                     | distinct on  | e4
              └── render            |              |
+                  │                | engine type  | time series
                   │                | e4           | e4
                   └── synchronizer |              |
                        └── ts scan |              |
                                    | ts-table     | ts_table2
                                    | access mode  | metaTable
                                    | filter       | e2 > 1000000
-(23 rows)
+(24 rows)
 > explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 order by e3 desc limit 10 offset 1) from test_ts.ts_table;
                      tree                    |    field     |                                   description
 ---------------------------------------------+--------------+----------------------------------------------------------------------------------
@@ -1399,6 +1400,7 @@ INSERT 2
    │                             └── distinct               |                    |
    │                                  │                     | distinct on        | e1
    │                                  └── render            |                    |
+   │                                       │                | engine type        | time series
    │                                       │                | e1                 | e1
    │                                       └── synchronizer |                    |
    │                                            └── ts scan |                    |
@@ -1423,7 +1425,7 @@ INSERT 2
                                                             | ts-table           | ts_table
                                                             | access mode        | metaTable
                                                             | filter             | e6 = 'test_ts1'
-(50 rows)
+(51 rows)
 > explain select extract('year', localtimestamp()) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where e3 = (select e3 from test_ts.ts_table where e6='test_ts1' limit 1)) order by e3 desc limit 1 offset 1;
                             tree                            |       field        |                           description
 ------------------------------------------------------------+--------------------+------------------------------------------------------------------
@@ -1452,6 +1454,7 @@ INSERT 2
    │                             └── distinct               |                    |
    │                                  │                     | distinct on        | e1
    │                                  └── render            |                    |
+   │                                       │                | engine type        | time series
    │                                       │                | e1                 | e1
    │                                       └── synchronizer |                    |
    │                                            └── ts scan |                    |
@@ -1476,7 +1479,7 @@ INSERT 2
                                                             | ts-table           | ts_table
                                                             | access mode        | metaTable
                                                             | filter             | e6 = 'test_ts1'
-(49 rows)
+(50 rows)
 > explain select extract('year', localtimestamp()) = ( select e4 from test_ts.ts_table2 limit 1 ) from test_ts.ts_table;
                 tree               |    field     |                     description
 -----------------------------------+--------------+------------------------------------------------------
@@ -1525,13 +1528,14 @@ INSERT 2
         └── distinct               |              |
              │                     | distinct on  | e4
              └── render            |              |
+                  │                | engine type  | time series
                   │                | e4           | e4
                   └── synchronizer |              |
                        └── ts scan |              |
                                    | ts-table     | ts_table2
                                    | access mode  | metaTable
                                    | filter       | e2 > 1000000
-(23 rows)
+(24 rows)
 > explain select extract('year', localtimestamp()) in ( select e4 from test_ts.ts_table2 order by e3 desc limit 10 offset 1) from test_ts.ts_table;
                      tree                    |    field     |                                    description
 ---------------------------------------------+--------------+-------------------------------------------------------------------------------------
@@ -2241,6 +2245,7 @@ INSERT 2
    │                             └── distinct               |                                                |
    │                                  │                     | distinct on                                    | e1
    │                                  └── render            |                                                |
+   │                                       │                | engine type                                    | time series
    │                                       │                | e1                                             | e1
    │                                       └── synchronizer |                                                |
    │                                            └── ts scan |                                                |
@@ -2265,7 +2270,7 @@ INSERT 2
                                                             | ts-table                                       | ts_table
                                                             | access mode                                    | metaTable
                                                             | filter                                         | e6 = 'test_ts1'
-(53 rows)
+(54 rows)
 > explain select max(extract('second', '2024-01-01 00:00:00'::timestamp)) = ( select e4 from test_ts.ts_table2 limit 1 ) from test_ts.ts_table;
                 tree               |                     field                      |                     description
 -----------------------------------+------------------------------------------------+------------------------------------------------------
