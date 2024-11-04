@@ -70,6 +70,7 @@ show all zone configurations ;
 -- wait-all-replica-health: 300s
 -- kill: c4
 -- kill: c5
+-- sleep: 30s
 
 -- insert
 INSERT INTO tsdb.ts1 select * from tsdb.ts1;
