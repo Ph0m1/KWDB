@@ -1566,6 +1566,11 @@ select floor(t1.e4), lower(t1.e6) from test_ts.ts_table as t1, test_ts.ts_table2
 select power(t1.e4, 2), lpad(t1.e6, 1) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.e1=t2.e1 and rpad(t1.e6, 1)='tes' order by t1.e4, t1.e6;
 select round(t1.e4), ltrim(t1.e6) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.e1=t2.e1 and rtrim(t1.e6)='test_ts1' order by t1.e4, t1.e6;
 
+-- ZDP-45235
+set cluster setting sql.all_push_down.enabled=true;
+explain select count(1) from test_ts.ts_table;
+explain select count(e1+e2) from test_ts.ts_table;
+
 -- ZDP-40021
 select count(localtime()) from test_ts.ts_table;
 

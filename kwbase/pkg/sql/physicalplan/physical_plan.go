@@ -2441,7 +2441,9 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 				infos[j] = scanOutPut[v]
 			}
 
-			if len(params) == 0 && typ == execinfrapb.AggregatorSpec_COUNT_ROWS {
+			// count_rows or count(1), convert to count(ts)
+			if (len(params) == 0 && typ == execinfrapb.AggregatorSpec_COUNT_ROWS) ||
+				(typ == execinfrapb.AggregatorSpec_COUNT && infos[0].Typ == execinfrapb.TSStatisticReaderSpec_ParamInfo_const) {
 				scanCols = append(scanCols, execinfrapb.TSStatisticReaderSpec_Params{
 					Param: []execinfrapb.TSStatisticReaderSpec_ParamInfo{
 						{

@@ -1084,9 +1084,13 @@ func (m *Memo) checkStatisticOpt(child *RelExpr, aggs []AggregationsItem, gp *Gr
 func (m *Memo) projectExprFillStatistic(
 	project *ProjectExpr, aggs []AggregationsItem, gp *GroupingPrivate,
 ) {
+	// if col is const, set true
+	mapColConst := make(map[opt.ColumnID]bool, 0)
 	for _, val := range project.Projections {
 		switch val.Element.(type) {
-		case *NullExpr, *ConstExpr:
+		case *NullExpr:
+		case *ConstExpr:
+			mapColConst[val.Col] = true
 		default:
 			return
 		}
@@ -1098,6 +1102,10 @@ func (m *Memo) projectExprFillStatistic(
 		for j := 0; j < agg.Agg.ChildCount(); j++ {
 			switch arg := agg.Agg.Child(j).(type) {
 			case *VariableExpr:
+				// if agg is count and arg is const, use statistic
+				if mapColConst[arg.Col] && agg.Agg.Op() == opt.CountOp {
+					continue
+				}
 				// is not table col, null or const
 				if 0 == m.metadata.ColumnMeta(arg.Col).Table {
 					return
