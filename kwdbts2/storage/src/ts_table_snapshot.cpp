@@ -348,6 +348,20 @@ KStatus TsSnapshotConsumer::Init(kwdbContext_p ctx, const TsSnapshotInfo& info) 
     LOG_DEBUG("create consumer snapshot[%s] success. table not exists. we will create one later.", Print().c_str());
     return KStatus::SUCCESS;
   }
+  uint64_t row_num_bef = 0;
+  s = snapshot_info_.table->GetRangeRowCount(ctx, info.begin_hash, info.end_hash, info.ts_span, &row_num_bef);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("snapshot[%s] GetRangeRowCount failed.", Print().c_str());
+    return KStatus::FAIL;
+  }
+  if (row_num_bef > 0) {
+    LOG_WARN("snapshot[%s] range has data rows [%lu], need delete first.", Print().c_str(), row_num_bef);
+    s = snapshot_info_.table->DeleteTotalRange(ctx, info.begin_hash, info.end_hash, info.ts_span, 1);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("snapshot[%s] DeleteTotalRange failed.", Print().c_str());
+      return KStatus::FAIL;
+    }
+  }
   s = beginMtrOfEntityGroup(ctx);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("beginMtrOfEntityGroup initialize failed.");

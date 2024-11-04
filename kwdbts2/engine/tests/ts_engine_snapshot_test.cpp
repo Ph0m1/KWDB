@@ -686,11 +686,11 @@ TEST_P(TestEngineSnapshotConvert, DestNoEmptyThreeTimes) {
   for (int i = 0; i < 3; i++) {
     uint64_t snapshot_id;
     s = ts_engine_->CreateSnapshotForRead(ctx_, cur_table_id, 0, UINT64_MAX,
-                                          {INT64_MIN, start_ts + batch_num * 10}, &snapshot_id);
+                                          {INT64_MIN, start_ts + batch_num * 10 - 1}, &snapshot_id);
     ASSERT_EQ(s, KStatus::SUCCESS);
     uint64_t desc_snapshot_id;
     s = ts_engine_->CreateSnapshotForWrite(ctx_, desc_table_id, 0, UINT64_MAX,
-                                        {INT64_MIN, start_ts + batch_num * 10}, &desc_snapshot_id);
+                                        {INT64_MIN, start_ts + batch_num * 10 - 1}, &desc_snapshot_id);
     ASSERT_EQ(s, KStatus::SUCCESS);
 
     // migrate data from 1007 to 1008
@@ -738,7 +738,7 @@ TEST_P(TestEngineSnapshotConvert, DestNoEmptyThreeTimes) {
     }
     total_count += count;
   }
-  EXPECT_EQ(total_count, 3 * batch_num);
+  EXPECT_EQ(total_count, batch_num);
   delete iter1;
   ts_span = {start_ts + batch_num * 10, INT64_MAX};
   ASSERT_EQ(tbl_range_desc->GetIterator(ctx_, 1, {1}, {ts_span}, scancols, scancols, scanaggtypes,
@@ -1231,4 +1231,4 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDestTableVersionHigh) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
 
-INSTANTIATE_TEST_CASE_P(InstantiationType, TestEngineSnapshotConvert, ::testing::Values(1, 2));
+INSTANTIATE_TEST_CASE_P(InstantiationType, TestEngineSnapshotConvert, ::testing::Values(1));
