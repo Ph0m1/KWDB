@@ -1539,8 +1539,11 @@ SELECT current_schemas(x) FROM (VALUES (true), (false)) AS t(x);
 {pg_catalog,public}
 {public}
 
-statement ok
+statement error pq: schema "test" does not exist
 SET search_path=test,pg_catalog
+
+statement ok
+SET search_path=pg_catalog
 
 query T
 SELECT current_schemas(true)

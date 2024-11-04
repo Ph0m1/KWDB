@@ -100,14 +100,3 @@ ALTER INDEX public."primary" RENAME TO t_pk
 # But we can see it with sufficient qualification.
 statement ok
 ALTER INDEX public.public."primary" RENAME TO t_pk
-
-# If the search path is invalid, we get a special error.
-statement ok
-SET search_path = invalid
-
-statement error schema or database was not found while searching index: "a_pk3"
-ALTER INDEX a_pk3 RENAME TO a_pk4
-
-# But qualification resolves the problem.
-statement ok
-ALTER INDEX public.a_pk3 RENAME TO a_pk4

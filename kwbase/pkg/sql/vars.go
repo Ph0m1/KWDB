@@ -718,10 +718,16 @@ var varGen = map[string]sessionVar{
 	// https://www.postgresql.org/docs/9.6/static/runtime-config-client.html
 	`search_path`: {
 		GetStringVal: func(
-			_ context.Context, evalCtx *extendedEvalContext, values []tree.TypedExpr,
+			ctx context.Context, evalCtx *extendedEvalContext, values []tree.TypedExpr,
 		) (string, error) {
 			comma := ""
 			var buf bytes.Buffer
+			dbName := evalCtx.SessionData.Database
+			dbDesc, err := evalCtx.schemaAccessors.logical.GetDatabaseDesc(ctx, evalCtx.Txn,
+				dbName, tree.DatabaseLookupFlags{Required: true})
+			if err != nil {
+				return "", err
+			}
 			for _, v := range values {
 				s, err := datumAsString(&evalCtx.EvalContext, "search_path", v)
 				if err != nil {
@@ -733,6 +739,13 @@ var varGen = map[string]sessionVar{
 					// arrays instead of a single string.
 					return "", unimplemented.Newf("schema names containing commas in search_path",
 						"schema name %q not supported in search_path", s)
+				}
+				found, _, err := evalCtx.schemaAccessors.logical.GetSchema(ctx, evalCtx.Txn, dbDesc.ID, s)
+				if err != nil {
+					return "", err
+				}
+				if !found {
+					return "", sqlbase.NewUndefinedSchemaError(s)
 				}
 				buf.WriteString(comma)
 				buf.WriteString(s)

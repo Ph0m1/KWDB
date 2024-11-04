@@ -1,4 +1,7 @@
 statement ok
+create schema foo;
+
+statement ok
 SET SEARCH_PATH = foo
 
 query T

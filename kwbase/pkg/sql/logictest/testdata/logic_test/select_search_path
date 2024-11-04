@@ -127,7 +127,7 @@ SELECT count(DISTINCT(1)) FROM pg_tables
 # Test that current_schema reports the first valid entry in search_path, or
 # NULL if there is no such entry.
 
-statement ok
+statement error pq: schema "nonexistent" does not exist
 SET search_path = nonexistent, public
 
 query T
@@ -135,18 +135,18 @@ SELECT current_schema
 ----
 public
 
-statement ok
+statement error pq: schema "nonexistent" does not exist
 SET search_path = nonexistent
 
 query T
 SELECT current_schema
 ----
-NULL
+public
 
 # Test that current_schemas only reports the valid entries in
 # search_path.
 
-statement ok
+statement error pq: schema "nonexistent" does not exist
 SET search_path = nonexistent, public
 
 query T
