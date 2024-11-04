@@ -32,13 +32,6 @@ var DefaultPartitionCoefficient = settings.RegisterIntSetting(
 	2000/5,
 )
 
-// DefaultEntityRangeReplicaNum is the default replica number
-var DefaultEntityRangeReplicaNum = settings.RegisterIntSetting(
-	"sql.hashrouter.tsrangereplicanum",
-	"the ts range replica num in the cluster",
-	3,
-)
-
 // AllowAdvanceDistributeSettingName is the name of cluster setting server.allow_advanced_distributed_operations
 const AllowAdvanceDistributeSettingName = "server.advanced_distributed_operations.enabled"
 
