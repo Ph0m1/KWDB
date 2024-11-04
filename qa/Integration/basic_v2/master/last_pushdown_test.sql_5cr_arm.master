@@ -1727,6 +1727,7 @@ SQLSTATE: 22023
         │                | engine type                              | time series
         │                | aggregate 0                              | lastts(k_timestamp, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
         │                | scalar                                   |
+        │                | pushLocalAggToScan                       | true
         │                | addSynchronizer                          | true
         └── render       |                                          |
              │           | engine type                              | time series
@@ -1735,10 +1736,8 @@ SQLSTATE: 22023
              └── ts scan |                                          |
                          | ts-table                                 | t
                          | access mode                              | metaTable
-                         | scan agg 0                               | ANY_NOT_NULL(9223372036854775807)
-                         | scan agg 1                               | LASTTS(k_timestamp,k_timestamp,9223372036854775807)
-                         | scan agg 2                               | LAST(k_timestamp,k_timestamp,9223372036854775807)
-(20 rows)
+                         | use statistic                            | true
+(19 rows)
 > select lastts(k_timestamp),lastts(k_timestamp)+'1s' from t;
              lastts             |           ?column?
 --------------------------------+--------------------------------
@@ -1756,6 +1755,7 @@ SQLSTATE: 22023
         │                | engine type                              | time series
         │                | aggregate 0                              | lastts(k_timestamp, k_timestamp, '2970-01-01 00:00:00+00:00'::TIMESTAMPTZ)
         │                | scalar                                   |
+        │                | pushLocalAggToScan                       | true
         │                | addSynchronizer                          | true
         └── render       |                                          |
              │           | engine type                              | time series
@@ -1764,10 +1764,8 @@ SQLSTATE: 22023
              └── ts scan |                                          |
                          | ts-table                                 | t
                          | access mode                              | metaTable
-                         | scan agg 0                               | ANY_NOT_NULL(9223372036854775807)
-                         | scan agg 1                               | LASTTS(k_timestamp,k_timestamp,9223372036854775807)
-                         | scan agg 2                               | LAST(k_timestamp,k_timestamp,9223372036854775807)
-(20 rows)
+                         | use statistic                            | true
+(19 rows)
 > insert into t values('2023-10-10 11:00:00.688', 0.1, -3, 'z',0.033333,-30,-300,'zz','last测试','表达式测试','zzz','zzzz','zzzzz', 1);
 INSERT 1
 > insert into t values('2023-10-10 11:00:00.688', 0.3, -3, 'z',0.0033333,-30,-300,'zz','last测试','表达式测试','zzz','zzzz','zzzzz', 1);
