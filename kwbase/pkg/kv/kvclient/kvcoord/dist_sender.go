@@ -1818,7 +1818,7 @@ func (ds *DistSender) sendPartialBatch(
 		// row and the range descriptor hasn't changed, return the error
 		// to our caller.
 		switch tErr := pErr.GetDetail().(type) {
-		case *roachpb.SendError:
+		case *roachpb.SendError, *roachpb.DefaultReplicaReceiveTSRequestError:
 			// 1. We've tried all the replicas without success. Either they're all down,
 			// or we're using an out-of-date range descriptor. Invalidate the cache
 			// and try again with the new metadata. Re-sending the request is ok even
@@ -1928,6 +1928,21 @@ func (ds *DistSender) sendTsPartialBatch(
 	// row and the range descriptor hasn't changed, return the error
 	// to our caller.
 	switch tErr := pErr.GetDetail().(type) {
+	case *roachpb.DefaultReplicaReceiveTSRequestError:
+		log.Warningf(ctx, "got DefaultReplicaReceiveTSRequestError, evict and retry")
+		r.Reset()
+		// do not retry immediately
+		r.Next()
+		if err = rangeBatch.evictToken.Evict(ctx); err != nil {
+			return response{pErr: roachpb.NewError(err)}
+		}
+		var retryErr *roachpb.Error
+		reply, retryErr = ds.divideAndSendTsRowPutBatch(ctx, rangeBatch.ba, withCommit, batchIdx, r)
+		if retryErr == nil {
+			return response{reply: reply, positions: rangeBatch.positions}
+		}
+		return response{pErr: pErr}
+
 	case *roachpb.SendError:
 		// 1. We've tried all the replicas without success. Either they're all down,
 		// or we're using an out-of-date range descriptor. Invalidate the cache

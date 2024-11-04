@@ -452,7 +452,7 @@ func (b *replicaAppBatch) Stage(cmdI apply.Command) (apply.CheckedCommand, error
 	// reject a command, all will.
 	if !b.r.shouldApplyCommand(ctx, cmd, &b.state) {
 		if b.r.isTs() && cmd.IsLocal() {
-			log.Infof(ctx, "r%d applying command with forced error: %s, proposal %p", b.r.RangeID, cmd.forcedErr, cmd.proposal)
+			log.Infof(ctx, "r%d applying command with forced error: %s, proposal %x - %p", b.r.RangeID, cmd.forcedErr, cmd.idKey, cmd.proposal)
 		} else {
 			log.VEventf(ctx, 1, "applying command with forced error: %s", cmd.forcedErr)
 		}
@@ -1423,11 +1423,13 @@ func (sm *replicaStateMachine) ApplySideEffects(
 				} else {
 					switch req := reqs.Requests[0].GetInner().(type) {
 					default:
-						log.Infof(ctx, "higherReproposalsExist in %+v, r%d, table%d", req, sm.r.RangeID, sm.r.Desc().TableId)
+						log.Infof(ctx, "higherReproposalsExist in method(%d) [%v, %v], r%d, table%d",
+							req.Method(), req.Header().Key, req.Header().EndKey, sm.r.RangeID, sm.r.Desc().TableId)
 					}
 				}
 			}
-			log.Fatalf(ctx, "finishing proposal with outstanding reproposal at a higher max lease index, %d-%d", cmd.raftCmd.MaxLeaseIndex, cmd.proposal.command.MaxLeaseIndex)
+			log.Fatalf(ctx, "finishing proposal %p with outstanding reproposal at a higher max lease index, %d-%d",
+				cmd.proposal, cmd.raftCmd.MaxLeaseIndex, cmd.proposal.command.MaxLeaseIndex)
 		}
 		if !rejected && cmd.proposal.applied {
 			// If the command already applied then we shouldn't be "finishing" its

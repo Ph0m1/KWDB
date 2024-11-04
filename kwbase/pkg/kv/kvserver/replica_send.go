@@ -65,6 +65,10 @@ func (r *Replica) Send(
 ) (*roachpb.BatchResponse, *roachpb.Error) {
 	// TsRequest processing logic
 	if r.isTsRequest(ctx, &ba) {
+		if !r.isTs() {
+			log.Warningf(ctx, "%+v receive ts request when still be default range", r.Desc())
+			return nil, roachpb.NewError(&roachpb.DefaultReplicaReceiveTSRequestError{})
+		}
 		log.VEventf(ctx, 3, "replica : +%v", r)
 		return r.sendTS(ctx, &ba)
 	}

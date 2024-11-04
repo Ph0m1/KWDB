@@ -150,7 +150,7 @@ func (n *scatterNode) startExec(params runParams) error {
 		RequestHeader:   roachpb.RequestHeader{Key: n.run.span.Key, EndKey: n.run.span.EndKey},
 		RandomizeLeases: true,
 	}
-	log.Infof(params.ctx, "send AdminScatterRequest to [%v, %v]", n.run.span.Key, n.run.span.EndKey)
+	log.VEventf(params.ctx, 3, "send AdminScatterRequest to [%v, %v]", n.run.span.Key, n.run.span.EndKey)
 	res, pErr := kv.SendWrapped(params.ctx, db.NonTransactionalSender(), req)
 	if pErr != nil {
 		return pErr.GoError()

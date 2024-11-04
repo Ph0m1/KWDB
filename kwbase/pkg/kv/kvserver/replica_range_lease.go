@@ -208,7 +208,7 @@ func (p *pendingLeaseRequest) InitOrJoinRequest(
 	transfer bool,
 ) *leaseRequestHandle {
 	if nextLeaseHolder.GetTag() == roachpb.TS_REPLICA {
-		log.Infof(ctx, "request lease for %+v:\n %s", nextLeaseHolder, debug.Stack())
+		log.VEventf(ctx, 3, "request lease for %+v:\n %s", nextLeaseHolder, debug.Stack())
 	}
 
 	if nextLease, ok := p.RequestPending(); ok {
@@ -457,6 +457,9 @@ func (p *pendingLeaseRequest) requestLeaseAsync(
 			// is beneficial as it'll allow the replica to attempt to transfer again or
 			// extend the existing lease in the future.
 
+			if pErr == nil && p.repl.isTs() {
+				log.VEventf(ctx, 3, "request lease successfully")
+			}
 			p.repl.mu.Lock()
 			defer p.repl.mu.Unlock()
 			if ctx.Err() != nil {
