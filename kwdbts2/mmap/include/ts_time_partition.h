@@ -668,8 +668,8 @@ class TsTimePartition : public TSObject {
   KStatus PrepareTempPartition(uint32_t max_rows_per_block, uint32_t max_blocks_pre_seg,
                                uint32_t ts_version, TsTimePartition** dest_pt);
 
-  KStatus ReOrderSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables, uint32_t max_segment_id,
-    uint32_t max_dest_block_id, const std::string& partition_path, const std::string& dest_path, uint32_t* offset);
+  KStatus CopyConcurrentSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables, uint32_t max_segment_id,
+    uint32_t max_block_id, TsTimePartition* dest_pt);
 
   /**
    * Using ts_version to vacuum data, read ordered data from original partition and write into new tempory partition,

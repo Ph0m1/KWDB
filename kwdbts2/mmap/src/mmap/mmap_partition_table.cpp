@@ -834,28 +834,37 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
   return SUCCESS;
 }
 
-KStatus TsTimePartition::ReOrderSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables,
-  uint32_t max_segment_id, uint32_t max_dest_block_id, const std::string& partition_path, const std::string& dest_path,
-  uint32_t* offset) {
-  bool first_loop = true;
-  BLOCK_ID new_segment_id =0;
+KStatus TsTimePartition::CopyConcurrentSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables,
+  uint32_t max_segment_id, uint32_t max_block_id, TsTimePartition* dest_pt) {
   // Segment IDs are arranged in descending order from largest to smallest
   for (const auto& segment : segment_tables) {
     if (segment->segment_id() <= max_segment_id) {
       break;
     }
-    if (first_loop) {
-      *offset = segment->segment_id() - max_dest_block_id - 1;
-      first_loop = false;
-    }
-    new_segment_id = segment->segment_id() - *offset;
-    std::string segment_dir_path = partition_path + std::to_string(segment->segment_id()) + '/';
-    std::string new_segment_dir_path = dest_path + std::to_string(new_segment_id) + '/';
-    std::string cmd = "cp -rf " + segment_dir_path + " " + new_segment_dir_path;
+    std::string segment_dir_path = GetPath() + std::to_string(segment->segment_id()) + '/';
+    std::string cmd = "cp -rf " + segment_dir_path + " " + dest_pt->GetPath();
     if (!System(cmd)) {
       LOG_ERROR("Copy segment[%s] files failed, %s", segment_dir_path.c_str(), strerror(errno));
       return FAIL;
     }
+  }
+  //  Rebuild added block_item
+  bool first_loop = true;
+  for (BLOCK_ID block_id = max_block_id + 1; block_id <= GetMaxBlockID(); ++block_id) {
+    BlockItem* block_item = GetBlockItem(block_id);
+    BlockItem* new_block_item;
+    if (first_loop) {
+      // the block item is allocated from max_block_id + 1.
+      EntityHeader* dest_header = dest_pt->meta_manager_.getEntityHeader();
+      dest_header->cur_block_id = max_block_id;
+      first_loop = false;
+    }
+    dest_pt->meta_manager_.AddBlockItem(block_item->entity_id, &new_block_item);
+
+    memcpy(&new_block_item->crc, &block_item->crc, sizeof(uint32_t) + 4 * sizeof(bool) + sizeof(BLOCK_ID));
+    memcpy(&new_block_item->publish_row_count, &block_item->publish_row_count, 3 * sizeof(uint32_t) + 128 + 28);
+    // Update entity item, otherwise, all new blocks added in the future point to the same prev
+    dest_pt->meta_manager_.UpdateEntityItem(new_block_item->entity_id, new_block_item);
   }
   return KStatus::SUCCESS;
 }
@@ -898,7 +907,6 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     // calculate temporary partition's segment need how many blocks
     max_block_num += (count + CLUSTER_SETTING_MAX_ROWS_PER_BLOCK - 1) / CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;
     src_spans[entity_id] = block_spans;
-    LOG_INFO("Entity: %u, blocks: %lu, count: %d", entity_id, block_spans.size(), count);
   }
 
   if (max_block_num == 0) {
@@ -915,10 +923,9 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     data_segments_.GetAllKey(&segment_ids);
     if (segment_ids.empty()) {
       drop_partition = true;
-      vacuumUnlock();
-      return SUCCESS;
     }
     vacuumUnlock();
+    return SUCCESS;
   }
 
   // Step 3: Create temporary partition.
@@ -995,30 +1002,23 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   }
   std::vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
   data_segments_.GetAllValue(&segment_tables);
-  BLOCK_ID offset = UINT32_MAX;
   if (segment_tables.front()->segment_id() != max_segment_id) {
-    if (max_block_num == 0) {
-      s = ReOrderSegments(segment_tables, max_segment_id, 0, partition_dir, dest_path, &offset);
-    } else {
-      s = ReOrderSegments(segment_tables, max_segment_id, dest_pt->GetMaxBlockID(), partition_dir, dest_path, &offset);
-    }
+    s = CopyConcurrentSegments(segment_tables, max_segment_id, max_block_id, dest_pt);
     if (s != SUCCESS) {
       return s;
     }
   } else {
     dest_segment->setSegmentStatus(ActiveSegment);
   }
-  // Step 6: Rebuild added block_item
-  for (BLOCK_ID block_id = max_block_id + 1; block_id <= GetMaxBlockID(); ++block_id) {
-    BlockItem* block_item = GetBlockItem(block_id);
-    BlockItem* new_block_item;
-    dest_pt->meta_manager_.AddBlockItem(block_item->entity_id, &new_block_item);
-    assert(block_id - new_block_item->block_id == offset);
-    memcpy(&new_block_item->crc, &block_item->crc, sizeof(uint32_t) + 4 * sizeof(bool) + sizeof(BLOCK_ID));
-    memcpy(&new_block_item->publish_row_count, &block_item->publish_row_count, 3 * sizeof(uint32_t) + 128 + 28);
+
+  // count(*) use entity_item->row_written
+  auto latest_entities = GetEntities();
+  for (auto& entity_id : latest_entities) {
+    EntityItem* entity_item = dest_pt->getEntityItem(entity_id);
+    entity_item->row_written = getEntityItem(entity_id)->row_written;
   }
 
-  // Step 7: Drop partition's old segments and move vacuumed segments to original partition
+  // Step 6: Drop partition's old segments and move vacuumed segments to original partition
   segment_ids.clear();
   data_segments_.GetAllKey(&segment_ids);
   if (DropSegmentDir(segment_ids) < 0) {
@@ -1032,7 +1032,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     LOG_ERROR("mv tmp partition dir failed");
     // mv failed, still need to reload meta and segments, not return fail
   }
-  // Step 8: Reload partition
+  // Step 7: Reload partition
   // reopen meta.0
   ErrorInfo err_info;
   if (openBlockMeta(MMAP_OPEN_NORECURSIVE, err_info) < 0) {
