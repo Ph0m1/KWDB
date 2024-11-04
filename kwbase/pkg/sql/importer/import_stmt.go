@@ -1240,7 +1240,7 @@ func (r *importResumer) dropTables(
 	} else {
 		tbl := details.Tables[0]
 		if tbl.IsNew { /* Delete tables created during import */
-			dropTable := fmt.Sprintf(`DROP TABLE %s`, strings.Join([]string{details.DatabaseName, tbl.TableName}, `.`))
+			dropTable := fmt.Sprintf(`DROP TABLE %s`, strings.Join([]string{details.DatabaseName, tbl.SchemaName, tbl.TableName}, `.`))
 			if _, err := executor.Exec(ctx, `import-drop-table`, txn, dropTable); err != nil {
 				return err
 			}

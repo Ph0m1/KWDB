@@ -888,6 +888,50 @@ func TestExportDatabaseWithMultiEmptySchemas(t *testing.T) {
 	// checkSchemaSql(t, filepath.Join(dir, database), schema2)
 }
 
+// Import files with schema for testing
+func TestImportSchemaRevert(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+	dir, cleanupDir := testutils.TempDir(t)
+	defer cleanupDir()
+
+	database := "testdb"
+	table := "t1"
+	schema := "sc"
+	cols := []string{"num", "square", "extra"}
+	stmt := []string{
+		fmt.Sprintf(`CREATE DATABASE %s`, database),
+		fmt.Sprintf(`USE %s`, database),
+		fmt.Sprintf(`CREATE SCHEMA %s`, schema),
+		fmt.Sprintf(`SET SEARCH_PATH TO %s`, schema),
+		fmt.Sprintf(`CREATE TABLE %s (%s INT, %s VARCHAR, %s INT)`, table, cols[0], cols[1], cols[2]),
+	}
+	for i := 0; i < 10; i++ {
+		stmt = append(stmt, fmt.Sprintf(`INSERT INTO %s VALUES (%d, '%d', %d)`, table, i+1, (i+1)*(i+1), i))
+	}
+
+	srv, db, _ := serverutils.StartServer(t, base.TestServerArgs{
+		ExternalIODir: dir,
+		UseDatabase:   database,
+	})
+	defer srv.Stopper().Stop(context.Background())
+	sqlDB := sqlutils.MakeSQLRunner(db)
+
+	for _, s := range stmt {
+		fmt.Println("exec: ", s)
+		sqlDB.Exec(t, s)
+	}
+
+	// export database with comment for DB
+	sqlDB.QueryStr(t, fmt.Sprintf(`EXPORT INTO CSV 'nodelocal://1/%s' FROM TABLE %s`, database, table))
+	sqlDB.QueryStr(t, fmt.Sprintf(`drop table %s`, table))
+	_, err := sqlDB.DB.ExecContext(context.Background(), fmt.Sprintf(`import table create using "nodelocal://1/%s/meta.sql" csv 
+  data ("nodelocal://1/%s");`, database, database))
+	str := "pq: expected a file but \"testdb\" is a directory"
+	if err.Error() != str {
+		t.Fatal(fmt.Errorf("err is not expected, err is  %s", err.Error()))
+	}
+}
+
 // Export the database of one table with comment
 func TestExportDBWithCommentForDB(t *testing.T) {
 	defer leaktest.AfterTest(t)()
