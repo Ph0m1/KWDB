@@ -37,10 +37,12 @@ class TableStatisticScanOperator : public BaseOperator {
   EEIteratorErrCode Reset(kwdbContext_p ctx) override;
   [[nodiscard]] BaseOperator* GetInput() const { return input_; }
   BaseOperator* Clone() override;
+  k_int64 ProcessPTagSpanFilter(RowBatch *row_batch);
 
  protected:
   EEIteratorErrCode InitHandler(kwdbContext_p ctx);
-  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatch **row_batch);
+  EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx,
+                                     ScanRowBatch **row_batch);
 
  protected:
   TSPostProcessSpec *post_{nullptr};
@@ -49,11 +51,8 @@ class TableStatisticScanOperator : public BaseOperator {
   std::vector<KwTsSpan> ts_kwspans_;
   StatisticSpecResolve param_;
   ScanRowBatch *row_batch_{nullptr};
-
- protected:
   BaseOperator *input_{nullptr};  // input iterator
-
- protected:
   StorageHandler *handler_{nullptr};
+  k_int32 tag_count_read_index_{-1};
 };
 }  // namespace kwdbts

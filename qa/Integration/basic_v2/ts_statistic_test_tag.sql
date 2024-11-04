@@ -78,4 +78,39 @@ select count(*),last(k_timestamp) from test1.t7  where k_timestamp > '2024-7-25 
 use defaultdb;
 drop database test1 CASCADE;
 
+create ts database test;
+use test;
+create table t2(ts timestamp not null, e1 int) tags(t int not null) primary tags(t);
+insert into t2 values(1,1,1);
+insert into t2 values(2,2,2);
+insert into t2 values(3,3,3);
+select *  from t2 order by ts;
+select count(t),max(t) from t2 where ts<='1970-01-01 00:00:00.002';
+select count(t),max(t),first(t) from t2 where ts<='1970-01-01 00:00:00.002';
+select count(t),max(t) from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(t),max(t),first(t) from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(t),first(t),t from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(t),t from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(t),last(t),t from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(t),last(t) from t2;
+select count(e1),max(t),first_row(t),t from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(t),first(t) from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),first(t) from t2 where ts<='1970-01-01 00:00:00.002';
+select max(t) from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(t),first(t)  from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
+select count(t),max(t) from t2 where ts<='2024-01-01 00:00:00.002';
+
+create table t3(ts timestamp not null, e1 int) tags(t int not null,t2 int ) primary tags(t);
+insert into t3 values('2024-01-01 00:00:00.001',1,1,2);
+insert into t3 values('2024-01-01 00:00:00.002',2,2,3);
+insert into t3 values('2024-01-01 00:00:00.003',3,3,4);
+select * from t3 order by ts;
+select count(t),max(t) from t3 where ts<='1970-01-01 00:00:00.002';
+select count(t),max(t),first(t) from t3 where ts<='2024-01-01 00:00:00.002';
+select count(t2),max(t2),first(t2) from t3 where ts<='2024-01-01 00:00:00.002';
+select count(e1),max(e1),first(t2),t from t3 where ts<='2024-01-01 00:00:00.002' group by t,ts order by ts;
+select count(e1),max(e1),sum(t2),t from t3 where ts<='2024-01-01 00:00:00.004' group by t,ts order by ts;
+select min(t2),max(t2),first(t2)  from t3 where ts<=' 2024-01-01 00:00:00.002';
+drop database test cascade;
+
 

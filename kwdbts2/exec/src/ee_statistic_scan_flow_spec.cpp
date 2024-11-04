@@ -128,6 +128,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
   std::vector<k_int64> tmp_tag_points_;
   k_int16 last_point_index_ = 0;
   k_int16 tag_index_{0};
+
   for (k_int32 i = 0; i < col_size; ++i) {
     TSStatisticReaderSpec_Params params = spec_->paramidx(i);
     if (params.param(0).typ() == params.param(0).const_) {
@@ -217,7 +218,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
     insert_last_tag_ts_num_ = tag_last_size;
   }
 
-  if (is_contain_sum_count) {
+  if (is_contain_sum_count || (tag_index_ > 0)) {
     insert_ts_index_ = 1;
     table_->scan_cols_.insert(table_->scan_cols_.begin(), 0);
     table_->scan_real_agg_types_.insert(table_->scan_real_agg_types_.begin(),
@@ -258,7 +259,15 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
     table_->scan_real_last_ts_points_.clear();
   }
 
+  if (tag_index_ > 0) {
+    tag_count_index_ = insert_ts_index_ - 1;
+  }
+
   Return(code);
+}
+
+k_int32 StatisticSpecResolve::ResolveChecktTagCount() {
+  return tag_count_index_;
 }
 
 void StatisticSpecResolve::RenderSize(kwdbContext_p ctx,

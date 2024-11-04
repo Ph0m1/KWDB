@@ -30,6 +30,7 @@ class StatisticSpecResolve : public PostResolve {
       kwdbContext_p ctx, const std::shared_ptr<VirtualField> &virtualField,
       Field **field) override;
   EEIteratorErrCode ResolveScanCols(kwdbContext_p ctx);
+  k_int32 ResolveChecktTagCount();
 
  protected:
   EEIteratorErrCode NewAggBaseField(kwdbContext_p ctx, Field **field,
@@ -45,6 +46,7 @@ class StatisticSpecResolve : public PostResolve {
 
  protected:
   k_bool is_have_tag_first_{false};
+  k_int32 tag_count_index_{-1};
 };
 
 }  // namespace kwdbts

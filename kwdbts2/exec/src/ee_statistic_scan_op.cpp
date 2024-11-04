@@ -156,6 +156,10 @@ EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
       LOG_ERROR("ResolveOutputFields() failed\n");
       break;
     }
+
+    // dispose tag span filter
+    tag_count_read_index_ = param_.ResolveChecktTagCount();
+
     // init column info used by data chunk.
     output_col_info_.reserve(output_fields_.size());
     for (auto field : output_fields_) {
@@ -197,7 +201,6 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
   }
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
   KWThdContext *thd = current_thd;
-  k_int64 counter = 0;
   do {
     code = InitScanRowBatch(ctx, &row_batch_);
     if (EEIteratorErrCode::EE_OK != code) {
@@ -223,10 +226,12 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
 
     // reset line
     row_batch_->ResetLine();
-    counter+=row_batch_->Count();
 
     if (!is_done_) {
       if (row_batch_->Count() > 0) {
+        if (0 == ProcessPTagSpanFilter(row_batch_)) {
+          continue;
+        }
         if (current_data_chunk_->Capacity() - current_data_chunk_->Count() < row_batch_->Count()) {
           if (current_data_chunk_->Count() > 0) {
             output_queue_.push(std::move(current_data_chunk_));
@@ -242,6 +247,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
             Return(EEIteratorErrCode::EE_ERROR)
           }
         }
+
         KStatus status = current_data_chunk_->AddRowBatchData(ctx, row_batch_, renders_);
         if (status != KStatus::SUCCESS) {
           Return(EEIteratorErrCode::EE_ERROR);
@@ -274,6 +280,19 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
       Return(code)
     }
   }
+}
+
+k_int64 TableStatisticScanOperator::ProcessPTagSpanFilter(RowBatch* row_batch) {
+  if (tag_count_read_index_ < 0) {
+    return 1;
+  }
+
+  row_batch->ResetLine();
+  char* data = row_batch->GetData(tag_count_read_index_, sizeof(k_int64),
+                                  roachpb::KWDBKTSColumn::TYPE_DATA,
+                                  roachpb::DataType::BIGINT);
+  k_int64 val = *reinterpret_cast<k_int64*>(data);
+  return val;
 }
 
 BaseOperator* TableStatisticScanOperator::Clone() {

@@ -661,7 +661,8 @@ char *FieldSumStatisticTagSum::get_ptr() {
 }
 
 k_bool FieldSumStatisticTagSum::is_nullable() {
-  return current_thd->GetRowBatch()->IsNull(num_, column_type_);
+  return args_[0]->is_nullable() ||
+         current_thd->GetRowBatch()->IsNull(num_, column_type_);
 }
 
 Field *FieldSumStatisticTagSum::field_to_copy() {
