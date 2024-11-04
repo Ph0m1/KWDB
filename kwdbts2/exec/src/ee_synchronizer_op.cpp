@@ -141,9 +141,12 @@ EEIteratorErrCode SynchronizerOperator::Init(kwdbContext_p ctx) {
 void SynchronizerOperator::CalculateDegree() {
   k_uint32 dop = degree_;
   // TagScan does not support parallelism, forcing parallelism to be set to 1
+  if (table_->only_tag_) {
+    dop = 1;
+  }
   char *class_name =
       abi::__cxa_demangle(typeid(*input_).name(), NULL, NULL, NULL);
-  if (strcmp(class_name, "kwdbts::TagScanOperator") == 0 || strcmp(class_name, "kwdbts::TsSamplerOperator") == 0) {
+  if (strcmp(class_name, "kwdbts::TsSamplerOperator") == 0) {
     dop = 1;
   }
   free(class_name);

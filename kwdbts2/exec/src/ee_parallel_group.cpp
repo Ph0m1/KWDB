@@ -56,49 +56,70 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
   thd_->SetParallelGroup(this);
   auto &instance = ExecPool::GetInstance();
   auto &g_error_info = EEPgErrorInfo::GetPgErrorInfo();
-  if (ps_ == PS_TASK_INIT) {
-    code = iterator_->Start(ctx);
-    if (code != EE_OK || g_error_info.code > 0 || CheckCancel(ctx) != SUCCESS) {
-      Close(ctx, code);
-      return;
+  try {
+    if (ps_ == PS_TASK_INIT) {
+      code = iterator_->Start(ctx);
+      if (code != EE_OK || g_error_info.code > 0 ||
+          CheckCancel(ctx) != SUCCESS) {
+        Close(ctx, code);
+        return;
+      }
     }
-  }
-  if (ps_ == PS_TASK_PAUSE && chunk_) {
-    bool wait = ExecPool::GetInstance().GetWaitThreadNum() > 0 ? true : false;
-    KStatus ret = sparent_->PushData(chunk_, wait);
-    if (ret != KStatus::SUCCESS) {
-      repeat_++;
-      Pause();
-      return;
+    if (ps_ == PS_TASK_PAUSE && chunk_) {
+      bool wait = ExecPool::GetInstance().GetWaitThreadNum() > 0 ? true : false;
+      KStatus ret = sparent_->PushData(chunk_, wait);
+      if (ret != KStatus::SUCCESS) {
+        repeat_++;
+        Pause();
+        return;
+      }
+      chunk_.reset();
     }
-    chunk_.reset();
-  }
-  ps_ = PS_TASK_RUN;
-  repeat_ = 1;
-  while (true) {
-    if (is_stop_ || CheckCancel(ctx) != SUCCESS) {
-      Close(ctx, code);
-      break;
-    }
+    ps_ = PS_TASK_RUN;
+    repeat_ = 1;
+    while (true) {
+      if (is_stop_ || CheckCancel(ctx) != SUCCESS) {
+        Close(ctx, code);
+        break;
+      }
 
-    DataChunkPtr ptr = nullptr;
-    code = iterator_->Next(ctx, ptr);
-    if (EEIteratorErrCode::EE_OK != code || g_error_info.code > 0 || is_stop_) {
-      Close(ctx, code);
-      break;
+      DataChunkPtr ptr = nullptr;
+      code = iterator_->Next(ctx, ptr);
+      if (EEIteratorErrCode::EE_OK != code || g_error_info.code > 0 ||
+          is_stop_) {
+        Close(ctx, code);
+        break;
+      }
+      ptr->ResetLine();
+      bool wait =
+          (index_ < 2 || instance.GetWaitThreadNum() > 0) ? true : false;
+      bool reduce_dop = false;
+      KStatus ret = sparent_->PushData(ptr, reduce_dop, wait);
+      if (!wait && reduce_dop && index_ > 1) {
+        thd_->auto_quit_ = true;
+      }
+      if (ret != KStatus::SUCCESS) {
+        chunk_ = std::move(ptr);
+        Pause();
+        break;
+      }
     }
-    ptr->ResetLine();
-    bool wait = (index_ < 2 || instance.GetWaitThreadNum() > 0) ? true : false;
-    bool reduce_dop = false;
-    KStatus ret = sparent_->PushData(ptr, reduce_dop, wait);
-    if (!wait && reduce_dop && index_ > 1) {
-      thd_->auto_quit_ = true;
-    }
-    if (ret != KStatus::SUCCESS) {
-      chunk_ = std::move(ptr);
-      Pause();
-      break;
-    }
+  } catch (const std::bad_alloc &e) {
+    LOG_ERROR("throw bad_alloc exception: %s.", e.what());
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, e.what());
+    Close(ctx, EEIteratorErrCode::EE_ERROR);
+  } catch (const std::runtime_error &e) {
+    LOG_ERROR("throw runtime_error exception: %s.", e.what());
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, e.what());
+    Close(ctx, EEIteratorErrCode::EE_ERROR);
+  } catch (const std::exception &e) {
+    LOG_ERROR("throw other exception: %s.", e.what());
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, e.what());
+    Close(ctx, EEIteratorErrCode::EE_ERROR);
+  } catch (...) {
+    LOG_ERROR("throw unknown exception.");
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "unknown exception.");
+    Close(ctx, EEIteratorErrCode::EE_ERROR);
   }
 }
 

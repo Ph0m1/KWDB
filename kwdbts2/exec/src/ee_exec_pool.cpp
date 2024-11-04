@@ -128,7 +128,7 @@ void ExecPool::Routine(void *arg) {
         task_ptr->SetState(ExecTaskState::EXEC_TASK_STATE_IDLE);
       } catch (...) {
         constexpr char ERROR_MESSAGE[128] =
-              "some unknown exception was thrown in execution of the thread pool!";
+            "some unknown exception was thrown in execution of the thread pool!";
         LOG_ERROR(ERROR_MESSAGE);
       }
       l.lock();

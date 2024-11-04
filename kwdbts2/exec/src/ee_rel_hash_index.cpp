@@ -260,11 +260,11 @@ void RelHashIndex::setLSN(uint64_t lsn) {
   meta_data.m_lsn = lsn;
 }
 
-RelHashIndexData* RelHashIndex::row(size_t n) const {
+inline RelHashIndexData* RelHashIndex::row(size_t n) const {
   return reinterpret_cast<RelHashIndexData*>(mem_hash_ + (n - 1) * meta_data.m_record_size);
 }
 
-char* RelHashIndex::keyvalue(size_t n) const {
+inline char* RelHashIndex::keyvalue(size_t n) const {
   return mem_hash_ + (n - 1) * meta_data.m_record_size + sizeof(RelHashIndexData);
 }
 
