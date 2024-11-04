@@ -173,11 +173,13 @@ int TagTable::InsertTagRecord(kwdbts::Payload &payload, int32_t sub_group_id, in
   // 1. check version
   auto tag_version_object = m_version_mgr_->GetVersionObject(payload.GetTsVersion());
   if (nullptr == tag_version_object) {
+    LOG_ERROR("Tag table version[%u] doesnot exist.", payload.GetTsVersion());
     return -1;
   }
   TableVersion tag_partition_version = tag_version_object->metaData()->m_real_used_version_;
   auto tag_partition_table = m_partition_mgr_->GetPartitionTable(tag_partition_version);
   if (nullptr == tag_partition_table) {
+    LOG_ERROR("Tag partition table version[%u] doesnot exist.", tag_partition_version);
     return -1;
   }
 
@@ -805,6 +807,13 @@ int TagPartitionTableManager::CreateTagPartitionTable(const std::vector<TagInfo>
   std::string partition_table_path = m_tbl_sub_path_ + "tag" + "_" + std::to_string(ts_version) + "/";
   std::string real_path = m_db_path_ + partition_table_path;
   wrLock();
+  // check partition table 
+  auto part_tbl = m_partition_tables_.find(ts_version);
+  if (part_tbl != m_partition_tables_.end()) {
+     unLock();
+     LOG_WARN("tag partition table version [%u] already exist.", ts_version);
+     return 0;
+  }
   if (access(real_path.c_str(), 0)) {
     // path does not exist
     if (!MakeDirectory(real_path)) {
