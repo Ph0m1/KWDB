@@ -245,6 +245,38 @@ func (inStr insertResponse) MarshalJSON() ([]byte, error) {
 	return []byte(str), nil
 }
 
+// splitStringQuotes handles special characters that exist for string splitting
+func splitStringQuotes(data string, separator rune) []string {
+	var result []string
+	var start int
+	inQuotes := false
+	start = 0
+
+	for i, char := range data {
+		switch char {
+		case '"':
+			inQuotes = !inQuotes
+		case separator:
+			if inQuotes {
+				// do not process separator inside quotes
+				continue
+			}
+			// outside of quotes, extract substring and add to result
+			if start < i {
+				result = append(result, data[start:i])
+			}
+			// update starting position
+			start = i + 1
+		}
+	}
+
+	// add the last field
+	if start < len(data) {
+		result = append(result, data[start:])
+	}
+	return result
+}
+
 func (ddlStr ddlResponse) MarshalJSON() ([]byte, error) {
 	results := strings.Split(ddlStr.Desc, ",")
 	resultStr := "["
@@ -1385,8 +1417,7 @@ func makeInfluxDBStmt(stmtOriginal string) (teleInsertStmt string, teleCreateStm
 			fmt.Println("invalid data for Influxdb protocol, please check the format.")
 		}
 	}()
-
-	slice := strings.Split(stmtOriginal, " ")
+	slice := splitStringQuotes(stmtOriginal, ' ')
 	attribute := strings.Split(slice[0], ",")
 	tblName := attribute[0]
 
@@ -1417,10 +1448,9 @@ func makeInfluxDBStmt(stmtOriginal string) (teleInsertStmt string, teleCreateStm
 		createTagStmt += coltagType[index]
 	}
 	createTagStmt += ")"
-
-	colkeyValue := strings.Split(slice[1], ",")
+	colkeyValue := splitStringQuotes(slice[1], ',')
 	for _, keyValue := range colkeyValue {
-		obj := strings.Split(keyValue, "=")
+		obj := strings.SplitN(keyValue, "=", 2)
 		colKey = append(colKey, obj[0])
 		colvalueName = append(colvalueName, obj[0])
 		value, col := determineType(obj[1])
@@ -1523,13 +1553,6 @@ func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 		insertflag := strings.Contains(strings.ToLower(insertTelegraphStmt), insertWithoutSchema)
 		if !insertflag {
 			desc += "can not find insert statement and please check" + ";"
-			code = -1
-			continue
-		}
-
-		teleStmtCount := strings.Count(insertTelegraphStmt, ";")
-		if teleStmtCount > 1 {
-			desc += "only support single statement for each influxdb interface and please check" + ";"
 			code = -1
 			continue
 		}
