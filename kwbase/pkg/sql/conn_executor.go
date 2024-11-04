@@ -2341,6 +2341,7 @@ func (ex *connExecutor) txnStateTransitionsApplyWrapper(
 	ev fsm.Event, payload fsm.EventPayload, res ResultBase, pos CmdPos,
 ) (advanceInfo, error) {
 	var implicitTxn bool
+
 	if os, ok := ex.machine.CurState().(stateOpen); ok {
 		implicitTxn = os.ImplicitTxn.Get()
 	}
@@ -2362,6 +2363,7 @@ func (ex *connExecutor) txnStateTransitionsApplyWrapper(
 	// Handle transaction events which cause updates to txnState.
 	switch advInfo.txnEvent {
 	case noEvent:
+
 	case txnStart:
 		ex.extraTxnState.autoRetryCounter = 0
 		ex.extraTxnState.onTxnFinish = ex.recordTransactionStart()

@@ -819,6 +819,24 @@ func (t *tableState) findForTimestamp(
 	return nil, false, errReadOlderTableVersion
 }
 
+// findForTableVersion finds a table descriptor valid for the version.
+func (t *tableState) findForTableVersion(version sqlbase.DescriptorVersion) *tableVersionState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Acquire a lease if no table descriptor exists in the cache.
+	if len(t.mu.active.data) == 0 {
+		return nil
+	}
+	// Walk back the versions to find one that is valid for the timestamp.
+	for i := len(t.mu.active.data) - 1; i >= 0; i-- {
+		if table := t.mu.active.data[i]; table.Version == version {
+			return table
+		}
+	}
+	return nil
+}
+
 // Read an older table descriptor version for the particular timestamp
 // from the store. We unfortunately need to read more than one table
 // version just so that we can set the expiration time on the descriptor

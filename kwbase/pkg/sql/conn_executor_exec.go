@@ -358,6 +358,9 @@ func (ex *connExecutor) execPortal(
 func (ex *connExecutor) execStmtInOpenState(
 	ctx context.Context, stmt Statement, res RestrictedCommandResult, pinfo *tree.PlaceholderInfo,
 ) (retEv fsm.Event, retPayload fsm.EventPayload, retErr error) {
+	// Update the deadline on the transaction based on the collections.
+	//ex.extraTxnState.tables.MaybeUpdateDeadline(ctx, ex.state.mu.txn)
+
 	ex.incrementStartedStmtCounter(stmt)
 	defer func() {
 		if retErr == nil && !payloadHasError(retPayload) {
@@ -911,6 +914,9 @@ func (ex *connExecutor) commitSQLTransactionInternal(
 	if err := ex.checkTableTwoVersionInvariant(ctx); err != nil {
 		return err
 	}
+	// This is the last step before committing a transaction.
+	// This is a perfect time to refresh the deadline prior to committing.
+	ex.extraTxnState.tables.MaybeUpdateDeadline(ctx, ex.state.mu.txn)
 
 	if err := ex.state.mu.txn.Commit(ctx); err != nil {
 		return err

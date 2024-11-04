@@ -707,6 +707,33 @@ func (txn *Txn) CommitInBatch(ctx context.Context, b *Batch) error {
 	return txn.Run(ctx, b)
 }
 
+// DeadlineLikelySufficient returns true if there currently is a deadline and
+// that deadline is earlier than either the ProvisionalCommitTimestamp or
+// the current reading of the node's HLC clock.
+func (txn *Txn) DeadlineLikelySufficient() bool {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	// Instead of using the current HLC clock we will
+	// use the current time with a fudge factor because:
+	// 1) The clocks are desynchronized, so we may have
+	//		been pushed above the current time.
+	// 2) There is a potential to race against concurrent pushes,
+	//    which a future timestamp will help against.
+	// 3) If we are writing to non-blocking ranges than any
+	//    push will be into the future.
+	getTargetTS := txn.db.Clock().Now()
+
+	return txn.mu.deadline != nil &&
+		// Avoid trying to get the txn mutex again by directly
+		// invoking ProvisionalCommitTimestamp versus calling
+		// ProvisionalCommitTimestampLocked on the Txn.
+		(txn.mu.deadline.Less(txn.mu.sender.ProvisionalCommitTimestamp()) ||
+			// In case the transaction gets pushed and the push is not observed,
+			// we cautiously also indicate that the deadline maybe expired if
+			// the current HLC clock (with a fudge factor) exceeds the deadline.
+			txn.mu.deadline.Less(getTargetTS))
+}
+
 // CommitOrCleanup sends an EndTxnRequest with Commit=true.
 // If that fails, an attempt to rollback is made.
 // txn should not be used to send any more commands after this call.
@@ -733,18 +760,17 @@ func (txn *Txn) UpdateDeadlineMaybe(ctx context.Context, deadline hlc.Timestamp)
 
 	txn.mu.Lock()
 	defer txn.mu.Unlock()
-	if txn.mu.deadline == nil || deadline.Less(*txn.mu.deadline) {
-		readTimestamp := txn.readTimestampLocked()
-		if deadline.Less(txn.readTimestampLocked()) {
-			log.Fatalf(ctx, "deadline below read timestamp is nonsensical; "+
-				"txn has would have no change to commit. Deadline: %s. Read timestamp: %s.",
-				deadline, readTimestamp)
-		}
-		txn.mu.deadline = new(hlc.Timestamp)
-		*txn.mu.deadline = deadline
-		return true
+
+	readTimestamp := txn.readTimestampLocked()
+	if deadline.Less(txn.readTimestampLocked()) {
+		log.Fatalf(ctx, "deadline below read timestamp is nonsensical; "+
+			"txn has would have no change to commit. Deadline: %s. Read timestamp: %s.",
+			deadline, readTimestamp)
 	}
-	return false
+
+	txn.mu.deadline = new(hlc.Timestamp)
+	*txn.mu.deadline = deadline
+	return true
 }
 
 // resetDeadlineLocked resets the deadline.

@@ -162,7 +162,11 @@ func (tb *tableWriterBase) curBatchSize() int { return tb.batchSize }
 func (tb *tableWriterBase) finalize(
 	ctx context.Context, tableDesc *sqlbase.ImmutableTableDescriptor,
 ) (err error) {
-	if tb.autoCommit == autoCommitEnabled {
+	if tb.autoCommit == autoCommitEnabled &&
+		// Also, we don't want to try to commit here if the deadline is expired.
+		// If we bubble back up to SQL then maybe we can get a fresh deadline
+		// before committing.
+		!tb.txn.DeadlineLikelySufficient() {
 		log.Event(ctx, "autocommit enabled")
 		// An auto-txn can commit the transaction with the batch. This is an
 		// optimization to avoid an extra round-trip to the transaction

@@ -484,10 +484,10 @@ func TestUpdateDeadlineMaybe(t *testing.T) {
 	}
 
 	futureDeadline := hlc.Timestamp{WallTime: 11, Logical: 1}
-	if txn.UpdateDeadlineMaybe(ctx, futureDeadline) {
-		t.Errorf("expected no update, but update happened")
+	if !txn.UpdateDeadlineMaybe(ctx, futureDeadline) {
+		t.Errorf("expected update, but no update happened")
 	}
-	if d := *txn.deadline(); d != deadline {
+	if d := *txn.deadline(); d != futureDeadline {
 		t.Errorf("unexpected deadline: %s", d)
 	}
 

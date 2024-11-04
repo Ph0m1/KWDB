@@ -45,6 +45,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
+	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 )
@@ -974,6 +975,36 @@ func (tc *TableCollection) copyModifiedSchema(to *TableCollection) {
 	// Do not copy the leased descriptors because we do not want
 	// the leased descriptors to be released by the "to" TableCollection.
 	// The "to" TableCollection can re-lease the same descriptors.
+}
+
+// MaybeUpdateDeadline updates the deadline in a given transaction
+// based on the leased descriptors in this collection. This update is
+// only done when a deadline exists.
+func (tc *TableCollection) MaybeUpdateDeadline(ctx context.Context, txn *kv.Txn) {
+	leaseDeadline, haveDeadline := tc.Deadline()
+	if haveDeadline {
+		txn.UpdateDeadlineMaybe(ctx, leaseDeadline)
+	}
+	return
+}
+
+// Deadline returns the latest expiration from our leased
+// descriptors which should be the transaction's deadline.
+func (tc *TableCollection) Deadline() (deadline hlc.Timestamp, haveDeadline bool) {
+	for _, l := range tc.leasedTables {
+		tabState := tc.leaseMgr.findTableState(l.ID, false)
+		if tabState != nil {
+			versionState := tabState.findForTableVersion(l.Version)
+			if versionState != nil {
+				expiration := versionState.expiration
+				if !haveDeadline || expiration.Less(deadline) {
+					haveDeadline = true
+					deadline = expiration
+				}
+			}
+		}
+	}
+	return deadline, haveDeadline
 }
 
 type tableCollectionModifier interface {
