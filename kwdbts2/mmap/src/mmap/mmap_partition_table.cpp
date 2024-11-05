@@ -56,6 +56,10 @@ TsTimePartition::~TsTimePartition() {
     delete vacuum_insert_lock_;
     vacuum_insert_lock_ = nullptr;
   }
+  if (vacuum_delete_lock_) {
+    delete vacuum_delete_lock_;
+    vacuum_delete_lock_ = nullptr;
+  }
   if (active_segment_lock_) {
     delete active_segment_lock_;
     active_segment_lock_ = nullptr;
@@ -962,21 +966,21 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
         uint32_t row_count = block_span.row_num;
         std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block_item->block_id);
         if (segment_tbl == nullptr) {
-          LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item->block_id, partition_dir.c_str());
+          LOG_ERROR("Can not find segment use block [%d], in partition [%s]", cur_block_item->block_id, partition_dir.c_str());
           return FAIL;
         }
         ResultSet res{num_col};
         // Step 4.1: Read data after vacuum
         s = GetVacuumData(segment_tbl, cur_block_item, block_start_row + 1, row_count, ts_version, &res);
         if (s != SUCCESS) {
-          LOG_ERROR("Get vacuum data failed.");
+          LOG_ERROR("Get vacuum data failed");
           // Defer will clear data
           return s;
         }
         // Step 4.2: Write into des_pt.
         s = WriteVacuumData(dest_pt, entity_id, &res, row_count);
         if (s != SUCCESS) {
-          LOG_ERROR("Get vacuum data failed.");
+          LOG_ERROR("Write vacuum data failed");
           // Defer will clear data
           return s;
         }
@@ -992,6 +996,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   dest_pt->maxTimestamp() = maxTimestamp();
   std::shared_ptr<MMapSegmentTable> dest_segment = dest_pt->getSegmentTable(1);
   dest_segment->setSegmentStatus(InActiveSegment);
+
   // Copy added segment files
   vacuumLock();
   Defer defer{[&]() { vacuumUnlock(); }};
@@ -1026,6 +1031,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     return FAIL;
   }
   data_segments_.Clear();
+  meta_manager_.release(); // avoid memory leak
 
   std::string cmd = "mv " + dest_path + "* " + partition_dir;
   if (!System(cmd)) {
@@ -1290,6 +1296,8 @@ int TsTimePartition::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64
 int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const std::vector<KwTsSpan>& ts_spans,
                                 vector<DelRowSpan>* delete_rows, uint64_t* count,
                                 ErrorInfo& err_info, bool evaluate_del) {
+  MUTEX_LOCK(vacuum_delete_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   // 1. using primary_tag\start\end, get all satisfied rows
   // 2.mark rows delete flag
   EntityItem* entity_item = getEntityItem(entity_id);

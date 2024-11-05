@@ -51,7 +51,9 @@ class TsTimePartition : public TSObject {
 
   TsTimePartitionRWLatch* vacuum_query_lock_;
 
-  TsTimePartitionLatch* vacuum_insert_lock_;
+  TsTimePartitionLatch* vacuum_insert_lock_; // control insert & vacuum concurrency
+  TsTimePartitionLatch* vacuum_delete_lock_; // control delete & vacuum concurrency
+
   TsTimePartitionLatch* active_segment_lock_;
   TsHashLatch entity_item_latch_;  // control entity item row written
 
@@ -108,6 +110,7 @@ class TsTimePartition : public TSObject {
     vacuum_query_lock_ = new TsTimePartitionRWLatch(RWLATCH_ID_MMAP_PARTITION_TABLE_RWLOCK);
     active_segment_lock_ = new TsTimePartitionLatch(LATCH_ID_MMAP_PARTITION_TABLE_SEGMENTS_MUTEX);
     vacuum_insert_lock_ = new TsTimePartitionLatch(LATCH_ID_PARTITION_VACUUM_WRITE_MUTEX);
+    vacuum_delete_lock_ = new TsTimePartitionLatch(LATCH_ID_PARTITION_VACUUM_DELETE_MUTEX);
     m_ref_cnt_mtx_ = new TsTimePartitionCntMutex(LATCH_ID_PARTITION_REF_COUNT_MUTEX);
     m_ref_cnt_cv_ = new TsTimePartitionCondVal(COND_ID_PARTITION_REF_COUNT_COND);
   }
@@ -131,11 +134,13 @@ class TsTimePartition : public TSObject {
   void vacuumLock() {
     wrLock();
     MUTEX_LOCK(vacuum_insert_lock_);
+    MUTEX_LOCK(vacuum_delete_lock_);
   }
 
   void vacuumUnlock() {
     unLock();
     MUTEX_UNLOCK(vacuum_insert_lock_);
+    MUTEX_UNLOCK(vacuum_delete_lock_);
   }
 
   inline static void GetBlkMinMaxTs(BlockItem* cur_block, MMapSegmentTable* segment_tbl,
