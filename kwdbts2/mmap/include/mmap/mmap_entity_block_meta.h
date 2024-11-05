@@ -139,6 +139,8 @@ struct EntityHeader {
   }
 };
 
+static_assert(sizeof(EntityHeader) == 88, "wrong size of EntityHeader, please check compatibility.");
+
 /**
  * @brief EntityItem records one entity status in current paritition.
  *  
@@ -169,6 +171,8 @@ struct EntityItem {
   }
 };
 
+static_assert(sizeof(EntityItem) == 104, "wrong size of EntityItem, please check compatibility.");
+
 /**
  * @brief  BlockItem managing BLock status, block has fixed row num used for store entity data.
  * 
@@ -189,7 +193,7 @@ struct BlockItem {
   uint32_t max_rows_in_block;  // max rows that can be stored in a block
   timestamp64 min_ts_in_block;
   timestamp64 max_ts_in_block;
-  char user_defined[12];      // reserved for user-defined information.
+  char user_defined[4];      // reserved for user-defined information.
 
   MetricRowID getRowID(uint32_t offset) {
     return std::move(MetricRowID{block_id, offset});
@@ -273,6 +277,8 @@ struct BlockItem {
     return os;
   }
 };
+
+static_assert(sizeof(BlockItem) == 192, "wrong size of BlockItem, please check compatibility.");
 
 // record one continous span in block.
 struct BlockSpan {

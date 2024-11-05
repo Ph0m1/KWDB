@@ -90,6 +90,8 @@ struct TSTableFileMetadata {
   char user_defined[123]; ///< reserved for user-defined meta data information.
 };
 
+static_assert(sizeof(TSTableFileMetadata) == 664, "wrong size of TSTableFileMetadata, please check compatibility.");
+
 class MMapEntityBlockMeta;
 
 class TsTableObject {

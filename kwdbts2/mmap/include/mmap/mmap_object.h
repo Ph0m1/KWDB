@@ -129,6 +129,8 @@ struct MMapMetaData {
   char user_defined[123]; ///< reserved for user-defined meta data information.
 };
 
+static_assert(sizeof(MMapMetaData) == 1024, "wrong size of MMapMetaData, please check compatibility.");
+
 class MMapObject: public MMapFile {
 protected:
   off_t mem_length_;
