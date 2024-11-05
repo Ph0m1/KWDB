@@ -37,18 +37,42 @@ function uninstall() {
   fi
 }
 
+function umount_loop() {
+  local ret=""
+  echo "Please wait, the device is being uninstalled."
+  arr=$(losetup -a | awk '{print $3}' | tr -d '()')
+  for loop in ${arr};do
+    if [[ $loop =~ ^$1 ]];then
+      ret=$(eval $prefix umount $loop 2>&1)
+      if [ $? -ne 0 ];then
+        echo "$ret"
+        return 1
+      fi
+    fi
+  done
+}
+
 function uninstall_dir() {
+  local ret=""
   if [ "$REMOTE" = "ON" ];then
     prefix=$node_cmd_prefix
   else
     prefix=$local_cmd_prefix
   fi
-  local ret=""
   local data_root=$(kw_data_dir)
   eval $prefix rm -rf /etc/kaiwudb /etc/systemd/system/kaiwudb.service
   if [ -n "$data_root" ];then
     if [ "$clear_opt" = "yes" ] || [ "$clear_opt" = "y" ]; then
-      eval $prefix rm -rf $data_root
+      ret=$(umount_loop $data_root)
+      if [ $? -ne 0 ];then
+        echo $ret
+        return 1
+      fi
+      ret=$(eval $prefix rm -rf $data_root 2>&1)
+      if [ $? -ne 0 ];then
+        echo $ret
+        return 1
+      fi
     fi
   fi
 }

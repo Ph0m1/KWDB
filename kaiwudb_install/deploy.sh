@@ -495,7 +495,11 @@ if [ "$g_kw_cmd" = "uninstall" ];then
   read -t60 -p "When uninstalling KaiwuDB, you can either delete or keep all user data. Please confirm your choice: Do you want to delete the data? (y/N)" -e clear_opt
   uninstall
   delete_user
-  uninstall_dir
+  func_info=$(uninstall_dir)
+  if [ $? -ne 0 ];then
+    log_err "dir uninstall error:$func_info"
+    exit 1
+  fi
   echo -e "\e[1;32m[UNINSTALL COMPLETED]:\e[0mKaiwuDB has been uninstalled successfully."
   exit 0
 fi
