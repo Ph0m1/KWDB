@@ -803,6 +803,8 @@ type ExecutorTestingKnobs struct {
 	// RunAfterSCJobsCacheLookup is called after the SchemaChangeJobCache is checked for
 	// a given table id.
 	RunAfterSCJobsCacheLookup func(*jobs.Job)
+
+	RunCreateTableFailedAndRollback func() error
 }
 
 // PGWireTestingKnobs contains knobs for the pgwire module.

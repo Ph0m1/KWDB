@@ -208,7 +208,7 @@ function execute_regression_sql_distribute_v2() {
             cat $out_file > $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}/${sql_file}_${topology}_$folder.out
             cat $diff_file > $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}/${sql_file}_${topology}_$folder.diff
             # cat $diff_file
-            return 1
+#            return 1
           else
             res='SUCC'
             mkdir -p $QA_DIR/TEST_integration/$dir/${sql_file}/$current_time-${res}
@@ -228,6 +228,9 @@ function execute_regression_sql_distribute_v2() {
           $QA_DIR/util/stop_basic_v2.sh ${topology}
           if [ $? = 1 ]; then
             echo_err "shutdown ${topology} failed"
+            return 1
+          fi
+          if "$res" = "FAIL"; then
             return 1
           fi
         done

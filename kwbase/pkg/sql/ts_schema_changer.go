@@ -179,6 +179,11 @@ func (sw *TSSchemaChangeWorker) exec(ctx context.Context) error {
 		}
 	}
 	syncErr = sw.completeTsTxn(ctx, syncErr)
+	if d.Type == createKwdbTsTable {
+		if sw.p.extendedEvalCtx.ExecCfg.TestingKnobs.RunCreateTableFailedAndRollback != nil {
+			syncErr = sw.p.extendedEvalCtx.ExecCfg.TestingKnobs.RunCreateTableFailedAndRollback()
+		}
+	}
 
 	return syncErr
 }

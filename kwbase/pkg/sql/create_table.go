@@ -3288,7 +3288,7 @@ func distributeAndDuplicateOfCreateTSTable(
 		// TODO(kang): send split key
 		var tmp = []int32{p.point}
 		var timestamps = []int64{p.timestamp}
-		if err := params.extendedEvalCtx.ExecCfg.DB.AdminSplitTs(params.ctx, spanKey, uint32(desc.ID), tmp, timestamps, true); err != nil {
+		if err := params.extendedEvalCtx.ExecCfg.DB.AdminSplitTs(params.ctx, spanKey, uint32(desc.ID), tmp, timestamps, false); err != nil {
 			return nil, errors.Wrap(err, "PreDistributionError: split failed")
 		}
 	}

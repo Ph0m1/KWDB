@@ -236,6 +236,17 @@ func setStickyBit(desc *roachpb.RangeDescriptor, expiration hlc.Timestamp) {
 	}
 }
 
+// ErrorTableStateAdd : When creating a time series data table, the splitQueue is triggered
+// after the first phase is committed, but the second phase is not completed at this time.
+// The tableDesc of the time series table already exists but its status is Add.
+// The second phase of the time series table creation may fail. If it is split directly,
+// the time series range will be left behind and cannot be cleaned up. After the splitQueue
+// is triggered in the first phase, query the tableDesc status.
+// If it is in the Add period, ErrorTableStateAdd is returned until the second phase is completed,
+// the tableDesc state is public and then the split range continues. Otherwise, roll back and
+// split into relational ranges.
+var ErrorTableStateAdd = errors.New("state of tableDesc is add")
+
 func splitTxnAttempt(
 	ctx context.Context,
 	store *Store,
@@ -253,6 +264,41 @@ func splitTxnAttempt(
 	_, dbDescValue, err := conditionalGetDescValueFromDB(ctx, txn, oldDesc.StartKey, checkDescsEqual(oldDesc))
 	if err != nil {
 		return err
+	}
+	// Creating a time series table may fail. In this case, we need to change the
+	// split type to relational.
+	// Why do we change the TS_SPLIT to a DEFAULT_SPLIT instead of stopping the split
+	//    To be consistent with the behavior of relational tables.
+	//		In the first phase of the time series table, kwbase creates the metadata information
+	//		of the time series table. In the second phase, tsEngine creates the metadata information
+	//		of the time series table and allocates a directory for storage.
+	//		If the second phase fails, the metadata of the first phase will be rolled back.
+	//		Actually, we have successfully committed the transaction, and the corresponding tableDesc
+	//		can be queried at this time (but the state is Add instead of Public at this time, and the
+	//		second phase is a different transaction from the first phase). This is similar to the
+	//		relational table. After the relational table is successfully created, the splitQueue will
+	//		be triggered through SystemConfigTrigger and its range will be split.
+
+	//		If the creation of the time series table fails,
+	//		first phase, the first phase transaction submission fails, and the splitQueue will not be triggered.
+	//		second phase, the metadata of the first phase will be rolled back. SplitType is DEFAULT_SPLIT, and
+	//	 	the relational range will be merged quickly due to the split range's rangeSize.
+	if splitType == roachpb.TS_SPLIT && isCreateTable {
+
+		tableDesc, err := sqlbase.GetTableDescFromID(ctx, txn, sqlbase.ID(tableID))
+		if err != nil {
+			// This must be after firse stage. So create ts table failed.
+			splitType = roachpb.DEFAULT_SPLIT
+		} else {
+			if tableDesc.State == sqlbase.TableDescriptor_ADD {
+				// return err to retry
+				return ErrorTableStateAdd
+			} else if tableDesc.State != sqlbase.TableDescriptor_PUBLIC {
+				// Something wrong, create ts table failed.
+				splitType = roachpb.DEFAULT_SPLIT
+			}
+		}
+
 	}
 	// TODO(tbg): return desc from conditionalGetDescValueFromDB and don't pass
 	// in oldDesc any more (just the start key).
@@ -496,32 +542,38 @@ func (r *Replica) adminSplitWithDescriptor(
 
 	log.Infof(ctx, "initiating a split of this range at key %s [r%d] (%s)%s",
 		splitKey.StringWithDirs(nil /* valDirs */, 50 /* maxLen */), rightRangeID, reason, extra)
-
-	if err := r.store.DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		return splitTxnAttempt(
-			ctx,
-			r.store,
-			txn,
-			rightRangeID,
-			splitKey,
-			args.ExpirationTime,
-			desc,
-			args.SplitType,
-			args.TableId,
-			args.IsCreateTsTable,
-		)
-	}); err != nil {
-		// The ConditionFailedError can occur because the descriptors acting
-		// as expected values in the CPuts used to update the left or right
-		// range descriptors are picked outside the transaction. Return
-		// ConditionFailedError in the error detail so that the command can be
-		// retried.
-		if msg, ok := maybeDescriptorChangedError(desc, err); ok {
-			// NB: we have to wrap the existing error here as consumers of this
-			// code look at the root cause to sniff out the changed descriptor.
-			err = &benignError{errors.Wrap(err, msg)}
+	for rt := retry.Start(base.DefaultRetryOptions()); rt.Next(); {
+		err := r.store.DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+			return splitTxnAttempt(
+				ctx,
+				r.store,
+				txn,
+				rightRangeID,
+				splitKey,
+				args.ExpirationTime,
+				desc,
+				args.SplitType,
+				args.TableId,
+				args.IsCreateTsTable,
+			)
+		})
+		if err == ErrorTableStateAdd {
+			continue
 		}
-		return reply, errors.Wrapf(err, "split at key %s failed", splitKey)
+		if err != nil {
+			// The ConditionFailedError can occur because the descriptors acting
+			// as expected values in the CPuts used to update the left or right
+			// range descriptors are picked outside the transaction. Return
+			// ConditionFailedError in the error detail so that the command can be
+			// retried.
+			if msg, ok := maybeDescriptorChangedError(desc, err); ok {
+				// NB: we have to wrap the existing error here as consumers of this
+				// code look at the root cause to sniff out the changed descriptor.
+				err = &benignError{errors.Wrap(err, msg)}
+			}
+			return reply, errors.Wrapf(err, "split at key %s failed", splitKey)
+		}
+		return reply, nil
 	}
 	return reply, nil
 }
