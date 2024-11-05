@@ -187,10 +187,6 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     memcpy(desc_mem, bitmap, getBlockBitmapSize());
   }
 
-  /**
-   * @brief  check if current segment schema is same with root table.
-  */
-  void verifySchema(const vector<AttributeInfo>& root_schema, bool& is_consistent);
 
   /**
    * PushPayload is used to write data into files.

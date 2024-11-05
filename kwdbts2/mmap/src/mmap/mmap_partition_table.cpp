@@ -856,6 +856,11 @@ KStatus TsTimePartition::CopyConcurrentSegments(const std::vector<std::shared_pt
   bool first_loop = true;
   for (BLOCK_ID block_id = max_block_id + 1; block_id <= GetMaxBlockID(); ++block_id) {
     BlockItem* block_item = GetBlockItem(block_id);
+    auto entity_item = dest_pt->meta_manager_.getEntityItem(block_item->entity_id);
+    if (!entity_item->entity_id) {
+      entity_item->entity_id = block_item->entity_id;
+    }
+
     BlockItem* new_block_item;
     if (first_loop) {
       // the block item is allocated from max_block_id + 1.
@@ -873,12 +878,27 @@ KStatus TsTimePartition::CopyConcurrentSegments(const std::vector<std::shared_pt
   return KStatus::SUCCESS;
 }
 
-KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version, bool& drop_partition) {
+KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version) {
   // Step 1: Change segment status and get the necessary information
   vacuumLock();
   if (!EvaluateVacuum(ts, ts_version)) {
     vacuumUnlock();
     return SUCCESS;
+  }
+  auto entities = GetEntities();
+  // check not inserting data.
+  for (uint32_t entity_id : entities) {
+    std::deque<BlockItem*> block_queue;
+    GetAllBlockItems(entity_id, block_queue);
+    while (!block_queue.empty()) {
+      BlockItem* block_item = block_queue.front();
+      block_queue.pop_front();
+      if (block_item->alloc_row_count != block_item->publish_row_count) {
+        LOG_WARN("entity[%u] blockid[%u] is inserting, cannot vacuumn now.", entity_id, block_item->block_id);
+        vacuumUnlock();
+        return SUCCESS;
+      }
+    }
   }
   // set revacuum flag false, if the data written after unlocking is disordered or deleted, indicates that need to
   // vacuum again, and the flag will be set to true
@@ -896,7 +916,6 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     max_segment_id = active_segment_->segment_id();
   }
   BLOCK_ID max_block_id = meta_manager_.getEntityHeader()->cur_block_id;
-  auto entities = GetEntities();
   ChangeSegmentStatus();
   vacuumUnlock();
 
@@ -915,6 +934,24 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
 
   if (max_block_num == 0) {
     vacuumLock();
+    // reset all entity item block info.
+    for (uint32_t entity_id : entities) {
+      auto entity_item = getEntityItem(entity_id);
+      if (0 == entity_item->cur_block_id) {
+        continue;
+      }
+      std::shared_ptr<MMapSegmentTable> value;
+      BLOCK_ID key;
+      bool ret = data_segments_.Seek(entity_item->cur_block_id, key, value);
+      if (ret && max_segment_id >= key) {
+        entity_item->block_count = 0;
+        entity_item->cur_block_id = 0;
+        entity_item->is_deleted = false;
+        entity_item->is_disordered = false;
+        entity_item->max_ts = 0;
+        entity_item->min_ts = 0;
+      }
+    }
     // All the data of segment_ids has been deleted, drop segments
     if (DropSegmentDir(segment_ids) < 0) {
       LOG_ERROR("Drop old segments failed.");
@@ -926,7 +963,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     segment_ids.clear();
     data_segments_.GetAllKey(&segment_ids);
     if (segment_ids.empty()) {
-      drop_partition = true;
+      meta_manager_.getEntityHeader()->cur_block_id = 0;
     }
     vacuumUnlock();
     return SUCCESS;
@@ -1857,6 +1894,8 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
 void TsTimePartition::publish_payload_space(const std::vector<BlockSpan>& alloc_spans,
                                             const std::vector<MetricRowID>& delete_rows, uint32_t entity_id,
                                             bool success) {
+  MUTEX_LOCK(vacuum_delete_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   // All requested space is marked as deleted space.
   if (!success) {
     for (auto alloc_span : alloc_spans) {
@@ -2618,6 +2657,9 @@ int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
     BLOCK_ID key;
     bool ret = data_segments_.Seek(segment_id, key, segment_table);
     if (ret) {
+      // reset all blockitem in segment valid.
+      memset(GetBlockItem(segment_id), 0, segment_table->getBlockMaxNum() * sizeof(BlockItem));
+      // delete segment directory.
       int error_code = segment_table->remove();
       if (error_code < 0) {
         LOG_ERROR("remove segment[%s] failed!", segment_table->realFilePath().c_str());
@@ -2626,6 +2668,5 @@ int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
       LOG_INFO("remove segment[%s] success!", segment_table->realFilePath().c_str());
     }
   }
-  releaseSegments();
   return 0;
 }

@@ -311,21 +311,12 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
         // data vacuum
         std::string partition_path = p_table->GetPath();
         LOG_INFO("Start vacuum in partition %s", partition_path.c_str());
-        bool drop_partition = false;
-        KStatus s = p_table->ProcessVacuum(compress_ts, ts_version, drop_partition);
+        KStatus s = p_table->ProcessVacuum(compress_ts, ts_version);
         if (s != SUCCESS) {
-          LOG_ERROR("Process vacuum failed.");
+          LOG_ERROR("Process vacuum failed, partition %s", partition_path.c_str());
+        } else {
+          LOG_INFO("Finish vacuum in partition %s", partition_path.c_str());
         }
-        if (drop_partition) {
-          auto ts = p_table->minTimestamp();
-          ReleasePartitionTable(p_table);
-          p_table = nullptr;
-          it = compress_tables.erase(it);
-          subgroup->RemovePartitionTable(ts, err_info, true);
-          LOG_INFO("Finish vacuum in partition %s, partition is empty and removed.", partition_path.c_str());
-          continue;
-        }
-        LOG_INFO("Finish vacuum in partition %s", partition_path.c_str());
       }
       p_table->Compress(compress_ts, err_info);
       if (err_info.errcode < 0) {

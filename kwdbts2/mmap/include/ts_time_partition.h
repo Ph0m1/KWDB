@@ -680,10 +680,9 @@ class TsTimePartition : public TSObject {
    * Using ts_version to vacuum data, read ordered data from original partition and write into new tempory partition,
    * then use the tempory to replace the original.
    * @param ts_version which version of data need to be vacuum
-   * @param [out] drop_partition if all the data of partition has been deleted, drop this partition.
    * @return KStatus
    */
-  KStatus ProcessVacuum(const timestamp64& ts, uint32_t ts_version, bool& drop_partition);
+  KStatus ProcessVacuum(const timestamp64& ts, uint32_t ts_version);
 
   /**
    * Read partial data from the block item of the specified segment and convert it into ResultSet.

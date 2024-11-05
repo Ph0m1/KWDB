@@ -180,28 +180,6 @@ int MMapSegmentTable::addColumnFile(int col, int flags, ErrorInfo& err_info) {
   return err_info.setError(err_info.errcode);
 }
 
-void MMapSegmentTable::verifySchema(const vector<AttributeInfo>& root_schema, bool& is_consistent) {
-  auto& schema = getSchemaInfo();
-  if (schema.size() != root_schema.size()) {
-    if (getSegmentStatus() != InActiveSegment) {
-      // if segment status is active, we should change to inactive. so this segment cannot insert new data.
-      setSegmentStatus(InActiveSegment);
-    }
-    is_consistent = false;
-  } else {
-    for (int i = 0; i < schema.size(); ++i) {
-      if (schema[i].isEqual(root_schema[i])) {
-        continue;
-      }
-      if (getSegmentStatus() != InActiveSegment) {
-        setSegmentStatus(InActiveSegment);
-        is_consistent = false;
-        break;
-      }
-    }
-  }
-}
-
 int MMapSegmentTable::initColumn(int flags, ErrorInfo& err_info) {
   col_files_.resize(cols_info_include_dropped_.size());
   col_block_header_size_.resize(cols_info_include_dropped_.size());
