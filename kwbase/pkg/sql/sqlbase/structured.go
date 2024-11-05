@@ -3127,7 +3127,25 @@ func (desc *TableDescriptor) IsPrimaryIndexDefaultRowID() bool {
 		// Should never be in this case.
 		panic(err)
 	}
-	return col.Hidden
+	return col.IsDefaultPrimaryKeyColumn()
+}
+
+// IsDefaultPrimaryKeyColumn returns whether or not the column is
+// the default primary key hidden column.
+func (desc *ColumnDescriptor) IsDefaultPrimaryKeyColumn() bool {
+	if !desc.IsHidden() {
+		return false
+	}
+	if !strings.HasPrefix(desc.Name, "rowid") {
+		return false
+	}
+	if !desc.DatumType().Equal(*types.Int) {
+		return false
+	}
+	if !desc.HasDefault() {
+		return false
+	}
+	return desc.DefaultExprStr() == "unique_rowid()"
 }
 
 // MakeMutationComplete updates the descriptor upon completion of a mutation.

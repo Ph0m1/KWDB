@@ -113,3 +113,31 @@ COMMENT ON TABLE test IS '""''"check""''?？~`!@#$%^&*()_+,./<>;:[]{}\！￥…�
 
 statement ok
 DROP DATABASE db1
+
+statement ok
+create table t1(id int8 not null default unique_rowid());
+
+query TT colnames
+SHOW CREATE TABLE t1
+----
+table_name create_statement
+t1         CREATE TABLE t1 (
+           id INT8 NOT NULL DEFAULT unique_rowid(),
+           FAMILY "primary" (id, rowid)
+)
+
+statement ok
+alter table t1 add constraint pk primary key(id);
+
+query TT colnames
+SHOW CREATE TABLE t1
+----
+table_name create_statement
+t1         CREATE TABLE t1 (
+           id INT8 NOT NULL DEFAULT unique_rowid(),
+           CONSTRAINT "primary" PRIMARY KEY (id ASC),
+           FAMILY "primary" (id)
+)
+
+statement ok
+drop table t1

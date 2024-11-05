@@ -590,7 +590,7 @@ SHOW CREATE t
 t  CREATE TABLE t (
    rowid INT4 NOT NULL,
    CONSTRAINT "primary" PRIMARY KEY (rowid ASC),
-   FAMILY "primary" (rowid, rowid_1)
+   FAMILY "primary" (rowid)
 )
 
 # Regression for old primary key not using PrimaryIndexEncoding as its encoding type.
@@ -661,7 +661,7 @@ SHOW CREATE t
 t  CREATE TABLE t (
    x INT4 NOT NULL,
    CONSTRAINT "primary" PRIMARY KEY (x ASC),
-   FAMILY "primary" (x, rowid)
+   FAMILY "primary" (x)
 )
 
 statement ok
@@ -677,7 +677,7 @@ t2                             CREATE TABLE t2 (
                                x INT4 NOT NULL,
                                y INT4 NOT NULL,
                                CONSTRAINT "primary" PRIMARY KEY (x ASC, y ASC),
-                               FAMILY fam_0_x_y_rowid (x, y, rowid)
+                               FAMILY fam_0_x_y_rowid (x, y)
 ) INTERLEAVE IN PARENT t1 (x)
 
 # Check that changing the primary key of a table removes interleave
@@ -701,7 +701,7 @@ SHOW CREATE t
 t  CREATE TABLE t (
    x INT4 NOT NULL,
    CONSTRAINT "primary" PRIMARY KEY (x ASC) USING HASH WITH BUCKET_COUNT = 4,
-   FAMILY "primary" (x, rowid, kwdb_internal_x_shard_4)
+   FAMILY "primary" (x, kwdb_internal_x_shard_4)
 )
 
 statement ok
@@ -715,7 +715,7 @@ SHOW CREATE t
 t  CREATE TABLE t (
    x INT4 NOT NULL,
    CONSTRAINT "primary" PRIMARY KEY (x ASC),
-   FAMILY "primary" (x, rowid)
+   FAMILY "primary" (x)
 )
 
 # Regression for #45362.
@@ -972,7 +972,7 @@ t  CREATE TABLE t (
    y INT8 NULL,
    CONSTRAINT "primary" PRIMARY KEY (x ASC),
    INDEX t_y_idx (y ASC),
-   FAMILY fam_0_x_y_rowid (x, y, rowid)
+   FAMILY fam_0_x_y_rowid (x, y)
 )
 
 # Ensure that index y got rewritten. If it was not rewritten,
@@ -1008,7 +1008,7 @@ t  CREATE TABLE t (
    y INT8 NULL,
    CONSTRAINT "primary" PRIMARY KEY (x ASC),
    INDEX t_y_idx (y ASC),
-   FAMILY fam_0_x_y_rowid (x, y, rowid)
+   FAMILY fam_0_x_y_rowid (x, y)
 )
 
 # Ensure that index y got rewritten. If it was not rewritten,
@@ -1046,7 +1046,7 @@ t2 CREATE TABLE t2 (
      x INT8 NOT NULL,
      y INT8 NOT NULL,
      CONSTRAINT "primary" PRIMARY KEY (x ASC, y ASC),
-     FAMILY fam_0_x_y_rowid (x, y, rowid)
+     FAMILY fam_0_x_y_rowid (x, y)
    ) INTERLEAVE IN PARENT t1 (x)
 
 # We should get an error if we try to drop t1.
@@ -1119,7 +1119,7 @@ t  CREATE TABLE t (
    INDEX i1 (y ASC),
    UNIQUE INDEX i2 (z ASC),
    INDEX i3 (w ASC) STORING (y, z),
-   FAMILY fam_0_x_y_z_w_rowid (x, y, z, w, rowid)
+   FAMILY fam_0_x_y_z_w_rowid (x, y, z, w)
 )
 
 # All index id's should be larger than 4.

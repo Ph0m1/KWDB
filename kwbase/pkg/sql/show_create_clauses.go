@@ -257,7 +257,10 @@ func showFamilyClause(desc *sqlbase.TableDescriptor, f *tree.FmtCtx) {
 	for _, fam := range desc.Families {
 		activeColumnNames := make([]string, 0, len(fam.ColumnNames))
 		for i, colID := range fam.ColumnIDs {
-			if _, err := desc.FindActiveColumnByID(colID); err == nil {
+			if col, err := desc.FindActiveColumnByID(colID); err == nil {
+				if !desc.IsPrimaryIndexDefaultRowID() && col.IsDefaultPrimaryKeyColumn() {
+					continue
+				}
 				activeColumnNames = append(activeColumnNames, fam.ColumnNames[i])
 			}
 		}
