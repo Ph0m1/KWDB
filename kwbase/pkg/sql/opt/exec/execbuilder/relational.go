@@ -658,7 +658,7 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 	if !b.buildArrayTypedExpr(scan.PrimaryTagFilter, &ctx, &primaryFilter) {
 		return execPlan{}, nil
 	}
-	if b.mem.CheckFlag(opt.HasDiff) && b.mem.CheckFlag(opt.SingleMode) {
+	if b.mem.CheckFlag(opt.DiffUseOrderScan) && b.mem.CheckFlag(opt.SingleMode) {
 		scan.OrderedScanType = opt.ForceOrderedScan
 	}
 

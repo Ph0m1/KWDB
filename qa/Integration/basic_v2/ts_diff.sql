@@ -222,7 +222,6 @@ SELECT sum(e),sum(e2)  FROM (SELECT diff(value1) OVER (PARTITION BY id1 order by
 SELECT sum(e),sum(e2)  FROM (SELECT diff(value1) OVER (PARTITION BY id1 order by ts) AS e, diff(value2) OVER (PARTITION BY id1
 order by ts) AS e2, ts,deviceid, abs(value2) AS e1 FROM test7.t1_8) AS temp where deviceid > 1;
 
-drop table test7.t1_9;
 create table test7.t1_9(ts timestamp not null, value1 bigint,value2 smallint) tags (id1 varchar(64) not null,id2 int) PRIMARY TAGS (id1);
 insert into test7.t1_9  values('2024-09-05 07:50:17.843',-32767,32767,'1',2);
 insert into test7.t1_9  values('2024-09-05 07:51:18.843',32767,-32765,'1',2);
@@ -398,6 +397,8 @@ INSERT INTO test_select_diff.t1 VALUES('2969-1-2 00:00:00',212,0,0,0,0,0,true,0,
 INSERT INTO test_select_diff.t1 VALUES('2969-1-10 00:00:00',220,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,21,null,null,null,null,true,null,'\0\0中文te@@~eng TE./。\0\\0\0',null,null,null,null,null,'\0\0中文te@@~eng TE./。。。',null,'\0\0中文te@@~eng TE./。。。');
 
 SELECT COUNT(*) FROM test_select_diff.t1 ;
+
+select e1,diff(e1) over (partition by code1,code8,code14,code16 order by k_timestamp) as d1,e2,diff(e2) over (partition by code1,code8,code14,code16) as d2 from test_select_diff.t1;
 
 select diff(NULL) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 

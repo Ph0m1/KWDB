@@ -163,23 +163,20 @@ const (
 	// HasGapFill is set when use time_bucket_gapfill function in SQL.
 	HasGapFill = 1 << 4
 
-	// HasSubquery is set when use subquery in SQL.
-	HasSubquery = 1 << 6
+	// DiffUseOrderScan is set when diff Function exec in AE.
+	DiffUseOrderScan = 1 << 5
 
-	// HasDiff is set when use diff Function in SQL.
-	HasDiff = 1 << 7
-
-	// DiffNotPush is set when diff function not exec in AE.
-	DiffNotExecInAE = 1 << 8
+	// HasMuiltDiff is set when has multi diff Function in SQL.
+	HasMuiltDiff = 1 << 6
 
 	// HasAutoLimit is set when the limit is autoLimit
-	HasAutoLimit = 1 << 9
+	HasAutoLimit = 1 << 7
 
 	// FinishOptInsideOut is set when the optimization of inside-out is done.
-	FinishOptInsideOut = 1 << 10
+	FinishOptInsideOut = 1 << 8
 
 	// ScalarSubQueryPush is set when the switch of push-scalar-subQuery is turned on
-	ScalarSubQueryPush = 1 << 11
+	ScalarSubQueryPush = 1 << 9
 )
 
 // OrderedTableType TSScanOrderedType

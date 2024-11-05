@@ -1023,9 +1023,6 @@ order by ts) AS e2, ts,deviceid, abs(value2) AS e1 FROM test7.t1_8) AS temp wher
 ------+------
    57 |  17
 (1 row)
-> drop table test7.t1_9;
-ERROR: relation "test7.t1_9" does not exist
-SQLSTATE: 42P01
 > create table test7.t1_9(ts timestamp not null, value1 bigint,value2 smallint) tags (id1 varchar(64) not null,id2 int) PRIMARY TAGS (id1);
 CREATE TABLE
 > insert into test7.t1_9  values('2024-09-05 07:50:17.843',-32767,32767,'1',2);
@@ -1281,6 +1278,11 @@ INSERT 1
 ---------
      45
 (1 row)
+> select e1,diff(e1) over (partition by code1,code8,code14,code16 order by k_timestamp) as d1,e2,diff(e2) over (partition by code1,code8,code14,code16) as d2 from test_select_diff.t1;
+  e1 | d1 | e2 | d2
+-----+----+----+-----
+  -1 | -1 |  1 |  1
+(1 row)
 > select diff(NULL) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 ERROR: invalid parameter data type: diff
 SQLSTATE: 42601
@@ -1306,7 +1308,9 @@ SQLSTATE: 42601
   NULL | NULL
 (1 row)
 > select time_bucket(k_timestamp,'30day') tb,diff(e) over (partition by code1,code8,code14,code16 order by k_timestamp) diff from (select code1,code8,code14,code16,k_timestamp,e5,diff(e5) over (partition by code1,code8,code14,code16 order by k_timestamp) e from test_select_diff.t1 where k_timestamp between '0000-1-1 00:00:00' and '2970-1-1 00:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')<='24:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')>='00:00:00');
-ERROR: multiple diff functions are not supported
-SQLSTATE: 42601
+             tb             | diff
+----------------------------+-------
+  2968-12-12 00:00:00+00:00 | NULL
+(1 row)
 > DROP DATABASE test_select_diff cascade;
 DROP DATABASE
