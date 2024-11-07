@@ -27,8 +27,8 @@ KWDB 为不同角色开发者提供以下支持（包括但不限于）：
 
 KWDB 支持用户根据需求选择二进制安装包、容器和源码安装与试用 KWDB 数据库：
 
-- **二进制安装包**：支持单机和集群以及安全和非安全部署模式，更多信息见[单节点部署](https://kaiwudb.com/kaiwudb_docs/#/quickstart/install-kaiwudb/quickstart-bare-metal.html)和[集群部署](https://kaiwudb.com/kaiwudb_docs/#/deployment/overview.html)。
-- **容器镜像**：KWDB 暂未提供可供下载的容器镜像，如需以容器方式部署 KWDB， 请联系 [KWDB 技术支持人员](https://kaiwudb.com/support/)。
+- **二进制安装包**：支持单机和集群以及安全和非安全部署模式，更多信息见[单节点部署](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/install-kaiwudb/quickstart-bare-metal.html)和[集群部署](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/deployment/overview.html)。
+- **容器镜像**：KWDB 暂未提供可供下载的容器镜像，如需以容器方式部署 KWDB， 请联系 [KWDB 技术支持人员](https://www.kaiwudb.com/support/)。
 - **源码**：源码编译目前支持单节点非安全模式部署。
 
 以下指南以 Ubuntu 22.04 操作系统为例说明如何编译源码和安装 KWDB。
@@ -97,19 +97,23 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
 
    - 个人用户设置：修改`~/.bashrc` 文件
    - 系统全局设置（需要 root 权限）：修改`/etc/profile`文件
+
       ```Bash
       export GOROOT=/usr/local/go
       export GOPATH=/home/go      #请以实际代码下载存放路径为准，在此以home/go目录为例
       export PATH=$PATH:/usr/local/go/bin:/usr/local/cmake/bin
       ```
 
-5.  使变量设置立即生效：
+5. 使变量设置立即生效：
 
     - 个人用户设置：
+
       ```Bash
       source ~/.bashrc                           
       ```
+
     - 系统全局设置：
+
       ```Bash
       source /etc/profile                           
       ```
@@ -119,6 +123,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
 在 [KWDB 代码仓库](https://gitee.com/kwdb/kwdb)下载代码，并将其存储到 `GOPATH` 声明的目录。
 
 - 使用 git clone 命令：
+
    ```Bash
    git clone https://gitee.com/kwdb/kwdb.git /home/go/src/gitee.com/kwbasedb #请勿修改目录路径中的 src/gitee.com/kwbasedb
    cd /home/go/src/gitee.com/kwbasedb 
@@ -138,7 +143,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
    ```
 
 2. 运行 CMake 配置。
-   
+
    ```Bash
    cmake .. -DCMAKE_BUILD_TYPE= [Release | Debug]
    ```
@@ -181,6 +186,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
       make
       make install
       ```
+
    编译和安装成功后的文件清单如下：
 
       ```Plain
@@ -231,7 +237,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
    ./kwbase start-single-node --insecure --listen-addr=:26257 --background
    ```
 
-4. 数据库启动后即可通过 kwbase CLI 工具、KaiwuDB 开发者中心或 JDBC 等连接器连接和使用 KWDB，具体连接和使用内容见[使用 kwbase CLI 工具连接 KWDB](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-cli.md)、[使用 KaiwuDB 开发者中心连接 KWDB ](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-kdc.md)和[使用 JDBC 连接 KWDB](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-jdbc.md)。
+4. 数据库启动后即可通过 kwbase CLI 工具、KaiwuDB 开发者中心或 JDBC 等连接器连接和使用 KWDB，具体连接和使用内容见[使用 kwbase CLI 工具连接 KWDB](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/access-kaiwudb/access-kaiwudb-cli.html)、[使用 KaiwuDB 开发者中心连接 KWDB ](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/access-kaiwudb/access-kaiwudb-kdc.html)和[使用 JDBC 连接 KWDB](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/access-kaiwudb/access-kaiwudb-jdbc.html)。
 
 ## 社区
 
@@ -241,11 +247,11 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
 
 ### 社区贡献
 
-欢迎大家参与贡献，详情请参阅我们的[社区贡献](https://gitee.com/kwdb/community/blob/master/Contribute_process.md)。
+欢迎大家参与贡献，详情请参阅我们的[社区贡献](https://gitee.com/kwdb/community/blob/master/Contribution_process.md)。
 
 ## 案例
 
-KWDB 典型应用场景包括但不限于物联网、能源电力、交通车联网、智慧政务、IT 运维、金融证券等，更多信息请参见[应用案例](https://gitee.com/link?target=https%3A%2F%2Fkaiwudb.com%2Fcase%2F)。
+KWDB 典型应用场景包括但不限于物联网、能源电力、交通车联网、智慧政务、IT 运维、金融证券等，更多信息请参见[应用案例](https://www.kaiwudb.com/case/)。
 
 ## 发版说明
 

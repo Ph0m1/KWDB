@@ -29,8 +29,8 @@ IoT, multi-model database, distributed, time-series data processing, cloud-edge 
 
 KWDB supports installation and trial use via binary packages, container images, and source code according to your needs.
 
-- **Binary Packages**: Support single-node and cluster deployments in both secure and non-secure modes. For more information, see [Single-Node Deployment](https://kaiwudb.com/kaiwudb_docs/#/quickstart/install-kaiwudb/quickstart-bare-metal.html) and [Cluster Deployment](https://kaiwudb.com/kaiwudb_docs/#/deployment/overview.html).
-- **Container Images**: Currently, KWDB does not provide downloadable container images. For container deployment, please contact [KWDB Technical Support](https://kaiwudb.com/support/).
+- **Binary Packages**: Support single-node and cluster deployments in both secure and non-secure modes. For more information, see [Single-Node Deployment](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/install-kaiwudb/quickstart-bare-metal.html) and [Cluster Deployment](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/deployment/overview.html).
+- **Container Images**: Currently, KWDB does not provide downloadable container images. For container deployment, please contact [KWDB Technical Support](https://www.kaiwudb.com/support/).
 - **Source Code**: Source code compilation currently supports single-node non-secure deployment.
 
 The following guide is only applicable for compiling and installing KWDB from source code.
@@ -244,7 +244,7 @@ Download the code from the [KWDB code repository](https://gitee.com/kwdb/kwdb) a
    ./kwbase start-single-node --insecure --listen-addr=:26257 --background
    ```
 
-4. After the database starts, you can connect and use it via the kwbase CLI tool, KaiwuDB Developer Center, or connectors like the KaiwuDB JDBC driver. For detailed instructions, see [Connecting to KWDB using kwbase CLI tool](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-cli.md), [Connecting to KWDB using KaiwuDB Developer Center](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-kdc.md) and [Connecting to KWDB using JDBC](https://gitee.com/kwdb/docs/blob/master/quickstart/access-kaiwudb/access-kaiwudb-jdbc.md).
+4. After the database starts, you can connect and use it via the kwbase CLI tool, KaiwuDB Developer Center, or connectors like the KaiwuDB JDBC driver. For detailed instructions, see [Connecting to KWDB using kwbase CLI tool](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/access-kaiwudb/access-kaiwudb-cli.html), [Connecting to KWDB using KaiwuDB Developer Center](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/access-kaiwudb/access-kaiwudb-kdc.html) and [Connecting to KWDB using JDBC](https://www.kaiwudb.com/kaiwudb_docs/#/oss_dev/quickstart/access-kaiwudb/access-kaiwudb-jdbc.html).
 
 ## Community
 
@@ -254,11 +254,11 @@ You are more than welcome to join our community organization! For details, pleas
 
 ### Community Contribution
 
-Everyone is welcome to contribute. For details, please see our [Community Contribution Guideline](https://gitee.com/kwdb/community/blob/master/Contribute_process.md).
+Everyone is welcome to contribute. For details, please see our [Community Contribution Guideline](https://gitee.com/kwdb/community/blob/master/Contribution_process.md).
 
 ## Use Cases
 
-KWDB can be used in various fields such as industrial IoT, digital energy, digital government, and finance. For more information, please see [Use Cases](https://gitee.com/link?target=https%3A%2F%2Fkaiwudb.com%2Fcase%2F).
+KWDB can be used in various fields such as industrial IoT, digital energy, digital government, and finance. For more information, please see [Use Cases](https://www.kaiwudb.com/case/).
 
 ## Release Notes
 
