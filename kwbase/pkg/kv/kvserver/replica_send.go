@@ -28,12 +28,14 @@ import (
 	"context"
 	"reflect"
 
+	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/batcheval"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/concurrency"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/spanset"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/txnwait"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
@@ -66,6 +68,22 @@ func (r *Replica) Send(
 	// TsRequest processing logic
 	if r.isTsRequest(ctx, &ba) {
 		if !r.isTs() {
+			reqTableID, _, _, err := sqlbase.DecodeTsRangeKey(ba.Requests[0].GetInner().Header().Key, true)
+			if err == nil && reqTableID == uint64(r.Desc().TableId) {
+				if errGetTable := r.DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+					table, _, errGet := sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(reqTableID))
+					if errGet != nil {
+						return errGet
+					}
+					if table.State != sqlbase.TableDescriptor_PUBLIC {
+						return errors.Errorf("table %d already dropped", r.Desc().TableId)
+					}
+					return nil
+				}); errGetTable != nil {
+					log.Warningf(ctx, "r%d conflict for table %d: %s", r.RangeID, reqTableID, errGetTable.Error())
+					return nil, roachpb.NewError(roachpb.NewAmbiguousResultError(errGetTable.Error()))
+				}
+			}
 			log.Warningf(ctx, "%+v receive ts request when still be default range", r.Desc())
 			return nil, roachpb.NewError(&roachpb.DefaultReplicaReceiveTSRequestError{})
 		}

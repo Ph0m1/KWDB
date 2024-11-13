@@ -274,14 +274,18 @@ func (r *Replica) disconnectReplicationRaftMuLocked(ctx context.Context) {
 		pq.Close("destroyed")
 	}
 	r.mu.proposalBuf.FlushLockedWithoutProposing()
+	var err *roachpb.Error
+	if r.isTsLocked() {
+		err = roachpb.NewError(roachpb.NewRangeNotFoundError(r.RangeID, r.StoreID()))
+	} else {
+		err = roachpb.NewError(roachpb.NewAmbiguousResultError(apply.ErrRemoved.Error()))
+	}
 	for _, p := range r.mu.proposals {
 		r.cleanupFailedProposalLocked(p)
 		// NB: each proposal needs its own version of the error (i.e. don't try to
 		// share the error across proposals).
 		p.finishApplication(ctx, proposalResult{
-			Err: roachpb.NewError(
-				roachpb.NewAmbiguousResultError(
-					apply.ErrRemoved.Error())),
+			Err: err,
 		})
 	}
 	r.mu.internalRaftGroup = nil

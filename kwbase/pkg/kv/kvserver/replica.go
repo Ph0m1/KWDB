@@ -610,6 +610,13 @@ func (r *Replica) isTs() bool {
 	return false
 }
 
+func (r *Replica) isTsLocked() bool {
+	if Desc, err := r.getReplicaDescriptorRLocked(); err == nil {
+		return Desc.GetTag() == roachpb.TS_REPLICA
+	}
+	return false
+}
+
 // cleanupFailedProposal cleans up after a proposal that has failed. It
 // clears any references to the proposal and releases associated quota.
 // It requires that both Replica.mu and Replica.raftMu are exclusively held.
