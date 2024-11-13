@@ -531,13 +531,21 @@ func (n *alterTableNode) startExec(params runParams) error {
 					return pgerror.New(pgcode.InvalidColumnDefinition, "cannot drop the first timestamp column")
 				}
 				var columnCount int
+				found := false
 				for _, column := range n.tableDesc.Columns {
 					if !column.IsTagCol() {
 						columnCount++
 					}
+					if column.ID == colToDrop.ID {
+						found = true
+					}
 				}
 				if columnCount == 2 {
 					return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only data column besides the timestamp column")
+				}
+				if !found {
+					return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+						"column %q in the middle of being added, try again later", t.Column)
 				}
 				// n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 				n.tableDesc.AddColumnMutation(colToDrop, sqlbase.DescriptorMutation_DROP)
@@ -1167,7 +1175,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return pgerror.New(pgcode.WrongObjectType, "can not drop tag on instance table")
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
-			tagColumn, _, err := n.tableDesc.FindColumnByName(t.TagName)
+			tagColumn, dropped, err := n.tableDesc.FindColumnByName(t.TagName)
 			if err != nil {
 				if strings.Contains(err.Error(), "does not exist") {
 					return sqlbase.NewUndefinedTagError(string(t.TagName))
@@ -1183,16 +1191,25 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return pgerror.Newf(pgcode.WrongObjectType,
 					"tag %q is a primary tag", tagColumn.Name)
 			}
-			if n.tableDesc.TableType == tree.TemplateTable {
-				var tagCount int
-				for _, tag := range n.tableDesc.Columns {
-					if tag.TsCol.ColumnType == sqlbase.ColumnType_TYPE_TAG {
-						tagCount++
-					}
+			if dropped {
+				continue
+			}
+			var tagCount int
+			found := false
+			for _, tag := range n.tableDesc.Columns {
+				if tag.IsTagCol() {
+					tagCount++
 				}
-				if tagCount == 1 {
-					return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only tag")
+				if tag.ID == tagColumn.ID {
+					found = true
 				}
+			}
+			if tagCount == 1 && n.tableDesc.TableType == tree.TemplateTable {
+				return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only tag")
+			}
+			if !found {
+				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
+					"tag %q in the middle of being added, try again later", tagColumn.Name)
 			}
 			//n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 			n.tableDesc.AddColumnMutation(tagColumn, sqlbase.DescriptorMutation_DROP)
