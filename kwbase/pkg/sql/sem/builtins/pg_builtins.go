@@ -648,7 +648,7 @@ var pgBuiltins = map[string]builtinDefinition{
 	// function. Multi-return builtins currently are returned as anyelement, which
 	// is a known incompatibility with Postgres.
 	// https://www.postgresql.org/docs/11/functions-info.html
-	"pg_get_function_result": makeBuiltin(defProps(),
+	"pg_get_function_result": makeBuiltin(tree.FunctionProperties{DistsqlBlacklist: true},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"func_oid", types.Oid}},
 			ReturnType: tree.FixedReturnType(types.String),

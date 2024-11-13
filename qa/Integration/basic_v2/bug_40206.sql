@@ -82,5 +82,16 @@ where ref_0.code6 IS DISTINCT FROM pg_catalog.pg_function_is_visible(
     as oid))
     limit 141;
 
+-- ZDP-42815
+select
+    ref_0.code7 as c0
+from
+    test_vacuum.t1 as ref_0
+where pg_catalog.pg_get_function_result(
+              cast(cast(coalesce(cast(coalesce(case when cast(null as _numeric)
+                  IS NOT DISTINCT FROM cast(null as _numeric) then cast(null as oid)
+                  else cast(null as oid) end,pg_catalog.pg_my_temp_schema()) as oid),
+                  pg_catalog.pg_my_temp_schema()) as oid) as oid)) ~ pg_catalog.timeofday()
+limit 23;
 
 drop database test_vacuum cascade;
