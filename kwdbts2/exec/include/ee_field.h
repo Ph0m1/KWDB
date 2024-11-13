@@ -347,6 +347,9 @@ class FieldSumInt : public FieldNum {
     if (storage_type >= roachpb::DataType::SMALLINT && storage_type <= roachpb::DataType::BIGINT) {
       storage_type_ = roachpb::DataType::DECIMAL;
     }
+    if (storage_type == roachpb::DataType::FLOAT) {
+      storage_type_ = roachpb::DataType::DOUBLE;
+    }
   }
 
   k_int64 ValInt() override;
