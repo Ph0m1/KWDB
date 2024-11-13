@@ -156,10 +156,10 @@ function execute_regression_sql_distribute_v2() {
           pkill -9 kwbase
           sleep 10s
           echo 'before umount'
-          df -h | grep install/deploy | awk {'print $6'}
+          find "${DEPLOY_ROOT}" -type d -exec findmnt {} \;
           echo 'after umount'
-          df -h | grep install/deploy | awk {'print $6'}  | xargs umount
-          df -h | grep install/deploy | awk {'print $6'}
+          find "${DEPLOY_ROOT}" -type d -exec findmnt {} \; -exec umount -l {} \;
+          find "${DEPLOY_ROOT}" -type d -exec findmnt {} \;
 
           rm -rf $QA_DIR/../install/deploy/
 
@@ -230,7 +230,7 @@ function execute_regression_sql_distribute_v2() {
             echo_err "shutdown ${topology} failed"
             return 1
           fi
-          if "$res" = "FAIL"; then
+          if [ "$res" = "FAIL" ]; then
             return 1
           fi
         done

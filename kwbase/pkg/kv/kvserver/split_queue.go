@@ -146,6 +146,43 @@ func (sq *splitQueue) shouldQueue(
 			shouldQ, priority = true, 1.0 // default priority
 		}
 	}
+	if shouldQ && desc.GetRangeType() == roachpb.TS_RANGE {
+		// When the EndID and TableID of range are not equal
+		// 1. If range is the last range, then its EndKey is /Max.
+		//    At this time, endTableID, hashPoint, and endTimeStamp
+		//    are math.MaxUint64, api.HashParamV2 - 1, math.MaxInt64.
+		// 2. If range is not the last range, but it crosses TableID.
+		//    For example, if the TableID of TsTable is 80, and then a
+		//    new database is created, the new database is 81, and then
+		//    a new table is created, while it's ID is 82, then the EndKey
+		//    of the last Range of 80 is /Table/82, and it will appear
+		//    that startTableID is 80 and endTableID is 81. In this case,
+		//    hashPoint is api.HashParamV2 - 1
+		// The hashPoint calculations in the above cases are all correct.
+
+		// Note: The first Range of the created table will be directly
+		// split after the SystemConfigTrigger is triggered,
+		// and will not enter the shouldQueue
+		startKey := desc.StartKey
+		endKey := desc.EndKey
+		_, startHashPoint, _, err := sqlbase.DecodeTsRangeKey(startKey, true)
+		if err != nil {
+			return false, priority
+		}
+		_, endHashPoint, _, err := sqlbase.DecodeTsRangeKey(endKey, false)
+		if err != nil {
+			return false, priority
+		}
+		splitHashPoint := (startHashPoint + endHashPoint + 1) / 2
+		sv := sq.store.ClusterSettings()
+		splitInterval := splitRangeSettings.Get(&sv.SV)
+		splitMode := splitModeSettings.Get(&sv.SV)
+		if splitHashPoint-startHashPoint < uint64(splitInterval) && !splitMode {
+			shouldQ = false
+			return shouldQ, priority
+		}
+	}
+
 	return shouldQ, priority
 }
 
