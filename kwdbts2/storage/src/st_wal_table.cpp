@@ -803,7 +803,7 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
   if (err_info.errcode < 0) {
-    LOG_ERROR("undoPut error : no subgroup %d", group_id);
+    LOG_ERROR("undoPut error : no subgroup %u", group_id);
     return KStatus::FAIL;
   }
   sub_group->MutexLockEntity(entity_id);
@@ -877,7 +877,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
   if (err_info.errcode < 0) {
-    LOG_ERROR("LoggedTsEntityGroup::redoPut error : no subgroup %d", group_id);
+    LOG_ERROR("LoggedTsEntityGroup::redoPut error : no subgroup %u", group_id);
     return KStatus::FAIL;
   }
   sub_group->MutexLockEntity(entity_id);
@@ -1140,7 +1140,7 @@ KStatus LoggedTsEntityGroup::undoDeleteTag(kwdbContext_p ctx, TSSlice& primary_t
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
   if (err_info.errcode < 0) {
-    LOG_ERROR("undoDeleteTag error : no subgroup %d", group_id);
+    LOG_ERROR("undoDeleteTag error : no subgroup %u", group_id);
     return KStatus::FAIL;
   }
   sub_group->MutexLockEntity(entity_id);

@@ -23,11 +23,20 @@ TsSnapshotProductor::~TsSnapshotProductor() {
     delete subgrp_data_scan_ctx_.sub_grp_data_iter;
     subgrp_data_scan_ctx_.sub_grp_data_iter  = nullptr;
   }
+  if (!scan_over_ || status_ != TsSnapshotStatus::SENDING_ALL_SCHEMAS) {
+    LOG_WARN("snapshot[%s] not scan over. status: %d.", Print().c_str(), status_);
+  }
+}
+
+TsSnapshotConsumer::~TsSnapshotConsumer() {
+  if (committed_ == 0) {
+    LOG_WARN("snapshot[%s] not committed or rollback.", Print().c_str());
+  }
 }
 
 std::string TsTableEntitiesSnapshot::Print() {
   char mem[256];
-  snprintf(mem, sizeof(mem), "type[%d] table[%lu] range{hashpoint[%lu - %lu], ts_span[%ld - %ld]}, id [%lu], rows [%lu]",
+  snprintf(mem, sizeof(mem), "type[%hhu] table[%lu] range{hashpoint[%lu - %lu], ts_span[%ld - %ld]}, id [%lu], rows [%lu]",
     snapshot_info_.type, snapshot_info_.table_id,
     snapshot_info_.begin_hash, snapshot_info_.end_hash,
     snapshot_info_.ts_span.begin, snapshot_info_.ts_span.end, snapshot_info_.id, total_rows_);
@@ -419,6 +428,7 @@ KStatus TsSnapshotConsumer::beginMtrOfEntityGroup(kwdbContext_p ctx) {
 }
 
 KStatus TsSnapshotConsumer::setMtrOver(kwdbContext_p ctx, bool commit) {
+  committed_ = commit ? 1 : -1;
   KStatus s;
 #ifdef K_DEBUG
   {
@@ -501,7 +511,7 @@ KStatus TsSnapshotConsumer::WriteData(kwdbContext_p ctx, TSSlice data) {
     return WriteMetricData(ctx, cur_data.data_part, cur_data.type);
     break;
   default:
-    LOG_ERROR("snapshot[%s] cannot parse payload type [%d]", Print().c_str(), cur_data.type);
+    LOG_ERROR("snapshot[%s] cannot parse payload type [%hhu]", Print().c_str(), cur_data.type);
     break;
   }
   return KStatus::FAIL;
@@ -526,7 +536,7 @@ KStatus TsSnapshotConsumerByPayload::WriteMetricData(kwdbContext_p ctx, TSSlice 
   if (type == TsSnapshotDataType::PAYLOAD_COL_BASED_DATA) {
     return writeDataWithPayload(ctx, data);
   }
-  LOG_FATAL("cannot parse payload type of [%d] in Payload Type snapshot Consumer.", type);
+  LOG_FATAL("cannot parse payload type of [%hhu] in Payload Type snapshot Consumer.", type);
   return KStatus::FAIL;
 }
 
@@ -589,7 +599,7 @@ KStatus TsSnapshotConsumerByBlock::WriteMetricData(kwdbContext_p ctx, TSSlice da
   if (type == TsSnapshotDataType::BLOCK_ITEM_BASED_DATA) {
     return writeBlocks(ctx, data);
   }
-  LOG_FATAL("cannot parse payload type of [%d] in Payload Type snapshot Consumer.", type);
+  LOG_FATAL("cannot parse payload type of [%hhu] in Payload Type snapshot Consumer.", type);
   return KStatus::FAIL;
 }
 
@@ -650,7 +660,7 @@ KStatus TsSnapshotConsumerByBlock::CopyBlockToPartitionTable(kwdbContext_p ctx, 
 
   err_code = segment_tbl->CopyColBlocks(blk_item, block, snapshot_info_.ts_span);
   if (err_code < 0) {
-    LOG_ERROR("faild during CopyColBlocks");
+    LOG_ERROR("failed during CopyColBlocks");
     return KStatus::FAIL;
   }
   return KStatus::SUCCESS;
@@ -716,7 +726,7 @@ KStatus TsSnapshotConsumerByBlock::writeBlocks(kwdbContext_p ctx, TSSlice data) 
         if (log_entity_grp != nullptr) {
           s = log_entity_grp->WriteTempDirectoryLog(ctx, entity_grp_mtr_id_[entity_grp_id], partition_table->GetPath());
           if (s != KStatus::SUCCESS) {
-            LOG_ERROR("writeblock faild during write to WAL log.");
+            LOG_ERROR("writeblock failed during write to WAL log");
             return s;
           }
         }
@@ -749,13 +759,13 @@ KStatus TsSnapshotConsumerByBlock::WriteCommit(kwdbContext_p ctx) {
     std::shared_ptr<kwdbts::TsEntityGroup> entity_group{nullptr};
     snapshot_info_.table->GetEntityGroup(ctx, entity_grp_id, &entity_group);
     if (entity_group == nullptr) {
-      LOG_ERROR("GetEntityGroup [%lu] faild.", entity_grp_id);
+      LOG_ERROR("GetEntityGroup [%lu] failed", entity_grp_id);
       return KStatus::FAIL;
     }
     ErrorInfo err_info;
     auto sub_grp = entity_group->GetSubEntityGroupManager()->GetSubGroup(sub_grp_id, err_info);
     if (sub_grp == nullptr) {
-      LOG_ERROR("GetSubGroup [%d] faild.", sub_grp_id);
+      LOG_ERROR("GetSubGroup [%u] failed", sub_grp_id);
       return KStatus::FAIL;
     }
     auto partition_table = sub_grp->GetPartitionTable(p_time, err_info, true);
@@ -763,12 +773,12 @@ KStatus TsSnapshotConsumerByBlock::WriteCommit(kwdbContext_p ctx) {
       ReleaseTable(partition_table);
     }};
     if (partition_table == nullptr) {
-      LOG_ERROR("GetPartitionTable [%s] faild.", p_string. c_str());
+      LOG_ERROR("GetPartitionTable [%s] failed", p_string. c_str());
       return KStatus::FAIL;
     }
     auto ok = partition_table->JoinOtherPartitionTable(tmp.second);
     if (!ok) {
-      LOG_ERROR("JoinOtherPartitionTable [%s] faild.", p_string. c_str());
+      LOG_ERROR("JoinOtherPartitionTable [%s] failed", p_string. c_str());
       return KStatus::FAIL;
     }
     tmp.second->remove(true);

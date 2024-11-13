@@ -202,7 +202,7 @@ PayloadBuilder* TsSnapshotProductorByPayload::genPayloadWithTag(const TagRowNum&
                 GetColumnsByRownumLocked(tag_row.tag_version, tag_row.tag_row_id,
                                          cur_src_scan_tag_idxs_, tag_schema_include_dropped_, &tag_res);
   if (error_code < 0) {
-    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %d ", error_code, tag_row.tag_row_id);
+    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %u ", error_code, tag_row.tag_row_id);
     return nullptr;
   }
   auto cur_entity_pl_builder = new PayloadBuilder(tag_attribute_info_exclude_dropped_, pl_metric_attribute_info_);
@@ -447,7 +447,7 @@ TSSlice TsSnapshotProductorByBlock::getPrimaryKey(EntityResultIndex* entity_id) 
                 GetColumnsByRownumLocked(tag_row.tag_version, tag_row.tag_row_id,
                                          cur_src_scan_tag_idxs_, tag_schema_include_dropped_, &tag_res);
   if (error_code < 0) {
-    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %d ", error_code, tag_row.tag_row_id);
+    LOG_ERROR("GetColumnsByRownumLocked failed. error_code= %d tag_row_id: %u ", error_code, tag_row.tag_row_id);
     return cur_primary_key_;
   }
   for (size_t i = 0; i < tag_attribute_info_exclude_dropped_.size(); i++) {

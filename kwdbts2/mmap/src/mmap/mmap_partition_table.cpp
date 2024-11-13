@@ -518,7 +518,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     for (size_t i = 0; i < full_block_idx.size(); i++) {
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[full_block_idx[i]].block_item->block_id);
       if (tbl == nullptr) {
-        LOG_ERROR("getSegmentTable failed, block_id:%d", (*alloc_spans)[full_block_idx[i]].block_item->block_id);
+        LOG_ERROR("getSegmentTable failed, block_id: %u", (*alloc_spans)[full_block_idx[i]].block_item->block_id);
         return;
       }
       const BlockSpan& span = (*alloc_spans)[full_block_idx[i]];
@@ -642,7 +642,7 @@ KStatus TsTimePartition::GetVacuumData(std::shared_ptr<MMapSegmentTable> segment
   std::vector<AttributeInfo> tb_schema;
   KStatus s = root_table_manager_->GetSchemaInfoExcludeDropped(&tb_schema, ts_version);
   if (s != SUCCESS) {
-    LOG_ERROR("Couldn't get schema info of version %d.", ts_version);
+    LOG_ERROR("Couldn't get schema info of version %u", ts_version);
     return s;
   }
   auto segment_schema = segment_tbl->getSchemaInfo();
@@ -726,7 +726,7 @@ KStatus
 TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, ResultSet* res, uint32_t row_count) {
   std::shared_ptr<MMapSegmentTable> dest_segment = dest_pt->getSegmentTable(1);
   if (!dest_segment) {
-    LOG_ERROR("Get segment table[%d] failed.", 1);
+    LOG_ERROR("Get segment table[%u] failed", 1);
     return FAIL;
   }
   // allocate block item
@@ -887,18 +887,10 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   }
   auto entities = GetEntities();
   // check not inserting data.
-  for (uint32_t entity_id : entities) {
-    std::deque<BlockItem*> block_queue;
-    GetAllBlockItems(entity_id, block_queue);
-    while (!block_queue.empty()) {
-      BlockItem* block_item = block_queue.front();
-      block_queue.pop_front();
-      if (block_item->alloc_row_count != block_item->publish_row_count) {
-        LOG_WARN("entity[%u] blockid[%u] is inserting, cannot vacuumn now.", entity_id, block_item->block_id);
-        vacuumUnlock();
-        return SUCCESS;
-      }
-    }
+  if (IsWriting()) {
+    LOG_WARN("partition[%s] is inserting, ref count [%d], cannot vacuum now.", file_path_.c_str(), writing_count_.load());
+    vacuumUnlock();
+    return SUCCESS;
   }
   // set revacuum flag false, if the data written after unlocking is disordered or deleted, indicates that need to
   // vacuum again, and the flag will be set to true
@@ -934,6 +926,18 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
 
   if (max_block_num == 0) {
     vacuumLock();
+
+    // All the data of segment_ids has been deleted, drop segments
+    if (IsSegmentsBusy(segment_ids)) {
+      vacuumUnlock();
+      return SUCCESS;
+    }
+    if (DropSegmentDir(segment_ids) < 0) {
+      LOG_ERROR("Drop old segments failed");
+      vacuumUnlock();
+      return FAIL;
+    }
+
     // reset all entity item block info.
     for (uint32_t entity_id : entities) {
       auto entity_item = getEntityItem(entity_id);
@@ -950,14 +954,24 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
         entity_item->is_disordered = false;
         entity_item->max_ts = 0;
         entity_item->min_ts = 0;
+      } else {
+        auto cur_block_id = entity_item->cur_block_id;
+        while (true) {
+          auto block = GetBlockItem(cur_block_id);
+          assert(block->entity_id == entity_id);
+          if (block->prev_block_id == 0) {
+            break;
+          }
+          bool ret = data_segments_.Seek(block->prev_block_id, key, value);
+          if (ret && max_segment_id >= key) {
+            block->prev_block_id = 0;
+            break;
+          }
+          cur_block_id = block->prev_block_id;
+        }
       }
     }
-    // All the data of segment_ids has been deleted, drop segments
-    if (DropSegmentDir(segment_ids) < 0) {
-      LOG_ERROR("Drop old segments failed.");
-      vacuumUnlock();
-      return FAIL;
-    }
+
     ErrorInfo err_info;
     loadSegments(err_info);
     segment_ids.clear();
@@ -1003,7 +1017,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
         uint32_t row_count = block_span.row_num;
         std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block_item->block_id);
         if (segment_tbl == nullptr) {
-          LOG_ERROR("Can not find segment use block [%d], in partition [%s]", cur_block_item->block_id, partition_dir.c_str());
+          LOG_ERROR("Can not find segment use block [%u], in partition [%s]", cur_block_item->block_id, partition_dir.c_str());
           return FAIL;
         }
         ResultSet res{num_col};
@@ -1042,6 +1056,10 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
          " and this vacuum is now suspended");
     return SUCCESS;
   }
+  if (IsWriting()) {
+    LOG_WARN("partition[%s] is inserting [%d], cancel vacuum.", file_path_.c_str(), writing_count_.load());
+    return SUCCESS;
+  }
   std::vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
   data_segments_.GetAllValue(&segment_tables);
   if (segment_tables.front()->segment_id() != max_segment_id) {
@@ -1063,8 +1081,13 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   // Step 6: Drop partition's old segments and move vacuumed segments to original partition
   segment_ids.clear();
   data_segments_.GetAllKey(&segment_ids);
+
+  if (IsSegmentsBusy(segment_ids)) {
+    vacuumUnlock();
+    return SUCCESS;
+  }
   if (DropSegmentDir(segment_ids) < 0) {
-    LOG_ERROR("Drop old segments failed.");
+    LOG_ERROR("Drop old segments failed");
     return FAIL;
   }
   data_segments_.Clear();
@@ -1308,7 +1331,7 @@ int TsTimePartition::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64
   while (true) {
     BlockItem* block_item = GetBlockItem(block_item_id);
     if (block_item->block_id == 0) {
-      LOG_WARN("BlockItem[%d, %d] error: No space has been allocated", entity_id, block_item_id)
+      LOG_WARN("BlockItem[%u, %u] error: No space has been allocated", entity_id, block_item_id)
       continue;
     }
     // Add deleted rows.
@@ -1405,14 +1428,14 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
   }
   EntityItem* entity_item = getEntityItem(entity_id);
   if (entity_item == nullptr) {
-    LOG_ERROR("EntityItem[%d] error: entity_item is null", entity_id);
+    LOG_ERROR("EntityItem[%u] error: entity_item is null", entity_id);
     return KWENOOBJ;
   }
   BLOCK_ID block_item_id = entity_item->cur_block_id;
   auto start_time = payload->GetTimestamp(start_row);
   auto end_time = payload->GetTimestamp(num - 1);
   if (start_time > entity_item->max_ts || end_time < entity_item->min_ts) {
-    LOG_ERROR("Payload data is not within this entity, entity_id = %d.", entity_id);
+    LOG_ERROR("Payload data is not within this entity, entity_id = %u", entity_id);
     return KWENOOBJ;
   }
   // Iterate through all blocks and verify if there is matching data (with identical timestamp and LSN).
@@ -1420,11 +1443,11 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
   while (block_item_id != 0 && p_count > 0) {
     BlockItem* block_item = GetBlockItem(block_item_id);
     if (block_item == nullptr) {
-      LOG_ERROR("BlockItem[%d, %d] error: block_item is null", entity_id, block_item_id);
+      LOG_ERROR("BlockItem[%u, %u] error: block_item is null", entity_id, block_item_id);
       return KWENOOBJ;
     }
     if (block_item->block_id == 0) {
-      LOG_WARN("BlockItem[%d, %d] error: No space has been allocated", entity_id, block_item_id)
+      LOG_WARN("BlockItem[%u, %u] error: No space has been allocated", entity_id, block_item_id)
       block_item_id = block_item->prev_block_id;
       continue;
     }
@@ -1605,7 +1628,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
       (*alloc_spans)[i].block_item->publish_row_count = (*alloc_spans)[i].block_item->alloc_row_count;
       std::shared_ptr<MMapSegmentTable> tbl = getSegmentTable((*alloc_spans)[i].block_item->block_id);
       if (tbl == nullptr) {
-        LOG_ERROR("getSegmentTable failed, block_id:%d", (*alloc_spans)[i].block_item->block_id);
+        LOG_ERROR("getSegmentTable failed, block_id: %u", (*alloc_spans)[i].block_item->block_id);
         return;
       }
       const BlockSpan& span = (*alloc_spans)[i];
@@ -2494,7 +2517,7 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
       block_queue.pop_front();
       std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block_item->block_id);
       if (segment_tbl == nullptr) {
-        LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, GetPath().c_str());
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]", block_item->block_id, GetPath().c_str());
         return -1;
       }
 
@@ -2571,7 +2594,7 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
         }
         std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(block->block_id);
         if (segment_tbl == nullptr) {
-          LOG_ERROR("Can not find segment use block [%d], in path [%s]", block->block_id, GetPath().c_str());
+          LOG_ERROR("Can not find segment use block [%u], in path [%s]", block->block_id, GetPath().c_str());
           return -1;
         }
 
@@ -2651,14 +2674,31 @@ void TsTimePartition::ChangeSegmentStatus() {
   });
 }
 
-int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
+int TsTimePartition::DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids) {
   for (unsigned int segment_id : segment_ids) {
     std::shared_ptr<MMapSegmentTable> segment_table;
     BLOCK_ID key;
     bool ret = data_segments_.Seek(segment_id, key, segment_table);
     if (ret) {
-      // reset all blockitem in segment valid.
-      memset(GetBlockItem(segment_id), 0, segment_table->getBlockMaxNum() * sizeof(BlockItem));
+      // set all blockitem in segment invalid.
+      auto block_id = segment_id;
+      while (true) {
+        std::shared_ptr<MMapSegmentTable> segment_block;
+        BLOCK_ID key_block;
+        if (data_segments_.Seek(block_id, key_block, segment_block)) {
+          if (segment_block.get() != segment_table.get()) {
+            break;
+          }
+        } else {
+          LOG_INFO("cannot found segment for block[%u]", block_id);
+          break;
+        }
+        memset(GetBlockItem(block_id), 0, sizeof(BlockItem));
+        block_id++;
+        if (block_id > meta_manager_.getEntityHeader()->cur_block_id) {
+          break;
+        }
+      }
       // delete segment directory.
       int error_code = segment_table->remove();
       if (error_code < 0) {
@@ -2669,4 +2709,21 @@ int TsTimePartition::DropSegmentDir(std::vector<BLOCK_ID> segment_ids) {
     }
   }
   return 0;
+}
+
+bool TsTimePartition::IsSegmentsBusy(const std::vector<BLOCK_ID>& segment_ids) {
+  for (auto id : segment_ids) {
+    std::shared_ptr<MMapSegmentTable> value;
+    BLOCK_ID key;
+    bool res = data_segments_.Seek(id, key, value);
+    if (res) {
+      if (value.use_count() == 2) {
+        continue;
+      } else if (value.use_count() > 2) {
+        LOG_WARN("segment[%s] is using, cannot vacuum now", value->realFilePath().c_str());
+        return true;
+      }
+    }
+  }
+  return false;
 }

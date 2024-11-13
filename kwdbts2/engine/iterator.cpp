@@ -249,7 +249,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
 
     std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partition_table_->getSegmentTable(cur_block_item_->block_id);
     if (segment_tbl == nullptr) {
-      LOG_ERROR("Can not find segment use block [%d], in path [%s]",
+      LOG_ERROR("Can not find segment use block [%u], in path [%s]",
                 cur_block_item_->block_id, cur_partition_table_->GetPath().c_str());
       return FAIL;
     }
@@ -276,7 +276,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
         return s;
       }
     }
-    LOG_DEBUG("block item[%d,%d] scan rows %u.", cur_block_item_->entity_id, cur_block_item_->block_id, *count);
+    LOG_DEBUG("block item[%u, %u] scan rows %u.", cur_block_item_->entity_id, cur_block_item_->block_id, *count);
     // If the data query within the current BlockItem is completed, switch to the next block.
     if (cur_blockdata_offset_ > cur_block_item_->publish_row_count) {
       cur_blockdata_offset_ = 1;
@@ -284,7 +284,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     }
     if (*count > 0) {
       KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
-      LOG_DEBUG("res entityId is %d, entitygrp is %ld , count is %d, startTime is %ld, endTime is %ld",
+      LOG_DEBUG("res entityId is %u, entitygrp is %lu , count is %u, startTime is %ld, endTime is %ld",
         entity_ids_[cur_entity_idx_], entity_group_id_, *count, ts_spans_.data()->begin, ts_spans_.data()->end);
       res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
       return SUCCESS;
@@ -688,7 +688,7 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
       }
       std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
       if (segment_tbl == nullptr) {
-        LOG_ERROR("Can not find segment use block [%d], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
         return KStatus::FAIL;
       }
       timestamp64 min_ts, max_ts;
@@ -808,7 +808,7 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
       }
       std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
       if (segment_tbl == nullptr) {
-        LOG_ERROR("Can not find segment use block [%d], in path [%s]",
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]",
                   block_item->block_id, cur_pt->GetPath().c_str());
         return KStatus::FAIL;
       }
@@ -1043,7 +1043,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     }
     std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partition_table_->getSegmentTable(cur_block->block_id);
     if (segment_tbl == nullptr) {
-      LOG_ERROR("Can not find segment use block [%d], in path [%s]",
+      LOG_ERROR("Can not find segment use block [%u], in path [%s]",
                 cur_block->block_id, cur_partition_table_->GetPath().c_str());
       return KStatus::FAIL;
     }
@@ -1674,7 +1674,7 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
     BlockItem* cur_block_item = cur_block_span_.block_item;
     std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(cur_block_item->block_id);
     if (segment_tbl == nullptr) {
-      LOG_ERROR("Can not find segment use block [%d], in path [%s]", cur_block_item->block_id, cur_pt->GetPath().c_str());
+      LOG_ERROR("Can not find segment use block [%u], in path [%s]", cur_block_item->block_id, cur_pt->GetPath().c_str());
       return FAIL;
     }
     if (ts != INVALID_TS) {

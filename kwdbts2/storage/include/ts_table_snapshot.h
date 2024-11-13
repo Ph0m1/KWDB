@@ -248,7 +248,7 @@ class TsSnapshotConsumer : public TsTableEntitiesSnapshot {
  public:
   TsSnapshotConsumer() {}
 
-  virtual ~TsSnapshotConsumer() {}
+  virtual ~TsSnapshotConsumer();
 
   /**
    * @brief initialize snapshot
@@ -288,6 +288,7 @@ class TsSnapshotConsumer : public TsTableEntitiesSnapshot {
   std::unordered_map<uint64_t, uint64_t> entity_grp_mtr_id_;
   std::vector<EntityResultIndex> entities_result_idx_;
   MMapMetricsTable* version_schema_{nullptr};
+  int committed_{0};
 };
 
 class TsSnapshotProductorByBlock : public TsSnapshotProductor {

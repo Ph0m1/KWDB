@@ -1078,22 +1078,22 @@ KStatus TSEngineImpl::UpdateSetting(kwdbContext_p ctx) {
 
   if (GetClusterSetting(ctx, "ts.wal.wal_level", &value) == SUCCESS) {
     options_.wal_level = std::stoll(value);
-    LOG_INFO("update wal level to %d", options_.wal_level)
+    LOG_INFO("update wal level to %hhu", options_.wal_level)
   }
 
   if (GetClusterSetting(ctx, "ts.wal.buffer_size", &value) == SUCCESS) {
     options_.wal_buffer_size = std::stoll(value);
-    LOG_INFO("update wal buffer size to %d Mib", options_.wal_buffer_size)
+    LOG_INFO("update wal buffer size to %hu Mib", options_.wal_buffer_size)
   }
 
   if (GetClusterSetting(ctx, "ts.wal.file_size", &value) == SUCCESS) {
     options_.wal_file_size = std::stoll(value);
-    LOG_INFO("update wal file size to %d Mib", options_.wal_file_size)
+    LOG_INFO("update wal file size to %hu Mib", options_.wal_file_size)
   }
 
   if (GetClusterSetting(ctx, "ts.wal.files_in_group", &value) == SUCCESS) {
     options_.wal_file_in_group = std::stoll(value);
-    LOG_INFO("update wal file num in group to %d", options_.wal_file_in_group)
+    LOG_INFO("update wal file num in group to %hu", options_.wal_file_in_group)
   }
 
   return KStatus::SUCCESS;

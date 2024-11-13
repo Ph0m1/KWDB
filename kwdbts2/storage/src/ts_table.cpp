@@ -180,7 +180,7 @@ KStatus TsEntityGroup::PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_
   // If it does not exist, allocate and insert it into the tag table.
   bool new_one;
   if (KStatus::SUCCESS != allocateEntityGroupId(ctx, pd, &entity_id, &group_id, &new_one)) {
-    LOG_ERROR("allocateEntityGroupId failed, entity id: %d, group id: %d.", entity_id, group_id);
+    LOG_ERROR("allocateEntityGroupId failed, entity id: %u, group id: %u", entity_id, group_id);
     return KStatus::FAIL;
   }
   if (new_one) {
@@ -203,7 +203,7 @@ KStatus TsEntityGroup::putTagData(kwdbContext_p ctx, int32_t groupid, int32_t en
   uint8_t payload_data_flag = payload.GetFlag();
   if (payload_data_flag == Payload::DATA_AND_TAG || payload_data_flag == Payload::TAG_ONLY) {
     // tag
-    LOG_DEBUG("tag bt insert hashPoint=%d", payload.getHashPoint());
+    LOG_DEBUG("tag bt insert hashPoint=%hu", payload.getHashPoint());
     err_info.errcode = new_tag_bt_->InsertTagRecord(payload, groupid, entity_id);
   }
   if (err_info.errcode < 0) {
@@ -323,7 +323,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
   std::vector<BlockSpan> alloc_spans;
   TsSubEntityGroup* sub_group = ebt_manager_->GetSubGroup(group_id, err_info, false);
   if (err_info.errcode < 0) {
-    LOG_ERROR("push_back_payload error: there is no subgroup: %d", group_id);
+    LOG_ERROR("push_back_payload error: there is no subgroup: %u", group_id);
     return KStatus::FAIL;
   }
 
@@ -357,6 +357,8 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
       continue;
     }
     last_p_time = p_time;
+
+    p_bt->RefWrtingCount();
 
     std::vector<BlockSpan> cur_alloc_spans;
     std::vector<MetricRowID> to_deleted_real_rows;
@@ -400,6 +402,7 @@ void TsEntityGroup::recordPutAfterProInfo(unordered_map<TsTimePartition*, PutAft
                                           TsTimePartition* p_bt, std::vector<BlockSpan>& cur_alloc_spans,
                                           std::vector<MetricRowID>& to_deleted_real_rows) {
   if (after_process_info.find(p_bt) != after_process_info.end()) {
+    p_bt->UnrefWrtingCount();
     ebt_manager_->ReleasePartitionTable(p_bt);
   } else {
     after_process_info[p_bt] = new PutAfterProcessInfo();
@@ -416,6 +419,7 @@ void TsEntityGroup::putAfterProcess(unordered_map<TsTimePartition*, PutAfterProc
                                     uint32_t entity_id, bool all_success) {
   for (auto iter : after_process_info) {
     iter.first->publish_payload_space((iter.second)->spans, (iter.second)->del_real_rows, entity_id, all_success);
+    iter.first->UnrefWrtingCount();
     ebt_manager_->ReleasePartitionTable(iter.first);
     delete iter.second;
   }
@@ -1367,7 +1371,7 @@ KStatus TsTable::GetEntityGroups(kwdbContext_p ctx, RangeGroups *groups) {
   for (auto &p : entity_groups_) {
     groups->ranges[i].range_group_id = p.first;
     groups->ranges[i].typ = p.second->HashRange().typ;
-    LOG_INFO("range_group_id: %lu, type: %d", groups->ranges[i].range_group_id, groups->ranges[i].typ);
+    LOG_INFO("range_group_id: %lu, type: %hhd", groups->ranges[i].range_group_id, groups->ranges[i].typ);
     ++i;
   }
   return KStatus::SUCCESS;
@@ -2503,7 +2507,7 @@ KStatus TsTable::AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KW
     msg = "Unknown column/tag type";
     return s;
   }
-  LOG_INFO("AlterTable begin. table_id: %lu alter_type: %d ", table_id_, alter_type);
+  LOG_INFO("AlterTable begin. table_id: %lu alter_type: %hhu ", table_id_, alter_type);
   if (alter_type == AlterType::ALTER_COLUMN_TYPE) {
     getDataTypeSize(attr_info);  // update max_len
   }
@@ -2512,7 +2516,7 @@ KStatus TsTable::AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KW
   } else if (attr_info.isAttrType(COL_TS_DATA)) {
     s = AlterTableCol(ctx, alter_type, attr_info, cur_version, new_version, msg);
   }
-  LOG_INFO("AlterTable end. table_id: %lu alter_type: %d ", table_id_, alter_type);
+  LOG_INFO("AlterTable end. table_id: %lu alter_type: %hhu ", table_id_, alter_type);
   return s;
 }
 
@@ -2729,7 +2733,7 @@ KStatus TsTable::undoAlterTableTag(kwdbContext_p ctx, AlterType alter_type, cons
     }
   }
   if (entity_bt_manager_->RollBack(cur_version, new_version) < 0) {
-    LOG_ERROR("undo alter tag failed: rollback metric table[%lu] version failed, new version[%d]", table_id_, new_version);
+    LOG_ERROR("undo alter tag failed: rollback metric table[%lu] version failed, new version[%u]", table_id_, new_version);
     return KStatus::FAIL;
   }
   LOG_INFO("undoAlterTableTag end, table id= %lu cur_version: %u new_version: %u ", table_id_, cur_version, new_version);

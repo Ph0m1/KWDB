@@ -151,7 +151,7 @@ EntityGroupTagIterator::EntityGroupTagIterator(std::shared_ptr<TsEntityGroup> en
     entity_group_->RdDropLock();
     #ifdef K_DEBUG
     for (int i =0; i< hps_.size(); i++) {
-      LOG_DEBUG("Init EntityGroupTagIterator hashpoints is %d", hps_.at(i));
+      LOG_DEBUG("Init EntityGroupTagIterator hashpoints is %u", hps_.at(i));
     }
     #endif
 }

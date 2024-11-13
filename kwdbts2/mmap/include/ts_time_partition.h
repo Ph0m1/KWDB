@@ -71,6 +71,7 @@ class TsTimePartition : public TSObject {
   string tbl_sub_path_;
   string file_path_;
   bool need_revacuum_ = false;
+  std::atomic<int> writing_count_{0};
 
   // root table with schema info in table root directory
   MMapRootTableManager*& root_table_manager_;
@@ -122,6 +123,18 @@ class TsTimePartition : public TSObject {
   int wrLock() override;
 
   int unLock() override;
+
+  inline void RefWrtingCount() {
+    writing_count_.fetch_add(1);
+  }
+
+  inline void UnrefWrtingCount() {
+    writing_count_.fetch_sub(1);
+  }
+
+  inline bool IsWriting() {
+    return writing_count_.load() > 0;
+  }
 
   int refMutexLock() override {
     return MUTEX_LOCK(m_ref_cnt_mtx_);
@@ -216,13 +229,13 @@ class TsTimePartition : public TSObject {
         if (value->open(const_cast<EntityBlockMetaManager*>(&meta_manager_), key, name_ + ".bt",
                         db_path_, tbl_sub_path_ + std::to_string(key) + "/", MMAP_OPEN_NORECURSIVE,
                         false, err_info) < 0) {
-          LOG_ERROR("getSegmentTable segment[%d] open failed", key);
+          LOG_ERROR("getSegmentTable segment[%u] open failed", key);
           return nullptr;
         }
       }
       if (UNLIKELY(value->getObjectStatus() == OBJ_READY && segment_id >= value->segment_id() + value->getBlockMaxNum())) {
         // this segment may not satisfy, means we not found segment.
-        LOG_ERROR("getSegmentTable segment[%d] is not exists", segment_id);
+        LOG_ERROR("getSegmentTable segment[%u] is not exists", segment_id);
         return nullptr;
       }
       return value;
@@ -710,7 +723,9 @@ class TsTimePartition : public TSObject {
   // Modify segment status
   void ChangeSegmentStatus();
 
-  int DropSegmentDir(std::vector<BLOCK_ID> segment_ids);
+  int DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids);
+
+  bool IsSegmentsBusy(const std::vector<BLOCK_ID>& segment_ids);
 
   std::vector<uint32_t> GetEntities() { return meta_manager_.getEntities(); }
 
