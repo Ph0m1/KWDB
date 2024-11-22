@@ -66,6 +66,9 @@ type WindowFrameRun struct {
 
 	// count null number
 	NullNum int
+
+	// record PartitionIdx
+	PartitionIdx int
 }
 
 // WindowFrameRangeOps allows for looking up an implementation of binary

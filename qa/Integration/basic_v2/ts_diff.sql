@@ -408,7 +408,7 @@ select id,k_timestamp,e1,diff(e1) over (partition by 12345 order by k_timestamp)
 
 select max(e1),diff(e1) over (partition by code1,code8,code14,code16) from test_select_diff.t1 group by e1,code1,code8,code14,code16 order by e1 limit 1;
 
-select time_bucket(k_timestamp,'30day') tb,diff(e) over (partition by code1,code8,code14,code16 order by k_timestamp) diff from (select code1,code8,code14,code16,k_timestamp,e5,diff(e5) over (partition by code1,code8,code14,code16 order by k_timestamp) e from test_select_diff.t1 where k_timestamp between '0000-1-1 00:00:00' and '2970-1-1 00:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')<='24:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')>='00:00:00');
+select time_bucket(k_timestamp,'30day') tb,diff(e) over (partition by code1,code8,code14,code16 order by k_timestamp) diff from (select code1,code8,code14,code16,k_timestamp,e5,diff(e5) over (partition by code1,code8,code14,code16 order by k_timestamp) e from test_select_diff.t1 where k_timestamp between '0000-1-1 00:00:00' and '2970-1-1 00:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')<='24:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')>='00:00:00') order by tb;
 
 DROP DATABASE test_select_diff cascade;
 

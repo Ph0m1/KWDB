@@ -822,23 +822,41 @@ func (nthValueWindow) Close(context.Context, *tree.EvalContext) {}
 // DiffWindowInt is use for DiffWindow for arg int
 type DiffWindowInt struct {
 	notNull     tree.Datum
-	HasOut      bool
-	IsFirstNull bool
-	NullNum     int
+	HasOut      []bool
+	IsFirstNull []bool
+	NullNum     []int
 }
 
 func newDiffWindowInt([]*types.T, *tree.EvalContext) tree.WindowFunc {
-	return &DiffWindowInt{}
+	newDiff := &DiffWindowInt{
+		HasOut:      make([]bool, 32),
+		IsFirstNull: make([]bool, 32),
+		NullNum:     make([]int, 32),
+	}
+	return newDiff
 }
 
 // Compute is for DiffWindowInt compute
 func (dw *DiffWindowInt) Compute(
 	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
 ) (tree.Datum, error) {
-	dw.NullNum = wfr.NullNum
+	if wfr.PartitionIdx < len(dw.NullNum)-1 {
+		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
+		dw.HasOut[wfr.PartitionIdx] = false
+		if wfr.FirstNull {
+			dw.IsFirstNull[wfr.PartitionIdx] = true
+		}
+	} else {
+		dw.NullNum = append(dw.NullNum, 0)
+		dw.HasOut = append(dw.HasOut, false)
+		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
+		dw.IsFirstNull = append(dw.IsFirstNull, false)
+		if wfr.FirstNull {
+			dw.IsFirstNull[wfr.PartitionIdx] = true
+		}
+	}
 	if wfr.FirstNull {
 		wfr.FirstNull = false
-		dw.IsFirstNull = true
 		return tree.DNull, nil
 	}
 
@@ -900,13 +918,17 @@ func (dw *DiffWindowInt) Close(context.Context, *tree.EvalContext) {}
 type DiffWindowFloat struct {
 	notNull     tree.Datum
 	ifdecimal   bool
-	HasOut      bool
-	IsFirstNull bool
-	NullNum     int
+	HasOut      []bool
+	IsFirstNull []bool
+	NullNum     []int
 }
 
 func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tree.WindowFunc {
-	result := &DiffWindowFloat{}
+	result := &DiffWindowFloat{
+		HasOut:      make([]bool, 32),
+		IsFirstNull: make([]bool, 32),
+		NullNum:     make([]int, 32),
+	}
 	for _, difftype := range difftypes {
 		if difftype.InternalType.Family == types.DecimalFamily {
 			result.ifdecimal = true
@@ -919,10 +941,23 @@ func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tre
 func (dw *DiffWindowFloat) Compute(
 	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
 ) (tree.Datum, error) {
-	dw.NullNum = wfr.NullNum
+	if wfr.PartitionIdx < len(dw.NullNum)-1 {
+		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
+		dw.HasOut[wfr.PartitionIdx] = false
+		if wfr.FirstNull {
+			dw.IsFirstNull[wfr.PartitionIdx] = true
+		}
+	} else {
+		dw.NullNum = append(dw.NullNum, 0)
+		dw.HasOut = append(dw.HasOut, false)
+		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
+		dw.IsFirstNull = append(dw.IsFirstNull, false)
+		if wfr.FirstNull {
+			dw.IsFirstNull[wfr.PartitionIdx] = true
+		}
+	}
 	if wfr.FirstNull {
 		wfr.FirstNull = false
-		dw.IsFirstNull = true
 		return tree.DNull, nil
 	}
 	var err error

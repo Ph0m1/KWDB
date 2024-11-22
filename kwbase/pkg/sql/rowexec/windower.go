@@ -676,6 +676,7 @@ func (w *windower) processPartition(
 						}
 					}
 				}
+				frameRun.PartitionIdx = partitionIdx
 				res, err := builtin.Compute(ctx, evalCtx, frameRun)
 				if err != nil {
 					return err
@@ -850,8 +851,8 @@ func (w *windower) populateNextOutputRow() (bool, bool, error) {
 
 		for i, builtin := range w.builtins {
 			if WindowFloat, okFloat := builtin.(*builtins.DiffWindowFloat); okFloat {
-				if WindowFloat.HasOut {
-					WindowFloat.HasOut = false
+				if WindowFloat.HasOut[w.partitionIdx] {
+					WindowFloat.HasOut[w.partitionIdx] = false
 					w.rowsInBucketEmitted++
 					if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
 						// We have emitted all rows from the current bucket, so we advance the
@@ -861,22 +862,29 @@ func (w *windower) populateNextOutputRow() (bool, bool, error) {
 					}
 					return true, true, nil
 				}
-				if rowIdx == 0 {
-					if len(w.windowValues[w.partitionIdx][i]) > 1 {
-						windowFnRes := w.windowValues[w.partitionIdx][i][rowIdx+1]
-						if windowFnRes == tree.DNull && WindowFloat.IsFirstNull {
-							WindowFloat.HasOut = true
-							copy(w.outputRow, inputRow[:len(w.inputTypes)])
-							encWindowFnRes := sqlbase.DatumToEncDatum(&w.outputTypes[w.windowFns[i].outputColIdx], tree.DNull)
-							w.outputRow[w.windowFns[i].outputColIdx] = encWindowFnRes
-							w.rowsInBucketEmitted++
-							if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-								// We have emitted all rows from the current bucket, so we advance the
-								// iterator.
-								w.partitionIdx++
-								w.rowsInBucketEmitted = 0
+				if rowIdx == 0 || WindowFloat.NullNum[w.partitionIdx] > 0 {
+					var windowFnRes tree.Datum
+					if WindowFloat.IsFirstNull[w.partitionIdx] {
+						windowFnRes = w.windowValues[w.partitionIdx][i][rowIdx]
+						if len(w.windowValues[w.partitionIdx][i]) > 0 {
+							if windowFnRes == tree.DNull && WindowFloat.IsFirstNull[w.partitionIdx] {
+								WindowFloat.NullNum[w.partitionIdx]--
+								if WindowFloat.NullNum[w.partitionIdx] == 0 {
+									WindowFloat.HasOut[w.partitionIdx] = true
+									WindowFloat.IsFirstNull[w.partitionIdx] = false
+								}
+								copy(w.outputRow, inputRow[:len(w.inputTypes)])
+								encWindowFnRes := sqlbase.DatumToEncDatum(&w.outputTypes[w.windowFns[i].outputColIdx], tree.DNull)
+								w.outputRow[w.windowFns[i].outputColIdx] = encWindowFnRes
+								w.rowsInBucketEmitted++
+								if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
+									// We have emitted all rows from the current bucket, so we advance the
+									// iterator.
+									w.partitionIdx++
+									w.rowsInBucketEmitted = 0
+								}
+								return true, false, nil
 							}
-							return true, false, nil
 						}
 					}
 
@@ -890,8 +898,8 @@ func (w *windower) populateNextOutputRow() (bool, bool, error) {
 					return true, true, nil
 				}
 			} else if WindowInt, okInt := builtin.(*builtins.DiffWindowInt); okInt {
-				if WindowInt.HasOut {
-					WindowInt.HasOut = false
+				if WindowInt.HasOut[w.partitionIdx] {
+					WindowInt.HasOut[w.partitionIdx] = false
 					w.rowsInBucketEmitted++
 					if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
 						// We have emitted all rows from the current bucket, so we advance the
@@ -901,16 +909,16 @@ func (w *windower) populateNextOutputRow() (bool, bool, error) {
 					}
 					return true, true, nil
 				}
-				if rowIdx == 0 || WindowInt.NullNum > 0 {
+				if rowIdx == 0 || WindowInt.NullNum[w.partitionIdx] > 0 {
 					var windowFnRes tree.Datum
-					if WindowInt.IsFirstNull {
+					if WindowInt.IsFirstNull[w.partitionIdx] {
 						windowFnRes = w.windowValues[w.partitionIdx][i][rowIdx]
 						if len(w.windowValues[w.partitionIdx][i]) > 0 {
-							if windowFnRes == tree.DNull && WindowInt.IsFirstNull {
-								WindowInt.NullNum--
-								if WindowInt.NullNum == 0 {
-									WindowInt.HasOut = true
-									WindowInt.IsFirstNull = false
+							if windowFnRes == tree.DNull && WindowInt.IsFirstNull[w.partitionIdx] {
+								WindowInt.NullNum[w.partitionIdx]--
+								if WindowInt.NullNum[w.partitionIdx] == 0 {
+									WindowInt.HasOut[w.partitionIdx] = true
+									WindowInt.IsFirstNull[w.partitionIdx] = false
 								}
 								copy(w.outputRow, inputRow[:len(w.inputTypes)])
 								encWindowFnRes := sqlbase.DatumToEncDatum(&w.outputTypes[w.windowFns[i].outputColIdx], tree.DNull)
