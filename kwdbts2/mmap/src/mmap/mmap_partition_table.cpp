@@ -278,10 +278,10 @@ int TsTimePartition::remove(bool exclude_segment) {
     data_segments_.Traversal([&](BLOCK_ID id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
       error_code = tbl->remove();
       if (error_code < 0) {
-        LOG_ERROR("remove segment[%s] failed!", tbl->realFilePath().c_str());
+        LOG_ERROR("remove segment[%s] failed!", tbl->GetPath().c_str());
         return false;
       }
-      LOG_INFO("remove segment[%s] success!", tbl->realFilePath().c_str());
+      LOG_INFO("remove segment[%s] success!", tbl->GetPath().c_str());
       return true;
     });
   }
@@ -962,6 +962,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     // Traverse every entity's data
     uint32_t entity_id = iter.first;
     auto block_spans = iter.second;
+    int64_t entity_row_count = 0;
     // Traverse every block span of this entity
     for (auto block_span : block_spans) {
       BlockItem* cur_block_item = block_span.block_item;
@@ -987,13 +988,14 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
         // Defer will clear data
         return s;
       }
+      entity_row_count += row_count;
     }
     EntityItem* tmp_entity_item = tmp_pt->getEntityItem(entity_id);
     EntityItem* origin_entity_item = getEntityItem(entity_id);
     tmp_entity_item->max_ts = origin_entity_item->max_ts;
     tmp_entity_item->min_ts = origin_entity_item->min_ts;
     // if delete concurrently, row_written will be wrong, but the 'cancel_vacuum_' flag would cancel vacuum
-    tmp_entity_item->row_written = origin_entity_item->row_written;
+    tmp_entity_item->row_written = entity_row_count;
   }
   tmp_pt->minTimestamp() = minTimestamp();
   tmp_pt->maxTimestamp() = maxTimestamp();
@@ -1037,6 +1039,9 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   }
   if (loadSegments(err_info) < 0) {
     LOG_ERROR("Reload segments failed, error: %s", err_info.errmsg.c_str());
+    return FAIL;
+  }
+  if (vacuum_status == VacuumStatus::FAILED) {
     return FAIL;
   }
   // update data version
@@ -1107,14 +1112,14 @@ void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
     }
     // Sync before compressing
     iSegmentTable->sync(MS_SYNC);
-    LOG_INFO("MMapSegmentTable[%s] compress start", iSegmentTable->realFilePath().c_str());
+    LOG_INFO("MMapSegmentTable[%s] compress start", iSegmentTable->GetPath().c_str());
     iSegmentTable->setSegmentStatus(ImmuSegment);
     bool ok = compress(db_path_, tbl_sub_path_, std::to_string(iSegmentTable->segment_id()),
                        g_mk_squashfs_option.processors_immediate, err_info);
     if (!ok) {
       // If compression fails, restore segment state
       iSegmentTable->setSegmentStatus(InActiveSegment);
-      LOG_ERROR("MMapSegmentTable[%s] compress failed", iSegmentTable->realFilePath().c_str());
+      LOG_ERROR("MMapSegmentTable[%s] compress failed", iSegmentTable->GetPath().c_str());
       return;
     }
     iSegmentTable->setSqfsIsExists();
@@ -1122,11 +1127,11 @@ void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
     // Mount the compressed segment
     if (!isMounted(db_path_ + iSegmentTable->tbl_sub_path())) {
       if (!reloadSegment(iSegmentTable, false, err_info)) {
-        LOG_ERROR("MMapSegmentTable[%s] reload failed", iSegmentTable->realFilePath().c_str());
+        LOG_ERROR("MMapSegmentTable[%s] reload failed", iSegmentTable->GetPath().c_str());
         return;
       }
     }
-    LOG_INFO("MMapSegmentTable[%s] compress succeeded", iSegmentTable->realFilePath().c_str());
+    LOG_INFO("MMapSegmentTable[%s] compress succeeded", iSegmentTable->GetPath().c_str());
   }
 }
 
@@ -1181,14 +1186,14 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_
         //   continue;
         // }
         // Compress segment data
-        LOG_INFO("MMapSegmentTable[%s] compress start", segment_tbl->realFilePath().c_str());
+        LOG_INFO("MMapSegmentTable[%s] compress start", segment_tbl->GetPath().c_str());
         segment_tbl->setSegmentStatus(ImmuSegment);
         bool ok = compress(db_path_, tbl_sub_path_, std::to_string(segment_tbl->segment_id()),
                            g_mk_squashfs_option.processors_scheduled, err_info);
         if (!ok) {
           // If compression fails, restore segment state
           segment_tbl->setSegmentStatus(InActiveSegment);
-          LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->realFilePath().c_str());
+          LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->GetPath().c_str());
           return;
         }
         segment_tbl->setSqfsIsExists();
@@ -1201,7 +1206,7 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_
             return;
           }
         }
-        LOG_INFO("MMapSegmentTable[%s] compress succeeded", segment_tbl->realFilePath().c_str());
+        LOG_INFO("MMapSegmentTable[%s] compress succeeded", segment_tbl->GetPath().c_str());
         break;
       }
       case ImmuSegment: {
@@ -1902,9 +1907,9 @@ int TsTimePartition::mergeToPayload(kwdbts::Payload* payload, size_t merge_row, 
     return 0;
   }
   auto schema_info = payload->GetSchemaInfo();
-  auto actual_cols = payload->GetActualCols();
+  auto payload_valid_cols = payload->GetValidCols();
   const std::vector<size_t>& payload_dedup = dedup_info.payload_rows[cur_ts];
-  for (size_t column = 0; column < actual_cols.size(); ++column) {
+  for (size_t column = 0; column < payload_valid_cols.size(); ++column) {
     if (!payload->IsNull(column, merge_row)) {
       // column value is not null, so no need merge from duplicate rows.
       continue;
@@ -1945,19 +1950,19 @@ int TsTimePartition::mergeToPayload(kwdbts::Payload* payload, size_t merge_row, 
           LOG_ERROR("Segment [%s] is null", (db_path_ + segment_tbl_sub_path(dup_row.block_id)).c_str());
           return -1;
         }
-        if (segment_tbl->isNullValue(dedup_info.table_real_rows[cur_ts][i], actual_cols[column])) {
+        if (segment_tbl->isNullValue(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column])) {
           continue;
         }
         // Verify the column types for compatibility, and perform type conversion if they do not match
         if (segment_tbl->getSchemaInfo()[column].type != schema_info[column].type
             || segment_tbl->getSchemaInfo()[column].size != schema_info[column].size) {
           MergeValueInfo merge_value;
-          merge_value.attr = segment_tbl->getSchemaInfo()[actual_cols[column]];
+          merge_value.attr = segment_tbl->getSchemaInfo()[payload_valid_cols[column]];
           if (merge_value.attr.type == VARSTRING || merge_value.attr.type == VARBINARY) {
-            merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], actual_cols[column]);
+            merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
           } else {
-            void* segment_merge_data = segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], actual_cols[column]);
-            CopyFixedData(static_cast<DATATYPE>(segment_tbl->getSchemaInfo()[actual_cols[column]].type),
+            void* segment_merge_data = segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
+            CopyFixedData(static_cast<DATATYPE>(segment_tbl->getSchemaInfo()[payload_valid_cols[column]].type),
                           static_cast<char*>(segment_merge_data), &merge_value.value);
           }
           if (payload->tmp_col_values_4_dedup_merge_.find(column) == payload->tmp_col_values_4_dedup_merge_.end()) {
@@ -1967,12 +1972,12 @@ int TsTimePartition::mergeToPayload(kwdbts::Payload* payload, size_t merge_row, 
         } else {
           if (schema_info[column].type != DATATYPE::VARSTRING && schema_info[column].type != DATATYPE::VARBINARY) {
             memcpy(payload->GetColumnAddr(merge_row, column),
-                   segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], actual_cols[column]),
+                   segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]),
               schema_info[column].size);
           } else {
             MergeValueInfo merge_value;
-            merge_value.attr = segment_tbl->getSchemaInfo()[actual_cols[column]];
-            merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], actual_cols[column]);
+            merge_value.attr = segment_tbl->getSchemaInfo()[payload_valid_cols[column]];
+            merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
             if (payload->tmp_col_values_4_dedup_merge_.find(column) == payload->tmp_col_values_4_dedup_merge_.end()) {
               payload->tmp_col_values_4_dedup_merge_.insert({column, {}});
             }
@@ -2641,10 +2646,10 @@ int TsTimePartition::DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids) {
       // delete segment directory
       int error_code = segment_table->remove();
       if (error_code < 0) {
-        LOG_ERROR("remove segment[%s] failed", segment_table->realFilePath().c_str());
+        LOG_ERROR("remove segment[%s] failed", segment_table->GetPath().c_str());
         return error_code;
       }
-      LOG_INFO("remove segment[%s] succeed", segment_table->realFilePath().c_str());
+      LOG_INFO("remove segment[%s] succeed", segment_table->GetPath().c_str());
     }
   }
   return 0;
@@ -2659,7 +2664,7 @@ bool TsTimePartition::IsSegmentsBusy(const std::vector<BLOCK_ID>& segment_ids) {
       if (value.use_count() == 2) {
         continue;
       } else if (value.use_count() > 2) {
-        LOG_WARN("segment[%s] is using, cancel vacuum", value->realFilePath().c_str());
+        LOG_WARN("segment[%s] is using, cancel vacuum", value->GetPath().c_str());
         return true;
       }
     }

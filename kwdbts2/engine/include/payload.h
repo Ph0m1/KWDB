@@ -90,7 +90,7 @@ class Payload {
   // data row first column is timestamp type
   Payload(MMapRootTableManager* root_bt_manager, TSSlice data);
 
-  Payload(const std::vector<AttributeInfo>& schema, const std::vector<uint32_t>& actual_cols, TSSlice data);
+  Payload(const std::vector<AttributeInfo>& schema, const std::vector<uint32_t>& valid_cols, TSSlice data);
 
   ~Payload() {
     if (rec_helper_) delete rec_helper_;
@@ -298,8 +298,8 @@ class Payload {
     return schema_;
   }
 
-  inline const std::vector<uint32_t>& GetActualCols() {
-    return actual_cols_;
+  inline const std::vector<uint32_t>& GetValidCols() {
+    return idx_for_valid_cols_;
   }
 
   inline uint8_t GetFlag() { return flag_; }
@@ -333,7 +333,7 @@ class Payload {
 
  private:
   vector<AttributeInfo> schema_;
-  vector<uint32_t> actual_cols_;
+  vector<uint32_t> idx_for_valid_cols_;  // column index that has not been dropped
   TSSlice slice_;
   int32_t primary_offset_;
   int16_t primary_len_;

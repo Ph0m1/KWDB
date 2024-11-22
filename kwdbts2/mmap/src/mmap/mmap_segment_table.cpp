@@ -485,7 +485,7 @@ int MMapSegmentTable::reserveBase(size_t n) {
     size_t max_length = getBlockMaxNum() * col_block_size_[i];
     // 32 bit system may overflow here
     if (max_length / (size_t) getBlockMaxNum() != col_block_size_[i]) {
-      LOG_ERROR("reserve overflow in column file: %s, block_max_num: %lu, col_block_size: %d",
+      LOG_ERROR("reserve overflow in column file: %s, block_max_num: %lu, col_block_size: %lu",
                 col_files_[i]->realFilePath().c_str(), getBlockMaxNum(),
                 getBlockMaxNum() * col_block_size_[i]);
       return KWECORR;
@@ -796,20 +796,24 @@ int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwd
     span.block_item->unordered_flag = true;
     (*inc_unordered_cnt) += span.row_num;
   }
-  int payload_col_idx = 1;
-  for (size_t i = 1; i < cols_info_exclude_dropped_.size(); ++i) {
-    // The data of the new column is set to empty
-    if (payload_col_idx >= payload->GetActualCols().size()) {
+
+  // compatibility process : payload version may lower segment version
+  auto payload_valid_cols = payload->GetValidCols();
+  int payload_col_idx = 1;  // skip ts column
+  for (size_t i = 1; i < idx_for_valid_cols_.size(); ++i) {
+    // payload columns may have been dropped, skip them
+    while (payload_col_idx < payload_valid_cols.size() &&
+           idx_for_valid_cols_[i] > payload_valid_cols[payload_col_idx]) {
+      payload_col_idx++;
+    }
+    // column not exists in payload, set to null
+    if (payload_col_idx == payload_valid_cols.size()) {
       MetricRowID row_id = start_row;
       for (int idx = 0 ; idx < span.row_num; ++idx) {
         setNullBitmap(row_id, idx_for_valid_cols_[i]);
         row_id.offset_row++;
       }
       continue;
-    }
-    // Skip data writes for deleted columns
-    while (idx_for_valid_cols_[i] > payload->GetActualCols()[payload_col_idx]) {
-      payload_col_idx++;
     }
 
     // Memcpy by column. If the column is of variable length, write it row by row. After completion, update the bitmap and aggregation results.
@@ -1020,6 +1024,10 @@ int MMapSegmentTable::addColumn(AttributeInfo& col_info,
 
 uint64_t MMapSegmentTable::dataLength() const {
   return 0;
+}
+
+string MMapSegmentTable::GetPath() {
+  return db_path_ + tbl_sub_path_;
 }
 
 string MMapSegmentTable::path() const {

@@ -86,9 +86,21 @@ std::time_t ModifyTime(const std::string& filePath) {
 
 bool System(const string& cmd, ErrorInfo& error_info) {
   int status = system(cmd.c_str());
-  if (-1 != status && WIFEXITED(status) && 0 == WEXITSTATUS(status)) {
-    return true;
+  if (WIFEXITED(status)) {
+    auto exit_code = WEXITSTATUS(status);
+    if (exit_code == 0) {
+      return true;
+    }
+    if (exit_code == 1) {
+      LOG_WARN("system(%s) exit code is not 0: status[%d], exit_code[%d], errno[%d], strerror[%s]",
+               cmd.c_str(), status, exit_code, errno, strerror(errno));
+      return true;
+    }
+    LOG_ERROR("system(%s) failed: status[%d], exit_code[%d], errno[%d], strerror[%s]",
+              cmd.c_str(), status, exit_code, errno, strerror(errno));
+    return false;
   }
+
   if (status == -1) {
     cerr << "OS system fork error." << std::endl;
     return false;

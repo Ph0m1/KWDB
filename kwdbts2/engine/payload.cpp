@@ -7,7 +7,7 @@
 Payload::Payload(MMapRootTableManager* root_bt_manager, TSSlice data) : slice_(data) {
   uint32_t ts_version = GetTsVersion();
   root_bt_manager->GetSchemaInfoExcludeDropped(&schema_, ts_version);
-  actual_cols_ = root_bt_manager->GetIdxForValidCols(ts_version);
+  idx_for_valid_cols_ = root_bt_manager->GetIdxForValidCols(ts_version);
   start_row_ = 0;
   count_ = *reinterpret_cast<int32_t*> (slice_.data + row_num_offset_);
   flag_ = *reinterpret_cast<uint8_t*> (slice_.data + row_type_offset_);
@@ -30,8 +30,8 @@ Payload::Payload(MMapRootTableManager* root_bt_manager, TSSlice data) : slice_(d
   }
 }
 
-Payload::Payload(const std::vector<AttributeInfo>& schema, const std::vector<uint32_t>& actual_cols, TSSlice data)
-    : schema_(schema), actual_cols_(actual_cols), slice_(data) {
+Payload::Payload(const std::vector<AttributeInfo>& schema, const std::vector<uint32_t>& valid_cols, TSSlice data)
+    : schema_(schema), idx_for_valid_cols_(valid_cols), slice_(data) {
   start_row_ = 0;
   count_ = *reinterpret_cast<int32_t*> (slice_.data + row_num_offset_);
   flag_ = *reinterpret_cast<uint8_t*> (slice_.data + row_type_offset_);

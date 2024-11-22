@@ -594,6 +594,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return !isAllNull(bitmap, start_row.offset_row, count);
   }
 
+  string GetPath();
 };
 
 int convertStrToFixed(const std::string& str, DATATYPE new_type, char* data, int32_t old_len,
