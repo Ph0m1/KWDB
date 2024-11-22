@@ -824,6 +824,7 @@ type DiffWindowInt struct {
 	notNull     tree.Datum
 	HasOut      bool
 	IsFirstNull bool
+	NullNum     int
 }
 
 func newDiffWindowInt([]*types.T, *tree.EvalContext) tree.WindowFunc {
@@ -834,6 +835,13 @@ func newDiffWindowInt([]*types.T, *tree.EvalContext) tree.WindowFunc {
 func (dw *DiffWindowInt) Compute(
 	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
 ) (tree.Datum, error) {
+	dw.NullNum = wfr.NullNum
+	if wfr.FirstNull {
+		wfr.FirstNull = false
+		dw.IsFirstNull = true
+		return tree.DNull, nil
+	}
+
 	var err error
 	columnIdx := int(wfr.ArgsIdxs[0])
 
@@ -850,9 +858,6 @@ func (dw *DiffWindowInt) Compute(
 		return nil, err
 	}
 	if prevValue == tree.DNull {
-		if currentIndex == 1 {
-			dw.IsFirstNull = true
-		}
 		prevValue = dw.notNull
 	}
 
@@ -897,6 +902,7 @@ type DiffWindowFloat struct {
 	ifdecimal   bool
 	HasOut      bool
 	IsFirstNull bool
+	NullNum     int
 }
 
 func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tree.WindowFunc {
@@ -913,6 +919,12 @@ func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tre
 func (dw *DiffWindowFloat) Compute(
 	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
 ) (tree.Datum, error) {
+	dw.NullNum = wfr.NullNum
+	if wfr.FirstNull {
+		wfr.FirstNull = false
+		dw.IsFirstNull = true
+		return tree.DNull, nil
+	}
 	var err error
 	columnIdx := int(wfr.ArgsIdxs[0])
 
@@ -929,9 +941,6 @@ func (dw *DiffWindowFloat) Compute(
 		return nil, err
 	}
 	if prevValue == tree.DNull {
-		if currentIndex == 1 {
-			dw.IsFirstNull = true
-		}
 		prevValue = dw.notNull
 	}
 

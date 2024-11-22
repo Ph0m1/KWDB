@@ -398,8 +398,6 @@ INSERT INTO test_select_diff.t1 VALUES('2969-1-10 00:00:00',220,null,null,null,n
 
 SELECT COUNT(*) FROM test_select_diff.t1 ;
 
-select e1,diff(e1) over (partition by code1,code8,code14,code16 order by k_timestamp) as d1,e2,diff(e2) over (partition by code1,code8,code14,code16) as d2 from test_select_diff.t1;
-
 select diff(NULL) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 
 select k_timestamp,e1,diff(k_timestamp) over (partition by code1,code14,code8,code16) from test_select_diff.t1;

@@ -1532,7 +1532,6 @@ func (c *conn) bufferRow(
 		}
 		switch fmtCode {
 		case pgwirebase.FormatText:
-			conv.ClientEncoding = c.sessionArgs.SessionDefaults.Get("client_encoding")
 			c.msgBuilder.writeTextDatumWithOid(ctx, col, conv, oids[i])
 		case pgwirebase.FormatBinary:
 			c.msgBuilder.writeBinaryDatum(ctx, col, conv.Location, oids[i])

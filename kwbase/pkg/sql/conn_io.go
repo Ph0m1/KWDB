@@ -743,6 +743,9 @@ type RestrictedCommandResult interface {
 	// shallow copy if it needs to.
 	AddRow(ctx context.Context, row tree.Datums) error
 
+	// SetClient set client encoding to con
+	SetClient()
+
 	// AddPGResult accumulates a pg result row.
 	AddPGResult(ctx context.Context, res []byte) error
 
@@ -966,6 +969,11 @@ func (r *bufferedCommandResult) AddRow(ctx context.Context, row tree.Datums) err
 	copy(rowCopy, row)
 	r.rows = append(r.rows, rowCopy)
 	return nil
+}
+
+// SetClient is part of the RestrictedCommandResult interface.
+func (r *bufferedCommandResult) SetClient() {
+	return
 }
 
 func (r *bufferedCommandResult) DisableBuffering() {

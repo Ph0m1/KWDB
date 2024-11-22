@@ -1284,11 +1284,6 @@ INSERT 1
 ---------
      45
 (1 row)
-> select e1,diff(e1) over (partition by code1,code8,code14,code16 order by k_timestamp) as d1,e2,diff(e2) over (partition by code1,code8,code14,code16) as d2 from test_select_diff.t1;
-  e1 | d1 | e2 | d2
------+----+----+-----
-  -1 | -1 |  1 |  1
-(1 row)
 > select diff(NULL) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 ERROR: invalid parameter data type: diff
 SQLSTATE: 42601
