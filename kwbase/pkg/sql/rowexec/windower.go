@@ -637,47 +637,24 @@ func (w *windower) processPartition(
 			return err
 		}
 		frameRun.CurRowPeerGroupNum = 0
-		diffFunction := isDiffFunction(builtin)
+		//diffFunction := isDiffFunction(builtin)
 
 		var prevRes tree.Datum
 		for frameRun.RowIdx < partition.Len() {
 			// Perform calculations on each row in the current peer group.
 			peerGroupEndIdx := frameRun.PeerHelper.GetFirstPeerIdx(frameRun.CurRowPeerGroupNum) + frameRun.PeerHelper.GetRowCount(frameRun.CurRowPeerGroupNum)
-			var firstNull bool
 			for ; frameRun.RowIdx < peerGroupEndIdx; frameRun.RowIdx++ {
 				if err := w.cancelChecker.Check(); err != nil {
 					return err
 				}
-				if diffFunction {
-					first, err := frameRun.FrameStartIdx(ctx, evalCtx)
-					if err != nil {
-						return err
-					}
-					if frameRun.RowIdx == first || firstNull == true {
-						var prevRow tree.IndexedRow
-						var prevValue tree.Datum
-						columnIdx := int(frameRun.ArgsIdxs[0])
-						prevRow, err = frameRun.Rows.GetRow(ctx, frameRun.RowIdx)
-						if err != nil {
-							return err
-						}
-						prevValue, err = prevRow.GetDatum(columnIdx)
-						if err != nil {
-							return err
-						}
-						if prevValue == tree.DNull {
-							firstNull = true
-							frameRun.FirstNull = true
-							frameRun.NullNum++
-						} else {
-							firstNull = false
-							frameRun.FirstNull = false
-							continue
-						}
-					}
-				}
-				frameRun.PartitionIdx = partitionIdx
 				res, err := builtin.Compute(ctx, evalCtx, frameRun)
+				if err != nil {
+					return err
+				}
+				if res == nil {
+					continue
+				}
+				row, err := frameRun.Rows.GetRow(ctx, frameRun.RowIdx)
 				if err != nil {
 					return err
 				}
@@ -692,18 +669,8 @@ func (w *windower) processPartition(
 						return err
 					}
 				}
-
-				if diffFunction && len(windowFn.ordering.Columns) != 0 {
-					w.windowValues[partitionIdx][windowFnIdx][frameRun.RowIdx] = res
-					prevRes = res
-				} else {
-					row, err := frameRun.Rows.GetRow(ctx, frameRun.RowIdx)
-					if err != nil {
-						return err
-					}
-					w.windowValues[partitionIdx][windowFnIdx][row.GetIdx()] = res
-					prevRes = res
-				}
+				w.windowValues[partitionIdx][windowFnIdx][row.GetIdx()] = res
+				prevRes = res
 			}
 			if err := frameRun.PeerHelper.Update(frameRun); err != nil {
 				return err
@@ -849,109 +816,25 @@ func (w *windower) populateNextOutputRow() (bool, bool, error) {
 			return false, false, err
 		}
 
-		for i, builtin := range w.builtins {
-			if WindowFloat, okFloat := builtin.(*builtins.DiffWindowFloat); okFloat {
-				if WindowFloat.HasOut[w.partitionIdx] {
-					WindowFloat.HasOut[w.partitionIdx] = false
-					w.rowsInBucketEmitted++
-					if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-						// We have emitted all rows from the current bucket, so we advance the
-						// iterator.
-						w.partitionIdx++
-						w.rowsInBucketEmitted = 0
-					}
-					return true, true, nil
-				}
-				if rowIdx == 0 || WindowFloat.NullNum[w.partitionIdx] > 0 {
-					var windowFnRes tree.Datum
-					if WindowFloat.IsFirstNull[w.partitionIdx] {
-						windowFnRes = w.windowValues[w.partitionIdx][i][rowIdx]
-						if len(w.windowValues[w.partitionIdx][i]) > 0 {
-							if windowFnRes == tree.DNull && WindowFloat.IsFirstNull[w.partitionIdx] {
-								WindowFloat.NullNum[w.partitionIdx]--
-								if WindowFloat.NullNum[w.partitionIdx] == 0 {
-									WindowFloat.HasOut[w.partitionIdx] = true
-									WindowFloat.IsFirstNull[w.partitionIdx] = false
-								}
-								copy(w.outputRow, inputRow[:len(w.inputTypes)])
-								encWindowFnRes := sqlbase.DatumToEncDatum(&w.outputTypes[w.windowFns[i].outputColIdx], tree.DNull)
-								w.outputRow[w.windowFns[i].outputColIdx] = encWindowFnRes
-								w.rowsInBucketEmitted++
-								if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-									// We have emitted all rows from the current bucket, so we advance the
-									// iterator.
-									w.partitionIdx++
-									w.rowsInBucketEmitted = 0
-								}
-								return true, false, nil
-							}
-						}
-					}
-
-					w.rowsInBucketEmitted++
-					if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-						// We have emitted all rows from the current bucket, so we advance the
-						// iterator.
-						w.partitionIdx++
-						w.rowsInBucketEmitted = 0
-					}
-					return true, true, nil
-				}
-			} else if WindowInt, okInt := builtin.(*builtins.DiffWindowInt); okInt {
-				if WindowInt.HasOut[w.partitionIdx] {
-					WindowInt.HasOut[w.partitionIdx] = false
-					w.rowsInBucketEmitted++
-					if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-						// We have emitted all rows from the current bucket, so we advance the
-						// iterator.
-						w.partitionIdx++
-						w.rowsInBucketEmitted = 0
-					}
-					return true, true, nil
-				}
-				if rowIdx == 0 || WindowInt.NullNum[w.partitionIdx] > 0 {
-					var windowFnRes tree.Datum
-					if WindowInt.IsFirstNull[w.partitionIdx] {
-						windowFnRes = w.windowValues[w.partitionIdx][i][rowIdx]
-						if len(w.windowValues[w.partitionIdx][i]) > 0 {
-							if windowFnRes == tree.DNull && WindowInt.IsFirstNull[w.partitionIdx] {
-								WindowInt.NullNum[w.partitionIdx]--
-								if WindowInt.NullNum[w.partitionIdx] == 0 {
-									WindowInt.HasOut[w.partitionIdx] = true
-									WindowInt.IsFirstNull[w.partitionIdx] = false
-								}
-								copy(w.outputRow, inputRow[:len(w.inputTypes)])
-								encWindowFnRes := sqlbase.DatumToEncDatum(&w.outputTypes[w.windowFns[i].outputColIdx], tree.DNull)
-								w.outputRow[w.windowFns[i].outputColIdx] = encWindowFnRes
-								w.rowsInBucketEmitted++
-								if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-									// We have emitted all rows from the current bucket, so we advance the
-									// iterator.
-									w.partitionIdx++
-									w.rowsInBucketEmitted = 0
-								}
-								return true, false, nil
-							}
-						}
-					}
-
-					w.rowsInBucketEmitted++
-					if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
-						// We have emitted all rows from the current bucket, so we advance the
-						// iterator.
-						w.partitionIdx++
-						w.rowsInBucketEmitted = 0
-					}
-					return true, true, nil
-				}
+		var ifdiff bool
+		for _, builtin := range w.builtins {
+			if isDiffFunction(builtin) {
+				ifdiff = true
+				break
 			}
 		}
-
 		copy(w.outputRow, inputRow[:len(w.inputTypes)])
 		for windowFnIdx, windowFn := range w.windowFns {
 			windowFnRes := w.windowValues[w.partitionIdx][windowFnIdx][rowIdx]
-			if windowFnRes == nil {
-				continue
+			if windowFnRes == nil && ifdiff {
+				w.rowsInBucketEmitted++
+				if w.rowsInBucketEmitted == w.partitionSizes[w.partitionIdx] {
+					// We have emitted all rows from the current bucket, so we advance the
+					// iterator.
+					w.partitionIdx++
+					w.rowsInBucketEmitted = 0
+				}
+				return true, true, nil
 			}
 			encWindowFnRes := sqlbase.DatumToEncDatum(&w.outputTypes[windowFn.outputColIdx], windowFnRes)
 			w.outputRow[windowFn.outputColIdx] = encWindowFnRes

@@ -165,10 +165,9 @@ var windows = map[string]builtinDefinition{
 			if t.Equal(*types.Int) {
 				return makeWindowOverload(tree.ArgTypes{{"val", types.Int}}, types.Int, newDiffWindowInt,
 					"Returns the difference between the current row's `val` and the previous row's `val` (both of type Int); if there is no previous row, returns null.")
-			} // 假设types.Double是浮点数类型
+			}
 			return makeWindowOverload(tree.ArgTypes{{"val", t}}, t, newDiffWindowFloat,
 				"Returns the difference between the current row's `val` and the previous row's `val` (both of type Float or Double); if there is no previous row, returns null.")
-
 		},
 	),
 }
@@ -821,45 +820,18 @@ func (nthValueWindow) Close(context.Context, *tree.EvalContext) {}
 
 // DiffWindowInt is use for DiffWindow for arg int
 type DiffWindowInt struct {
-	notNull     tree.Datum
-	HasOut      []bool
-	IsFirstNull []bool
-	NullNum     []int
+	notNull tree.Datum
+	IsFirst bool
 }
 
 func newDiffWindowInt([]*types.T, *tree.EvalContext) tree.WindowFunc {
-	newDiff := &DiffWindowInt{
-		HasOut:      make([]bool, 32),
-		IsFirstNull: make([]bool, 32),
-		NullNum:     make([]int, 32),
-	}
-	return newDiff
+	return &DiffWindowInt{}
 }
 
 // Compute is for DiffWindowInt compute
 func (dw *DiffWindowInt) Compute(
 	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
 ) (tree.Datum, error) {
-	if wfr.PartitionIdx < len(dw.NullNum)-1 {
-		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
-		dw.HasOut[wfr.PartitionIdx] = false
-		if wfr.FirstNull {
-			dw.IsFirstNull[wfr.PartitionIdx] = true
-		}
-	} else {
-		dw.NullNum = append(dw.NullNum, 0)
-		dw.HasOut = append(dw.HasOut, false)
-		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
-		dw.IsFirstNull = append(dw.IsFirstNull, false)
-		if wfr.FirstNull {
-			dw.IsFirstNull[wfr.PartitionIdx] = true
-		}
-	}
-	if wfr.FirstNull {
-		wfr.FirstNull = false
-		return tree.DNull, nil
-	}
-
 	var err error
 	columnIdx := int(wfr.ArgsIdxs[0])
 
@@ -867,6 +839,28 @@ func (dw *DiffWindowInt) Compute(
 
 	var prevRow tree.IndexedRow
 	var prevValue tree.Datum
+
+	first, err := wfr.FrameStartIdx(ctx, evalCtx)
+	if err != nil {
+		return nil, err
+	}
+	if currentIndex == first || dw.IsFirst {
+		currentRow, currentErr := wfr.Rows.GetRow(ctx, currentIndex)
+		if currentErr != nil {
+			return nil, currentErr
+		}
+		currentValue, currentErr := currentRow.GetDatum(columnIdx)
+		if currentErr != nil {
+			return nil, currentErr
+		}
+		if currentValue == tree.DNull {
+			dw.IsFirst = true
+			return tree.DNull, nil
+		}
+		dw.IsFirst = false
+		return nil, nil
+	}
+
 	prevRow, err = wfr.Rows.GetRow(ctx, currentIndex-1)
 	if err != nil {
 		return nil, err
@@ -908,27 +902,21 @@ func (dw *DiffWindowInt) Compute(
 	return &diffValue, nil
 }
 
-// Reset 和 Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+// Reset is for DiffWindowInt reset
 func (dw *DiffWindowInt) Reset(context.Context) {}
 
-// Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+// Close is for DiffWindowInt close
 func (dw *DiffWindowInt) Close(context.Context, *tree.EvalContext) {}
 
 // DiffWindowFloat is use for DiffWindow for arg float
 type DiffWindowFloat struct {
-	notNull     tree.Datum
-	ifdecimal   bool
-	HasOut      []bool
-	IsFirstNull []bool
-	NullNum     []int
+	notNull   tree.Datum
+	ifdecimal bool
+	IsFirst   bool
 }
 
 func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tree.WindowFunc {
-	result := &DiffWindowFloat{
-		HasOut:      make([]bool, 32),
-		IsFirstNull: make([]bool, 32),
-		NullNum:     make([]int, 32),
-	}
+	result := &DiffWindowFloat{}
 	for _, difftype := range difftypes {
 		if difftype.InternalType.Family == types.DecimalFamily {
 			result.ifdecimal = true
@@ -941,25 +929,6 @@ func newDiffWindowFloat(difftypes []*types.T, evalcontext *tree.EvalContext) tre
 func (dw *DiffWindowFloat) Compute(
 	ctx context.Context, evalCtx *tree.EvalContext, wfr *tree.WindowFrameRun,
 ) (tree.Datum, error) {
-	if wfr.PartitionIdx < len(dw.NullNum)-1 {
-		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
-		dw.HasOut[wfr.PartitionIdx] = false
-		if wfr.FirstNull {
-			dw.IsFirstNull[wfr.PartitionIdx] = true
-		}
-	} else {
-		dw.NullNum = append(dw.NullNum, 0)
-		dw.HasOut = append(dw.HasOut, false)
-		dw.NullNum[wfr.PartitionIdx] = wfr.NullNum
-		dw.IsFirstNull = append(dw.IsFirstNull, false)
-		if wfr.FirstNull {
-			dw.IsFirstNull[wfr.PartitionIdx] = true
-		}
-	}
-	if wfr.FirstNull {
-		wfr.FirstNull = false
-		return tree.DNull, nil
-	}
 	var err error
 	columnIdx := int(wfr.ArgsIdxs[0])
 
@@ -967,6 +936,28 @@ func (dw *DiffWindowFloat) Compute(
 
 	var prevRow tree.IndexedRow
 	var prevValue tree.Datum
+
+	first, err := wfr.FrameStartIdx(ctx, evalCtx)
+	if err != nil {
+		return nil, err
+	}
+	if currentIndex == first || dw.IsFirst {
+		currentRow, currentErr := wfr.Rows.GetRow(ctx, currentIndex)
+		if currentErr != nil {
+			return nil, currentErr
+		}
+		currentValue, currentErr := currentRow.GetDatum(columnIdx)
+		if currentErr != nil {
+			return nil, currentErr
+		}
+		if currentValue == tree.DNull {
+			dw.IsFirst = true
+			return tree.DNull, nil
+		}
+		dw.IsFirst = false
+		return nil, nil
+	}
+
 	prevRow, err = wfr.Rows.GetRow(ctx, currentIndex-1)
 	if err != nil {
 		return nil, err
@@ -1028,8 +1019,8 @@ func (dw *DiffWindowFloat) Compute(
 	return &diffValue, nil
 }
 
-// Reset 和 Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+// Reset is for DiffWindowFloat reset
 func (dw *DiffWindowFloat) Reset(context.Context) {}
 
-// Close 方法与 nthValueWindow 相同，因为它们不需要特定于 diff 的逻辑
+// Close is for DiffWindowFloat close
 func (dw *DiffWindowFloat) Close(context.Context, *tree.EvalContext) {}

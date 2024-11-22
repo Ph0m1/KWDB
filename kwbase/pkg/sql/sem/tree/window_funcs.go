@@ -60,15 +60,6 @@ type WindowFrameRun struct {
 
 	// changes for each row (each call to WindowFunc.Add)
 	RowIdx int // the current row index
-
-	// tell if fistrow is null
-	FirstNull bool
-
-	// count null number
-	NullNum int
-
-	// record PartitionIdx
-	PartitionIdx int
 }
 
 // WindowFrameRangeOps allows for looking up an implementation of binary
