@@ -70,6 +70,11 @@ WindowOperator::~WindowOperator() {
   }
   win_func_output_fields_.clear();
 
+  for (auto field : win_func_fields_) {
+    SafeDeletePointer(field);
+  }
+  win_func_fields_.clear();
+
   for (auto col : group_by_cols_) {
     if (nullptr != col.data_ptr) {
       free(col.data_ptr);
@@ -105,6 +110,7 @@ EEIteratorErrCode WindowOperator::Init(kwdbContext_p ctx) {
       break;
     }
 
+    // win func material
     param_.ResolveWinFuncFields(win_func_fields_);
 
     // temp output field
@@ -113,7 +119,7 @@ EEIteratorErrCode WindowOperator::Init(kwdbContext_p ctx) {
       LOG_ERROR("ResolveWinTempFields() failed\n");
       break;
     }
-    // post->filter;
+    // set trunk win filter field;
     param_.ResolveSetOutputFields(win_func_output_fields_);
 
     code = param_.ResolveFilter(ctx, &filter_, false);

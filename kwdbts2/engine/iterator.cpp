@@ -1088,6 +1088,14 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
         if (i < ts_scan_cols_.size()) {
           col_idx = ts_scan_cols_[i];
         }
+        if (scan_agg_types_[i] == COUNT && col_blk_bitmaps_.IsColSpanNull(i, first_row, *count)) {
+          Batch* b;
+          b = new AggBatch(malloc(sizeof(uint64_t)), 1, nullptr);
+          *static_cast<uint64_t*>(b->mem) = 0;
+          b->is_new = true;
+          res->push_back(i, b);
+          continue;
+        }
         if (col_idx < 0 || col_blk_bitmaps_.IsColSpanNull(i, first_row, *count) ||
             !colTypeHasAggResult((DATATYPE)attrs_[col_idx].type, scan_agg_types_[i])) {
           continue;

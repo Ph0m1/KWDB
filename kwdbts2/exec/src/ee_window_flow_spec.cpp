@@ -129,7 +129,7 @@ void WindowSpecParam::ResolveSetOutputFields(
 void WindowSpecParam::ResolveWinFuncFields(
     std::vector<Field *> &output_fields) {
   for (k_int32 i = 0; i < func_size_; i++) {
-    output_fields.push_back(window_field_[i]);
+    output_fields.push_back(window_field_[i]->field_to_copy());
   }
 }
 
