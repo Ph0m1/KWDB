@@ -420,7 +420,13 @@ CREATE TABLE pg_catalog.pg_attrdef (
 					} else {
 						ctx := tree.NewFmtCtx(tree.FmtPGAttrdefAdbin)
 						ctx.FormatNode(expr)
-						defSrc = tree.NewDString(ctx.String())
+						defaultStr := ctx.String()
+						if strings.HasPrefix(defaultStr, "e'") && strings.HasSuffix(defaultStr, "'") {
+							defaultStr = strings.TrimPrefix(defaultStr, "e'")
+							defaultStr = strings.TrimSuffix(defaultStr, "'")
+							defaultStr = sqlbase.ConvertUnicodeString(strings.ToLower(defaultStr))
+						}
+						defSrc = tree.NewDString(defaultStr)
 					}
 					return addRow(
 						h.ColumnOid(table.ID, column.ID), // oid

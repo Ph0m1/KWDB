@@ -3919,7 +3919,7 @@ func (desc *ColumnDescriptor) SQLString() string {
 		if strings.HasPrefix(s, "e'") && strings.HasSuffix(s, "'") {
 			s = strings.TrimPrefix(s, "e'")
 			s = strings.TrimSuffix(s, "'")
-			s = convertUnicodeString(strings.ToLower(s))
+			s = ConvertUnicodeString(strings.ToLower(s))
 		}
 		f.WriteString(s)
 	}
@@ -3931,8 +3931,8 @@ func (desc *ColumnDescriptor) SQLString() string {
 	return f.CloseAndGetString()
 }
 
-// convert UNICODE to original string
-func convertUnicodeString(input string) string {
+// ConvertUnicodeString converts UNICODE to original string
+func ConvertUnicodeString(input string) string {
 	// reg match
 	re := regexp.MustCompile(`\\u([0-9a-fA-F]{4,8})`)
 
