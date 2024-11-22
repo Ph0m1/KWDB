@@ -664,6 +664,9 @@ func (r *importResumer) relationalResume(
 		details = r.job.Details().(jobspb.ImportDetails)
 	}
 	if details.OnlyMeta {
+		if err := r.publishTables(ctx, cfg); err != nil {
+			return err
+		}
 		showResult(resultsCh, *r.job.ID(), r.res.Rows, 0, 0, false)
 		return nil
 	}
