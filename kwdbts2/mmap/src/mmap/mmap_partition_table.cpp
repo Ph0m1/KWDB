@@ -574,19 +574,23 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
 }
 
 bool TsTimePartition::ShouldVacuum(const timestamp64& ts, uint32_t ts_version) {
-  std::vector<std::shared_ptr<MMapSegmentTable>> segments;
-  data_segments_.GetAllValue(&segments);
-  if (segments.empty()) {
+  std::vector<BLOCK_ID> segment_ids;
+  data_segments_.GetAllKey(&segment_ids);
+  if (segment_ids.empty()) {
     return false;
   }
-  if (segments.size() > 2) {
+  if (segment_ids.size() > 2) {
     return true;
   }
   if (IsModifiedRecent(ts)) {
     return false;
   }
   // DDL
-  for (auto& segment_tbl : segments) {
+  for (auto& segment_id : segment_ids) {
+    std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(segment_id);
+    if (segment_tbl == nullptr) {
+      continue;
+    }
     auto segment_version = segment_tbl->schemaVersion();
     if (segment_version != ts_version) {
       return true;
