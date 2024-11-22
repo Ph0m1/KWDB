@@ -1846,9 +1846,12 @@ void TsTimePartition::publish_payload_space(const std::vector<BlockSpan>& alloc_
   Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   // All requested space is marked as deleted space.
   if (!success) {
+    TsHashLatch* entity_item_latch = GetEntityItemLatch();
+    entity_item_latch->Lock(entity_id);
     for (auto alloc_span : alloc_spans) {
       meta_manager_.MarkSpaceDeleted(entity_id, const_cast<BlockSpan*>(&alloc_span));
     }
+    entity_item_latch->Unlock(entity_id);
   } else {
     int delete_num = 0;
     for (auto delete_row : delete_rows) {
@@ -1857,8 +1860,13 @@ void TsTimePartition::publish_payload_space(const std::vector<BlockSpan>& alloc_
       }
       BlockItem* cur_blk_item = meta_manager_.GetBlockItem(delete_row.block_id);
       SetDeleted();
-      cur_blk_item->setDeleted(delete_row.offset_row);
-      delete_num++;
+      bool is_deleted = false;
+      if (cur_blk_item->isDeleted(delete_row.offset_row, &is_deleted) == 0) {
+        if (!is_deleted) {
+          cur_blk_item->setDeleted(delete_row.offset_row);
+          delete_num++;
+        }
+      }
     }
     EntityItem* entity_item = getEntityItem(entity_id);
     TsHashLatch* entity_item_latch = GetEntityItemLatch();

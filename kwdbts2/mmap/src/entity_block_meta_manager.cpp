@@ -182,7 +182,21 @@ int EntityBlockMetaManager::MarkSpaceDeleted(uint32_t entity_id, BlockSpan* span
   std::lock_guard<std::shared_mutex> lk(entity_block_item_mutex_);
   BlockItem* block_item = span->block_item;
   assert(block_item != nullptr);
-  setBatchDeleted(block_item->rows_delete_flags, span->start_row + 1, span->row_num);
+  EntityItem* entity_item = getEntityItem(entity_id);
+  if (hasDeleted(block_item->rows_delete_flags, span->start_row + 1, span->row_num)) {
+    for (int i = 0; i < span->row_num; i++) {
+      bool is_deleted = false;
+      if (block_item->isDeleted(span->start_row + i + 1, &is_deleted) == 0) {
+        if (!is_deleted) {
+          block_item->setDeleted(span->start_row + i + 1);
+          entity_item->row_written--;
+        }
+      }
+    }
+  } else {
+    setBatchDeleted(block_item->rows_delete_flags, span->start_row + 1, span->row_num);
+    entity_item->row_written -= span->row_num;
+  }
   return 0;
 }
 

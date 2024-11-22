@@ -74,3 +74,12 @@ void setBatchValid(char* delete_flags, size_t start_row, size_t del_rows_count);
  * 
 */
 bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count);
+
+/**
+ * @brief check if has deleted rows.
+ * @param[in] delete_flags  bitmap addr of blockItem.
+ * @param[in] start_row     row num of bitmap. start from 1.
+ * @param[in] rows_count    check count.
+ *
+*/
+bool hasDeleted(char* delete_flags, size_t start_row, size_t rows_count);
