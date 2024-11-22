@@ -989,7 +989,7 @@ func (r *RocksDB) Iterate(start, end roachpb.Key, f func(MVCCKeyValue) (bool, er
 
 // Capacity queries the underlying file system for disk capacity information.
 func (r *RocksDB) Capacity() (roachpb.StoreCapacity, error) {
-	return computeCapacity(r.cfg.Dir, r.cfg.MaxSize)
+	return computeCapacity(r.cfg.Settings, r.cfg.Dir, r.cfg.MaxSize)
 }
 
 // Compact forces compaction over the entire database.

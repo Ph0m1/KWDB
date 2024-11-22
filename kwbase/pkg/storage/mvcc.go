@@ -38,6 +38,8 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
+	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
@@ -63,6 +65,31 @@ var (
 	MVCCKeyMax = MakeMVCCMetadataKey(roachpb.KeyMax)
 	// NilKey is the nil MVCCKey.
 	NilKey = MVCCKey{}
+)
+
+var (
+	// StatsCapacityCount is the counter of computing capacity.
+	StatsCapacityCount int64 = -1
+
+	// StatsCapacityPeriod is the default period of computing capacity.
+	defaultStatsCapacityPeriod int64 = 12
+
+	// statsCapacityPeriod is a period to delay the capacity computing
+	// where the frequency of computing capacity is 10s.
+	// There are two threads alternately computing capacity, thus the period
+	// is set as 12 to fulfill computing capacity once per minute.
+	statsCapacityPeriod = settings.RegisterPublicIntSetting(
+		"capacity.stats.period",
+		"period of computing capacity",
+		defaultStatsCapacityPeriod,
+	)
+
+	// capacityCache is the last time when computing capacity.
+	capacityCache = roachpb.StoreCapacity{
+		Used:           0,
+		TsdbUsed:       0,
+		RelationalUsed: 0,
+	}
 )
 
 // MakeValue returns the inline value.
@@ -3598,7 +3625,9 @@ func ComputeStatsGo(
 
 // computeCapacity returns capacity details for the engine's available storage,
 // by querying the underlying file system.
-func computeCapacity(path string, maxSizeBytes int64) (roachpb.StoreCapacity, error) {
+func computeCapacity(
+	s *cluster.Settings, path string, maxSizeBytes int64,
+) (roachpb.StoreCapacity, error) {
 	fileSystemUsage := gosigar.FileSystemUsage{}
 	dir := path
 	if dir == "" {
@@ -3630,43 +3659,62 @@ func computeCapacity(path string, maxSizeBytes int64) (roachpb.StoreCapacity, er
 	// subdirectories.
 	var totalUsedBytes int64
 	var tsdbUsedBytes int64
+	var relationalUsedBytes int64
 	var tsdbPath = path + "/tsdb/"
-	rootDevNum, err := sysutil.GetDeviceNumber(path)
-	if err != nil {
-		return roachpb.StoreCapacity{}, err
-	}
-	if errOuter := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			// This can happen if rocksdb removes files out from under us - just keep
-			// going to get the best estimate we can.
-			if os.IsNotExist(err) {
-				return nil
-			}
-			// Special-case: if the store-dir is configured using the root of some fs,
-			// e.g. "/mnt/db", we might have special fs-created files like lost+found
-			// that we can't read, so just ignore them rather than crashing.
-			if os.IsPermission(err) && filepath.Base(path) == "lost+found" {
-				return nil
-			}
-			return err
-		}
-		subDevNum, err := sysutil.GetDeviceNumber(path)
-		if err != nil {
-			return nil
-		}
-		if info.Mode().IsRegular() && subDevNum == rootDevNum {
-			totalUsedBytes += info.Size()
-			// Check if the current file is in the tsdb subdirectory and update tsdbUsedBytes.
-			if strings.HasPrefix(path, tsdbPath) {
-				tsdbUsedBytes += info.Size()
-			}
-		}
-		return nil
-	}); errOuter != nil {
-		return roachpb.StoreCapacity{}, errOuter
-	}
 
-	var relationalUsedBytes = totalUsedBytes - tsdbUsedBytes
+	var period = defaultStatsCapacityPeriod // default value is 12
+	if s != nil {
+		period = statsCapacityPeriod.Get(&s.SV)
+	}
+	StatsCapacityCount++
+	if StatsCapacityCount%period == 0 {
+		rootDevNum, err := sysutil.GetDeviceNumber(path)
+		if err != nil {
+			return roachpb.StoreCapacity{}, err
+		}
+		// Iterate through all files in the store directory and add up their sizes.
+		if errOuter := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				// This can happen if rocksdb removes files out from under us - just keep
+				// going to get the best estimate we can.
+				if os.IsNotExist(err) {
+					return nil
+				}
+				// Special-case: if the store-dir is configured using the root of some fs,
+				// e.g. "/mnt/db", we might have special fs-created files like lost+found
+				// that we can't read, so just ignore them rather than crashing.
+				if os.IsPermission(err) && filepath.Base(path) == "lost+found" {
+					return nil
+				}
+				return err
+			}
+			subDevNum, err := sysutil.GetDeviceNumber(path)
+			if err != nil {
+				return nil
+			}
+			if info.Mode().IsRegular() && subDevNum == rootDevNum {
+				totalUsedBytes += info.Size()
+				// Check if the current file is in the tsdb subdirectory and update tsdbUsedBytes.
+				if strings.HasPrefix(path, tsdbPath) {
+					tsdbUsedBytes += info.Size()
+				}
+			}
+			return nil
+		}); errOuter != nil {
+			return roachpb.StoreCapacity{}, errOuter
+		}
+
+		relationalUsedBytes = totalUsedBytes - tsdbUsedBytes
+		//update cache
+		capacityCache.Used = totalUsedBytes
+		capacityCache.TsdbUsed = tsdbUsedBytes
+		capacityCache.RelationalUsed = relationalUsedBytes
+	} else {
+		// Use cached values.
+		totalUsedBytes = capacityCache.Used
+		tsdbUsedBytes = capacityCache.TsdbUsed
+		relationalUsedBytes = capacityCache.RelationalUsed
+	}
 
 	// If no size limitation have been placed on the store size or if the
 	// limitation is greater than what's available, just return the actual

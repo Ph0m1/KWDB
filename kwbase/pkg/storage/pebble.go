@@ -198,9 +198,9 @@ var MVCCMerger = &pebble.Merger{
 //
 // The handling of timestamps in intents is mildly complicated. Consider:
 //
-//   a@<meta>   -> <MVCCMetadata: Timestamp=t2>
-//   a@t2       -> <value>
-//   a@t1       -> <value>
+//	a@<meta>   -> <MVCCMetadata: Timestamp=t2>
+//	a@t2       -> <value>
+//	a@t1       -> <value>
 //
 // The metadata record (a.k.a. the intent) for a key always sorts first. The
 // timestamp field always points to the next record. In this case, the meta
@@ -777,7 +777,7 @@ func (p *Pebble) Attrs() roachpb.Attributes {
 
 // Capacity implements the Engine interface.
 func (p *Pebble) Capacity() (roachpb.StoreCapacity, error) {
-	return computeCapacity(p.path, p.maxSize)
+	return computeCapacity(p.settings, p.path, p.maxSize)
 }
 
 // Flush implements the Engine interface.
