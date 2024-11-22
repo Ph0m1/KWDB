@@ -573,21 +573,20 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
   return err_code;
 }
 
-bool TsTimePartition::EvaluateVacuum(const timestamp64& ts, uint32_t ts_version) {
-  std::vector<BLOCK_ID> segment_ids;
-  data_segments_.GetAllKey(&segment_ids);
-  if (segment_ids.size() > 2) {
+bool TsTimePartition::ShouldVacuum(const timestamp64& ts, uint32_t ts_version) {
+  std::vector<std::shared_ptr<MMapSegmentTable>> segments;
+  data_segments_.GetAllValue(&segments);
+  if (segments.empty()) {
+    return false;
+  }
+  if (segments.size() > 2) {
     return true;
   }
   if (IsModifiedRecent(ts)) {
     return false;
   }
   // DDL
-  for (auto& seg_id : segment_ids) {
-    std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(seg_id);
-    if (segment_tbl == nullptr) {
-      continue;
-    }
+  for (auto& segment_tbl : segments) {
     auto segment_version = segment_tbl->schemaVersion();
     if (segment_version != ts_version) {
       return true;
@@ -607,7 +606,7 @@ KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint3
   }
   // Create a temporary partition and segment to store the data after vacuum
   if (!MakeDirectory(tmp_dir, err_info)) {
-    LOG_ERROR("Compact partition[%s] failed, couldn't create temporary directory.", tmp_dir.c_str());
+    LOG_ERROR("couldn't create temporary partition [%s]", tmp_dir.c_str());
     return FAIL;
   }
   *dest_pt = new TsTimePartition(root_table_manager_, meta_manager_.max_entities_per_subgroup);
@@ -616,7 +615,7 @@ KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint3
   (*dest_pt)->open(file_path_, db_path_, tmp_partition_sub_path, MMAP_CREAT_EXCL, err_info);
   if (!err_info.isOK()) {
     delete *dest_pt;
-    LOG_ERROR("Compact partition[%s] failed, couldn't open temporary table.", tmp_dir.c_str());
+    LOG_ERROR("couldn't open temporary table [%s]", tmp_dir.c_str());
     return FAIL;
   }
   // create segment use max_rows_per_block and max_blocks_per_seg
@@ -838,78 +837,41 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
   return SUCCESS;
 }
 
-KStatus TsTimePartition::CopyConcurrentSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables,
-  uint32_t max_segment_id, uint32_t max_block_id, TsTimePartition* dest_pt) {
-  // Segment IDs are arranged in descending order from largest to smallest
-  for (const auto& segment : segment_tables) {
-    if (segment->segment_id() <= max_segment_id) {
-      break;
-    }
-    std::string segment_dir_path = GetPath() + std::to_string(segment->segment_id()) + '/';
-    std::string cmd = "cp -rf " + segment_dir_path + " " + dest_pt->GetPath();
-    if (!System(cmd)) {
-      LOG_ERROR("Copy segment[%s] files failed, %s", segment_dir_path.c_str(), strerror(errno));
-      return FAIL;
-    }
-  }
-  //  Rebuild added block_item
-  bool first_loop = true;
-  for (BLOCK_ID block_id = max_block_id + 1; block_id <= GetMaxBlockID(); ++block_id) {
-    BlockItem* block_item = GetBlockItem(block_id);
-    auto entity_item = dest_pt->meta_manager_.getEntityItem(block_item->entity_id);
-    if (!entity_item->entity_id) {
-      entity_item->entity_id = block_item->entity_id;
-    }
-
-    BlockItem* new_block_item;
-    if (first_loop) {
-      // the block item is allocated from max_block_id + 1.
-      EntityHeader* dest_header = dest_pt->meta_manager_.getEntityHeader();
-      dest_header->cur_block_id = max_block_id;
-      first_loop = false;
-    }
-    dest_pt->meta_manager_.AddBlockItem(block_item->entity_id, &new_block_item);
-
-    memcpy(&new_block_item->crc, &block_item->crc, sizeof(uint32_t) + 4 * sizeof(bool) + sizeof(BLOCK_ID));
-    memcpy(&new_block_item->publish_row_count, &block_item->publish_row_count, 3 * sizeof(uint32_t) + 128 + 28);
-    // Update entity item, otherwise, all new blocks added in the future point to the same prev
-    dest_pt->meta_manager_.UpdateEntityItem(new_block_item->entity_id, new_block_item);
-  }
-  return KStatus::SUCCESS;
-}
-
-KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version) {
-  // Step 1: Change segment status and get the necessary information
-  vacuumLock();
-  if (!EvaluateVacuum(ts, ts_version)) {
-    vacuumUnlock();
-    return SUCCESS;
-  }
-  auto entities = GetEntities();
-  // check not inserting data.
+KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version, VacuumStatus& vacuum_status) {
+  // check whether partition is being inserted.
+  // Partition's ref count has a wider range than lock.
   if (IsWriting()) {
-    LOG_WARN("partition[%s] is inserting, ref count [%d], cannot vacuum now.", file_path_.c_str(), writing_count_.load());
-    vacuumUnlock();
+    LOG_WARN("partition[%s] is being inserted, ref count [%d], cannot vacuum now", GetPath().c_str(), writing_count_.load());
     return SUCCESS;
   }
-  // set revacuum flag false, if the data written after unlocking is disordered or deleted, indicates that need to
-  // vacuum again, and the flag will be set to true
-  need_revacuum_ = false;
+
+  std::vector<uint32_t> entities;
+  BLOCK_ID max_block_id{0};
   std::vector<BLOCK_ID> segment_ids;
-  data_segments_.GetAllKey(&segment_ids);
-  BLOCK_ID max_segment_id = 0;
-  if (active_segment_ == nullptr) {
-    if (segment_ids.empty()) {
-      vacuumUnlock();
+  BLOCK_ID max_segment_id{0};
+
+  // Step 1: Change segment status and get the necessary information
+  {
+    vacuumLock();
+    Defer defer{[&]() { vacuumUnlock(); }};
+    if (!ShouldVacuum(ts, ts_version)) {
       return SUCCESS;
     }
+    // check not inserting data.
+    if (IsWriting()) {
+      LOG_WARN("partition[%s] is being inserted, ref count [%d], cannot vacuum now", GetPath().c_str(), writing_count_.load());
+      return SUCCESS;
+    }
+    LOG_INFO("Start vacuum in partition [%s]", GetPath().c_str());
+    entities = GetEntities();
+    // set cancel_vacuum_ flag false, if the data written after unlocking is disordered or deleted, indicates that need to
+    // vacuum again, and the flag will be set to true
+    cancel_vacuum_ = false;
+    data_segments_.GetAllKey(&segment_ids);
     max_segment_id = segment_ids.front();
-  } else {
-    max_segment_id = active_segment_->segment_id();
+    max_block_id = meta_manager_.getEntityHeader()->cur_block_id;
+    ChangeSegmentStatus();
   }
-  BLOCK_ID max_block_id = meta_manager_.getEntityHeader()->cur_block_id;
-  ChangeSegmentStatus();
-  vacuumUnlock();
 
   // Step 2: Read all valid data of the current entities and record the number of rows
   std::unordered_map<uint32_t, std::deque<BlockSpan>> src_spans;
@@ -919,22 +881,28 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   for (uint32_t entity_id : entities) {
     std::deque<BlockSpan> block_spans;
     uint32_t count = GetAllBlockSpans(entity_id, ts_spans, block_spans, max_block_id);
-    // calculate temporary partition's segment need how many blocks
+    // Calculate how many blocks are needed for a temporary partition
     max_block_num += (count + CLUSTER_SETTING_MAX_ROWS_PER_BLOCK - 1) / CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;
     src_spans[entity_id] = block_spans;
   }
 
+  // drop all the segments if all entities have been deleted
   if (max_block_num == 0) {
     vacuumLock();
+    Defer defer{[&]() { vacuumUnlock(); }};
+    std::vector<BLOCK_ID> new_segment_ids;
+    data_segments_.GetAllKey(&new_segment_ids);
+    if (IsWriting() || (new_segment_ids[0] > max_segment_id)) {
+      LOG_WARN("partition[%s] is being inserted concurrently, ref count [%d], cancel vacuum", GetPath().c_str(), writing_count_.load());
+      vacuum_status = VacuumStatus::CANCEL;
+      return SUCCESS;
+    }
 
-    // All the data of segment_ids has been deleted, drop segments
     if (IsSegmentsBusy(segment_ids)) {
-      vacuumUnlock();
+      vacuum_status = VacuumStatus::CANCEL;
       return SUCCESS;
     }
     if (DropSegmentDir(segment_ids) < 0) {
-      LOG_ERROR("Drop old segments failed");
-      vacuumUnlock();
       return FAIL;
     }
 
@@ -944,172 +912,129 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
       if (0 == entity_item->cur_block_id) {
         continue;
       }
-      std::shared_ptr<MMapSegmentTable> value;
-      BLOCK_ID key;
-      bool ret = data_segments_.Seek(entity_item->cur_block_id, key, value);
-      if (ret && max_segment_id >= key) {
-        entity_item->block_count = 0;
-        entity_item->cur_block_id = 0;
-        entity_item->is_deleted = false;
-        entity_item->is_disordered = false;
-        entity_item->max_ts = 0;
-        entity_item->min_ts = 0;
-      } else {
-        auto cur_block_id = entity_item->cur_block_id;
-        while (true) {
-          auto block = GetBlockItem(cur_block_id);
-          assert(block->entity_id == entity_id);
-          if (block->prev_block_id == 0) {
-            break;
-          }
-          bool ret = data_segments_.Seek(block->prev_block_id, key, value);
-          if (ret && max_segment_id >= key) {
-            block->prev_block_id = 0;
-            break;
-          }
-          cur_block_id = block->prev_block_id;
-        }
-      }
+      entity_item->block_count = 0;
+      entity_item->cur_block_id = 0;
+      entity_item->is_deleted = false;
+      entity_item->is_disordered = false;
+      entity_item->max_ts = INVALID_TS;
+      entity_item->min_ts = INVALID_TS;
+    }
+    for (int i = 1; i <= max_block_id; ++i) {
+      BlockItem* block = GetBlockItem(i);
+      memset((void*)block, 0, sizeof(BlockItem));
     }
 
-    ErrorInfo err_info;
-    loadSegments(err_info);
-    segment_ids.clear();
-    data_segments_.GetAllKey(&segment_ids);
-    if (segment_ids.empty()) {
-      meta_manager_.getEntityHeader()->cur_block_id = 0;
-    }
-    vacuumUnlock();
+    releaseSegments();
+    meta_manager_.getEntityHeader()->cur_block_id = 0;
+    vacuum_status = VacuumStatus::FINISH;
     return SUCCESS;
   }
 
   // Step 3: Create temporary partition.
-  TsTimePartition* dest_pt = nullptr;
-  KStatus s = PrepareTempPartition(CLUSTER_SETTING_MAX_ROWS_PER_BLOCK, max_block_num, ts_version, &dest_pt);
+  TsTimePartition* tmp_pt = nullptr;
+  KStatus s = PrepareTempPartition(CLUSTER_SETTING_MAX_ROWS_PER_BLOCK, max_block_num, ts_version, &tmp_pt);
   if (s != SUCCESS) {
     return s;
   }
-  std::string partition_dir = GetPath();
-  std::string dest_path = dest_pt->GetPath();
+
+  std::string tmp_partition_path = tmp_pt->GetPath();
   Defer defer_delete{[&]() {
-    delete dest_pt;
-    dest_pt = nullptr;
-    Remove(dest_path);
+    delete tmp_pt;
+    tmp_pt = nullptr;
+    Remove(tmp_partition_path);
   }};
 
-  //Step 4: Traverse all read data and write to the temporary partition
-  if (max_block_num != 0) {
-    uint32_t num_col = root_table_manager_->GetIdxForValidCols(ts_version).size();
-    for (const auto& iter : src_spans) {
-      // Check if it is necessary to suspend this vacuum.
-      if (need_revacuum_) {
-        LOG_WARN("During the vacuum process, it was discovered that the partition needed to be revacuum,"
-                 " and this vacuum is now suspended");
-        return SUCCESS;
-      }
-      // Traverse every entity's data
-      uint32_t entity_id = iter.first;
-      auto block_spans = iter.second;
-      // Traverse every block span of this entity
-      for (auto block_span : block_spans) {
-        BlockItem* cur_block_item = block_span.block_item;
-        uint32_t block_start_row = block_span.start_row;
-        uint32_t row_count = block_span.row_num;
-        std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block_item->block_id);
-        if (segment_tbl == nullptr) {
-          LOG_ERROR("Can not find segment use block [%u], in partition [%s]", cur_block_item->block_id, partition_dir.c_str());
-          return FAIL;
-        }
-        ResultSet res{num_col};
-        // Step 4.1: Read data after vacuum
-        s = GetVacuumData(segment_tbl, cur_block_item, block_start_row + 1, row_count, ts_version, &res);
-        if (s != SUCCESS) {
-          LOG_ERROR("Get vacuum data failed");
-          // Defer will clear data
-          return s;
-        }
-        // Step 4.2: Write into des_pt.
-        s = WriteVacuumData(dest_pt, entity_id, &res, row_count);
-        if (s != SUCCESS) {
-          LOG_ERROR("Write vacuum data failed");
-          // Defer will clear data
-          return s;
-        }
-      }
-      EntityItem* entity_item = dest_pt->getEntityItem(entity_id);
-      entity_item->max_ts = getEntityItem(entity_id)->max_ts;
-      entity_item->min_ts = getEntityItem(entity_id)->min_ts;
+  // Step 4: Traverse all read data and write to the temporary partition
+  uint32_t num_col = root_table_manager_->GetIdxForValidCols(ts_version).size();
+  for (const auto& iter : src_spans) {
+    // Check whether it is needed to cancel this vacuum.
+    std::vector<BLOCK_ID> new_segment_ids;
+    data_segments_.GetAllKey(&new_segment_ids);
+    if (IsWriting() || (new_segment_ids[0] > max_segment_id) || cancel_vacuum_) {
+      LOG_WARN("partition[%s] is being inserted concurrently, or there are some data been deleted, cancel vacuum", GetPath().c_str());
+      vacuum_status = VacuumStatus::CANCEL;
+      return SUCCESS;
     }
+    // Traverse every entity's data
+    uint32_t entity_id = iter.first;
+    auto block_spans = iter.second;
+    // Traverse every block span of this entity
+    for (auto block_span : block_spans) {
+      BlockItem* cur_block_item = block_span.block_item;
+      uint32_t block_start_row = block_span.start_row;
+      uint32_t row_count = block_span.row_num;
+      std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(cur_block_item->block_id);
+      if (segment_tbl == nullptr) {
+        LOG_ERROR("Can not find segment use block [%u], in partition [%s]", cur_block_item->block_id, GetPath().c_str());
+        return FAIL;
+      }
+      ResultSet res{num_col};
+      // Step 4.1: Read data for vacuum
+      s = GetVacuumData(segment_tbl, cur_block_item, block_start_row + 1, row_count, ts_version, &res);
+      if (s != SUCCESS) {
+        LOG_ERROR("Get vacuum data failed");
+        // Defer would clear data
+        return s;
+      }
+      // Step 4.2: Write into tmp_pt.
+      s = WriteVacuumData(tmp_pt, entity_id, &res, row_count);
+      if (s != SUCCESS) {
+        LOG_ERROR("Write vacuum data failed");
+        // Defer will clear data
+        return s;
+      }
+    }
+    EntityItem* tmp_entity_item = tmp_pt->getEntityItem(entity_id);
+    EntityItem* origin_entity_item = getEntityItem(entity_id);
+    tmp_entity_item->max_ts = origin_entity_item->max_ts;
+    tmp_entity_item->min_ts = origin_entity_item->min_ts;
+    // if delete concurrently, row_written will be wrong, but the 'cancel_vacuum_' flag would cancel vacuum
+    tmp_entity_item->row_written = origin_entity_item->row_written;
   }
-
-  // Step 5: Copy added segment files from original partition to the temporary and update status
-  dest_pt->minTimestamp() = minTimestamp();
-  dest_pt->maxTimestamp() = maxTimestamp();
-  std::shared_ptr<MMapSegmentTable> dest_segment = dest_pt->getSegmentTable(1);
+  tmp_pt->minTimestamp() = minTimestamp();
+  tmp_pt->maxTimestamp() = maxTimestamp();
+  std::shared_ptr<MMapSegmentTable> dest_segment = tmp_pt->getSegmentTable(1);
   dest_segment->setSegmentStatus(InActiveSegment);
 
-  // Copy added segment files
+
+  // Step 6: Replace partition's old segments with vacuumed segments
   vacuumLock();
   Defer defer{[&]() { vacuumUnlock(); }};
-  if (need_revacuum_) {
-    LOG_WARN("During the vacuum process, it was discovered that the partition needed to be revacuum,"
-         " and this vacuum is now suspended");
+  std::vector<BLOCK_ID> new_segment_ids;
+  data_segments_.GetAllKey(&new_segment_ids);
+  if (IsWriting() || (new_segment_ids[0] > max_segment_id) || cancel_vacuum_) {
+    LOG_WARN("partition[%s] is being inserted concurrently, or there are some data been deleted, cancel vacuum", GetPath().c_str());
+    vacuum_status = VacuumStatus::CANCEL;
     return SUCCESS;
   }
-  if (IsWriting()) {
-    LOG_WARN("partition[%s] is inserting [%d], cancel vacuum.", file_path_.c_str(), writing_count_.load());
-    return SUCCESS;
-  }
-  std::vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
-  data_segments_.GetAllValue(&segment_tables);
-  if (segment_tables.front()->segment_id() != max_segment_id) {
-    s = CopyConcurrentSegments(segment_tables, max_segment_id, max_block_id, dest_pt);
-    if (s != SUCCESS) {
-      return s;
-    }
-  } else {
-    dest_segment->setSegmentStatus(ActiveSegment);
-  }
-
-  // count(*) use entity_item->row_written
-  auto latest_entities = GetEntities();
-  for (auto& entity_id : latest_entities) {
-    EntityItem* entity_item = dest_pt->getEntityItem(entity_id);
-    entity_item->row_written = getEntityItem(entity_id)->row_written;
-  }
-
-  // Step 6: Drop partition's old segments and move vacuumed segments to original partition
-  segment_ids.clear();
-  data_segments_.GetAllKey(&segment_ids);
 
   if (IsSegmentsBusy(segment_ids)) {
-    vacuumUnlock();
+    vacuum_status = VacuumStatus::CANCEL;
     return SUCCESS;
   }
   if (DropSegmentDir(segment_ids) < 0) {
-    LOG_ERROR("Drop old segments failed");
+    LOG_ERROR("Drop original segments failed");
     return FAIL;
   }
-  data_segments_.Clear();
-  meta_manager_.release(); // avoid memory leak
 
-  std::string cmd = "mv " + dest_path + "* " + partition_dir;
+  std::string cmd = "mv " + tmp_partition_path + "* " + GetPath();
   if (!System(cmd)) {
     LOG_ERROR("mv tmp partition dir failed");
     // mv failed, still need to reload meta and segments, not return fail
   }
-  // Step 7: Reload partition
-  // reopen meta.0
+
+  // Step 7: Reload partition & reopen meta.0
   ErrorInfo err_info;
+  meta_manager_.release(); // avoid memory leak
   if (openBlockMeta(MMAP_OPEN_NORECURSIVE, err_info) < 0) {
     LOG_ERROR("Reopen block meta failed, error: %s", err_info.errmsg.c_str());
     return FAIL;
   }
-  // reload segments
   if (loadSegments(err_info) < 0) {
     LOG_ERROR("Reload segments failed, error: %s", err_info.errmsg.c_str());
     return FAIL;
   }
+  // update data version
   if (root_table_manager_->GetTableVersionOfLatestData() < ts_version) {
     root_table_manager_->UpdateTableVersionOfLastData(ts_version);
   }
@@ -2651,7 +2576,7 @@ void TsTimePartition::ChangeSegmentStatus() {
     active_segment_ = nullptr;
   }
   // Set all the segments of this partition to InActiveSegment
-  data_segments_.Traversal([&](BLOCK_ID s_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+  data_segments_.Traversal([&](BLOCK_ID s_id, const std::shared_ptr<MMapSegmentTable>& tbl) -> bool {
     if (tbl->sqfsIsExists()) {
       return true;
     }
@@ -2699,13 +2624,13 @@ int TsTimePartition::DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids) {
           break;
         }
       }
-      // delete segment directory.
+      // delete segment directory
       int error_code = segment_table->remove();
       if (error_code < 0) {
         LOG_ERROR("remove segment[%s] failed!", segment_table->realFilePath().c_str());
         return error_code;
       }
-      LOG_INFO("remove segment[%s] success!", segment_table->realFilePath().c_str());
+      LOG_INFO("remove segment[%s] succeed!", segment_table->realFilePath().c_str());
     }
   }
   return 0;
@@ -2720,7 +2645,7 @@ bool TsTimePartition::IsSegmentsBusy(const std::vector<BLOCK_ID>& segment_ids) {
       if (value.use_count() == 2) {
         continue;
       } else if (value.use_count() > 2) {
-        LOG_WARN("segment[%s] is using, cannot vacuum now", value->realFilePath().c_str());
+        LOG_WARN("segment[%s] is using, cancel vacuum", value->realFilePath().c_str());
         return true;
       }
     }

@@ -33,7 +33,7 @@ extern size_t META_BLOCK_ITEM_MAX;                  // blockitem num in one .met
 const size_t BLOCK_ITEM_MAX = 1000000;              // max block item number in each segment
 const size_t BLOCK_ROWS_MAX = 1000;                 // max rows number in each block item, pay attention to the delete bitmap
 const size_t BLOCK_ROWS_MIN = 10;                   // min rows number in each block
-const uint64_t INVALID_TS = INT64_MAX;
+const int64_t INVALID_TS = INT64_MAX;
 
 #define BLOCK_ITEM_BITMAP_SIZE 128
 

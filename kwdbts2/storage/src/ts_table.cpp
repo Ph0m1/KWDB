@@ -358,7 +358,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     }
     last_p_time = p_time;
 
-    p_bt->RefWrtingCount();
+    p_bt->RefWritingCount();
 
     std::vector<BlockSpan> cur_alloc_spans;
     std::vector<MetricRowID> to_deleted_real_rows;
@@ -402,7 +402,7 @@ void TsEntityGroup::recordPutAfterProInfo(unordered_map<TsTimePartition*, PutAft
                                           TsTimePartition* p_bt, std::vector<BlockSpan>& cur_alloc_spans,
                                           std::vector<MetricRowID>& to_deleted_real_rows) {
   if (after_process_info.find(p_bt) != after_process_info.end()) {
-    p_bt->UnrefWrtingCount();
+    p_bt->UnrefWritingCount();
     ebt_manager_->ReleasePartitionTable(p_bt);
   } else {
     after_process_info[p_bt] = new PutAfterProcessInfo();
@@ -419,7 +419,7 @@ void TsEntityGroup::putAfterProcess(unordered_map<TsTimePartition*, PutAfterProc
                                     uint32_t entity_id, bool all_success) {
   for (auto iter : after_process_info) {
     iter.first->publish_payload_space((iter.second)->spans, (iter.second)->del_real_rows, entity_id, all_success);
-    iter.first->UnrefWrtingCount();
+    iter.first->UnrefWritingCount();
     ebt_manager_->ReleasePartitionTable(iter.first);
     delete iter.second;
   }
@@ -1833,6 +1833,7 @@ KStatus TsTable::GetDataVolume(kwdbContext_p ctx, uint64_t begin_hash, uint64_t 
       std::deque<BlockItem*> block_item_queue;
       timestamp64 min_ts, max_ts;
       for (auto& partition : partitions) {
+        partition->rdLock();  // control vacuum concurrency
         for (auto cur_entity_id : sub_grp.second) {
           block_item_queue.clear();
           partition->GetAllBlockItems(cur_entity_id, block_item_queue);
@@ -1843,6 +1844,7 @@ KStatus TsTable::GetDataVolume(kwdbContext_p ctx, uint64_t begin_hash, uint64_t 
             }
           }
         }
+        partition->unLock();
         ReleaseTable(partition);
       }
     }
@@ -1911,6 +1913,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
       std::deque<BlockItem*> block_item_queue;
       timestamp64 min_ts, max_ts, max_pt_time;
       for (auto& partition : partitions) {
+        partition->rdLock();  // control vacuum concurrency
         uint64_t partition_time = cur_sub_group->PartitionTime(partition->minTimestamp(), max_pt_time);
         TsPartitonIteratorParams param{entity_grp.first, sub_grp.first, sub_grp.second, {ts_span}, {0}, {0}, data_schema};
         TsPartitionIterator pt_iter(partition, param);
@@ -1953,6 +1956,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
             }
           }
         }
+        partition->unLock();
         ReleaseTable(partition);
       }
     }
@@ -2842,6 +2846,9 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
       // Traverse all partitions
       for (auto& partition : partition_tables) {
         usleep(10);
+        partition->rdLock();  // control vacuum concurrency
+        Defer defer_lock{[&]() { partition->unLock(); }};
+
         if (!partition || partition->getObjectStatus() != OBJ_READY) {
           err_info.setError(KWEOTHER, "partition table is nullptr or not ready");
           break;

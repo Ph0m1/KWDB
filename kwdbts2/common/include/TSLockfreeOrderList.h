@@ -39,12 +39,12 @@ class TSLockfreeOrderList {
 
   void Clear() {
     TSListItem* cur = tail_.prev_.load();
+    tail_.prev_.store(nullptr);
     while (cur != nullptr) {
       TSListItem * prev = cur->prev_.load();
       delete cur;
       cur = prev;
     }
-    tail_.prev_.store(nullptr);
   }
 
   bool Insert(K key, V value) {

@@ -56,14 +56,14 @@ bool MakeDirectory(const string& dir_path, ErrorInfo& error_info) {
       if (mkdir(path, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) < 0) {
         error_info.errcode = errnumToErrorCode(errno);
         error_info.errmsg = strerror(errno);
-        LOG_ERROR("%s mkdir failed: errno[%d], strerror[%s]", path, errno, error_info.errmsg.c_str());
+        LOG_ERROR("mkdir [%s] failed: errno[%d], strerror[%s]", path, errno, error_info.errmsg.c_str());
         return false;
       }
     } else {
       if (!S_ISDIR(st.st_mode)) {
         error_info.errcode = KWEOTHER;
         error_info.errmsg = std::string(path) + " is not directory";
-        LOG_ERROR("%s mkdir failed: %s", path, error_info.errmsg.c_str());
+        LOG_ERROR("mkdir [%s] failed: %s", path, error_info.errmsg.c_str());
         return false;
       }
     }

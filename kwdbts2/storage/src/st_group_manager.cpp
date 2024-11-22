@@ -310,14 +310,19 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
       if (enable_vacuum) {
         // data vacuum
         std::string partition_path = p_table->GetPath();
-        LOG_INFO("Start vacuum in partition %s", partition_path.c_str());
-        KStatus s = p_table->ProcessVacuum(compress_ts, ts_version);
+        VacuumStatus vacuum_status{VacuumStatus::NOT_BEGIN};
+        KStatus s = p_table->ProcessVacuum(compress_ts, ts_version, vacuum_status);
         if (s != SUCCESS) {
-          LOG_ERROR("Process vacuum failed, partition %s", partition_path.c_str());
+          LOG_ERROR("Vacuum failed, partition [%s]", partition_path.c_str());
         } else {
-          LOG_INFO("Finish vacuum in partition %s", partition_path.c_str());
+          if (vacuum_status == VacuumStatus::CANCEL) {
+            LOG_INFO("Cancel vacuum in partition [%s]", partition_path.c_str());
+          } else if (vacuum_status == VacuumStatus::FINISH) {
+            LOG_INFO("Finish vacuum in partition [%s]", partition_path.c_str());
+          }
         }
       }
+
       p_table->Compress(compress_ts, err_info);
       if (err_info.errcode < 0) {
         LOG_ERROR("MMapPartitionTable[%s] compress error : %s", p_table->path().c_str(), err_info.errmsg.c_str());

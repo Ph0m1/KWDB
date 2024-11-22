@@ -50,7 +50,6 @@ class TsTimePartition : public TSObject {
   using TsTimePartitionLatch = KLatch;
 
   TsTimePartitionRWLatch* vacuum_query_lock_;
-
   TsTimePartitionLatch* vacuum_insert_lock_; // control insert & vacuum concurrency
   TsTimePartitionLatch* vacuum_delete_lock_; // control delete & vacuum concurrency
 
@@ -70,7 +69,7 @@ class TsTimePartition : public TSObject {
   string db_path_;
   string tbl_sub_path_;
   string file_path_;
-  bool need_revacuum_ = false;
+  bool cancel_vacuum_ = false;
   std::atomic<int> writing_count_{0};
 
   // root table with schema info in table root directory
@@ -124,11 +123,11 @@ class TsTimePartition : public TSObject {
 
   int unLock() override;
 
-  inline void RefWrtingCount() {
+  inline void RefWritingCount() {
     writing_count_.fetch_add(1);
   }
 
-  inline void UnrefWrtingCount() {
+  inline void UnrefWritingCount() {
     writing_count_.fetch_sub(1);
   }
 
@@ -647,12 +646,12 @@ class TsTimePartition : public TSObject {
   // Set partition need to be reorganization.
   inline void SetDisordered() {
     meta_manager_.getEntityHeader()->data_disordered = true;
-    need_revacuum_ = true;
+    cancel_vacuum_ = true;
   }
 
   inline void SetDeleted() {
     meta_manager_.getEntityHeader()->data_deleted = true;
-    need_revacuum_ = true;
+    cancel_vacuum_ = true;
   }
 
   inline void ResetVacuumFlags() {
@@ -678,7 +677,7 @@ class TsTimePartition : public TSObject {
   }
 
   // Evaluate the partition can be vacuumed or not.
-  bool EvaluateVacuum(const timestamp64& ts, uint32_t ts_version);
+  bool ShouldVacuum(const timestamp64& ts, uint32_t ts_version);
 
   /**
    * Create a temporary partition using specified parameters and version
@@ -686,16 +685,13 @@ class TsTimePartition : public TSObject {
   KStatus PrepareTempPartition(uint32_t max_rows_per_block, uint32_t max_blocks_pre_seg,
                                uint32_t ts_version, TsTimePartition** dest_pt);
 
-  KStatus CopyConcurrentSegments(const std::vector<std::shared_ptr<MMapSegmentTable>>& segment_tables, uint32_t max_segment_id,
-    uint32_t max_block_id, TsTimePartition* dest_pt);
-
   /**
    * Using ts_version to vacuum data, read ordered data from original partition and write into new tempory partition,
-   * then use the tempory to replace the original.
+   * then use the temporary to replace the original.
    * @param ts_version which version of data need to be vacuum
    * @return KStatus
    */
-  KStatus ProcessVacuum(const timestamp64& ts, uint32_t ts_version);
+  KStatus ProcessVacuum(const timestamp64& ts, uint32_t ts_version, VacuumStatus& vacuum_status);
 
   /**
    * Read partial data from the block item of the specified segment and convert it into ResultSet.

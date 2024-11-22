@@ -78,6 +78,12 @@ struct UnorderedDataStats {
   }
 };
 
+enum class VacuumStatus {
+  NOT_BEGIN = 0,
+  CANCEL,
+  FINISH
+};
+
 enum SortOrder {
   ASC = 0,
   DESC,
