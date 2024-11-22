@@ -80,7 +80,7 @@ var (
 	// is set as 12 to fulfill computing capacity once per minute.
 	statsCapacityPeriod = settings.RegisterPublicIntSetting(
 		"capacity.stats.period",
-		"period of computing capacity",
+		"period of computing capacity, the valid value is [1, 10000], default value is 12",
 		defaultStatsCapacityPeriod,
 	)
 

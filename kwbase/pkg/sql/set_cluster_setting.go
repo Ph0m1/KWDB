@@ -241,6 +241,18 @@ func checkTsCountUseStatistics(encodedValue string) error {
 	return nil
 }
 
+// checkCapacityStatsPeriod checks whether the capacity stats period value set is valid
+func checkCapacityStatsPeriod(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 1 || value > 10000 {
+		return errors.New("invalid value, the range of capacity stats period should be [1, 10000]")
+	}
+	return nil
+}
+
 // CheckClusterSetting map of checking methods for saving cluster settings
 var CheckClusterSetting = map[string]CheckOperation{
 	"ts.dedup.rule":      checkTsDedupRule,
@@ -255,6 +267,7 @@ var CheckClusterSetting = map[string]CheckOperation{
 	"immediate_compression.threads":               checkTsCompressThreads,
 	"ts.sql.query_opt_mode":                       checkTsQueryOptMode,
 	"ts.count.use_statistics.enabled":             checkTsCountUseStatistics,
+	"capacity.stats.period":                       checkCapacityStatsPeriod,
 }
 
 func (n *setClusterSettingNode) startExec(params runParams) error {
