@@ -1622,6 +1622,9 @@ func (c internalReplicationChanges) useJoint() bool {
 	// These could be lifted, but it doesn't seem worth it.
 	return len(c) > 1 || c[0].typ == internalChangeTypeDemote
 }
+func (c internalReplicationChanges) isRemoval() bool {
+	return len(c) == 1 && c[0].typ == internalChangeTypeRemove
+}
 
 type storeSettings interface {
 	ClusterSettings() *cluster.Settings
@@ -1795,16 +1798,37 @@ func execChangeReplicasTxn(
 	check := func(kvDesc *roachpb.RangeDescriptor) bool {
 		// NB: We might fail to find the range if the range has been merged away
 		// in which case we definitely want to fail the check below.
-		if kvDesc != nil && kvDesc.RangeID == referenceDesc.RangeID && chgs.leaveJoint() {
-			// If there are no changes, we're trying to leave a joint config,
-			// so that's all we care about. But since leaving a joint config
-			// is done opportunistically whenever one is encountered, this is
-			// more likely to race than other operations. So we verify literally
-			// nothing about the descriptor, but once we get the descriptor out
-			// from conditionalGetDescValueFromDB, we'll check if it's in a
-			// joint config and if not, noop.
-			return true
+		if kvDesc != nil && kvDesc.RangeID == referenceDesc.RangeID {
+			if chgs.leaveJoint() && !kvDesc.Replicas().InAtomicReplicationChange() {
+				// If there are no changes, we're trying to leave a joint config, so
+				// that's all we care about. But since leaving a joint config is done
+				// opportunistically whenever one is encountered, this is more likely to
+				// race than other operations. So we verify that the descriptor fetched
+				// from kv is indeed in a joint config, and hint to the caller that it
+				// can no-op this replication change.
+				log.Infof(
+					ctx, "we were trying to exit a joint config but found that we are no longer in one; skipping",
+				)
+				return true
+			}
+
+			if chgs.isRemoval() {
+				// If we're simply trying to remove a learner replica, but find that
+				// that learner has already been removed from the range, we can no-op.
+				learnerAlreadyRemoved := true
+				for _, repl := range kvDesc.Replicas().All() {
+					if repl.StoreID == chgs[0].target.StoreID && repl.GetType() == roachpb.LEARNER {
+						learnerAlreadyRemoved = false
+						break
+					}
+				}
+				if learnerAlreadyRemoved {
+					log.Infof(ctx, "skipping learner removal because it was already removed")
+					return true
+				}
+			}
 		}
+
 		// Otherwise, check that the descriptors are equal.
 		//
 		// TODO(tbg): check that the replica sets are equal only. I was going to

@@ -142,7 +142,7 @@ func (rq *raftSnapshotQueue) processRaftSnapshot(
 			// bail for now and try again later.
 			err := errors.Errorf(
 				"skipping snapshot; replica is likely a learner in the process of being added: %s", repDesc)
-			log.Info(ctx, err)
+			log.VEventf(ctx, 2, "%v", err)
 			// TODO(dan): This is super brittle and non-obvious. In the common case,
 			// this check avoids duplicate work, but in rare cases, we send the
 			// learner snap at an index before the one raft wanted here. The raft
