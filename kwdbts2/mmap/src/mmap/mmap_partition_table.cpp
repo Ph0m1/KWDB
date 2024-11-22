@@ -1260,6 +1260,8 @@ int TsTimePartition::Sync(kwdbts::TS_LSN check_lsn, map<uint32_t, uint64_t>& row
 }
 
 int TsTimePartition::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t* count, ErrorInfo& err_info) {
+  MUTEX_LOCK(vacuum_delete_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   *count = 0;
   EntityItem* entity_item = getEntityItem(entity_id);
   if (entity_item->cur_block_id == 0) {
@@ -1364,6 +1366,8 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
 
 int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t start_row, size_t num,
                              kwdbts::Payload* payload, ErrorInfo& err_info) {
+  MUTEX_LOCK(vacuum_delete_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   size_t p_count = num;
   if (p_count == 0) {
     return 0;
@@ -1449,6 +1453,8 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
 
 int TsTimePartition::UndoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
                                 const vector<DelRowSpan>* rows, ErrorInfo& err_info) {
+  MUTEX_LOCK(vacuum_delete_lock_);
+  Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   uint32_t undo_num = 0;
   /*
      1. struct BlockItem.rows_delete_flags records the delete flags for 1000 rows in the data block.
