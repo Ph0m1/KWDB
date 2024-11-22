@@ -2503,7 +2503,7 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
   sort(intervals.begin(), intervals.end());
   vector<pair<pair<timestamp64, timestamp64>, vector<BlockItem*>>> block_items;
   for (auto interval : intervals) {
-    if (block_items.empty() || interval[0] >= block_items.end()->first.second) {
+    if (block_items.empty() || interval[0] >= block_items.back().first.second) {
       block_items.push_back({{interval[0], interval[1]}, {interval_block_map[{interval[0], interval[1]}]}});
     } else {
       if (interval[1] > block_items.back().first.second) {
