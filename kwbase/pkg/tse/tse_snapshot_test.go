@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver"
@@ -226,6 +227,14 @@ func TestCreateTsTableFailed(t *testing.T) {
 	require.Equal(t, err, nil)
 	_, err = s.Exec("create table tsdb.tab1(k_timestamp timestamp not null,e1 float not null, e2 float4 not null, e3 float8 not null, e4 double precision not null,e5 real not null,e6 int not null, e7 int2 not null, e8 int4 not null, e9 int8 not null, e10 int64 not null, e11 bigint not null, e12 smallint not null,e13 integer not null,e14 bool not null,e15 char not null, e16 char(100) not null, e17 varbytes(100) not null,e18 timestamp not null ,e19 nchar(100) not null,e20 varchar(100) not null,e21 nvarchar(100) not null,e22 varbytes(100) not null, e23 varbytes not null,e24 nchar not null,e25 varchar not null,e26 nvarchar not null,e27 varbytes not null) tags (tag1 int not null)primary tags(tag1);")
 	require.NotEqual(t, err, nil)
+
+	// When create ts table is submitted in the first phase, its first range will be created.
+	// This step will wait for the second phase to succeed or fail before proceeding.
+	// After the second phase fails, the first range query tableDesc fails.And change
+	// splitType to DEFAULT and then split the first range.
+	// Sleep for a while to wait for the first range to split.
+	time.Sleep(time.Second * 3)
+
 	rows, err := c.Servers[0].InternalExecutor().(*sql.InternalExecutor).Query(ctx, "", nil, "select start_pretty, end_pretty from kwdb_internal.ranges where end_pretty = '/Max';")
 	require.Equal(t, "/Table/78", string(*(rows[0][0].(*tree.DString))))
 	require.Equal(t, "/Max", string(*(rows[0][1].(*tree.DString))))
