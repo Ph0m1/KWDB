@@ -43,10 +43,10 @@ class StatisticSpecResolve : public PostResolve {
   k_int16 statistic_last_tag_index_{0};
   k_int16 is_insert_ts_index_{0};
   k_int16 insert_last_tag_ts_num_{0};
+  k_int32 tag_count_index_{-1};
 
  protected:
   k_bool is_have_tag_first_{false};
-  k_int32 tag_count_index_{-1};
 };
 
 }  // namespace kwdbts

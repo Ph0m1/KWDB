@@ -99,6 +99,10 @@ select count(e1),first(t) from t2 where ts<='1970-01-01 00:00:00.002';
 select max(t) from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
 select count(e1),max(t),first(t)  from t2 where ts<='1970-01-01 00:00:00.002' group by t,ts order by ts;
 select count(t),max(t) from t2 where ts<='2024-01-01 00:00:00.002';
+select max(t),first(t) from t2 where ts<='1970-01-01 00:00:00.002';
+select first(t),last(t) from t2 where ts<='1970-01-01 00:00:00.002';
+select first(t),last(e1) from t2 where ts<='1970-01-01 00:00:00.002';
+select first(t),lastts(e1) from t2 where ts<='1970-01-01 00:00:00.002';
 
 create table t3(ts timestamp not null, e1 int) tags(t int not null,t2 int ) primary tags(t);
 insert into t3 values('2024-01-01 00:00:00.001',1,1,2);

@@ -62,6 +62,7 @@ TableStatisticScanOperator::TableStatisticScanOperator(
   is_clone_ = true;
   param_.insert_ts_index_ = other.param_.insert_ts_index_;
   param_.insert_last_tag_ts_num_ = other.param_.insert_last_tag_ts_num_;
+  param_.tag_count_index_ = other.param_.tag_count_index_;
 }
 
 TableStatisticScanOperator::~TableStatisticScanOperator() {
@@ -288,11 +289,10 @@ k_int64 TableStatisticScanOperator::ProcessPTagSpanFilter(RowBatch* row_batch) {
   }
 
   row_batch->ResetLine();
-  char* data = row_batch->GetData(tag_count_read_index_, sizeof(k_int64),
-                                  roachpb::KWDBKTSColumn::TYPE_DATA,
-                                  roachpb::DataType::BIGINT);
-  k_int64 val = *reinterpret_cast<k_int64*>(data);
-  return val;
+  return row_batch->IsNull(tag_count_read_index_,
+                           roachpb::KWDBKTSColumn::TYPE_DATA)
+             ? 0
+             : 1;
 }
 
 BaseOperator* TableStatisticScanOperator::Clone() {
