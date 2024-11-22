@@ -482,7 +482,15 @@ int MMapSegmentTable::reserveBase(size_t n) {
     if (cols_info_include_dropped_[i].isFlag(AINFO_DROPPED)) {
       continue;
     }
-    err_code = col_files_[i]->mremap(getBlockMaxNum() * col_block_size_[i]);
+    size_t max_length = getBlockMaxNum() * col_block_size_[i];
+    // 32 bit system may overflow here
+    if (max_length / (size_t) getBlockMaxNum() != col_block_size_[i]) {
+      LOG_ERROR("reserve overflow in column file: %s, block_max_num: %lu, col_block_size: %d",
+                col_files_[i]->realFilePath().c_str(), getBlockMaxNum(),
+                getBlockMaxNum() * col_block_size_[i]);
+      return KWECORR;
+    }
+    err_code = col_files_[i]->mremap(max_length);
     if (err_code < 0) {
       break;
     }

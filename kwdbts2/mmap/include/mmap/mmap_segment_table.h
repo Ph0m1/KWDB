@@ -46,6 +46,8 @@ struct AggDataAddresses {
   void* sum;
 };
 
+inline void noFree(char* data) {}
+
 class MMapSegmentTable : public TSObject, public TsTableObject {
  private:
   KRWLatch rw_latch_;
@@ -462,45 +464,37 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // get vartype column value, value is copied from stringfile.
   inline std::shared_ptr<void> varColumnAddr(MetricRowID row_id, size_t c) const {
     size_t offset = *reinterpret_cast<uint64_t*>(columnAddr(row_id, c));
-    m_str_file_->rdLock();
-    char* data = m_str_file_->getStringAddr(offset);
-    uint16_t len = *(reinterpret_cast<uint16_t*>(data));
-    void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
-    memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
-    std::shared_ptr<void> ptr(var_data, free);
-    m_str_file_->unLock();
-    return ptr;
+    if (static_cast<SegmentStatus>(TsTableObject::status()) == SegmentStatus::ActiveSegment) {
+      m_str_file_->rdLock();
+      char* data = m_str_file_->getStringAddr(offset);
+      uint16_t len = *(reinterpret_cast<uint16_t*>(data));
+      void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
+      memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
+      std::shared_ptr<void> ptr(var_data, free);
+      m_str_file_->unLock();
+      return ptr;
+    } else {
+      std::shared_ptr<void> ptr(m_str_file_->getStringAddr(offset), noFree);
+      return ptr;
+    }
   }
 
   // get vartype column agg result address.
   inline std::shared_ptr<void> varColumnAggAddr(MetricRowID row_id, size_t c, kwdbts::Sumfunctype agg_type) const {
     size_t offset = *reinterpret_cast<uint64_t*>(columnAggAddr(row_id.block_id, c, agg_type));
-    m_str_file_->rdLock();
-    char* data = m_str_file_->getStringAddr(offset);
-    uint16_t len = *(reinterpret_cast<uint16_t*>(data));
-    void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
-    memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
-    std::shared_ptr<void> ptr(var_data, free);
-    m_str_file_->unLock();
-    return ptr;
-  }
-
-  // get vartype column values address, row start_real_r ~ end_real_r
-  // only used in putdata for agg.
-  inline std::shared_ptr<void> varColumnAddr(MetricRowID start_real_r, MetricRowID end_real_r, size_t c) const {
-    size_t start_offset = *reinterpret_cast<uint64_t*>(columnAddr(start_real_r, c));
-    size_t end_offset = *reinterpret_cast<uint64_t*>(columnAddr(end_real_r, c));
-    m_str_file_->rdLock();
-    char* start_data = m_str_file_->getStringAddr(start_offset);
-    char* end_data = m_str_file_->getStringAddr(end_offset);
-    uint16_t end_data_len = *(reinterpret_cast<uint16_t*>(end_data)) + MMapStringColumn::kStringLenLen;
-    size_t total_var_len = (end_offset - start_offset) + end_data_len;
-
-    void* var_data = std::malloc(total_var_len);
-    memcpy(var_data, start_data, total_var_len);
-    std::shared_ptr<void> ptr(var_data, free);
-    m_str_file_->unLock();
-    return ptr;
+    if (static_cast<SegmentStatus>(TsTableObject::status()) == SegmentStatus::ActiveSegment) {
+      m_str_file_->rdLock();
+      char* data = m_str_file_->getStringAddr(offset);
+      uint16_t len = *(reinterpret_cast<uint16_t*>(data));
+      void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
+      memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
+      std::shared_ptr<void> ptr(var_data, free);
+      m_str_file_->unLock();
+      return ptr;
+    } else {
+      std::shared_ptr<void> ptr(m_str_file_->getStringAddr(offset), noFree);
+      return ptr;
+    }
   }
 
   inline void* columnAddrByBlk(BLOCK_ID block_id, size_t r, size_t c) const {
@@ -513,14 +507,19 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // get vartype column value addrees
   inline std::shared_ptr<void> varColumnAddrByBlk(BLOCK_ID block_id, size_t r, size_t c) const {
     size_t offset = *reinterpret_cast<uint64_t*>(columnAddrByBlk(block_id, r, c));
-    m_str_file_->rdLock();
-    char* data = m_str_file_->getStringAddr(offset);
-    uint16_t len = *(reinterpret_cast<uint16_t*>(data));
-    void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
-    memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
-    std::shared_ptr<void> ptr(var_data, free);
-    m_str_file_->unLock();
-    return ptr;
+    if (static_cast<SegmentStatus>(TsTableObject::status()) == SegmentStatus::ActiveSegment) {
+      m_str_file_->rdLock();
+      char* data = m_str_file_->getStringAddr(offset);
+      uint16_t len = *(reinterpret_cast<uint16_t*>(data));
+      void* var_data = std::malloc(len + MMapStringColumn::kStringLenLen);
+      memcpy(var_data, data, len + MMapStringColumn::kStringLenLen);
+      std::shared_ptr<void> ptr(var_data, free);
+      m_str_file_->unLock();
+      return ptr;
+    } else {
+      std::shared_ptr<void> ptr(m_str_file_->getStringAddr(offset), noFree);
+      return ptr;
+    }
   }
 
   inline AttributeInfo GetColInfo(size_t c) const {

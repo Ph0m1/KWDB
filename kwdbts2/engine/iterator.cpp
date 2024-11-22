@@ -115,7 +115,7 @@ KStatus TsIterator::Init(bool is_reversed) {
 }
 
 // return -1 means all partition tables scan over.
-int TsIterator::nextBlockItem(k_uint32 entity_id) {
+int TsIterator::nextBlockItem(k_uint32 entity_id, timestamp64 ts) {
   cur_block_item_ = nullptr;
   // block_item_queue_ saves the BlockItem object pointer of the partition table for the current query
   // Calling the Next function once can retrieve data within a maximum of one BlockItem.
@@ -144,6 +144,20 @@ int TsIterator::nextBlockItem(k_uint32 entity_id) {
     }
     cur_block_item_ = block_item_queue_.front();
     block_item_queue_.pop_front();
+    if (ts != INVALID_TS) {
+      std::shared_ptr<MMapSegmentTable> segment_tbl = cur_partition_table_->getSegmentTable(cur_block_item_->block_id);
+      if (segment_tbl == nullptr) {
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]",
+                  cur_block_item_->block_id, cur_partition_table_->GetPath().c_str());
+        return NextBlkStatus::error;
+      }
+      timestamp64 min_ts, max_ts;
+      TsTimePartition::GetBlkMinMaxTs(cur_block_item_, segment_tbl.get(), min_ts, max_ts);
+      if ((is_reversed_ && max_ts < ts) || (!is_reversed_ && min_ts > ts)) {
+        cur_block_item_ = nullptr;
+        continue;
+      }
+    }
 
     if (cur_block_item_ == nullptr) {
       LOG_WARN("BlockItem[] error: No space has been allocated");
@@ -218,7 +232,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     //    needs to be switched to the next entity before attempting to retrieve cur_block_item_
     // 3. If all entities have been queried, the current query process ends and returns directly
     if (!cur_block_item_) {
-      auto ret = nextBlockItem(entity_ids_[cur_entity_idx_]);
+      auto ret = nextBlockItem(entity_ids_[cur_entity_idx_], ts);
       if (ret == NextBlkStatus::scan_over) {
         if (++cur_entity_idx_ >= entity_ids_.size()) {
           *is_finished = true;
@@ -255,7 +269,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     }
     if (segment_tbl->schemaVersion() > table_version_) {
       cur_blockdata_offset_ = 1;
-      nextBlockItem(entity_ids_[cur_entity_idx_]);
+      nextBlockItem(entity_ids_[cur_entity_idx_], ts);
       continue;
     }
     if (nullptr == segment_iter_ || segment_iter_->segment_id() != segment_tbl->segment_id()) {

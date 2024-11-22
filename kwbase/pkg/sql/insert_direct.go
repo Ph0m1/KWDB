@@ -1113,7 +1113,7 @@ func GetColsInfo(
 	var ptPos, tPos, dPos []int
 	colsDesc := *tsColsDesc
 	di.ColIndexs = make(map[int]int, len(colsDesc))
-	fixColsDesc := make([]sqlbase.ColumnDescriptor, 0, 22)
+	fixColsDesc := make([]sqlbase.ColumnDescriptor, 0, len(colsDesc))
 	di.Dcs = make([]sqlbase.ColumnDescriptor, 0, 11)
 	tagCols := make([]sqlbase.ColumnDescriptor, 0, 11)
 	samecol := make([]bool, len(ins.Columns))
@@ -1210,11 +1210,11 @@ func GetColsInfo(
 	tsVersion := uint32(1)
 	di.PArgs, err = execbuilder.BuildPayloadArgs(tsVersion, di.PrimaryTagCols, otherTagCols, dataCols)
 	di.PrettyCols = di.PArgs.PrettyCols
-	di.IDMap = make([]int, 0, 22)
+	di.IDMap = make([]int, 0, len(colsDesc))
 	di.IDMap = append(di.IDMap, ptID...)
 	di.IDMap = append(di.IDMap, tID...)
 	di.IDMap = append(di.IDMap, dID...)
-	di.PosMap = make([]int, 0, 22)
+	di.PosMap = make([]int, 0, len(colsDesc))
 	di.PosMap = append(di.PosMap, ptPos...)
 	di.PosMap = append(di.PosMap, tPos...)
 	di.PosMap = append(di.PosMap, dPos...)

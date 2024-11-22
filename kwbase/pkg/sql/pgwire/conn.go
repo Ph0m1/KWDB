@@ -841,7 +841,7 @@ func (c *conn) handleSimpleQuery(
 	var dit sql.DirectInsertTable
 	c.parser.Dudgetstable = func(dbName *string, tableName string) bool {
 		user := c.sessionArgs.User
-		if *dbName == "public" {
+		if *dbName == "public" || *dbName == "" {
 			*dbName = unqis.GetTsSessionData().Database
 		}
 		var isTsTable bool
@@ -1136,6 +1136,9 @@ func (c *conn) handleParse(
 	var dit sql.DirectInsertTable
 	c.parser.Dudgetstable = func(dbName *string, tableName string) bool {
 		user := c.sessionArgs.User
+		if *dbName == "public" || *dbName == "" {
+			*dbName = unqis.GetTsSessionData().Database
+		}
 		var isTsTable bool
 		var insertErr error
 		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, *dbName, tableName, user)

@@ -267,6 +267,7 @@ class TsIterator {
    * @param res            the set of returned query results
    * @param count          number of rows of data
    * @param is_finished    identify whether the iterator has completed querying
+   * @param ts             used for block and partition table level data filtering during orderbylimit queries
    */
   virtual KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) = 0;
 
@@ -297,7 +298,8 @@ class TsIterator {
     }
     return false;
   }
-  int nextBlockItem(k_uint32 entity_id);
+  // ts is used for block filter for orderbylimit queries
+  int nextBlockItem(k_uint32 entity_id, timestamp64 ts = INVALID_TS);
 
   bool getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable> segment_tbl, uint32_t* first_row,
                        uint32_t* count);
@@ -358,6 +360,7 @@ class TsRawDataIterator : public TsIterator {
    * @param res            the set of returned query results
    * @param count          number of rows of data
    * @param is_finished    identify whether the iterator has completed querying
+   * @param ts             used for block and partition table level data filtering during orderbylimit queries
    */
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
 };
