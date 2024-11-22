@@ -998,6 +998,92 @@ KStatus TsAggIterator::countDataUseStatitics(ResultSet* res, k_uint32* count, ti
   return s;
 }
 
+KStatus TsAggIterator::countDataAllBlocks(ResultSet* res, k_uint32* count, timestamp64 ts) {
+  KWDB_DURATION(StStatistics::Get().agg_blocks);
+  *count = 0;
+  k_uint64 total_count = 0;
+  partition_table_iter_->Reset();
+  while (true) {
+    TsTimePartition* cur_pt = nullptr;
+    partition_table_iter_->Next(&cur_pt);
+    block_item_queue_.clear();
+    if (cur_pt == nullptr) {
+      // all partition scan over.
+      break;
+    }
+    if (ts != INVALID_TS) {
+      if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
+        break;
+      } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
+        break;
+      }
+    }
+
+    cur_pt->GetAllBlockItems(entity_ids_[cur_entity_idx_], block_item_queue_);
+    auto entity_item = cur_pt->getEntityItem(entity_ids_[cur_entity_idx_]);
+    // Obtain the minimum timestamp for the current query entity.
+    // Once a record's timestamp is traversed to be equal to it,
+    // it indicates that the query result has been found and no additional data needs to be traversed.
+    timestamp64 min_entity_ts = entity_item->min_ts;
+    while (!block_item_queue_.empty()) {
+      BlockItem* block_item = block_item_queue_.front();
+      cur_block_item_ = block_item;
+      block_item_queue_.pop_front();
+      if (!block_item || !block_item->publish_row_count) {
+        continue;
+      }
+      // all rows in block is deleted.
+      if (block_item->isBlockEmpty()) {
+        continue;
+      }
+      std::shared_ptr<MMapSegmentTable> segment_tbl = cur_pt->getSegmentTable(block_item->block_id);
+      if (segment_tbl == nullptr) {
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]", block_item->block_id, cur_pt->GetPath().c_str());
+        return KStatus::FAIL;
+      }
+      timestamp64 min_ts, max_ts;
+      TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), min_ts, max_ts);
+      // If the time range of the BlockItem is not within the ts_span range, continue traversing the next BlockItem.
+      if (!isTimestampInSpans(ts_spans_, min_ts, max_ts)) {
+        continue;
+      }
+      if (isTimestampWithinSpans(ts_spans_, min_ts, max_ts)) {
+        total_count += block_item->getNonNullRowCount();
+      } else {
+        // Traverse all data of this BlockItem
+        uint32_t cur_row_offset = 1;
+        while (cur_row_offset <= block_item->publish_row_count) {
+          bool is_deleted = !segment_tbl->IsRowVaild(block_item, cur_row_offset);
+          if (is_deleted) {
+            ++cur_row_offset;
+            continue;
+          }
+          // If the data in the cur_row_offset row is not within the ts_span range or has been deleted,
+          // continue to verify the data in the next row.
+          MetricRowID real_row = block_item->getRowID(cur_row_offset);
+          timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(real_row, 0));
+          if (!checkIfTsInSpan(cur_ts)) {
+            ++cur_row_offset;
+            continue;
+          }
+          ++cur_row_offset;
+          ++total_count;
+        }
+      }
+    }
+  }
+
+  if (total_count != 0) {
+    Batch* b = new AggBatch(malloc(sizeof(uint64_t)), 1, nullptr);
+    *static_cast<uint64_t*>(b->mem) = total_count;
+    b->is_new = true;
+    res->push_back(0, b);
+    res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
+    *count = 1;
+  }
+  return SUCCESS;
+}
+
 KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item, int type) {
   for (int i = 0; i < ts_scan_cols_.size(); i++) {
     auto& col_idx = ts_scan_cols_[i];
@@ -1377,26 +1463,27 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
     reset();
     return s;
   }
+  if (only_count_ts_) {
+    s = countDataAllBlocks(res, count, ts);
+    reset();
+    return s;
+  }
   if (!partition_table_iter_->Valid()) {
     *is_finished = true;
     return KStatus::SUCCESS;
   }
 
   ResultSet result{(k_uint32) kw_scan_cols_.size()};
-  if (only_count_ts_) {
-    s = countDataUseStatitics(&result, count, ts);
-  } else {
-    // Continuously calling the traceAllBlocks function to obtain
-    // the intermediate aggregation result of all data for the current query entity.
-    // When the count is 0, it indicates that the query is complete.
-    // Further integration and calculation of the results in the variable result are needed in the future.
-    do {
-      s = traverseAllBlocks(&result, count, ts);
-      if (s != KStatus::SUCCESS) {
-        return KStatus::FAIL;
-      }
-    } while (*count != 0);
-  }
+  // Continuously calling the traceAllBlocks function to obtain
+  // the intermediate aggregation result of all data for the current query entity.
+  // When the count is 0, it indicates that the query is complete.
+  // Further integration and calculation of the results in the variable result are needed in the future.
+  do {
+    s = traverseAllBlocks(&result, count, ts);
+    if (s != KStatus::SUCCESS) {
+      return KStatus::FAIL;
+    }
+  } while (*count != 0);
 
   if (result.empty() && !first_last_row_.NeedFirstLastAgg()) {
     reset();

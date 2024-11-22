@@ -533,6 +533,8 @@ class TsAggIterator : public TsIterator {
 
   KStatus countDataUseStatitics(ResultSet* res, k_uint32* count, timestamp64 ts);
 
+  KStatus countDataAllBlocks(ResultSet* res, k_uint32* count, timestamp64 ts);
+
   /**
    * @brief using iterator find last data info, store into first_last_row_
   */

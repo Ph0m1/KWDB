@@ -609,6 +609,9 @@ void MMapSegmentTable::updateAggregateResult(const BlockSpan& span, bool include
     }
     AggDataAddresses addresses{};
     columnAggCalculate(span, start_row, segment_col_idx, addresses, span.block_item->publish_row_count, true);
+    if (segment_col_idx == 0) {
+      span.block_item->non_null_row_count = *reinterpret_cast<uint16_t*>(addresses.count);
+    }
   }
   span.block_item->is_agg_res_available = true;
 }
@@ -844,6 +847,7 @@ int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwd
     if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
       minTimestamp() = KTimestamp(addresses.min);
     }
+    span.block_item->non_null_row_count = *reinterpret_cast<uint16_t*>(addresses.count);
     RW_LATCH_UNLOCK(&rw_latch_);
   }
   return error_code;

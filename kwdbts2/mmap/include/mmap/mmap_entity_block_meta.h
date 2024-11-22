@@ -183,7 +183,8 @@ struct BlockItem {
   bool is_overflow;
   bool is_agg_res_available;  //  agg for block is valid.
   bool read_only = false;     // mark the blockitem is read only
-  BLOCK_ID useless;           // no implementation
+  uint16_t non_null_row_count;  // the number of non-null rows
+  uint16_t useless;           // no implementation
   uint32_t entity_id;
   BLOCK_ID block_id;          // block ID
   BLOCK_ID prev_block_id;     // pre BlockItem ID
@@ -262,6 +263,10 @@ struct BlockItem {
 
   void clear() {
     memset(this, 0, sizeof(BlockItem));
+  }
+
+  uint32_t getNonNullRowCount() {
+    return (is_agg_res_available && non_null_row_count > 0) ? non_null_row_count : (publish_row_count - getDeletedCount());
   }
 
   ostream& to_string(ostream& os) {

@@ -678,7 +678,7 @@ class TsTimePartition : public TSObject {
       newest_modify_time = meta_modify_time;
     }
 
-    if (newest_modify_time <= now() - g_compress_interval || newest_modify_time <= compress_ts) {
+    if (newest_modify_time <= now() - g_compress_interval) {
       return false;
     }
     return true;
