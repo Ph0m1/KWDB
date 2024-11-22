@@ -1833,7 +1833,7 @@ func execChangeReplicasTxn(
 		log.Infof(ctx, "change replicas (add %v remove %v): existing descriptor %s", crt.Added(), crt.Removed(), desc)
 
 		if desc.GetRangeType() == roachpb.TS_RANGE && desc.TableId > keys.MinNonPredefinedUserDescID {
-			nodeIDs := getNewNodeIDs(ctx, desc, crt.Desc)
+			nodeIDs := getNewReplNodeIDs(ctx, desc, crt.Desc)
 			if len(nodeIDs) != 0 {
 				// get table descriptor and check state
 				table, _, err := sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(desc.TableId))
@@ -1857,6 +1857,24 @@ func execChangeReplicasTxn(
 						return kwdberrors.Newf("wait for table %d to update version", desc.TableId)
 					}
 				}
+			}
+		}
+
+		// t1: last range(relational od time-series) has LEARNER replica to FULL/INCOMING
+		// eg: (n1-FULL, n2-FULL, n3-LEARNER)
+		// t2: create a new time-series table , GetTableNodeIDs will miss LEARNER
+		// eg: get (n1, n2)
+		// t3: snapshot finished. eg.(n1-FULL, n2-FULL, n3-FULL)
+		// t4: alter table get eg.(n1-FULL, n2-FULL, n3-FULL)
+		// but n3 don't have table.
+		// Solution: we break the process LEARNER replica to INCOMING/FULL replica by check
+		// whether there is new time-series table between the StartKey to the EndKey("/Max").
+		if desc.EndKey.String() == "/Max" && len(getNewReplNodeIDs(ctx, desc, crt.Desc)) > 0 {
+			// check whether the time-series table exists the last range between StartKey and EndKey.
+			maxID := sqlbase.CheckMaxTableIDIsTimeSeries(ctx, txn)
+			_, tableID, err := keys.DecodeTablePrefix(desc.StartKey.AsRawKey())
+			if err == nil && maxID > uint32(tableID) {
+				return kwdberrors.Newf("waiting for range %d to split", desc.RangeID)
 			}
 		}
 
@@ -1958,8 +1976,14 @@ func execChangeReplicasTxn(
 	return returnDesc, nil
 }
 
-func getNewNodeIDs(ctx context.Context, src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
-	if tags := logtags.FromContext(ctx).Get(); len(tags) > 1 && tags[1].Key() == "split" {
+// getNewReplNodeIDs return nodeID list where snapshot will add INCOMING/FULL replica.
+func getNewReplNodeIDs(ctx context.Context, src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
+	// todo(qzy): test has empty context, try not use context later
+	buffer := logtags.FromContext(ctx)
+	if buffer == nil {
+		return nil
+	}
+	if tags := buffer.Get(); len(tags) > 1 && tags[1].Key() == "split" {
 		return nil
 	}
 	var nodeIDs []roachpb.NodeID

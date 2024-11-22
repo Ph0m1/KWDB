@@ -1529,6 +1529,7 @@ func (s *Store) Start(
 		}
 		s.TsEngine = tsEngine
 		s.cfg.TseDB = tseDB
+		s.cfg.TsEngine = tsEngine
 	}
 
 	// Start Raft processing goroutines.
