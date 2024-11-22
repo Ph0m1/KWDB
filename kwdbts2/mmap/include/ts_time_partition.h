@@ -695,7 +695,7 @@ class TsTimePartition : public TSObject {
 
   /**
    * Read partial data from the block item of the specified segment and convert it into ResultSet.
-   * @param segment_tbl Get data from this segment tabl
+   * @param origin_segment_tbl Get data from this segment tabl
    * @param cur_block_item Get data from this block item
    * @param block_start_row Get data from this row of block item
    * @param row_count How many rows get from block item
@@ -703,7 +703,7 @@ class TsTimePartition : public TSObject {
    * @param res Get data and store in the ResultSet
    * @return KStatus
    */
-  KStatus GetVacuumData(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
+  KStatus GetVacuumData(const std::shared_ptr<MMapSegmentTable>& origin_segment_tbl, BlockItem* cur_block_item,
                         size_t block_start_row, k_uint32 row_count, uint32_t ts_version, ResultSet* res);
 
   /**

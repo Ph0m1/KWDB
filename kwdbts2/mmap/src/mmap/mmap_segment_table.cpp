@@ -158,6 +158,7 @@ int MMapSegmentTable::create(EntityBlockMetaManager* meta_manager, const vector<
     max_blocks_per_segment_ = max_blocks_per_segment;
     meta_data_->max_rows_per_block = max_rows_per_block;
     meta_data_->max_blocks_per_segment = max_blocks_per_segment;
+    block_null_bitmap_size_ = (max_rows_per_block_ + 7) / 8;
   }
 
   meta_data_->magic = magic();

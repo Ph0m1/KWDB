@@ -640,59 +640,65 @@ KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint3
   return SUCCESS;
 }
 
-KStatus TsTimePartition::GetVacuumData(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
-                                       size_t block_start_idx, k_uint32 row_count, uint32_t ts_version, ResultSet* res) {
-  std::vector<AttributeInfo> tb_schema;
-  KStatus s = root_table_manager_->GetSchemaInfoExcludeDropped(&tb_schema, ts_version);
+KStatus TsTimePartition::GetVacuumData(const std::shared_ptr<MMapSegmentTable>& origin_segment_tbl,
+                                       BlockItem* cur_block_item, size_t block_start_idx, k_uint32 row_count,
+                                       uint32_t ts_version, ResultSet* res) {
+  auto origin_segment_schema = origin_segment_tbl->getSchemaInfo();
+  std::vector<AttributeInfo> dst_segment_schema;
+  KStatus s = root_table_manager_->GetSchemaInfoExcludeDropped(&dst_segment_schema, ts_version);
   if (s != SUCCESS) {
     LOG_ERROR("Couldn't get schema info of version %u", ts_version);
     return s;
   }
-  auto segment_schema = segment_tbl->getSchemaInfo();
-  std::vector<uint32_t> scan_cols = root_table_manager_->GetIdxForValidCols(ts_version);
+  std::vector<uint32_t> valid_cols = root_table_manager_->GetIdxForValidCols(ts_version);
+
   Batch* b;
-  for (int i = 0; i < scan_cols.size(); i++) {
-    auto ts_col = scan_cols[i];
-    if (ts_col >= 0 && segment_tbl->isColExist(ts_col)) {
-      void* bitmap_addr = segment_tbl->getBlockHeader(cur_block_item->block_id, ts_col);
-      if (tb_schema[ts_col].type != VARSTRING && tb_schema[ts_col].type != VARBINARY) {
+  for (int i = 0; i < valid_cols.size(); i++) {
+    auto col_idx = valid_cols[i];
+    if (col_idx >= 0 && origin_segment_tbl->isColExist(col_idx)) {
+      void* bitmap_addr = origin_segment_tbl->getBlockHeader(cur_block_item->block_id, col_idx);
+      if (!isVarLenType(dst_segment_schema[i].type)) {
         // not varlen column
-        if (segment_schema[ts_col].type != tb_schema[ts_col].type) {
+        if (origin_segment_schema[col_idx].type != dst_segment_schema[i].type) {
           // convert other types to fixed-length type
-          char* value = static_cast<char*>(malloc(tb_schema[ts_col].size * row_count));
-          memset(value, 0, tb_schema[ts_col].size * row_count);
+          char* value = static_cast<char*>(malloc(dst_segment_schema[i].size * row_count));
+          memset(value, 0, dst_segment_schema[i].size * row_count);
           bool need_free_bitmap = false;
-          s = ConvertToFixedLen(segment_tbl, value, cur_block_item->block_id,
-                                        static_cast<DATATYPE>(segment_schema[ts_col].type),
-                                        static_cast<DATATYPE>(tb_schema[ts_col].type),
-                                        tb_schema[ts_col].size, block_start_idx, row_count, ts_col, &bitmap_addr, need_free_bitmap);
+          s = ConvertToFixedLen(origin_segment_tbl, value, cur_block_item->block_id,
+                                static_cast<DATATYPE>(origin_segment_schema[col_idx].type),
+                                static_cast<DATATYPE>(dst_segment_schema[i].type),
+                                dst_segment_schema[i].size, block_start_idx, row_count, col_idx, &bitmap_addr, need_free_bitmap);
           if (s != KStatus::SUCCESS) {
             free(value);
             return s;
           }
-          b = new Batch(static_cast<void *>(value), row_count, bitmap_addr, block_start_idx, segment_tbl);
+          b = new Batch(static_cast<void *>(value), row_count, bitmap_addr, block_start_idx, origin_segment_tbl);
           b->is_new = true;
           b->need_free_bitmap = need_free_bitmap;
         } else {
-          if (segment_schema[ts_col].size != tb_schema[ts_col].size) {
-            // convert same fixed-length type to different length
-            char* value = static_cast<char*>(malloc(tb_schema[ts_col].size * row_count));
-            memset(value, 0, tb_schema[ts_col].size * row_count);
-            for (int idx = 0; idx < row_count; idx++) {
-              memcpy(value + idx * tb_schema[ts_col].size,
-                     segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx + idx - 1, ts_col),
-                     segment_schema[ts_col].size);
+          if (origin_segment_schema[col_idx].size != dst_segment_schema[i].size) {
+            if (origin_segment_schema[col_idx].size > dst_segment_schema[i].size) {
+              LOG_ERROR("The original column width is greater than the modified column width.");
+              return FAIL;
             }
-            b = new Batch(static_cast<void *>(value), row_count, bitmap_addr, block_start_idx, segment_tbl);
+            // convert same fixed-length type to different length
+            char* value = static_cast<char*>(malloc(dst_segment_schema[i].size * row_count));
+            memset(value, 0, dst_segment_schema[i].size * row_count);
+            for (int idx = 0; idx < row_count; idx++) {
+              memcpy(value + idx * dst_segment_schema[i].size,
+                     origin_segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx + idx - 1, col_idx),
+                     origin_segment_schema[col_idx].size);
+            }
+            b = new Batch(static_cast<void *>(value), row_count, bitmap_addr, block_start_idx, origin_segment_tbl);
             b->is_new = true;
           } else {
-            b = new Batch(segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx - 1, ts_col),
-                          row_count, bitmap_addr, block_start_idx, segment_tbl);
+            b = new Batch(origin_segment_tbl->columnAddrByBlk(cur_block_item->block_id, block_start_idx - 1, col_idx),
+                          row_count, bitmap_addr, block_start_idx, origin_segment_tbl);
           }
         }
       } else {
         // varlen column
-        b = new VarColumnBatch(row_count, bitmap_addr, block_start_idx, segment_tbl);
+        b = new VarColumnBatch(row_count, bitmap_addr, block_start_idx, origin_segment_tbl);
         for (k_uint32 j = 0; j < row_count; ++j) {
           std::shared_ptr<void> data = nullptr;
           bool is_null;
@@ -704,13 +710,13 @@ KStatus TsTimePartition::GetVacuumData(std::shared_ptr<MMapSegmentTable> segment
           if (is_null) {
             data = nullptr;
           } else {
-            if (segment_schema[ts_col].type != tb_schema[ts_col].type) {
+            if (origin_segment_schema[col_idx].type != dst_segment_schema[i].type) {
               // convert other types to variable length
-              data = ConvertToVarLen(segment_tbl, cur_block_item->block_id,
-                                     static_cast<DATATYPE>(segment_schema[ts_col].type),
-                                     static_cast<DATATYPE>(tb_schema[ts_col].type), block_start_idx + j - 1, ts_col);
+              data = ConvertToVarLen(origin_segment_tbl, cur_block_item->block_id,
+                                     static_cast<DATATYPE>(origin_segment_schema[col_idx].type),
+                                     static_cast<DATATYPE>(dst_segment_schema[i].type), block_start_idx + j - 1, col_idx);
             } else {
-              data = segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, block_start_idx + j - 1, ts_col);
+              data = origin_segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, block_start_idx + j - 1, col_idx);
             }
           }
           b->push_back(data);
@@ -718,7 +724,7 @@ KStatus TsTimePartition::GetVacuumData(std::shared_ptr<MMapSegmentTable> segment
       }
     } else {
       void* bitmap = nullptr;  // column not exist in segment table. so return nullptr.
-      b = new Batch(bitmap, row_count, bitmap, block_start_idx, segment_tbl);
+      b = new Batch(bitmap, row_count, bitmap, block_start_idx, origin_segment_tbl);
     }
     res->push_back(i, b);
   }
