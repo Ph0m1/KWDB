@@ -255,3 +255,18 @@ void EntityBlockMetaManager::UpdateEntityItem(uint entity_id, BlockItem* blk_ite
   entity_item->block_count++;
   entity_item->cur_block_id = blk_item->block_id;
 }
+
+int64_t EntityBlockMetaManager::GetModifyTime() {
+  int64_t newest_modify_time = INT64_MIN;
+  for (auto meta : entity_block_metas_) {
+    if (meta == nullptr) {
+      break;
+    }
+    auto meta_file_path = meta->realFilePath();
+    int64_t modify_time = ModifyTime(meta_file_path);
+    if (newest_modify_time < modify_time) {
+      newest_modify_time = modify_time;
+    }
+  }
+  return newest_modify_time;
+}

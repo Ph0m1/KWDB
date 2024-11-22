@@ -579,11 +579,11 @@ bool TsTimePartition::ShouldVacuum(const timestamp64& ts, uint32_t ts_version) {
   if (segment_ids.empty()) {
     return false;
   }
-  if (segment_ids.size() > 2) {
-    return true;
-  }
   if (IsModifiedRecent(ts)) {
     return false;
+  }
+  if (segment_ids.size() > 2) {
+    return true;
   }
   // DDL
   for (auto& segment_id : segment_ids) {

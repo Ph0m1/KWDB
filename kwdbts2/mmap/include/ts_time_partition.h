@@ -668,9 +668,17 @@ class TsTimePartition : public TSObject {
     if (nullptr == active_segment_) {
       return false;
     }
+    // get ts column file's modify time of active segment
     string ts_file_path = db_path_ + active_segment_->tbl_sub_path() + name_ + ".0";
-    int64_t modify_time = ModifyTime(ts_file_path);
-    if (modify_time <= now() - g_compress_interval || modify_time <= compress_ts) {
+    int64_t newest_modify_time = ModifyTime(ts_file_path);
+
+    // get meta file's modify time
+    int64_t meta_modify_time =  meta_manager_.GetModifyTime();
+    if (newest_modify_time < meta_modify_time) {
+      newest_modify_time = meta_modify_time;
+    }
+
+    if (newest_modify_time <= now() - g_compress_interval || newest_modify_time <= compress_ts) {
       return false;
     }
     return true;

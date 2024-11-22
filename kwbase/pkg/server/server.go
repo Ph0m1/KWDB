@@ -197,7 +197,7 @@ var (
 	tsCompressionVacuum = settings.RegisterPublicBoolSetting(
 		"ts.compression.vacuum.enabled",
 		"enable vacuum before compression",
-		true)
+		false)
 
 	tsCompressionType = settings.RegisterPublicStringSetting(
 		"ts.compression.type",

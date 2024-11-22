@@ -95,6 +95,8 @@ class EntityBlockMetaManager {
   // resize vector space that storing meta file names.
   void resizeMeta();
 
+  int64_t GetModifyTime();
+
   uint16_t max_entities_per_subgroup = 500;   // configure item: entity max num in subgroup
 
  protected:
