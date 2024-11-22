@@ -425,7 +425,7 @@ func TestIdleInSessionTimeout(t *testing.T) {
 			"is dead, %v", err)
 	}
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 	err = conn.PingContext(ctx)
 
 	if err == nil {

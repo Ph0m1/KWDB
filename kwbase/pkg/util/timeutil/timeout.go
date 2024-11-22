@@ -19,13 +19,13 @@ type Timeout struct {
 }
 
 // Stop stops timer within Timeout
-func (t Timeout) Stop() {
+func (t *Timeout) Stop() {
 	if t.timeout != nil {
 		t.timeout.Stop()
 	}
 }
 
 // Set setts timer within Timeout
-func (t Timeout) Set(timer *time.Timer) {
+func (t *Timeout) Set(timer *time.Timer) {
 	t.timeout = timer
 }
