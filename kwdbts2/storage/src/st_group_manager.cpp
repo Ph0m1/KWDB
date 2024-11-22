@@ -313,12 +313,14 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
         VacuumStatus vacuum_status{VacuumStatus::NOT_BEGIN};
         KStatus s = p_table->ProcessVacuum(compress_ts, ts_version, vacuum_status);
         if (s != SUCCESS) {
-          LOG_ERROR("Vacuum failed, partition [%s]", partition_path.c_str());
+          LOG_ERROR("Failed Vacuum in partition [%s]", partition_path.c_str());
         } else {
           if (vacuum_status == VacuumStatus::CANCEL) {
             LOG_INFO("Cancel vacuum in partition [%s]", partition_path.c_str());
           } else if (vacuum_status == VacuumStatus::FINISH) {
             LOG_INFO("Finish vacuum in partition [%s]", partition_path.c_str());
+          } else if (vacuum_status == VacuumStatus::FAILED) {
+            LOG_ERROR("Failed Vacuum in partition [%s]", partition_path.c_str());
           }
         }
       }

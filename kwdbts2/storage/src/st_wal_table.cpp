@@ -788,10 +788,10 @@ KStatus LoggedTsEntityGroup::rollback(kwdbContext_p ctx, LogEntry* wal_log) {
 KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice payload) {
   Payload pd(root_bt_manager_, payload);
   auto primary_tag = pd.GetPrimaryTag();
-  uint32_t entity_id, group_id;
-  ErrorInfo err_info;
+  uint32_t entity_id{0}, group_id{0};
   if (!new_tag_bt_->hasPrimaryKey(primary_tag.data, primary_tag.len, entity_id, group_id)) {
-    return KStatus::FAIL;
+    LOG_WARN("undoPut: can not find primary tag: [%s]", primary_tag.data);
+    return KStatus::SUCCESS;
   }
 
   KwTsSpan span{};
@@ -799,7 +799,7 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
   if (row_count < 1) {
     return KStatus::SUCCESS;
   }
-
+  ErrorInfo err_info;
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
   if (err_info.errcode < 0) {
@@ -865,15 +865,14 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
 
 KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwdbts::TS_LSN log_lsn,
                                      const TSSlice& payload) {
-  uint32_t entity_id, group_id;
-  ErrorInfo err_info;
-  int res = new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.length(), entity_id, group_id);
-  if (!new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.length(), entity_id, group_id)) {
-    return KStatus::FAIL;
+  uint32_t entity_id{0}, group_id{0};
+  if (!new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.size(), entity_id, group_id)) {
+    LOG_WARN("redoPut: can not find primary tag: [%s]", primary_tag.c_str());
+    return KStatus::SUCCESS;
   }
 
   Payload pd(root_bt_manager_, payload);
-
+  ErrorInfo err_info;
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
   if (err_info.errcode < 0) {
@@ -912,7 +911,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
     p_bt = ebt_manager_->GetPartitionTable(last_p_time, group_id, err_info, true);
     if (err_info.errcode == KWEDROPPEDOBJ) {
       ebt_manager_->ReleasePartitionTable(p_bt);
-      LOG_ERROR("GetPartitionTable error: %s", err_info.errmsg.c_str());
+      LOG_WARN("GetPartitionTable error: %s", err_info.errmsg.c_str());
       err_info.clear();
       batch_start = row_id;
       continue;
@@ -962,10 +961,10 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
 
 KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, TS_LSN log_lsn,
                                         const std::vector<DelRowSpan>& rows) {
-  uint32_t entity_id, subgroup_id;
-  ErrorInfo err_info;
+  uint32_t entity_id{0}, subgroup_id{0};
   if (!new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.size(), entity_id, subgroup_id)) {
-    return KStatus::FAIL;
+    LOG_WARN("undoDelete: can not find primary tag: [%s]", primary_tag.c_str());
+    return KStatus::SUCCESS;
   }
 
   map<timestamp64, vector<DelRowSpan>> partition_del_rows;
@@ -977,7 +976,7 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
       iter->second.emplace_back(row_span);
     }
   }
-
+  ErrorInfo err_info;
   for (auto& del_rows : partition_del_rows) {
     TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
@@ -1010,9 +1009,11 @@ KStatus LoggedTsEntityGroup::undoDelete(kwdbContext_p ctx, string& primary_tag, 
 
 KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, kwdbts::TS_LSN log_lsn,
                                         const vector<DelRowSpan>& rows) {
-  uint32_t entity_id, subgroup_id;
-  ErrorInfo err_info;
-  new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.size(), entity_id, subgroup_id);
+  uint32_t entity_id{0}, subgroup_id{0};
+  if (!new_tag_bt_->hasPrimaryKey(primary_tag.data(), primary_tag.size(), entity_id, subgroup_id)) {
+    LOG_WARN("redoDelete: can not find primary tag: [%s]", primary_tag.c_str());
+    return KStatus::SUCCESS;
+  }
 
   map<timestamp64, vector<DelRowSpan>> partition_del_rows;
   for (auto& row_span : rows) {
@@ -1023,17 +1024,17 @@ KStatus LoggedTsEntityGroup::redoDelete(kwdbContext_p ctx, string& primary_tag, 
       iter->second.emplace_back(row_span);
     }
   }
-
+  ErrorInfo err_info;
   for (auto& del_rows : partition_del_rows) {
     TsTimePartition* p_bt;
     p_bt = ebt_manager_->GetPartitionTable(del_rows.first, subgroup_id, err_info);
     if (err_info.errcode < 0) {
-      LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
       ebt_manager_->ReleasePartitionTable(p_bt);
       if (err_info.errcode == KWEDROPPEDOBJ) {
         err_info.clear();
         continue;
       }
+      LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
       return KStatus::FAIL;
     }
     if (!p_bt->isValid()) {

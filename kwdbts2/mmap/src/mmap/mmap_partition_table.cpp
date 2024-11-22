@@ -1025,6 +1025,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   if (!System(cmd)) {
     LOG_ERROR("mv tmp partition dir failed");
     // mv failed, still need to reload meta and segments, not return fail
+    vacuum_status = VacuumStatus::FAILED;
   }
 
   // Step 7: Reload partition & reopen meta.0
@@ -1043,6 +1044,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     root_table_manager_->UpdateTableVersionOfLastData(ts_version);
   }
   ResetVacuumFlags();
+  vacuum_status = VacuumStatus::FINISH;
   return SUCCESS;
 }
 
@@ -2639,10 +2641,10 @@ int TsTimePartition::DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids) {
       // delete segment directory
       int error_code = segment_table->remove();
       if (error_code < 0) {
-        LOG_ERROR("remove segment[%s] failed!", segment_table->realFilePath().c_str());
+        LOG_ERROR("remove segment[%s] failed", segment_table->realFilePath().c_str());
         return error_code;
       }
-      LOG_INFO("remove segment[%s] succeed!", segment_table->realFilePath().c_str());
+      LOG_INFO("remove segment[%s] succeed", segment_table->realFilePath().c_str());
     }
   }
   return 0;

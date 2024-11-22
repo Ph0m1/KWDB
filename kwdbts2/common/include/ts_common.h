@@ -81,7 +81,8 @@ struct UnorderedDataStats {
 enum class VacuumStatus {
   NOT_BEGIN = 0,
   CANCEL,
-  FINISH
+  FINISH,
+  FAILED
 };
 
 enum SortOrder {
