@@ -122,17 +122,23 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
   do {
     // read a batch of data
     DataChunkPtr data_chunk = nullptr;
-    code = input_->Next(ctx, data_chunk);
-    start = std::chrono::high_resolution_clock::now();
+    while (true) {
+      code = input_->Next(ctx, data_chunk);
+      if (code != EEIteratorErrCode::EE_OK) {
+        break;
+      }
+
+      // data is null
+      if (data_chunk == nullptr || data_chunk->Count() == 0) {
+        data_chunk = nullptr;
+        continue;
+      }
+      break;
+    }
     if (code != EEIteratorErrCode::EE_OK) {
       break;
     }
-
-    // data is null
-    if (data_chunk == nullptr || data_chunk->Count() == 0) {
-      continue;
-    }
-
+    start = std::chrono::high_resolution_clock::now();
     read_row_num += data_chunk->Count();
     // result set
     if (nullptr == chunk) {
