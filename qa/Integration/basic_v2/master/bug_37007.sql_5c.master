@@ -16,24 +16,26 @@ CREATE TABLE
 > explain select t.point_sn as point_sn  from t_point t
 where k_timestamp > '2024-05-01 00:00:00'::timestamptz  and k_timestamp < '2024-06-01 00:00:00'::timestamptz  and t.point_sn = 'GZZYQ'
 group by t.point_sn  order by count(*) desc  limit 1;
-        tree        |      field       |            description
---------------------+------------------+------------------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  group             |                  |
-   │                | engine type      | time series
-   │                | aggregate 0      | any_not_null(point_sn)
-   │                | addSynchronizer  | true
-   └── render       |                  |
-        │           | engine type      | time series
-        │           | point_sn         | point_sn
-        └── ts scan |                  |
-                    | ts-table         | t_point
-                    | access mode      | tagIndex
-                    | spans:fromTime   | 2024-05-01 00:00:00.001 +0000 UTC
-                    | spans:toTime     | 2024-05-31 23:59:59.999 +0000 UTC
-                    | ptag filter[0]   | point_sn = 'GZZYQ'
-(15 rows)
+        tree        |        field        |            description
+--------------------+---------------------+------------------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | any_not_null(point_sn)
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | point_sn            | point_sn
+        └── ts scan |                     |
+                    | ts-table            | t_point
+                    | access mode         | tagIndex
+                    | use statistic       | true
+                    | spans:fromTime      | 2024-05-01 00:00:00.001 +0000 UTC
+                    | spans:toTime        | 2024-05-31 23:59:59.999 +0000 UTC
+                    | ptag filter[0]      | point_sn = 'GZZYQ'
+(17 rows)
 > explain select t.point_sn as point_sn  from t_point t
 where k_timestamp > '2024-05-01 00:00:00'::timestamptz  and k_timestamp < '2024-06-01 00:00:00'::timestamptz  and t.work_area_sn = 'GZZYQ'
 group by t.point_sn  order by count(*) desc  limit 1;

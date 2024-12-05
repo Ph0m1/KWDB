@@ -76,24 +76,26 @@ CREATE TABLE
         WHERE hostname = 'host_4'
         GROUP BY hostname
         ORDER BY hostname;
-        tree        |      field       |      description
---------------------+------------------+-------------------------
-                    | distributed      | true
-                    | vectorized       | false
-  render            |                  |
-   │                | engine type      | time series
-   │                | hostname         | any_not_null
-   │                | max              | max
-   └── group        |                  |
-        │           | engine type      | time series
-        │           | aggregate 0      | max(usage_user)
-        │           | aggregate 1      | any_not_null(hostname)
-        │           | addSynchronizer  | true
-        └── ts scan |                  |
-                    | ts-table         | cpu
-                    | access mode      | tagIndex
-                    | ptag filter[0]   | hostname = 'host_4'
-(15 rows)
+        tree        |        field        |      description
+--------------------+---------------------+-------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  render            |                     |
+   │                | engine type         | time series
+   │                | hostname            | any_not_null
+   │                | max                 | max
+   └── group        |                     |
+        │           | engine type         | time series
+        │           | aggregate 0         | max(usage_user)
+        │           | aggregate 1         | any_not_null(hostname)
+        │           | pushLocalAggToScan  | true
+        │           | addSynchronizer     | true
+        └── ts scan |                     |
+                    | ts-table            | cpu
+                    | access mode         | tagIndex
+                    | use statistic       | true
+                    | ptag filter[0]      | hostname = 'host_4'
+(17 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
                hostname,usage_nice,
                max(usage_user)
@@ -233,5 +235,30 @@ group by usage_idle having usage_idle > 20;
                          | access mode      | metaTable
                          | filter           | usage_idle > 20
 (21 rows)
+> explain select count(usage_user),hostname from benchmark_ut.cpu
+where hostname='host_0' and k_timestamp >='2023-01-01 00:00:00' and k_timestamp<'2024-10-01 00:00:00'
+group by hostname;
+        tree        |        field        |            description
+--------------------+---------------------+------------------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | count(usage_user)
+   │                | aggregate 1         | any_not_null(hostname)
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | usage_user          | usage_user
+        │           | hostname            | hostname
+        └── ts scan |                     |
+                    | ts-table            | cpu
+                    | access mode         | tagIndex
+                    | use statistic       | true
+                    | spans:fromTime      | 2023-01-01 00:00:00 +0000 UTC
+                    | spans:toTime        | 2024-09-30 23:59:59.999 +0000 UTC
+                    | ptag filter[0]      | hostname = 'host_0'
+(19 rows)
 > drop database benchmark_ut cascade;
 DROP DATABASE

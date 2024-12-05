@@ -135,7 +135,7 @@ func (c *CustomFuncs) extractColumn(input memo.RelExpr, col opt.ColumnID) opt.Sc
 // one time, or if the projection expressions contain a correlated subquery.
 // For example:
 //
-//   SELECT x+1, x+2, y FROM a
+//	SELECT x+1, x+2, y FROM a
 //
 // HasDuplicateRefs would be true, since the x column is referenced twice.
 //
@@ -266,7 +266,10 @@ func (c *CustomFuncs) InlineProjectProject(
 	}
 
 	// Add any outer passthrough columns that refer to inner synthesized columns.
-	newPassthrough := passthrough
+	var newPassthrough opt.ColSet
+	passthrough.ForEach(func(colID opt.ColumnID) {
+		newPassthrough.Add(colID)
+	})
 	if !newPassthrough.Empty() {
 		for i := range innerProjections {
 			item := &innerProjections[i]
@@ -325,9 +328,12 @@ func (c *CustomFuncs) extractVarEqualsConst(
 
 // CanInlineConstVar returns true if there is an opportunity in the filters to
 // inline a variable restricted to be a constant, as in:
-//   SELECT * FROM foo WHERE a = 4 AND a IN (1, 2, 3, 4).
+//
+//	SELECT * FROM foo WHERE a = 4 AND a IN (1, 2, 3, 4).
+//
 // =>
-//   SELECT * FROM foo WHERE a = 4 AND 4 IN (1, 2, 3, 4).
+//
+//	SELECT * FROM foo WHERE a = 4 AND 4 IN (1, 2, 3, 4).
 func (c *CustomFuncs) CanInlineConstVar(f memo.FiltersExpr) bool {
 	// usedIndices tracks the set of filter indices we've used to infer constant
 	// values, so we don't inline into them.

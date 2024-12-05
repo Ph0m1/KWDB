@@ -79,4 +79,8 @@ explain select first_row(usage_user),first_row(usage_user),first_row(usage_user)
 from benchmark_ut.cpu
 group by usage_idle having usage_idle > 20;
 
+explain select count(usage_user),hostname from benchmark_ut.cpu
+where hostname='host_0' and k_timestamp >='2023-01-01 00:00:00' and k_timestamp<'2024-10-01 00:00:00'
+group by hostname;
+
 drop database benchmark_ut cascade;

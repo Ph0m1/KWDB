@@ -201,12 +201,14 @@ INSERT 1
                   │           | engine type           | time series
                   │           | aggregate 0           | max(measure_value)
                   │           | aggregate 1           | any_not_null(station_sn)
+                  │           | pushLocalAggToScan    | true
                   │           | addSynchronizer       | true
                   └── ts scan |                       |
                               | ts-table              | t_point
                               | access mode           | tableTableMeta
+                              | use statistic         | true
                               | tag filter[0]         | station_sn = 'd1'
-(22 rows)
+(24 rows)
 > select max(measure_value) from (select * from db_pipec.t_point where station_sn='d1' limit 10) p,pipec_r.station_info s where p.station_sn=s.station_sn;
   max
 --------

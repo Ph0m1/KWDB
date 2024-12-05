@@ -1243,7 +1243,7 @@ func (m *Memo) checkAggStatisticUsable(aggs []AggregationsItem) bool {
 	for i := range aggs {
 		switch aggs[i].Agg.(type) {
 		case *SumExpr, *MinExpr, *MaxExpr, *CountExpr, *FirstExpr, *FirstTimeStampExpr, *FirstRowExpr, *AvgExpr,
-			*FirstRowTimeStampExpr, *LastExpr, *LastTimeStampExpr, *LastRowExpr, *LastRowTimeStampExpr, *CountRowsExpr:
+			*FirstRowTimeStampExpr, *LastExpr, *LastTimeStampExpr, *LastRowExpr, *LastRowTimeStampExpr, *CountRowsExpr, *ConstAggExpr:
 		default:
 			return false
 		}
