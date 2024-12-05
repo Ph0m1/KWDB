@@ -464,7 +464,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // get vartype column value, value is copied from stringfile.
   inline std::shared_ptr<void> varColumnAddr(MetricRowID row_id, size_t c) const {
     size_t offset = *reinterpret_cast<uint64_t*>(columnAddr(row_id, c));
-    if (static_cast<SegmentStatus>(TsTableObject::status()) == SegmentStatus::ActiveSegment) {
+    if (static_cast<SegmentStatus>(TsTableObject::status()) != SegmentStatus::ImmuSegment) {
       m_str_file_->rdLock();
       char* data = m_str_file_->getStringAddr(offset);
       uint16_t len = *(reinterpret_cast<uint16_t*>(data));
@@ -482,7 +482,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // get vartype column agg result address.
   inline std::shared_ptr<void> varColumnAggAddr(MetricRowID row_id, size_t c, kwdbts::Sumfunctype agg_type) const {
     size_t offset = *reinterpret_cast<uint64_t*>(columnAggAddr(row_id.block_id, c, agg_type));
-    if (static_cast<SegmentStatus>(TsTableObject::status()) == SegmentStatus::ActiveSegment) {
+    if (static_cast<SegmentStatus>(TsTableObject::status()) != SegmentStatus::ImmuSegment) {
       m_str_file_->rdLock();
       char* data = m_str_file_->getStringAddr(offset);
       uint16_t len = *(reinterpret_cast<uint16_t*>(data));
@@ -507,7 +507,7 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
   // get vartype column value addrees
   inline std::shared_ptr<void> varColumnAddrByBlk(BLOCK_ID block_id, size_t r, size_t c) const {
     size_t offset = *reinterpret_cast<uint64_t*>(columnAddrByBlk(block_id, r, c));
-    if (static_cast<SegmentStatus>(TsTableObject::status()) == SegmentStatus::ActiveSegment) {
+    if (static_cast<SegmentStatus>(TsTableObject::status()) != SegmentStatus::ImmuSegment) {
       m_str_file_->rdLock();
       char* data = m_str_file_->getStringAddr(offset);
       uint16_t len = *(reinterpret_cast<uint16_t*>(data));
