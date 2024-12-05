@@ -51,9 +51,11 @@ KStatus TagPartitionIterator::Next(std::vector<EntityResultIndex>* entity_id_lis
     if (!m_tag_partition_table_->isValidRow(row_num) || needSkip) {
       if (has_data) {
         for (int idx = 0; idx < src_version_scan_tags_.size(); idx++) {
-          // if (src_version_scan_tags_[idx] == INVALID_COL_IDX) {
-          //  continue;
-          // }
+          if (src_version_scan_tags_[idx] == INVALID_COL_IDX) {
+            Batch* batch = new(std::nothrow) kwdbts::TagBatch(0, nullptr, row_num - start_row);
+            res->push_back(idx, batch);
+            continue;
+          }
           uint32_t col_idx = src_version_scan_tags_[idx];
           Batch* batch = m_tag_partition_table_->GetTagBatchRecord(start_row, row_num, col_idx,
                                                  result_version_tag_infos_[col_idx], err_info);
@@ -97,9 +99,11 @@ success_end:
   if (start_row < row_num) {
     // need start_row < end_row
     for (int idx = 0; idx < src_version_scan_tags_.size(); idx++) {
-      // if (src_version_scan_tags_[idx] == INVALID_COL_IDX) {
-      //  continue;
-      // }
+      if (src_version_scan_tags_[idx] == INVALID_COL_IDX) {
+        Batch* batch = new(std::nothrow) kwdbts::TagBatch(0, nullptr, row_num - start_row);
+        res->push_back(idx, batch);
+        continue;
+      }
       uint32_t col_idx = src_version_scan_tags_[idx];
       Batch* batch = m_tag_partition_table_->GetTagBatchRecord(start_row, row_num, col_idx,
                                       result_version_tag_infos_[col_idx], err_info);

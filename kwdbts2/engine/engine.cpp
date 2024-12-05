@@ -276,7 +276,6 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
 
 KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id,  RangeGroup range,
                                   roachpb::CreateTsTable* meta) {
-  LOG_INFO("TSEngineImpl::GetMetaData Begin!");
   std::shared_ptr<TsTable> table;
   ErrorInfo err_info;
   KStatus s = GetTsTable(ctx, table_id, table, err_info);
@@ -284,24 +283,26 @@ KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id, 
     s = err_info.errcode == KWENOOBJ ? SUCCESS : FAIL;
     return s;
   }
-
+  uint32_t cur_table_version = table->GetCurrentTableVersion();
+  LOG_INFO("TSEngineImpl::GetMetaData Begin! table_id: %lu table_version: %u ",
+     table_id, cur_table_version);
   // Construct roachpb::CreateTsTable.
   // Set table configures.
   auto ts_table = meta->mutable_ts_table();
   ts_table->set_ts_table_id(table_id);
-  ts_table->set_ts_version(table->GetCurrentTableVersion());
+  ts_table->set_ts_version(cur_table_version);
   ts_table->set_partition_interval(table->GetPartitionInterval());
 
   // Get table data schema.
   std::vector<AttributeInfo> data_schema;
-  s = table->GetDataSchemaIncludeDropped(ctx, &data_schema);
+  s = table->GetDataSchemaIncludeDropped(ctx, &data_schema, cur_table_version);
   if (s == KStatus::FAIL) {
     LOG_ERROR("GetDataSchemaIncludeDropped failed during GetMetaData, table id is %ld.", table_id)
     return s;
   }
   // Get table tag schema.
   std::vector<TagInfo> tag_schema_info;
-  s = table->GetTagSchema(ctx, range, &tag_schema_info);
+  s = table->GetTagSchemaIncludeDropped(ctx, range, &tag_schema_info, cur_table_version);
   if (s == KStatus::FAIL) {
     LOG_ERROR("GetTagSchema failed during GetMetaData, table id is %ld.", table_id)
     return s;
@@ -1057,7 +1058,8 @@ KStatus TSEngineImpl::parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable*
       tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
                                              static_cast<uint32_t>(col_var.length), 0,
                                              static_cast<uint32_t>(col_var.size),
-                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG}));
+                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG,
+                                             col_var.flag}));
     } else {
       metric_schema.push_back(std::move(col_var));
     }

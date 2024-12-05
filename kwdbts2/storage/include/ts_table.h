@@ -72,7 +72,8 @@ class TsTable {
    *
    * @return std::vector<AttributeInfo>
    */
-  KStatus GetDataSchemaIncludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema);
+  KStatus GetDataSchemaIncludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema,
+                                      uint32_t table_version = 0);
 
   /**
    * @brief Query Table Column Definition
@@ -87,6 +88,9 @@ class TsTable {
    * @return std::vector<AttributeInfo>
    */
   KStatus GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<TagInfo>* tag_schema);
+
+  KStatus GetTagSchemaIncludeDropped(kwdbContext_p ctx, RangeGroup range, std::vector<TagInfo>* tag_schema,
+                                    uint32_t table_version);
 
   // convert schema info to protobuf
   KStatus GenerateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta, std::vector<AttributeInfo>& metric_schema,

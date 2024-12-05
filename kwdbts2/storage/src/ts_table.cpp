@@ -1255,12 +1255,13 @@ KStatus TsTable::Create(kwdbContext_p ctx, vector<AttributeInfo>& metric_schema,
   return KStatus::SUCCESS;
 }
 
-KStatus TsTable::GetDataSchemaIncludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema) {
+KStatus TsTable::GetDataSchemaIncludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema,
+                                             uint32_t table_version) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     return KStatus::FAIL;
   }
-  return entity_bt_manager_->GetSchemaInfoIncludeDropped(data_schema);
+  return entity_bt_manager_->GetSchemaInfoIncludeDropped(data_schema, table_version);
 }
 
 KStatus TsTable::GetDataSchemaExcludeDropped(kwdbContext_p ctx, std::vector<AttributeInfo>* data_schema) {
@@ -1282,6 +1283,20 @@ KStatus TsTable::GetTagSchema(kwdbContext_p ctx, RangeGroup range, std::vector<T
     return KStatus::FAIL;
   }
   return entity_groups_[range.range_group_id]->GetCurrentTagSchemaExcludeDropped(tag_schema);
+}
+
+KStatus TsTable::GetTagSchemaIncludeDropped(kwdbContext_p ctx, RangeGroup range, std::vector<TagInfo>* tag_schema,
+                                            uint32_t table_version) {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+  RW_LATCH_S_LOCK(entity_groups_mtx_);
+  Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+  if (entity_groups_.find(range.range_group_id) == entity_groups_.end()) {
+    return KStatus::FAIL;
+  }
+  return entity_groups_[range.range_group_id]->GetTagSchemaIncludeDroppedByVersion(tag_schema, table_version);
 }
 
 KStatus TsTable::GenerateMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable* meta,

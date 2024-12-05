@@ -919,9 +919,11 @@ int MMapTagColumnTable::getColumnsByRownum(size_t row, const std::vector<uint32_
   ErrorInfo err_info;
   res->setColumnNum(src_scan_tags.size());
   for (int idx = 0; idx < src_scan_tags.size(); idx++) {
-    // if (src_scan_tags[idx] == INVALID_COL_IDX) {
-    //  continue;
-    // }
+    if (src_scan_tags[idx] == INVALID_COL_IDX) {
+      Batch* batch = new(std::nothrow) kwdbts::TagBatch(0, nullptr, 1);
+      res->push_back(idx, batch);
+      continue;
+    }
     uint32_t col_idx = src_scan_tags[idx];
     Batch* batch = this->GetTagBatchRecord(row, row + 1, col_idx,
                                     result_scan_tag_infos[col_idx], err_info);
@@ -1254,10 +1256,10 @@ kwdbts::Batch* MMapTagColumnTable::GetTagBatchRecordByConverted(size_t start_row
 
 kwdbts::Batch* MMapTagColumnTable::GetTagBatchRecord(size_t start_row, size_t end_row, uint32_t col, const TagInfo& result_schema, ErrorInfo& err_info) {
   Batch* batch = nullptr;
-  if (col == INVALID_COL_IDX) {
-    batch = new(std::nothrow) kwdbts::TagBatch(0, nullptr, end_row - start_row);
-    return batch;
-  }
+  // if (col == INVALID_COL_IDX) {
+  //  batch = new(std::nothrow) kwdbts::TagBatch(0, nullptr, end_row - start_row);
+  //  return batch;
+  // }
   const TagInfo& src_tag_schema = m_cols_[col]->attributeInfo();
   if (src_tag_schema.isEqual(result_schema)) {
     batch = GetTagBatchRecordWithNoConvert(start_row, end_row, col, err_info);
