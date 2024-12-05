@@ -2072,7 +2072,7 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 	descColumnIDs []sqlbase.ColumnID,
 ) error {
 	//construct TSReaderSpec
-	if n.ScanAggArray {
+	if n.ScanAggArray && !planCtx.IsLocal() {
 		tr := execinfrapb.TSStatisticReaderSpec{TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, TsCols: colMetas,
 			TableVersion: n.Table.GetTSVersion()}
 		err := p.initPhyPlanForStatisticReaders(tr)
