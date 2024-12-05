@@ -117,7 +117,7 @@ int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_
     LOG_ERROR("The [%s] versions don't match: Code Metric Version[%d], Data Metric Version[%d]",
               file_path.c_str(), METRIC_VERSION, entity_block_metas_[0]->entity_header_->version);
     char* version_validate = getenv("KW_DATA_VERSION_VALIDATE");
-    if (version_validate == nullptr || strcmp(version_validate, "true") == 0) {
+    if (version_validate != nullptr && strcmp(version_validate, "true") == 0) {
       exit(1);
     }
   }
