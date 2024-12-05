@@ -698,6 +698,10 @@ k_int64 FieldFuncTimeBucket::ValInt() {
     auto original_timestamp = args_[0]->ValInt();
     KTimestampTz time_diff = time_zone_ * 3600000 + BASE_CONSTANT;
     KTimestampTz bucket_start = (original_timestamp + time_diff) / interval_seconds_ * interval_seconds_;
+    // Negative timestamp needs to be rounded down
+    if (original_timestamp + time_diff < 0 && (original_timestamp + time_diff) % interval_seconds_ != 0) {
+      bucket_start -= interval_seconds_;
+    }
     return bucket_start - time_diff;
   } else {
     // construct_variable calculate the start of time_bucket for year and month
@@ -743,20 +747,21 @@ Field *FieldFuncTimeBucket::field_to_copy() {
 }
 
 std::string FieldFuncTimeBucket::replaceKeywords(const std::string& timestring) {
-    static const std::vector<std::pair<std::string, char>> replacements = {
-        {"seconds", 's'}, {"second", 's'}, {"secs", 's'}, {"sec", 's'},
-        {"minutes", 'm'}, {"minute", 'm'}, {"mins", 'm'}, {"min", 'm'},
-        {"hours", 'h'}, {"hour", 'h'}, {"hrs", 'h'}, {"hr", 'h'},
-        {"days", 'd'}, {"day", 'd'},
-        {"weeks", 'w'}, {"week", 'w'},
-        {"months", 'n'}, {"month", 'n'}, {"mons", 'n'}, {"mon", 'n'},
-        {"years", 'y'}, {"year", 'y'}, {"yrs", 'y'}, {"yr", 'y'}
+    static const std::vector<std::pair<std::string, std::string>> replacements = {
+        {"milliseconds", "ms"}, {"millisecond", "ms"}, {"msecs", "ms"}, {"msec", "ms"},
+        {"seconds", "s"}, {"second", "s"}, {"secs", "s"}, {"sec", "s"},
+        {"minutes", "m"}, {"minute", "m"}, {"mins", "m"}, {"min", "m"},
+        {"hours", "h"}, {"hour", "h"}, {"hrs", "h"}, {"hr", "h"},
+        {"days", "d"}, {"day", "d"},
+        {"weeks", "w"}, {"week", "w"},
+        {"months", "n"}, {"month", "n"}, {"mons", "n"}, {"mon", "n"},
+        {"years", "y"}, {"year", "y"}, {"yrs", "y"}, {"yr", "y"}
     };
 
     std::string result = timestring;
     for (const auto& pair : replacements) {
       if (timestring.find(pair.first) != std::string::npos) {
-        result = std::regex_replace(result, std::regex(pair.first), std::string(1, pair.second));
+        result = std::regex_replace(result, std::regex(pair.first), pair.second);
         break;
       }
     }
@@ -776,7 +781,7 @@ k_int64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& ye
 
   k_uint32 code = ERRCODE_INVALID_DATETIME_FORMAT;
   std::string intervalStr;
-  char unit;
+  std::string unit;
   do {
     if (timestring.length() < 2) {
       error_info =
@@ -787,13 +792,17 @@ k_int64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& ye
     }
 
     unit = timestring.back();
-    if (unit != 'y' && unit != 'n' && unit != 'w' && unit != 'd' &&
-        unit != 'h' && unit != 'm' && unit != 's') {
+    if (unit != "y" && unit != "n" && unit != "w" && unit != "d" &&
+        unit != "h" && unit != "m" && unit != "s") {
       error_info = "interval: invalid input syntax: " + raw_string + ".";
       break;
     }
-
-    intervalStr = timestring.substr(0, timestring.size() - 1);
+    if (unit == "s" && timestring[timestring.length() - 2] == 'm') {
+      intervalStr = timestring.substr(0, timestring.size() - 2);
+      unit = timestring[timestring.length() - 2] + unit;
+    } else {
+      intervalStr = timestring.substr(0, timestring.size() - 1);
+    }
     try {
       if (std::stol(intervalStr) <= 0) {
         error_info = "second arg should be a positive interval.";
@@ -822,31 +831,23 @@ k_int64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& ye
   k_int64 interval_seconds_ = stoll(intervalStr);
 
   // Convert interval to milliseconds based on unit
-  switch (unit) {
-      case 'y':
-          year_bucket = true;
-          var_interval = true;
-          // Do not convert interval_seconds_ as it is a variable interval
-          break;
-      case 'n':
-          var_interval = true;
-          // Do not convert interval_seconds_ as it is a variable interval
-          break;
-      case 'm':
-          interval_seconds_ *= 60000;
-          break;
-      case 'h':
-          interval_seconds_ *= 3600000;
-          break;
-      case 'd':
-          interval_seconds_ *= 86400000;
-          break;
-      case 'w':
-          interval_seconds_ *= 604800000;
-          break;
-      default:
-          interval_seconds_ *= 1000;
-          break;
+  if (unit == "y") {
+    year_bucket = true;
+    var_interval = true;
+    // Do not convert interval_seconds_ as it is a variable interval
+  } else if (unit == "n") {
+    var_interval = true;
+    // Do not convert interval_seconds_ as it is a variable interval
+  } else if (unit == "s") {
+    interval_seconds_ *= 1000;
+  } else if (unit == "m") {
+    interval_seconds_ *= 60000;
+  } else if (unit == "h") {
+    interval_seconds_ *= 3600000;
+  } else if (unit == "d") {
+    interval_seconds_ *= 86400000;
+  } else if (unit == "w") {
+    interval_seconds_ *= 604800000;
   }
 
   nullable_ = false;

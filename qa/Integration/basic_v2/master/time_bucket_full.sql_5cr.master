@@ -2246,5 +2246,20 @@ SQLSTATE: 22023
   2023-05-10 09:15:10+00:00 |     5000
   2024-05-10 23:23:20+00:00 |     8000
 (2 rows)
+> select time_bucket(k_timestamp,'ms') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+ERROR: interval: invalid input syntax: ms.
+SQLSTATE: 22007
+> select time_bucket(k_timestamp,'10ms') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+               tb
+--------------------------------
+  2023-05-10 09:15:15.78+00:00
+  2024-05-10 23:23:23.78+00:00
+(2 rows)
+> select time_bucket(k_timestamp,'10μs') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
+SQLSTATE: 22023
+> select time_bucket(k_timestamp,'10ns') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
+SQLSTATE: 22023
 > use defaultdb;drop database test_select_timebucket cascade;
 DROP DATABASE

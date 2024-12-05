@@ -41,7 +41,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
 	"gitee.com/kwbasedb/kwbase/pkg/util/stringarena"
-	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"github.com/cockroachdb/errors"
 	"github.com/opentracing/opentracing-go"
@@ -130,7 +129,7 @@ type gapfilltype struct {
 	prevtime time.Time
 	// prevgaptime is the last timestamp that we used for gapfilling.
 	// we use this value to keep track of the gapfilling progress.
-	prevgaptime int64
+	prevgaptime time.Time
 	// endgapfilling marks the end of gapfilling if true. We need to emit the gapfillingrow
 	// at the end of gapfilling
 	endgapfilling bool
@@ -248,7 +247,7 @@ func (ag *aggregatorBase) init(
 		groupTimeIndex:   groupTimeIndex,
 		anyNotNUllNum:    anyNotNUllNum,
 		firstInterval:    true,
-		prevgaptime:      time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		prevgaptime:      time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC),
 		endgapfilling:    false, // marks the end of gapfilling if true
 		gapfillingrow:    nil,
 		gapfillingbucket: nil,
@@ -865,16 +864,16 @@ func (ag *aggregatorBase) aggGapFillStart() (
 		case *(builtins.TimeBucketAggregate):
 			// We check the gap between currTime and last filled timestamp value and update the
 			// gapfilling status accordingly.
-			newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
-			newTimeUnix := newTime.Unix()
-			currTime := t.Time.Unix()
+			newTime := ag.gapfill.prevgaptime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos())).UTC()
+			newTimeUnix := newTime.UnixNano()
+			currTime := t.Time.UnixNano()
 			if !(newTimeUnix < currTime) {
 				// gapFillStart ends, switch the state to gapFillEnd.
 				ag.gapfill.gapFillState = gapFillEnd
 				break
 			}
 			// increment prevgaptime by t.Timebucket
-			ag.gapfill.prevgaptime = newTimeUnix
+			ag.gapfill.prevgaptime = newTime
 			timeTmp := newTime
 			// record data in row
 			ag.outputTypes[i] = *types.Timestamp
@@ -882,7 +881,7 @@ func (ag *aggregatorBase) aggGapFillStart() (
 			for j := 0; j < ag.gapfill.anyNotNUllNum; j++ {
 				if ag.gapfill.groupTimeIndex == j {
 					// change to the same time as the new line.
-					row[j] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
+					row[j] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestamp{Time: timeTmp})
 				} else {
 					// when in a gapFillGroup, insert same group.
 					row[j] = ag.row[j]
@@ -891,15 +890,15 @@ func (ag *aggregatorBase) aggGapFillStart() (
 		case *(builtins.TimestamptzBucketAggregate):
 			// We check the gap between currTime and last filled timestamp value and update the
 			// gapfilling status accordingly.
-			newTime := timeutil.Unix(ag.gapfill.prevgaptime, 0).AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
-			newTimeUnix := newTime.Unix()
-			currTime := t.Time.Unix()
+			newTime := ag.gapfill.prevgaptime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos())).UTC()
+			newTimeUnix := newTime.UnixNano()
+			currTime := t.Time.UnixNano()
 			if !(newTimeUnix < currTime) {
 				// gapFillStart ends, switch the state to gapFillEnd.
 				ag.gapfill.gapFillState = gapFillEnd
 				break
 			}
-			ag.gapfill.prevgaptime = newTimeUnix
+			ag.gapfill.prevgaptime = newTime
 			timeTmp := newTime
 			ag.outputTypes[i] = *types.TimestampTZ
 			row[i] = sqlbase.DatumToEncDatum(&ag.outputTypes[i], &tree.DTimestampTZ{Time: timeTmp})
@@ -1008,10 +1007,16 @@ func (ag *aggregatorBase) aggGapFillInit(
 			prevTime := ag.gapfill.prevtime
 
 			newTime := prevTime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
-			newTimeUnix := newTime.Unix()
-			currTime := t.Time.Unix()
+			var newTimeUnix, currTime int64
+			if newTime.After(time.Date(2262, time.January, 1, 0, 0, 0, 0, time.UTC)) {
+				newTimeUnix = newTime.Unix()
+				currTime = t.Time.Unix()
+			} else {
+				newTimeUnix = newTime.UnixNano()
+				currTime = t.Time.UnixNano()
+			}
 			ag.gapfill.prevtime = t.Time
-			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).Unix()
+			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).UTC()
 			// we check if gapfilling is needed by comparing currTime with Time in the last row
 			if newTimeUnix < currTime && isGapFillGroup {
 				if t.Timebucket.Months != 0 {
@@ -1035,10 +1040,17 @@ func (ag *aggregatorBase) aggGapFillInit(
 			prevTime := ag.gapfill.prevtime
 
 			newTime := prevTime.AddDate(0, int(t.Timebucket.Months), int(t.Timebucket.Days)).Add(time.Duration(t.Timebucket.Nanos()))
-			newTimeUnix := newTime.Unix()
-			currTime := t.Time.Unix()
+			var newTimeUnix, currTime int64
+			if newTime.After(time.Date(2262, time.January, 1, 0, 0, 0, 0, time.UTC)) {
+				newTimeUnix = newTime.Unix()
+				currTime = t.Time.Unix()
+			} else {
+				newTimeUnix = newTime.UnixNano()
+				currTime = t.Time.UnixNano()
+			}
+
 			ag.gapfill.prevtime = t.Time
-			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).Unix()
+			ag.gapfill.prevgaptime = newTime.AddDate(0, -int(t.Timebucket.Months), -int(t.Timebucket.Days)).Add(-time.Duration(t.Timebucket.Nanos())).UTC()
 			// we check if gapfilling is needed by comparing currTime with Time in the last row
 			if newTimeUnix < currTime && isGapFillGroup {
 				if t.Timebucket.Months != 0 {

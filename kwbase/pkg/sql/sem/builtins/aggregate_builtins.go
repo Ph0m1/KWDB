@@ -426,6 +426,8 @@ var aggregates = map[string]builtinDefinition{
 			"Interpolate"),
 		makeAggOverload([]*types.T{types.NChar, types.Int}, types.Int, newImputationAggregate,
 			"Interpolate"),
+		makeAggOverload([]*types.T{types.Bytes, types.String}, types.Int, newImputationAggregate,
+			"Interpolate"),
 	),
 
 	// final_(variance|stddev) computes the global (variance|standard deviation)
@@ -3080,6 +3082,7 @@ func getTimeInterval(datum tree.Datum) (tree.DInterval, error) {
 // e.g., '2year', '3mon'.
 func checkTimeUnit(str string) error {
 	replaceMap := map[string]string{
+		"milliseconds": "ms", "millisecond": "ms", "msecs": "ms", "msec": "ms",
 		"second": "s", "secs": "s", "sec": "s", "seconds": "s",
 		"minute": "m", "mins": "m", "min": "m", "minutes": "m",
 		"hour": "h", "hrs": "h", "hr": "h", "hours": "h",
@@ -3088,6 +3091,7 @@ func checkTimeUnit(str string) error {
 		"year": "y", "years": "y", "yrs": "y", "yr": "y",
 	}
 	replaceSlice := []string{
+		"milliseconds", "millisecond", "msecs", "msec",
 		"minutes", "seconds",
 		"minute", "second", "months",
 		"hours", "weeks", "years", "month",

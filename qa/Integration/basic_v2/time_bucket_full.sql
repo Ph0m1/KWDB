@@ -305,5 +305,9 @@ select time_bucket(k_timestamp,'10s') as tb,last_row(t2)%count(t3) from test_sel
 select time_bucket(k_timestamp,'10s') as tb,max(e2)+min(t1)/count(t9) from test_select_timebucket.tb group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,sum(t2)-avg(t3)*sum(e4) from test_select_timebucket.tb2 group by tb order by tb;
 select time_bucket(k_timestamp,'10s') as tb,last_row(t1)%count(t3)+min(e3) from test_select_timebucket.tb3 group by tb order by tb;
+select time_bucket(k_timestamp,'ms') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+select time_bucket(k_timestamp,'10ms') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+select time_bucket(k_timestamp,'10μs') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
+select time_bucket(k_timestamp,'10ns') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
 
 use defaultdb;drop database test_select_timebucket cascade;
