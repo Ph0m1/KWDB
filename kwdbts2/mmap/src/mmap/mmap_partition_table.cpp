@@ -2031,16 +2031,15 @@ int TsTimePartition::updatePayloadUsingDedup(uint32_t entity_id, const BlockSpan
     dedup_info.payload_rows[current_ts].push_back(start_in_payload + i);
   }
   // If there is no need to scan the table, simply return
-  if (!dedup_info.need_scan_table) {
-    return err_code;
+  if (dedup_info.need_scan_table) {
+    // find all duplicate rows.
+    // Within the specified BlockSpan range, retrieve unique rows that fall within a specific timestamp range.
+    err_code = GetDedupRows(entity_id, first_span, dedup_info, ts_with_lsn);
+    if (err_code < 0) {
+      return err_code;
+    }
   }
 
-  // find all duplicate rows.
-  // Within the specified BlockSpan range, retrieve unique rows that fall within a specific timestamp range.
-  err_code = GetDedupRows(entity_id, first_span, dedup_info, ts_with_lsn);
-  if (err_code < 0) {
-    return err_code;
-  }
   if (payload->dedup_rule_ == DedupRule::MERGE) {
     // If the deduplication rule is MERGE and the current payload column is empty,
     // traverse the duplicate data to find the latest duplicate, and update the payload.
