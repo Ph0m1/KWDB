@@ -58,8 +58,8 @@ const (
 	// when Raft log truncation usually occurs when using the number of entries
 	// as the sole criteria.
 	RaftLogQueueStaleSize = 64 << 10
-	// RaftLogQueueTsStaleSize is the minimum size with 5 GB. Ts Range is not split by size.
-	RaftLogQueueTsStaleSize = 5 << 30
+	// RaftLogQueueTsStaleSize is the minimum size with 512MiB. Ts Range is not split by size.
+	RaftLogQueueTsStaleSize = 1 << 29
 	// Allow a limited number of Raft log truncations to be processed
 	// concurrently.
 	raftLogQueueConcurrency = 4
@@ -189,7 +189,7 @@ func newTruncateDecision(ctx context.Context, r *Replica) (truncateDecision, err
 	}
 	if Desc, err := r.getReplicaDescriptorRLocked(); err == nil {
 		if Desc.GetTag() == roachpb.TS_REPLICA {
-			targetSize = 10 << 30 // 10 GB
+			targetSize = 1 << 30 // 1024 MiB
 		}
 	}
 	raftStatus := r.raftStatusRLocked()

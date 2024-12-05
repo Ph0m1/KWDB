@@ -98,7 +98,8 @@ const (
 
 	// defaultRaftEntryCacheSize is the default size in bytes for a
 	// store's Raft log entry cache.
-	defaultRaftEntryCacheSize = 1 << 24 // 16M
+	// for ts range, max range number 200, raft log size 64M , may be 4GiB is ok
+	defaultRaftEntryCacheSize = 1 << 30 // 1GiB
 
 	// replicaRequestQueueSize specifies the maximum number of requests to queue
 	// for a replica.
