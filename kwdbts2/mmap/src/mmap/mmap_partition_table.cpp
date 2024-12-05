@@ -405,7 +405,10 @@ int TsTimePartition::ProcessDuplicateData(kwdbts::Payload* payload, size_t start
   // need deleted rows in payload, can delete here.
   for (auto kv: dedup_info.payload_rows) {
     if (kv.second.size() > 1) {
-      for (int i = kv.second.size() - 2; i >= 0; i--) {
+      // If the dedup rule is discard, the first record will be retained, and the rest of the date will be deleted,
+      // and if it is other mode, the last record will be retained.
+      int offset = payload->dedup_rule_ == DedupRule::DISCARD ? 1 : 0;
+      for (int i = kv.second.size() - 2 + offset; i >= 0 + offset; i--) {
         if (kv.second[i] >= start_in_payload + count && kv.second[i] < start_in_payload + count + span.row_num) {
           SetDeleted();
           span.block_item->setDeleted(span.start_row + (kv.second[i] - start_in_payload - count) + 1);
