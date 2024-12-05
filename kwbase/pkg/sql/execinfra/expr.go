@@ -92,7 +92,7 @@ func processExpression(
 			return nil, errors.Errorf(err.Error(), "%s", expr)
 		}
 		// Type checking must succeed by now.
-		return nil, errors.NewAssertionErrorWithWrappedErrf(err, "%s", expr)
+		return nil, errors.Errorf("%v, Expr: %v \n", err.Error(), expr.String())
 	}
 
 	// Pre-evaluate constant expressions. This is necessary to avoid repeatedly
