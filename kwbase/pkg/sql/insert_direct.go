@@ -12,6 +12,7 @@
 package sql
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"strconv"
@@ -29,6 +30,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/lib/pq/oid"
 	"github.com/paulsmith/gogeos/geos"
@@ -56,9 +58,10 @@ type DirectInsert struct {
 
 // GetInputValues performs column type conversion and length checking
 func GetInputValues(
+	ctx context.Context,
 	ptCtx tree.ParseTimeContext,
 	cols *[]sqlbase.ColumnDescriptor,
-	di DirectInsert,
+	di *DirectInsert,
 	stmts parser.Statements,
 ) ([]tree.Datums, error) {
 	inputValues := make([]tree.Datums, di.RowNum)
@@ -68,309 +71,347 @@ func GetInputValues(
 		inputValues[i], preSlice = preSlice[:di.ColNum:di.ColNum], preSlice[di.ColNum:]
 	}
 	var err error
+	outputValues := make([]tree.Datums, 0, di.RowNum)
 	for row := range inputValues {
-		for i := 0; i < len(di.IDMap); i++ {
-			// col position in raw cols slice
-			colPos := di.IDMap[i]
-			// col's metadata
-			column := (*cols)[colPos]
-			// col position in insert cols slice
-			col := di.PosMap[i]
-			rawValue := stmts[0].Insertdirectstmt.InsertValues[col+row*di.ColNum]
-			valueType := stmts[0].Insertdirectstmt.ValuesType[col+row*di.ColNum]
-			if valueType != parser.STRINGTYPE && rawValue == "" {
-				goto NullExec
+		err2 := getSingleRecord(ptCtx, cols, *di, stmts, row, inputValues, err)
+		if err2 != nil {
+			if !stmts[0].Insertdirectstmt.TsSupportBatch {
+				return nil, err2
 			}
-			switch column.Type.Oid() {
-			case oid.T_timestamptz:
-				var dVal *tree.DInt
-				if valueType == parser.STRINGTYPE {
-					t, err := tree.ParseDTimestampTZ(ptCtx, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
-					if err != nil {
-						return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-					}
-					dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
-					if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-						return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-							"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
-					}
-				} else {
-					if rawValue == "now" {
-						currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
-						inputValues[row][col] = tree.NewDInt(tree.DInt(currentTime))
-						continue
-					}
-					in, err2 := strconv.ParseInt(rawValue, 10, 64)
-					if err2 != nil {
-						if strings.Contains(err2.Error(), "out of range") {
-							return nil, err2
-						}
-						return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-					}
-					dVal = (*tree.DInt)(&in)
-					// consistent with the timestamp range supported by savedata
-					if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-					}
-				}
-				inputValues[row][col] = dVal
-				continue
-			case oid.T_timestamp:
-				var dVal *tree.DInt
-				if valueType == parser.STRINGTYPE {
-					t, err := tree.ParseDTimestamp(nil, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
-					if err != nil {
-						return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-					}
-					dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
-					if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-						return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-							"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
-					}
-				} else {
-					if rawValue == "now" {
-						currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
-						inputValues[row][col] = tree.NewDInt(tree.DInt(currentTime))
-						continue
-					}
-					in, err2 := strconv.ParseInt(rawValue, 10, 64)
-					if err2 != nil {
-						if strings.Contains(err2.Error(), "out of range") {
-							return nil, err2
-						}
-						return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-					}
-					dVal = (*tree.DInt)(&in)
-					// consistent with the timestamp range supported by savedata
-					if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-					}
-				}
-				inputValues[row][col] = dVal
-				continue
-			case oid.T_int8:
-				if valueType == parser.STRINGTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				in, err := strconv.Atoi(rawValue)
-				if err != nil {
-					dat, err := parserString2Int(rawValue, err, column)
-					if err != nil {
-						if valueType == parser.NORMALTYPE {
-							return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-						}
-						return nil, err
-					}
-					if dat != nil {
-						inputValues[row][col] = dat
-						continue
-					}
-				}
-				if in < math.MinInt64 || in > math.MaxInt64 {
-					err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-					return nil, err
-				}
-				d := tree.DInt(in)
-				inputValues[row][col] = &d
-				continue
-			case oid.T_int4:
-				if valueType == parser.STRINGTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				in, err := strconv.Atoi(rawValue)
-				if err != nil {
-					dat, err := parserString2Int(rawValue, err, column)
-					if err != nil {
-						if valueType == parser.NORMALTYPE {
-							return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-						}
-						return nil, err
-					}
-					if dat != nil {
-						inputValues[row][col] = dat
-						continue
-					}
-				}
-				if in < math.MinInt32 || in > math.MaxInt32 {
-					err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-					return nil, err
-				}
-				d := tree.DInt(in)
-				inputValues[row][col] = &d
-				continue
-			case oid.T_int2:
-				if valueType == parser.STRINGTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				in, err := strconv.Atoi(rawValue)
-				if err != nil {
-					dat, err := parserString2Int(rawValue, err, column)
-					if err != nil {
-						if valueType == parser.NORMALTYPE {
-							return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-						}
-						return nil, err
-					}
-					if dat != nil {
-						inputValues[row][col] = dat
-						continue
-					}
-				}
-				if in < math.MinInt16 || in > math.MaxInt16 {
-					err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-					return nil, err
-				}
-				d := tree.DInt(in)
-				inputValues[row][col] = &d
-				continue
-			case oid.T_cstring, oid.T_char:
-				if valueType == parser.NUMTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				if valueType == parser.BYTETYPE {
-					// convert the value of the input bytes type into a string
-					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-				}
-				inputValues[row][col] = tree.NewDString(rawValue)
-				continue
-			case oid.T_text, oid.T_bpchar, oid.T_varchar:
-				if valueType == parser.NUMTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				if valueType == parser.BYTETYPE {
-					// Convert the value of the input bytes type into a string
-					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-				}
-				// string(n)/char(n)/varchar(n) calculate length by byte
-				if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
-					return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-						"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-				}
-				inputValues[row][col] = tree.NewDString(rawValue)
-				continue
-			// NCHAR or NVARCHAR
-			case oid.Oid(91004), oid.Oid(91002):
-				if valueType == parser.NUMTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				if valueType == parser.BYTETYPE {
-					// Convert the value of the input bytes type into a string
-					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-				}
-				// nchar(n)/nvarchar(n) calculate length by character
-				if column.Type.Width() > 0 && utf8.RuneCountInString(rawValue) > int(column.Type.Width()) {
-					return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-						"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-				}
-				inputValues[row][col] = tree.NewDString(rawValue)
-				continue
-			case oid.T_bytea, oid.T_varbytea:
-				if valueType == parser.NUMTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				v, err := tree.ParseDByte(rawValue)
-				if err != nil {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				// bytes(n)/varbytes(n) calculate length by byte
-				if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
-					return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-						"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-				}
-				inputValues[row][col] = v
-				continue
-			case oid.T_float4:
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				if valueType == parser.STRINGTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				var in float64
-				in, err = strconv.ParseFloat(rawValue, 32)
-				if err != nil {
-					if strings.Contains(err.Error(), "out of range") {
-						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-					}
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
-				continue
-			case oid.T_float8:
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				if valueType == parser.STRINGTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				var in float64
-				in, err = strconv.ParseFloat(rawValue, 64)
-				if err != nil {
-					if strings.Contains(err.Error(), "out of range") {
-						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-					}
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
-			case oid.T_bool:
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				inputValues[row][col], err = tree.ParseDBool(rawValue)
-				if err != nil {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-			case types.T_geometry:
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				if valueType == parser.NUMTYPE {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-				}
-				_, err := geos.FromWKT(rawValue)
-				if err != nil {
-					if strings.Contains(err.Error(), "load error") {
-						return nil, err
-					}
-					return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", rawValue, column.Type.SQLString())
-				}
-				inputValues[row][col] = tree.NewDString(rawValue)
-			default:
-				return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-
-			}
-			if err != nil {
-				return nil, err
-			}
+			stmts[0].Insertdirectstmt.BatchFailed++
+			log.Errorf(ctx, "BatchInsert Error: %s", err2)
 			continue
-		NullExec:
-			if !column.IsNullable() {
-				return nil, sqlbase.NewNonNullViolationError(column.Name)
-			}
-			// attempting to insert a NULL value when no value is specified
-			inputValues[row][col] = tree.DNull
 		}
+		outputValues = append(outputValues, inputValues[row])
 	}
-	return inputValues, nil
+	return outputValues, nil
+}
+
+func getSingleRecord(
+	ptCtx tree.ParseTimeContext,
+	cols *[]sqlbase.ColumnDescriptor,
+	di DirectInsert,
+	stmts parser.Statements,
+	row int,
+	inputValues []tree.Datums,
+	err error,
+) error {
+	for i := 0; i < len(di.IDMap); i++ {
+		// col position in raw cols slice
+		colPos := di.IDMap[i]
+		// col's metadata
+		column := (*cols)[colPos]
+		// col position in insert cols slice
+		col := di.PosMap[i]
+		rawValue := stmts[0].Insertdirectstmt.InsertValues[col+row*di.ColNum]
+		valueType := stmts[0].Insertdirectstmt.ValuesType[col+row*di.ColNum]
+		if valueType != parser.STRINGTYPE && rawValue == "" {
+			goto NullExec
+		}
+		switch column.Type.Oid() {
+		case oid.T_timestamptz:
+			var dVal *tree.DInt
+			if valueType == parser.STRINGTYPE {
+				t, err := tree.ParseDTimestampTZ(ptCtx, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
+				if err != nil {
+					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				}
+				dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
+				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
+					return pgerror.Newf(pgcode.StringDataLengthMismatch,
+						"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
+				}
+			} else {
+				if rawValue == "now" {
+					currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
+					inputValues[row][col] = tree.NewDInt(tree.DInt(currentTime))
+					continue
+				}
+				in, err2 := strconv.ParseInt(rawValue, 10, 64)
+				if err2 != nil {
+					if strings.Contains(err2.Error(), "out of range") {
+						return err2
+					}
+					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				}
+				dVal = (*tree.DInt)(&in)
+				// consistent with the timestamp range supported by savedata
+				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
+					return pgerror.Newf(pgcode.NumericValueOutOfRange,
+						"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+				}
+			}
+			inputValues[row][col] = dVal
+			continue
+		case oid.T_timestamp:
+			var dVal *tree.DInt
+			if valueType == parser.STRINGTYPE {
+				t, err := tree.ParseDTimestamp(nil, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
+				if err != nil {
+					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				}
+				dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
+				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
+					return pgerror.Newf(pgcode.StringDataLengthMismatch,
+						"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
+				}
+			} else {
+				if rawValue == "now" {
+					currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
+					inputValues[row][col] = tree.NewDInt(tree.DInt(currentTime))
+					continue
+				}
+				in, err2 := strconv.ParseInt(rawValue, 10, 64)
+				if err2 != nil {
+					if strings.Contains(err2.Error(), "out of range") {
+						return err2
+					}
+					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				}
+				dVal = (*tree.DInt)(&in)
+				// consistent with the timestamp range supported by savedata
+				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
+					return pgerror.Newf(pgcode.NumericValueOutOfRange,
+						"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+				}
+			}
+			inputValues[row][col] = dVal
+			continue
+		case oid.T_int8:
+			if valueType == parser.STRINGTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			in, err := strconv.Atoi(rawValue)
+			if err != nil {
+				dat, err := parserString2Int(rawValue, err, column)
+				if err != nil {
+					if valueType == parser.NORMALTYPE {
+						return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+					}
+					return err
+				}
+				if dat != nil {
+					inputValues[row][col] = dat
+					continue
+				}
+			}
+			if in < math.MinInt64 || in > math.MaxInt64 {
+				err = pgerror.Newf(pgcode.NumericValueOutOfRange,
+					"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
+				return err
+			}
+			d := tree.DInt(in)
+			inputValues[row][col] = &d
+			continue
+		case oid.T_int4:
+			if valueType == parser.STRINGTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			in, err := strconv.Atoi(rawValue)
+			if err != nil {
+				dat, err := parserString2Int(rawValue, err, column)
+				if err != nil {
+					if valueType == parser.NORMALTYPE {
+						return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+					}
+					return err
+				}
+				if dat != nil {
+					inputValues[row][col] = dat
+					continue
+				}
+			}
+			if in < math.MinInt32 || in > math.MaxInt32 {
+				err = pgerror.Newf(pgcode.NumericValueOutOfRange,
+					"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
+				return err
+			}
+			d := tree.DInt(in)
+			inputValues[row][col] = &d
+			continue
+		case oid.T_int2:
+			if valueType == parser.STRINGTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			in, err := strconv.Atoi(rawValue)
+			if err != nil {
+				dat, err := parserString2Int(rawValue, err, column)
+				if err != nil {
+					if valueType == parser.NORMALTYPE {
+						return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+					}
+					return err
+				}
+				if dat != nil {
+					inputValues[row][col] = dat
+					continue
+				}
+			}
+			if in < math.MinInt16 || in > math.MaxInt16 {
+				err = pgerror.Newf(pgcode.NumericValueOutOfRange,
+					"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
+				return err
+			}
+			d := tree.DInt(in)
+			inputValues[row][col] = &d
+			continue
+		case oid.T_cstring, oid.T_char:
+			if valueType == parser.NUMTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			if valueType == parser.BYTETYPE {
+				switch column.Type.Family() {
+				case types.BytesFamily:
+					// Convert the value of the input bytes type into a string
+					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+				default:
+					// do nothing
+				}
+			}
+			inputValues[row][col] = tree.NewDString(rawValue)
+			continue
+		case oid.T_text, oid.T_bpchar, oid.T_varchar:
+			if valueType == parser.NUMTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			if valueType == parser.BYTETYPE {
+				switch column.Type.Family() {
+				case types.BytesFamily:
+					// Convert the value of the input bytes type into a string
+					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+				default:
+					// do nothing
+				}
+			}
+			// string(n)/char(n)/varchar(n) calculate length by byte
+			if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
+				return pgerror.Newf(pgcode.StringDataRightTruncation,
+					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
+			}
+			inputValues[row][col] = tree.NewDString(rawValue)
+			continue
+		// NCHAR or NVARCHAR
+		case oid.Oid(91004), oid.Oid(91002):
+			if valueType == parser.NUMTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			if valueType == parser.BYTETYPE {
+				switch column.Type.Family() {
+				case types.BytesFamily:
+					// Convert the value of the input bytes type into a string
+					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+				default:
+					// do nothing
+				}
+			}
+			// nchar(n)/nvarchar(n) calculate length by character
+			if column.Type.Width() > 0 && utf8.RuneCountInString(rawValue) > int(column.Type.Width()) {
+				return pgerror.Newf(pgcode.StringDataRightTruncation,
+					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
+			}
+			inputValues[row][col] = tree.NewDString(rawValue)
+			continue
+		case oid.T_bytea, oid.T_varbytea:
+			if valueType == parser.NUMTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			v, err := tree.ParseDByte(rawValue)
+			if err != nil {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			// bytes(n)/varbytes(n) calculate length by byte
+			if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
+				return pgerror.Newf(pgcode.StringDataRightTruncation,
+					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
+			}
+			inputValues[row][col] = v
+			continue
+		case oid.T_float4:
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			if valueType == parser.STRINGTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			var in float64
+			in, err = strconv.ParseFloat(rawValue, 32)
+			if err != nil {
+				if strings.Contains(err.Error(), "out of range") {
+					return pgerror.Newf(pgcode.NumericValueOutOfRange,
+						"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+				}
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
+			continue
+		case oid.T_float8:
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			if valueType == parser.STRINGTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			var in float64
+			in, err = strconv.ParseFloat(rawValue, 64)
+			if err != nil {
+				if strings.Contains(err.Error(), "out of range") {
+					return pgerror.Newf(pgcode.NumericValueOutOfRange,
+						"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+				}
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
+		case oid.T_bool:
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			inputValues[row][col], err = tree.ParseDBool(rawValue)
+			if err != nil {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+		case types.T_geometry:
+			if valueType == parser.NORMALTYPE {
+				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			}
+			if valueType == parser.NUMTYPE {
+				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			_, err := geos.FromWKT(rawValue)
+			if err != nil {
+				if strings.Contains(err.Error(), "load error") {
+					return err
+				}
+				return pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", rawValue, column.Type.SQLString())
+			}
+			inputValues[row][col] = tree.NewDString(rawValue)
+		default:
+			return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+
+		}
+		if err != nil {
+			return err
+		}
+		continue
+	NullExec:
+		if !column.IsNullable() {
+			return sqlbase.NewNonNullViolationError(column.Name)
+		}
+		// attempting to insert a NULL value when no value is specified
+		inputValues[row][col] = tree.DNull
+	}
+	return nil
 }
 
 func parserString2Int(
@@ -1106,7 +1147,12 @@ func bigEndianToLittleEndian(bigEndian []byte) []byte {
 
 // GetColsInfo to obtain relevant column information
 func GetColsInfo(
-	tsColsDesc *[]sqlbase.ColumnDescriptor, ins *tree.Insert, di *DirectInsert,
+	ctx context.Context,
+	StartSinglenode bool,
+	tsColsDesc *[]sqlbase.ColumnDescriptor,
+	ins *tree.Insert,
+	di *DirectInsert,
+	stmt *parser.Statement,
 ) (err error) {
 	var otherTagCols, dataCols []*sqlbase.ColumnDescriptor
 	var ptID, tID, dID []int
@@ -1181,7 +1227,25 @@ func GetColsInfo(
 					}
 				}
 				err = sqlbase.NewUndefinedColumnError(string(name))
-				return
+				if !stmt.Insertdirectstmt.TsSupportBatch || !StartSinglenode {
+					return
+				}
+				valueLength := len(stmt.Insertdirectstmt.InsertValues)
+				insertColLength := len(ins.Columns)
+				cleanInsertValues := make([]string, 0, valueLength)
+				// Traverse the unknown columns in each inserted row
+				for i := 0; i < valueLength; i += insertColLength {
+					if stmt.Insertdirectstmt.InsertValues[i+idx] != "" {
+						// BatchInsert: Unknown column has value, record log, delete this row
+						(*di).RowNum--
+						stmt.Insertdirectstmt.BatchFailedColumn++
+						log.Errorf(ctx, "BatchInsert Error: %s", err)
+						continue
+					}
+					// BatchInsert: Unknown column is null, ignore this column and continue inserting this row
+					cleanInsertValues = append(cleanInsertValues, stmt.Insertdirectstmt.InsertValues[i:i+insertColLength]...)
+				}
+				(*stmt).Insertdirectstmt.InsertValues = cleanInsertValues
 			}
 		}
 		if !haveDataCol {
@@ -1609,8 +1673,13 @@ func GetSingleDatum(
 			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
 		}
 		if valueType == parser.BYTETYPE {
-			// convert the value of the input bytes type into a string
-			rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			switch column.Type.Family() {
+			case types.BytesFamily:
+				// Convert the value of the input bytes type into a string
+				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			default:
+				// do nothing
+			}
 		}
 		return tree.NewDString(rawValue), nil
 		//continue
@@ -1622,8 +1691,13 @@ func GetSingleDatum(
 			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
 		}
 		if valueType == parser.BYTETYPE {
-			// Convert the value of the input bytes type into a string
-			rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			switch column.Type.Family() {
+			case types.BytesFamily:
+				// Convert the value of the input bytes type into a string
+				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			default:
+				// do nothing
+			}
 		}
 		// string(n)/char(n)/varchar(n) calculate length by byte
 		if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
@@ -1641,8 +1715,13 @@ func GetSingleDatum(
 			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
 		}
 		if valueType == parser.BYTETYPE {
-			// Convert the value of the input bytes type into a string
-			rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			switch column.Type.Family() {
+			case types.BytesFamily:
+				// Convert the value of the input bytes type into a string
+				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			default:
+				// do nothing
+			}
 		}
 		// nchar(n)/nvarchar(n) calculate length by character
 		if column.Type.Width() > 0 && utf8.RuneCountInString(rawValue) > int(column.Type.Width()) {

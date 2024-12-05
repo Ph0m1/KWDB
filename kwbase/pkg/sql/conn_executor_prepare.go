@@ -447,16 +447,6 @@ func (ex *connExecutor) execPreparedirectBind(
 			flags.Required = false
 			table, err := tables.GetTableVersion(ctx, txn, ps.PrepareInsertDirect.Dit.Tname, flags)
 			if table == nil || err != nil {
-
-			}
-			if err := GetColsInfo(&ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di); err != nil {
-				return err
-			}
-			di.RowNum, di.ColNum = len(bindCmd.Args), len(di.IDMap)
-			ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
-			// Calculate rowTimestamps and save the value of the timestamp column
-			inputValues, rowTimestamps, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, ps.PrepareInsertDirect.Dit.ColsDesc, di)
-			if err != nil {
 				return err
 			}
 			var sd sessiondata.SessionData
@@ -468,7 +458,16 @@ func (ex *connExecutor) execPreparedirectBind(
 				Settings:         ex.server.GetCFG().Settings,
 			}
 			EvalContext.StartSinglenode = (ex.server.GetCFG().StartMode == StartSingleNode)
-
+			if err := GetColsInfo(ctx, EvalContext.StartSinglenode, &ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di, &ps.PrepareMetadata.Statement); err != nil {
+				return err
+			}
+			di.RowNum, di.ColNum = len(bindCmd.Args), len(di.IDMap)
+			ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
+			// Calculate rowTimestamps and save the value of the timestamp column
+			inputValues, rowTimestamps, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, ps.PrepareInsertDirect.Dit.ColsDesc, di)
+			if err != nil {
+				return err
+			}
 			if !EvalContext.StartSinglenode {
 				//start mode
 				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)

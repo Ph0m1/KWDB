@@ -864,6 +864,14 @@ var varGen = map[string]sessionVar{
 			return formatBoolAsPostgresSetting(insertShortCircuitClusterMode.Get(sv))
 		},
 	},
+	// tsinsert_direct special handling error, needs to be used with the tsinsert_direct switch turned on
+	`ts_ignore_batcherror`: {
+		Get: func(evalCtx *extendedEvalContext) string {
+			return formatBoolAsPostgresSetting(evalCtx.SessionData.TsSupportBatch)
+		},
+		GetStringVal: makePostgresBoolGetStringValFn("ts_ignore_batcherror"),
+		Set:          tssupportbatch,
+	},
 
 	// See https://www.postgresql.org/docs/10/static/runtime-config-client.html#GUC-TIMEZONE
 	`timezone`: {

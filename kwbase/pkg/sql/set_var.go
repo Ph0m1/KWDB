@@ -413,6 +413,15 @@ func tsinsertshortcircuitSet(ctx context.Context, m *sessionDataMutator, s strin
 	return nil
 }
 
+func tssupportbatch(ctx context.Context, m *sessionDataMutator, s string) error {
+	b, err := parsePostgresBool(s)
+	if err != nil {
+		return err
+	}
+	m.SetTsSupportBatch(b)
+	return nil
+}
+
 func intervalToDuration(interval *tree.DInterval) (time.Duration, error) {
 	nanos, _, _, err := interval.Encode()
 	if err != nil {

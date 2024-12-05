@@ -88,6 +88,9 @@ type Insertdirectstmt struct {
 	DedupRule          int64
 	DedupRows          int64
 	PreparePlaceholder int
+	TsSupportBatch     bool
+	BatchFailed        int
+	BatchFailedColumn  int
 }
 
 // Statements is a list of parsed statements.
@@ -120,6 +123,7 @@ type Parser struct {
 	stmtBuf        [1]Statement
 	Dudgetstable   func(dbName *string, tableName string) bool
 	IsShortcircuit bool
+	TsSupportBatch bool
 }
 
 // INT8 is the historical interpretation of INT. This should be left

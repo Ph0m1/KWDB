@@ -531,6 +531,11 @@ func (h ConnectionHandler) GetTsSessionData() *sessiondata.SessionData {
 	return h.ex.sessionData
 }
 
+// GetTsSupportBatch get TsSupportBatch status
+func (h ConnectionHandler) GetTsSupportBatch() bool {
+	return h.ex.sessionData.TsSupportBatch
+}
+
 // GetTsZone constructs a ParseTimeContext that returns the given values.
 func (h ConnectionHandler) GetTsZone() time.Time {
 	return h.ex.state.sqlTimestamp.In(h.ex.sessionData.DataConversion.Location)
@@ -1547,6 +1552,9 @@ func (ex *connExecutor) execCmd(ctx context.Context) error {
 		} else {
 			ex.sendDedupClientNoticeToRes(ctx, stmtRes, curStmt.Insertdirectstmt.UseDeepRule, curStmt.Insertdirectstmt.DedupRule, curStmt.Insertdirectstmt.DedupRows)
 			err = curStmt.Insertdirectstmt.ErrorInfo
+			if curStmt.Insertdirectstmt.TsSupportBatch && curStmt.Insertdirectstmt.BatchFailed+curStmt.Insertdirectstmt.BatchFailedColumn != 0 {
+				ex.sendBatchErrorToRes(stmtRes, curStmt.Insertdirectstmt.BatchFailed+curStmt.Insertdirectstmt.BatchFailedColumn)
+			}
 			stmtRes.IncrementRowsAffected(int(curStmt.Insertdirectstmt.RowsAffected - curStmt.Insertdirectstmt.DedupRows))
 		}
 		if err != nil {

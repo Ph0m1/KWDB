@@ -1413,6 +1413,14 @@ func (ex *connExecutor) sendDedupClientNoticeToRes(
 	}
 }
 
+func (ex *connExecutor) sendBatchErrorToRes(r CommandResult, Rows int) {
+	errString := "rejected"
+	errMsg := errors.Newf(
+		" %d rows %s\nDetails: %d rows rejected due to err. Check logs under the user data directory for more information.",
+		Rows, errString, Rows)
+	r.AppendNotice(errMsg)
+}
+
 // beginTransactionTimestampsAndReadMode computes the timestamps and
 // ReadWriteMode to be used for the associated transaction state based on the
 // values of the statement's Modes. Note that this method may reset the

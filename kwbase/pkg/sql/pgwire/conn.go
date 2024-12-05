@@ -591,6 +591,8 @@ type unqualifiedIntSizer interface {
 	GetTsSessionData() *sessiondata.SessionData
 
 	GetPreparedStatement(PreparedStatementName string) (*sql.PreparedStatement, bool)
+
+	GetTsSupportBatch() bool
 }
 
 type fixedIntSizer struct {
@@ -602,6 +604,10 @@ func (f fixedIntSizer) GetUnqualifiedIntSize() *types.T {
 }
 
 func (f fixedIntSizer) GetTsinsertdirect() bool {
+	return false
+}
+
+func (f fixedIntSizer) GetTsSupportBatch() bool {
 	return false
 }
 
@@ -888,6 +894,7 @@ func (c *conn) handleSimpleQuery(
 					stmts = actualStmts
 					break
 				}
+				stmts[0].Insertdirectstmt.TsSupportBatch = unqis.GetTsSupportBatch() && (di.RowNum != 1)
 				cfg := server.GetCFG()
 				ie := cfg.InternalExecutor
 				err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
@@ -899,7 +906,9 @@ func (c *conn) handleSimpleQuery(
 					if table == nil || err != nil {
 						return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 					}
-					if err = sql.GetColsInfo(&dit.ColsDesc, ins, &di); err != nil {
+					EvalContext := getEvalContext(ctx, txn, server)
+					EvalContext.StartSinglenode = (server.GetCFG().StartMode == sql.StartSingleNode)
+					if err = sql.GetColsInfo(ctx, EvalContext.StartSinglenode, &dit.ColsDesc, ins, &di, &stmts[0]); err != nil {
 						return err
 					}
 					di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
@@ -907,8 +916,6 @@ func (c *conn) handleSimpleQuery(
 					if con, ok := unqis.(sql.ConnectionHandler); ok {
 						ptCtx = tree.NewParseTimeContext(con.GetTsZone())
 					}
-					EvalContext := getEvalContext(ctx, txn, server)
-					EvalContext.StartSinglenode = (server.GetCFG().StartMode == sql.StartSingleNode)
 					r := c.allocCommandResult()
 					*r = commandResult{
 						conn: c,
@@ -921,7 +928,7 @@ func (c *conn) handleSimpleQuery(
 						}
 					} else {
 						// start-single-node mode
-						if di.InputValues, err = sql.GetInputValues(ptCtx, &dit.ColsDesc, di, stmts); err != nil {
+						if di.InputValues, err = sql.GetInputValues(ctx, ptCtx, &dit.ColsDesc, &di, stmts); err != nil {
 							return err
 						}
 						priTagValMap := sql.BuildpriTagValMap(di)
@@ -1047,9 +1054,13 @@ func Send(
 	timeReceived, startParse, endParse time.Time,
 ) error {
 	if con, ok := unqis.(sql.ConnectionHandler); ok {
-		stmts[0].Insertdirectstmt.UseDeepRule, stmts[0].Insertdirectstmt.DedupRule, stmts[0].Insertdirectstmt.DedupRows = con.SendDTI(EvalContext.Context, &EvalContext, r, di, stmts)
-		stmts[0].Insertdirectstmt.InsertFast = true
-		stmts[0].Insertdirectstmt.RowsAffected = int64(di.RowNum)
+		insertStmt := &stmts[0].Insertdirectstmt
+		insertStmt.InsertFast = true
+		insertStmt.RowsAffected = int64(di.RowNum - insertStmt.BatchFailed)
+		if di.RowNum == insertStmt.BatchFailed || di.RowNum == 0 {
+			return errors.Errorf("All BatchInsert Error.Check logs under the user data directory for more information.")
+		}
+		insertStmt.UseDeepRule, insertStmt.DedupRule, insertStmt.DedupRows = con.SendDTI(EvalContext.Context, &EvalContext, r, di, stmts)
 		if err := c.stmtBuf.Push(
 			ctx,
 			sql.ExecStmt{

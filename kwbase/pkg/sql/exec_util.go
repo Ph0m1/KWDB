@@ -2116,6 +2116,10 @@ func (m *sessionDataMutator) SetTsInsertShortcircuit(val bool) {
 	m.data.TsInsertShortcircuit = val
 }
 
+func (m *sessionDataMutator) SetTsSupportBatch(val bool) {
+	m.data.TsSupportBatch = val
+}
+
 func (m *sessionDataMutator) SetAllowPrepareAsOptPlan(val bool) {
 	m.data.AllowPrepareAsOptPlan = val
 }

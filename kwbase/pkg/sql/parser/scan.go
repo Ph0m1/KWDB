@@ -1008,6 +1008,10 @@ outer:
 		s.shortinsert.ValuesType = append(s.shortinsert.ValuesType, STRINGTYPE)
 		return true
 	}
+	// tsinsert_direct handling of "column" situation
+	if s.shortinsert.bracket == 1 {
+		s.shortinsert.Columnsname = append(s.shortinsert.Columnsname, tree.Name(s.finishString(buf)))
+	}
 
 	lval.str = s.finishString(buf)
 	return true

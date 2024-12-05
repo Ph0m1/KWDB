@@ -77,6 +77,7 @@ transaction_isolation                     serializable
 transaction_priority                      normal
 transaction_read_only                     off
 transaction_status                        NoTxn
+ts_ignore_batcherror                      off
 tsinsert_direct                           off
 vectorize                                 off
 vectorize_row_count_threshold             0

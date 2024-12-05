@@ -138,6 +138,8 @@ type SessionData struct {
 	CommandLimit         int64
 	OutFormats           bool
 	TsInsertShortcircuit bool
+	// tsinsert_direct special handling error
+	TsSupportBatch bool
 	// Support GB18030 and GBK
 	ClientEncoding string
 }
