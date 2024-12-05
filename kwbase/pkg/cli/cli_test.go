@@ -1404,8 +1404,6 @@ Available Commands:
   start-single-node    start a single-node cluster
   init                 initialize a cluster
   cert                 create ca, node, and client certs
-  quit                 drain and shut down a node
-
   sql                  open a sql shell
   statement-diag       commands for managing statement diagnostics bundles
   auth-session         log in and out of HTTP sessions

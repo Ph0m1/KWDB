@@ -58,8 +58,9 @@ the server process is shut down.
 See also 'kwbase node drain' to drain a server
 without stopping the server process.
 `,
-	Args: cobra.NoArgs,
-	RunE: MaybeDecorateGRPCError(runQuit),
+	Args:   cobra.NoArgs,
+	Hidden: true,
+	RunE:   MaybeDecorateGRPCError(runQuit),
 }
 
 // runQuit accesses the quit shutdown path.
