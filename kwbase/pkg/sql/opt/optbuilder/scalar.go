@@ -425,6 +425,7 @@ func (b *Builder) buildScalar(
 				panic(err)
 			}
 			out = b.factory.ConstructConstVal(d, t.ResolvedType())
+			out.SetConstDeductionEnabled(true)
 		} else {
 			out = b.factory.ConstructPlaceholder(t)
 		}
@@ -435,6 +436,12 @@ func (b *Builder) buildScalar(
 		inputTo := b.buildScalar(t.TypedLeftTo(), inScope, nil, nil, colRefs)
 		to := b.buildScalar(t.TypedTo(), inScope, nil, nil, colRefs)
 		out = b.buildRangeCond(t.Not, t.Symmetric, inputFrom, from, inputTo, to)
+		if inputFrom.CheckConstDeductionEnabled() && from.CheckConstDeductionEnabled() &&
+			inputTo.CheckConstDeductionEnabled() && to.CheckConstDeductionEnabled() {
+			out.SetConstDeductionEnabled(true)
+		} else {
+			out.SetConstDeductionEnabled(false)
+		}
 
 	case *srf:
 		if len(t.cols) == 1 {
@@ -477,8 +484,9 @@ func (b *Builder) buildScalar(
 		out.SetConstDeductionEnabled(flag)
 
 	case *tree.UnaryExpr:
-		out = b.buildScalar(t.TypedInnerExpr(), inScope, nil, nil, colRefs)
-		out = b.constructUnary(t.Operator, out, t.ResolvedType())
+		input := b.buildScalar(t.TypedInnerExpr(), inScope, nil, nil, colRefs)
+		out = b.constructUnary(t.Operator, input, t.ResolvedType())
+		out.SetConstDeductionEnabled(input.CheckConstDeductionEnabled())
 
 	case *tree.IsOfTypeExpr:
 		// IsOfTypeExpr is a little strange because its value can be determined
@@ -637,8 +645,8 @@ func checkScalarIsConst(expr opt.ScalarExpr) bool {
 	switch e := expr.(type) {
 	case *memo.ConstExpr:
 		return true
-	case *memo.FunctionExpr:
-		return e.IsConstForLogicPlan
+	default:
+		return e.CheckConstDeductionEnabled()
 	}
 	return false
 }

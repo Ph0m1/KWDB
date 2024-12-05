@@ -28,8 +28,10 @@ insert into ts_table values('2023-05-31 10:00:00', 1000,1000000,1000000000000000
 insert into ts_table2 values('2023-05-31 10:00:00', 1000,1000000,100000000000000000,100000000000000000.101,true, 'test_ts1', 1000, 1000000, 1000000000, 100.11, false, 'test_attr_ts'), ('2023-05-31 11:00:00', 2000,2000000,200000000000000000,200000000000000000.202,true, 'test_ts1', 1000, 1000000, 1000000000, 100.11, false, 'test_attr_ts');
 
 -- simple function
+explain select extract('second', time) from ts_table;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from ts_table;
-explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table order by e1 desc limit 1 offset 1;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp-1h) from ts_table;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table group by e1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table order by e1 desc limit 1 offset 1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table order by attr2 desc limit 1 offset 1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e3 < 300000000000000000;
@@ -37,55 +39,83 @@ explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where attr3 < 300000000000000000;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where attr2 < 2000000;
 
--- simple function with UNION
+-- project has function
+--- simple function with UNION
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table union select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp+1h) from test_ts.ts_table union select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from (select e1,e2,e3 from test_ts.ts_table union (select e1,e2,e3 from test_ts.ts_table2 union select e1,e2,e3 from test_ts.ts_table)) as t where t.e1 < 2000 order by e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from (select e1,e2,e3 from test_ts.ts_table union (select e1,e2,e3 from test_ts.ts_table2 union select e1,e2,e3 from test_ts.ts_table)) as t where t.e1-1000 < 3000 order by e2 desc limit 1 offset 1;
 
--- simple function with uncorrelated subquery
+--- simple function with uncorrelated subquery
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2) order by e2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp-1s) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2) order by e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 group by e1 having e1 < 3000) order by e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 order by e3 desc limit 1 offset 1) order by e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2) group by e2 having e2 < 3000000 order by e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2) order by e3 desc limit 1 offset 1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2) order by e2;
 
--- simple function with correlated subquery
+--- simple function with correlated subquery
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) = ( select e4 from test_ts.ts_table2 limit 1 ) from test_ts.ts_table;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 where e2 > 1000000 group by e4) from test_ts.ts_table;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 order by e3 desc limit 10 offset 1) from test_ts.ts_table;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) in ( select e4 from test_ts.ts_table2 ) from test_ts.ts_table order by e3 desc limit 10 offset 1;
 
--- simple function with JOIN
+--- simple function with JOIN
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp+1d) from test_ts.ts_table as t1 join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 join test_ts.ts_table2 as t2 on t1.e1=t2.e1 where t1.e2 < 3000000 and t2.e4 > 1000.101 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 join test_ts.ts_table2 as t2 on t1.e1=t2.e1 group by t1.e2 having t1.e2 > 1000000 order by t1.e2;
 
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 left join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp-1d) from test_ts.ts_table as t1 left join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 left join test_ts.ts_table2 as t2 on t1.e1=t2.e1 where t1.e2 < 3000000 and t2.e4 > 1000.101 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 left join test_ts.ts_table2 as t2 on t1.e1=t2.e1 group by t1.e2 having t1.e2 > 1000000 order by t1.e2;
 
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 right join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp+1d) from test_ts.ts_table as t1 right join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 right join test_ts.ts_table2 as t2 on t1.e1=t2.e1 where t1.e2 < 3000000 and t2.e4 > 1000.101 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 right join test_ts.ts_table2 as t2 on t1.e1=t2.e1 group by t1.e2 having t1.e2 > 1000000 order by t1.e2;
 
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 full join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp-1d) from test_ts.ts_table as t1 full join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 full join test_ts.ts_table2 as t2 on t1.e1=t2.e1 where t1.e2 < 3000000 and t2.e4 > 1000.101 order by t1.e2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1 full join test_ts.ts_table2 as t2 on t1.e1=t2.e1 group by t1.e2 having t1.e2 > 1000000 order by t1.e2;
 
--- simple function with multiple tables
+--- simple function with multiple tables
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table, test_ts.ts_table2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp+1s) from test_ts.ts_table, test_ts.ts_table2;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.e2 < 3000000 and t2.e4 > 1000.101 order by t1.e1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 group by t1.e1, t2.e1 having t1.e1 > 1000 or t2.e1 < 3000 order by t1.e1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 order by t1.e1 desc limit 10 offset 1;
 explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 order by t1.e1 desc limit 10 offset 1;
 
+-- filters has function
+--- simple function
+explain select extract('second', time) from ts_table where time > date_trunc('hour', time-1h);
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from ts_table where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h);
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from ts_table where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) group by e1;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from ts_table where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) order by e1 desc limit 1;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from ts_table where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) order by attr1 desc limit 1;
+
+--- simple function with uncorrelated subquery
+explain select e1 from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h)) order by e2;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table where e1 in (select e1 from test_ts.ts_table2 where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h)) order by e2;
+
+--- simple function with correlated subquery
+explain select time = ( select time from test_ts.ts_table2 where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) limit 1 ) from test_ts.ts_table;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) = ( select e4 from test_ts.ts_table2 where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) limit 1 ) from test_ts.ts_table;
+
+--- simple function with multiple tables
+explain select t1.time from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) order by t1.e1;
+explain select extract('second', '2024-01-01 00:00:00'::timestamp) from test_ts.ts_table as t1, test_ts.ts_table2 as t2 where t1.time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h) order by t1.e1;
+
 -- args has function
 explain select extract('year', localtimestamp()) from ts_table;
 explain select extract('year', localtimestamp()) from test_ts.ts_table group by e1 having e1 < 3000;
 explain select extract('year', localtimestamp()) from test_ts.ts_table order by e1 desc limit 1 offset 1;
-explain select extract('year', localtimestamp()) from test_ts.ts_table order by e1 desc limit 1 offset 1;
 explain select extract('year', localtimestamp()) from test_ts.ts_table order by attr2 desc limit 1 offset 1;
+explain select extract('year', localtimestamp()) from test_ts.ts_table where time < date_trunc('hour', '2024-01-01 00:00:00'::timestamp-1h);
 explain select extract('year', localtimestamp()) from test_ts.ts_table where e3 < 300000000000000000;
 explain select extract('year', localtimestamp()) from test_ts.ts_table where e3 < 300000000000000000;
 explain select extract('year', localtimestamp()) from test_ts.ts_table where attr3 < 300000000000000000;
