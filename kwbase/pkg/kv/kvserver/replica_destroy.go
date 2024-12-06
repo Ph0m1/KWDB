@@ -227,15 +227,19 @@ func (r *Replica) destroyRaftMuLocked(ctx context.Context, nextReplicaID roachpb
 
 	// delete replica ts data
 	desc := r.Desc()
-	if desc.GetRangeType() == roachpb.TS_RANGE {
-		tableID, beginHash, endHash, startTs, endTs, err := sqlbase.DecodeTSRangeKey(desc.StartKey, desc.EndKey)
-		if err != nil {
-			log.Errorf(ctx, "DeleteReplicaTSData failed: %v", err)
-		} else {
-			err = r.store.TsEngine.DeleteReplicaTSData(tableID, beginHash, endHash, startTs, endTs)
-			log.VEventf(ctx, 3, "TsEngine.DeleteReplicaTSData %v, r%v, %v, %v, %v, %v, %v, %v", r.store.StoreID(), desc.RangeID, tableID, beginHash, endHash, startTs, endTs, err)
+	if desc.GetRangeType() == roachpb.TS_RANGE && r.store.TsEngine != nil && desc.TableId != 0 {
+		exist, _ := r.store.TsEngine.TSIsTsTableExist(uint64(desc.TableId))
+		log.VEventf(ctx, 3, "TsEngine.TSIsTsTableExist r%v, %v, %v", desc.RangeID, desc.TableId, exist)
+		if exist {
+			tableID, beginHash, endHash, startTs, endTs, err := sqlbase.DecodeTSRangeKey(desc.StartKey, desc.EndKey)
 			if err != nil {
-				log.Errorf(ctx, "DeleteReplicaTSData failed", err)
+				log.Errorf(ctx, "DecodeTSRangeKey failed: %v", err)
+			} else {
+				err = r.store.TsEngine.DeleteReplicaTSData(tableID, beginHash, endHash, startTs, endTs)
+				log.VEventf(ctx, 3, "TsEngine.DeleteReplicaTSData %v, r%v, %v, %v, %v, %v, %v, %v", r.store.StoreID(), desc.RangeID, tableID, beginHash, endHash, startTs, endTs, err)
+				if err != nil {
+					log.Errorf(ctx, "DeleteReplicaTSData failed %v", err)
+				}
 			}
 		}
 	}
