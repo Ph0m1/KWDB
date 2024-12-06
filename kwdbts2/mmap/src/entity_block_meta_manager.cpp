@@ -202,10 +202,11 @@ int EntityBlockMetaManager::MarkSpaceDeleted(uint32_t entity_id, BlockSpan* span
 
 void EntityBlockMetaManager::resizeMeta() {
   if (meta_num_ > entity_block_metas_.size() * 0.8) {
-    // Data reorganization may result in meta_num_ being much larger than the current size,
-    // so it is safer to use meta_num_ to resize
-    entity_block_metas_.resize(meta_num_ * 2);
-    // entity_metas_.resize(entity_metas_.size()*2);
+    lock();
+    entity_block_metas_swap_ = entity_block_metas_;
+    entity_block_metas_swap_.resize(meta_num_ * 2);
+    entity_block_metas_.swap(entity_block_metas_swap_);
+    unlock();
   }
 }
 

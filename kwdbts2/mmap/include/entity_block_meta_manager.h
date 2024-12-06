@@ -101,6 +101,7 @@ class EntityBlockMetaManager {
 
  protected:
   std::vector<MMapEntityBlockMeta*> entity_block_metas_;
+  std::vector<MMapEntityBlockMeta*> entity_block_metas_swap_;
   uint64_t table_id_;
   std::string file_path_base_;
   std::string db_path_;
