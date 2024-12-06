@@ -207,6 +207,25 @@ function kw_status() {
   return 1
 }
 
+function whether_running() {
+  local ret=""
+  if [ "$REMOTE" = "ON" ];then
+    prefix=$node_cmd_prefix
+  else
+    prefix=$local_cmd_prefix
+  fi
+  if [ "$(install_type)" = "bare" ];then
+    cd /usr/local/kaiwudb/bin
+    local cmd="$prefix -u $(user_name) bash -c \"./kwbase node status --host=127.0.0.1:$(local_port) $(secure_opt)\""
+    ret=$(eval $cmd 2>&1)
+  else
+    ret=$(docker exec -it kaiwudb-container bash -c "./kwbase node status $(secure_opt)" 2>&1)
+  fi
+  if $?;then
+    return 1
+  fi
+}
+
 function rollback() {
   if [ "$REMOTE" = "ON" ];then
     prefix=$node_cmd_prefix

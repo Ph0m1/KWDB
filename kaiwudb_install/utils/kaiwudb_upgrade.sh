@@ -263,7 +263,10 @@ function recover_node() {
     sudo sed -iq 's/--upgrade-complete//g' /etc/kaiwudb/script/kaiwudb_env
   else
     cd /etc/kaiwudb/script
-    sudo sed -iq 's/.*\/kaiwudb\/bin\/kwbase.*/& --upgrade-complete/' /etc/kaiwudb/script/docker-compose.yml
+    ret=$(sed -n '/--upgrade-complete/p' /etc/kaiwudb/script/docker-compose.yml 2>&1)
+    if [ -z "$ret" ];then
+      sudo sed -iq 's/.*\/kaiwudb\/bin\/kwbase.*/& --upgrade-complete/' /etc/kaiwudb/script/docker-compose.yml
+    fi
     kw_start
     if [ $? -ne 0 ];then
       echo "Restart KaiwuDB failed. For more information, use 'journalctl -u kaiwudb' to view the system logs"

@@ -579,11 +579,11 @@ if [ "$g_kw_cmd" = "cluster" ];then
     if [ $? -ne 0 ];then
       exit 1
     fi
-    if ! $(kw_start >/dev/null 2>&1);then
+    if ! $(exec_start >/dev/null 2>&1);then
       log_err "Start KaiwuDB failed. For more information, check kwbase's log."
       exit 1
     fi
-    parallel_exec "${ip_arr[*]}" $ssh_port $ssh_user "kw_start"
+    parallel_exec "${ip_arr[*]}" $ssh_port $ssh_user "exec_start"
     if [ $? -ne 0 ];then
       exit 1
     fi

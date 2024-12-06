@@ -14,8 +14,8 @@ function kw_start() {
     return 1
   fi
   sleep 3
-  until [ $count -gt 60 ];do
-    kw_status >/dev/null 2>&1
+  until [ $count -gt 300 ];do
+    whether_running >/dev/null 2>&1
     if [ $? -eq 0 ];then
       return 0
     fi
@@ -52,6 +52,31 @@ function kw_restart() {
   if [ $? -ne 0 ];then
     return 1
   fi
+  until [ $count -gt 300 ];do
+    whether_running >/dev/null 2>&1
+    if [ $? -eq 0 ];then
+      return 0
+    fi
+    ((count++));
+    sleep 2
+  done
+  return 1
+}
+
+function exec_start() {
+  if [ "$REMOTE" = "ON" ];then
+    prefix=$node_cmd_prefix
+  else
+    prefix=$local_cmd_prefix
+  fi
+  local count=0
+  eval $prefix systemctl daemon-reload
+  eval $prefix systemctl start kaiwudb >/dev/null 2>&1
+  if [ $? -ne 0 ];then
+    echo "Start KaiwuDB failed. For more information, check system log(journactl -u kaiwudb)."
+    return 1
+  fi
+  sleep 3
   until [ $count -gt 60 ];do
     kw_status >/dev/null 2>&1
     if [ $? -eq 0 ];then
@@ -60,5 +85,6 @@ function kw_restart() {
     ((count++));
     sleep 2
   done
+  echo "Start KaiwuDB failed. For more information, check kwbase's log."
   return 1
 }
