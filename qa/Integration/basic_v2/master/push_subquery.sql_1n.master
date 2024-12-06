@@ -152,7 +152,6 @@ LIMIT 1;
    │    │                               | engine type         | time series
    │    │                               | count               | 1
    │    └── sort                        |                     |
-   │         │                          | engine type         | time series
    │         │                          | order               | -abnormal_point_count
    │         └── group                  |                     |
    │              │                     | engine type         | time series
@@ -189,7 +188,7 @@ LIMIT 1;
                                         | use statistic       | true
                                         | tag filter[0]       | measure_type = 4
                                         | tag filter[1]       | pipeline_sn = 'e1'
-(44 rows)
+(43 rows)
 > SELECT COUNT(*) AS max_sample_count,
 AVG(t.measure_value) AS avg_value,
 t.measure_value AS first_n_max_value
@@ -240,7 +239,6 @@ ORDER BY t.measure_value DESC LIMIT 10;
    │         │                               | engine type       | time series
    │         │                               | count             | 10
    │         └── sort                        |                   |
-   │              │                          | engine type       | time series
    │              │                          | order             | -measure_value
    │              └── group                  |                   |
    │                   │                     | engine type       | time series
@@ -284,7 +282,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                              | spans:fromTime    | 2024-01-01 00:00:00.001 +0000 UTC
                                              | spans:toTime      | 2025-03-31 23:59:59.999 +0000 UTC
                                              | tag filter[0]     | work_area_sn = 'c1'
-(56 rows)
+(55 rows)
 > select measure_value, point_sn,point_sn in (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
   measure_value | point_sn | ?column?
 ----------------+----------+-----------
@@ -304,12 +302,10 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                    | vectorized          | false
   root                             |                     |
    ├── render                      |                     |
-   │    │                          | engine type         | time series
    │    │                          | measure_value       | measure_value
    │    │                          | point_sn            | point_sn
    │    │                          | ?column?            | "?column?"
    │    └── sort                   |                     |
-   │         │                     | engine type         | time series
    │         │                     | order               | +point_sn
    │         └── synchronizer      |                     |
    │              └── render       |                     |
@@ -334,7 +330,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                    | ts-table            | t_point
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(34 rows)
+(32 rows)
 > select measure_value, point_sn, exists (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
   measure_value | point_sn | exists
 ----------------+----------+---------
@@ -354,12 +350,10 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                    | vectorized          | false
   root                             |                     |
    ├── render                      |                     |
-   │    │                          | engine type         | time series
    │    │                          | measure_value       | measure_value
    │    │                          | point_sn            | point_sn
    │    │                          | exists              | "exists"
    │    └── sort                   |                     |
-   │         │                     | engine type         | time series
    │         │                     | order               | +point_sn
    │         └── synchronizer      |                     |
    │              └── render       |                     |
@@ -384,7 +378,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                    | ts-table            | t_point
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(34 rows)
+(32 rows)
 > select measure_value, point_sn, (select max(point_sn) from db_pipec.t_point ) from db_pipec.t_point order by point_sn;
   measure_value | point_sn | max
 ----------------+----------+------
@@ -404,12 +398,10 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                    | vectorized          | false
   root                             |                     |
    ├── render                      |                     |
-   │    │                          | engine type         | time series
    │    │                          | measure_value       | measure_value
    │    │                          | point_sn            | point_sn
    │    │                          | max                 | max
    │    └── sort                   |                     |
-   │         │                     | engine type         | time series
    │         │                     | order               | +point_sn
    │         └── synchronizer      |                     |
    │              └── render       |                     |
@@ -434,7 +426,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                                    | ts-table            | t_point
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(34 rows)
+(32 rows)
 > select measure_value,point_sn, array (select point_sn from db_pipec.t_point order by point_sn) from db_pipec.t_point order by point_sn;
   measure_value | point_sn |          array
 ----------------+----------+---------------------------
@@ -472,13 +464,12 @@ ORDER BY t.measure_value DESC LIMIT 10;
         │                          | original sql  | (SELECT point_sn FROM db_pipec.t_point ORDER BY point_sn)
         │                          | exec mode     | all rows
         └── sort                   |               |
-             │                     | engine type   | time series
              │                     | order         | +point_sn
              └── synchronizer      |               |
                   └── ts scan      |               |
                                    | ts-table      | t_point
                                    | access mode   | tableTableMeta
-(28 rows)
+(27 rows)
 > select measure_value, point_sn from db_pipec.t_point where point_sn = (select max(point_sn) from db_pipec.t_point) order by point_sn;
   measure_value | point_sn
 ----------------+-----------
@@ -491,7 +482,6 @@ ORDER BY t.measure_value DESC LIMIT 10;
                          | vectorized          | false
   root                   |                     |
    ├── sort              |                     |
-   │    │                | engine type         | time series
    │    │                | order               | +point_sn
    │    └── synchronizer |                     |
    │         └── ts scan |                     |
@@ -512,7 +502,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                          | ts-table            | t_point
                          | access mode         | tableTableMeta
                          | use statistic       | true
-(25 rows)
+(24 rows)
 > select measure_value, point_sn from db_pipec.t_point where  exists (select max(point_sn) from db_pipec.t_point) order by point_sn;
   measure_value | point_sn
 ----------------+-----------
@@ -532,7 +522,6 @@ ORDER BY t.measure_value DESC LIMIT 10;
                          | vectorized          | false
   root                   |                     |
    ├── sort              |                     |
-   │    │                | engine type         | time series
    │    │                | order               | +point_sn
    │    └── synchronizer |                     |
    │         └── ts scan |                     |
@@ -553,7 +542,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                          | ts-table            | t_point
                          | access mode         | tableTableMeta
                          | use statistic       | true
-(25 rows)
+(24 rows)
 > select measure_value, t.point_sn from db_pipec.t_point t, pipec_r.point_info p where t.point_sn = (select max(point_sn) from pipec_r.point_info) order by point_sn;
   measure_value | point_sn
 ----------------+-----------
@@ -613,11 +602,9 @@ ORDER BY t.measure_value DESC LIMIT 10;
                               | vectorized       | false
   root                        |                  |
    ├── render                 |                  |
-   │    │                     | engine type      | time series
    │    │                     | max              | max
    │    │                     | min              | min
    │    └── sort              |                  |
-   │         │                | engine type      | time series
    │         │                | order            | +point_sn
    │         └── group        |                  |
    │              │           | engine type      | time series
@@ -641,7 +628,7 @@ ORDER BY t.measure_value DESC LIMIT 10;
                               | table            | point_info@primary
                               | spans            | LIMITED SCAN
                               | limit            | 1
-(32 rows)
+(30 rows)
 > select max(measure_value), min(t.point_sn) from db_pipec.t_point t  group by  (select max(point_sn) from pipec_r.point_info);
   max  | min
 -------+------

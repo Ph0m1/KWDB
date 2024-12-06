@@ -142,6 +142,12 @@ type SessionData struct {
 	TsSupportBatch bool
 	// Support GB18030 and GBK
 	ClientEncoding string
+
+	// MaxPushLimitNumber if number of limit shall not exceed it, limit can push to tsScan
+	MaxPushLimitNumber int64
+
+	// CanPushSorter if set true, can push sorter to ts engine
+	CanPushSorter bool
 }
 
 // DataConversionConfig contains the parameters that influence

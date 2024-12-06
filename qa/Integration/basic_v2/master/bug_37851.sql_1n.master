@@ -10,7 +10,6 @@ SET
                          | distributed         | true
                          | vectorized          | false
   sort                   |                     |
-   │                     | engine type         | time series
    │                     | order               | +point_sn
    └── group             |                     |
         │                | engine type         | time series
@@ -28,14 +27,13 @@ SET
                          | access mode         | tableTableMeta
                          | use statistic       | true
                          | tag filter[0]       | work_area_sn = 'work_area_sn_1'
-(21 rows)
+(20 rows)
 > explain SELECT t.point_sn, last_row(t.measure_value) FROM t_point t WHERE t.work_area_sn = 'work_area_sn_1' GROUP BY t.point_sn ORDER BY t.point_sn;
            tree          |        field        |             description
 -------------------------+---------------------+---------------------------------------
                          | distributed         | true
                          | vectorized          | false
   sort                   |                     |
-   │                     | engine type         | time series
    │                     | order               | +point_sn
    └── group             |                     |
         │                | engine type         | time series
@@ -55,6 +53,6 @@ SET
                          | access mode         | tableTableMeta
                          | use statistic       | true
                          | tag filter[0]       | work_area_sn = 'work_area_sn_1'
-(23 rows)
+(22 rows)
 > drop database db_pipec cascade;
 DROP DATABASE

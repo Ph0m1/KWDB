@@ -151,8 +151,6 @@ EEIteratorErrCode SortOperator::Start(kwdbContext_p ctx) {
       continue;
     }
 
-    LOG_DEBUG("Read a batch of data %d\n", chunk->Count());
-
     total_count += chunk->Count();
     buffer_size += chunk->RowSize() * chunk->Count();
     KStatus ret = SUCCESS;

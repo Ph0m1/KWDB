@@ -2226,3 +2226,13 @@ func ChangeStartMode(cmdName string) int {
 
 	return -1
 }
+
+// SetPushLimitNumber set PushLimitNumber
+func (m *sessionDataMutator) SetMaxPushLimitNumber(val int64) {
+	m.data.MaxPushLimitNumber = val
+}
+
+// CanPushSorter set CanPushSorter
+func (m *sessionDataMutator) SetCanPushSorter(val bool) {
+	m.data.CanPushSorter = val
+}

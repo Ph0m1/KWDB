@@ -41,12 +41,10 @@ CREATE TABLE
                               | distributed         | true
                               | vectorized          | false
   render                      |                     |
-   │                          | engine type         | time series
    │                          | k_timestamp_b       | k_timestamp_b
    │                          | hostname            | any_not_null
    │                          | max                 | max
    └── sort                   |                     |
-        │                     | engine type         | time series
         │                     | order               | +k_timestamp_b
         └── group             |                     |
              │                | engine type         | time series
@@ -68,7 +66,7 @@ CREATE TABLE
                               | ordered type        | order scan
                               | access mode         | tagIndex
                               | ptag filter[0]      | hostname = 'host_4'
-(30 rows)
+(28 rows)
 > explain SELECT
                hostname,
                max(usage_user)
@@ -108,13 +106,11 @@ CREATE TABLE
                               | distributed      | true
                               | vectorized       | false
   render                      |                  |
-   │                          | engine type      | time series
    │                          | k_timestamp_b    | k_timestamp_b
    │                          | hostname         | any_not_null
    │                          | usage_nice       | usage_nice
    │                          | max              | max
    └── sort                   |                  |
-        │                     | engine type      | time series
         │                     | order            | +k_timestamp_b
         └── group             |                  |
              │                | engine type      | time series
@@ -134,7 +130,7 @@ CREATE TABLE
                               | ts-table         | cpu
                               | access mode      | tagIndex
                               | ptag filter[0]   | hostname = 'host_4'
-(29 rows)
+(27 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
                hostname,
                max(usage_user)
@@ -147,7 +143,6 @@ CREATE TABLE
                          | distributed      | true
                          | vectorized       | false
   sort                   |                  |
-   │                     | engine type      | time series
    │                     | order            | +k_timestamp_b
    └── render            |                  |
         │                | engine type      | time series
@@ -165,7 +160,7 @@ CREATE TABLE
                          | ts-table         | cpu
                          | access mode      | tagIndex
                          | ptag filter[0]   | hostname = 'host_4'
-(21 rows)
+(20 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        max(usage_user)
@@ -181,12 +176,10 @@ ORDER BY hostname, k_timestamp_b;
                               | distributed      | true
                               | vectorized       | false
   render                      |                  |
-   │                          | engine type      | time series
    │                          | k_timestamp_b    | k_timestamp_b
    │                          | hostname         | any_not_null
    │                          | max              | max
    └── sort                   |                  |
-        │                     | engine type      | time series
         │                     | order            | +k_timestamp_b
         └── group             |                  |
              │                | engine type      | time series
@@ -207,7 +200,7 @@ ORDER BY hostname, k_timestamp_b;
                               | spans:toTime     | 2023-12-31 23:59:59.999 +0000 UTC
                               | filter           | usage_nice > 2000
                               | ptag filter[0]   | hostname = 'host_4'
-(29 rows)
+(27 rows)
 > explain select first_row(usage_user),first_row(usage_user),first_row(usage_user),first_row(usage_user)
 from benchmark_ut.cpu
 group by usage_idle having usage_idle > 20;

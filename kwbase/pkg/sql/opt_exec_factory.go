@@ -1032,7 +1032,7 @@ func (ef *execFactory) ConstructLimit(
 		countExpr:  limit,
 		offsetExpr: offset,
 		engine:     engine,
-		canOpt:     tryOptLimitOrder(meta, limitExpr),
+		canOpt:     tryOptLimitOrder(meta, limitExpr, limit, ef.planner.SessionData().MaxPushLimitNumber),
 	}, nil
 }
 
@@ -2575,7 +2575,12 @@ func (ef *execFactory) singleSpan(
 // tryOptLimitOrder check if limit and sort can optimize.
 // meta is metadata.
 // e is memo.LimitExpr
-func tryOptLimitOrder(meta *opt.Metadata, e memo.RelExpr) bool {
+func tryOptLimitOrder(
+	meta *opt.Metadata, e memo.RelExpr, limit tree.TypedExpr, pushLimitNumber int64,
+) bool {
+	if val, ok := limit.(*tree.DInt); ok && int64(*val) > pushLimitNumber {
+		return false
+	}
 	if e.IsTSEngine() {
 		if l, ok := e.(*memo.LimitExpr); ok {
 			if sort, ok := l.Input.(*memo.SortExpr); ok {

@@ -1876,6 +1876,36 @@ select cast(x as decimal(18, 6)) from t;
 use defaultdb;
 drop database last_db cascade;
 
+-- limit offset bug
+create ts database test_limit_offset;
+use test_limit_offset;
+CREATE TABLE stbl_raw (
+    ts TIMESTAMPTZ NOT NULL,
+    data VARCHAR(16374) NULL,
+    type VARCHAR(10) NULL,
+    parse VARCHAR(10) NULL
+) TAGS (
+    device VARCHAR(64) NOT NULL,
+	iot_hub_name NCHAR(64) NOT NULL ) PRIMARY TAGS(device, iot_hub_name);
+
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 20 offset 980;
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 20 offset 981;
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 1000;
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 1001;
+
+show max_push_limit_number;
+set max_push_limit_number = 1100;
+
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 1100;
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 1101;
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 20 offset 1080;
+EXPLAIN SELECT ts as timestamp,* FROM stbl_raw order by ts desc LIMIT 20 offset 1081;
+
+reset max_push_limit_number;
+
+use defaultdb;
+drop database test_limit_offset cascade;
+
 -- clean data
 use defaultdb;
 drop database test_ts cascade;

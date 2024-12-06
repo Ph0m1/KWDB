@@ -178,13 +178,17 @@ EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx) {
   // init col
   std::vector<ColumnInfo> col_info;
   col_info.reserve(output_fields_.size());
+  k_int32 row_size = 0;
   for (auto field : output_fields_) {
     col_info.emplace_back(field->get_storage_length(),
                           field->get_storage_type(), field->get_return_type());
+    row_size += field->get_storage_length();
   }
-
-  data_chunk_ = std::make_unique<DataChunk>(col_info, limit_ + offset_);
-  if (data_chunk_->Initialize() != true) {
+  k_uint64 lines = limit_ + offset_;
+  if (lines * row_size < BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE) {
+    data_chunk_ = std::make_unique<DataChunk>(col_info, lines);
+  }
+  if (!data_chunk_ || data_chunk_->Initialize() != true) {
     data_chunk_ = nullptr;
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     return EEIteratorErrCode::EE_ERROR;

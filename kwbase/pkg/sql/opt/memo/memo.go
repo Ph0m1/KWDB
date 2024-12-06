@@ -173,6 +173,8 @@ type Memo struct {
 	tsForcePushGroupToTSEngine bool
 	tsOrderedScan              bool
 	tsQueryOptMode             int64
+	maxPushLimitNumber         int64
+	tsCanPushSorterToTsEngine  bool
 
 	// curID is the highest currently in-use scalar expression ID.
 	curID opt.ScalarID
@@ -400,6 +402,8 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 	m.safeUpdates = evalCtx.SessionData.SafeUpdates
 	m.saveTablesPrefix = evalCtx.SessionData.SaveTablesPrefix
 	m.insertFastPath = evalCtx.SessionData.InsertFastPath
+	m.maxPushLimitNumber = evalCtx.SessionData.MaxPushLimitNumber
+	m.tsCanPushSorterToTsEngine = evalCtx.SessionData.CanPushSorter
 
 	if evalCtx.Settings != nil {
 		m.tsOrderedScan = opt.TSOrderedTable.Get(&evalCtx.Settings.SV)
@@ -568,7 +572,9 @@ func (m *Memo) IsStale(
 		m.tsOrderedScan != opt.TSOrderedTable.Get(&evalCtx.Settings.SV) ||
 		m.tsCanPushAllProcessor != opt.PushdownAll.Get(&evalCtx.Settings.SV) ||
 		m.tsQueryOptMode != opt.TSQueryOptMode.Get(&evalCtx.Settings.SV) ||
-		m.tsForcePushGroupToTSEngine == stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV) {
+		m.tsForcePushGroupToTSEngine == stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV) ||
+		m.maxPushLimitNumber != evalCtx.SessionData.MaxPushLimitNumber ||
+		m.tsCanPushSorterToTsEngine != evalCtx.SessionData.CanPushSorter {
 		return true, nil
 	}
 
@@ -1042,6 +1048,17 @@ func setOrderedForce(expr *TSScanExpr) {
 	expr.OrderedScanType = opt.ForceOrderedScan
 }
 
+// check sorter can push to ts engine.
+// if tsCanPushSorterToTsEngine is true,
+// rowCount of sorter less than maxPushLimitNumber,
+// sorter can push to ts engine
+func (m *Memo) checkSorterCanPushToTsEngine(sort *SortExpr) bool {
+	if m.tsCanPushSorterToTsEngine && int64(sort.Relational().Stats.RowCount) <= m.maxPushLimitNumber {
+		return true
+	}
+	return false
+}
+
 // dealWithOrderBy set engine and add flag for the child of order by
 // when it's child can exec in ts engine.
 // sort is memo.SortExpr of memo tree.
@@ -1051,7 +1068,7 @@ func setOrderedForce(expr *TSScanExpr) {
 func (m *Memo) dealWithOrderBy(sort *SortExpr, ret *CrossEngCheckResults, props *bestProps) {
 	if ret.execInTSEngine {
 		// only single node, order by can exec in ts engine.
-		if m.CheckFlag(opt.SingleMode) {
+		if m.CheckFlag(opt.SingleMode) && m.checkSorterCanPushToTsEngine(sort) {
 			sort.SetEngineTS()
 		}
 

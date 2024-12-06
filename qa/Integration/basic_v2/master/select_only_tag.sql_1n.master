@@ -662,7 +662,6 @@ INSERT 10
                               | distributed    | true
                               | vectorized     | false
   sort                        |                |
-   │                          | engine type    | time series
    │                          | order          | +sm
    └── render                 |                |
         │                     | engine type    | time series
@@ -685,14 +684,13 @@ INSERT 10
                               | access mode    | tagIndexTable
                               | tag filter[0]  | t1 > 1000
                               | ptag filter[0] | ptag1 = 100
-(26 rows)
+(25 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table1 where ptag1 = 100 and t1 > 1000 group by ptag1, t1, t2 order by sm;
              tree             |     field      |     description
 ------------------------------+----------------+----------------------
                               | distributed    | true
                               | vectorized     | false
   sort                        |                |
-   │                          | engine type    | time series
    │                          | order          | +sm
    └── render                 |                |
         │                     | engine type    | time series
@@ -717,14 +715,13 @@ INSERT 10
                               | access mode    | tagIndexTable
                               | tag filter[0]  | t1 > 1000
                               | ptag filter[0] | ptag1 = 100
-(28 rows)
+(27 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table1 where ptag1 = 100 and t1 > 1000 group by ptag1, t1, t2, t3 order by sm;
              tree             |     field      |     description
 ------------------------------+----------------+----------------------
                               | distributed    | true
                               | vectorized     | false
   sort                        |                |
-   │                          | engine type    | time series
    │                          | order          | +sm
    └── render                 |                |
         │                     | engine type    | time series
@@ -751,7 +748,7 @@ INSERT 10
                               | access mode    | tagIndexTable
                               | tag filter[0]  | t1 > 1000
                               | ptag filter[0] | ptag1 = 100
-(30 rows)
+(29 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table1 where t1 > 1000 group by ptag1 order by sm limit 2 offset 1;
                 tree               |     field     |  description
 -----------------------------------+---------------+-----------------
@@ -763,7 +760,6 @@ INSERT 10
         │                          | engine type   | time series
         │                          | count         | 3
         └── sort                   |               |
-             │                     | engine type   | time series
              │                     | order         | +sm
              └── group             |               |
                   │                | engine type   | time series
@@ -779,7 +775,7 @@ INSERT 10
                                    | only tag      | true
                                    | access mode   | tableTableMeta
                                    | tag filter[0] | t1 > 1000
-(24 rows)
+(23 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table1 where t1 > 1000 group by ptag1, t1 order by sm limit 2 offset 1;
                   tree                  |     field     |  description
 ----------------------------------------+---------------+-----------------
@@ -794,7 +790,6 @@ INSERT 10
              │                          | engine type   | time series
              │                          | count         | 3
              └── sort                   |               |
-                  │                     | engine type   | time series
                   │                     | order         | +sum
                   └── group             |               |
                        │                | engine type   | time series
@@ -812,7 +807,7 @@ INSERT 10
                                         | only tag      | true
                                         | access mode   | tableTableMeta
                                         | tag filter[0] | t1 > 1000
-(29 rows)
+(28 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table1 where t1 > 1000 group by ptag1, t1, t2 order by sm limit 2 offset 1;
                   tree                  |     field     |  description
 ----------------------------------------+---------------+-----------------
@@ -827,7 +822,6 @@ INSERT 10
              │                          | engine type   | time series
              │                          | count         | 3
              └── sort                   |               |
-                  │                     | engine type   | time series
                   │                     | order         | +sum
                   └── group             |               |
                        │                | engine type   | time series
@@ -847,7 +841,7 @@ INSERT 10
                                         | only tag      | true
                                         | access mode   | tableTableMeta
                                         | tag filter[0] | t1 > 1000
-(31 rows)
+(30 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table1 where t1 > 1000 group by ptag1, t1, t2, t3 order by sm limit 2 offset 1;
                   tree                  |     field     |    description
 ----------------------------------------+---------------+--------------------
@@ -862,7 +856,6 @@ INSERT 10
              │                          | engine type   | time series
              │                          | count         | 3
              └── sort                   |               |
-                  │                     | engine type   | time series
                   │                     | order         | +sum
                   └── group             |               |
                        │                | engine type   | time series
@@ -884,7 +877,7 @@ INSERT 10
                                         | only tag      | true
                                         | access mode   | tableTableMeta
                                         | tag filter[0] | t1 > 1000
-(33 rows)
+(32 rows)
 > explain select distinct ptag1 from only_tag.table2;
         tree        |    field    |  description
 --------------------+-------------+-----------------
@@ -1445,7 +1438,6 @@ INSERT 10
                               | distributed   | true
                               | vectorized    | false
   sort                        |               |
-   │                          | engine type   | time series
    │                          | order         | +sm
    └── render                 |               |
         │                     | engine type   | time series
@@ -1468,14 +1460,13 @@ INSERT 10
                               | access mode   | tableTableMeta
                               | tag filter[0] | t1 > 1000
                               | tag filter[1] | ptag1 = 100
-(26 rows)
+(25 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table2 where ptag1 = 100 and t1 > 1000 group by ptag1, t1, t2 order by sm;
              tree             |     field     |     description
 ------------------------------+---------------+----------------------
                               | distributed   | true
                               | vectorized    | false
   sort                        |               |
-   │                          | engine type   | time series
    │                          | order         | +sm
    └── render                 |               |
         │                     | engine type   | time series
@@ -1500,14 +1491,13 @@ INSERT 10
                               | access mode   | tableTableMeta
                               | tag filter[0] | t1 > 1000
                               | tag filter[1] | ptag1 = 100
-(28 rows)
+(27 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table2 where ptag1 = 100 and t1 > 1000 group by ptag1, t1, t2, t3 order by sm;
              tree             |     field     |     description
 ------------------------------+---------------+----------------------
                               | distributed   | true
                               | vectorized    | false
   sort                        |               |
-   │                          | engine type   | time series
    │                          | order         | +sm
    └── render                 |               |
         │                     | engine type   | time series
@@ -1534,7 +1524,7 @@ INSERT 10
                               | access mode   | tableTableMeta
                               | tag filter[0] | t1 > 1000
                               | tag filter[1] | ptag1 = 100
-(30 rows)
+(29 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table2 where t1 > 1000 group by ptag1 order by sm limit 2 offset 1;
                 tree               |      field       |  description
 -----------------------------------+------------------+-----------------
@@ -1546,7 +1536,6 @@ INSERT 10
         │                          | engine type      | time series
         │                          | count            | 3
         └── sort                   |                  |
-             │                     | engine type      | time series
              │                     | order            | +sm
              └── group             |                  |
                   │                | engine type      | time series
@@ -1562,7 +1551,7 @@ INSERT 10
                                    | ts-table         | table2
                                    | access mode      | tableTableMeta
                                    | tag filter[0]    | t1 > 1000
-(24 rows)
+(23 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table2 where t1 > 1000 group by ptag1, t1 order by sm limit 2 offset 1;
                   tree                  |     field     |  description
 ----------------------------------------+---------------+-----------------
@@ -1577,7 +1566,6 @@ INSERT 10
              │                          | engine type   | time series
              │                          | count         | 3
              └── sort                   |               |
-                  │                     | engine type   | time series
                   │                     | order         | +sum
                   └── group             |               |
                        │                | engine type   | time series
@@ -1595,7 +1583,7 @@ INSERT 10
                                         | only tag      | true
                                         | access mode   | tableTableMeta
                                         | tag filter[0] | t1 > 1000
-(29 rows)
+(28 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table2 where t1 > 1000 group by ptag1, t1, t2 order by sm limit 2 offset 1;
                   tree                  |     field     |  description
 ----------------------------------------+---------------+-----------------
@@ -1610,7 +1598,6 @@ INSERT 10
              │                          | engine type   | time series
              │                          | count         | 3
              └── sort                   |               |
-                  │                     | engine type   | time series
                   │                     | order         | +sum
                   └── group             |               |
                        │                | engine type   | time series
@@ -1630,7 +1617,7 @@ INSERT 10
                                         | only tag      | true
                                         | access mode   | tableTableMeta
                                         | tag filter[0] | t1 > 1000
-(31 rows)
+(30 rows)
 > explain select ptag1, sum(t1+t2) as sm from only_tag.table2 where t1 > 1000 group by ptag1, t1, t2, t3 order by sm limit 2 offset 1;
                   tree                  |     field     |    description
 ----------------------------------------+---------------+--------------------
@@ -1645,7 +1632,6 @@ INSERT 10
              │                          | engine type   | time series
              │                          | count         | 3
              └── sort                   |               |
-                  │                     | engine type   | time series
                   │                     | order         | +sum
                   └── group             |               |
                        │                | engine type   | time series
@@ -1667,7 +1653,7 @@ INSERT 10
                                         | only tag      | true
                                         | access mode   | tableTableMeta
                                         | tag filter[0] | t1 > 1000
-(33 rows)
+(32 rows)
 > select distinct ptag1 from only_tag.table1 ORDER by ptag1;
   ptag1
 ---------
