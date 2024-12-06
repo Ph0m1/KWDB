@@ -184,7 +184,6 @@ KStatus SynchronizerOperator::Close(kwdbContext_p ctx) {
         parallel_group->Stop();
       }
     }
-    data_queue_.clear();
     not_fill_cv_.notify_all();
     std::unique_lock l(lock_);
     while (true) {
@@ -195,6 +194,7 @@ KStatus SynchronizerOperator::Close(kwdbContext_p ctx) {
       wait_cond_.wait_for(l, std::chrono::seconds(2));
       continue;
     }
+    data_queue_.clear();
   }
   KStatus ret = input_->Close(ctx);
   Return(ret);
