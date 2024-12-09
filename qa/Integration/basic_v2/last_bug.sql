@@ -279,4 +279,8 @@ insert into test_last.stb values('2023-05-10 20:20:00', 111111110044, 300, 30000
 select last(*) from test_last.stb group by e7 order by e7 desc;
 select last_row(*) from test_last.stb group by e7 order by e7 desc;
 
+create table test_last.t1(ts timestamp not null,a int, b int) tags(tag1 int not null, tag2 int) primary tags(tag1);
+create statistics st from test_last.t1;
+select last(*) from test_last.t1;
+
 drop database test_last cascade;

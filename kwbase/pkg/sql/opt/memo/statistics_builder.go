@@ -584,7 +584,9 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 					}
 					if stat.ColumnCount() == 1 && !tab.Column(stat.ColumnOrdinal(0)).IsTagCol() {
 						// For time series tables, the number of table rows is determined by non-tag columns
-						stats.RowCount = float64(stat.RowCount())
+						// Make sure the row count is at least 1. The stats may be stale, and we
+						// can end up with weird and inefficient plans if we estimate 0 rows.
+						stats.RowCount = max(float64(stat.RowCount()), 1)
 					}
 				}
 

@@ -530,5 +530,14 @@ INSERT 1
   2023-07-10 20:00:00+00:00 | 1973-07-10 00:11:50.033+00:00 |          700 |        70000 |       700000 | 7.000000707e+06 | 7.000000007070777e+08 |     true     | a            | char4        | h             | nchar255定长类型测试1测试2测试3()&^%{} | varchar_33    | varchar255_123456中文测试abc!<>&^%$ | varcharlengthof4096字符类型test%%&!+  | nvarchar-3    | nvarchar255+!@#nvarchar255_+!@# | nvarchar4096_2中英文测试2中英文测试2中英文测试2()&^%{} | \x74          | \x6279746573   | \x76617262797465735f32 | \xaaddee      | \xaaaaaabbbbbb                                                                               | stb_1          | NULL           | NULL           |           NULL |      NULL      | NULL           | NULL           | NULL           | beijing        | NULL           | \x726564        | NULL
   2023-05-10 20:20:00+00:00 | 1973-07-10 00:11:50.044+00:00 |          300 |        30000 |       300000 | 3.000000303e+06 | 3.000000003030333e+08 |    false     | r            | char3        | a             | nchar255定长类型测试1测试2测试3()&^%{} | varchar_44    | varchar255_中文测试abc!<>&^%$       | varcharlengthof4096通用查询test%%&!+_ | nvarchar-2    | nvarchar255()&^%{}              | nvarchar4096中英文测试1中英文测试1中英文测试1()*&^%{}  | \x65          | \x627974653132 | \x76617262797465735f33 | \xbbccff      | \x76617262797465733430393624255e76617262797465733430393624255e76617262797465733430393624255e | stb_3          | NULL           | NULL           |           NULL |      NULL      | NULL           | NULL           | NULL           | shanghai       | NULL           | \x626c7565      | NULL
 (2 rows)
+> create table test_last.t1(ts timestamp not null,a int, b int) tags(tag1 int not null, tag2 int) primary tags(tag1);
+CREATE TABLE
+> create statistics st from test_last.t1;
+CREATE STATISTICS
+> select last(*) from test_last.t1;
+  last(ts) | last(a) | last(b) | last(tag1) | last(tag2)
+-----------+---------+---------+------------+-------------
+  NULL     | NULL    | NULL    | NULL       | NULL
+(1 row)
 > drop database test_last cascade;
 DROP DATABASE
