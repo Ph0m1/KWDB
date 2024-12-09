@@ -6508,16 +6508,6 @@ func (dsp *DistSQLPlanner) getSpans(
 		for _, col := range ptCols {
 			payloads, err = getPtagPayloads(payloads, n.PrimaryTagValues[uint32(col.ID)], offset, col.DatumType(), pTagSize)
 			if err != nil {
-				// If the value of PrimaryTag out of the range,
-				// it must be empty data, and then return a Hashpoint with the Max value.
-				if strings.Contains(err.Error(), "out of range") {
-					rangeSpans := make(map[roachpb.NodeID][]execinfrapb.HashpointSpan, 1)
-					rangeSpans[dsp.nodeDesc.NodeID] = []execinfrapb.HashpointSpan{{
-						Hashpoint: math.MaxUint32,
-						Tspans:    []execinfrapb.TsSpan{{math.MinInt64, math.MaxInt64}},
-					}}
-					return rangeSpans, nil
-				}
 				return nil, err
 			}
 			offset += int(col.TsCol.StorageLen)
