@@ -2404,9 +2404,11 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 	tsPostSpec *execinfrapb.TSPostProcessSpec,
 	aggResTypes []types.T,
 	constValues []int64,
+	scalar bool,
 ) error {
 	if p.Processors[idx].TSSpec.Core.StatisticReader != nil {
 		tr := p.Processors[idx].TSSpec.Core.StatisticReader
+		tr.Scalar = scalar
 		scanPost := &p.Processors[idx].TSSpec.Post
 		//get render col index and const value
 		scanOutPut := getTableOutPutInfoFromPost(scanPost, constValues)
@@ -2509,7 +2511,6 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 				if !ok1 {
 					return pgerror.New(pgcode.Internal, "statistic table could not find count col")
 				}
-
 				varIdxs[1] = v1
 
 				// create dev render for avg
@@ -2546,10 +2547,9 @@ func (p *PhysicalPlan) PushAggToTableReader(
 	if p.Processors[idx].TSSpec.Core.TableReader != nil {
 		r := p.Processors[idx].TSSpec.Core.TableReader
 		r.Aggregator = localAggsSpec
-		if pruneLocalAgg {
-			r.OrderedScan = true
-		}
+		r.OrderedScan = pruneLocalAgg
 		r.AggregatorPost = tsPost
+		p.Processors[idx].TSSpec.Post.OutputTypes = tsPost.OutputTypes
 	} else {
 		str := fmt.Sprintf("PushAggToTableReader table reader is not exists, sub is %v", p.Processors[idx].TSSpec.Core)
 		panic(str)

@@ -43,6 +43,7 @@ class TableStatisticScanOperator : public BaseOperator {
   EEIteratorErrCode InitHandler(kwdbContext_p ctx);
   EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx,
                                      ScanRowBatch **row_batch);
+  void ProcessScalar();
 
  protected:
   TSPostProcessSpec *post_{nullptr};
@@ -54,5 +55,7 @@ class TableStatisticScanOperator : public BaseOperator {
   BaseOperator *input_{nullptr};  // input iterator
   StorageHandler *handler_{nullptr};
   k_int32 tag_count_read_index_{-1};
+  k_bool is_has_data_for_scalar_{false};
+  k_bool is_scalar_{false};
 };
 }  // namespace kwdbts

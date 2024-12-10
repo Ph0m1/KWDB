@@ -658,6 +658,9 @@ type PlanningCtx struct {
 
 	// unique id to identify tsTableReader for batchlookup join
 	tsTableReaderID int32
+
+	// pTagAllNotSplit a flag that primary tag not split by time
+	pTagAllNotSplit bool
 }
 
 var _ physicalplan.ExprContext = &PlanningCtx{}
@@ -2246,11 +2249,11 @@ func (dsp *DistSQLPlanner) createTSReaders(
 	ptCols, typs, descColumnIDs, columnIDSet := visitTableMeta(n)
 
 	rangeSpans := make(map[roachpb.NodeID][]execinfrapb.HashpointSpan)
-
+	pTagAllNotSplit := true
 	if planCtx.ExtendedEvalCtx.ExecCfg.StartMode == StartSingleNode {
 		rangeSpans[dsp.nodeDesc.NodeID] = []execinfrapb.HashpointSpan{}
 	} else {
-		rangeSpans, err = dsp.getSpans(planCtx, n, ptCols)
+		rangeSpans, pTagAllNotSplit, err = dsp.getSpans(planCtx, n, ptCols)
 		if err != nil {
 			return PhysicalPlan{}, err
 		}
@@ -2259,6 +2262,8 @@ func (dsp *DistSQLPlanner) createTSReaders(
 	if len(rangeSpans) == 0 {
 		return PhysicalPlan{}, pgerror.New(pgcode.Warning, "get spans error, length of spans is 0")
 	}
+
+	planCtx.pTagAllNotSplit = pTagAllNotSplit
 
 	// construct TSTagReaderSpec
 	// RelInfo is not nil only for multiple model processing
@@ -2737,7 +2742,7 @@ func (dsp *DistSQLPlanner) addSorters(p *PhysicalPlan, n *sortNode) {
 	// Sorting is needed; we add a stage of sorting processors.
 	ordering := execinfrapb.ConvertToMappedSpecOrdering(n.ordering, p.PlanToStreamColMap)
 
-	if p.SelfCanExecInTSEngine(n.engine == tree.EngineTypeTimeseries) {
+	if p.SelfCanExecInTSEngine(n.engine == tree.EngineTypeTimeseries) && len(p.ResultRouters) == 1 {
 		kwdbordering := execinfrapb.ConvertToMappedSpecOrdering(n.ordering, p.PlanToStreamColMap)
 		p.AddTSNoGroupingStage(
 			execinfrapb.TSProcessorCoreUnion{
@@ -3239,10 +3244,7 @@ func addSynchronizerForAgg(
 	tsPost := execinfrapb.TSPostProcessSpec{}
 	if post == nil {
 		// add ts post spec output type from intermediateTypes
-		tsPost.OutputTypes = make([]types.Family, len(intermediateTypes))
-		for i, typ := range intermediateTypes {
-			tsPost.OutputTypes[i] = typ.InternalType.Family
-		}
+		tsPost = createTSPostSpec(&intermediateTypes)
 	} else {
 		tsPost = *post
 	}
@@ -3372,6 +3374,16 @@ func (dsp *DistSQLPlanner) addTwiceAggregators(
 	return finalAggsSpec, finalAggsPost, nil
 }
 
+func createTSPostSpec(src *[]types.T) execinfrapb.TSPostProcessSpec {
+	post := execinfrapb.TSPostProcessSpec{}
+	// add ts post spec output type from intermediateTypes
+	post.OutputTypes = make([]types.Family, len(*src))
+	for i, typ := range *src {
+		post.OutputTypes[i] = typ.InternalType.Family
+	}
+	return post
+}
+
 // addTwoStageAggForTS add two stage aggregator spec
 // Parameters:
 // - planCtx: context
@@ -3404,7 +3416,7 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 	orderedGroupColSet util.FastIntSet,
 	n *groupNode,
 	addTSTwiceAgg bool,
-	secOpt bool,
+	pruneFinalAgg bool,
 	addSync bool,
 ) (execinfrapb.AggregatorSpec, execinfrapb.PostProcessSpec, error) {
 	var finalAggsSpec execinfrapb.AggregatorSpec
@@ -3451,11 +3463,9 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		preType = tsAggsTypes
 	}
 
-	if !secOpt {
-		if finalAggs, finalPreRenderTypes, err = getFinalFuncAndType(aggregations, preType, colIndex, needRender,
-			&finalIdxMap); err != nil {
-			return finalAggsSpec, finalAggsPost, err
-		}
+	if finalAggs, finalPreRenderTypes, err = getFinalFuncAndType(aggregations, preType, colIndex, needRender,
+		&finalIdxMap); err != nil {
+		return finalAggsSpec, finalAggsPost, err
 	}
 
 	// In queries like SELECT min(v) FROM kv GROUP BY k, not all group columns appear in the rendering.
@@ -3487,22 +3497,17 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		AggPushDown:      n.optType.TimeBucketOpt(),
 	}
 
-	// construct Synchronizer post spec
-	tsPost := execinfrapb.TSPostProcessSpec{}
-	// add ts post spec output type from intermediateTypes
-	tsPost.OutputTypes = make([]types.Family, len(intermediateTypes))
-	for i, typ := range intermediateTypes {
-		tsPost.OutputTypes[i] = typ.InternalType.Family
-	}
-
 	addLocalAgg := !n.optType.UseStatisticOpt() && (addTSTwiceAgg || !n.optType.PruneLocalAggOpt())
 	if n.optType.PushLocalAggToScanOpt() {
-		if err = pushAggToScan(p, &localAggsSpec, &tsPost, intermediateTypes, !addLocalAgg, n); err != nil {
+		tsPost1 := createTSPostSpec(&intermediateTypes)
+		if err = pushAggToScan(p, &localAggsSpec, &tsPost1, intermediateTypes, !addLocalAgg, n); err != nil {
 			return finalAggsSpec, finalAggsPost, err
 		}
 	}
 
+	var tsPost execinfrapb.TSPostProcessSpec
 	if addLocalAgg {
+		tsPost = createTSPostSpec(&intermediateTypes)
 		// add ts local agg
 		p.AddTSNoGroupingStage(
 			execinfrapb.TSProcessorCoreUnion{Aggregator: &localAggsSpec},
@@ -3512,13 +3517,10 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		)
 	} else {
 		intermediateTypes = p.ResultTypes
-		tsPost.OutputTypes = make([]types.Family, len(p.ResultTypes))
-		for i, typ := range p.ResultTypes {
-			tsPost.OutputTypes[i] = typ.InternalType.Family
-		}
+		tsPost = createTSPostSpec(&intermediateTypes)
 	}
 
-	if !secOpt || len(p.ResultRouters) > 1 {
+	if !pruneFinalAgg || len(p.ResultRouters) > 1 {
 		// add parallel processor
 		if addSync {
 			addSynchronizerForAgg(planCtx, p, intermediateTypes, ordCols, &tsPost)
@@ -3533,11 +3535,7 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 					AggPushDown:      false,                 // must false
 				}
 
-				tsPostTwice := execinfrapb.TSPostProcessSpec{}
-				tsPostTwice.OutputTypes = make([]types.Family, len(tsAggsTypes))
-				for i, typ := range tsAggsTypes {
-					tsPostTwice.OutputTypes[i] = typ.InternalType.Family
-				}
+				tsPostTwice := createTSPostSpec(&tsAggsTypes)
 
 				// add twice stage agg for parallel
 				p.AddTSNoGroupingStage(
@@ -3591,7 +3589,7 @@ func pushAggToScan(
 					}
 				}
 			}
-			if err := p.PushAggToStatisticReader(idx, aggSpecs, tsPost, aggResTypes, constValues); err != nil {
+			if err := p.PushAggToStatisticReader(idx, aggSpecs, tsPost, aggResTypes, constValues, n.isScalar); err != nil {
 				return err
 			}
 		} else {
@@ -3695,15 +3693,6 @@ func (dsp *DistSQLPlanner) addDistinct(
 ) {
 	for _, e := range aggregations {
 		if !e.Distinct {
-			// child can push ts engine, so must add relational noop
-			if p.ChildIsExecInTSEngine() {
-				p.AddNoGroupingStage(
-					execinfrapb.ProcessorCoreUnion{Noop: &execinfrapb.NoopCoreSpec{}},
-					execinfrapb.PostProcessSpec{},
-					p.ResultTypes,
-					p.MergeOrdering,
-				)
-			}
 			return
 		}
 	}
@@ -3753,12 +3742,6 @@ func (dsp *DistSQLPlanner) addDistinct(
 				execinfrapb.TSPostProcessSpec{OutputTypes: res},
 				p.ResultTypes,
 				execinfrapb.Ordering{},
-			)
-			// add noop
-			p.AddNoGroupingStage(
-				execinfrapb.ProcessorCoreUnion{Noop: &execinfrapb.NoopCoreSpec{}},
-				execinfrapb.PostProcessSpec{},
-				p.ResultTypes, p.MergeOrdering,
 			)
 		} else {
 			// Add distinct processors local to each existing current result processor.
@@ -4078,6 +4061,11 @@ func (dsp *DistSQLPlanner) addAggregators(
 	// functions are distinct.
 	dsp.addDistinct(aggregations, p, n.plan)
 
+	// add noop spec for receive data before add relation operator
+	if p.ChildIsExecInTSEngine() {
+		p.AddNoop(nil, nil)
+	}
+
 	// Check if the previous stage is all on one node.
 	prevStageNode := getPreStageNodeID(p)
 
@@ -4163,7 +4151,7 @@ func (dsp *DistSQLPlanner) addSynchronizerForTS(p *PhysicalPlan, degree int32) e
 
 // addTSAggregators add ts engine agg processor
 func (dsp *DistSQLPlanner) addTSAggregators(
-	planCtx *PlanningCtx, p *PhysicalPlan, n *groupNode, secOpt bool, addSync bool,
+	planCtx *PlanningCtx, p *PhysicalPlan, n *groupNode, pruneFinalAgg bool, addSync bool,
 ) (bool, error) {
 	// get agg spec and agg column type
 	aggregations, aggregationsColumnTypes, _, err := getAggFuncAndType(planCtx, n.funcs, n.aggFuncs,
@@ -4186,6 +4174,10 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 	groupCols := getPhysicalGroupCols(p, n.groupCols)
 	orderedGroupCols, orderedGroupColSet := getPhysicalOrderedGroupColsAndMap(p, n.groupColOrdering)
 
+	// We can have a local stage of distinct processors if all aggregation
+	// functions are distinct.
+	dsp.addDistinct(aggregations, p, n.plan)
+
 	// Check if the previous stage is all on one node.
 	prevStageNode := getPreStageNodeID(p)
 
@@ -4206,37 +4198,33 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 	// has been programmed to produce the same columns as the groupNode.
 	p.PlanToStreamColMap = identityMap(p.PlanToStreamColMap, len(aggregations))
 
-	addOutPutType := true
-	if len(p.ResultRouters) == 1 {
-		if (n.optType.PushLocalAggToScanOpt() && n.optType.PruneLocalAggOpt() && secOpt) ||
-			(n.optType.UseStatisticOpt() && secOpt) {
+	afterAddOutPutType := true
+	// prune all aggregator operator
+	if pruneFinalAgg && (n.optType.PruneLocalAggOpt() || n.optType.UseStatisticOpt()) {
+		tsPost := createTSPostSpec(&finalOutTypes)
+		if err = pushAggToScan(p, coreUnion.Aggregator, &tsPost, finalOutTypes, n.optType.PruneLocalAggOpt(), n); err != nil {
+			return true, err
+		}
 
-			tsPost := execinfrapb.TSPostProcessSpec{}
-			for _, v := range finalOutTypes {
-				tsPost.OutputTypes = append(tsPost.OutputTypes, v.InternalType.Family)
-			}
+		afterAddOutPutType = false
 
-			if err = pushAggToScan(p, coreUnion.Aggregator, &tsPost, finalOutTypes, n.optType.PruneLocalAggOpt(), n); err != nil {
-				return true, err
-			}
-			addOutPutType = false
+		if addSync {
+			addSynchronizerForAgg(planCtx, p, finalOutTypes, []execinfrapb.Ordering_Column{}, &tsPost)
+		}
 
-			if addSync {
-				addSynchronizerForAgg(planCtx, p, finalOutTypes, []execinfrapb.Ordering_Column{}, &tsPost)
-			}
-
-			p.ResultTypes = finalOutTypes
-		} else {
+		p.ResultTypes = finalOutTypes
+	} else {
+		if len(p.ResultRouters) == 1 {
 			// add synchronizer need parallel execute, so need local agg and finial agg
 			if addSync || n.optType.UseStatisticOpt() {
 				// add local agg
 				finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType, aggregations, groupCols,
-					orderedGroupCols, orderedGroupColSet, n, false, secOpt, addSync)
+					orderedGroupCols, orderedGroupColSet, n, false, pruneFinalAgg, addSync)
 				if err != nil {
-					return addOutPutType, err
+					return false, err
 				}
 
-				if !secOpt {
+				if !pruneFinalAgg {
 					// add twice agg for ts engine
 					var tsFinalAggsPost execinfrapb.TSPostProcessSpec
 					for _, val := range finalAggsPost.RenderExprs {
@@ -4260,40 +4248,40 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 				dsp.addSingleGroupStateForTS(p, prevStageNode, coreUnion, execinfrapb.TSPostProcessSpec{}, finalOutTypes)
 				pushDownProcessorToTSReader(p, n.optType.TimeBucketOpt(), true)
 			}
-		}
-	} else {
-		// Check whether twice aggregation is necessary in time series engine
-		needsTSTwiceAgg, err := needsTSTwiceAggregation(n, planCtx)
-		if err != nil {
-			return addOutPutType, err
-		}
-		// add twice agg local
-		finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType,
-			aggregations, groupCols, orderedGroupCols, orderedGroupColSet, n, needsTSTwiceAgg, secOpt, addSync)
-		if err != nil {
-			return addOutPutType, err
-		}
-
-		if !secOpt {
-			p.AddTSTableReader()
-
-			// get all data to gateway node compute agg
-			if 0 == len(finalAggsSpec.GroupCols) {
-				dsp.addSingleGroupState(p, prevStageNode, finalAggsSpec, finalAggsPost, finalOutTypes)
-			} else {
-				// ts engine compute twice agg , relational engine compute third agg
-				dsp.setupMultiAggFinalState(planCtx, p, finalOutTypes, &n.reqOrdering, finalAggsSpec, finalAggsPost)
-			}
 		} else {
-			post := p.GetLastStageTSPost()
-			for i := range finalAggsPost.RenderExprs {
-				post.Renders = append(post.Renders, finalAggsPost.RenderExprs[i].String())
+			// Check whether twice aggregation is necessary in time series engine
+			needsTSTwiceAgg, err := needsTSTwiceAggregation(n, planCtx)
+			if err != nil {
+				return false, err
 			}
-			p.SetLastStageTSPost(post, finalOutTypes)
+			// add twice agg local
+			finalAggsSpec, finalAggsPost, err = dsp.addTwoStageAggForTS(planCtx, p, aggType,
+				aggregations, groupCols, orderedGroupCols, orderedGroupColSet, n, needsTSTwiceAgg, pruneFinalAgg, addSync)
+			if err != nil {
+				return false, err
+			}
+
+			if !pruneFinalAgg {
+				p.AddTSTableReader()
+
+				// get all data to gateway node compute agg
+				if 0 == len(finalAggsSpec.GroupCols) {
+					dsp.addSingleGroupState(p, prevStageNode, finalAggsSpec, finalAggsPost, finalOutTypes)
+				} else {
+					// ts engine compute twice agg , relational engine compute third agg
+					dsp.setupMultiAggFinalState(planCtx, p, finalOutTypes, &n.reqOrdering, finalAggsSpec, finalAggsPost)
+				}
+			} else {
+				post := p.GetLastStageTSPost()
+				for i := range finalAggsPost.RenderExprs {
+					post.Renders = append(post.Renders, finalAggsPost.RenderExprs[i].String())
+				}
+				p.SetLastStageTSPost(post, finalOutTypes)
+			}
 		}
 	}
 
-	return addOutPutType, nil
+	return afterAddOutPutType, nil
 }
 
 func (dsp *DistSQLPlanner) createPlanForIndexJoin(
@@ -4607,8 +4595,10 @@ func (dsp *DistSQLPlanner) createPlanForSynchronizer(
 		return PhysicalPlan{}, err
 	}
 
-	if err := dsp.addSynchronizerForTS(&plan, planCtx.GetTsDop()); err != nil {
-		return PhysicalPlan{}, err
+	if !plan.HasTSParallelProcessor() {
+		if err := dsp.addSynchronizerForTS(&plan, planCtx.GetTsDop()); err != nil {
+			return PhysicalPlan{}, err
+		}
 	}
 	return plan, nil
 }
@@ -4626,9 +4616,9 @@ func (dsp *DistSQLPlanner) createPlanForGroup(
 	if plan.SelfCanExecInTSEngine(n.engine == tree.EngineTypeTimeseries) {
 		pruneFinalAgg := n.optType.PruneFinalAggOpt()
 		addSynchronizer := n.addSynchronizer
-		if len(plan.ResultRouters) > 1 {
+		if len(plan.ResultRouters) > 1 && !planCtx.pTagAllNotSplit {
 			pruneFinalAgg = false
-			if !plan.HasTSParallelProcessor() {
+			if !addSynchronizer && !plan.HasTSParallelProcessor() {
 				addSynchronizer = true
 			}
 		}
@@ -4963,10 +4953,13 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 		if err := plan.AddFilter(n.filter, planCtx, plan.PlanToStreamColMap, n.engine == tree.EngineTypeTimeseries); err != nil {
 			return PhysicalPlan{}, err
 		}
+
 	case *synchronizerNode:
 		plan, err = dsp.createPlanForSynchronizer(planCtx, n)
+
 	case *groupNode:
 		plan, addOutPutType, err = dsp.createPlanForGroup(planCtx, n)
+
 	case *indexJoinNode:
 		plan, err = dsp.createPlanForIndexJoin(planCtx, n)
 
@@ -6494,13 +6487,13 @@ func pushDownProcessorToTSReader(p *PhysicalPlan, canOpt bool, isAgg bool) {
 // PartitionTSSpansByTableID() functions, and then parse it and construct it as a RangeSpans.
 func (dsp *DistSQLPlanner) getSpans(
 	planCtx *PlanningCtx, n *tsScanNode, ptCols []*sqlbase.ColumnDescriptor,
-) (map[roachpb.NodeID][]execinfrapb.HashpointSpan, error) {
+) (map[roachpb.NodeID][]execinfrapb.HashpointSpan, bool, error) {
 	var partitions []SpanPartition
 	var err error
 	if len(n.PrimaryTagValues) != 0 {
 		pTagSize, _, err := execbuilder.ComputeColumnSize(ptCols)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		payloads := make([][]byte, 0)
@@ -6508,7 +6501,7 @@ func (dsp *DistSQLPlanner) getSpans(
 		for _, col := range ptCols {
 			payloads, err = getPtagPayloads(payloads, n.PrimaryTagValues[uint32(col.ID)], offset, col.DatumType(), pTagSize)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			offset += int(col.TsCol.StorageLen)
 		}
@@ -6519,10 +6512,10 @@ func (dsp *DistSQLPlanner) getSpans(
 		partitions, err = dsp.PartitionTSSpansByTableID(planCtx, uint64(n.Table.ID()))
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(partitions) == 0 {
-		return nil, pgerror.New(pgcode.Warning, "get Partitions error, length of Partitions is 0")
+		return nil, false, pgerror.New(pgcode.Warning, "get Partitions error, length of Partitions is 0")
 	}
 	return constructRangeSpans(partitions, n)
 }
@@ -6530,9 +6523,10 @@ func (dsp *DistSQLPlanner) getSpans(
 // constructRangeSpans construct RangeSpans base on partitions.
 func constructRangeSpans(
 	partitions []SpanPartition, n *tsScanNode,
-) (map[roachpb.NodeID][]execinfrapb.HashpointSpan, error) {
+) (map[roachpb.NodeID][]execinfrapb.HashpointSpan, bool, error) {
 	rangeSpans := make(map[roachpb.NodeID][]execinfrapb.HashpointSpan, len(partitions))
 
+	pTagAllNotSplit := true
 	//The number of partitions is equal to the number of nodes.
 	log.VEventf(context.TODO(), 3, "dist sql range partitions : +%v ", partitions)
 	for k := range partitions {
@@ -6545,11 +6539,15 @@ func constructRangeSpans(
 		for k1 := range partitions[k].Spans {
 			_, startHashPoint, startTimestamp, err := sqlbase.DecodeTsRangeKey(partitions[k].Spans[k1].Key, true)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			_, endHashPoint, endTimestamp, err := sqlbase.DecodeTsRangeKey(partitions[k].Spans[k1].EndKey, false)
 			if err != nil {
-				return nil, err
+				return nil, false, err
+			}
+
+			if pTagAllNotSplit && (startTimestamp != math.MinInt64 || endTimestamp != math.MaxInt64) {
+				pTagAllNotSplit = false
 			}
 
 			if startHashPoint == endHashPoint {
@@ -6582,7 +6580,7 @@ func constructRangeSpans(
 			})
 		}
 	}
-	return rangeSpans, nil
+	return rangeSpans, pTagAllNotSplit, nil
 }
 
 // addHashPointMap confirms the scanning timestamp span, and then
@@ -6657,7 +6655,11 @@ func addHashPointMap(
 //     for the same reason: the grouping covers all primary tag columns.
 func needsTSTwiceAggregation(n *groupNode, planCtx *PlanningCtx) (bool, error) {
 	// No grouping by condition requires two aggregates
-	if n.optType.TimeBucketOpt() || len(n.groupCols) == 0 {
+	if n.optType.TimeBucketOpt() {
+		return false, nil
+	}
+
+	if len(n.groupCols) == 0 {
 		return true, nil
 	}
 

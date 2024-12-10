@@ -781,6 +781,8 @@ message TSStatisticReaderSpec {
 
   // table version
   required uint32 tableVersion = 6;
+
+  optional bool scalar = 7;
 }
 
 message HashpointSpan{

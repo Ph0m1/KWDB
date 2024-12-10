@@ -88,12 +88,13 @@ CREATE TABLE
         │           | aggregate 1         | any_not_null(hostname)
         │           | pushLocalAggToScan  | true
         │           | addSynchronizer     | true
+        │           | pruneFinalAgg       | true
         └── ts scan |                     |
                     | ts-table            | cpu
                     | access mode         | tagIndex
                     | use statistic       | true
                     | ptag filter[0]      | hostname = 'host_4'
-(17 rows)
+(18 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
                hostname,usage_nice,
                max(usage_user)
@@ -241,6 +242,7 @@ group by hostname;
    │                | aggregate 1         | any_not_null(hostname)
    │                | pushLocalAggToScan  | true
    │                | addSynchronizer     | true
+   │                | pruneFinalAgg       | true
    └── render       |                     |
         │           | engine type         | time series
         │           | usage_user          | usage_user
@@ -252,6 +254,6 @@ group by hostname;
                     | spans:fromTime      | 2023-01-01 00:00:00 +0000 UTC
                     | spans:toTime        | 2024-09-30 23:59:59.999 +0000 UTC
                     | ptag filter[0]      | hostname = 'host_0'
-(19 rows)
+(20 rows)
 > drop database benchmark_ut cascade;
 DROP DATABASE

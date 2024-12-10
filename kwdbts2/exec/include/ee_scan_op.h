@@ -94,6 +94,7 @@ class TableScanOperator : public BaseOperator {
   k_uint32 total_read_row_{0};
   // if copy the data source using column mode.
   bool batch_copy_{false};
+  bool ignore_outputtypes_{false};
 };
 
 }  // namespace kwdbts

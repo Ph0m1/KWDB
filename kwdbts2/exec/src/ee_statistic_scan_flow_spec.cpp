@@ -393,6 +393,7 @@ EEIteratorErrCode StatisticSpecResolve::NewAggBaseField(kwdbContext_p ctx,
         *field = new FieldSumStatisticTagCount(field_tag);
         if (nullptr != *field) {
           (*field)->set_num(num);
+          (*field)->set_field_statistic(true);
         }
       } else {
         *field =

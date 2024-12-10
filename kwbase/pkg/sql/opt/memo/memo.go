@@ -255,6 +255,7 @@ func (m *TSCheckHelper) init() {
 	m.flags = 0
 	m.PushHelper.MetaMap = make(MetaInfoMap)
 	m.GroupHint = keys.NoGroupHint
+	m.onlyOnePTagValue = false
 }
 
 // MultimodelHelper is a helper struct designed to assist in setting
@@ -1002,22 +1003,21 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 		ret.commonRet.canDiffExecInAE = false
 	}
 
+	// case: group by can execute in ts engine, but agg can not Parallel.
+	if !ret.isParallel && !ret.commonRet.hasAddSynchronizer {
+		m.setSynchronizerForChild(child, &ret.commonRet.hasAddSynchronizer)
+	}
+
+	// agg has distinct, need add distinct spec gather all data to gateway
+	if ret.hasDistinct {
+		ret.commonRet.execInTSEngine = false
+	}
+
 	// do nothing when group by can not execute in ts engine.
 	if !ret.commonRet.execInTSEngine {
 		return
 	}
 
-	// case: agg with distinct
-	if ret.hasDistinct {
-		// multi node, agg with distinct can not execute in ts engine.
-		if !(m.CheckFlag(opt.SingleMode)) {
-			if !ret.commonRet.hasAddSynchronizer {
-				m.setSynchronizerForChild(child, &ret.commonRet.hasAddSynchronizer)
-			}
-			ret.commonRet.execInTSEngine = false
-			return
-		}
-	}
 	src.SetEngineTS()
 
 	// fill statistics
@@ -1067,8 +1067,7 @@ func (m *Memo) checkSorterCanPushToTsEngine(sort *SortExpr) bool {
 // props is not nil when there is a OrderGroupBy.
 func (m *Memo) dealWithOrderBy(sort *SortExpr, ret *CrossEngCheckResults, props *bestProps) {
 	if ret.execInTSEngine {
-		// only single node, order by can exec in ts engine.
-		if m.CheckFlag(opt.SingleMode) && m.checkSorterCanPushToTsEngine(sort) {
+		if m.checkSorterCanPushToTsEngine(sort) {
 			sort.SetEngineTS()
 		}
 
@@ -1164,7 +1163,7 @@ func (m *Memo) tsScanFillStatistic(tsScan *TSScanExpr, gp *GroupingPrivate) {
 		return
 	}
 
-	if m.CheckFlag(opt.SingleMode) && gp.GroupingCols.Len() > 0 {
+	if gp.GroupingCols.Len() > 0 || m.CheckHelper.onlyOnePTagValue {
 		gp.OptFlags |= opt.PruneFinalAgg
 	}
 
@@ -1550,6 +1549,7 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 		ret.hasAddSynchronizer = onlyTag || source.OrderedScanType == opt.SortAfterScan
 	}
 
+	m.CheckHelper.onlyOnePTagValue = false
 	if onlyTag || len(source.PrimaryTagValues) == 0 {
 		source.OrderedScanType = opt.NoOrdered
 	} else {
@@ -1863,15 +1863,6 @@ func (m *Memo) checkGroupBy(
 				}
 				ret.isParallel = ret.isParallel && aggExecParallel
 			}
-			// case: group by can execute in ts engine, but agg can not Parallel.
-			if !ret.isParallel && !ret.commonRet.hasAddSynchronizer {
-				m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
-			}
-		} else {
-			// case: group cols can not execute in ts engine.
-			if !ret.commonRet.hasAddSynchronizer {
-				m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
-			}
 		}
 
 		return ret
@@ -1889,9 +1880,7 @@ func (m *Memo) setSynchronizerForChild(child RelExpr, hasSynchronizer *bool) {
 	if _, ok := child.(*SortExpr); ok {
 		// case: OrderGroupBy, set sortExpr to ts engine when single node and set AddSynchronizer of child of sort.
 		// only single node, order by can exec in ts engine.
-		if m.CheckFlag(opt.SingleMode) {
-			child.SetEngineTS()
-		}
+		child.SetEngineTS()
 		child.Child(0).(RelExpr).SetAddSynchronizer()
 	} else {
 		child.SetAddSynchronizer()

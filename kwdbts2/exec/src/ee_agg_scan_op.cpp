@@ -29,9 +29,10 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode ret;
   do {
+    ignore_outputtypes_ = true;
     ret = TableScanOperator::Init(ctx);
     if (ret != EEIteratorErrCode::EE_OK) {
-      LOG_ERROR("RenderSize() failed\n")
+      LOG_ERROR("scan op Init() failed\n")
       break;
     }
 

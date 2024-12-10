@@ -151,6 +151,9 @@ EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
       break;
     }
 
+    // resolve scalar
+    is_scalar_ = param_.spec_->scalar();
+
     // dispose Output Fields
     ret = param_.ResolveOutputFields(ctx, renders_, num_, output_fields_);
     if (EEIteratorErrCode::EE_OK != ret) {
@@ -221,12 +224,18 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
       if (row_batch_->count_ < 1) {
         continue;
       } else {
+        is_has_data_for_scalar_ = true;
         break;
       }
     }
 
     // reset line
     row_batch_->ResetLine();
+
+    if (is_scalar_ && !is_has_data_for_scalar_ &&
+        code == EEIteratorErrCode::EE_END_OF_RECORD) {
+      ProcessScalar();
+    }
 
     if (!is_done_) {
       if (row_batch_->Count() > 0) {
@@ -293,6 +302,21 @@ k_int64 TableStatisticScanOperator::ProcessPTagSpanFilter(RowBatch* row_batch) {
                            roachpb::KWDBKTSColumn::TYPE_DATA)
              ? 0
              : 1;
+}
+
+void TableStatisticScanOperator::ProcessScalar() {
+  k_uint32 count_ = current_data_chunk_->Count();
+  k_uint32 col_num_ = output_col_info_.size();
+  for (k_uint32 col = 0; col < col_num_; ++col) {
+    if (renders_[col]->get_field_statistic()) {
+      k_int64 val = 0;
+      current_data_chunk_->InsertData(
+          count_, col, reinterpret_cast<char*>(&val), sizeof(k_int64));
+    } else {
+      current_data_chunk_->SetNull(count_, col);
+    }
+  }
+  current_data_chunk_->AddCount();
 }
 
 BaseOperator* TableStatisticScanOperator::Clone() {

@@ -112,13 +112,14 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
       break;
     }
 
-    // resolve output type(return type)
-    ret = param_.ResolveOutputType(ctx, renders_, num_);
-    if (ret != EEIteratorErrCode::EE_OK) {
-      LOG_ERROR("ResolveOutputType() failed\n");
-      break;
+    if (!ignore_outputtypes_) {
+      // resolve output type(return type)
+      ret = param_.ResolveOutputType(ctx, renders_, num_);
+      if (ret != EEIteratorErrCode::EE_OK) {
+        LOG_ERROR("ResolveOutputType() failed\n");
+        break;
+      }
     }
-
     // output Field
     ret = param_.ResolveOutputFields(ctx, renders_, num_, output_fields_);
     if (ret != EEIteratorErrCode::EE_OK) {

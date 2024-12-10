@@ -71,11 +71,12 @@ INSERT 1
                   │           | group by            | tag1
                   │           | pushLocalAggToScan  | true
                   │           | addSynchronizer     | true
+                  │           | pruneFinalAgg       | true
                   └── ts scan |                     |
                               | ts-table            | ts1
                               | access mode         | tableTableMeta
                               | use statistic       | true
-(25 rows)
+(26 rows)
 > select min(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   min
 -------
@@ -105,11 +106,12 @@ INSERT 1
                   │           | group by            | tag1
                   │           | pushLocalAggToScan  | true
                   │           | addSynchronizer     | true
+                  │           | pruneFinalAgg       | true
                   └── ts scan |                     |
                               | ts-table            | ts1
                               | access mode         | tableTableMeta
                               | use statistic       | true
-(25 rows)
+(26 rows)
 > select count(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   count
 ---------
@@ -139,11 +141,12 @@ INSERT 1
                   │           | group by            | tag1
                   │           | pushLocalAggToScan  | true
                   │           | addSynchronizer     | true
+                  │           | pruneFinalAgg       | true
                   └── ts scan |                     |
                               | ts-table            | ts1
                               | access mode         | tableTableMeta
                               | use statistic       | true
-(25 rows)
+(26 rows)
 > select sum(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   sum
 -------
@@ -173,11 +176,12 @@ INSERT 1
                   │           | group by            | tag1
                   │           | pushLocalAggToScan  | true
                   │           | addSynchronizer     | true
+                  │           | pruneFinalAgg       | true
                   └── ts scan |                     |
                               | ts-table            | ts1
                               | access mode         | tableTableMeta
                               | use statistic       | true
-(25 rows)
+(26 rows)
 > select avg(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   avg
 -------
@@ -212,11 +216,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(30 rows)
+(31 rows)
 > select count(*) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   count
 ---------
@@ -246,11 +251,12 @@ INSERT 1
                   │           | group by            | tag1
                   │           | pushLocalAggToScan  | true
                   │           | addSynchronizer     | true
+                  │           | pruneFinalAgg       | true
                   └── ts scan |                     |
                               | ts-table            | ts1
                               | access mode         | tableTableMeta
                               | use statistic       | true
-(25 rows)
+(26 rows)
 > select max(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1;
   max
 -------
@@ -585,11 +591,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(29 rows)
+(30 rows)
 > select min(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by r.e1;
   min
 -------
@@ -623,11 +630,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(29 rows)
+(30 rows)
 > select count(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1;
   count
 ---------
@@ -661,11 +669,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(29 rows)
+(30 rows)
 > select sum(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1;
   sum
 -------
@@ -699,11 +708,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(29 rows)
+(30 rows)
 > select avg(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
   avg
 -------
@@ -740,11 +750,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(32 rows)
+(33 rows)
 > select count(*) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by ts.tag1, r.e1;
   count
 ---------
@@ -778,11 +789,12 @@ INSERT 1
                        │           | group by            | tag1
                        │           | pushLocalAggToScan  | true
                        │           | addSynchronizer     | true
+                       │           | pruneFinalAgg       | true
                        └── ts scan |                     |
                                    | ts-table            | ts1
                                    | access mode         | tableTableMeta
                                    | use statistic       | true
-(29 rows)
+(30 rows)
 > select max(ts.e1+ts.e2) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1 group by r.e1;
   max
 -------

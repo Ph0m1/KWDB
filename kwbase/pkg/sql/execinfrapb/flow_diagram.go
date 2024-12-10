@@ -307,13 +307,13 @@ func (tr *TSTagReaderSpec) summary() (string, []string) {
 	for _, val := range tr.PrimaryTags {
 		res = append(res, fmt.Sprintf("ptag [%v]: %v", val.Colid, val.TagValues))
 	}
-	res = append(res, "RangeSpans: ")
-	for _, val := range tr.RangeSpans {
-		res = append(res, fmt.Sprintf("Hashpoint: %v", val.Hashpoint))
-		for _, v := range val.Tspans {
-			res = append(res, fmt.Sprintf("[%v - %v]", v.FromTimeStamp, v.ToTimeStamp))
-		}
-	}
+	//res = append(res, "RangeSpans: ")
+	//for _, val := range tr.RangeSpans {
+	//	res = append(res, fmt.Sprintf("Hashpoint: %v", val.Hashpoint))
+	//	for _, v := range val.Tspans {
+	//		res = append(res, fmt.Sprintf("[%v - %v]", v.FromTimeStamp, v.ToTimeStamp))
+	//	}
+	//}
 
 	return "TagReader", res
 }
@@ -343,6 +343,9 @@ func (ts *TSStatisticReaderSpec) summary() (string, []string) {
 		buf.WriteByte(')')
 
 		details = append(details, fmt.Sprintf("Agg[%d]: %v", idx, buf.String()))
+	}
+	if ts.Scalar {
+		details = append(details, "scalar")
 	}
 	return "StatisticReader", details
 }
