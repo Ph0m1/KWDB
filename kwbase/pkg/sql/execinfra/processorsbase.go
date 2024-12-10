@@ -37,6 +37,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
+	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
@@ -831,8 +832,9 @@ func (pb *ProcessorBase) Run(ctx context.Context) RowStats {
 	if pb.Out.output == nil {
 		panic("processor output not initialized for emitting rows")
 	}
+	start := timeutil.Now()
 	ctx = pb.self.Start(ctx)
-	Run(ctx, pb.self, pb.Out.output)
+	Run(ctx, pb.self, pb.Out.output, start)
 	return pb.Out.output.GetStats()
 }
 
@@ -874,8 +876,9 @@ func (pb *ProcessorBase) RunTS(ctx context.Context) {
 	if pb.Out.output == nil {
 		panic("processor output not initialized for emitting rows")
 	}
+	start := timeutil.Now()
 	ctx = pb.self.Start(ctx)
-	Run(ctx, pb.self, pb.Out.output)
+	Run(ctx, pb.self, pb.Out.output, start)
 	pb.self.ConsumerClosed()
 }
 

@@ -73,6 +73,15 @@ func (isc *inputStatCollector) Child(nth int, verbose bool) execinfra.OpNode {
 	return nil
 }
 
+// Start implements the RowSource interface. It calls Start on the embedded
+// RowSource and collects stats.
+func (isc *inputStatCollector) Start(ctx context.Context) context.Context {
+	start := timeutil.Now()
+	ctx = isc.RowSource.Start(ctx)
+	isc.StallTime += timeutil.Since(start)
+	return ctx
+}
+
 // Next implements the RowSource interface. It calls Next on the embedded
 // RowSource and collects stats.
 func (isc *inputStatCollector) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata) {

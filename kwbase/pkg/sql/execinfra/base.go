@@ -195,8 +195,7 @@ type RowSourcedProcessor interface {
 // draining the source of metadata and closing both the source and receiver.
 //
 // src needs to have been Start()ed before calling this.
-func Run(ctx context.Context, src RowSource, dst RowReceiver) {
-	start := timeutil.Now()
+func Run(ctx context.Context, src RowSource, dst RowReceiver, startTime time.Time) {
 	for {
 		row, meta := src.Next()
 		// Emit the row; stop if no more rows are needed.
@@ -208,18 +207,18 @@ func Run(ctx context.Context, src RowSource, dst RowReceiver) {
 			case DrainRequested:
 				DrainAndForwardMetadata(ctx, src, dst)
 				dst.ProducerDone()
-				dst.AddStats(timeutil.Since(start), row != nil)
+				dst.AddStats(timeutil.Since(startTime), row != nil)
 				return
 			case ConsumerClosed:
 				src.ConsumerClosed()
 				dst.ProducerDone()
-				dst.AddStats(timeutil.Since(start), row != nil)
+				dst.AddStats(timeutil.Since(startTime), row != nil)
 				return
 			}
 		}
 		// row == nil && meta == nil: the source has been fully drained.
 		dst.ProducerDone()
-		dst.AddStats(timeutil.Since(start), row != nil)
+		dst.AddStats(timeutil.Since(startTime), row != nil)
 		return
 	}
 }

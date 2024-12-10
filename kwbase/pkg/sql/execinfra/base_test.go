@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
@@ -57,7 +58,7 @@ func TestRunDrain(t *testing.T) {
 	buf.InitWithBufSizeAndNumSenders(nil, 10, 1)
 	buf.ConsumerDone()
 
-	Run(ctx, src, buf)
+	Run(ctx, src, buf, time.Time{})
 
 	if src.ConsumerStatus != DrainRequested {
 		t.Fatalf("expected DrainRequested, but found %d", src.ConsumerStatus)

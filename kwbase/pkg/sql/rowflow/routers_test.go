@@ -1021,7 +1021,7 @@ func BenchmarkRouter(b *testing.B) {
 						for i := range chans {
 							go drainRowChannel(&chans[i])
 						}
-						execinfra.Run(ctx, input, r)
+						execinfra.Run(ctx, input, r, time.Time{})
 						r.ProducerDone()
 						wg.Wait()
 					}
