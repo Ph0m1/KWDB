@@ -458,7 +458,7 @@ func (ex *connExecutor) execPreparedirectBind(
 				Settings:         ex.server.GetCFG().Settings,
 			}
 			EvalContext.StartSinglenode = (ex.server.GetCFG().StartMode == StartSingleNode)
-			if err := GetColsInfo(ctx, EvalContext.StartSinglenode, &ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di, &ps.PrepareMetadata.Statement); err != nil {
+			if err := GetColsInfo(ctx, &ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di, &ps.PrepareMetadata.Statement); err != nil {
 				return err
 			}
 			di.RowNum, di.ColNum = len(bindCmd.Args), len(di.IDMap)

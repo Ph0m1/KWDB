@@ -88,7 +88,7 @@ type Insertdirectstmt struct {
 	DedupRule          int64
 	DedupRows          int64
 	PreparePlaceholder int
-	TsSupportBatch     bool
+	IgnoreBatcherror   bool
 	BatchFailed        int
 	BatchFailedColumn  int
 }

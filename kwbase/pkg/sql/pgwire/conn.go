@@ -894,7 +894,7 @@ func (c *conn) handleSimpleQuery(
 					stmts = actualStmts
 					break
 				}
-				stmts[0].Insertdirectstmt.TsSupportBatch = unqis.GetTsSupportBatch() && (di.RowNum != 1)
+				stmts[0].Insertdirectstmt.IgnoreBatcherror = unqis.GetTsSupportBatch() && (di.RowNum != 1)
 				cfg := server.GetCFG()
 				ie := cfg.InternalExecutor
 				err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
@@ -908,7 +908,7 @@ func (c *conn) handleSimpleQuery(
 					}
 					EvalContext := getEvalContext(ctx, txn, server)
 					EvalContext.StartSinglenode = (server.GetCFG().StartMode == sql.StartSingleNode)
-					if err = sql.GetColsInfo(ctx, EvalContext.StartSinglenode, &dit.ColsDesc, ins, &di, &stmts[0]); err != nil {
+					if err = sql.GetColsInfo(ctx, &dit.ColsDesc, ins, &di, &stmts[0]); err != nil {
 						return err
 					}
 					di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
@@ -923,7 +923,7 @@ func (c *conn) handleSimpleQuery(
 					}
 					if !EvalContext.StartSinglenode {
 						// start mode
-						if err = sql.GetPayloadMapForMuiltNode(ptCtx, dit, &di, stmts, EvalContext, table, cfg.NodeInfo.NodeID.Get()); err != nil {
+						if err = sql.GetPayloadMapForMuiltNode(ctx, ptCtx, dit, &di, stmts, EvalContext, table, cfg.NodeInfo.NodeID.Get()); err != nil {
 							return err
 						}
 					} else {

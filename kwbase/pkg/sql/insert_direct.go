@@ -75,7 +75,7 @@ func GetInputValues(
 	for row := range inputValues {
 		err2 := getSingleRecord(ptCtx, cols, *di, stmts, row, inputValues, err)
 		if err2 != nil {
-			if !stmts[0].Insertdirectstmt.TsSupportBatch {
+			if !stmts[0].Insertdirectstmt.IgnoreBatcherror {
 				return nil, err2
 			}
 			stmts[0].Insertdirectstmt.BatchFailed++
@@ -1148,7 +1148,6 @@ func bigEndianToLittleEndian(bigEndian []byte) []byte {
 // GetColsInfo to obtain relevant column information
 func GetColsInfo(
 	ctx context.Context,
-	StartSinglenode bool,
 	tsColsDesc *[]sqlbase.ColumnDescriptor,
 	ins *tree.Insert,
 	di *DirectInsert,
@@ -1227,7 +1226,7 @@ func GetColsInfo(
 					}
 				}
 				err = sqlbase.NewUndefinedColumnError(string(name))
-				if !stmt.Insertdirectstmt.TsSupportBatch || !StartSinglenode {
+				if !stmt.Insertdirectstmt.IgnoreBatcherror {
 					return
 				}
 				valueLength := len(stmt.Insertdirectstmt.InsertValues)
@@ -1381,8 +1380,8 @@ func computeColumnSize(cols *[]sqlbase.ColumnDescriptor) (int, int, error) {
 
 // GetRowBytesForTsInsert performs column type conversion and length checking
 func GetRowBytesForTsInsert(
+	ctx context.Context,
 	ptCtx tree.ParseTimeContext,
-	cols *[]sqlbase.ColumnDescriptor,
 	di *DirectInsert,
 	stmts parser.Statements,
 	rowTimestamps []int64,
@@ -1398,116 +1397,138 @@ func GetRowBytesForTsInsert(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// Define the required variables
-	var curColLength, dataColIdx int
-	var isDataCol, isLastDataCol bool
-	bitmapOffset := execbuilder.DataLenSize
 	// partition input data based on primary tag values
 	priTagValMap := make(map[string][]int)
 	// Type check for input values.
 	var buf strings.Builder
+	outputValues := make([]tree.Datums, 0, di.RowNum)
+	outrowBytes := make([][]byte, 0, len(rowBytes))
 	for row := range inputValues {
 		tp.SetPayload(rowBytes[row])
 		offset := dataOffset
 		varDataOffset := independentOffset
-		for i, column := range di.PrettyCols {
-			colIdx := di.ColIndexs[int(column.ID)]
-			isDataCol = !column.IsTagCol()
-			isLastDataCol = false
-			if colIdx < 0 {
-				if !column.IsNullable() {
-					return nil, nil, nil, sqlbase.NewNonNullViolationError(column.Name)
-				} else if column.IsTagCol() {
-					continue
-				}
-				dataColIdx = i
-				if column.IsTagCol() {
-					continue
-				}
-			}
-			if isDataCol {
-				dataColIdx = i - di.PArgs.PTagNum - di.PArgs.AllTagNum
-				isLastDataCol = dataColIdx == di.PArgs.DataColNum-1
-
-				if int(column.TsCol.VariableLengthType) == sqlbase.StorageTuple {
-					curColLength = int(column.TsCol.StorageLen)
-				} else {
-					curColLength = execbuilder.VarColumnSize
-				}
-				// deal with NULL value
-				if colIdx < 0 {
-					execbuilder.SetBit(tp, bitmapOffset, dataColIdx)
-					offset += curColLength
-					// Fill the length of rowByte
-					if isLastDataCol {
-						execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
-						rowBytes[row] = tp.GetPayload(varDataOffset)
-					}
-					continue
-				}
-			}
-			col := colIdx
-			rawValue := stmts[0].Insertdirectstmt.InsertValues[col+row*di.ColNum]
-			valueType := stmts[0].Insertdirectstmt.ValuesType[col+row*di.ColNum]
-			if valueType != parser.STRINGTYPE && rawValue == "" {
-				if !column.IsNullable() {
-					return nil, nil, nil, sqlbase.NewNonNullViolationError(column.Name)
-				}
-				// attempting to insert a NULL value when no value is specified
-				inputValues[row][col] = tree.DNull
-			} else {
-				inputValues[row][col], err = GetSingleDatum(ptCtx, *column, valueType, rawValue)
-			}
-
-			if err != nil {
+		err = getSingleRowBytes(ptCtx, di, tp, offset, varDataOffset, row, rowBytes, stmts, inputValues, &buf, rowTimestamps)
+		if err != nil {
+			if !stmts[0].Insertdirectstmt.IgnoreBatcherror {
 				return nil, nil, nil, err
 			}
-			if i < di.PArgs.PTagNum {
-				buf.WriteString(sqlbase.DatumToString(inputValues[row][col]))
-			}
-			if isDataCol {
-				if inputValues[row][col] == tree.DNull {
-					execbuilder.SetBit(tp, bitmapOffset, dataColIdx)
-					offset += curColLength
-					// Fill the length of rowByte
-					if isLastDataCol {
-						execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
-						rowBytes[row] = tp.GetPayload(varDataOffset)
-					}
-					continue
-				}
-
-				if dataColIdx == 0 {
-					rowTimestamps[row] = int64(*inputValues[row][col].(*tree.DInt))
-				}
-				if varDataOffset, err = tp.FillColData(
-					inputValues[row][col],
-					column, false, false,
-					offset, varDataOffset, bitmapOffset,
-				); err != nil {
-					return nil, nil, nil, err
-				}
-				offset += curColLength
-				if isLastDataCol {
-					tp.SetPayload(tp.GetPayload(varDataOffset))
-					execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
-					rowBytes[row] = tp.GetPayload(varDataOffset)
-				}
-			}
+			stmts[0].Insertdirectstmt.BatchFailed++
+			log.Errorf(ctx, "BatchInsert Error: %s", err)
 			continue
-			// TODO 需要处理空值(data的空值)
-			//NullExec:
-			//	if !column.IsNullable() {
-			//		return nil, nil, nil, sqlbase.NewNonNullViolationError(column.Name)
-			//	}
-			//	// attempting to insert a NULL value when no value is specified
-			//	inputValues[row][col] = tree.DNull
 		}
-		priTagValMap[buf.String()] = append(priTagValMap[buf.String()], row)
+
+		outputValues = append(outputValues, inputValues[row])
+		priTagValMap[buf.String()] = append(priTagValMap[buf.String()], row-stmts[0].Insertdirectstmt.BatchFailed)
+		outrowBytes = append(outrowBytes, rowBytes[row])
+
 		buf.Reset()
 	}
 
-	return inputValues, priTagValMap, rowBytes, nil
+	return outputValues, priTagValMap, outrowBytes, nil
+}
+
+func getSingleRowBytes(
+	ptCtx tree.ParseTimeContext,
+	di *DirectInsert,
+	tp *execbuilder.TsPayload,
+	offset, varDataOffset, row int,
+	rowBytes [][]byte,
+	stmts parser.Statements,
+	inputValues []tree.Datums,
+	buf *strings.Builder,
+	rowTimestamps []int64,
+) error {
+	var curColLength, dataColIdx int
+	var isDataCol, isLastDataCol bool
+	bitmapOffset := execbuilder.DataLenSize
+	var err error
+	for i, column := range di.PrettyCols {
+		colIdx := di.ColIndexs[int(column.ID)]
+		isDataCol = !column.IsTagCol()
+		isLastDataCol = false
+		if colIdx < 0 {
+			if !column.IsNullable() {
+				return sqlbase.NewNonNullViolationError(column.Name)
+			} else if column.IsTagCol() {
+				continue
+			}
+			dataColIdx = i
+			if column.IsTagCol() {
+				continue
+			}
+		}
+		if isDataCol {
+			dataColIdx = i - di.PArgs.PTagNum - di.PArgs.AllTagNum
+			isLastDataCol = dataColIdx == di.PArgs.DataColNum-1
+
+			if int(column.TsCol.VariableLengthType) == sqlbase.StorageTuple {
+				curColLength = int(column.TsCol.StorageLen)
+			} else {
+				curColLength = execbuilder.VarColumnSize
+			}
+			// deal with NULL value
+			if colIdx < 0 {
+				execbuilder.SetBit(tp, bitmapOffset, dataColIdx)
+				offset += curColLength
+				// Fill the length of rowByte
+				if isLastDataCol {
+					execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
+					rowBytes[row] = tp.GetPayload(varDataOffset)
+				}
+				continue
+			}
+		}
+		col := colIdx
+		rawValue := stmts[0].Insertdirectstmt.InsertValues[col+row*di.ColNum]
+		valueType := stmts[0].Insertdirectstmt.ValuesType[col+row*di.ColNum]
+		if valueType != parser.STRINGTYPE && rawValue == "" {
+			if !column.IsNullable() {
+				return sqlbase.NewNonNullViolationError(column.Name)
+			}
+			// attempting to insert a NULL value when no value is specified
+			inputValues[row][col] = tree.DNull
+		} else {
+			inputValues[row][col], err = GetSingleDatum(ptCtx, *column, valueType, rawValue)
+		}
+
+		if err != nil {
+			return err
+		}
+		if i < di.PArgs.PTagNum {
+			buf.WriteString(sqlbase.DatumToString(inputValues[row][col]))
+		}
+		if isDataCol {
+			if inputValues[row][col] == tree.DNull {
+				execbuilder.SetBit(tp, bitmapOffset, dataColIdx)
+				offset += curColLength
+				// Fill the length of rowByte
+				if isLastDataCol {
+					execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
+					rowBytes[row] = tp.GetPayload(varDataOffset)
+				}
+				continue
+			}
+
+			if dataColIdx == 0 {
+				rowTimestamps[row] = int64(*inputValues[row][col].(*tree.DInt))
+			}
+			if varDataOffset, err = tp.FillColData(
+				inputValues[row][col],
+				column, false, false,
+				offset, varDataOffset, bitmapOffset,
+			); err != nil {
+				return err
+			}
+			offset += curColLength
+			if isLastDataCol {
+				tp.SetPayload(tp.GetPayload(varDataOffset))
+				execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
+				rowBytes[row] = tp.GetPayload(varDataOffset)
+			}
+		}
+		continue
+	}
+	return nil
 }
 
 // GetSingleDatum gets single datum by columnDesc
@@ -1819,6 +1840,7 @@ func GetSingleDatum(
 
 // GetPayloadMapForMuiltNode builds payloads for distributed insertion
 func GetPayloadMapForMuiltNode(
+	ctx context.Context,
 	ptCtx tree.ParseTimeContext,
 	dit DirectInsertTable,
 	di *DirectInsert,
@@ -1828,7 +1850,7 @@ func GetPayloadMapForMuiltNode(
 	nodeid roachpb.NodeID,
 ) error {
 	rowTimestamps := make([]int64, di.RowNum)
-	inputValues, priTagValMap, rowBytes, err := GetRowBytesForTsInsert(ptCtx, &dit.ColsDesc, di, stmts, rowTimestamps)
+	inputValues, priTagValMap, rowBytes, err := GetRowBytesForTsInsert(ctx, ptCtx, di, stmts, rowTimestamps)
 	if err != nil {
 		return err
 	}
