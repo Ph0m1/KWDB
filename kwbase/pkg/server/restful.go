@@ -84,6 +84,26 @@ var transTypeToLength = map[string]int64{
 	"_TEXT":       9223372036854775807,
 	"NAME":        9223372036854775807}
 
+var isBool = map[string]bool{
+	"true":  true,
+	"t":     true,
+	"T":     true,
+	"True":  true,
+	"TRUE":  true,
+	"false": false,
+	"f":     false,
+	"F":     false,
+	"False": false,
+	"FALSE": false,
+}
+
+var (
+	// Regular expression matching for numbers
+	isFloat        = regexp.MustCompile(`^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$`)
+	isNumericWithU = regexp.MustCompile(`^[-+]?[0-9]+u$`)
+	isNumericWithI = regexp.MustCompile(`^[-+]?[0-9]+i$`)
+)
+
 const (
 	//insert_type_str = "INSERT INTO"
 	insertTypeStrLowercase = "insert into"
@@ -1370,25 +1390,6 @@ func (s *restfulServer) getUserWIthPass(
 // determineType returns the corresponding type based on the input string
 func determineType(input string) (string, string) {
 	input = strings.TrimSpace(input)
-
-	// Regular expression matching for numbers
-	isFloat := regexp.MustCompile(`^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$`)
-	isNumericWithU := regexp.MustCompile(`^[-+]?[0-9]+u$`)
-	isNumericWithI := regexp.MustCompile(`^[-+]?[0-9]+i$`)
-
-	isBool := map[string]bool{
-		"true":  true,
-		"t":     true,
-		"T":     true,
-		"True":  true,
-		"TRUE":  true,
-		"false": false,
-		"f":     false,
-		"F":     false,
-		"False": false,
-		"FALSE": false,
-	}
-
 	if val, ok := isBool[input]; ok {
 		return fmt.Sprintf("%t", val), "bool"
 	}
