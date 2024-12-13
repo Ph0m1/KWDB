@@ -131,14 +131,14 @@ class SubEntityGroupManager : public TSObject {
 
   /**
    * @brief Compress the segment whose maximum timestamp is smaller than ts in all subgroups of entity group
-   * @param[in] ts A timestamp that needs to be compressed
-   * @param[in] Whether to start vacuum
+   * @param[in] compress_ts A timestamp that needs to be compressed
    * @param[out] err_info error info
    *
    * @return void
    */
-  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, bool enable_vacuum,
-                uint32_t ts_version, ErrorInfo& err_info);
+  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info);
+
+  void Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info);
 
   void ReleasePartitionTable(TsTimePartition* e_bt, bool is_force = false);
 

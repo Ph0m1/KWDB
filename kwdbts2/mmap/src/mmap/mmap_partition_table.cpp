@@ -32,6 +32,7 @@
 #include "lg_api.h"
 #include "perf_stat.h"
 
+int64_t g_vacuum_interval = 3600;
 
 void markDeleted(char* delete_flags, size_t row_index) {
   size_t byte = (row_index - 1) >> 3;
@@ -576,30 +577,39 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
   return err_code;
 }
 
-bool TsTimePartition::ShouldVacuum(const timestamp64& ts, uint32_t ts_version) {
+bool TsTimePartition::ShouldVacuum(uint32_t ts_version) {
   std::vector<BLOCK_ID> segment_ids;
   data_segments_.GetAllKey(&segment_ids);
   if (segment_ids.empty()) {
     return false;
   }
-  if (IsModifiedRecent(ts)) {
+  if (IsModifiedRecent()) {
     return false;
   }
-  if (segment_ids.size() > 2) {
-    return true;
-  }
-  // DDL
+
+  bool been_altered = false;  // DDL check
+  // only vacuum the partition that it's all segments had been compressed
   for (auto& segment_id : segment_ids) {
     std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(segment_id);
     if (segment_tbl == nullptr) {
       continue;
     }
+    if (segment_tbl->getSegmentStatus() != ImmuSegment) {
+      return false;
+    }
     auto segment_version = segment_tbl->schemaVersion();
     if (segment_version != ts_version) {
-      return true;
+      been_altered = true;
     }
   }
-  return ShouldVacuum();
+
+  if (segment_ids.size() > 2) {
+    return true;
+  }
+  if (been_altered) {
+    return true;
+  }
+  return meta_manager_.getEntityHeader()->data_disordered || meta_manager_.getEntityHeader()->data_deleted;
 }
 
 KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint32_t max_blocks_per_seg,
@@ -749,12 +759,17 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
   for (int i = 0; i < cols_idx.size(); ++i) {
     uint32_t batch_row_idx = 0;
     const Batch* batch = res->data[i][0];
+    bool is_col_not_null = cols_info[i].isFlag(AINFO_NOT_NULL);
+    bool has_null = false;
+    if (!is_col_not_null) {
+      has_null = batch->hasNull();
+    }
     if (!isVarLenType(cols_info[i].type)) {
       // fixed length
       uint32_t total_row = 0;
       for (BlockSpan block_span : dst_spans) {
         MetricRowID row_id{block_span.block_item->block_id, block_span.start_row + 1};
-        if (i) {  // timestamp col is not null
+        if (i && has_null) {  // timestamp col is not null
           for (int j = 0; j < block_span.row_num; j++) {
             bool is_null = false;
             batch->isNull(batch_row_idx, &is_null);
@@ -779,13 +794,15 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
       // var length data, write one by one
       uint32_t cur_block_row = dst_spans[block_span_idx].start_row;
       for (uint32_t row_idx = 0; row_idx < row_count; ++row_idx, ++cur_block_row) {
-        bool is_null = false;
-        batch->isNull(batch_row_idx, &is_null);
-        batch_row_idx++;
-        if (is_null) {
-          MetricRowID row_id{dst_spans[block_span_idx].block_item->block_id, cur_block_row + 1};
-          dest_segment->setNullBitmap(row_id, cols_idx[i]);
-          continue;
+        if (has_null) {
+          bool is_null = false;
+          batch->isNull(batch_row_idx, &is_null);
+          batch_row_idx++;
+          if (is_null) {
+            MetricRowID row_id{dst_spans[block_span_idx].block_item->block_id, cur_block_row + 1};
+            dest_segment->setNullBitmap(row_id, cols_idx[i]);
+            continue;
+          }
         }
         char* var_addr = (char*)batch->getVarColData(row_idx);
         uint16_t var_c_len = batch->getVarColDataLen(row_idx);
@@ -850,7 +867,7 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
   return SUCCESS;
 }
 
-KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_version, VacuumStatus& vacuum_status) {
+KStatus TsTimePartition::Vacuum(uint32_t ts_version, VacuumStatus &vacuum_result) {
   // check whether partition is being inserted.
   // Partition's ref count has a wider range than lock.
   if (IsWriting()) {
@@ -867,7 +884,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   {
     vacuumLock();
     Defer defer{[&]() { vacuumUnlock(); }};
-    if (!ShouldVacuum(ts, ts_version)) {
+    if (!ShouldVacuum(ts_version)) {
       return SUCCESS;
     }
     // check not inserting data.
@@ -875,6 +892,12 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
       LOG_WARN("partition[%s] is being inserted, ref count [%d], cannot vacuum now", GetPath().c_str(), writing_count_.load());
       return SUCCESS;
     }
+
+    if (!TrySetCompVacuumStatus(CompVacuumStatus::VACUUMING)) {
+      LOG_WARN("partition[%s] is being compressed, cannot vacuum now", GetPath().c_str());
+      return SUCCESS;
+    }
+    Defer defer2{[&]() { ResetCompVacuumStatus(); }};
     LOG_INFO("Start vacuum in partition [%s]", GetPath().c_str());
     entities = GetEntities();
     // set cancel_vacuum_ flag false, if the data written after unlocking is disordered or deleted, indicates that need to
@@ -907,12 +930,12 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     data_segments_.GetAllKey(&new_segment_ids);
     if (IsWriting() || (new_segment_ids[0] > max_segment_id)) {
       LOG_WARN("partition[%s] is being inserted concurrently, ref count [%d], cancel vacuum", GetPath().c_str(), writing_count_.load());
-      vacuum_status = VacuumStatus::CANCEL;
+      vacuum_result = VacuumStatus::CANCEL;
       return SUCCESS;
     }
 
     if (IsSegmentsBusy(segment_ids)) {
-      vacuum_status = VacuumStatus::CANCEL;
+      vacuum_result = VacuumStatus::CANCEL;
       return SUCCESS;
     }
     if (DropSegmentDir(segment_ids) < 0) {
@@ -939,7 +962,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
 
     releaseSegments();
     meta_manager_.getEntityHeader()->cur_block_id = 0;
-    vacuum_status = VacuumStatus::FINISH;
+    vacuum_result = VacuumStatus::FINISH;
     return SUCCESS;
   }
 
@@ -965,7 +988,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     data_segments_.GetAllKey(&new_segment_ids);
     if (IsWriting() || (new_segment_ids[0] > max_segment_id) || cancel_vacuum_) {
       LOG_WARN("partition[%s] is being inserted concurrently, or there are some data been deleted, cancel vacuum", GetPath().c_str());
-      vacuum_status = VacuumStatus::CANCEL;
+      vacuum_result = VacuumStatus::CANCEL;
       return SUCCESS;
     }
     // Traverse every entity's data
@@ -1019,12 +1042,12 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   data_segments_.GetAllKey(&new_segment_ids);
   if (IsWriting() || (new_segment_ids[0] > max_segment_id) || cancel_vacuum_) {
     LOG_WARN("partition[%s] is being inserted concurrently, or there are some data been deleted, cancel vacuum", GetPath().c_str());
-    vacuum_status = VacuumStatus::CANCEL;
+    vacuum_result = VacuumStatus::CANCEL;
     return SUCCESS;
   }
 
   if (IsSegmentsBusy(segment_ids)) {
-    vacuum_status = VacuumStatus::CANCEL;
+    vacuum_result = VacuumStatus::CANCEL;
     return SUCCESS;
   }
   if (DropSegmentDir(segment_ids) < 0) {
@@ -1036,7 +1059,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
   if (!System(cmd)) {
     LOG_ERROR("mv tmp partition dir failed");
     // mv failed, still need to reload meta and segments, not return fail
-    vacuum_status = VacuumStatus::FAILED;
+    vacuum_result = VacuumStatus::FAILED;
   }
 
   // Step 7: Reload partition & reopen meta.0
@@ -1050,7 +1073,7 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     LOG_ERROR("Reload segments failed, error: %s", err_info.errmsg.c_str());
     return FAIL;
   }
-  if (vacuum_status == VacuumStatus::FAILED) {
+  if (vacuum_result == VacuumStatus::FAILED) {
     return FAIL;
   }
   // update data version
@@ -1058,12 +1081,12 @@ KStatus TsTimePartition::ProcessVacuum(const timestamp64& ts, uint32_t ts_versio
     root_table_manager_->UpdateTableVersionOfLastData(ts_version);
   }
   ResetVacuumFlags();
-  vacuum_status = VacuumStatus::FINISH;
+  vacuum_result = VacuumStatus::FINISH;
   return SUCCESS;
 }
 
 // Get segments that require compression processing
-std::vector<std::shared_ptr<MMapSegmentTable>> TsTimePartition::GetAllSegmentsForCompressing(){
+std::vector<std::shared_ptr<MMapSegmentTable>> TsTimePartition::GetAllSegmentsForCompressing() {
   vector<std::shared_ptr<MMapSegmentTable>> segment_tables;
   data_segments_.Traversal([&](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
     // Compressed segment
@@ -1096,12 +1119,12 @@ std::vector<std::shared_ptr<MMapSegmentTable>> TsTimePartition::GetAllSegmentsFo
 void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
   auto segment_tables = GetAllSegmentsForCompressing();
   int num_of_active_segments = 0;
-  for (auto iSegmentTable : segment_tables) {
-    if (iSegmentTable->getSegmentStatus() == ActiveSegment) {
+  for (const auto& segment : segment_tables) {
+    if (segment->getSegmentStatus() == ActiveSegment) {
       num_of_active_segments++;
-      iSegmentTable->setSegmentStatus(InActiveSegment);
+      segment->setSegmentStatus(InActiveSegment);
       MUTEX_LOCK(active_segment_lock_);
-      if (active_segment_ && active_segment_->segment_id() == iSegmentTable->segment_id()) {
+      if (active_segment_ && active_segment_->segment_id() == segment->segment_id()) {
         active_segment_ = nullptr;
       }
       MUTEX_UNLOCK(active_segment_lock_);
@@ -1115,32 +1138,32 @@ void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
   }
 
   // compress all the InActiveSegments and make sure they are mounted
-  for (auto iSegmentTable : segment_tables) {
-    if (iSegmentTable->getSegmentStatus() != InActiveSegment) {
+  for (const auto& segment_tbl : segment_tables) {
+    if (segment_tbl->getSegmentStatus() != InActiveSegment) {
       continue;
     }
     // Sync before compressing
-    iSegmentTable->sync(MS_SYNC);
-    LOG_INFO("MMapSegmentTable[%s] compress start", iSegmentTable->GetPath().c_str());
-    iSegmentTable->setSegmentStatus(ImmuSegment);
-    bool ok = compress(db_path_, tbl_sub_path_, std::to_string(iSegmentTable->segment_id()),
+    segment_tbl->sync(MS_SYNC);
+    LOG_INFO("MMapSegmentTable[%s] compress start", segment_tbl->GetPath().c_str());
+    segment_tbl->setSegmentStatus(ImmuSegment);
+    bool ok = compress(db_path_, tbl_sub_path_, std::to_string(segment_tbl->segment_id()),
                        g_mk_squashfs_option.processors_immediate, err_info);
     if (!ok) {
       // If compression fails, restore segment state
-      iSegmentTable->setSegmentStatus(InActiveSegment);
-      LOG_ERROR("MMapSegmentTable[%s] compress failed", iSegmentTable->GetPath().c_str());
+      segment_tbl->setSegmentStatus(InActiveSegment);
+      LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->GetPath().c_str());
       return;
     }
-    iSegmentTable->setSqfsIsExists();
+    segment_tbl->setSqfsIsExists();
 
     // Mount the compressed segment
-    if (!isMounted(db_path_ + iSegmentTable->tbl_sub_path())) {
-      if (!reloadSegment(iSegmentTable, false, err_info)) {
-        LOG_ERROR("MMapSegmentTable[%s] reload failed", iSegmentTable->GetPath().c_str());
+    if (!isMounted(db_path_ + segment_tbl->tbl_sub_path())) {
+      if (!reloadSegment(segment_tbl, false, err_info)) {
+        LOG_ERROR("MMapSegmentTable[%s] reload failed", segment_tbl->GetPath().c_str());
         return;
       }
     }
-    LOG_INFO("MMapSegmentTable[%s] compress succeeded", iSegmentTable->GetPath().c_str());
+    LOG_INFO("MMapSegmentTable[%s] compress succeeded", segment_tbl->GetPath().c_str());
   }
 }
 
@@ -1236,12 +1259,28 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_
   }
 }
 
+bool TsTimePartition::TrySetCompVacuumStatus(CompVacuumStatus desired) {
+  CompVacuumStatus expected = CompVacuumStatus::NONE;
+  if (comp_vacuum_status_.compare_exchange_strong(expected, desired)) {
+    return true;
+  }
+  return false;
+}
+
+void TsTimePartition::ResetCompVacuumStatus() {
+  comp_vacuum_status_.store(CompVacuumStatus::NONE);
+}
+
 void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_info){
+  if (!TrySetCompVacuumStatus(CompVacuumStatus::COMPRESSING)) {
+    return;
+  }
   if (compress_ts == INT64_MAX){
     ImmediateCompress(err_info);
   } else {
     ScheduledCompress(compress_ts, err_info);
   }
+  ResetCompVacuumStatus();
 }
 
 int TsTimePartition::Sync(kwdbts::TS_LSN check_lsn, ErrorInfo& err_info) {

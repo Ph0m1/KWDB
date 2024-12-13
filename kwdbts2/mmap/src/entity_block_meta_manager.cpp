@@ -146,7 +146,13 @@ int EntityBlockMetaManager::GetAllBlockItems(uint32_t entity_id, std::deque<Bloc
   BLOCK_ID block_item_id = entity_item->cur_block_id;
   while (block_item_id != 0) {
     BlockItem* block_item = GetBlockItem(block_item_id);
-    if (block_item == nullptr || block_item->entity_id == 0) {
+    if (block_item == nullptr) {
+      LOG_ERROR("GetBlockItem error: block item is nullptr, entity id[%u], block id[%u]", entity_id, block_item_id)
+      return KWENOOBJ;
+    }
+    if (block_item->entity_id != entity_id) {
+      LOG_ERROR("entity id in block item is inconsistent: entity_id[%u], block_item->entity_id[%u]",
+                entity_id, block_item->entity_id)
       return KWENOOBJ;
     }
     reverse ? block_items.push_back(block_item) : block_items.push_front(block_item);

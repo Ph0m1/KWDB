@@ -31,7 +31,7 @@ std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
 std::shared_mutex g_settings_mutex;
 bool g_engine_initialized = false;
-bool g_vacuum_enabled = false;
+extern int64_t g_vacuum_interval;
 
 TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
                 AppliedRangeIndex* applied_indexes, size_t range_num) {
@@ -275,7 +275,7 @@ TSStatus TSDropTsTable(TSEngine* engine, TSTableID table_id) {
   return kTsSuccess;
 }
 
-TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts, uint32_t ts_version) {
+TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -290,7 +290,7 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts,
     return kTsSuccess;
   }
   ErrorInfo err_info;
-  s = table->Compress(ctx_p, ts, g_vacuum_enabled, ts_version, err_info);
+  s = table->Compress(ctx_p, ts, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("CompressTsTable Error!");
@@ -299,7 +299,7 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts,
   return kTsSuccess;
 }
 
-TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id, uint32_t ts_version) {
+TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id) {
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -316,12 +316,36 @@ TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID ta
     return kTsSuccess;
   }
   ErrorInfo err_info;
-  s = table->Compress(ctx_p, INT64_MAX, g_vacuum_enabled, ts_version, err_info);
+  s = table->Compress(ctx_p, INT64_MAX, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("compress error, reason: " + err_info.errmsg);
   }
   LOG_INFO("compress table[%lu] succeeded", table_id);
+  return kTsSuccess;
+}
+
+TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_version) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  LOG_INFO("vacuum table[%lu] start", table_id);
+  std::shared_ptr<TsTable> table;
+  s = engine->GetTsTable(ctx_p, table_id, table);
+  if (s != KStatus::SUCCESS) {
+    LOG_INFO("The current node does not have the table[%lu], skip vacuum", table_id);
+    return kTsSuccess;
+  }
+  ErrorInfo err_info;
+  s = table->Vacuum(ctx_p, ts_version, err_info);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("vacuum table[%lu] failed", table_id);
+    return ToTsStatus("VacuumTsTable Error!");
+  }
+  LOG_INFO("vacuum table[%lu] succeeded", table_id);
   return kTsSuccess;
 }
 
@@ -641,12 +665,8 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
       compression.second.compression_level = level;
     }
     g_compression.compression_level = level;
-  } else if ("ts.compression.vacuum.enabled" == key) {
-    if ("false" == value) {
-      g_vacuum_enabled = false;
-    } else if ("true" == value) {
-      g_vacuum_enabled = true;
-    }
+  } else if ("ts.vacuum_interval" == key) {
+    g_vacuum_interval = atoi(value.c_str());
   } else if ("immediate_compression.threads" == key) {
     g_mk_squashfs_option.processors_immediate = atoi(value.c_str());
   } else if ("ts.count.use_statistics.enabled" == key) {

@@ -194,11 +194,6 @@ var (
 		"the maximum number of rows that can be held in a block item",
 		1000)
 
-	tsCompressionVacuum = settings.RegisterPublicBoolSetting(
-		"ts.compression.vacuum.enabled",
-		"enable vacuum before compression",
-		false)
-
 	tsCompressionType = settings.RegisterPublicStringSetting(
 		"ts.compression.type",
 		"compression algorithm for time series data",
@@ -2263,6 +2258,11 @@ func (s *Server) Start(ctx context.Context) error {
 		sql.SQLExecutorName,
 		func() (jobs.ScheduledJobExecutor, error) {
 			return &sql.ScheduledSQLExecutor{}, nil
+		})
+	jobs.RegisterScheduledJobExecutorFactory(
+		sql.VacuumExecutorName,
+		func() (jobs.ScheduledJobExecutor, error) {
+			return &sql.ScheduledVacuumExecutor{}, nil
 		})
 	// Start scheduled jobs daemon.
 	jobs.StartJobSchedulerDaemon(

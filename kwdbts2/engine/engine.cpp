@@ -200,8 +200,7 @@ KStatus TSEngineImpl::DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) 
   return SUCCESS;
 }
 
-KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts,
-                                      bool enable_vacuum, uint32_t ts_version) {
+KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) {
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table);
   if (s == FAIL) {
@@ -210,7 +209,7 @@ KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_
   }
 
   ErrorInfo err_info;
-  s = table->Compress(ctx, ts, enable_vacuum, ts_version, err_info);
+  s = table->Compress(ctx, ts, err_info);
   if (s == KStatus::FAIL) {
     LOG_ERROR("table[%lu] compress failed", table_id);
   }
@@ -1048,20 +1047,20 @@ KStatus TSEngineImpl::parseMetaSchema(kwdbContext_p ctx, roachpb::CreateTsTable*
                                       std::vector<TagInfo>& tag_schema) {
   for (int i = 0; i < meta->k_column_size(); i++) {
     const auto& col = meta->k_column(i);
-    struct AttributeInfo col_var;
-    KStatus s = TsEntityGroup::GetColAttributeInfo(ctx, col, col_var, i == 0);
+    struct AttributeInfo attr_info;
+    KStatus s = TsEntityGroup::GetColAttributeInfo(ctx, col, attr_info, i == 0);
     if (s != KStatus::SUCCESS) {
       return s;
     }
 
-    if (col_var.isAttrType(COL_GENERAL_TAG) || col_var.isAttrType(COL_PRIMARY_TAG)) {
-      tag_schema.push_back(std::move(TagInfo{col.column_id(), col_var.type,
-                                             static_cast<uint32_t>(col_var.length), 0,
-                                             static_cast<uint32_t>(col_var.size),
-                                             col_var.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG,
-                                             col_var.flag}));
+    if (attr_info.isAttrType(COL_GENERAL_TAG) || attr_info.isAttrType(COL_PRIMARY_TAG)) {
+      tag_schema.push_back(std::move(TagInfo{col.column_id(), attr_info.type,
+                                             static_cast<uint32_t>(attr_info.length), 0,
+                                             static_cast<uint32_t>(attr_info.size),
+                                             attr_info.isAttrType(COL_PRIMARY_TAG) ? PRIMARY_TAG : GENERAL_TAG,
+                                             attr_info.flag}));
     } else {
-      metric_schema.push_back(std::move(col_var));
+      metric_schema.push_back(std::move(attr_info));
     }
   }
   return KStatus::SUCCESS;

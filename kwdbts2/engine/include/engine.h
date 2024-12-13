@@ -83,8 +83,7 @@ struct TSEngine {
    *
    * @return KStatus
    */
-  virtual KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts,
-                                  bool enable_vacuum, uint32_t ts_version) = 0;
+  virtual KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) = 0;
 
   /**
    * @brief get ts table object
@@ -504,8 +503,7 @@ class TSEngineImpl : public TSEngine {
 
   KStatus DropTsTable(kwdbContext_p ctx, const KTableKey& table_id) override;
 
-  KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts,
-                          bool enable_vacuum, uint32_t ts_version) override;
+  KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) override;
 
   KStatus GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& ts_table,
                      ErrorInfo& err_info = getDummyErrorInfo()) override;

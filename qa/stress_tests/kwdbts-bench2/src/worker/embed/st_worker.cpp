@@ -348,7 +348,7 @@ KBStatus StCompressWorker::do_work(KTimestamp  new_ts) {
   KWDB_START();
 
   KBStatus s;
-  auto stat = st_inst_->GetTSEngine()->CompressTsTable(ctx, r_table, new_ts, true, 1);
+  auto stat = st_inst_->GetTSEngine()->CompressTsTable(ctx, r_table, new_ts);
   s = dump_zstatus("CompressTsTable", ctx, stat);
   if (s.isNotOK()) {
     return s;

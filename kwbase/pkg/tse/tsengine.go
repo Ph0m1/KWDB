@@ -60,6 +60,7 @@ const (
 
 const (
 	compressInterval = "ts.compress_interval"
+	vacuumInterval   = "ts.vacuum_interval"
 )
 
 // TsPayloadSizeLimit is the max size of per payload.
@@ -903,8 +904,8 @@ func (r *TsEngine) DeleteData(
 }
 
 // CompressTsTable compress partitions with maximum time<=ts
-func (r *TsEngine) CompressTsTable(tableID uint64, ts int64, tsVersion uint32) error {
-	status := C.TSCompressTsTable(r.tdb, C.TSTableID(tableID), C.int64_t(ts), C.uint32_t(tsVersion))
+func (r *TsEngine) CompressTsTable(tableID uint64, ts int64) error {
+	status := C.TSCompressTsTable(r.tdb, C.TSTableID(tableID), C.int64_t(ts))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to compress ts table")
 	}
@@ -912,13 +913,20 @@ func (r *TsEngine) CompressTsTable(tableID uint64, ts int64, tsVersion uint32) e
 }
 
 // CompressImmediately compress partitions immediately
-func (r *TsEngine) CompressImmediately(
-	ctx context.Context, tableID uint64, tsVersion uint32,
-) error {
+func (r *TsEngine) CompressImmediately(ctx context.Context, tableID uint64) error {
 	goCtxPtr := C.uint64_t(uintptr(unsafe.Pointer(&ctx)))
-	status := C.TSCompressImmediately(r.tdb, goCtxPtr, C.TSTableID(tableID), C.uint32_t(tsVersion))
+	status := C.TSCompressImmediately(r.tdb, goCtxPtr, C.TSTableID(tableID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to compress ts table")
+	}
+	return nil
+}
+
+// VacuumTsTable vacuum partitions after compress
+func (r *TsEngine) VacuumTsTable(tableID uint64, tsVersion uint32) error {
+	status := C.TSVacuumTsTable(r.tdb, C.TSTableID(tableID), C.uint32_t(tsVersion))
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to vacuum ts table")
 	}
 	return nil
 }
@@ -1171,6 +1179,11 @@ func (r *TsEngine) TSGetWaitThreadNum() (uint32, error) {
 // SetCompressInterval send compress interval to AE
 func SetCompressInterval(interval []byte) {
 	C.TSSetClusterSetting(goToTSSlice([]byte(compressInterval)), goToTSSlice(interval))
+}
+
+// SetVacuumInterval send vacuum interval to AE
+func SetVacuumInterval(interval []byte) {
+	C.TSSetClusterSetting(goToTSSlice([]byte(vacuumInterval)), goToTSSlice(interval))
 }
 
 // Close close TsEngine

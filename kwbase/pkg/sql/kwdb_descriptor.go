@@ -2548,13 +2548,14 @@ func InitCompressInterval(ctx context.Context, ie sqlutil.InternalExecutor) erro
 		return err
 	}
 	for _, row := range rows {
-		if string(tree.MustBeDString(row[0])) == ScheduleCompress {
+		name := string(tree.MustBeDString(row[0]))
+		if name == ScheduleCompress || name == ScheduleVacuum {
 			scheduleExpr := string(tree.MustBeDString(row[1]))
 			expr, err := cronexpr.Parse(scheduleExpr)
 			if err != nil {
 				return err
 			}
-			// get new compress interval
+			// get new compress or vacuum interval
 			var duration int64
 			nextTime1 := expr.Next(timeutil.Now())
 			nextTime2 := expr.Next(nextTime1)
@@ -2566,7 +2567,11 @@ func InitCompressInterval(ctx context.Context, ie sqlutil.InternalExecutor) erro
 			} else {
 				duration = int64(duration1)
 			}
-			tse.SetCompressInterval(strconv.AppendInt([]byte{}, duration, 10))
+			if name == ScheduleCompress {
+				tse.SetCompressInterval(strconv.AppendInt([]byte{}, duration, 10))
+			} else {
+				tse.SetVacuumInterval(strconv.AppendInt([]byte{}, duration, 10))
+			}
 			return nil
 		}
 	}
@@ -2585,12 +2590,17 @@ type ScheduleDetail struct {
 var Schedules = map[string]ScheduleDetail{
 	ScheduleRetention: {
 		Name:     ScheduleRetention,
-		Executor: "scheduled-retention-executor",
+		Executor: RetentionExecutorName,
 		CronExpr: "@hourly",
 	},
 	ScheduleCompress: {
 		Name:     ScheduleCompress,
-		Executor: "scheduled-compress-executor",
+		Executor: CompressExecutorName,
+		CronExpr: "@hourly",
+	},
+	ScheduleVacuum: {
+		Name:     ScheduleVacuum,
+		Executor: VacuumExecutorName,
 		CronExpr: "@hourly",
 	},
 }

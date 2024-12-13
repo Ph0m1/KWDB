@@ -70,6 +70,8 @@ const (
 	compressAll
 	compressDB
 	compressTable
+	vacuum
+	alterVacuumInterval
 )
 
 // tsSchemaChangeResumer implements the jobs.Resumer interface for syncMetaCache
@@ -331,7 +333,7 @@ func (sw *TSSchemaChangeWorker) handleResult(
 				},
 			}
 			updateErr = p.handleSetTagValue(ctx, d.SNTable, insTable, syncErr)
-		case compress, deleteExpiredData, autonomy:
+		case compress, deleteExpiredData, autonomy, vacuum:
 			updateErr = p.handleSchedule(ctx, sw.job, syncErr)
 		default:
 		}
@@ -840,7 +842,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 			allNodePayloadInfos: [][]*sqlbase.SinglePayloadInfo{payInfo},
 		}
 		newPlanNode = tsIns
-	case compress, deleteExpiredData, autonomy:
+	case compress, deleteExpiredData, autonomy, vacuum:
 		log.Infof(ctx, "%s job start, jobID: %d", opType, sw.job.ID())
 		var desc []sqlbase.TableDescriptor
 		var allDesc []sqlbase.DescriptorProto
@@ -860,7 +862,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		for _, table := range allDesc {
 			tableDesc, ok := table.(*sqlbase.TableDescriptor)
 			// can not compress table if table has mutations
-			if d.Type == compress {
+			if d.Type == compress || d.Type == vacuum {
 				if ok && tableDesc.IsTSTable() && tableDesc.State == sqlbase.TableDescriptor_PUBLIC && len(tableDesc.Mutations) == 0 {
 					desc = append(desc, *tableDesc)
 				}
@@ -1045,6 +1047,8 @@ func getDDLOpType(op int32) string {
 		return "alter compress interval"
 	case autonomy:
 		return "autonomy"
+	case vacuum:
+		return "vacuum"
 	}
 	return ""
 }

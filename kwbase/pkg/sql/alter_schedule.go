@@ -44,6 +44,8 @@ const (
 	ScheduleRetention = "scheduled_table_retention"
 	// ScheduleAutonomy is the name of scheduled_table_autonomy
 	ScheduleAutonomy = "scheduled_table_autonomy"
+	// ScheduleVacuum is the name of scheduled_table_vacuum
+	ScheduleVacuum = "scheduled_table_vacuum"
 )
 
 var scheduledBackupOptionExpectValues = map[string]KVStringOptValidate{
@@ -151,7 +153,7 @@ func (n *alterScheduleNode) startExec(params runParams) error {
 	}
 	params.p.SetAuditTarget(0, string(n.n.ScheduleName), nil)
 	// if alter compress schedule interval, we should send this interval to AE.
-	if n.n.ScheduleName == ScheduleCompress {
+	if n.n.ScheduleName == ScheduleCompress || n.n.ScheduleName == ScheduleVacuum {
 		// get new compress interval
 		var duration int
 		// nextTime1,2,3, are used to calculate compress interval which will be sent
@@ -178,10 +180,15 @@ func (n *alterScheduleNode) startExec(params runParams) error {
 				nodeList = append(nodeList, n.Desc.NodeID)
 			}
 		}
-
-		d := jobspb.SyncMetaCacheDetails{Type: alterCompressInterval}
-		newPlanNode := &tsDDLNode{d: d, nodeID: nodeList, compressInterval: strconv.Itoa(duration)}
-		_, err = params.p.makeNewPlanAndRun(params.ctx, params.p.txn, newPlanNode)
+		var newPlanNode tsDDLNode
+		if n.n.ScheduleName == ScheduleCompress {
+			d := jobspb.SyncMetaCacheDetails{Type: alterCompressInterval}
+			newPlanNode = tsDDLNode{d: d, nodeID: nodeList, compressInterval: strconv.Itoa(duration)}
+		} else {
+			d := jobspb.SyncMetaCacheDetails{Type: alterVacuumInterval}
+			newPlanNode = tsDDLNode{d: d, nodeID: nodeList, vacuumInterval: strconv.Itoa(duration)}
+		}
+		_, err = params.p.makeNewPlanAndRun(params.ctx, params.p.txn, &newPlanNode)
 		if err != nil {
 			return err
 		}

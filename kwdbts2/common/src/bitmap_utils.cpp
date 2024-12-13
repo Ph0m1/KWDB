@@ -186,6 +186,10 @@ bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
 }
 
 bool hasDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
+  return hasNonZeroBit(delete_flags, start_row, rows_count);
+}
+
+bool hasNonZeroBit(char* delete_flags, size_t start_row, size_t rows_count) {
   size_t byte_start = (start_row - 1) >> 3;
   size_t bit_start = (start_row - 1) & 7;
   size_t byte_end = (start_row - 1 + rows_count - 1) >> 3;
@@ -194,7 +198,11 @@ bool hasDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
   // in same byte
   if (byte_start == byte_end) {
     del_flag = 0;
-    if (((delete_flags[byte_start] >> bit_start) | del_flag) != del_flag) {
+    for (size_t i = bit_start; i <= bit_end; i++) {
+      del_flag <<= 1;
+      del_flag += 1;
+    }
+    if (((delete_flags[byte_start] >> bit_start) & del_flag) != 0) {
       return true;
     }
     return false;
@@ -208,7 +216,11 @@ bool hasDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
     bytes_length += 1;
   } else {
     del_flag = 0;
-    if (((delete_flags[byte_start] >> bit_start) | del_flag) != del_flag) {
+    for (size_t i = bit_start; i < 8; i++) {
+      del_flag <<= 1;
+      del_flag += 1;
+    }
+    if (((delete_flags[byte_start] >> bit_start) & del_flag) != 0) {
       return true;
     }
   }
@@ -217,7 +229,11 @@ bool hasDeleted(char* delete_flags, size_t start_row, size_t rows_count) {
     bytes_length += 1;
   } else {
     del_flag = 0;
-    if ((delete_flags[byte_end] | del_flag) != del_flag) {
+    for (size_t i = 0; i <= bit_end; i++) {
+      del_flag <<= 1;
+      del_flag += 1;
+    }
+    if ((delete_flags[byte_end] & del_flag) != 0) {
       return true;
     }
   }

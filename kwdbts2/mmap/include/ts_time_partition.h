@@ -36,6 +36,14 @@
 
 #define ENTITY_ITEM_LATCH_BUCKET_NUM 10
 
+extern int64_t g_vacuum_interval;
+
+enum class CompVacuumStatus{
+  NONE = 0,
+  COMPRESSING,
+  VACUUMING
+};
+
 bool ReachMetaMaxBlock(BLOCK_ID cur_block_id);
 
 
@@ -64,6 +72,11 @@ class TsTimePartition : public TSObject {
 
   void ScheduledCompress(timestamp64 ts, ErrorInfo& err_info);
 
+  bool TrySetCompVacuumStatus(CompVacuumStatus desired);
+
+  void ResetCompVacuumStatus();
+
+
  protected:
   string name_;
   string db_path_;
@@ -71,6 +84,7 @@ class TsTimePartition : public TSObject {
   string file_path_;
   bool cancel_vacuum_ = false;
   std::atomic<int> writing_count_{0};
+  std::atomic<CompVacuumStatus> comp_vacuum_status_{CompVacuumStatus::NONE};
 
   // root table with schema info in table root directory
   MMapRootTableManager*& root_table_manager_;
@@ -659,12 +673,8 @@ class TsTimePartition : public TSObject {
     meta_manager_.getEntityHeader()->data_deleted = false;
   }
 
-  bool ShouldVacuum() {
-    return meta_manager_.getEntityHeader()->data_disordered || meta_manager_.getEntityHeader()->data_deleted;
-  }
-
   // Check if there have been any recent modifications to the partition
-  bool IsModifiedRecent(const timestamp64& compress_ts) {
+  bool IsModifiedRecent() {
     if (nullptr == active_segment_) {
       return false;
     }
@@ -678,14 +688,14 @@ class TsTimePartition : public TSObject {
       newest_modify_time = meta_modify_time;
     }
 
-    if (newest_modify_time <= now() - g_compress_interval) {
+    if (newest_modify_time <= now() - g_vacuum_interval) {
       return false;
     }
     return true;
   }
 
   // Evaluate the partition can be vacuumed or not.
-  bool ShouldVacuum(const timestamp64& ts, uint32_t ts_version);
+  bool ShouldVacuum(uint32_t ts_version);
 
   /**
    * Create a temporary partition using specified parameters and version
@@ -696,10 +706,11 @@ class TsTimePartition : public TSObject {
   /**
    * Using ts_version to vacuum data, read ordered data from original partition and write into new tempory partition,
    * then use the temporary to replace the original.
-   * @param ts_version which version of data need to be vacuum
+   * @param ts_version vacuum data use specified ts version
+   * @param vacuum_result failed/canceled/finished
    * @return KStatus
    */
-  KStatus ProcessVacuum(const timestamp64& ts, uint32_t ts_version, VacuumStatus& vacuum_status);
+  KStatus Vacuum(uint32_t ts_version, VacuumStatus &vacuum_result);
 
   /**
    * Read partial data from the block item of the specified segment and convert it into ResultSet.

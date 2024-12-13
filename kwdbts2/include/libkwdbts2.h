@@ -189,11 +189,10 @@ TSStatus TSDropTsTable(TSEngine* engine, TSTableID tableId);
  * @brief Compress the segment whose maximum timestamp in the time series table is less than ts
  * @param[in] table_id id of the time series table
  * @param[in] ts A timestamp that needs to be compressed
- * @param[in] ts_version Reorganize the data into a certain schema version
  *
  * @return TSStatus
  */
-TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, KTimestamp ts, uint32_t ts_version);
+TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, KTimestamp ts);
 
 /**
  * @brief Compress all segments in the time series table
@@ -202,7 +201,9 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, KTimestamp ts, 
  *
  * @return TSStatus
  */
-TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id, uint32_t ts_version);
+TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID table_id);
+
+TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_version);
 
 TSStatus TSTableAutonomy(TSEngine* engine, TSTableID table_id);
 

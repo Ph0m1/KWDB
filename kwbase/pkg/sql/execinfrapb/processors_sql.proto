@@ -176,6 +176,8 @@ enum OperatorType {
   TsAlterCompressInterval = 18;
   TsAutonomy = 19;
   TsManualCompressTable = 20;
+  TsVacuum = 21;
+  TsAlterVacuumInterval = 22;
 }
 
 // TsInsertSelSpec build payLoads for TsInsert
@@ -267,6 +269,7 @@ message TsAlterProSpec {
   optional bytes compressInterval = 7;
   optional uint32 nextTSVersion = 8 [(gogoproto.nullable) = false];
   optional uint32 currentTSVersion = 9 [(gogoproto.nullable) = false];
+  optional bytes vacuumInterval = 10;
 }
 
 // IndexSkipTableReaderSpec is the specification for a table reader that

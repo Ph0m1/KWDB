@@ -30,6 +30,7 @@
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "lg_api.h"
 #include "mmap/mmap_string_column.h"
+#include "bitmap_utils.h"
 
 class MMapSegmentTable;
 
@@ -127,7 +128,7 @@ struct Batch {
   }
 
   // row_idx  start from 0
-  virtual void* getVarColData(k_uint32 row_idx) const { return 0; }
+  virtual void* getVarColData(k_uint32 row_idx) const { return nullptr; }
 
   virtual uint16_t getVarColDataLen(k_uint32 row_idx) const { return 0; }
 
@@ -157,6 +158,13 @@ struct Batch {
     static_cast<char*>(bitmap)[byte] |= (1 << bit);
     return KStatus::SUCCESS;
   }
+
+  bool hasNull() const {
+    if (bitmap == nullptr) {
+      return true;
+    }
+    return hasNonZeroBit(static_cast<char* >(bitmap), offset, count);
+  }
 };
 
 struct TagBatch : public Batch {
@@ -166,7 +174,7 @@ struct TagBatch : public Batch {
     data_length_ = data_len;
   }
 
-  virtual ~TagBatch() {
+  ~TagBatch() override {
     if (mem) {
       free(mem);
       mem = nullptr;
@@ -182,7 +190,7 @@ struct TagBatch : public Batch {
           data, data_len);
   }
 
-  KStatus isNull(k_uint32 row_idx, bool* is_null) const {
+  KStatus isNull(k_uint32 row_idx, bool* is_null) const override {
     if (mem == nullptr || row_idx >= count) {
       *is_null = true;
       return KStatus::FAIL;
@@ -191,7 +199,7 @@ struct TagBatch : public Batch {
     return KStatus::SUCCESS;
   }
 
-  KStatus setNull(uint32_t row_idx) {
+  KStatus setNull(uint32_t row_idx) override {
     if (row_idx >= count) {
       return KStatus::FAIL;
     }
@@ -225,7 +233,7 @@ struct VarTagBatch : public Batch {
     var_data_ptrs_.resize(count);
     m_blocks_.push_back(var_data_);
   }
-  virtual ~VarTagBatch() {
+  ~VarTagBatch() override {
     if (mem) {
       free(mem);
       mem = nullptr;
@@ -304,7 +312,7 @@ struct VarTagBatch : public Batch {
     return *reinterpret_cast<uint16_t*>((intptr_t)var_data_ptrs_[row_idx]);
   }
 
-  KStatus isNull(k_uint32 row_idx, bool* is_null) const {
+  KStatus isNull(k_uint32 row_idx, bool* is_null) const override {
     if (row_idx >= count) {
       *is_null = true;
       return KStatus::FAIL;
@@ -313,7 +321,7 @@ struct VarTagBatch : public Batch {
     return KStatus::SUCCESS;
   }
 
-  KStatus setNull(uint32_t row_idx) {
+  KStatus setNull(uint32_t row_idx) override {
     if (row_idx >= count) {
       return KStatus::FAIL;
     }
@@ -330,17 +338,17 @@ struct AggBatch : public Batch {
   AggBatch(std::shared_ptr<void> m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t) : Batch(m.get(), c, t), var_mem_(m) {}
 
   // row_idx  start from 0
-  KStatus isNull(k_uint32 row_idx, bool* is_null) const {
+  KStatus isNull(k_uint32 row_idx, bool* is_null) const override {
     *is_null = (count == 0) || (mem == nullptr);
     return KStatus::SUCCESS;
   }
 
-  void* getVarColData(uint32_t row_idx) const {
+  void* getVarColData(uint32_t row_idx) const override {
     if (!var_mem_) return nullptr;
     return reinterpret_cast<void*>((intptr_t)var_mem_.get() + sizeof(uint16_t));
   }
 
-  uint16_t getVarColDataLen(k_uint32 row_idx) const {
+  uint16_t getVarColDataLen(k_uint32 row_idx) const override {
     if (!var_mem_) return 0;
     return *reinterpret_cast<uint16_t*>(var_mem_.get());
   }
@@ -351,7 +359,7 @@ struct AggBatch : public Batch {
 struct VarColumnBatch : public Batch {
   VarColumnBatch(k_uint32 c, void* b, k_uint32 o, std::shared_ptr<MMapSegmentTable> t) : Batch(c, b, o, t) {}
 
-  ~VarColumnBatch() {
+  ~VarColumnBatch() override {
     var_data_mem_.clear();
   }
 
@@ -533,7 +541,7 @@ inline bool isSumType(DATATYPE type) {
 }
 
 inline DATATYPE getSumType(DATATYPE type) {
-  DATATYPE sum_type;
+  DATATYPE sum_type{INVALID};
   switch (type) {
     case INT8:
     case INT16:
@@ -552,7 +560,7 @@ inline DATATYPE getSumType(DATATYPE type) {
 }
 
 inline k_uint32 getSumSize(DATATYPE type) {
-  k_uint32 sum_size;
+  k_uint32 sum_size{0};
   switch (type) {
     case FLOAT:
     case INT8:

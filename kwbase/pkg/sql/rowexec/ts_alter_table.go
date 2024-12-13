@@ -48,6 +48,7 @@ type tsAlterTable struct {
 
 	partitionInterval uint64
 	compressInterval  []byte
+	vacuumInterval    []byte
 
 	notFirst             bool
 	alterTsColumnSuccess bool
@@ -77,6 +78,7 @@ func newTsAlterColumn(
 		newTSVersion:      tst.NextTSVersion,
 		partitionInterval: tst.PartitionInterval,
 		compressInterval:  tst.CompressInterval,
+		vacuumInterval:    tst.VacuumInterval,
 	}
 	if err := tat.Init(
 		tat,
@@ -164,6 +166,9 @@ func (tct *tsAlterTable) Start(ctx context.Context) context.Context {
 		tct.alterTsColumnSuccess = true
 	case execinfrapb.OperatorType_TsAlterCompressInterval:
 		tse.SetCompressInterval(tct.compressInterval)
+		tct.alterTsColumnSuccess = true
+	case execinfrapb.OperatorType_TsAlterVacuumInterval:
+		tse.SetVacuumInterval(tct.vacuumInterval)
 		tct.alterTsColumnSuccess = true
 	default:
 		tct.alterTsColumnSuccess = false

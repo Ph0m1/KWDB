@@ -686,14 +686,24 @@ KStatus TsEntityGroup::Drop(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
-                                uint32_t ts_version, ErrorInfo& err_info) {
+KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  ebt_manager_->Compress(ctx, ts, enable_vacuum, ts_version, err_info);
+  ebt_manager_->Compress(ctx, ts, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("TsEntityGroup::Compress error : %s", err_info.errmsg.c_str());
-    return KStatus::FAIL;
+    return FAIL;
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsEntityGroup::Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo &err_info) {
+  RW_LATCH_S_LOCK(drop_mutex_);
+  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
+  ebt_manager_->Vacuum(ctx, ts_version, err_info);
+  if (err_info.errcode < 0) {
+    LOG_ERROR("TsEntityGroup::Vacuum error : %s", err_info.errmsg.c_str());
+    return FAIL;
   }
   return KStatus::SUCCESS;
 }
@@ -1633,16 +1643,14 @@ KStatus TsTable::DropAll(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
-                          uint32_t ts_version, ErrorInfo& err_info) {
+KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info) {
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     err_info.setError(KWENOOBJ, "table not created");
     return KStatus::FAIL;
   }
 
-  bool isScheduledCompress = (ts != INT64_MAX);
-  if (isScheduledCompress) {
+  if (ts != INT64_MAX) {
     if (!entity_bt_manager_->TrySetCompressStatus(true)) {
       // If other threads are currently undergoing the compression process,
       // scheduled compression will be skipped to avoid concurrency issues.
@@ -1679,7 +1687,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_v
     if (!entity_group) {
       continue;
     }
-    s = entity_group->Compress(ctx, ts, enable_vacuum, ts_version, err_info);
+    s = entity_group->Compress(ctx, ts, err_info);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("TsTableRange compress failed : %s", tbl_sub_path_.c_str());
       break;
@@ -1687,6 +1695,36 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_v
   }
 
   entity_bt_manager_->SetCompressStatus(false);
+  return s;
+}
+
+KStatus TsTable::Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info) {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    err_info.setError(KWENOOBJ, "table not created");
+    return KStatus::FAIL;
+  }
+  KStatus s = KStatus::SUCCESS;
+  std::vector<std::shared_ptr<TsEntityGroup>> vacuum_entity_groups;
+  {
+    RW_LATCH_S_LOCK(entity_groups_mtx_);
+    Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+    // get all entity groups
+    for (auto& [fst, snd] : entity_groups_) {
+      vacuum_entity_groups.push_back(snd);
+    }
+  }
+
+  for (auto& entity_group : vacuum_entity_groups) {
+    if (!entity_group) {
+      continue;
+    }
+    s = entity_group->Vacuum(ctx, ts_version, err_info);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("TsTableRange vacuum failed : %s", tbl_sub_path_.c_str());
+      break;
+    }
+  }
   return s;
 }
 

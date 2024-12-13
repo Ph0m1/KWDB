@@ -199,7 +199,7 @@ vector<timestamp64> SubEntityGroupManager::GetPartitions(const KwTsSpan& ts_span
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
     LOG_WARN(" cannot found subgroup %u at sandbox %s.", subgroup_id, this->tbl_sub_path_.c_str());
-    return vector<timestamp64> ();
+    return {};
   }
   return sub_group->GetPartitions(ts_span);
 }
@@ -219,7 +219,7 @@ vector<TsTimePartition*> SubEntityGroupManager::GetPartitionTables(const KwTsSpa
   KWDB_DURATION(StStatistics::Get().get_partitions);
   TsSubEntityGroup* sub_group = GetSubGroup(subgroup_id, err_info, false);
   if (sub_group == nullptr) {
-    return vector<TsTimePartition*> ();
+    return {};
   }
   return sub_group->GetPartitionTables(ts_span, err_info);
 }
@@ -280,8 +280,7 @@ int SubEntityGroupManager::DropAll(bool is_force, ErrorInfo& err_info) {
   return 0;
 }
 
-void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts, bool enable_vacuum,
-                                     uint32_t ts_version, ErrorInfo& err_info) {
+void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info) {
   std::unordered_map<TsTimePartition*, TsSubEntityGroup*> compress_tables;
   // Gets all the compressible partitions in the [INT64_MIN, ts] time range under subgroup
   rdLock();
@@ -305,26 +304,7 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
       return;
     }
     TsTimePartition* p_table = it->first;
-    auto subgroup = it->second;
     if (p_table != nullptr && !compress_error) {
-      if (enable_vacuum) {
-        // data vacuum
-        std::string partition_path = p_table->GetPath();
-        VacuumStatus vacuum_status{VacuumStatus::NOT_BEGIN};
-        KStatus s = p_table->ProcessVacuum(compress_ts, ts_version, vacuum_status);
-        if (s != SUCCESS) {
-          LOG_ERROR("Failed Vacuum in partition [%s]", partition_path.c_str());
-        } else {
-          if (vacuum_status == VacuumStatus::CANCEL) {
-            LOG_INFO("Cancel vacuum in partition [%s]", partition_path.c_str());
-          } else if (vacuum_status == VacuumStatus::FINISH) {
-            LOG_INFO("Finish vacuum in partition [%s]", partition_path.c_str());
-          } else if (vacuum_status == VacuumStatus::FAILED) {
-            LOG_ERROR("Failed Vacuum in partition [%s]", partition_path.c_str());
-          }
-        }
-      }
-
       p_table->Compress(compress_ts, err_info);
       if (err_info.errcode < 0) {
         LOG_ERROR("MMapPartitionTable[%s] compress error : %s", p_table->path().c_str(), err_info.errmsg.c_str());
@@ -332,7 +312,55 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
       }
     }
     ReleaseTable(p_table);
-    it++;
+    ++it;
+  }
+
+  // Call partition table lru cache to eliminate after compression
+  rdLock();
+  for (auto & subgroup : subgroups_) {
+    subgroup.second->PartitionCacheEvict();
+  }
+  unLock();
+}
+
+void SubEntityGroupManager::Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo &err_info) {
+  std::unordered_map<TsTimePartition*, TsSubEntityGroup*> vacuum_tables;
+  rdLock();
+  for (auto& [fst, snd] : subgroups_) {
+    vector<TsTimePartition*> p_tables = snd->GetPartitionTables({INT64_MIN, INT64_MAX}, err_info);
+    if (err_info.errcode < 0) {
+      LOG_ERROR("SubEntityGroupManager GetPartitionTable error : %s", err_info.errmsg.c_str());
+      break;
+    }
+    for (auto p_table : p_tables) {
+      vacuum_tables.insert({p_table, snd});
+    }
+  }
+  unLock();
+
+  bool vacuum_error = false;
+  for (auto it = vacuum_tables.begin(); it != vacuum_tables.end();) {
+    TsTimePartition* p_table = it->first;
+    if (p_table != nullptr && !vacuum_error) {
+      // data vacuum
+      std::string partition_path = p_table->GetPath();
+      VacuumStatus vacuum_status{VacuumStatus::NOT_BEGIN};
+      KStatus s = p_table->Vacuum(ts_version, vacuum_status);
+      if (s != SUCCESS) {
+        LOG_ERROR("Failed Vacuum in partition [%s]", partition_path.c_str());
+        vacuum_error = true;
+      } else {
+        if (vacuum_status == VacuumStatus::CANCEL) {
+          LOG_INFO("Cancel vacuum in partition [%s]", partition_path.c_str());
+        } else if (vacuum_status == VacuumStatus::FINISH) {
+          LOG_INFO("Finish vacuum in partition [%s]", partition_path.c_str());
+        } else if (vacuum_status == VacuumStatus::FAILED) {
+          LOG_ERROR("Failed Vacuum in partition [%s]", partition_path.c_str());
+        }
+      }
+    }
+    ReleaseTable(p_table);
+    ++it;
   }
 
   // Call partition table lru cache to eliminate after compression

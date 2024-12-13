@@ -42,6 +42,8 @@ type tsDDLNode struct {
 	tsTxn
 	// compressInterval is set if stmt is alter compress interval
 	compressInterval string
+	// vacuumInterval is set if stmt is alter vacuum interval
+	vacuumInterval string
 }
 
 // tsTxn is used to record ts txn ID and txn event

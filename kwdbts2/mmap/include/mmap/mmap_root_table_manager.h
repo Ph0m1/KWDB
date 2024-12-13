@@ -51,7 +51,8 @@ protected:
   // Partition interval.
   uint64_t partition_interval_;
   // Compression status.
-  std::atomic<bool> is_compressing_ = false;
+  std::atomic<bool> is_compressing_{false};
+  std::atomic<bool> is_vacuuming_{false};
   // Control delete data concurrency.
   TsHashLatch delete_data_latch_;
   // Stores mappings of all versions of the root table.

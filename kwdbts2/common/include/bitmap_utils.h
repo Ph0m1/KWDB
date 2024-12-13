@@ -83,3 +83,5 @@ bool isAllDeleted(char* delete_flags, size_t start_row, size_t rows_count);
  *
 */
 bool hasDeleted(char* delete_flags, size_t start_row, size_t rows_count);
+
+bool hasNonZeroBit(char* delete_flags, size_t start_row, size_t rows_count);

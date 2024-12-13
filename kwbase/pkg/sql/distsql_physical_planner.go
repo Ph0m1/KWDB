@@ -2536,6 +2536,8 @@ func (dsp *DistSQLPlanner) operateTSData(
 		tsPro.TsOperator = execinfrapb.OperatorType_TsDeleteExpiredData
 	case autonomy:
 		tsPro.TsOperator = execinfrapb.OperatorType_TsAutonomy
+	case vacuum:
+		tsPro.TsOperator = execinfrapb.OperatorType_TsVacuum
 	default:
 		return p, pgerror.New(pgcode.WrongObjectType, "operate type is not supported")
 	}
@@ -2689,6 +2691,12 @@ func (dsp *DistSQLPlanner) createTSDDL(planCtx *PlanningCtx, n *tsDDLNode) (Phys
 			var tsAlter = &execinfrapb.TsAlterProSpec{}
 			tsAlter.TsOperator = execinfrapb.OperatorType_TsAlterCompressInterval
 			tsAlter.CompressInterval = []byte(n.compressInterval)
+			proc.Spec.Core = execinfrapb.ProcessorCoreUnion{TsAlter: tsAlter}
+			p.TsOperator = tsAlter.TsOperator
+		case alterVacuumInterval:
+			var tsAlter = &execinfrapb.TsAlterProSpec{}
+			tsAlter.TsOperator = execinfrapb.OperatorType_TsAlterVacuumInterval
+			tsAlter.VacuumInterval = []byte(n.vacuumInterval)
 			proc.Spec.Core = execinfrapb.ProcessorCoreUnion{TsAlter: tsAlter}
 			p.TsOperator = tsAlter.TsOperator
 		default:

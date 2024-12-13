@@ -177,7 +177,8 @@ func (n *noopProcessor) handleMetaForTs(meta *execinfrapb.ProducerMetadata) (Nee
 			meta.TsInsert.DedupRows = n.DedupRows
 		}
 	case execinfrapb.OperatorType_TsDropTsTable, execinfrapb.OperatorType_TsDropDeleteEntities,
-		execinfrapb.OperatorType_TsDeleteExpiredData, execinfrapb.OperatorType_TsCompressTsTable:
+		execinfrapb.OperatorType_TsDeleteExpiredData, execinfrapb.OperatorType_TsCompressTsTable,
+		execinfrapb.OperatorType_TsVacuum:
 		// n.InputNum > 1: Collect multi node information.
 		if n.InputNum > 1 {
 			if meta.TsPro != nil {

@@ -236,9 +236,9 @@ class TsTable {
    *
    * @return KStatus
    */
-  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
-                           uint32_t ts_version, ErrorInfo& err_info);
+  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info);
 
+  virtual KStatus Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info);
 
   std::string GetStoreDirectory() {
     return db_path_ + tbl_sub_path_;
@@ -571,12 +571,12 @@ class TsEntityGroup {
    * @param[in] ctx Database Context
    * @param[in] ts A timestamp that needs to be compressed. If ts=INT64_MAX,
    *            all segments will be compressed, including the current one.
-   * @param[in] enable_vacuum Whether to start vacuum
    *
    * @return KStatus
    */
-  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, bool enable_vacuum,
-                           uint32_t ts_version, ErrorInfo& err_info);
+  virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info);
+
+  virtual KStatus Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info);
 
   /**
    * @brief Write entity tags values and support tag value modification.
