@@ -369,3 +369,22 @@ func ShowCreateInstanceTable(
 	}
 	return f.CloseAndGetString()
 }
+
+// delegateShowCreate rewrites ShowCreate statement to select statement which returns
+// database_name, create_statement from pg_catalog.pg_database
+func (d *delegator) delegateShowCreateDatabase(n *tree.ShowCreateDatabase) (tree.Statement, error) {
+	sqltelemetry.IncrementShowCounter(sqltelemetry.Create)
+	const showCreateQuery = `select datname as database_name, datstatement as create_statement from pg_catalog.pg_database where datname = '%[1]s'`
+
+	flags := cat.Flags{AvoidDescriptorCaches: true, NoTableStats: true}
+	database, err := d.catalog.ResolveDatabase(d.ctx, flags, n.Database.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := d.catalog.CheckAnyPrivilege(d.ctx, database); err != nil {
+		return nil, err
+	}
+	query := fmt.Sprintf(showCreateQuery, n.Database.String())
+
+	return parse(query)
+}

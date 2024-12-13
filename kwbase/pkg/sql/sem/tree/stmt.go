@@ -1489,6 +1489,18 @@ func (*ShowCreate) StatementTag() string { return "SHOW CREATE" }
 func (*ShowCreate) StatTargetType() string { return "" }
 
 // StatementType implements the Statement interface.
+func (*ShowCreateDatabase) StatementType() StatementType { return Rows }
+
+// StatOp implements the StatOp interface.
+func (*ShowCreateDatabase) StatOp() string { return "" }
+
+// StatementTag returns a short string identifying the type of statement.
+func (*ShowCreateDatabase) StatementTag() string { return "SHOW CREATE DATABASE" }
+
+// StatTargetType implements the StatTargetType interface.
+func (*ShowCreateDatabase) StatTargetType() string { return "" }
+
+// StatementType implements the Statement interface.
 func (*ShowBackup) StatementType() StatementType { return Rows }
 
 // StatOp implements the StatOp interface.
@@ -2070,6 +2082,7 @@ func (n *ShowClusterSettingList) String() string         { return AsString(n) }
 func (n *ShowColumns) String() string                    { return AsString(n) }
 func (n *ShowConstraints) String() string                { return AsString(n) }
 func (n *ShowCreate) String() string                     { return AsString(n) }
+func (n *ShowCreateDatabase) String() string             { return AsString(n) }
 func (n *ShowDatabases) String() string                  { return AsString(n) }
 func (n *ShowFunction) String() string                   { return AsString(n) }
 func (n *ShowSchedule) String() string                   { return AsString(n) }

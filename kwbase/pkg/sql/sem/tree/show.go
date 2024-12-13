@@ -595,6 +595,17 @@ func (node *ShowCreate) Format(ctx *FmtCtx) {
 	ctx.FormatNode(node.Name)
 }
 
+// ShowCreateDatabase represents a SHOW CREATE DATABASE statement.
+type ShowCreateDatabase struct {
+	Database Name
+}
+
+// Format implements the NodeFormatter interface.
+func (node *ShowCreateDatabase) Format(ctx *FmtCtx) {
+	ctx.WriteString("SHOW CREATE DATABASE ")
+	ctx.FormatNode(&node.Database)
+}
+
 // ShowSyntax represents a SHOW SYNTAX statement.
 // This the most lightweight thing that can be done on a statement
 // server-side: just report the statement that was entered without

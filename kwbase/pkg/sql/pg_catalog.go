@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1129,12 +1130,14 @@ CREATE TABLE pg_catalog.pg_database (
 	datfrozenxid INT8,
 	datminmxid INT8,
 	dattablespace OID,
-	datacl STRING[]
+	datacl STRING[],
+	datstatement STRING
 )`,
 	populate: func(ctx context.Context, p *planner, _ *DatabaseDescriptor, addRow func(...tree.Datum) error) error {
 		return forEachDatabaseDesc(ctx, p, nil /*all databases*/, false, /* requiresPrivileges */
 			func(db *sqlbase.DatabaseDescriptor) error {
 				databaseType := tree.NewDString(tree.EngineName(db.EngineType))
+				stmt := showCreateDatabase(db)
 
 				return addRow(
 					defaultOid(db.ID),      // oid
@@ -1154,6 +1157,7 @@ CREATE TABLE pg_catalog.pg_database (
 					tree.DNull,                 // datminmxid
 					oidZero,                    // dattablespace
 					tree.DNull,                 // datacl
+					tree.NewDString(stmt),      // datstatement
 				)
 			})
 	},
@@ -3125,4 +3129,26 @@ func stringOid(s string) *tree.DOid {
 	h := makeOidHasher()
 	h.writeStr(s)
 	return h.getOid()
+}
+
+// showCreateDatabase build database create statement with db desc
+func showCreateDatabase(db *DatabaseDescriptor) string {
+	f := tree.NewFmtCtx(tree.FmtSimple)
+	f.WriteString("CREATE ")
+	if db.EngineType == tree.EngineTypeTimeseries {
+		f.WriteString("TS DATABASE ")
+		f.WriteString(db.Name)
+		f.WriteString("\n\t")
+		f.WriteString(" retentions ")
+		f.WriteString(strconv.Itoa(int(db.TsDb.Lifetime)))
+		f.WriteString("s ")
+		f.WriteString("\n\t")
+		f.WriteString(" partition interval ")
+		f.WriteString(strconv.Itoa(int(db.TsDb.PartitionInterval / 86400)))
+		f.WriteString("d ")
+	} else if db.EngineType == tree.EngineTypeRelational {
+		f.WriteString("DATABASE ")
+		f.WriteString(db.Name)
+	}
+	return f.CloseAndGetString()
 }

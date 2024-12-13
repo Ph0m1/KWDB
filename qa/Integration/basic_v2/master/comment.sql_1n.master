@@ -2260,7 +2260,10 @@ SQLSTATE: 42809
                          |     code1 INT2 NOT NULL,
                          |     code8 VARCHAR(128) NOT NULL,
                          |     code14 CHAR(1023) NOT NULL,
-                         |     code16 NCHAR(254) NOT NULL ) PRIMARY TAGS(code1, code8, code14, code16);
+                         |     code16 NCHAR(254) NOT NULL ) PRIMARY TAGS(code1, code8, code14, code16)
+                         |     retentions 0s
+                         |     activetime 0s
+                         |     partition interval 10d ;
                          | COMMENT ON TABLE t1 IS '《!!database TEST中文英文TABLE!!》';
                          | COMMENT ON COLUMN t1.k_timestamp IS '《!!database TEST中文英文COLUMN-k_timestamp!!》';
                          | COMMENT ON COLUMN t1.code1 IS '《!!database TEST中文英文COLUMN-code1!!》';

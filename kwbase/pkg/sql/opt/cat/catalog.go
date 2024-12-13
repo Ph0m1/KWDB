@@ -96,6 +96,10 @@ type Catalog interface {
 	// be safely copied or used across goroutines.
 	ResolveSchema(ctx context.Context, flags Flags, name *SchemaName) (Schema, SchemaName, error)
 
+	// ResolveDatabase locates a database with the given name and returns it
+	// along with the resolved Database.
+	ResolveDatabase(ctx context.Context, flags Flags, name string) (Database, error)
+
 	// ResolveDataSource locates a data source with the given name and returns it
 	// along with the resolved DataSourceName.
 	//

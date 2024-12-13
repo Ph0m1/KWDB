@@ -53,8 +53,9 @@ const (
 
 // Catalog implements the cat.Catalog interface for testing purposes.
 type Catalog struct {
-	testSchema Schema
-	counter    int
+	testDatabase Database
+	testSchema   Schema
+	counter      int
 }
 
 type dataSource interface {
@@ -112,6 +113,17 @@ func (tc *Catalog) ResolveSchema(
 	toResolve.CatalogName = tree.Name(testDB)
 	toResolve.SchemaName = tree.PublicSchemaName
 	return tc.resolveSchema(&toResolve)
+}
+
+// ResolveDatabase is part of the cat.Catalog interface.
+func (tc *Catalog) ResolveDatabase(
+	_ context.Context, _ cat.Flags, name string,
+) (cat.Database, error) {
+	if name != testDB {
+		return nil, pgerror.Newf(pgcode.InvalidSchemaName,
+			"target database or schema does not exist")
+	}
+	return &tc.testDatabase, nil
 }
 
 // ReleaseTables is part of the cat.Catalog interface.
@@ -429,6 +441,29 @@ func (tc *Catalog) qualifyTableName(name *tree.TableName) {
 	// Use the current database.
 	name.CatalogName = testDB
 	name.SchemaName = tree.PublicSchemaName
+}
+
+// Database implements the cat.Database interface for testing purposes.
+type Database struct {
+	databaseID cat.StableID
+}
+
+var _ cat.Database = &Database{}
+
+// ID is part of the cat.Object interface.
+func (d *Database) ID() cat.StableID {
+	return d.databaseID
+}
+
+// PostgresDescriptorID is part of the cat.Object interface.
+func (d *Database) PostgresDescriptorID() cat.StableID {
+	return d.databaseID
+}
+
+// Equals is part of the cat.Object interface.
+func (d *Database) Equals(other cat.Object) bool {
+	otherDatabase, ok := other.(*Database)
+	return ok && d.databaseID == otherDatabase.databaseID
 }
 
 // Schema implements the cat.Schema interface for testing purposes.

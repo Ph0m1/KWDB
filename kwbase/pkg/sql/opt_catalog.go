@@ -92,6 +92,28 @@ func (oc *optCatalog) reset() {
 	}
 }
 
+// optDatabase is a wrapper around sqlbase.DatabaseDescriptor that implements the
+// cat.Object and cat.Database interfaces.
+type optDatabase struct {
+	desc *sqlbase.DatabaseDescriptor
+}
+
+// ID is part of the cat.Object interface.
+func (os *optDatabase) ID() cat.StableID {
+	return cat.StableID(os.desc.GetID())
+}
+
+// PostgresDescriptorID is part of the cat.Object interface.
+func (os *optDatabase) PostgresDescriptorID() cat.StableID {
+	return cat.StableID(os.desc.ID)
+}
+
+// Equals is part of the cat.Object interface.
+func (os *optDatabase) Equals(other cat.Object) bool {
+	otherDatabase, ok := other.(*optDatabase)
+	return ok && os.desc.ID == otherDatabase.desc.ID
+}
+
 // optSchema is a wrapper around sqlbase.DatabaseDescriptor that implements the
 // cat.Object and cat.Schema interfaces.
 type optSchema struct {
@@ -201,6 +223,26 @@ func (oc *optCatalog) ResetTxn(ctx context.Context) {
 	*oc.planner.txn = *newTxn
 }
 
+// ResolveDatabase is part of the cat.Catalog interface.
+func (oc *optCatalog) ResolveDatabase(
+	ctx context.Context, flags cat.Flags, name string,
+) (cat.Database, error) {
+	if flags.AvoidDescriptorCaches {
+		defer func(prev bool) {
+			oc.planner.avoidCachedDescriptors = prev
+		}(oc.planner.avoidCachedDescriptors)
+		oc.planner.avoidCachedDescriptors = true
+	}
+	db, err := oc.planner.ResolveUncachedDatabaseByName(ctx, name, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &optDatabase{
+		desc: db,
+	}, nil
+}
+
 // ResolveDataSource is part of the cat.Catalog interface.
 func (oc *optCatalog) ResolveDataSource(
 	ctx context.Context, flags cat.Flags, name *cat.DataSourceName,
@@ -264,6 +306,8 @@ func getDescForCatalogObject(o cat.Object) (sqlbase.DescriptorProto, error) {
 	case *optView:
 		return t.desc, nil
 	case *optSequence:
+		return t.desc, nil
+	case *optDatabase:
 		return t.desc, nil
 	default:
 		return nil, errors.AssertionFailedf("invalid object type: %T", o)

@@ -228,39 +228,32 @@ func ShowCreateTable(
 			f.WriteString(")")
 		}
 
-		if desc.TsTable.Downsampling != nil {
-			if len(desc.TsTable.Downsampling) > 0 {
-				f.WriteString("\n\t")
-				f.WriteString(" retentions ")
-				f.WriteString(desc.TsTable.Downsampling[0])
-				if len(desc.TsTable.Downsampling) > 1 {
-					if desc.TsTable.Downsampling != nil {
-						if len(desc.TsTable.Downsampling) > 0 {
-							f.WriteString("\n\t")
-							f.WriteString(" retentions ")
-							f.WriteString(desc.TsTable.Downsampling[0])
-							if len(desc.TsTable.Downsampling) > 1 {
-								f.WriteString("\n\t")
-								f.WriteString(" sample ")
-								f.WriteString(desc.TsTable.Downsampling[1])
-							}
-						}
-					}
-				}
-			}
+		f.WriteString("\n\t")
+		f.WriteString("retentions ")
+		if len(desc.TsTable.Downsampling) > 0 {
+			f.WriteString(desc.TsTable.Downsampling[0])
+		} else {
+			f.WriteString(strconv.Itoa(int(desc.TsTable.Lifetime)))
+			f.WriteString("s ")
 		}
+
+		f.WriteString("\n\t")
+		f.WriteString("activetime ")
 		if desc.TsTable.ActiveTimeInput != nil {
-			f.WriteString("\n\t")
-			f.WriteString(" activetime ")
 			f.WriteString(*desc.TsTable.ActiveTimeInput)
+		} else {
+			f.WriteString("0s")
 		}
 		if desc.TsTable.Sde {
 			f.WriteString(" DICT ENCODING")
 		}
+		f.WriteString("\n\t")
+		f.WriteString("partition interval ")
 		if desc.TsTable.PartitionIntervalInput != nil {
-			f.WriteString("\n\t")
-			f.WriteString(" partition interval ")
 			f.WriteString(*desc.TsTable.PartitionIntervalInput)
+		} else {
+			f.WriteString(strconv.Itoa(int(desc.TsTable.PartitionInterval / 86400)))
+			f.WriteString("d ")
 		}
 	}
 

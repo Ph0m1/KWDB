@@ -4472,6 +4472,10 @@ show_create_stmt:
     /* SKIP DOC */
     $$.val = &tree.ShowCreate{Name: $4.unresolvedObjectName()}
   }
+| SHOW CREATE DATABASE database_name
+  {
+    $$.val = &tree.ShowCreateDatabase{Database: tree.Name($4)}
+  }
 | SHOW CREATE error // SHOW HELP: SHOW CREATE
 
 create_kw:

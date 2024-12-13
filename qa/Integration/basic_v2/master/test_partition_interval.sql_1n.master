@@ -143,6 +143,9 @@ CREATE TABLE
                 |     a INT4 NULL
                 | ) TAGS (
                 |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
+                |     retentions 0s
+                |     activetime 0s
+                |     partition interval 10d
 (1 row)
 > SHOW CREATE TABLE tsdb.t1;
     table_name   |              create_statement
@@ -152,7 +155,9 @@ CREATE TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 15d
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 15d
 (1 row)
 > alter ts database tsdb set PARTITION INTERVAL = 15d; -- tsdb, t1: 15d, t:10d
 ALTER TS DATABASE
@@ -169,6 +174,9 @@ ALTER TS DATABASE
                 |     a INT4 NULL
                 | ) TAGS (
                 |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
+                |     retentions 0s
+                |     activetime 0s
+                |     partition interval 10d
 (1 row)
 > SHOW CREATE TABLE tsdb.t1;
     table_name   |              create_statement
@@ -178,7 +186,9 @@ ALTER TS DATABASE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 15d
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 15d
 (1 row)
 > alter table tsdb.t1 set PARTITION INTERVAL = 25d;  -- t1: 25d
 ALTER TABLE
@@ -192,7 +202,9 @@ CREATE TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 25d
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 25d
 (1 row)
 > SHOW CREATE TABLE tsdb.t2;
     table_name   |              create_statement
@@ -202,6 +214,9 @@ CREATE TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 15d
 (1 row)
 > alter table tsdb.t2 set PARTITION INTERVAL = 10s;  -- t2: 15d
 ERROR: unsupported partition interval unit: s
@@ -214,6 +229,9 @@ SQLSTATE: 22023
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 15d
 (1 row)
 > DROP database tsdb cascade;
 DROP DATABASE
@@ -234,6 +252,9 @@ CREATE TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 10d
 (1 row)
 > insert into tsdb.t1 values('2019-12-11 01:23:05', 1, 100);
 INSERT 1
@@ -281,7 +302,9 @@ ALTER TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 10d
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 10d
 (1 row)
 > insert into tsdb.t1 values('2019-12-04 01:23:04', 2, 200);
 INSERT 1
@@ -319,7 +342,9 @@ ALTER TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 1mon
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 1mon
 (1 row)
 > insert into tsdb.t1 values('2021-08-04 01:23:47', 3, 100);
 INSERT 1
@@ -343,7 +368,9 @@ ALTER TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 1d
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 1d
 (1 row)
 > insert into tsdb.t1 values('2020-08-04 01:23:12', 4, 100);
 INSERT 1
@@ -375,7 +402,9 @@ ALTER TABLE
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
-                 |      partition interval 2year
+                 |     retentions 0s
+                 |     activetime 0s
+                 |     partition interval 2year
 (1 row)
 > insert into tsdb.t1 values('2018-08-04 01:23:01', 5, 500);
 INSERT 1

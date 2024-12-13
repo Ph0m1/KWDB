@@ -42,4 +42,7 @@
                             |     sex CHAR(1023),
                             |     year NCHAR(1),
                             |     type NCHAR(254) ) PRIMARY TAGS(code1, flag, color)
+                            |     retentions 0s
+                            |     activetime 0s
+                            |     partition interval 10d
 (1 row)
