@@ -166,7 +166,7 @@ INSERT 1
              |     tag10 NCHAR(64) NOT NULL,
              |     tag11 VARBYTES(255) NOT NULL ) PRIMARY TAGS(tag4, tag5, tag8)
              |     retentions 0s
-             |     activetime 0s
+             |     activetime 1d
              |     partition interval 10d
 (1 row)
 > show create table tb1_1;
@@ -197,7 +197,7 @@ INSERT 1
              |     tag10 NCHAR(64) NOT NULL,
              |     tag11 VARBYTES(255) NOT NULL ) PRIMARY TAGS(tag1, tag2, tag3)
              |     retentions 0s
-             |     activetime 0s
+             |     activetime 1d
              |     partition interval 10d
 (1 row)
 > show create table tb2;
@@ -226,7 +226,7 @@ INSERT 1
              |     tag10 VARCHAR(255) NOT NULL,
              |     tag11 VARCHAR(255) NOT NULL ) PRIMARY TAGS(tag1, tag2, tag3)
              |     retentions 0s
-             |     activetime 0s
+             |     activetime 1d
              |     partition interval 10d
 (1 row)
 > show create table tb2_1;
@@ -255,7 +255,7 @@ INSERT 1
              |     tag10 VARCHAR(64) NOT NULL,
              |     tag11 VARCHAR(64) NOT NULL ) PRIMARY TAGS(tag10, tag11)
              |     retentions 0s
-             |     activetime 0s
+             |     activetime 1d
              |     partition interval 10d
 (1 row)
 > show columns from tb1;

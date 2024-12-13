@@ -19,7 +19,7 @@ INSERT 8
                      | ) TAGS (
                      |     t1_attribute VARCHAR(64) NOT NULL ) PRIMARY TAGS(t1_attribute)
                      |     retentions 0s
-                     |     activetime 0s
+                     |     activetime 1d
                      |     partition interval 10d
 (1 row)
 > create ts database db;
@@ -49,7 +49,7 @@ SQLSTATE: 23502
                      | ) TAGS (
                      |     t1_attribute VARCHAR(64) NOT NULL ) PRIMARY TAGS(t1_attribute)
                      |     retentions 0s
-                     |     activetime 0s
+                     |     activetime 1d
                      |     partition interval 10d
 (1 row)
 > show create table test.sjcx01;
@@ -64,7 +64,7 @@ SQLSTATE: 23502
                      | ) TAGS (
                      |     t1_attribute VARCHAR(64) NOT NULL ) PRIMARY TAGS(t1_attribute)
                      |     retentions 0s
-                     |     activetime 0s
+                     |     activetime 1d
                      |     partition interval 10d
 (1 row)
 > drop table test.sjcx01;

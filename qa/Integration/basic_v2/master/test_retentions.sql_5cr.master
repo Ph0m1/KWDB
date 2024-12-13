@@ -191,7 +191,7 @@ CREATE TABLE
                 | ) TAGS (
                 |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
                 |     retentions 0s
-                |     activetime 0s
+                |     activetime 1d
                 |     partition interval 10d
 (1 row)
 > create table tsdb.t1(ts timestamp not null, a int) tags(ptag int not null) primary tags(ptag) activetime 100d;

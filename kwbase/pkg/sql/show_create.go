@@ -234,7 +234,7 @@ func ShowCreateTable(
 			f.WriteString(desc.TsTable.Downsampling[0])
 		} else {
 			f.WriteString(strconv.Itoa(int(desc.TsTable.Lifetime)))
-			f.WriteString("s ")
+			f.WriteString("s")
 		}
 
 		f.WriteString("\n\t")
@@ -242,7 +242,7 @@ func ShowCreateTable(
 		if desc.TsTable.ActiveTimeInput != nil {
 			f.WriteString(*desc.TsTable.ActiveTimeInput)
 		} else {
-			f.WriteString("0s")
+			f.WriteString("1d")
 		}
 		if desc.TsTable.Sde {
 			f.WriteString(" DICT ENCODING")
@@ -253,7 +253,7 @@ func ShowCreateTable(
 			f.WriteString(*desc.TsTable.PartitionIntervalInput)
 		} else {
 			f.WriteString(strconv.Itoa(int(desc.TsTable.PartitionInterval / 86400)))
-			f.WriteString("d ")
+			f.WriteString("d")
 		}
 	}
 

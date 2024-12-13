@@ -769,7 +769,7 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 			// replace "\n"
 			restData[row][col] = strings.ReplaceAll(restData[row][col], "\n", "")
 			// replace "\t"
-			restData[row][col] = strings.ReplaceAll(restData[row][col], "\t", "")
+			restData[row][col] = strings.ReplaceAll(restData[row][col], "\t", " ")
 		}
 	}
 
