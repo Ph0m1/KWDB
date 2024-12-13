@@ -233,8 +233,6 @@ EEIteratorErrCode PostResolve::BuildBinaryTree(kwdbContext_p ctx,
 }
 
 Field *PostResolve::ResolveBinaryTree(kwdbContext_p ctx, ExprPtr expr) {
-  EnterFunc();
-
   Field *field = nullptr;
 
   do {
@@ -315,7 +313,7 @@ Field *PostResolve::ResolveBinaryTree(kwdbContext_p ctx, ExprPtr expr) {
     }
   } while (0);
 
-  Return(field);
+  return field;
 }
 
 Field *PostResolve::ResolveOperator(kwdbContext_p ctx, AstEleType operator_type,
