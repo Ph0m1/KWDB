@@ -2479,11 +2479,18 @@ int TsTimePartition::GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>&
         return -1;
       }
 
+      timestamp64 min_ts, max_ts;
+      GetBlkMinMaxTs(block_item, segment_tbl.get(), min_ts, max_ts);
+      if (!isTimestampInSpans(ts_spans, min_ts, max_ts) || !block_item->publish_row_count) {
+        continue;
+      }
+
       uint32_t first_row = 1;
+      bool all_within_spans = isTimestampWithinSpans(ts_spans, min_ts, max_ts);
       for (uint32_t i = 1; i <= block_item->publish_row_count; ++i) {
         MetricRowID row_id = block_item->getRowID(i);
         timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
-        if (!(CheckIfTsInSpan(cur_ts, ts_spans)) || !segment_tbl->IsRowVaild(block_item, i)) {
+        if ((!all_within_spans && !CheckIfTsInSpan(cur_ts, ts_spans)) || !segment_tbl->IsRowVaild(block_item, i)) {
           if (i > first_row) {
             reverse ? block_spans.push_front({block_item, first_row - 1, i - first_row}) :
                       block_spans.push_back({block_item, first_row - 1, i - first_row});

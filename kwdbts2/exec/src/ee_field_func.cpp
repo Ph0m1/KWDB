@@ -28,8 +28,6 @@
 
 namespace kwdbts {
 
-const k_int64 BASE_CONSTANT = 62135596800000;
-
 void FieldFuncOp::CalcStorageType() {
   for (k_int32 i = 0; i < arg_count_; ++i) {
     if (roachpb::DataType::FLOAT == args_[i]->get_storage_type() ||
@@ -693,16 +691,21 @@ k_int64 FieldFuncTimeBucket::ValInt() {
     return 0;
   }
   if (!var_interval_) {
-    // use 0000-01-01 00:00:00 as start
-    // -62135596800000 is the timestamp of 0000-01-01 00:00:00
     auto original_timestamp = args_[0]->ValInt();
-    KTimestampTz time_diff = time_zone_ * 3600000 + BASE_CONSTANT;
-    KTimestampTz bucket_start = (original_timestamp + time_diff) / interval_seconds_ * interval_seconds_;
-    // Negative timestamp needs to be rounded down
-    if (original_timestamp + time_diff < 0 && (original_timestamp + time_diff) % interval_seconds_ != 0) {
-      bucket_start -= interval_seconds_;
+    if (divisible_ && last_time_bucket_value_ != INT64_MIN && original_timestamp > last_time_bucket_value_ &&
+        original_timestamp < (last_time_bucket_value_ + interval_seconds_)) {
+      return last_time_bucket_value_;
+    } else {
+      // use 0000-01-01 00:00:00 as start
+      // -62135596800000 is the timestamp of 0000-01-01 00:00:00
+      KTimestampTz bucket_start = (original_timestamp + time_diff_) / interval_seconds_ * interval_seconds_;
+      // Negative timestamp needs to be rounded down
+      if (original_timestamp + time_diff_ < 0 && (original_timestamp + time_diff_) % interval_seconds_ != 0) {
+        bucket_start -= interval_seconds_;
+      }
+      last_time_bucket_value_ = bucket_start - time_diff_;
+      return last_time_bucket_value_;
     }
-    return bucket_start - time_diff;
   } else {
     // construct_variable calculate the start of time_bucket for year and month
     // use 0000-01-01 00:00:00 as start

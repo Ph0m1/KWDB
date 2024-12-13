@@ -115,14 +115,15 @@ class AggTableScanOperator : public TableScanOperator {
   void processGroupByColumn(char* source_ptr, char* target_ptr, uint32_t target_col,
                             bool is_dest_null, GroupByColumnInfo *group_by_cols, bool& is_new_group, k_int32 col_index) {
     if constexpr (std::is_same_v<T, std::string>) {
-      auto source_str = std::string_view{source_ptr};
+      auto source_str = String(source_ptr);
       k_uint32 len = source_str.length();
       if (is_dest_null) {
         is_new_group = true;
       } else {
         auto string_val_ptr = target_ptr + STRING_WIDE;
-        auto target_str = std::string_view{string_val_ptr};
-        if (source_str != target_str) {
+        k_uint16 typ_len = *static_cast<k_uint16*>(static_cast<void*>(target_ptr));
+        auto target_str = String(string_val_ptr, typ_len);
+        if (source_str.compare(target_str) != 0) {
           is_new_group = true;
         }
       }

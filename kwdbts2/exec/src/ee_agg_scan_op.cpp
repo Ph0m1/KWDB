@@ -200,7 +200,7 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
     if (!is_done_) {
       // If the result set is unordered, it is necessary to perform secondary
       // HASH aggregation on the basis of AGG SCAN.
-      if (disorder_ || handler->isDisorderedMetrics()) {
+      if (disorder_ || (!table_->ordered_scan_ && handler->isDisorderedMetrics())) {
         disorder_ = true;
         if (nullptr != current_data_chunk_) {
           current_data_chunk_->setDisorder(true);

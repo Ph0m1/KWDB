@@ -21,6 +21,8 @@
 
 namespace kwdbts {
 
+const k_int64 BASE_CONSTANT = 62135596800000;
+
 // typedef KString (*_str_fn)(Field **);
 // Base class for operations like '+', '-', '*', '/', '%'
 class FieldFuncOp : public FieldFunc {
@@ -228,6 +230,12 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
   explicit FieldFuncTimeBucket(std::list<Field *> fields, k_int8 tz) : FieldFuncOp(fields) {
     time_zone_ = tz;
     interval_seconds_ = getIntervalSeconds(var_interval_, year_bucket_, error_info_);
+    if (!var_interval_ && interval_seconds_ > 0) {
+      time_diff_ = time_zone_ * 3600000 + BASE_CONSTANT;
+      if (time_diff_ % interval_seconds_ == 0) {
+        divisible_ = true;
+      }
+    }
   }
   enum Functype functype() override { return TIME_BUCKET_FUNC; }
 
@@ -251,6 +259,9 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
   k_bool var_interval_{false};
   k_bool year_bucket_{false};
   std::string error_info_{""};
+  k_int64 last_time_bucket_value_{INT64_MIN};
+  k_bool divisible_{false};
+  k_int64 time_diff_{0};
 };
 
 class FieldFuncCastCheckTs : public FieldFunc {
