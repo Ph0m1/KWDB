@@ -34,7 +34,9 @@ TagVersionObject* TagTableVersionManager::CreateTagVersionObject(const std::vect
   if (version_obj != m_version_tables_.end()) {
      unLock();
      LOG_WARN("tag table version [%u] already exist.", ts_version);
-     return version_obj->second;
+     err_info.errmsg = "tag table version: " + std::to_string(ts_version) + " already exist.";
+     // if already exist,mean error
+     return nullptr;
   }
   TagVersionObject* tmp_obj = KNEW TagVersionObject(m_db_path_, m_tbl_sub_path_, m_table_id_, ts_version);
   if (tmp_obj && !tmp_obj->create(schema, err_info)) {

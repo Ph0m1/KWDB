@@ -388,7 +388,8 @@ int TagTable::AddNewPartitionVersion(const vector<TagInfo> &schema, uint32_t new
 
 int TagTable::AlterTableTag(AlterType alter_type, const AttributeInfo& attr_info,
                     uint32_t cur_version, uint32_t new_version, ErrorInfo& err_info) {
-  TableVersion latest_version = m_version_mgr_->GetCurrentTableVersion();
+  // get latest version
+  TableVersion latest_version = m_version_mgr_->GetNewestTableVersion();
   TagVersionObject* tag_ver_obj = m_version_mgr_->GetVersionObject(cur_version);
   if (nullptr == tag_ver_obj) {
     LOG_ERROR("tag version [%u] does not exist.", cur_version);
@@ -416,6 +417,8 @@ int TagTable::AlterTableTag(AlterType alter_type, const AttributeInfo& attr_info
         err_info.errmsg = "tag schema does not exist";
         return -1;
       } else if (latest_version >= new_version) {
+        LOG_WARN("new_version [%u] already exist, tag newest_version[%u]",
+              new_version, latest_version);
         return 0;
       }
       cur_schemas[col_idx].setFlag(AINFO_DROPPED);
@@ -492,7 +495,10 @@ void TagTable::sync_with_lsn(kwdbts::TS_LSN lsn) {
   TableVersion cur_tbl_version = this->GetTagTableVersionManager()->GetCurrentTableVersion();
   m_partition_mgr_->GetAllPartitionTablesLessVersion(all_parttables, cur_tbl_version);
   for (const auto& part_table : all_parttables) {
+    // add read lock
+    (void)part_table->startRead();
     part_table->sync_with_lsn(lsn);
+    (void)part_table->stopRead();
   }
   m_index_->setLSN(lsn);
   return ;
@@ -517,6 +523,13 @@ TagTuplePack* TagTable::GenTagPack(const char* primarytag, int len) {
 }
 
 int TagTable::undoAlterTagTable(uint32_t cur_version, uint32_t new_version, ErrorInfo& err_info) {
+  // 1. check version is valid
+  auto cur_tbl_version = m_version_mgr_->GetCurrentTableVersion();
+  if (cur_version < cur_tbl_version) {
+    LOG_WARN("Tag rollback version: %u  < committed version: %u ",
+              cur_version, cur_tbl_version);
+    return 0;
+  }
   auto newest_tbl_version = m_version_mgr_->GetNewestTableVersion();
   if (new_version > newest_tbl_version) {
     LOG_ERROR("Tag Table newest table version is %u < rollback version: %u ",

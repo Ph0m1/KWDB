@@ -2564,7 +2564,8 @@ KStatus TsTable::AlterTable(kwdbContext_p ctx, AlterType alter_type, roachpb::KW
     msg = "Unknown column/tag type";
     return s;
   }
-  LOG_INFO("AlterTable begin. table_id: %lu alter_type: %hhu ", table_id_, alter_type);
+  LOG_INFO("AlterTable begin. table_id: %lu alter_type: %hhu cur_version: %u new_version: %u is_general_tag: %d",
+          table_id_, alter_type, cur_version, new_version, attr_info.isAttrType(COL_GENERAL_TAG));
   if (alter_type == AlterType::ALTER_COLUMN_TYPE) {
     getDataTypeSize(attr_info);  // update max_len
   }
