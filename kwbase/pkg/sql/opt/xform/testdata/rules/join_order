@@ -31,20 +31,20 @@ CREATE TABLE abc (
 opt join-limit=3
 SELECT * FROM abc, bx, cy WHERE a = 1 AND abc.b = bx.b AND abc.c = cy.c
 ----
-inner-join (lookup bx)
+inner-join (lookup cy)
  ├── columns: a:1!null b:2!null c:3!null d:4 b:5!null x:6 c:7!null y:8
- ├── key columns: [2] = [5]
+ ├── key columns: [3] = [7]
  ├── lookup columns are key
  ├── cardinality: [0 - 1]
  ├── key: ()
  ├── fd: ()-->(1-8)
- ├── inner-join (lookup cy)
- │    ├── columns: a:1!null abc.b:2 abc.c:3!null d:4 cy.c:7!null y:8
- │    ├── key columns: [3] = [7]
+ ├── inner-join (lookup bx)
+ │    ├── columns: a:1!null abc.b:2!null abc.c:3 d:4 bx.b:5!null x:6
+ │    ├── key columns: [2] = [5]
  │    ├── lookup columns are key
  │    ├── cardinality: [0 - 1]
  │    ├── key: ()
- │    ├── fd: ()-->(1-4,7,8)
+ │    ├── fd: ()-->(1-6)
  │    ├── scan abc
  │    │    ├── columns: a:1!null abc.b:2 abc.c:3 d:4
  │    │    ├── constraint: /1: [/1 - /1]
@@ -444,17 +444,14 @@ WHERE
 project
  ├── columns: "?column?":7!null
  ├── fd: ()-->(7)
- ├── inner-join (hash)
+ ├── inner-join (cross)
  │    ├── columns: a1.id:1!null a2.id:2!null a3.id:3!null a4.id:4!null bool:6!null
  │    ├── key: (3)
  │    ├── fd: ()-->(2,4,6), (1)==(3), (3)==(1)
- │    ├── scan a3
- │    │    ├── columns: a3.id:3!null
- │    │    └── key: (3)
- │    ├── inner-join (cross)
- │    │    ├── columns: a1.id:1!null a2.id:2!null a4.id:4!null bool:6!null
- │    │    ├── key: (1)
- │    │    ├── fd: ()-->(2,4,6)
+ │    ├── inner-join (hash)
+ │    │    ├── columns: a1.id:1!null a3.id:3!null bool:6!null
+ │    │    ├── key: (3)
+ │    │    ├── fd: ()-->(6), (1)==(3), (3)==(1)
  │    │    ├── inner-join-apply
  │    │    │    ├── columns: a1.id:1!null bool:6!null
  │    │    │    ├── key: (1)
@@ -482,26 +479,29 @@ project
  │    │    │    │              └── true [as=bool:6]
  │    │    │    └── filters
  │    │    │         └── bool:6 [outer=(6), constraints=(/6: [/true - /true]; tight), fd=()-->(6)]
- │    │    ├── inner-join (cross)
- │    │    │    ├── columns: a2.id:2!null a4.id:4!null
+ │    │    ├── scan a3
+ │    │    │    ├── columns: a3.id:3!null
+ │    │    │    └── key: (3)
+ │    │    └── filters
+ │    │         └── a1.id:1 = a3.id:3 [outer=(1,3), constraints=(/1: (/NULL - ]; /3: (/NULL - ]), fd=(1)==(3), (3)==(1)]
+ │    ├── inner-join (cross)
+ │    │    ├── columns: a2.id:2!null a4.id:4!null
+ │    │    ├── cardinality: [0 - 1]
+ │    │    ├── key: ()
+ │    │    ├── fd: ()-->(2,4)
+ │    │    ├── scan a2
+ │    │    │    ├── columns: a2.id:2!null
+ │    │    │    ├── constraint: /2: [/1 - /1]
  │    │    │    ├── cardinality: [0 - 1]
  │    │    │    ├── key: ()
- │    │    │    ├── fd: ()-->(2,4)
- │    │    │    ├── scan a2
- │    │    │    │    ├── columns: a2.id:2!null
- │    │    │    │    ├── constraint: /2: [/1 - /1]
- │    │    │    │    ├── cardinality: [0 - 1]
- │    │    │    │    ├── key: ()
- │    │    │    │    └── fd: ()-->(2)
- │    │    │    ├── scan a4
- │    │    │    │    ├── columns: a4.id:4!null
- │    │    │    │    ├── constraint: /4: [/1 - /1]
- │    │    │    │    ├── cardinality: [0 - 1]
- │    │    │    │    ├── key: ()
- │    │    │    │    └── fd: ()-->(4)
- │    │    │    └── filters (true)
+ │    │    │    └── fd: ()-->(2)
+ │    │    ├── scan a4
+ │    │    │    ├── columns: a4.id:4!null
+ │    │    │    ├── constraint: /4: [/1 - /1]
+ │    │    │    ├── cardinality: [0 - 1]
+ │    │    │    ├── key: ()
+ │    │    │    └── fd: ()-->(4)
  │    │    └── filters (true)
- │    └── filters
- │         └── a1.id:1 = a3.id:3 [outer=(1,3), constraints=(/1: (/NULL - ]; /3: (/NULL - ]), fd=(1)==(3), (3)==(1)]
+ │    └── filters (true)
  └── projections
       └── 1 [as="?column?":7]

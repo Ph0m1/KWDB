@@ -1031,21 +1031,15 @@ func checkInsideOutOptApplicable(f *Factory, join *memo.InnerJoinExpr) (bool, bo
 		}
 	}
 
-	// here checks if it is a single column of a relation table
-	tagCols := checkTagColInFilter(f.Metadata(), join.On)
-	if tagCols.Empty() {
+	// check if the ts col on condition is a tag col
+	if !checkTagColInFilter(f.Metadata(), join.On) {
 		return false, false, nil
 	}
 
 	var tsEngineTable memo.RelExpr
 	tsEngineInLeft := true
-	tagCols.ForEach(func(col opt.ColumnID) {
-		if !join.Left.Relational().OutputCols.Contains(col) {
-			tsEngineInLeft = false
-		}
-	})
 
-	if tsEngineInLeft {
+	if typR == 1 {
 		tsEngineTable = join.Left
 	} else {
 		tsEngineTable = join.Right
@@ -1095,9 +1089,11 @@ func getAllEngine(input memo.RelExpr) int {
 	return ret
 }
 
-// checkTagColInFilter checks on filters whether it has tag col
-func checkTagColInFilter(meta *opt.Metadata, on memo.FiltersExpr) opt.ColSet {
-	var tsCols opt.ColSet
+// checkTagColInFilter checks if the ts col on condition is a tag col.
+// not allow normal ts col in the on filter, because it is inefficient.
+// allow no on filter.
+// allow no ts col in the on filter.
+func checkTagColInFilter(meta *opt.Metadata, on memo.FiltersExpr) bool {
 	for _, v := range on {
 		eq, ok1 := v.Condition.(*memo.EqExpr)
 		if !ok1 {
@@ -1115,17 +1111,17 @@ func checkTagColInFilter(meta *opt.Metadata, on memo.FiltersExpr) opt.ColSet {
 		}
 
 		if meta.IsSingleRelCol(lCol.Col) {
-			if meta.ColumnMeta(rCol.Col).IsTag() {
-				tsCols.Add(rCol.Col)
+			if meta.ColumnMeta(rCol.Col).TSType == opt.TSColNormal {
+				return false
 			}
 		} else if meta.IsSingleRelCol(rCol.Col) {
-			if meta.ColumnMeta(lCol.Col).IsTag() {
-				tsCols.Add(lCol.Col)
+			if meta.ColumnMeta(lCol.Col).TSType == opt.TSColNormal {
+				return false
 			}
 		}
 	}
 
-	return tsCols
+	return true
 }
 
 // getColIDOfParamOfAgg returns the col ID base on input.

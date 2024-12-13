@@ -193,7 +193,19 @@
         $innerPrivate:* & (NoJoinHintsAndLeadingTable $innerPrivate)
     )
     $right:* & (ShouldReorderJoins $left $right)
-    $on:*
+    $on:* & (AvoidAssociateCrossJoin
+        $right
+        $innerLeft
+        $innerOn
+        $boundOn:(ExtractBoundConditions
+                    $newOn:(MapJoinOpEqualities
+                              (ConcatFilters $on $innerOn)
+                              (OutputCols $innerLeft)
+                              $cols:(OutputCols2 $innerRight $right)
+                           )
+                    $cols
+                 )
+        )
     $private:* & (NoJoinHintsAndLeadingTable $private)
 )
 =>
@@ -202,16 +214,7 @@
     (InnerJoin
         $innerRight
         $right
-        (SortFilters
-            (ExtractBoundConditions
-                $newOn:(MapJoinOpEqualities
-                    (ConcatFilters $on $innerOn)
-                    (OutputCols $innerLeft)
-                    $cols:(OutputCols2 $innerRight $right)
-                )
-                $cols
-            )
-        )
+        (SortFilters $boundOn)
         (EmptyJoinPrivate)
     )
     (SortFilters (ExtractUnboundConditions $newOn $cols))

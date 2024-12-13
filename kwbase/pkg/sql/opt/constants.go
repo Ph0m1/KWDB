@@ -94,6 +94,7 @@ var TSHashScanMode = settings.RegisterPublicIntSetting(
 // -- 2. Scalar quantum query optimization
 // -- 3. inside-out push down aggregation optimization
 // -- 4. inside-out push down time_bucket optimization
+// -- 5. reduce explore cross join
 //
 // For example:
 // If you want to turn on
@@ -138,6 +139,9 @@ const (
 
 	// FilterOptOrder indicates that the order of filtering conditions will be optimized
 	FilterOptOrder = 1 << 3
+
+	// ReduceCrossJoinExplore use for avoid exploring invalid cross join.
+	ReduceCrossJoinExplore = 1 << 4
 )
 
 // TSOrderedTable ts get ordered table data

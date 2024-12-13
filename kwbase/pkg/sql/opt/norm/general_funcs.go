@@ -25,6 +25,7 @@
 package norm
 
 import (
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/constraint"
@@ -886,4 +887,19 @@ func (c *CustomFuncs) CanAddConstInts(first tree.Datum, second tree.Datum) bool 
 // IntConst constructs a Const holding a DInt.
 func (c *CustomFuncs) IntConst(d *tree.DInt) opt.ScalarExpr {
 	return c.f.ConstructConst(d, types.Int)
+}
+
+// NoJoinHints returns true if no hints were specified for this join.
+func (c *CustomFuncs) NoJoinHints(p *memo.JoinPrivate) bool {
+	return p.Flags.Empty() && !p.HintInfo.FromHintTree
+}
+
+// OpenOutsideIn returns true if there use outside-in.
+func (c *CustomFuncs) OpenOutsideIn() bool {
+	return c.f.evalCtx.SessionData.MultiModelEnabled
+}
+
+// GetValues returns the settings.Values.
+func (c *CustomFuncs) GetValues() *settings.Values {
+	return &c.f.evalCtx.Settings.SV
 }

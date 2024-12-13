@@ -705,57 +705,58 @@ CREATE TABLE
                                  │                                              | equality                                             | (l_partkey) = (p_partkey)
                                  ├── hash-join                                  |                                                      |
                                  │    │                                         | type                                                 | inner
-                                 │    │                                         | equality                                             | (l_suppkey, n_nationkey) = (s_suppkey, s_nationkey)
+                                 │    │                                         | equality                                             | (s_nationkey) = (n_nationkey)
                                  │    ├── hash-join                             |                                                      |
                                  │    │    │                                    | type                                                 | inner
-                                 │    │    │                                    | equality                                             | (o_orderkey) = (l_orderkey)
-                                 │    │    ├── hash-join                        |                                                      |
-                                 │    │    │    │                               | type                                                 | inner
-                                 │    │    │    │                               | equality                                             | (c_custkey) = (o_custkey)
-                                 │    │    │    ├── cross-join                  |                                                      |
-                                 │    │    │    │    │                          | type                                                 | cross
-                                 │    │    │    │    ├── synchronizer           |                                                      |
-                                 │    │    │    │    │    └── ts scan           |                                                      |
-                                 │    │    │    │    │                          | ts-table                                             | nation
-                                 │    │    │    │    │                          | access mode                                          | metaTable
-                                 │    │    │    │    └── hash-join              |                                                      |
-                                 │    │    │    │         │                     | type                                                 | inner
-                                 │    │    │    │         │                     | equality                                             | (c_nationkey) = (n_nationkey)
-                                 │    │    │    │         ├── synchronizer      |                                                      |
-                                 │    │    │    │         │    └── ts scan      |                                                      |
-                                 │    │    │    │         │                     | ts-table                                             | customer
-                                 │    │    │    │         │                     | access mode                                          | metaTable
-                                 │    │    │    │         └── hash-join         |                                                      |
-                                 │    │    │    │              │                | type                                                 | inner
-                                 │    │    │    │              │                | equality                                             | (n_regionkey) = (r_regionkey)
-                                 │    │    │    │              ├── synchronizer |                                                      |
-                                 │    │    │    │              │    └── ts scan |                                                      |
-                                 │    │    │    │              │                | ts-table                                             | nation
-                                 │    │    │    │              │                | access mode                                          | metaTable
-                                 │    │    │    │              └── synchronizer |                                                      |
-                                 │    │    │    │                   └── ts scan |                                                      |
-                                 │    │    │    │                               | ts-table                                             | region
-                                 │    │    │    │                               | access mode                                          | metaTable
-                                 │    │    │    │                               | filter                                               | r_name = 'AMERICA'
-                                 │    │    │    └── synchronizer                |                                                      |
-                                 │    │    │         └── ts scan                |                                                      |
-                                 │    │    │                                    | ts-table                                             | orders
+                                 │    │    │                                    | equality                                             | (s_suppkey) = (l_suppkey)
+                                 │    │    ├── synchronizer                     |                                                      |
+                                 │    │    │    └── ts scan                     |                                                      |
+                                 │    │    │                                    | ts-table                                             | supplier
                                  │    │    │                                    | access mode                                          | metaTable
-                                 │    │    │                                    | filter                                               | (o_orderdate >= '1995-01-01 00:00:00+00:00') AND (o_orderdate <= '1996-12-31 00:00:00+00:00')
-                                 │    │    └── synchronizer                     |                                                      |
-                                 │    │         └── ts scan                     |                                                      |
-                                 │    │                                         | ts-table                                             | lineitem
+                                 │    │    └── hash-join                        |                                                      |
+                                 │    │         │                               | type                                                 | inner
+                                 │    │         │                               | equality                                             | (l_orderkey) = (o_orderkey)
+                                 │    │         ├── synchronizer                |                                                      |
+                                 │    │         │    └── ts scan                |                                                      |
+                                 │    │         │                               | ts-table                                             | lineitem
+                                 │    │         │                               | access mode                                          | metaTable
+                                 │    │         └── hash-join                   |                                                      |
+                                 │    │              │                          | type                                                 | inner
+                                 │    │              │                          | equality                                             | (o_custkey) = (c_custkey)
+                                 │    │              ├── synchronizer           |                                                      |
+                                 │    │              │    └── ts scan           |                                                      |
+                                 │    │              │                          | ts-table                                             | orders
+                                 │    │              │                          | access mode                                          | metaTable
+                                 │    │              │                          | filter                                               | (o_orderdate >= '1995-01-01 00:00:00+00:00') AND (o_orderdate <= '1996-12-31 00:00:00+00:00')
+                                 │    │              └── hash-join              |                                                      |
+                                 │    │                   │                     | type                                                 | inner
+                                 │    │                   │                     | equality                                             | (c_nationkey) = (n_nationkey)
+                                 │    │                   ├── synchronizer      |                                                      |
+                                 │    │                   │    └── ts scan      |                                                      |
+                                 │    │                   │                     | ts-table                                             | customer
+                                 │    │                   │                     | access mode                                          | metaTable
+                                 │    │                   └── hash-join         |                                                      |
+                                 │    │                        │                | type                                                 | inner
+                                 │    │                        │                | equality                                             | (n_regionkey) = (r_regionkey)
+                                 │    │                        ├── synchronizer |                                                      |
+                                 │    │                        │    └── ts scan |                                                      |
+                                 │    │                        │                | ts-table                                             | nation
+                                 │    │                        │                | access mode                                          | metaTable
+                                 │    │                        └── synchronizer |                                                      |
+                                 │    │                             └── ts scan |                                                      |
+                                 │    │                                         | ts-table                                             | region
                                  │    │                                         | access mode                                          | metaTable
+                                 │    │                                         | filter                                               | r_name = 'AMERICA'
                                  │    └── synchronizer                          |                                                      |
                                  │         └── ts scan                          |                                                      |
-                                 │                                              | ts-table                                             | supplier
+                                 │                                              | ts-table                                             | nation
                                  │                                              | access mode                                          | metaTable
                                  └── synchronizer                               |                                                      |
                                       └── ts scan                               |                                                      |
                                                                                 | ts-table                                             | part
                                                                                 | access mode                                          | metaTable
                                                                                 | filter                                               | p_type = 'SMALL POLISHED STEEL'
-(77 rows)
+(78 rows)
 > explain select
             nation,
             o_year,
@@ -810,41 +811,42 @@ CREATE TABLE
                        │                                    | equality    | (l_partkey) = (p_partkey)
                        ├── hash-join                        |             |
                        │    │                               | type        | inner
-                       │    │                               | equality    | (l_suppkey, n_nationkey) = (s_suppkey, s_nationkey)
-                       │    ├── cross-join                  |             |
-                       │    │    │                          | type        | cross
-                       │    │    ├── synchronizer           |             |
-                       │    │    │    └── ts scan           |             |
-                       │    │    │                          | ts-table    | nation
-                       │    │    │                          | access mode | metaTable
-                       │    │    └── hash-join              |             |
-                       │    │         │                     | type        | inner
-                       │    │         │                     | equality    | (o_orderkey) = (l_orderkey)
-                       │    │         ├── synchronizer      |             |
-                       │    │         │    └── ts scan      |             |
-                       │    │         │                     | ts-table    | orders
-                       │    │         │                     | access mode | metaTable
-                       │    │         └── hash-join         |             |
-                       │    │              │                | type        | inner
-                       │    │              │                | equality    | (ps_suppkey, ps_partkey) = (l_suppkey, l_partkey)
-                       │    │              ├── synchronizer |             |
-                       │    │              │    └── ts scan |             |
-                       │    │              │                | ts-table    | partsupp
-                       │    │              │                | access mode | metaTable
-                       │    │              └── synchronizer |             |
-                       │    │                   └── ts scan |             |
-                       │    │                               | ts-table    | lineitem
+                       │    │                               | equality    | (n_nationkey) = (s_nationkey)
+                       │    ├── synchronizer                |             |
+                       │    │    └── ts scan                |             |
+                       │    │                               | ts-table    | nation
                        │    │                               | access mode | metaTable
-                       │    └── synchronizer                |             |
-                       │         └── ts scan                |             |
-                       │                                    | ts-table    | supplier
+                       │    └── hash-join                   |             |
+                       │         │                          | type        | inner
+                       │         │                          | equality    | (s_suppkey) = (l_suppkey)
+                       │         ├── synchronizer           |             |
+                       │         │    └── ts scan           |             |
+                       │         │                          | ts-table    | supplier
+                       │         │                          | access mode | metaTable
+                       │         └── hash-join              |             |
+                       │              │                     | type        | inner
+                       │              │                     | equality    | (o_orderkey) = (l_orderkey)
+                       │              ├── synchronizer      |             |
+                       │              │    └── ts scan      |             |
+                       │              │                     | ts-table    | orders
+                       │              │                     | access mode | metaTable
+                       │              └── hash-join         |             |
+                       │                   │                | type        | inner
+                       │                   │                | equality    | (l_suppkey, l_partkey) = (ps_suppkey, ps_partkey)
+                       │                   ├── synchronizer |             |
+                       │                   │    └── ts scan |             |
+                       │                   │                | ts-table    | lineitem
+                       │                   │                | access mode | metaTable
+                       │                   └── synchronizer |             |
+                       │                        └── ts scan |             |
+                       │                                    | ts-table    | partsupp
                        │                                    | access mode | metaTable
                        └── synchronizer                     |             |
                             └── ts scan                     |             |
                                                             | ts-table    | part
                                                             | access mode | metaTable
                                                             | filter      | p_name LIKE '%firebrick%'
-(54 rows)
+(55 rows)
 > explain select
             c_custkey,
             c_name,
@@ -2499,14 +2501,13 @@ CREATE STATISTICS
    │                                                                            | mkt_share                                            | sum / sum
    └── limit                                                                    |                                                      |
         │                                                                       | count                                                | 1
-        └── group                                                               |                                                      |
-             │                                                                  | aggregate 0                                          | o_year
-             │                                                                  | aggregate 1                                          | sum(CASE WHEN nation = 'CANADA' THEN volume ELSE 0.0 END)
-             │                                                                  | aggregate 2                                          | sum(volume)
-             │                                                                  | group by                                             | o_year
-             │                                                                  | ordered                                              | +o_year
-             └── sort                                                           |                                                      |
-                  │                                                             | order                                                | +o_year
+        └── sort                                                                |                                                      |
+             │                                                                  | order                                                | +o_year
+             └── group                                                          |                                                      |
+                  │                                                             | aggregate 0                                          | o_year
+                  │                                                             | aggregate 1                                          | sum(CASE WHEN nation = 'CANADA' THEN volume ELSE 0.0 END)
+                  │                                                             | aggregate 2                                          | sum(volume)
+                  │                                                             | group by                                             | o_year
                   └── render                                                    |                                                      |
                        │                                                        | CASE WHEN nation = 'CANADA' THEN volume ELSE 0.0 END | CASE WHEN n_name = 'CANADA' THEN volume ELSE 0.0 END
                        │                                                        | o_year                                               | o_year
@@ -2520,49 +2521,49 @@ CREATE STATISTICS
                                  │                                              | equality                                             | (l_partkey) = (p_partkey)
                                  ├── hash-join                                  |                                                      |
                                  │    │                                         | type                                                 | inner
-                                 │    │                                         | equality                                             | (l_suppkey, n_nationkey) = (s_suppkey, s_nationkey)
-                                 │    ├── hash-join                             |                                                      |
-                                 │    │    │                                    | type                                                 | inner
-                                 │    │    │                                    | equality                                             | (l_orderkey) = (o_orderkey)
-                                 │    │    ├── synchronizer                     |                                                      |
-                                 │    │    │    └── ts scan                     |                                                      |
-                                 │    │    │                                    | ts-table                                             | lineitem
-                                 │    │    │                                    | access mode                                          | metaTable
-                                 │    │    └── hash-join                        |                                                      |
-                                 │    │         │                               | type                                                 | inner
-                                 │    │         │                               | equality                                             | (c_custkey) = (o_custkey)
-                                 │    │         ├── cross-join                  |                                                      |
-                                 │    │         │    │                          | type                                                 | cross
-                                 │    │         │    ├── synchronizer           |                                                      |
-                                 │    │         │    │    └── ts scan           |                                                      |
-                                 │    │         │    │                          | ts-table                                             | nation
-                                 │    │         │    │                          | access mode                                          | metaTable
-                                 │    │         │    └── hash-join              |                                                      |
-                                 │    │         │         │                     | type                                                 | inner
-                                 │    │         │         │                     | equality                                             | (c_nationkey) = (n_nationkey)
-                                 │    │         │         ├── synchronizer      |                                                      |
-                                 │    │         │         │    └── ts scan      |                                                      |
-                                 │    │         │         │                     | ts-table                                             | customer
-                                 │    │         │         │                     | access mode                                          | metaTable
-                                 │    │         │         └── hash-join         |                                                      |
-                                 │    │         │              │                | type                                                 | inner
-                                 │    │         │              │                | equality                                             | (n_regionkey) = (r_regionkey)
-                                 │    │         │              ├── synchronizer |                                                      |
-                                 │    │         │              │    └── ts scan |                                                      |
-                                 │    │         │              │                | ts-table                                             | nation
-                                 │    │         │              │                | access mode                                          | metaTable
-                                 │    │         │              └── synchronizer |                                                      |
-                                 │    │         │                   └── ts scan |                                                      |
-                                 │    │         │                               | ts-table                                             | region
-                                 │    │         │                               | access mode                                          | metaTable
-                                 │    │         │                               | filter                                               | r_name = 'AMERICA'
-                                 │    │         └── synchronizer                |                                                      |
-                                 │    │              └── ts scan                |                                                      |
-                                 │    │                                         | ts-table                                             | orders
+                                 │    │                                         | equality                                             | (n_nationkey) = (s_nationkey)
+                                 │    ├── synchronizer                          |                                                      |
+                                 │    │    └── ts scan                          |                                                      |
+                                 │    │                                         | ts-table                                             | nation
                                  │    │                                         | access mode                                          | metaTable
-                                 │    │                                         | filter                                               | (o_orderdate >= '1995-01-01 00:00:00+00:00') AND (o_orderdate <= '1996-12-31 00:00:00+00:00')
-                                 │    └── synchronizer                          |                                                      |
-                                 │         └── ts scan                          |                                                      |
+                                 │    └── hash-join                             |                                                      |
+                                 │         │                                    | type                                                 | inner
+                                 │         │                                    | equality                                             | (l_suppkey) = (s_suppkey)
+                                 │         ├── hash-join                        |                                                      |
+                                 │         │    │                               | type                                                 | inner
+                                 │         │    │                               | equality                                             | (l_orderkey) = (o_orderkey)
+                                 │         │    ├── synchronizer                |                                                      |
+                                 │         │    │    └── ts scan                |                                                      |
+                                 │         │    │                               | ts-table                                             | lineitem
+                                 │         │    │                               | access mode                                          | metaTable
+                                 │         │    └── hash-join                   |                                                      |
+                                 │         │         │                          | type                                                 | inner
+                                 │         │         │                          | equality                                             | (n_nationkey, n_regionkey) = (c_nationkey, r_regionkey)
+                                 │         │         ├── synchronizer           |                                                      |
+                                 │         │         │    └── ts scan           |                                                      |
+                                 │         │         │                          | ts-table                                             | nation
+                                 │         │         │                          | access mode                                          | metaTable
+                                 │         │         └── cross-join             |                                                      |
+                                 │         │              │                     | type                                                 | cross
+                                 │         │              ├── hash-join         |                                                      |
+                                 │         │              │    │                | type                                                 | inner
+                                 │         │              │    │                | equality                                             | (c_custkey) = (o_custkey)
+                                 │         │              │    ├── synchronizer |                                                      |
+                                 │         │              │    │    └── ts scan |                                                      |
+                                 │         │              │    │                | ts-table                                             | customer
+                                 │         │              │    │                | access mode                                          | metaTable
+                                 │         │              │    └── synchronizer |                                                      |
+                                 │         │              │         └── ts scan |                                                      |
+                                 │         │              │                     | ts-table                                             | orders
+                                 │         │              │                     | access mode                                          | metaTable
+                                 │         │              │                     | filter                                               | (o_orderdate >= '1995-01-01 00:00:00+00:00') AND (o_orderdate <= '1996-12-31 00:00:00+00:00')
+                                 │         │              └── synchronizer      |                                                      |
+                                 │         │                   └── ts scan      |                                                      |
+                                 │         │                                    | ts-table                                             | region
+                                 │         │                                    | access mode                                          | metaTable
+                                 │         │                                    | filter                                               | r_name = 'AMERICA'
+                                 │         └── synchronizer                     |                                                      |
+                                 │              └── ts scan                     |                                                      |
                                  │                                              | ts-table                                             | supplier
                                  │                                              | access mode                                          | metaTable
                                  └── synchronizer                               |                                                      |
@@ -2570,7 +2571,7 @@ CREATE STATISTICS
                                                                                 | ts-table                                             | part
                                                                                 | access mode                                          | metaTable
                                                                                 | filter                                               | p_type = 'SMALL POLISHED STEEL'
-(78 rows)
+(77 rows)
 > explain select
             nation,
             o_year,
@@ -2609,14 +2610,13 @@ CREATE STATISTICS
                                                             | vectorized  | false
   limit                                                     |             |
    │                                                        | count       | 1
-   └── group                                                |             |
-        │                                                   | aggregate 0 | n_name
-        │                                                   | aggregate 1 | o_year
-        │                                                   | aggregate 2 | sum(amount)
-        │                                                   | group by    | n_name, o_year
-        │                                                   | ordered     | +n_name,-o_year
-        └── sort                                            |             |
-             │                                              | order       | +n_name,-o_year
+   └── sort                                                 |             |
+        │                                                   | order       | +nation,-o_year
+        └── group                                           |             |
+             │                                              | aggregate 0 | n_name
+             │                                              | aggregate 1 | o_year
+             │                                              | aggregate 2 | sum(amount)
+             │                                              | group by    | n_name, o_year
              └── render                                     |             |
                   │                                         | o_year      | extract('year', o_orderdate)
                   │                                         | amount      | (l_extendedprice * (1.0 - l_discount)) - (ps_supplycost * l_quantity)
@@ -2631,34 +2631,35 @@ CREATE STATISTICS
                        │                                    | filter      | p_name LIKE '%firebrick%'
                        └── hash-join                        |             |
                             │                               | type        | inner
-                            │                               | equality    | (l_suppkey, n_nationkey) = (s_suppkey, s_nationkey)
-                            ├── cross-join                  |             |
-                            │    │                          | type        | cross
-                            │    ├── synchronizer           |             |
-                            │    │    └── ts scan           |             |
-                            │    │                          | ts-table    | nation
-                            │    │                          | access mode | metaTable
-                            │    └── hash-join              |             |
-                            │         │                     | type        | inner
-                            │         │                     | equality    | (o_orderkey) = (l_orderkey)
-                            │         ├── synchronizer      |             |
-                            │         │    └── ts scan      |             |
-                            │         │                     | ts-table    | orders
-                            │         │                     | access mode | metaTable
-                            │         └── hash-join         |             |
-                            │              │                | type        | inner
-                            │              │                | equality    | (l_suppkey, l_partkey) = (ps_suppkey, ps_partkey)
-                            │              ├── synchronizer |             |
-                            │              │    └── ts scan |             |
-                            │              │                | ts-table    | lineitem
-                            │              │                | access mode | metaTable
-                            │              └── synchronizer |             |
-                            │                   └── ts scan |             |
-                            │                               | ts-table    | partsupp
+                            │                               | equality    | (n_nationkey) = (s_nationkey)
+                            ├── synchronizer                |             |
+                            │    └── ts scan                |             |
+                            │                               | ts-table    | nation
                             │                               | access mode | metaTable
-                            └── synchronizer                |             |
-                                 └── ts scan                |             |
-                                                            | ts-table    | supplier
+                            └── hash-join                   |             |
+                                 │                          | type        | inner
+                                 │                          | equality    | (s_suppkey) = (l_suppkey)
+                                 ├── synchronizer           |             |
+                                 │    └── ts scan           |             |
+                                 │                          | ts-table    | supplier
+                                 │                          | access mode | metaTable
+                                 └── hash-join              |             |
+                                      │                     | type        | inner
+                                      │                     | equality    | (o_orderkey) = (l_orderkey)
+                                      ├── synchronizer      |             |
+                                      │    └── ts scan      |             |
+                                      │                     | ts-table    | orders
+                                      │                     | access mode | metaTable
+                                      └── hash-join         |             |
+                                           │                | type        | inner
+                                           │                | equality    | (l_suppkey, l_partkey) = (ps_suppkey, ps_partkey)
+                                           ├── synchronizer |             |
+                                           │    └── ts scan |             |
+                                           │                | ts-table    | lineitem
+                                           │                | access mode | metaTable
+                                           └── synchronizer |             |
+                                                └── ts scan |             |
+                                                            | ts-table    | partsupp
                                                             | access mode | metaTable
 (55 rows)
 > explain select
