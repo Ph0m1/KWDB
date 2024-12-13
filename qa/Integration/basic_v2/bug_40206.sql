@@ -94,4 +94,71 @@ where pg_catalog.pg_get_function_result(
                   pg_catalog.pg_my_temp_schema()) as oid) as oid)) ~ pg_catalog.timeofday()
 limit 23;
 
+-- ZDP-44002
+use test_vacuum;
+select
+    subq_0.c1 as c0,
+    89 as c1,
+    (select code16 from public.t1 limit 1 offset 3)
+     as c2,
+  subq_0.c1 as c3,
+  case when subq_0.c1 is NULL then subq_0.c0 else subq_0.c0 end
+     as c4,
+  subq_0.c2 as c5,
+  case when (pg_catalog.transaction_timestamp() IS DISTINCT FROM case when ((true)
+              and (cast(null as date) < cast(null as "timestamp")))
+            or (cast(null as _timestamp) >= cast(null as _timestamp)) then pg_catalog.statement_timestamp() else pg_catalog.statement_timestamp() end
+          )
+      or (true) then subq_0.c0 else subq_0.c0 end
+     as c6,
+  subq_0.c0 as c7,
+  subq_0.c1 as c8,
+  38 as c9,
+  70 as c10,
+  subq_0.c1 as c11
+from
+  (select
+        (select pg_catalog.bool_and(e6) from public.t1)
+           as c0,
+        ref_0.e3 as c1,
+        ref_0.code6 as c2,
+        ref_0.code9 as c3
+      from
+        public.t1 as ref_0
+      where ((ref_0.code3 != ref_0.e5)
+          and (((cast(null as date) IS NOT DISTINCT FROM cast(null as "timestamptz"))
+              or (cast(null as "numeric") = ref_0.code3))
+            or ((select pg_catalog.max(e3) from public.t1)
+                 is not NULL)))
+        or ((select pg_catalog.array_agg(e3) from public.t1)
+             < cast(null as _int8))) as subq_0
+where (((subq_0.c1 is not NULL)
+      or (subq_0.c0 is not NULL))
+    and (case when subq_0.c0 is not NULL then case when EXISTS (
+            select
+                subq_0.c2 as c0,
+                ref_1.e4 as c1,
+                (select e2 from public.t1 limit 1 offset 3)
+                   as c2,
+                ref_1.code9 as c3
+              from
+                public.t1 as ref_1
+              where cast(null as text) != cast(null as text)
+              limit 145) then pg_catalog.pg_client_encoding() else pg_catalog.pg_client_encoding() end
+           else case when EXISTS (
+            select
+                subq_0.c2 as c0,
+                ref_1.e4 as c1,
+                (select e2 from public.t1 limit 1 offset 3)
+                   as c2,
+                ref_1.code9 as c3
+              from
+                public.t1 as ref_1
+              where cast(null as text) != cast(null as text)
+              limit 145) then pg_catalog.pg_client_encoding() else pg_catalog.pg_client_encoding() end
+           end
+         NOT SIMILAR TO pg_catalog.pg_get_function_identity_arguments(
+        cast(pg_catalog.pg_my_temp_schema() as oid))))
+  and (subq_0.c0 is not NULL);
+
 drop database test_vacuum cascade;

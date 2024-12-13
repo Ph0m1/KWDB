@@ -674,7 +674,7 @@ var pgBuiltins = map[string]builtinDefinition{
 	// identify a function, in the form it would need to appear in within ALTER
 	// FUNCTION, for instance. This form omits default values.
 	// https://www.postgresql.org/docs/11/functions-info.html
-	"pg_get_function_identity_arguments": makeBuiltin(defProps(),
+	"pg_get_function_identity_arguments": makeBuiltin(tree.FunctionProperties{DistsqlBlacklist: true},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"func_oid", types.Oid}},
 			ReturnType: tree.FixedReturnType(types.String),
