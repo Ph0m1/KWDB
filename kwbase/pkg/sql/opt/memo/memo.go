@@ -1027,6 +1027,7 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 		checkOptPruneFinalAgg(gp, m.Metadata(), m.CheckHelper.onlyOnePTagValue)
 
 		gp.OptFlags |= opt.TimeBucketPushAgg
+		ret.commonRet.canLimitOptimize = true
 
 		// single device can prune local agg
 		if m.CheckHelper.onlyOnePTagValue || gp.OptFlags.PruneFinalAggOpt() {
@@ -1278,6 +1279,9 @@ type CrossEngCheckResults struct {
 	canTimeBucketOptimize bool
 	// canDiffExecInAE:  return true when diff function can exec in AE.
 	canDiffExecInAE bool
+	// canLimitOptimize: return true when the expr can push limit to aggScan
+	// eg: SELECT time_bucket(k_timestamp, '60s'), max(usage_user1) FROM cpu GROUP BY time_bucket(k_timestamp, '60s') ORDER BY time_bucket(k_timestamp, '60s') LIMIT 5;
+	canLimitOptimize bool
 	// err: is the error.
 	err error
 }
@@ -1318,6 +1322,32 @@ func addSynchronizeStruct(ret *CrossEngCheckResults, src RelExpr) {
 	}
 
 	ret.execInTSEngine = false
+}
+
+// checklimitOptimize check whether use limit optimize
+func (m *Memo) checklimitOptimize(source *LimitExpr, ret *CrossEngCheckResults) {
+	if s, ok1 := source.Input.(*SortExpr); ok1 {
+		if _, ok2 := s.Input.(*GroupByExpr); ok2 && len(source.Ordering.Columns) > 0 {
+			for _, col := range source.Ordering.Columns {
+				col.Group.ForEach(func(colID opt.ColumnID) {
+					if m.CheckHelper.PushHelper.MetaMap != nil {
+						if v, ok := m.CheckHelper.PushHelper.MetaMap[colID]; !ok || !v.IsTimeBucket {
+							ret.canLimitOptimize = false
+							return
+						}
+					}
+				})
+				if !ret.canLimitOptimize {
+					break
+				}
+			}
+			if ret.canLimitOptimize {
+				source.LimitOptFlag |= opt.TSPushLimitToAggScan
+			}
+		}
+	} else if _, ok := source.Input.(*GroupByExpr); ok && len(source.Ordering.Columns) <= 0 {
+		source.LimitOptFlag |= opt.TSPushLimitToAggScan
+	}
 }
 
 // CheckWhiteListAndAddSynchronizeImp check if each expr of memo tree can execute in ts engine,
@@ -1437,6 +1467,9 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		if ret.execInTSEngine {
 			addSynchronize(&ret.hasAddSynchronizer, source)
 			source.SetEngineTS()
+			if ret.canLimitOptimize {
+				m.checklimitOptimize(source, &ret)
+			}
 		}
 		return ret
 	case *ScanExpr:
@@ -1692,6 +1725,7 @@ func (m *Memo) checkProject(source *ProjectExpr) (ret CrossEngCheckResults) {
 				if f.Name != tree.FuncTimeBucket {
 					ret.canTimeBucketOptimize = false
 				} else {
+					ret.canTimeBucketOptimize = !findTimeBucket
 					if v, ok := m.CheckHelper.PushHelper.Find(proj.Col); ok {
 						m.AddColumn(proj.Col, v.Alias, v.Type, v.Pos, v.Hash, true)
 						m.CheckHelper.orderedCols.Add(proj.Col)
@@ -1741,6 +1775,7 @@ func (m *Memo) checkGrouping(cols opt.ColSet, optTimeBucket *bool) bool {
 		if !m.CheckExecInTS(colID, ExprPosGroupBy) || colMeta.Type.Family() == types.BytesFamily {
 			execInTSEngine = false
 		}
+
 		if v, ok := m.CheckHelper.PushHelper.Find(colID); ok {
 			if !v.IsTimeBucket && !m.metadata.ColumnMeta(colID).IsPrimaryTag() {
 				*optTimeBucket = false

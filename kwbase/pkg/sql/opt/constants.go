@@ -259,3 +259,17 @@ func (v GroupOptType) WithSumInt() bool {
 func (v GroupOptType) UseStatisticOpt() bool {
 	return v&UseStatistic > 0
 }
+
+// LimitOptType represents Limit expr opt type
+type LimitOptType uint64
+
+// LimitOptType
+const (
+	// TSPushLimitToAggScan represents push limit to aggScan in time series
+	TSPushLimitToAggScan = 1 << 0
+)
+
+// TSPushLimitToAggScan return true that has TSPushLimitToAggScan
+func (l LimitOptType) TSPushLimitToAggScan() bool {
+	return l&TSPushLimitToAggScan > 0
+}

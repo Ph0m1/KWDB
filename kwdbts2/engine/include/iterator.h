@@ -378,6 +378,14 @@ class TsSortedRowDataIterator : public TsIterator {
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
 
  private:
+  void nextEntity() {
+    cur_block_span_ = BlockSpan{};
+    cur_blockdata_offset_ = 1;
+    block_spans_.clear();
+    ++cur_entity_idx_;
+    partition_table_iter_->Reset(is_reversed_);
+  }
+
   int nextBlockSpan(k_uint32 entity_id);
   void fetchBlockSpans(k_uint32 entity_id);
 

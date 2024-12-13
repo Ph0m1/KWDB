@@ -207,6 +207,9 @@ func (g *exprsGen) genExprStruct(define *lang.DefineExpr) {
 			fmt.Fprintf(g.w, "  %s %s\n", fieldName, g.md.typeOf(field).asField())
 		}
 	}
+	if opTyp.name == "LimitExpr" {
+		fmt.Fprintf(g.w, "  LimitOptFlag opt.LimitOptType\n")
+	}
 
 	if define.Tags.Contains("Scalar") {
 		fmt.Fprintf(g.w, "\n")
@@ -234,6 +237,7 @@ func (g *exprsGen) genExprStruct(define *lang.DefineExpr) {
 
 	fmt.Fprintf(g.w, "  engine tree.EngineType\n")
 	fmt.Fprintf(g.w, "}\n\n")
+
 }
 
 // genExprFuncs generates the methods for an expression, including those from

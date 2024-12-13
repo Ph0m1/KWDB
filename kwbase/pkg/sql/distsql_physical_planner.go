@@ -4254,7 +4254,14 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 				// If the previous stage was all on a single node, put the final
 				// aggregator there. Otherwise, bring the results back on this node.
 				dsp.addSingleGroupStateForTS(p, prevStageNode, coreUnion, execinfrapb.TSPostProcessSpec{}, finalOutTypes)
-				pushDownProcessorToTSReader(p, n.optType.TimeBucketOpt(), true)
+				if n.optType.TimeBucketOpt() {
+					tsProcessorSpec := p.getTSSpecFromTSTableReader()
+					// add Aggregator and AggPost to TableReader
+					if tsProcessorSpec != nil {
+						tsProcessorSpec.Core.TableReader.Aggregator = p.Processors[p.ResultRouters[0]].TSSpec.Core.Aggregator
+						tsProcessorSpec.Core.TableReader.AggregatorPost = &p.Processors[p.ResultRouters[0]].TSSpec.Post
+					}
+				}
 			}
 		} else {
 			// Check whether twice aggregation is necessary in time series engine
@@ -4988,7 +4995,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 		if err := plan.AddLimit(n.count, n.offset, planCtx, dsp.nodeDesc.NodeID, n.engine == tree.EngineTypeTimeseries); err != nil {
 			return PhysicalPlan{}, err
 		}
-		pushDownProcessorToTSReader(&plan, n.canOpt, false)
+		handleTSReaderPost(&plan, n.canOpt, n.pushLimitToAggScan)
 
 	case *lookupJoinNode:
 		plan, err = dsp.createPlanForLookupJoin(planCtx, n)
@@ -6448,47 +6455,70 @@ func makeTableReaderSpans(spans roachpb.Spans) []execinfrapb.TableReaderSpan {
 	return trSpans
 }
 
-// pushDownAggToTSReader push (Aggregator, Sorter) and it's post into tsTableReader.
+// handleTSReaderPost push (Limit, Sorter) to post of tsTableReader.
 // p is physical plan.
-// canOpt is true when need to optimize agg or limit order by.
-// isAgg is true when there is agg.
-func pushDownProcessorToTSReader(p *PhysicalPlan, canOpt bool, isAgg bool) {
+// pushLimitAndSorterToScan is true when push limit and sorter to post of tsScan.
+// pushLimitToAggScan is true when need push limit to post of tsAggScan
+func handleTSReaderPost(p *PhysicalPlan, pushLimitAndSorterToScan bool, pushLimitToAggScan bool) {
+	if pushLimitAndSorterToScan || pushLimitToAggScan {
+		tsProcessorSpec := p.getTSSpecFromTSTableReader()
+		if tsProcessorSpec == nil {
+			return
+		}
+
+		if pushLimitAndSorterToScan {
+			// add limit, offset and sorter to TSSpec.Post
+			order, limit, offset := p.getLimitOffset()
+			tsProcessorSpec.Post.Limit = limit
+			tsProcessorSpec.Post.Offset = offset
+			if order != nil {
+				tsProcessorSpec.Core.TableReader.Sorter = &order.OutputOrdering
+			}
+		} else if pushLimitToAggScan && tsProcessorSpec.Core.TableReader.AggregatorPost != nil {
+			// add limit and offset to TableReader.AggPost
+			_, limit, offset := p.getLimitOffset()
+			tsProcessorSpec.Core.TableReader.AggregatorPost.Limit = limit
+			tsProcessorSpec.Core.TableReader.AggregatorPost.Offset = offset
+			tsProcessorSpec.Core.TableReader.OrderedScan = true
+		}
+	}
+}
+
+func (p *PhysicalPlan) getTSSpecFromTSTableReader() *execinfrapb.TSProcessorSpec {
+	var tsProcessorSpec *execinfrapb.TSProcessorSpec
 	tsReaderCount := 0
-	if canOpt {
-		for k, v := range p.Processors {
-			if v.TSSpec.Core.TableReader != nil {
-				if isAgg {
-					p.Processors[k].TSSpec.Core.TableReader.Aggregator = p.Processors[p.ResultRouters[0]].TSSpec.Core.Aggregator
-					p.Processors[k].TSSpec.Core.TableReader.AggregatorPost = &p.Processors[p.ResultRouters[0]].TSSpec.Post
-				} else {
-					var order *execinfrapb.SorterSpec
-					var limit, offset uint32
-					if p.ChildIsExecInTSEngine() {
-						order = p.Processors[p.ResultRouters[0]].TSSpec.Core.Sorter
-						limit = p.Processors[p.ResultRouters[0]].TSSpec.Post.Limit
-						offset = p.Processors[p.ResultRouters[0]].TSSpec.Post.Offset
-					} else {
-						for i := p.ResultRouters[0]; i >= 0; i-- {
-							if p.Processors[i].Spec.Core.Sorter != nil {
-								order = p.Processors[i].Spec.Core.Sorter
-								break
-							}
-						}
-						limit = uint32(p.Processors[p.ResultRouters[0]].Spec.Post.Limit)
-						offset = uint32(p.Processors[p.ResultRouters[0]].Spec.Post.Offset)
-					}
-					p.Processors[k].TSSpec.Post.Limit = limit
-					p.Processors[k].TSSpec.Post.Offset = offset
-					if order != nil {
-						p.Processors[k].TSSpec.Core.TableReader.Sorter = &order.OutputOrdering
-					}
-				}
-				tsReaderCount++
-			} else if tsReaderCount != 0 {
+	for k, v := range p.Processors {
+		if v.TSSpec.Core.TableReader != nil {
+			tsProcessorSpec = &p.Processors[k].TSSpec
+			tsReaderCount++
+		} else if tsReaderCount != 0 {
+			break
+		}
+	}
+
+	return tsProcessorSpec
+}
+
+func (p *PhysicalPlan) getLimitOffset() (
+	order *execinfrapb.SorterSpec,
+	limit uint32,
+	offset uint32,
+) {
+	if p.ChildIsExecInTSEngine() {
+		order = p.Processors[p.ResultRouters[0]].TSSpec.Core.Sorter
+		limit = p.Processors[p.ResultRouters[0]].TSSpec.Post.Limit
+		offset = p.Processors[p.ResultRouters[0]].TSSpec.Post.Offset
+	} else {
+		for i := p.ResultRouters[0]; i >= 0; i-- {
+			if p.Processors[i].Spec.Core.Sorter != nil {
+				order = p.Processors[i].Spec.Core.Sorter
 				break
 			}
 		}
+		limit = uint32(p.Processors[p.ResultRouters[0]].Spec.Post.Limit)
+		offset = uint32(p.Processors[p.ResultRouters[0]].Spec.Post.Offset)
 	}
+	return order, limit, offset
 }
 
 // getSpans obtain the corresponding SpanPartition through the PartitionTSSpansByPrimaryTagValue() or

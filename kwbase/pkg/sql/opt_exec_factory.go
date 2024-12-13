@@ -1027,12 +1027,14 @@ func (ef *execFactory) ConstructLimit(
 	if limitExpr.IsTSEngine() {
 		engine = tree.EngineTypeTimeseries
 	}
+
 	return &limitNode{
-		plan:       plan,
-		countExpr:  limit,
-		offsetExpr: offset,
-		engine:     engine,
-		canOpt:     tryOptLimitOrder(meta, limitExpr, limit, ef.planner.SessionData().MaxPushLimitNumber),
+		plan:               plan,
+		countExpr:          limit,
+		offsetExpr:         offset,
+		engine:             engine,
+		canOpt:             tryOptLimitOrder(meta, limitExpr, limit, ef.planner.SessionData().MaxPushLimitNumber),
+		pushLimitToAggScan: getLimitOpt(limitExpr),
 	}, nil
 }
 
@@ -2570,6 +2572,14 @@ func (ef *execFactory) singleSpan(
 	//s.PreferInclusive(&keyCtx)
 
 	out.Spans.InitSingleSpan(&s)
+}
+
+// get LimitOpt of LimitExpr
+func getLimitOpt(e memo.RelExpr) bool {
+	if l, ok := e.(*memo.LimitExpr); ok {
+		return l.LimitOptFlag.TSPushLimitToAggScan()
+	}
+	return false
 }
 
 // tryOptLimitOrder check if limit and sort can optimize.

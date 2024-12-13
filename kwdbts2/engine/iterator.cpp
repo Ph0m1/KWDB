@@ -1764,6 +1764,10 @@ KStatus TsSortedRowDataIterator::GetBatch(std::shared_ptr<MMapSegmentTable> segm
 KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts) {
   KWDB_DURATION(StStatistics::Get().it_next);
   *count = 0;
+  if (cur_entity_idx_ >= entity_ids_.size()) {
+    *is_finished = true;
+    return KStatus::SUCCESS;
+  }
   while (true) {
     if (!cur_block_span_.block_item) {
       int ret = nextBlockSpan(entity_ids_[cur_entity_idx_]);

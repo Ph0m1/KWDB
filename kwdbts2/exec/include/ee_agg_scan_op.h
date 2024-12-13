@@ -43,7 +43,8 @@ class AggTableScanOperator : public TableScanOperator {
         table_reader_spec_(other.table_reader_spec_),
         aggregation_spec_(other.aggregation_spec_),
         aggregation_post_(other.aggregation_post_),
-        has_post_agg_(other.has_post_agg_) {}
+        has_post_agg_(other.has_post_agg_),
+        agg_limit_{other.agg_limit_} {}
 
   ~AggTableScanOperator() override {
     SafeDeletePointer(agg_param_);
@@ -189,6 +190,8 @@ class AggTableScanOperator : public TableScanOperator {
   GroupByMetadata group_by_metadata_;
   bool disorder_{false};  // it is disorder if only group by timebucket
   bool has_post_agg_{false};
+  k_uint32 agg_limit_{0};
+  k_int64 max_ts_{INT64_MAX};
 };
 
 }  //  namespace kwdbts

@@ -112,6 +112,13 @@ class ScanRowBatch : public RowBatch {
 
   virtual void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
                       roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt);
+  void SetCount(k_uint32 count) {
+    if (is_filter_) {
+      effect_count_ = count;
+    } else {
+      count_ = count;
+    }
+  }
 };
 
 class ReverseScanRowBatch : public ScanRowBatch {

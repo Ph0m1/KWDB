@@ -43,8 +43,9 @@ type limitNode struct {
 	offset     int64
 
 	// engine is a bit set that indicates which engine to exec.
-	engine tree.EngineType
-	canOpt bool
+	engine             tree.EngineType
+	canOpt             bool
+	pushLimitToAggScan bool
 }
 
 func (n *limitNode) startExec(params runParams) error {

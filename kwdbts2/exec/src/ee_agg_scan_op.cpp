@@ -57,7 +57,6 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
       ret = EEIteratorErrCode::EE_ERROR;
       break;
     }
-
     // extract from agg spec
     agg_param_ = new AggregatorSpecParam<TSAggregatorSpec>(this,
                                                             const_cast<TSAggregatorSpec*>(&aggregation_spec_),
@@ -141,6 +140,9 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
     for (auto field : output_fields_) {
       output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
     }
+    if (aggregation_post_.has_limit()) {
+      agg_limit_ = aggregation_post_.limit();
+    }
   } while (false);
   Return(ret)
 }
@@ -164,6 +166,7 @@ EEIteratorErrCode AggTableScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& ch
     }
     // read data
     while (!is_done_) {
+      row_batch_->ts_ = max_ts_;
       code = handler->TsNext(ctx);
       if (EEIteratorErrCode::EE_OK != code) {
         is_done_ = true;
@@ -277,7 +280,7 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
   }
-
+  k_uint32 new_group_count = 0;
   for (k_uint32 row = 0; row < row_batch_count; ++row) {
     // check all the group by column, and increase the target_row number if it finds a different group.
     KTimestampTz time_bucket = 0;
@@ -285,6 +288,13 @@ KStatus AggTableScanOperator::AddRowBatchData(kwdbContext_p ctx, RowBatch* row_b
 
     // new group or end of rowbatch
     if (is_new_group) {
+      if (agg_limit_ > 0) {
+        if ((++new_group_count) > agg_limit_) {
+          max_ts_ = time_bucket;
+          row_batch->SetCount(row);
+          break;
+        }
+      }
       group_by_metadata_.setNewGroup(row);
 
       if (current_chunk->isFull()) {
