@@ -150,11 +150,19 @@ int TsSubEntityGroup::OpenInit(SubGroupID subgroup_id, const std::string& db_pat
     return ret;
   }
   // Load all partition directories
-  DIR* dir_ptr = opendir((db_path_ + "/" + tbl_sub_path_).c_str());
+  DIR* dir_ptr = opendir(real_path_.c_str());
   if (dir_ptr) {
     struct dirent* entry;
     while ((entry = readdir(dir_ptr)) != nullptr) {
-      if (entry->d_type != DT_DIR) {
+      std::string full_path = real_path_ + entry->d_name;
+      struct stat file_stat{};
+      if (stat(full_path.c_str(), &file_stat) != 0) {
+        LOG_ERROR("stat[%s] failed", full_path.c_str());
+        err_info.setError(KWENFILE, "stat[" + full_path + "] failed");
+        closedir(dir_ptr);
+        return err_info.errcode;
+      }
+      if (!S_ISDIR(file_stat.st_mode)) {
         continue;
       }
       if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0
@@ -618,16 +626,24 @@ int TsSubEntityGroup::removePartitionDir(const std::string& db_path, const std::
   std::string real_partition_path = db_path + pt_tbl_sub_path;
   DIR* dir_ptr = opendir(real_partition_path.c_str());
   if (dir_ptr) {
-    struct dirent* entity;
-    while ((entity = readdir(dir_ptr)) != nullptr) {
-      if (entity->d_type == DT_REG) {
-        int dn_len = strlen(entity->d_name);
+    struct dirent* entry;
+    while ((entry = readdir(dir_ptr)) != nullptr) {
+      std::string full_path = real_partition_path + entry->d_name;
+      struct stat file_stat{};
+      if (stat(full_path.c_str(), &file_stat) != 0) {
+        LOG_ERROR("stat[%s] failed", full_path.c_str());
+        closedir(dir_ptr);
+        return -1;
+      }
+      if (S_ISREG(file_stat.st_mode)) {
+        int dn_len = strlen(entry->d_name);
         dn_len = dn_len - 5;
-        if (strcmp(entity->d_name + dn_len, ".sqfs") == 0) {
-          string part_name = string(entity->d_name, dn_len);
+        if (strcmp(entry->d_name + dn_len, ".sqfs") == 0) {
+          string part_name = string(entry->d_name, dn_len);
           ErrorInfo err_info;
           umount(db_path, pt_tbl_sub_path + part_name + '/', err_info);
           if (err_info.errcode < 0) {
+            closedir(dir_ptr);
             return err_info.errcode;
           }
         }

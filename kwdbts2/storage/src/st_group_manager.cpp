@@ -55,14 +55,22 @@ int SubEntityGroupManager::OpenInit(const std::string& db_path, const std::strin
   // max_sub_group_id
   DIR* dir_ptr = opendir((db_path_ + tbl_sub_path_).c_str());
   if (dir_ptr) {
-    struct dirent* entity;
-    while ((entity = readdir(dir_ptr)) != nullptr) {
-      if (entity->d_type == DT_DIR) {
-        if (strcmp(entity->d_name, ".") == 0 || strcmp(entity->d_name, "..") == 0
-            || entity->d_name[0] == '_' || strcmp(entity->d_name, "wal") == 0) {
+    struct dirent* entry;
+    while ((entry = readdir(dir_ptr)) != nullptr) {
+      std::string full_path = db_path_ + tbl_sub_path_ + entry->d_name;
+      struct stat file_stat{};
+      if (stat(full_path.c_str(), &file_stat) != 0) {
+        LOG_ERROR("stat[%s] failed", full_path.c_str());
+        err_info.setError(KWENFILE, "stat[" + full_path + "] failed");
+        closedir(dir_ptr);
+        return err_info.errcode;
+      }
+      if (S_ISDIR(file_stat.st_mode)) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0
+            || entry->d_name[0] == '_' || strcmp(entry->d_name, "wal") == 0) {
           continue;
         }
-        string dir_name = entity->d_name;
+        string dir_name = entry->d_name;
         size_t idx = dir_name.find_last_of('_');
         if (idx == string::npos) {
           continue;

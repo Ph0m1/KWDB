@@ -18,6 +18,7 @@
 #include <fstream>
 #include <sstream>
 #include <sys/syscall.h>
+#include <sys/stat.h>
 #include "cm_backtrace.h"
 #include "cm_kwdb_context.h"
 #include "kwdb_compatible.h"
@@ -89,13 +90,22 @@ bool DumpAllThreadBacktrace(char* folder, char* nowTimeStamp) {
   GetThreadBtFilePath(kThreadBtPath, folder, nowTimeStamp);
 
   // Get all thread tids.
-  dir = opendir("/proc/self/task");
+  char task_dir[] = "/proc/self/task/";
+  dir = opendir(task_dir);
   if (dir == NULL) {
     return false;
   }
 
   while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type == DT_DIR) {
+    std::string full_path = task_dir;
+    full_path += entry->d_name;
+    struct stat file_stat{};
+    if (stat(full_path.c_str(), &file_stat) != 0) {
+      LOG_ERROR("stat[%s] failed", full_path.c_str());
+      closedir(dir);
+      return false;
+    }
+    if (S_ISDIR(file_stat.st_mode)) {
       if (entry->d_name[0] >= '0' && entry->d_name[0] <= '9') {
         usleep(20000);
         SignalThreadDump(getpid(), getuid(), strtoll(entry->d_name, nullptr, 10));

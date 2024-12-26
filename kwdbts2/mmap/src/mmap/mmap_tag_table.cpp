@@ -472,7 +472,15 @@ int TagTable::loadAllVersions(std::vector<TableVersion>& all_versions, ErrorInfo
           || entry->d_name[0] == '_') {
         continue;
       }
-      if (entry->d_type == DT_REG &&
+      std::string full_path = real_path + entry->d_name;
+      struct stat file_stat{};
+      if (stat(full_path.c_str(), &file_stat) != 0) {
+        LOG_ERROR("stat[%s] failed", full_path.c_str());
+        err_info.setError(KWENFILE, "stat[" + full_path + "] failed");
+        closedir(dir_ptr);
+        return -1;
+      }
+      if (S_ISREG(file_stat.st_mode) &&
           strncmp(entry->d_name, prefix.c_str(), prefix_len) == 0) {
         all_versions.push_back(std::stoi(entry->d_name + prefix_len));
       }

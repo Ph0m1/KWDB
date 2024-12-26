@@ -1020,12 +1020,19 @@ KStatus TSEngineImpl::TSxRollback(kwdbContext_p ctx, const KTableKey& table_id, 
 void TSEngineImpl::GetTableIDList(kwdbContext_p ctx, std::vector<KTableKey>& table_id_list) {
   DIR* dir_ptr = opendir((options_.db_path).c_str());
   if (dir_ptr) {
-    struct dirent* entity;
-    while ((entity = readdir(dir_ptr)) != nullptr) {
-      if (entity->d_type == DT_DIR) {
+    struct dirent* entry;
+    while ((entry = readdir(dir_ptr)) != nullptr) {
+      std::string full_path = options_.db_path + '/' + entry->d_name;
+      struct stat file_stat{};
+      if (stat(full_path.c_str(), &file_stat) != 0) {
+        LOG_ERROR("stat[%s] failed", full_path.c_str());
+        closedir(dir_ptr);
+        return;
+      }
+      if (S_ISDIR(file_stat.st_mode)) {
         bool is_table = true;
-        for (int i = 0; i < strlen(entity->d_name); i++) {
-          if (entity->d_name[i] < '0' || entity->d_name[i] > '9') {
+        for (int i = 0; i < strlen(entry->d_name); i++) {
+          if (entry->d_name[i] < '0' || entry->d_name[i] > '9') {
             is_table = false;
             break;
           }
@@ -1034,7 +1041,7 @@ void TSEngineImpl::GetTableIDList(kwdbContext_p ctx, std::vector<KTableKey>& tab
           continue;
         }
 
-        KTableKey table_id = std::stoull(entity->d_name);
+        KTableKey table_id = std::stoull(entry->d_name);
         table_id_list.push_back(table_id);
       }
     }

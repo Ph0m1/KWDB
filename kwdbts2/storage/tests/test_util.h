@@ -72,8 +72,12 @@ bool RemoveDirectory(const char* path) {
     }
 
     std::string full_path = std::string(path) + "/" + entry->d_name;
-
-    if (entry->d_type == DT_DIR) {
+    struct stat file_stat{};
+    if (stat(full_path.c_str(), &file_stat) != 0) {
+      closedir(dir);
+      return false;
+    }
+    if (S_ISDIR(file_stat.st_mode)) {
       if (!RemoveDirectory(full_path.c_str())) {
         closedir(dir);
         return false;

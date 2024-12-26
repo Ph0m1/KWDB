@@ -140,22 +140,30 @@ int TsTimePartition::loadSegments(ErrorInfo& err_info) {
   {
     DIR* dir_ptr = opendir(real_path.c_str());
     if (dir_ptr) {
-      struct dirent* entity;
-      while ((entity = readdir(dir_ptr)) != nullptr) {
+      struct dirent* entry;
+      while ((entry = readdir(dir_ptr)) != nullptr) {
         BLOCK_ID segment_id = 0;
-        if (entity->d_type == DT_REG) {
-          int dn_len = strlen(entity->d_name);
+        std::string full_path = real_path + entry->d_name;
+        struct stat file_stat{};
+        if (stat(full_path.c_str(), &file_stat) != 0) {
+          LOG_ERROR("stat[%s] failed", full_path.c_str());
+          err_info.setError(KWENFILE, "stat[" + full_path + "] failed");
+          closedir(dir_ptr);
+          return err_info.errcode;
+        }
+        if (S_ISREG(file_stat.st_mode)) {
+          int dn_len = strlen(entry->d_name);
           dn_len = dn_len - 5;
-          if (strcmp(entity->d_name + dn_len, ".sqfs") == 0) {
-            string part_name = string(entity->d_name, dn_len);
+          if (strcmp(entry->d_name + dn_len, ".sqfs") == 0) {
+            string part_name = string(entry->d_name, dn_len);
             segment_id = stoi(part_name);
           }
-        } else if (entity->d_type == DT_DIR) {
-          if (strcmp(entity->d_name, ".") == 0 || strcmp(entity->d_name, "..") == 0
-              || entity->d_name[0] == '_') {  // _log directory  _tmp directory
+        } else if (S_ISDIR(file_stat.st_mode)) {
+          if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0
+              || entry->d_name[0] == '_') {  // _log directory  _tmp directory
             continue;
           }
-          segment_id = std::stoi(entity->d_name);
+          segment_id = std::stoi(entry->d_name);
         }
         if (segment_id > 0 && segment_ids.count(segment_id) == 0) {
           int err_code = loadSegment(segment_id, err_info);

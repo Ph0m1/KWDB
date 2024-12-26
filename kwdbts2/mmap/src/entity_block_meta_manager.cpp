@@ -13,6 +13,7 @@
 #include <thread>
 #include "dirent.h"
 #include "sys/types.h"
+#include "sys/stat.h"
 #include "entity_block_meta_manager.h"
 #include "utils/big_table_utils.h"
 #include "st_config.h"
@@ -44,23 +45,30 @@ int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_
     return KWENOOBJ;
   }
 
-  struct dirent* entity;
-  while ((entity = readdir(dir_ptr)) != nullptr) {
-    if (entity->d_type != DT_REG) {
+  struct dirent* entry;
+  while ((entry = readdir(dir_ptr)) != nullptr) {
+    std::string full_path = db_path_ + tbl_sub_path + entry->d_name;
+    struct stat file_stat{};
+    if (stat(full_path.c_str(), &file_stat) != 0) {
+      LOG_ERROR("stat[%s] failed", full_path.c_str());
+      closedir(dir_ptr);
+      return KWENFILE;
+    }
+    if (!S_ISREG(file_stat.st_mode)) {
       continue;
     }
     string meta_prefix = file_path + ".";
     //  entity->d_name: 78.meta.XX
     //  meta_prefix: 78.meta
-    if (strncmp(entity->d_name, meta_prefix.c_str(), meta_prefix.length()) == 0) {
+    if (strncmp(entry->d_name, meta_prefix.c_str(), meta_prefix.length()) == 0) {
       char* endptr;
       errno = 0;
-      uint64_t num = std::strtoull(entity->d_name + meta_prefix.length(), &endptr, 10);
+      uint64_t num = std::strtoull(entry->d_name + meta_prefix.length(), &endptr, 10);
       if ((errno == ERANGE && num == ULLONG_MAX) || (errno != 0 && num == 0)) {
         continue;
         // There is a file name that starts with "78.meta.", but it is not followed by a number, ignore it
       }
-      meta_map[num] = entity->d_name;
+      meta_map[num] = entry->d_name;
     }
   }
   closedir(dir_ptr);

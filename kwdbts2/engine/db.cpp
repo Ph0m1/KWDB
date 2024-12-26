@@ -640,16 +640,19 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     } else if ("zstd" == value) {
       type = kwdbts::CompressionType::ZSTD;
     }
-    if (g_mk_squashfs_option.compressions.find(type) ==
-        g_mk_squashfs_option.compressions.end()) {
-      LOG_WARN("mksquashfs does not support the %s algorithm and uses gzip by default. "
-                "Please upgrade the mksquashfs version.", value.c_str())
-      type = kwdbts::CompressionType::GZIP;
-    } else if (g_mount_option.mount_compression_types.find(type) ==
-               g_mount_option.mount_compression_types.end()) {
-      LOG_WARN("mount does not support the %s algorithm and uses gzip by default. "
-                "Upgrade to a linux kernel version that supports this algorithm", value.c_str())
-      type = kwdbts::CompressionType::GZIP;
+    if (type != kwdbts::CompressionType::GZIP) {
+      if (g_mk_squashfs_option.compressions.find(type) ==
+          g_mk_squashfs_option.compressions.end()) {
+        LOG_WARN("mksquashfs does not support the %s algorithm and uses gzip by default. "
+                 "Please upgrade the mksquashfs version.", value.c_str())
+        type = kwdbts::CompressionType::GZIP;
+      } else if (g_mount_option.mount_compression_types.find(type) ==
+                 g_mount_option.mount_compression_types.end()) {
+        LOG_WARN("mount does not support the %s algorithm and uses gzip by default. "
+                 "Upgrade to a linux kernel version that supports this algorithm or map /boot:/boot if using docker",
+                 value.c_str())
+        type = kwdbts::CompressionType::GZIP;
+      }
     }
     g_compression = g_mk_squashfs_option.compressions.find(type)->second;
   } else if ("ts.compression.level" == key) {
