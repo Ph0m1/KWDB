@@ -179,6 +179,15 @@ KStatus WALMgr::CreateCheckpoint(kwdbContext_p ctx) {
   return SUCCESS;
 }
 
+KStatus WALMgr::CreateCheckpointWithoutFlush(kwdbts::kwdbContext_p ctx) {
+  meta_.current_checkpoint_no++;
+  buffer_mgr_->setHeaderBlockCheckpointInfo(meta_.current_lsn, meta_.current_checkpoint_no);
+  meta_.checkpoint_lsn = meta_.current_lsn;
+  meta_.checkpoint_file_no = meta_.current_file_no;
+
+  return SUCCESS;
+}
+
 KStatus WALMgr::Close() {
   file_mgr_->Close();
   meta_file_.close();
@@ -498,6 +507,57 @@ void WALMgr::CleanUp(kwdbContext_p ctx) {
   Flush(ctx);
   file_mgr_->CleanUp(meta_.checkpoint_lsn, meta_.current_lsn);
   this->Unlock();
+}
+
+KStatus WALMgr::ResetWAL(kwdbContext_p ctx) {
+  LOG_INFO("Cleaning wal meta file tableid: %d.", table_id_)
+  if (!IsExists(wal_path_)) {
+    if (!MakeDirectory(wal_path_)) {
+      LOG_ERROR("Failed to create the WAL log directory '%s'", wal_path_.c_str())
+      return FAIL;
+    }
+  }
+
+  TS_LSN current_lsn_recover = FetchCurrentLSN();
+  WALMeta old_meta = meta_;
+  if (meta_file_.is_open()) {
+    meta_file_.close();
+  }
+  string meta_path = wal_path_ + "kwdb_wal.meta";
+  if (IsExists(meta_path)) {
+    Remove(meta_path);
+  }
+
+  KStatus s = initWalMeta(ctx, true);
+  if (s == KStatus::FAIL) {
+    LOG_ERROR("Failed to initialize the WAL metadata.")
+    return s;
+  }
+  meta_ = old_meta;
+  meta_.current_file_no = 0;
+  meta_.current_checkpoint_no = 0;
+  meta_.checkpoint_file_no = 0;
+
+  s = file_mgr_->ResetWALInternal(ctx, current_lsn_recover);
+  if (s == KStatus::FAIL) {
+    LOG_ERROR("Failed to Reset the WAL files.")
+    return s;
+  }
+
+  s = file_mgr_->Open(meta_.current_file_no);
+  if (s == KStatus::FAIL) {
+    LOG_ERROR("Failed to Open the WAL metadata.")
+    return s;
+  }
+
+  buffer_mgr_->ResetMeta();
+
+  s = buffer_mgr_->init(0);
+  if (s == KStatus::FAIL) {
+    LOG_ERROR("Failed to initialize the WAL buffer.")
+    return s;
+  }
+  return SUCCESS;
 }
 
 bool WALMgr::NeedCheckpoint() {

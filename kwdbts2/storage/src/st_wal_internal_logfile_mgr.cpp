@@ -297,6 +297,21 @@ void WALFileMgr::CleanUp(TS_LSN checkpoint_lsn, TS_LSN current_lsn) {
   }
 }
 
+KStatus WALFileMgr::ResetWALInternal(kwdbContext_p ctx, TS_LSN current_lsn_recover) {
+  for (int i = 0; i < opt_->wal_file_in_group; i++) {
+    string path = getFilePath(i);
+    if (IsExists(path)) {
+      Remove(path);
+    }
+    KStatus s = initWalFile(i, current_lsn_recover);
+    if (s == KStatus::FAIL) {
+      LOG_ERROR("Failed to initialize the WAL file.")
+      return s;
+    }
+  }
+  return SUCCESS;
+}
+
 TS_LSN WALFileMgr::GetLSNFromBlockNo(uint64_t block_no) {
   HeaderBlock header = header_block_;
   uint16_t file_num = current_file_no_;

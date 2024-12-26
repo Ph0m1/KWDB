@@ -942,7 +942,7 @@ TEST_F(TestTSWALTable, incompleteRecover) {
   auto wal3_ = new WALMgr(kDbPath + "/", table_id_, range_group_id_, &opt_);
   wal3_->Init(ctx_);
   wal3_->ReadWALLogForMtr(mtr_id, wal_logs);
-  ASSERT_EQ(wal_logs.size(), 5);
+  ASSERT_EQ(wal_logs.size(), 1);
 
   for (auto& log : wal_logs) {
     delete log;
@@ -1010,14 +1010,14 @@ TEST_F(TestTSWALTable, incompleteRollbackRecover) {
   applied_indexes.insert(std::pair<uint64_t, uint64_t>(range_group_id_, 1));
   ASSERT_EQ(log_eg->Recover(ctx_, applied_indexes), KStatus::SUCCESS);
   log_eg->FlushBuffer(ctx_);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {ts_span}), 10);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, {ts_span}), 0);
 
   std::vector<LogEntry*> wal_logs;
 
   auto wal3_ = new WALMgr(kDbPath + "/", table_id_, range_group_id_, &opt_);
   wal3_->Init(ctx_);
   wal3_->ReadWALLogForMtr(mtr_id, wal_logs);
-  ASSERT_EQ(wal_logs.size(), 3);
+  ASSERT_EQ(wal_logs.size(), 0);
 
   for (auto& log : wal_logs) {
     delete log;

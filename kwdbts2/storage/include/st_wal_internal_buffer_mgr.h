@@ -38,6 +38,8 @@ class WALBufferMgr {
    */
   KStatus init(TS_LSN start_lsn = 0);
 
+  void ResetMeta();
+
   /**
    * Write WAL log entry into WAL Buffer
    * 1. Write WAL log entry into current EntryBlock.

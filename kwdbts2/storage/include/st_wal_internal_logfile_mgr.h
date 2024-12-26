@@ -85,6 +85,11 @@ class WALFileMgr {
   */
   void CleanUp(TS_LSN checkpoint_lsn, TS_LSN current_lsn);
 
+  /**
+ * Reset WAL files.
+ */
+  KStatus ResetWALInternal(kwdbContext_p ctx, TS_LSN current_lsn);
+
   TS_LSN GetLSNFromBlockNo(uint64_t block_no);
 
   uint64_t GetBlockNoFromLsn(TS_LSN lsn);

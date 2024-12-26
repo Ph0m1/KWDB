@@ -86,6 +86,8 @@ class WALMgr {
    */
   KStatus CreateCheckpoint(kwdbContext_p ctx);
 
+  KStatus CreateCheckpointWithoutFlush(kwdbContext_p ctx);
+
   KStatus Close();
 
   KStatus Drop();
@@ -305,6 +307,11 @@ class WALMgr {
   * Clean up the expired WAL files.
   */
   void CleanUp(kwdbContext_p ctx);
+
+  /**
+   * Reset WAL files.
+   */
+  KStatus ResetWAL(kwdbContext_p ctx);
 
   /**
   * NeedCheckpoint

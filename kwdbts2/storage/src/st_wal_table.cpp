@@ -519,6 +519,11 @@ KStatus LoggedTsEntityGroup::Recover(kwdbContext_p ctx, const std::map<uint64_t,
     if (s == FAIL) Return(s)
   }
 
+  s = wal_manager_->ResetWAL(ctx);
+  if (s == FAIL) {
+    Return(s)
+  }
+
   for (auto& it : incomplete) {
     TS_LSN mtr_id = it.first;
     auto log_entry = it.second;
@@ -580,9 +585,9 @@ KStatus LoggedTsEntityGroup::applyWal(kwdbContext_p ctx, LogEntry* wal_log,
       }
       break;
     }
+    // There is nothing to do while applying CHECKPOINT WAL.
     case WALLogType::CHECKPOINT: {
-      // define when what why
-      s = wal_manager_->CreateCheckpoint(ctx);
+      s = wal_manager_->CreateCheckpointWithoutFlush(ctx);
       if (s == FAIL) return s;
       break;
     }

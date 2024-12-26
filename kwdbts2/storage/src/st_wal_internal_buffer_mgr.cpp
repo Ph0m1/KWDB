@@ -64,6 +64,12 @@ KStatus WALBufferMgr::init(TS_LSN start_lsn) {
   return SUCCESS;
 }
 
+void WALBufferMgr::ResetMeta() {
+  begin_block_index_ = 0;
+  current_block_index_ = 0;
+  end_block_index_ = init_buffer_size_ - 1;
+}
+
 KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
                                   TS_LSN start_lsn, TS_LSN end_lsn, uint64_t txn_id) {
   if (end_lsn <= start_lsn || end_lsn > getCurrentLsn()) {
