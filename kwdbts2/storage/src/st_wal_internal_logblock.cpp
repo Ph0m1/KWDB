@@ -53,6 +53,10 @@ void EntryBlock::reset(uint32_t block_no) {
 
 char* EntryBlock::encode() {
   char* value = KNEW char[BLOCK_SIZE];
+  if (value == nullptr) {
+    LOG_ERROR("Failed to malloc memory.")
+    return nullptr;
+  }
   size_t offset = 0;
   std::memcpy(value, &block_no_, sizeof(block_no_));
   offset += sizeof(block_no_);
@@ -121,6 +125,10 @@ KStatus EntryBlock::readBytes(size_t& offset, char*& res, size_t length,
     return FAIL;
   }
   res = KNEW char[length];
+  if (res == nullptr) {
+    LOG_ERROR("Failed to malloc memory.")
+    return FAIL;
+  }
 
   read_size = 0;
 
@@ -163,6 +171,10 @@ void HeaderBlock::setCheckpointInfo(TS_LSN checkpoint_lsn,
 
 char* HeaderBlock::encode() {
   char* value = KNEW char[BLOCK_SIZE];
+  if (value == nullptr) {
+    LOG_ERROR("Failed to malloc memory.")
+    return nullptr;
+  }
   size_t offset = 0;
   std::memcpy(value, &format, sizeof(format));
   offset += sizeof(format);

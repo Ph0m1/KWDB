@@ -213,6 +213,10 @@ KStatus WALMgr::WriteInsertWAL(kwdbContext_p ctx, uint64_t x_id, int64_t time_pa
   size_t log_len = InsertLogTagsEntry::fixed_length + prepared_payload.len;
   auto* wal_log = InsertLogTagsEntry::construct(WALLogType::INSERT, x_id, WALTableType::TAG, time_partition, offset,
                                                 prepared_payload.len, prepared_payload.data);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
   delete[] wal_log;
@@ -224,6 +228,10 @@ KStatus WALMgr::WriteInsertWAL(kwdbContext_p ctx, uint64_t x_id, int64_t time_pa
   auto* wal_log = InsertLogMetricsEntry::construct(WALLogType::INSERT, x_id, WALTableType::DATA, time_partition, offset,
                                                    prepared_payload.len, prepared_payload.data, primary_tag.len,
                                                    primary_tag.data);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = InsertLogMetricsEntry::fixed_length + prepared_payload.len + primary_tag.len;
   KStatus status = writeWALInternal(ctx, wal_log, log_len, entry_lsn);
 
@@ -236,6 +244,10 @@ KStatus WALMgr::WriteUpdateWAL(kwdbContext_p ctx, uint64_t x_id, int64_t time_pa
   size_t log_len = UpdateLogTagsEntry::fixed_length + new_payload.len+ old_payload.len;
   auto* wal_log = UpdateLogTagsEntry::construct(WALLogType::UPDATE, x_id, WALTableType::TAG, time_partition, offset,
                                                 new_payload.len, old_payload.len, new_payload.data, old_payload.data);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
   delete[] wal_log;
@@ -246,6 +258,10 @@ KStatus WALMgr::WriteDeleteMetricsWAL(kwdbContext_p ctx, uint64_t x_id, const st
                                       const std::vector<KwTsSpan>& ts_spans, vector<DelRowSpan>& row_spans) {
   auto* wal_log = DeleteLogMetricsEntry::construct(WALLogType::DELETE, x_id, WALTableType::DATA, primary_tag.length(),
                                                    0, 0, row_spans.size(), primary_tag.data(), row_spans.data());
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = DeleteLogMetricsEntry::fixed_length + row_spans.size() * sizeof(DelRowSpan) + primary_tag.length();
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -257,6 +273,10 @@ KStatus WALMgr::WriteDeleteTagWAL(kwdbContext_p ctx, uint64_t x_id, const string
                                   uint32_t sub_group_id, uint32_t entity_id, TSSlice tag_pack) {
   auto* wal_log = DeleteLogTagsEntry::construct(WALLogType::DELETE, x_id, WALTableType::TAG, sub_group_id, entity_id,
                                                 primary_tag.length(), primary_tag.data(), tag_pack.len, tag_pack.data);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = DeleteLogTagsEntry::fixed_length + primary_tag.length() + tag_pack.len;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -268,7 +288,10 @@ KStatus WALMgr::WriteCheckpointWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t ta
                                    uint32_t range_size, CheckpointPartition* time_partitions, TS_LSN& entry_lsn) {
   auto* wal_log = CheckpointEntry::construct(WALLogType::CHECKPOINT, x_id, meta_.current_checkpoint_no, tag_offset,
                                              range_size, time_partitions);
-
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   uint64_t partition_len = sizeof(CheckpointPartition) * range_size;
   size_t log_len = CheckpointEntry::fixed_length + partition_len;
   KStatus status = writeWALInternal(ctx, wal_log, log_len, entry_lsn);
@@ -279,6 +302,10 @@ KStatus WALMgr::WriteCheckpointWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t ta
 
 KStatus WALMgr::WriteCheckpointWAL(kwdbContext_p ctx, uint64_t x_id, TS_LSN& entry_lsn) {
   auto* wal_log = CheckpointEntry::construct(WALLogType::CHECKPOINT, x_id, meta_.current_checkpoint_no, 0, 0, nullptr);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = CheckpointEntry::fixed_length;
   KStatus status = writeWALInternal(ctx, wal_log, log_len, entry_lsn);
 
@@ -289,6 +316,10 @@ KStatus WALMgr::WriteCheckpointWAL(kwdbContext_p ctx, uint64_t x_id, TS_LSN& ent
 KStatus WALMgr::WriteSnapshotWAL(kwdbContext_p ctx, uint64_t x_id, TSTableID tbl_id, uint64_t b_hash,
                                  uint64_t e_hash, KwTsSpan span) {
   auto* wal_log = SnapshotEntry::construct(WALLogType::RANGE_SNAPSHOT, x_id, tbl_id, b_hash, e_hash, span.begin, span.end);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = SnapshotEntry::fixed_length;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -298,6 +329,10 @@ KStatus WALMgr::WriteSnapshotWAL(kwdbContext_p ctx, uint64_t x_id, TSTableID tbl
 
 KStatus WALMgr::WriteTempDirectoryWAL(kwdbContext_p ctx, uint64_t x_id, std::string path) {
   auto* wal_log = TempDirectoryEntry::construct(WALLogType::SNAPSHOT_TMP_DIRCTORY, x_id, path);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = TempDirectoryEntry::fixed_length + path.length() + 1;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -309,6 +344,10 @@ KStatus WALMgr::WriteDDLCreateWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t obj
                                   roachpb::CreateTsTable* meta, std::vector<RangeGroup>* ranges) {
   auto* wal_log = DDLCreateEntry::construct(WALLogType::DDL_CREATE, x_id, object_id,
                                             meta->ByteSize(), ranges->size(), meta, ranges->data());
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = DDLCreateEntry::fixed_length + meta->ByteSizeLong() + ranges->size() * DDLCreateEntry::range_length;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -318,6 +357,10 @@ KStatus WALMgr::WriteDDLCreateWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t obj
 
 KStatus WALMgr::WriteDDLDropWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t object_id) {
   auto* wal_log = DDLDropEntry::construct(WALLogType::DDL_DROP, x_id, object_id);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = DDLDropEntry::fixed_length;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -329,6 +372,10 @@ KStatus WALMgr::WriteDDLAlterWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t obje
                                  uint32_t cur_version, uint32_t new_version, TSSlice& column_meta) {
   auto* wal_log = DDLAlterEntry::construct(WALLogType::DDL_ALTER_COLUMN, x_id, object_id, alter_type,
                                            cur_version, new_version, column_meta);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = DDLAlterEntry::fixed_length + column_meta.len;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -338,6 +385,10 @@ KStatus WALMgr::WriteDDLAlterWAL(kwdbContext_p ctx, uint64_t x_id, uint64_t obje
 
 KStatus WALMgr::WriteMTRWAL(kwdbContext_p ctx, uint64_t x_id, const char* tsx_id, WALLogType log_type) {
   auto* wal_log = MTREntry::construct(log_type, x_id, tsx_id);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = MTREntry::fixed_length;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 
@@ -347,6 +398,10 @@ KStatus WALMgr::WriteMTRWAL(kwdbContext_p ctx, uint64_t x_id, const char* tsx_id
 
 KStatus WALMgr::WriteTSxWAL(kwdbContext_p ctx, uint64_t x_id, const char* ts_trans_id, WALLogType log_type) {
   auto* wal_log = TTREntry::construct(log_type, x_id, ts_trans_id);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
   size_t log_len = TTREntry::fixed_length;
   KStatus status = WriteWAL(ctx, wal_log, log_len);
 

@@ -166,6 +166,11 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
 
         if (txn_id == 0 || txn_id == x_id) {
           auto* mtr_entry = KNEW MTRBeginEntry(current_lsn, x_id, tsx_id, range_id, index);
+          if (mtr_entry == nullptr) {
+            LOG_ERROR("Failed to construct entry.")
+            status = FAIL;
+            break;
+          }
           log_entries.push_back(mtr_entry);
         }
         break;
@@ -191,6 +196,11 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
 
         if (txn_id == 0 || txn_id == x_id) {
           auto* mtr_entry = KNEW MTREntry(current_lsn, typ, x_id, tsx_id);
+          if (mtr_entry == nullptr) {
+            LOG_ERROR("Failed to construct entry.")
+            status = FAIL;
+            break;
+          }
           log_entries.push_back(mtr_entry);
         }
         break;
@@ -228,6 +238,11 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
         auto* mtr_entry = KNEW TTREntry(current_lsn, typ, x_id, read_buf);
         delete[] read_buf;
         read_buf = nullptr;
+        if (mtr_entry == nullptr) {
+          LOG_ERROR("Failed to construct entry.")
+          status = FAIL;
+          break;
+        }
 
         log_entries.push_back(mtr_entry);
         break;
@@ -266,6 +281,11 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
         auto* drop_entry = KNEW DDLDropEntry(current_lsn, typ, x_id, object_id);
         delete[] read_buf;
         read_buf = nullptr;
+        if (drop_entry == nullptr) {
+          LOG_ERROR("Failed to construct entry.")
+          status = FAIL;
+          break;
+        }
 
         log_entries.push_back(drop_entry);
         break;
@@ -298,6 +318,11 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
         auto* drop_entry = KNEW SnapshotEntry(current_lsn, x_id, table_id, b_hash, e_hash, span);
         delete[] read_buf;
         read_buf = nullptr;
+        if (drop_entry == nullptr) {
+          LOG_ERROR("Failed to construct entry.")
+          status = FAIL;
+          break;
+        }
 
         log_entries.push_back(drop_entry);
         break;
@@ -327,6 +352,13 @@ KStatus WALBufferMgr::readWALLogs(std::vector<LogEntry*>& log_entries,
         }
         std::string file_path(read_buf, length);
         auto* drop_entry = KNEW TempDirectoryEntry(current_lsn, x_id, file_path);
+        if (drop_entry == nullptr) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to construct entry.")
+          status = FAIL;
+          break;
+        }
         delete[] read_buf;
         read_buf = nullptr;
         log_entries.push_back(drop_entry);
@@ -611,6 +643,12 @@ KStatus WALBufferMgr::readInsertLog(std::vector<LogEntry*>& log_entries, TS_LSN 
       if (txn_id == 0 || txn_id == x_id) {
         auto* insert_tags = KNEW InsertLogTagsEntry(current_lsn, WALLogType::INSERT, x_id, tbl_typ, time_partition,
                                                     offset, length, read_buf);
+        if (insert_tags == nullptr) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to construct entry.")
+          return FAIL;
+        }
         log_entries.push_back(insert_tags);
       }
       delete[] read_buf;
@@ -656,7 +694,12 @@ KStatus WALBufferMgr::readInsertLog(std::vector<LogEntry*>& log_entries, TS_LSN 
       if (txn_id == 0 || txn_id == x_id) {
         auto* insert_metrics = KNEW InsertLogMetricsEntry(current_lsn, WALLogType::INSERT, x_id, tbl_typ,
                                                           time_partition, offset, length, p_tag_len, read_buf);
-
+        if (insert_metrics == nullptr) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to construct entry.")
+          return FAIL;
+        }
         log_entries.push_back(insert_metrics);
       }
 
@@ -730,6 +773,12 @@ KStatus WALBufferMgr::readUpdateLog(std::vector<LogEntry*>& log_entries, TS_LSN 
       if (txn_id == 0 || txn_id == x_id) {
         auto* update_tags = KNEW UpdateLogTagsEntry(current_lsn, WALLogType::UPDATE, x_id, tbl_typ, time_partition,
                                                     offset, length, old_len, read_buf);
+        if (update_tags == nullptr) {
+          delete[] read_buf;
+          read_buf = nullptr;
+          LOG_ERROR("Failed to construct entry.")
+          return FAIL;
+        }
         log_entries.push_back(update_tags);
       }
       delete[] read_buf;
@@ -813,6 +862,12 @@ KStatus WALBufferMgr::readDeleteLog(vector<LogEntry*>& log_entries, TS_LSN curre
       if (txn_id == 0 || txn_id == x_id) {
         auto* d_tags_entry = KNEW DeleteLogTagsEntry(current_lsn, WALLogType::DELETE, x_id, table_type, group_id,
                                                      entity_id, p_tag_len, tag_len, res);
+        if (d_tags_entry == nullptr) {
+          delete[] res;
+          res = nullptr;
+          LOG_ERROR("Failed to construct entry.")
+          return FAIL;
+        }
         log_entries.push_back(d_tags_entry);
       }
       delete[] res;
@@ -858,6 +913,12 @@ KStatus WALBufferMgr::readDeleteLog(vector<LogEntry*>& log_entries, TS_LSN curre
       if (txn_id == 0 || txn_id == x_id) {
         auto* metrics_entry = KNEW DeleteLogMetricsEntry(current_lsn, WALLogType::DELETE, x_id, table_type, p_tag_len,
                                                          range_size, res);
+        if (metrics_entry == nullptr) {
+          delete[] res;
+          res = nullptr;
+          LOG_ERROR("Failed to construct entry.")
+          return FAIL;
+        }
         log_entries.push_back(metrics_entry);
       }
       delete[] res;
@@ -886,6 +947,10 @@ KStatus WALBufferMgr::readCheckpointLog(vector<LogEntry*>& log_entries, TS_LSN c
 
   delete[] read_buf;
   read_buf = nullptr;
+  if (checkpoint == nullptr) {
+    LOG_ERROR("Failed to construct entry.")
+    return FAIL;
+  }
 
   size_t partition_size = checkpoint->getPartitionLen();
   if (partition_size == 0) {
@@ -930,6 +995,10 @@ KStatus WALBufferMgr::readDDLCreateLog(vector<LogEntry*>& log_entries, TS_LSN cu
 
   delete[] read_buf;
   read_buf = nullptr;
+  if (entry == nullptr) {
+    LOG_ERROR("Failed to construct entry.")
+    return FAIL;
+  }
 
   status = readBytes(current_offset, read_queue, entry->getMetaLength(), read_buf);
   if (status == FAIL) {
@@ -987,6 +1056,10 @@ KStatus WALBufferMgr::readDDLAlterLog(vector<LogEntry*>& log_entries, TS_LSN cur
 
   delete[] read_buf;
   read_buf = nullptr;
+  if (entry == nullptr) {
+    LOG_ERROR("Failed to construct entry.")
+    return FAIL;
+  }
 
   status = readBytes(current_offset, read_queue, entry->getLength(), read_buf);
   if (status == FAIL) {
