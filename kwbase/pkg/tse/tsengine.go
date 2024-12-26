@@ -1213,7 +1213,7 @@ func (r *TsEngine) manageWAL() {
 			case <-r.stopper.ShouldStop():
 				return
 			case <-flushTimer.C:
-				if flushInterval >= 0 && flushInterval <= 200*time.Millisecond {
+				if flushInterval <= 200*time.Millisecond {
 					continue
 				}
 				flushTimer.Read = true

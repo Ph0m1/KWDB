@@ -139,6 +139,9 @@ BlockItem* EntityBlockMetaManager::GetBlockItem(BLOCK_ID item_id) {
 int EntityBlockMetaManager::sync(int flags) {
   int meta_size = entity_block_metas_.size();
   for (int i = 0; i < meta_size; i++) {
+    if (!entity_block_metas_[i]) {
+      break;
+    }
     int error_code = entity_block_metas_[i]->sync(flags);
     if (error_code < 0) return error_code;
   }

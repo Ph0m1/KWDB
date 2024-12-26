@@ -204,6 +204,7 @@ type timeSeriesImportInfo struct {
 	// for fast type check while converting string to datums ts col which maybe int64 or string.
 	tsColTypeMap map[int]oid.Oid
 	m1           syncutil.RWMutex
+	writeWAL     bool
 	// Does the CSV file contain line breaks
 	hasSwap bool
 }
@@ -335,7 +336,7 @@ func initPrettyColsAndComputeColumnSize(
 		autoShrink: autoShrink, logColumnID: logColumnID, batchSize: batchSize, fileSplitInfos: fileSplitInfos,
 		parallelNums: parallelNums, dbID: dbID, tbID: tbID, flowCtx: flowCtx,
 		datumsCh: datumsCh, txn: txn, primaryTagCols: primaryTagCols,
-		OptimizedDispatch: spec.OptimizedDispatch}
+		OptimizedDispatch: spec.OptimizedDispatch, writeWAL: spec.WriteWAL}
 	t.mu.pTagToWorkerID = pTagToWorkerID
 	t.tsColTypeMap = make(map[int]oid.Oid, pArgs.PTagNum+pArgs.AllTagNum+pArgs.DataColNum)
 	return t, err
@@ -1039,6 +1040,7 @@ func (t *timeSeriesImportInfo) BuildPayloadForTsImportStartSingleNode(
 		TBID:           uint64(t.tbID),
 		TSVersion:      t.pArgs.TSVersion,
 		RowNum:         uint32(rowNum),
+		WriteWAL:       t.writeWAL,
 	})
 
 	return tsPayload.BuildRowsPayloadByDatums(InputDatums, rowNum, t.prettyCols, t.colIndexs, true)
@@ -1057,6 +1059,7 @@ func (t *timeSeriesImportInfo) BuildPayloadForTsImportStartDistributeMode(
 		TBID:           uint64(t.tbID),
 		TSVersion:      t.pArgs.TSVersion,
 		RowNum:         uint32(rowNum),
+		WriteWAL:       t.writeWAL,
 	})
 
 	return tsPayload.BuildRowBytesForTsImport(evalCtx, txn, InputDatums, rowNum, t.prettyCols, t.colIndexs, t.pArgs, uint32(t.dbID), uint32(t.tbID), true)

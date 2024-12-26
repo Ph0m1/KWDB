@@ -11,6 +11,7 @@ Payload::Payload(MMapRootTableManager* root_bt_manager, TSSlice data) : slice_(d
   start_row_ = 0;
   count_ = *reinterpret_cast<int32_t*> (slice_.data + row_num_offset_);
   flag_ = *reinterpret_cast<uint8_t*> (slice_.data + row_type_offset_);
+  with_wal_ = *reinterpret_cast<uint8_t*> (slice_.data + with_wal_offset_);
   primary_len_ = KInt16(slice_.data + header_size_);
   primary_offset_ = header_size_ + 2;
   tag_len_ = KInt32(slice_.data + primary_offset_ + primary_len_);
@@ -35,6 +36,7 @@ Payload::Payload(const std::vector<AttributeInfo>& schema, const std::vector<uin
   start_row_ = 0;
   count_ = *reinterpret_cast<int32_t*> (slice_.data + row_num_offset_);
   flag_ = *reinterpret_cast<uint8_t*> (slice_.data + row_type_offset_);
+  with_wal_ = *reinterpret_cast<uint8_t*> (slice_.data + with_wal_offset_);
   primary_len_ = KInt16(slice_.data + header_size_);
   primary_offset_ = header_size_ + 2;
   tag_len_ = KInt32(slice_.data + primary_offset_ + primary_len_);
