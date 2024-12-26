@@ -1013,7 +1013,7 @@ SELECT description
 	// pg_table_is_visible returns true if the input oid corresponds to a table
 	// that is part of the databases on the search path.
 	// https://www.postgresql.org/docs/9.6/static/functions-info.html
-	"pg_table_is_visible": makeBuiltin(defProps(),
+	"pg_table_is_visible": makeBuiltin(tree.FunctionProperties{DistsqlBlacklist: true},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"oid", types.Oid}},
 			ReturnType: tree.FixedReturnType(types.Bool),
