@@ -182,8 +182,8 @@ var TsWALBufferSize = settings.RegisterValidatedByteSizeSetting(
 	"ts WAL buffer size, default 4Mib",
 	4<<20,
 	func(v int64) error {
-		if v < 4 {
-			return errors.Errorf("WAL buffer size must more than 4(Mib)")
+		if v < 4<<20 {
+			return errors.Errorf("WAL buffer size can not less than 4(Mib)")
 		}
 		return nil
 	},
@@ -227,6 +227,19 @@ var SQLTimeseriesTrace = settings.RegisterStringSetting(
 	"ts.trace.on_off_list",
 	"collection/push switch",
 	"",
+)
+
+// TsFreeSpaceAlertThreshold indicates alarm threshold of the available disk space of TsEngine
+var TsFreeSpaceAlertThreshold = settings.RegisterPublicValidatedByteSizeSetting(
+	"ts.disk_free_space.alert_threshold",
+	"ts disk free space alert threshold for insert, default 0Byte, indicates no alert",
+	0,
+	func(v int64) error {
+		if v < 0 {
+			return errors.Errorf("%d is not nonnegative", v)
+		}
+		return nil
+	},
 )
 
 //export isCanceledCtx

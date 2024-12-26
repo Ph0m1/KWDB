@@ -17,13 +17,13 @@ SET
 CREATE TABLE
 > insert into test.tb1 values('2024-01-01 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_0');
 INSERT 1
-> insert into test.tb1 values('2024-01-02 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_1');
+> insert into test.tb1 values('2024-01-02 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_0');
 INSERT 1
 > select * from test.tb1 order by k_timestamp, hostname;
          k_timestamp        | usage_user | usage_system | usage_idle | usage_nice | usage_iowait | usage_irq | usage_softirq | usage_steal | usage_guest | usage_guest_nice | hostname
 ----------------------------+------------+--------------+------------+------------+--------------+-----------+---------------+-------------+-------------+------------------+-----------
   2024-01-01 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
-  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_1
+  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
 (2 rows)
 > export into csv "nodelocal://1/tbKeep/tb1/" from table test.tb1;
   result
@@ -52,8 +52,8 @@ SET CLUSTER SETTING
 ----------------------------+------------+--------------+------------+------------+--------------+-----------+---------------+-------------+-------------+------------------+-----------
   2024-01-01 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
   2024-01-01 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
-  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_1
-  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_1
+  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
+  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
 (4 rows)
 > drop table test.tb1;
 DROP TABLE
@@ -83,7 +83,7 @@ INSERT 1
          k_timestamp        | usage_user | usage_system | usage_idle | usage_nice | usage_iowait | usage_irq | usage_softirq | usage_steal | usage_guest | usage_guest_nice | hostname
 ----------------------------+------------+--------------+------------+------------+--------------+-----------+---------------+-------------+-------------+------------------+-----------
   2024-01-01 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
-  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_1
+  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
 (2 rows)
 > drop table test.tb1;
 DROP TABLE
@@ -107,17 +107,18 @@ INSERT 1
 > import into test.tb1 csv data ('nodelocal://1/tbReject/tb1');
   job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
 ---------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    1 | 1            | 0
+  -      | succeeded |                  1 |    0 | 2            | 0
 (1 row)
 > select * from test.tb1 order by k_timestamp, hostname;
          k_timestamp        | usage_user | usage_system | usage_idle | usage_nice | usage_iowait | usage_irq | usage_softirq | usage_steal | usage_guest | usage_guest_nice | hostname
 ----------------------------+------------+--------------+------------+------------+--------------+-----------+---------------+-------------+-------------+------------------+-----------
   2024-01-01 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_0
-  2024-01-02 00:00:01+00:00 |       NULL |         NULL |       NULL |       NULL |         NULL |      NULL |          NULL |        NULL |        NULL |             NULL | host_1
-(2 rows)
+(1 row)
 > drop table test.tb1;
 DROP TABLE
 > use defaultdb;
 SET
 > drop database test cascade;
 DROP DATABASE
+> SET CLUSTER SETTING ts.dedup.rule = 'override';
+SET CLUSTER SETTING

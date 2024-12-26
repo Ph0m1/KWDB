@@ -214,6 +214,12 @@ MMapSegmentTable* TsTimePartition::createSegmentTable(BLOCK_ID segment_id,  uint
     err_info.setError(KWEINVALPATH, db_path_ + tbl_sub_path_ + " is not data path.");
     return nullptr;
   }
+
+  if (!IsDiskSpaceEnough(db_path_)) {
+    err_info.setError(KWEFREESPCLIMIT);
+    return nullptr;
+  }
+
   string segment_sand = segment_tbl_sub_path(segment_id);
   string dir_path = db_path_ + segment_sand;
   // Attempt to access the directory, create it if it doesn't exist.
@@ -443,7 +449,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
                                            std::vector<BlockSpan>* alloc_spans, std::vector<MetricRowID>* todo_markdel,
                                            ErrorInfo& err_info, uint32_t* inc_unordered_cnt, DedupResult* dedup_result) {
   KWDB_DURATION(StStatistics::Get().push_payload);
-  int64_t err_code = 0;
+  int err_code = 0;
   err_info.errcode = 0;
   alloc_spans->clear();
 
@@ -471,7 +477,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     err_code = AllocateAllDataSpace(entity_id, num, alloc_spans, payload->GetTsVersion());
     if (err_code < 0) {
       err_info.errcode = err_code;
-      err_info.errmsg = "AllocateSpace failed : " + string(strerror(errno));
+      err_info.errmsg = "AllocateSpace failed : " + string(ErrorInfo::errorCodeString(err_code));
       MUTEX_UNLOCK(vacuum_insert_lock_);
       return err_code;
     }
@@ -543,7 +549,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
   err_code = updatePayloadUsingDedup(entity_id, (*alloc_spans)[0], payload, start_in_payload, num, dedup_info);
   if (err_code < 0) {
     err_info.errcode = err_code;
-    err_info.errmsg = "updatePayloadUsingDedup failed : " + string(strerror(errno));
+    err_info.errmsg = "updatePayloadUsingDedup failed : " + string(ErrorInfo::errorCodeString(err_code));
     return err_code;
   }
 
@@ -564,7 +570,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
                                         start_in_payload + count, span, inc_unordered_cnt, dedup_info);
     if (err_code < 0) {
       err_info.errcode = err_code;
-      err_info.errmsg = "PushPayload failed : " + string(strerror(errno));
+      err_info.errmsg = "PushPayload failed : " + string(ErrorInfo::errorCodeString(err_code));
       return err_code;
     }
     err_code = ProcessDuplicateData(payload, start_in_payload, count, span, dedup_info, dedup_result, err_info, &deleted_rows);
@@ -1427,12 +1433,17 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
     LOG_ERROR("EntityItem[%u] error: entity_item is null", entity_id);
     return KWENOOBJ;
   }
+  // TODO:(zqh) 创建第二个segment失败，undo put是否正确处理
+  if (entity_item->max_ts == INVALID_TS || entity_item->min_ts == INVALID_TS) {
+    LOG_WARN("UndoPut: entity_id [%u] has no data inserted", entity_id);
+    return 0;
+  }
   BLOCK_ID block_item_id = entity_item->cur_block_id;
   auto start_time = payload->GetTimestamp(start_row);
   auto end_time = payload->GetTimestamp(num - 1);
   if (start_time > entity_item->max_ts || end_time < entity_item->min_ts) {
-    LOG_ERROR("Payload data is not within this entity, entity_id = %u", entity_id);
-    return KWENOOBJ;
+    LOG_WARN("Payload data is not within this entity, entity_id = %u", entity_id);
+    return 0;
   }
   // Iterate through all blocks and verify if there is matching data (with identical timestamp and LSN).
   // If such data is found, an undo operation is required to mark the data as deleted.
@@ -1545,7 +1556,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
                              std::vector<BlockSpan>* alloc_spans, std::vector<MetricRowID>* todo_markdel,
                              std::unordered_map<KTimestamp, MetricRowID>* partition_ts_map, KTimestamp p_time,
                              ErrorInfo& err_info) {
-  int64_t err_code = 0;
+  int err_code = 0;
   err_info.errcode = 0;
   alloc_spans->clear();
   // Inspect whether the partition table's current state is valid
@@ -1579,7 +1590,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
                                           alloc_spans);
     if (err_code < 0) {
       err_info.errcode = err_code;
-      err_info.errmsg = "AllocateSpace failed : " + string(strerror(errno));
+      err_info.errmsg = "AllocateSpace failed : " + string(ErrorInfo::errorCodeString(err_code));
       MUTEX_UNLOCK(vacuum_insert_lock_);
       return err_code;
     }
@@ -1642,7 +1653,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
   err_code = updatePayloadUsingDedup(entity_id, (*alloc_spans)[0], payload, start_row, num, dedup_info);
   if (err_code < 0) {
     err_info.errcode = err_code;
-    err_info.errmsg = "updatePayloadUsingDedup failed : " + string(strerror(errno));
+    err_info.errmsg = "updatePayloadUsingDedup failed : " + string(ErrorInfo::errorCodeString(err_code));
     return err_code;
   }
 
@@ -1664,7 +1675,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
                                         start_row + count, span, &inc_unordered_cnt, dedup_info);
     if (err_code < 0) {
       err_info.errcode = err_code;
-      err_info.errmsg = "PushPayload failed : " + string(strerror(errno));
+      err_info.errmsg = "PushPayload failed : " + string(ErrorInfo::errorCodeString(err_code));
       return err_code;
     }
     err_code = ProcessDuplicateData(payload, start_row, count, span, dedup_info, dedup_result, err_info, &deleted_rows);
@@ -1896,6 +1907,8 @@ int TsTimePartition::allocateBlockItem(uint entity_id, BlockItem** blk_item, uin
     block_item->is_overflow = false;
     block_item->is_agg_res_available = false;
     block_item->max_rows_in_block = active_segment_->getBlockMaxRows();
+    block_item->max_ts_in_block = INVALID_TS;
+    block_item->min_ts_in_block = INVALID_TS;
 
     // Updates the metadata of the active segment.
     active_segment_->metaData()->block_num_of_segment++;

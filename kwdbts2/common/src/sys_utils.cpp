@@ -21,12 +21,10 @@
   namespace fs = std::filesystem;
 #endif
 
+int64_t g_free_space_alert_threshold = 0;
+
 bool IsExists(const string& path) {
-  if (access(path.c_str(), F_OK) != 0) {
-    return false;
-  } else {
-    return true;
-  }
+  return fs::exists(path);
 }
 
 bool Remove(const string& path, ErrorInfo& error_info) {
@@ -114,4 +112,27 @@ bool System(const string& cmd, ErrorInfo& error_info) {
   error_info.errmsg = strerror(errno);
   LOG_ERROR("system(%s) failed: errno[%d], strerror[%s]", cmd.c_str(), errno, error_info.errmsg.c_str());
   return false;
+}
+
+bool DirExists(const std::string& path) {
+  return fs::exists(path) && fs::is_directory(path);
+}
+
+int64_t GetDiskFreeSpace(const std::string &path) {
+  std::error_code ec;
+  auto space_info = fs::space(path, ec);
+  if (ec) {
+    // error happens, just quits here
+    return -1;
+  }
+  // the available size is space_info.available
+  return static_cast<int64_t>(space_info.available);
+}
+
+bool IsDiskSpaceEnough(const std::string& path) {
+  if (g_free_space_alert_threshold == 0) {
+    return true;
+  }
+  auto free_space = GetDiskFreeSpace(path);
+  return free_space > g_free_space_alert_threshold;
 }

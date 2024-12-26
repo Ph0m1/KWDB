@@ -16,6 +16,8 @@
 #include "lg_api.h"
 #include "ts_object_error.h"
 
+extern int64_t g_free_space_alert_threshold;
+
 /*
  * @Description: Check whether the file or directory exists
  * @IN: path: the path of file or directory
@@ -50,3 +52,9 @@ std::time_t ModifyTime(const std::string& filePath);
  * @Return: true/false
  */
 bool System(const string& cmd, ErrorInfo& error_info = getDummyErrorInfo());
+
+bool DirExists(const std::string& path);
+
+int64_t GetDiskFreeSpace(const std::string& path);
+
+bool IsDiskSpaceEnough(const std::string& path);

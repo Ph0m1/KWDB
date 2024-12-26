@@ -43,6 +43,7 @@ using namespace std;
 #define KWEDUPREJECT     -24  // reject duplicate data
 #define KWERSRCBUSY      -25  // resource is busy
 #define KWEDROPPEDOBJ    -26  // object is dropped
+#define KWEFREESPCLIMIT  -27  // free space alert
 
 #define ERROR_LEN_LIMIT 128
 

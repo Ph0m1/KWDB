@@ -25,15 +25,14 @@ const char * TsErrmsg[] = {
   "No space left on device.",           // KWENOSPC         -6
   "Cannot open more files.",		        // KWENFILE	        -7
   "Invalid path: ",                     // KWEINVALPATH     -8
-  // KWEROFS  -9    // Operation not permitted on read only FS.
-  "Operation not permitted on read only file system for ",
+  "Operation not permitted on read only file system for ",  // KWEROFS -9
   "TSObject doesn't exist: ",           // KWENOOBJ        -10
   "Unknown attribute: ",                // KWENOATTR       -11
   "Invalid name: ",                     // KWEINVALIDNAME  -12
   "NameService full",                   // KWENAMESERVICE  -13
   "Cannot lock(r) object: ",            // KWERLOCK        -14
   "Cannot lock(w) object: ",            // KWEWLOCK        -15
-  "Other error: ",                      // KWEOTHER	      -16
+  "Other error: ",                      // KWEOTHER	       -16
   "Invalid value: ",                    // KWEVALUE        -17
   "Out of range data: ",                // KWERANGE        -18
   "Incorrect date value: ",             // KWEINVDATE      -19
@@ -42,7 +41,9 @@ const char * TsErrmsg[] = {
   "Datatype mismatch: " ,               // BOEDATATYPEMISMATCH   -22
   "Need create new segment directory: ",  // KWENOEGMENT         -23
   "Reject duplicate data: " ,           // KWEDUPREJECT     -24
-  "Resource is busy: ",                 // KWERSRCBUSY         -25
+  "Resource is busy: ",                 // KWERSRCBUSY      -25
+  "Object is dropped",                  // KWEDROPPEDOBJ    -26
+  "Disk free space reaches the alert threshold."   // KWEFREESPCLIMIT  -27
 };
 
 #define TsError(x)  (-x)

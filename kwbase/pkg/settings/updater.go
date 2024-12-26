@@ -106,7 +106,8 @@ func goToTSSlice(b []byte) C.TSSlice {
 var SendToAeList = []string{"ts.trace.on_off_list", "ts.dedup.rule", "ts.mount.max_limit",
 	"ts.wal.files_in_group", "ts.entities_per_subgroup.max_limit", "ts.blocks_per_segment.max_limit",
 	"ts.rows_per_block.max_limit", "ts.compression.type", "ts.compression.level",
-	"ts.cached_partitions_per_subgroup.max_limit", "immediate_compression.threads", "ts.count.use_statistics.enabled"}
+	"ts.cached_partitions_per_subgroup.max_limit", "immediate_compression.threads", "ts.count.use_statistics.enabled",
+	"ts.disk_free_space.alert_threshold"}
 
 func needSendToAE(key string) bool {
 	for _, value := range SendToAeList {

@@ -14,7 +14,7 @@ create table test.tb1(k_timestamp timestamptz not null,  usage_user INT8,
  ) TAGS (
      hostname VARCHAR(30) NOT NULL) PRIMARY TAGS(hostname);
 insert into test.tb1 values('2024-01-01 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_0');
-insert into test.tb1 values('2024-01-02 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_1');
+insert into test.tb1 values('2024-01-02 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_0');
 select * from test.tb1 order by k_timestamp, hostname;
 export into csv "nodelocal://1/tbKeep/tb1/" from table test.tb1;
 export into csv "nodelocal://1/tbReject/tb1/" from table test.tb1;
@@ -65,3 +65,5 @@ drop table test.tb1;
 
 use defaultdb;
 drop database test cascade;
+
+SET CLUSTER SETTING ts.dedup.rule = 'override';

@@ -395,7 +395,7 @@ TSStatus TSPutData(TSEngine* engine, TSTableID table_id, TSSlice* payload, size_
   if (s != KStatus::SUCCESS) {
     std::ostringstream ss;
     ss << tmp_range_group_id;
-    return ToTsStatus("PutData Error!,RangeGroup:" + ss.str());
+    return ToTsStatus("PutData Error! RangeGroup:" + ss.str());
   }
   return TSStatus{nullptr, 0};
 }
@@ -678,6 +678,8 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     } else {
       CLUSTER_SETTING_COUNT_USE_STATISTICS = false;
     }
+  } else if ("ts.disk_free_space.alert_threshold" == key) {
+    g_free_space_alert_threshold = atoll(value.c_str());
   }
 #ifndef KWBASE_OSS
   else if ("ts.storage.autonomy.mode" == key) {  // NOLINT

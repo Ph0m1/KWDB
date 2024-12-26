@@ -662,7 +662,7 @@ func (t *timeSeriesImportInfo) handleDedupResp(
 		ruleType, succeedCount, _ = resp.DedupRule, resp.Header().NumKeys, resp.DiscardBitmap
 	} else {
 		resp := resp.(tse.DedupResult)
-		ruleType, succeedCount, _ = int64(resp.DedupRule), int64(resp.DedupRows), resp.DiscardBitmap
+		ruleType, succeedCount, _ = int64(resp.DedupRule), reqCount-int64(resp.DedupRows), resp.DiscardBitmap
 	}
 	switch ruleType {
 	case int64(execinfrapb.DedupRule_TsReject):

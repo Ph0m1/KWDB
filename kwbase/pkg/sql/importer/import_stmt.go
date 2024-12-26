@@ -541,6 +541,8 @@ func (r *importResumer) Resume(
 	p := phs.(sql.PlanHookState)
 	if p.ExecCfg().StartMode != sql.StartSingleNode {
 		p.ExtendedEvalContext().EvalContext.StartDistributeMode = true
+	} else {
+		p.ExtendedEvalContext().EvalContext.StartSinglenode = true
 	}
 	cfg := p.ExecCfg()
 	if details.TimeSeriesImport {
