@@ -271,6 +271,7 @@ use defaultdb;
 drop database test CASCADE;
 
 CREATE ts DATABASE test_select_diff;
+use test_select_diff;
 CREATE TABLE test_select_diff.t1(
         k_timestamp TIMESTAMPTZ NOT NULL,
         id INT NOT NULL,
@@ -396,7 +397,7 @@ INSERT INTO test_select_diff.t1 VALUES('2970-1-1 00:00:00',211,-1,1,-1,1.125,-2.
 INSERT INTO test_select_diff.t1 VALUES('2969-1-2 00:00:00',212,0,0,0,0,0,true,0,'','','','','','','','','','','','','','','',21,0,0,0,0,false,'','\0\0中文te@@~eng TE./。\0\\0\0','','','','','','\0\0中文te@@~eng TE./。。。','','\0\0中文te@@~eng TE./。。。');
 INSERT INTO test_select_diff.t1 VALUES('2969-1-10 00:00:00',220,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,21,null,null,null,null,true,null,'\0\0中文te@@~eng TE./。\0\\0\0',null,null,null,null,null,'\0\0中文te@@~eng TE./。。。',null,'\0\0中文te@@~eng TE./。。。');
 
-SELECT COUNT(*) FROM test_select_diff.t1 ;
+SELECT COUNT(*) FROM test_select_diff.t1;
 
 select diff(NULL) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 
@@ -410,6 +411,27 @@ select max(e1),diff(e1) over (partition by code1,code8,code14,code16) from test_
 
 select time_bucket(k_timestamp,'30day') tb,diff(e) over (partition by code1,code8,code14,code16 order by k_timestamp) diff from (select code1,code8,code14,code16,k_timestamp,e5,diff(e5) over (partition by code1,code8,code14,code16 order by k_timestamp) e from test_select_diff.t1 where k_timestamp between '0000-1-1 00:00:00' and '2970-1-1 00:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')<='24:00:00' and experimental_strftime(k_timestamp,'%H:%M:%S')>='00:00:00') order by tb;
 
+-- mutil diff
+CREATE TABLE space_data_1823973101770842113 (
+    ts TIMESTAMPTZ NOT NULL,
+    occurred TIMESTAMP NULL,
+    pac FLOAT8 NULL,
+    soc FLOAT8 NULL,
+    availablechargedenergy FLOAT8 NULL,
+    availabledischargedenergy FLOAT8 NULL,
+    chargedenergy FLOAT8 NULL,
+    dischargedenergy FLOAT8 NULL
+) TAGS (
+    rel_id NCHAR(50) NOT NULL,
+    space_model_id NCHAR(50),
+    station_id NCHAR(50),
+    tenant_id NCHAR(50),
+    space_node_id NCHAR(50),
+    device_id NCHAR(50) ) PRIMARY TAGS(rel_id);
+
+explain SELECT SUM(chargedenergy) AS chargedenergy , SUM(dischargedenergy) AS dischargedenergy FROM (SELECT ts, DIFF(chargedenergy) over(partition by rel_id) AS chargedenergy,DIFF(dischargedenergy) over(partition by rel_id) AS dischargedenergy FROM space_data_1823973101770842113 where ts >= '2024-11-21 00:00:00.000+0800' AND ts<'2024-11-22 00:00:00.000+0800');
+
+use defaultdb;
 DROP DATABASE test_select_diff cascade;
 
 CREATE ts DATABASE test_select_diff5;
@@ -460,4 +482,6 @@ INSERT INTO test_select_diff5.t1 VALUES('2024-6-3 11:00:00',28,987,222,333,245.6
 INSERT INTO test_select_diff5.t1 VALUES('2024-6-3 19:00:00',29,187,252,338,249.8,19.657,false,'2020-1-1 12:00:00.000','\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\'  ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\'  ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,' '  ,'中文te@@~eng TE./' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,2,0,0,0,0,false,'\0\0中文te@@~eng TE./。\0\\0\0' ,'test数据库语法查询测试！！！@TEST2-8',' ','中文te@@~eng TE./。' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\ ' ,'test数据库语法查询测试！！！@TEST2-14','\'  ,'test数据库语法查询测试！！！@TEST2-16');
 INSERT INTO test_select_diff5.t1 VALUES('2024-6-3 22:00:00',30,107,452,938,49.8,9.657,false,'2020-1-1 12:00:00.000','\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\'  ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\'  ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,' '  ,'中文te@@~eng TE./' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,2,0,0,0,0,false,'\0\0中文te@@~eng TE./。\0\\0\0' ,'test数据库语法查询测试！！！@TEST2-8',' ','中文te@@~eng TE./。' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\0\0中文te@@~eng TE./。\0\\0\0' ,'\ ' ,'test数据库语法查询测试！！！@TEST2-14','\'  ,'test数据库语法查询测试！！！@TEST2-16');
 select avg(LE) from (select diff(e1) over (partition by code1,code8,code14,code16 order by k_timestamp) as LE from test_select_diff5.t1) group by LE having le>=0 order by LE;
+
+use defaultdb;
 DROP DATABASE test_select_diff5 cascade;

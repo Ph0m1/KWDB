@@ -102,17 +102,6 @@ func (b *Builder) buildWindow(outScope *scope, inScope *scope) {
 		}
 	}
 
-	// if first window, set DiffUseOrderScan, if multi diff exist in SQL set HasMuiltDiff
-	if isDiff && !b.factory.Memo().CheckFlag(opt.DiffUseOrderScan) {
-		b.factory.Memo().SetFlag(opt.DiffUseOrderScan)
-		if len(inScope.windows) > 1 {
-			b.factory.Memo().SetFlag(opt.HasMuiltDiff)
-		}
-		// second window, set HasMuiltDiff
-	} else if isDiff {
-		b.factory.Memo().SetFlag(opt.HasMuiltDiff)
-	}
-
 	if !isDiff && (inScope.TableType.HasStable() || inScope.TableType.HasGtable()) {
 		panic(pgerror.New(pgcode.Warning, "window functions are not supported in tstable and stable"))
 	}
@@ -248,6 +237,17 @@ func (b *Builder) buildWindow(outScope *scope, inScope *scope) {
 				},
 			),
 		)
+	}
+
+	// if first window, set DiffUseOrderScan, if multi diff exist in SQL set HasMuiltDiff
+	if isDiff && !b.factory.Memo().CheckFlag(opt.DiffUseOrderScan) {
+		b.factory.Memo().SetFlag(opt.DiffUseOrderScan)
+		if len(frames) > 1 {
+			b.factory.Memo().SetFlag(opt.HasMuiltDiff)
+		}
+		// second window, set HasMuiltDiff
+	} else if isDiff {
+		b.factory.Memo().SetFlag(opt.HasMuiltDiff)
 	}
 
 	for _, f := range frames {
