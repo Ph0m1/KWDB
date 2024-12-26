@@ -28,7 +28,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/optbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -107,10 +106,17 @@ func (b *Builder) buildScalar(ctx *buildScalarCtx, scalar opt.ScalarExpr) (tree.
 		if err != nil {
 			return nil, err
 		}
-		if b.evalCtx != nil && optbuilder.CheckConstScalarWhitelist(scalar, nil) {
+		if b.evalCtx != nil && scalar.CheckConstDeductionEnabled() {
 			value, err := texpr.Eval(b.evalCtx)
 			if err != nil {
-				return nil, err
+				if errors.IsAssertionFailure(err) {
+					return nil, err
+				}
+				// Ignore any errors here (e.g. division by zero), so they can happen
+				// during execution where they are correctly handled. Note that in some
+				// cases we might not even get an error (if this particular expression
+				// does not get evaluated when the query runs, e.g. it's inside a CASE).
+				return texpr, nil
 			}
 			if value == tree.DNull {
 				// We don't want to return an expression that has a different type; cast
@@ -583,10 +589,6 @@ func (b *Builder) addSubquery(
 	// by index (1-based).
 	exprNode.Idx = len(b.subqueries)
 	return exprNode
-}
-
-func (b *Builder) isConst(expr tree.Expr, scalar opt.ScalarExpr) bool {
-	return b.fastIsConstVisitor.run(expr) || optbuilder.CheckConstScalarWhitelist(scalar, nil)
 }
 
 // fastIsConstVisitor determines if an expression is constant by visiting

@@ -90,7 +90,7 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
     if (input_) {
       ret = input_->Init(ctx);
       if (ret != EEIteratorErrCode::EE_OK) {
-        LOG_ERROR("Tag Scan Init() failed\n");
+        LOG_ERROR("Init tagscan failed.");
         break;
       }
     }
@@ -98,7 +98,7 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
     // post->filter;
     ret = param_.ResolveFilter(ctx, &filter_, false);
     if (EEIteratorErrCode::EE_OK != ret) {
-      LOG_ERROR("ReaderPostResolve::ResolveFilter() failed\n");
+      LOG_ERROR("Rosolve filter failed.");
       break;
     }
 
@@ -108,7 +108,7 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
     // resolve renders
     ret = param_.ResolveRender(ctx, &renders_, num_);
     if (ret != EEIteratorErrCode::EE_OK) {
-      LOG_ERROR("ResolveRender() failed\n");
+      LOG_ERROR("Resolve render failed.");
       break;
     }
 
@@ -116,14 +116,14 @@ EEIteratorErrCode TableScanOperator::Init(kwdbContext_p ctx) {
       // resolve output type(return type)
       ret = param_.ResolveOutputType(ctx, renders_, num_);
       if (ret != EEIteratorErrCode::EE_OK) {
-        LOG_ERROR("ResolveOutputType() failed\n");
+        LOG_ERROR("Resolve output type failed.");
         break;
       }
     }
     // output Field
     ret = param_.ResolveOutputFields(ctx, renders_, num_, output_fields_);
     if (ret != EEIteratorErrCode::EE_OK) {
-      LOG_ERROR("ResolveOutputFields() failed\n");
+      LOG_ERROR("Resolve output fields failed.");
       break;
     }
 
@@ -169,7 +169,7 @@ EEIteratorErrCode TableScanOperator::Start(kwdbContext_p ctx) {
   if (input_) {
     code = input_->Start(ctx);
     if (code != EEIteratorErrCode::EE_OK) {
-      LOG_ERROR("Tag Scan Init() failed\n");
+      LOG_ERROR("Start tagscan failed.");
       Return(code);
     }
   }
@@ -412,7 +412,7 @@ EEIteratorErrCode TableScanOperator::InitScanRowBatch(kwdbContext_p ctx, ScanRow
 
   if (nullptr == (*row_batch)) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-    LOG_ERROR("make scan data handle failed");
+    LOG_ERROR("Create rowbatch failed.");
     return EEIteratorErrCode::EE_ERROR;
   }
   return EEIteratorErrCode::EE_OK;

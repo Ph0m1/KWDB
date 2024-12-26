@@ -382,9 +382,23 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		fmt.Fprintf(g.w, "}\n\n")
 
 		// Generate the SetConstDeductionEnabled method.
-		fmt.Fprintf(g.w, "func (e *%s) SetConstDeductionEnabled(flag bool) {\n", opTyp.name)
-		fmt.Fprintf(g.w, "  e.IsConstForLogicPlan = flag\n")
-		fmt.Fprintf(g.w, "}\n\n")
+		if opTyp.name == "ConstExpr" {
+			fmt.Fprintf(g.w, "func (e *%s) SetConstDeductionEnabled(flag bool) {\n", opTyp.name)
+			fmt.Fprintf(g.w, "  e.IsConstForLogicPlan = true\n")
+			fmt.Fprintf(g.w, "}\n\n")
+		} else if opTyp.name == "FunctionExpr" {
+			fmt.Fprintf(g.w, "func (e *%s) SetConstDeductionEnabled(flag bool) {\n", opTyp.name)
+			fmt.Fprintf(g.w, "  if _, ok := constraint.ConstScalarWhitelist[e.FunctionPrivate.Name]; !ok {\n")
+			fmt.Fprintf(g.w, "    e.IsConstForLogicPlan = false\n")
+			fmt.Fprintf(g.w, "  } else {\n")
+			fmt.Fprintf(g.w, "    e.IsConstForLogicPlan = flag\n")
+			fmt.Fprintf(g.w, "  }\n")
+			fmt.Fprintf(g.w, "}\n\n")
+		} else {
+			fmt.Fprintf(g.w, "func (e *%s) SetConstDeductionEnabled(flag bool) {\n", opTyp.name)
+			fmt.Fprintf(g.w, "  e.IsConstForLogicPlan = flag\n")
+			fmt.Fprintf(g.w, "}\n\n")
+		}
 
 		// Generate the PopulateProps and ScalarProps methods.
 		if define.Tags.Contains("ScalarProps") {

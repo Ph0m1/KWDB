@@ -137,7 +137,7 @@ EEIteratorErrCode PostResolve::ResolveOutputFields(kwdbContext_p ctx,
           new_field = KNEW FieldDecimal(i, field->get_storage_type(), field->get_storage_length());
           break;
         default:
-          LOG_WARN("Unknown Output Field Type!\n");
+          LOG_WARN("Unknown Output Field Type: %d.", field->get_storage_type());
           EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "Unknown Output Field Type");
           break;
     }
@@ -180,7 +180,7 @@ EEIteratorErrCode PostResolve::ResolveFilter(kwdbContext_p ctx, Field **field, b
     // resolve binary tree
     *field = ResolveBinaryTree(ctx, expr);
     if (nullptr == *field) {
-      LOG_ERROR("Resolve filter failed\n");
+      LOG_ERROR("Resolve filter failed, filter is %s.", filter);
       code = EEIteratorErrCode::EE_ERROR;
       break;
     }
@@ -225,7 +225,7 @@ EEIteratorErrCode PostResolve::BuildBinaryTree(kwdbContext_p ctx,
   *expr = parser.ParseImpl();  // binary tree
   if (nullptr == *expr) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "Invalid expr");
-    LOG_ERROR("BuildBinaryTree - ParseImpl() failed\n");
+    LOG_ERROR("Parse expr failed, expr is: %s", str.c_str());
     code = EEIteratorErrCode::EE_ERROR;
   }
 
@@ -489,7 +489,7 @@ Field *PostResolve::ResolveOperator(kwdbContext_p ctx, AstEleType operator_type,
     }
     default: {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "Undecided datatype");
-      LOG_ERROR("unknow operator type\n");
+      LOG_ERROR("unknow operator type, type is: %d.", operator_type);
       break;
     }
   }
@@ -569,7 +569,7 @@ EEIteratorErrCode PostResolve::ResolveConst(kwdbContext_p ctx,
   }
 
   if (nullptr == *field) {
-    LOG_ERROR("new TableFieldConst error\n");
+    LOG_ERROR("malloc failed.");
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     code = EEIteratorErrCode::EE_ERROR;
   } else {
@@ -612,7 +612,7 @@ Field *PostResolve::ResolveInOperator(kwdbContext_p ctx, Field *left,
     begin = 0;
     malloc_field = static_cast<Field **>(malloc(num * sizeof(Field *)));
     if (nullptr == malloc_field) {
-      LOG_ERROR("malloc failed\n");
+      LOG_ERROR("malloc failed.");
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       InValueFree(in_values);
     }
@@ -630,7 +630,7 @@ Field *PostResolve::ResolveInOperator(kwdbContext_p ctx, Field *left,
   if (!str.empty()) {
     malloc_field = static_cast<Field **>(malloc(num * sizeof(Field *)));
     if (nullptr == malloc_field) {
-      LOG_ERROR("malloc failed\n");
+      LOG_ERROR("malloc failed.");
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       InValueFree(in_values);
     }
@@ -710,7 +710,7 @@ Field *PostResolve::ResolveInField(kwdbContext_p ctx, const std::string &str) {
     // resolve binary tree
     in_field = ResolveBinaryTree(ctx, expr);
     if (nullptr == in_field) {
-      LOG_ERROR("Resolve in clause failed\n");
+      LOG_ERROR("Resolve in clause failed, expr is %s.", str.c_str());
       code = EEIteratorErrCode::EE_ERROR;
       break;
     }
@@ -745,7 +745,7 @@ EEIteratorErrCode BasePostResolve::ResolveRender(kwdbContext_p ctx,
     *render = static_cast<Field **>(malloc(num * sizeof(Field *)));
     if (nullptr == *render) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-      LOG_ERROR("renders_ malloc failed\n");
+      LOG_ERROR("malloc failed\n");
       Return(EEIteratorErrCode::EE_ERROR);
     }
     memset(*render, 0, num * sizeof(Field *));
@@ -776,7 +776,7 @@ EEIteratorErrCode BasePostResolve::ResolveOutputCol(kwdbContext_p ctx) {
         static_cast<Field **>(malloc(outputcols_size_ * sizeof(Field *)));
     if (nullptr == outputcols_) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-      LOG_ERROR("outputcols_ malloc failed\n");
+      LOG_ERROR("malloc failed\n");
       Return(EEIteratorErrCode::EE_ERROR);
     }
 
@@ -819,7 +819,7 @@ EEIteratorErrCode ReaderPostResolve::ResolveRender(kwdbContext_p ctx,
     *render = static_cast<Field **>(malloc(num * sizeof(Field *)));
     if (nullptr == *render) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-      LOG_ERROR("renders_ malloc failed\n");
+      LOG_ERROR("malloc failed\n");
       Return(EEIteratorErrCode::EE_ERROR);
     }
     memset(*render, 0, num * sizeof(Field *));
@@ -830,7 +830,7 @@ EEIteratorErrCode ReaderPostResolve::ResolveRender(kwdbContext_p ctx,
         static_cast<Field **>(malloc(outputcols_size_ * sizeof(Field *)));
     if (nullptr == outputcols_) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
-      LOG_ERROR("outputcols_ malloc failed\n");
+      LOG_ERROR("malloc failed\n");
       Return(EEIteratorErrCode::EE_ERROR);
     }
     memset(outputcols_, 0, outputcols_size_ * sizeof(Field *));

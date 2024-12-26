@@ -213,7 +213,6 @@ func (b *Builder) buildScalar(
 			expr,
 			b.buildScalar(subscript.Begin.(tree.TypedExpr), inScope, nil, nil, colRefs),
 		)
-		out.SetConstDeductionEnabled(expr.CheckConstDeductionEnabled())
 
 	case *tree.IfErrExpr:
 		cond := b.buildScalar(t.Cond.(tree.TypedExpr), inScope, nil, nil, colRefs)
@@ -600,7 +599,7 @@ func (b *Builder) buildFunction(
 		Overload:   f.ResolvedOverload(),
 	})
 
-	out = b.setConstForScalar(out, isConstForLogicPlanArg)
+	out.SetConstDeductionEnabled(isConstForLogicPlanArg)
 
 	if isGenerator(def) {
 		return b.finishBuildGeneratorFunction(f, out, inScope, outScope, outCol)
@@ -609,37 +608,6 @@ func (b *Builder) buildFunction(
 	return b.finishBuildScalar(f, out, inScope, outScope, outCol)
 }
 
-var (
-	// ConstScalarWhitelist if functionExpr is in the list of builtins, then it can convert constExpr
-	ConstScalarWhitelist = map[string]struct{}{
-		"client_encoding":              {},
-		"version":                      {},
-		"current_database":             {},
-		"current_schema":               {},
-		"current_user":                 {},
-		"now":                          {},
-		"current_timestamp":            {},
-		"localtimestamp":               {},
-		"statement_timestamp":          {},
-		"cluster_logical_timestamp":    {},
-		"clock_timestamp":              {},
-		"timeofday":                    {},
-		"transaction_timestamp":        {},
-		"kwdb_internal.create_regtype": {},
-		"get_bit":                      {},
-		"set_bit":                      {},
-		"quote_literal":                {},
-		"quote_nullable":               {},
-		"experimental_strftime":        {},
-		"experimental_strptime":        {},
-		"extract":                      {},
-		"extract_duration":             {},
-		"date_trunc":                   {},
-		"timezone":                     {},
-		"width_bucket":                 {},
-	}
-)
-
 // check IsConstForLogicPlan
 func checkScalarIsConst(expr opt.ScalarExpr) bool {
 	switch e := expr.(type) {
@@ -647,39 +615,6 @@ func checkScalarIsConst(expr opt.ScalarExpr) bool {
 		return true
 	default:
 		return e.CheckConstDeductionEnabled()
-	}
-	return false
-}
-
-// set IsConstForLogicPlan for constExpr or FunctionExpr
-func (b *Builder) setConstForScalar(
-	expr opt.ScalarExpr, isConstForLogicPlanSub bool,
-) opt.ScalarExpr {
-	switch e := expr.(type) {
-	case *memo.ConstExpr:
-		e.IsConstForLogicPlan = true
-	case *memo.FunctionExpr:
-		e.IsConstForLogicPlan = isConstForLogicPlanSub
-		if isConstForLogicPlanSub && CheckConstScalarWhitelist(expr, b.stmt) {
-			e.IsConstForLogicPlan = true
-		} else {
-			e.IsConstForLogicPlan = false
-		}
-	}
-	return expr
-}
-
-// CheckConstScalarWhitelist check whether function is in the CheckConstScalarWhitelist.
-func CheckConstScalarWhitelist(expr opt.ScalarExpr, stmt tree.Statement) bool {
-	switch s := stmt.(type) {
-	case *tree.Explain:
-		return CheckConstScalarWhitelist(expr, s.Statement)
-	case *tree.Select, *tree.ParenSelect, nil:
-		if e, ok := expr.(*memo.FunctionExpr); ok {
-			if _, ok1 := ConstScalarWhitelist[e.FunctionPrivate.Name]; ok1 && e.IsConstForLogicPlan {
-				return true
-			}
-		}
 	}
 	return false
 }
