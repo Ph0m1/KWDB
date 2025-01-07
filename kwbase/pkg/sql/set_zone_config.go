@@ -37,6 +37,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/config/zonepb"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
+	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server/serverpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
@@ -320,27 +321,19 @@ func (n *setZoneConfigNode) startExec(params runParams) error {
 			if (*name == "constraints" || *name == "lease_preferences") && n.zoneSpecifier.Partition == "" {
 				return pgerror.Newf(pgcode.FeatureNotSupported, "set zone config constraints and lease_preferences is not supported")
 			}
+			// if node status is dead or unhealthy ,change the num replicas will lead to lock when replica relocate
+			// TODO(liyang): if has node dead or unhealthy, relocate in replicate queue maybe select the dead or unhealthy node then can not connect it and will be locked.
 			if *name == "num_replicas" {
-				row, err := params.ExecCfg().InternalExecutor.QueryRow(params.ctx, "", params.p.txn,
-					`SELECT count(*) from(
-										SELECT node_id AS id,
-														address,sql_address,
-														build_tag AS build,started_at,
-														updated_at,
-														locality,
-														start_mode,
-														CASE WHEN split_part(expiration,',',1)::decimal > now()::decimal AND not upgrading 
-															THEN true 
-															ELSE false 
-														END AS is_available,
-														ifnull(is_live, false) as is_live
-										FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id))
-								where is_available = false or is_live = false`)
+				nodeStatus, err := params.ExecCfg().StatusServer.Nodes(params.ctx, &serverpb.NodesRequest{})
 				if err != nil {
 					return err
 				}
-				if int(tree.MustBeDInt(row[0])) > 0 {
-					return pgerror.Newf(pgcode.FeatureNotSupported, "set zone config num_replicas when node unhealthy or dead is not supported")
+				for index := range nodeStatus.Nodes {
+					nodeID := nodeStatus.Nodes[index].Desc.NodeID
+					if nodeStatus.LivenessByNodeID[nodeID] == storagepb.NodeLivenessStatus_UNAVAILABLE ||
+						nodeStatus.LivenessByNodeID[nodeID] == storagepb.NodeLivenessStatus_DEAD {
+						return pgerror.Newf(pgcode.FeatureNotSupported, "set zone config num_replicas when node unhealthy or dead is not supported")
+					}
 				}
 			}
 			inheritVal, expr := val.inheritValue, val.explicitValue

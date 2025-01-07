@@ -21,8 +21,11 @@ SELECT COUNT(1) FROM tsdb1.ts_t3;
 SELECT COUNT(1) FROM tsdb1.ts_t4;
 
 -- kill: c4
--- sleep: 120s
+-- sleep: 30s
+alter range default configure zone using num_replicas = 5;
+-- sleep: 90s
 -- wait-zero-replica: c4
+alter range default configure zone using num_replicas = 5;
 SELECT COUNT(*) = 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 4=ANY(replicas);
 SELECT COUNT(*) FROM tsdb1.ts_t3;
 SELECT COUNT(*) FROM tsdb1.ts_t4;

@@ -51,6 +51,14 @@ SET CLUSTER SETTING
 ----------
   250000
 (1 row)
+> alter range default configure zone using num_replicas = 5;
+ERROR: set zone config num_replicas when node unhealthy or dead is not supported
+SQLSTATE: 0A000
+Failed running "sql"
+> alter range default configure zone using num_replicas = 5;
+ERROR: set zone config num_replicas when node unhealthy or dead is not supported
+SQLSTATE: 0A000
+Failed running "sql"
 > SELECT COUNT(*) = 0 FROM kwdb_internal.ranges WHERE database_name = 'tsdb1' AND 4=ANY(replicas); 
   ?column?
 ------------
