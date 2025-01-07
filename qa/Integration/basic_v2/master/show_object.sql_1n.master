@@ -527,3 +527,39 @@ ALTER TABLE
 (1 row)
 > drop database d1 cascade;
 DROP DATABASE
+> create ts database tsdb;
+CREATE TS DATABASE
+> use tsdb;
+SET
+> CREATE TABLE s11(k_timestamp TIMESTAMPTZ NOT NULL,"1e" INT8 ) TAGS (primary_tag VARCHAR(64) NOT NULL,"1t" VARCHAR(254) ) PRIMARY TAGS(primary_tag);
+CREATE TABLE
+> show create s11;
+  table_name |                 create_statement
+-------------+----------------------------------------------------
+  s11        | CREATE TABLE s11 (
+             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     "1e" INT8 NULL
+             | ) TAGS (
+             |     primary_tag VARCHAR(64) NOT NULL,
+             |     "1t" VARCHAR(254) ) PRIMARY TAGS(primary_tag)
+             |     retentions 0s
+             |     activetime 1d
+             |     partition interval 10d
+(1 row)
+> CREATE TABLE s12(k_timestamp TIMESTAMPTZ NOT NULL,"1e" INT8 ) TAGS ("1p" VARCHAR(64) NOT NULL,"1t" VARCHAR(254) ) PRIMARY TAGS("1p");
+CREATE TABLE
+> show create s12;
+  table_name |              create_statement
+-------------+---------------------------------------------
+  s12        | CREATE TABLE s12 (
+             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     "1e" INT8 NULL
+             | ) TAGS (
+             |     "1p" VARCHAR(64) NOT NULL,
+             |     "1t" VARCHAR(254) ) PRIMARY TAGS("1p")
+             |     retentions 0s
+             |     activetime 1d
+             |     partition interval 10d
+(1 row)
+> drop database tsdb cascade;
+DROP DATABASE

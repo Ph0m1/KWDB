@@ -181,3 +181,12 @@ select count(*) from [show tag values from tb1] where tag8 = false;
 select count(*) from [show tag values from tb1] where tag8 = true;
 
 drop database d1 cascade;
+
+create ts database tsdb;
+use tsdb;
+CREATE TABLE s11(k_timestamp TIMESTAMPTZ NOT NULL,"1e" INT8 ) TAGS (primary_tag VARCHAR(64) NOT NULL,"1t" VARCHAR(254) ) PRIMARY TAGS(primary_tag);
+show create s11;
+CREATE TABLE s12(k_timestamp TIMESTAMPTZ NOT NULL,"1e" INT8 ) TAGS ("1p" VARCHAR(64) NOT NULL,"1t" VARCHAR(254) ) PRIMARY TAGS("1p");
+show create s12;
+
+drop database tsdb cascade;

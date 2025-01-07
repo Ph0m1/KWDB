@@ -198,7 +198,7 @@ func ShowCreateTable(
 					primaryTags = append(primaryTags, desc.Columns[i].Name)
 				}
 				f.WriteString("\n\t")
-				f.WriteString(desc.Columns[i].Name)
+				f.FormatNameP(&desc.Columns[i].Name)
 				f.WriteString(" ")
 				typeStr := desc.Columns[i].Type.SQLString()
 				f.WriteString(typeStr)
@@ -223,7 +223,7 @@ func ShowCreateTable(
 				if i != 0 {
 					f.WriteString(", ")
 				}
-				f.WriteString(pt)
+				f.FormatNameP(&pt)
 			}
 			f.WriteString(")")
 		}
