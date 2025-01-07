@@ -81,9 +81,6 @@ func (p *planner) AlterTSDatabase(ctx context.Context, n *tree.AlterTSDatabase) 
 
 func (n *alterTSDatabaseNode) startExec(params runParams) error {
 	// explicit txn is not allowed in time-series mode.
-	if !params.extendedEvalCtx.TxnImplicit {
-		return sqlbase.UnsupportedTSExplicitTxnError()
-	}
 	log.Infof(params.ctx, "alter ts database %s start, id: %d", n.databaseDesc.Name, n.databaseDesc.ID)
 	p := params.p
 	ctx := params.ctx

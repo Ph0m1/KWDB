@@ -79,7 +79,7 @@ func (r *runParams) Ann() *tree.Annotations {
 // TableDescriptor. See TableDescriptor.ModificationTime.
 //
 // TODO(ajwerner): remove in 20.1.
-func (r *runParams) creationTimeForNewTableDescriptor() hlc.Timestamp {
+func (r *runParams) creationTimeForNewTableDescriptor() (hlc.Timestamp, error) {
 	// Before 19.2 we needed to observe the transaction CommitTimestamp to ensure
 	// that CreateAsOfTime and ModificationTime reflected the timestamp at which the
 	// creating transaction committed. Starting in 19.2 we use a zero-valued
@@ -89,9 +89,13 @@ func (r *runParams) creationTimeForNewTableDescriptor() hlc.Timestamp {
 	if !r.ExecCfg().Settings.Version.IsActive(
 		r.ctx, clusterversion.VersionTableDescModificationTimeFromMVCC,
 	) {
-		ts = r.p.txn.CommitTimestamp()
+		var err error
+		ts, err = r.p.txn.CommitTimestamp()
+		if err != nil {
+			return ts, err
+		}
 	}
-	return ts
+	return ts, nil
 }
 
 // planNode defines the interface for executing a query or portion of a query.

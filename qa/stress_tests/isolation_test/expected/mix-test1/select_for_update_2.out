@@ -1,0 +1,23 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1r s1u s2r s1c s2u s2c
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r: SELECT * FROM t1 WHERE id IN (1, 2) FOR UPDATE;  finished.
+id|balance
+--+-------
+ 1|1000.00
+ 2|2000.00
+(2 rows)
+
+step s1u: UPDATE t1 SET balance = balance + 150 WHERE id = 2;  finished.
+step s2r: SELECT * FROM t1 WHERE id = 2 FOR UPDATE;; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2r: <... completed>
+id|balance
+--+-------
+ 2|2150.00
+(1 row)
+
+step s2u: UPDATE t1 SET balance = balance - 100 WHERE id = 2;  finished.
+step s2c: COMMIT;  finished.

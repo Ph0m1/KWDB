@@ -607,3 +607,10 @@ func (sr *txnSpanRefresher) rollbackToSavepointLocked(ctx context.Context, s sav
 
 // closeLocked implements the txnInterceptor interface.
 func (*txnSpanRefresher) closeLocked() {}
+
+// resetRefreshSpansLocked clear refreshFootprint, reset refreshInvalid and refreshedTimestamp
+func (sr *txnSpanRefresher) resetRefreshSpansLocked() {
+	sr.refreshFootprint.clear()
+	sr.refreshInvalid = false
+	sr.refreshedTimestamp.Reset()
+}

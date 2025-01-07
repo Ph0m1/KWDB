@@ -1,0 +1,17 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s2u1 s1w1 s2c s1r1 s1c
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s2u1: update kv set k = 2 where k = 1;  finished.
+step s1w1: insert into kv values (1, 1) on conflict (k) do update set v = 100; <waiting ...>
+step s2c: COMMIT;  finished.
+step s1w1: <... completed>
+step s1r1: select * from kv;  finished.
+k|v
+-+-
+1|1
+2|1
+(2 rows)
+
+step s1c: commit;  finished.

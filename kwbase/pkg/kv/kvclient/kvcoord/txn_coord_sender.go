@@ -51,12 +51,19 @@ const (
 
 // txnState represents states relating to whether an EndTxn request needs
 // to be sent.
+//
 //go:generate stringer -type=txnState
 type txnState int
 
 const (
 	// txnPending is the normal state for ongoing transactions.
 	txnPending txnState = iota
+
+	// txnRetryableError means that the transaction encountered a
+	// TransactionRetryWithProtoRefreshError, and calls to Send() fail in this
+	// state. It is possible to move back to txnPending by calling
+	// ClearRetryableErr().
+	txnRetryableError
 
 	// txnError means that a batch encountered a non-retriable error. Further
 	// batches except EndTxn(commit=false) will be rejected.
@@ -113,6 +120,11 @@ type TxnCoordSender struct {
 		syncutil.Mutex
 
 		txnState txnState
+
+		// storedRetryableErr is set when txnState == txnRetryableError. This
+		// storedRetryableErr is returned to clients on Send().
+		storedRetryableErr *roachpb.TransactionRetryWithProtoRefreshError
+
 		// storedErr is set when txnState == txnError. This storedErr is returned to
 		// clients on Send().
 		storedErr *roachpb.Error
@@ -601,7 +613,9 @@ func (tc *TxnCoordSender) maybeRejectClientLocked(
 	// Check the transaction coordinator state.
 	switch tc.mu.txnState {
 	case txnPending:
-		// All good.
+	// All good.
+	case txnRetryableError:
+		return roachpb.NewError(tc.mu.storedRetryableErr)
 	case txnError:
 		return tc.mu.storedErr
 	case txnFinalized:
@@ -678,6 +692,16 @@ func (tc *TxnCoordSender) UpdateStateOnRemoteRetryableErr(
 func (tc *TxnCoordSender) handleRetryableErrLocked(
 	ctx context.Context, pErr *roachpb.Error,
 ) *roachpb.TransactionRetryWithProtoRefreshError {
+	// If the transaction is already in a retryable state and the provided error
+	// does not have a higher priority than the existing error, return the
+	// existing error instead of attempting to handle the retryable error. This
+	// prevents the TxnCoordSender from losing information about a higher
+	// priority error.
+	if tc.mu.txnState == txnRetryableError &&
+		roachpb.ErrPriority(pErr.GoError()) <= roachpb.ErrPriority(tc.mu.storedRetryableErr) {
+		return tc.mu.storedRetryableErr
+	}
+
 	// If the error is a transaction retry error, update metrics to
 	// reflect the reason for the restart. More details about the
 	// different error types are documented above on the metaRestart
@@ -729,6 +753,26 @@ func (tc *TxnCoordSender) handleRetryableErrLocked(
 		// Abort the old txn. The client is not supposed to use use this
 		// TxnCoordSender any more.
 		tc.interceptorAlloc.txnHeartbeater.abortTxnAsyncLocked(ctx)
+		log.VEventf(ctx, 2, "closes all the interceptors on retry")
+		tc.cleanupTxnLocked(ctx)
+		return retErr
+	}
+	// Set txnState to txnRetryableError for statement level retry at RC level
+	if tc.mu.txn.IsoLevel == enginepb.ReadCommitted {
+		tc.mu.txnState = txnRetryableError
+		tc.mu.storedRetryableErr = retErr
+	}
+	// If the previous transaction is aborted, it means we had to start a new
+	// transaction and the old one is toast. This TxnCoordSender cannot be used
+	// any more - future Send() calls will be rejected; the client is supposed to
+	// create a new one.
+	if retErr.PrevTxnAborted() {
+		// Remember that this txn is aborted to reject future requests.
+		tc.mu.txn.Status = roachpb.ABORTED
+		// Abort the old txn. The client is not supposed to use this
+		// TxnCoordSender anymore.
+		tc.interceptorAlloc.txnHeartbeater.abortTxnAsyncLocked(ctx)
+		log.VEventf(ctx, 2, "closes all the interceptors on retry")
 		tc.cleanupTxnLocked(ctx)
 		return retErr
 	}
@@ -738,9 +782,17 @@ func (tc *TxnCoordSender) handleRetryableErrLocked(
 
 	// Reset state as this is a retryable txn error that is incrementing
 	// the transaction's epoch.
-	log.VEventf(ctx, 2, "resetting epoch-based coordinator state on retry")
-	for _, reqInt := range tc.interceptorStack {
-		reqInt.epochBumpedLocked()
+	// Only reset when the Epoch of pErr and the Epoch of newTxn are not equal,
+	// because retry of transaction level need to clear interceptorStack, and
+	// need to check if previous txn is aborted through txn ID before check epoch
+	if !pErr.GetTxn().ID.Equal(newTxn.ID) {
+		panic("GetTxn called on aborted txn")
+	}
+	if pErr.GetTxn().Epoch != newTxn.Epoch {
+		log.VEventf(ctx, 2, "resetting epoch-based coordinator state on retry")
+		for _, reqInt := range tc.interceptorStack {
+			reqInt.epochBumpedLocked()
+		}
 	}
 	return retErr
 }
@@ -922,12 +974,36 @@ func (tc *TxnCoordSender) ProvisionalCommitTimestamp() hlc.Timestamp {
 }
 
 // CommitTimestamp is part of the client.TxnSender interface.
-func (tc *TxnCoordSender) CommitTimestamp() hlc.Timestamp {
+// Due to the addition of RC and the timestamp of RC is at the statement level,
+// so it cannot return only txn.ReadTimestamp like SSI did before. We need
+// to add  judgments of txn state and isolation level
+func (tc *TxnCoordSender) CommitTimestamp() (hlc.Timestamp, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	txn := &tc.mu.txn
-	tc.mu.txn.CommitTimestampFixed = true
-	return txn.ReadTimestamp
+	switch txn.Status {
+	case roachpb.COMMITTED:
+		return txn.ReadTimestamp, nil
+	case roachpb.ABORTED:
+		return hlc.Timestamp{}, errors.Errorf("CommitTimestamp called on aborted transaction")
+	default:
+		// If the transaction is not yet committed, configure the ReadTimestampFixed
+		// flag to ensure that the transaction's read timestamp is not pushed before
+		// it commits.
+		//
+		// This operates by disabling the transaction refresh mechanism. For
+		// isolation levels that can tolerate write skew, this is not enough to
+		// prevent the transaction from committing with a later timestamp. In fact,
+		// it's not even clear what timestamp to consider the "commit timestamp" for
+		// these transactions, given that they can read at one or more different
+		// timestamps than the one they eventually write at. For this reason, we
+		// disable the CommitTimestamp method for these isolation levels.
+		if txn.IsoLevel != enginepb.Serializable && txn.IsoLevel != enginepb.RepeatedRead {
+			return hlc.Timestamp{}, errors.Errorf("CommitTimestamp called on weak isolation transaction")
+		}
+		tc.mu.txn.CommitTimestampFixed = true
+		return txn.ReadTimestamp, nil
+	}
 }
 
 // CommitTimestampFixed is part of the client.TxnSender interface.
@@ -966,13 +1042,19 @@ func (tc *TxnCoordSender) ManualRestart(
 		log.Fatalf(ctx, "ManualRestart called on finalized txn: %s", tc.mu.txn)
 	}
 
-	// Invalidate any writes performed by any workers after the retry updated
-	// the txn's proto but before we synchronized (some of these writes might
-	// have been performed at the wrong epoch).
-	tc.mu.txn.Restart(pri, 0 /* upgradePriority */, ts)
-
-	for _, reqInt := range tc.interceptorStack {
-		reqInt.epochBumpedLocked()
+	// just forward timestamp on RC level because it is statement level's retry
+	if !tc.PerStatementReadSnapshot() {
+		// Invalidate any writes performed by any workers after the retry updated
+		// the txn's proto but before we synchronized (some of these writes might
+		// have been performed at the wrong epoch).
+		tc.mu.txn.Restart(pri, 0 /* upgradePriority */, ts)
+		for _, reqInt := range tc.interceptorStack {
+			reqInt.epochBumpedLocked()
+		}
+	} else {
+		log.VEventf(ctx, 2, "transaction bump timestamp on retry when ManualRestart called")
+		tc.mu.txn.WriteTimestamp.Forward(ts)
+		tc.mu.txn.BumpReadTimestamp(tc.mu.txn.WriteTimestamp)
 	}
 
 	// The txn might have entered the txnError state after the epoch was bumped.
@@ -1151,7 +1233,19 @@ func (tc *TxnCoordSender) Step(ctx context.Context) error {
 	}
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
+	// build statement level's snapshot through bump timestamp
+	if tc.PerStatementReadSnapshot() {
+		tc.stepReadTimestampLocked()
+	}
 	return tc.interceptorAlloc.txnSeqNumAllocator.stepLocked(ctx)
+}
+
+// stepReadTimestampLocked bump timestamp and refresh txnSpanRefresher
+// It is used for per-statement to implement transaction isolation level of Read Committed
+func (tc *TxnCoordSender) stepReadTimestampLocked() {
+	now := tc.clock.Now()
+	tc.mu.txn.BumpReadTimestamp(now)
+	tc.interceptorAlloc.txnSpanRefresher.resetRefreshSpansLocked()
 }
 
 // ConfigureStepping is part of the TxnSender interface.
@@ -1174,4 +1268,57 @@ func (tc *TxnCoordSender) GetSteppingMode(ctx context.Context) (curMode kv.Stepp
 		curMode = kv.SteppingEnabled
 	}
 	return curMode
+}
+
+// SetIsoLevel is part of the TxnCoordSender interface and set transaction's IsoLevel.
+func (tc *TxnCoordSender) SetIsoLevel(isoLevel enginepb.Level) error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.mu.active && isoLevel != tc.mu.txn.IsoLevel {
+		return errors.New("cannot change the isolation level of a running transaction")
+	}
+	tc.mu.txn.IsoLevel = isoLevel
+	return nil
+}
+
+// IsoLevel is part of the kv.TxnSender interface and get transaction's IsoLevel.
+func (tc *TxnCoordSender) IsoLevel() enginepb.Level {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	return tc.mu.txn.IsoLevel
+}
+
+// GetRetryableErr is part of the TxnSender interface .
+// And get storedRetryableErr of TxnCoordSender if txnState is txnRetryableError.
+func (tc *TxnCoordSender) GetRetryableErr(
+	ctx context.Context,
+) *roachpb.TransactionRetryWithProtoRefreshError {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.mu.txnState == txnRetryableError {
+		return tc.mu.storedRetryableErr
+	}
+	return nil
+}
+
+// ClearRetryableErr is part of the TxnSender interface.
+// Clear storedRetryableErr and set txnState to txnPending.
+func (tc *TxnCoordSender) ClearRetryableErr(ctx context.Context) error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.mu.txnState != txnRetryableError {
+		return errors.AssertionFailedf("cannot clear retryable error, in state: %s", tc.mu.txnState)
+	}
+	if tc.mu.storedRetryableErr.PrevTxnAborted() {
+		return errors.AssertionFailedf("cannot clear retryable error, txn aborted: %s", tc.mu.txn)
+	}
+	tc.mu.txnState = txnPending
+	tc.mu.storedRetryableErr = nil
+	return nil
+}
+
+// PerStatementReadSnapshot is part of the kv.TxnSender interface.
+// Determine whether IsoLevel is ReadCommitted
+func (tc *TxnCoordSender) PerStatementReadSnapshot() bool {
+	return tc.mu.txn.IsoLevel == enginepb.ReadCommitted
 }

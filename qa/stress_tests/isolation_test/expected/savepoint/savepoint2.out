@@ -1,0 +1,109 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1r1 s1s s1r2 s1rs s2r1 s1c s2c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r1: SELECT * FROM foo FOR KEY SHARE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1s: SAVEPOINT f;  finished.
+step s1r2: SELECT * FROM foo FOR NO KEY UPDATE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1rs: ROLLBACK TO f;  finished.
+step s2r1: SELECT * FROM foo FOR UPDATE; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2r1: <... completed>
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s2c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1r1 s1s s1r2 s2r1 s1rs s1c s2c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r1: SELECT * FROM foo FOR KEY SHARE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1s: SAVEPOINT f;  finished.
+step s1r2: SELECT * FROM foo FOR NO KEY UPDATE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s2r1: SELECT * FROM foo FOR UPDATE; <waiting ...>
+step s1rs: ROLLBACK TO f;  finished.
+step s1c: COMMIT;  finished.
+step s2r1: <... completed>
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s2c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1r1 s1s s1r2 s1rs s2r2 s1c s2c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r1: SELECT * FROM foo FOR KEY SHARE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1s: SAVEPOINT f;  finished.
+step s1r2: SELECT * FROM foo FOR NO KEY UPDATE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1rs: ROLLBACK TO f;  finished.
+step s2r2: SELECT * FROM foo FOR NO KEY UPDATE; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2r2: <... completed>
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s2c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1r1 s1s s1r2 s2r2 s1rs s1c s2c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r1: SELECT * FROM foo FOR KEY SHARE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1s: SAVEPOINT f;  finished.
+step s1r2: SELECT * FROM foo FOR NO KEY UPDATE;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s2r2: SELECT * FROM foo FOR NO KEY UPDATE; <waiting ...>
+step s1rs: ROLLBACK TO f;  finished.
+step s1c: COMMIT;  finished.
+step s2r2: <... completed>
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s2c: COMMIT;  finished.

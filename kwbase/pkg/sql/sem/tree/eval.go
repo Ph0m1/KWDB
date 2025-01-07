@@ -46,6 +46,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/arith"
 	"gitee.com/kwbasedb/kwbase/pkg/util/bitarray"
@@ -3224,12 +3225,21 @@ func (ctx *EvalContext) GetStmtTimestamp() time.Time {
 
 // GetClusterTimestamp retrieves the current cluster timestamp as per
 // the evaluation context. The timestamp is guaranteed to be nonzero.
-func (ctx *EvalContext) GetClusterTimestamp() *DDecimal {
-	ts := ctx.Txn.CommitTimestamp()
-	if ts == (hlc.Timestamp{}) {
-		panic(errors.AssertionFailedf("zero cluster timestamp in txn"))
+// Return error when isolation level is RC because it is statement level's
+// timestamp.
+func (ctx *EvalContext) GetClusterTimestamp() (*DDecimal, error) {
+	if ctx.Txn.IsoLevel() == enginepb.ReadCommitted {
+		return nil, errors.AssertionFailedf("unsupported in read_committed isolation")
 	}
-	return TimestampToDecimal(ts)
+
+	ts, err := ctx.Txn.CommitTimestamp()
+	if err != nil {
+		return nil, err
+	}
+	if ts == (hlc.Timestamp{}) {
+		return nil, errors.AssertionFailedf("zero cluster timestamp in txn")
+	}
+	return TimestampToDecimal(ts), nil
 }
 
 // HasPlaceholders returns true if this EvalContext's placeholders have been

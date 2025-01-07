@@ -49,6 +49,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil"
@@ -848,7 +849,8 @@ func (s *Server) newConnExecutorWithTxn(
 		txn.UserPriority(),
 		tree.ReadWrite,
 		txn,
-		ex.transitionCtx)
+		ex.transitionCtx,
+		tree.SerializableIsolation)
 
 	// Modify the TableCollection to match the parent executor's TableCollection.
 	// This allows the InternalExecutor to see schema changes made by the
@@ -878,6 +880,32 @@ var MaxSQLStatReset = settings.RegisterPublicNonNegativeDurationSettingWithMaxim
 	time.Hour*2, // 2 x diagnostics.sql_stat_reset.interval
 	time.Hour*24,
 )
+
+// clusterTransactionIsolation is transaction level setting of cluster ,which including UNSPECIFIED, SERIALIZABLE and READ COMMITTED
+var clusterTransactionIsolation = settings.RegisterEnumSetting(
+	"sql.txn.cluster_transaction_isolation",
+	"default cluster transactions isolation",
+	"SERIALIZABLE",
+	map[int64]string{
+		int64(tree.SerializableIsolation):  "SERIALIZABLE",
+		int64(tree.RepeatedReadIsolation):  "REPEATABLE READ",
+		int64(tree.ReadCommittedIsolation): "READ COMMITTED",
+	},
+)
+
+// txnIsolationLevelToKV return isolation level through given level, default level and cluster level,
+// which priority from high to low. We will choose s lower isolation level is the higher level is
+// UnspecifiedIsolation, and the level is SerializableIsolation if all the isolation are UnspecifiedIsolation.
+func (ex *connExecutor) txnIsolationLevelToKV(level tree.IsolationLevel) tree.IsolationLevel {
+	defaultLevel := tree.IsolationLevel(ex.sessionData.DefaultTxnIsolationLevel)
+	if level == tree.UnspecifiedIsolation {
+		if defaultLevel != tree.UnspecifiedIsolation {
+			return defaultLevel
+		}
+		return tree.SerializableIsolation
+	}
+	return level
+}
 
 // PeriodicallyClearSQLStats spawns a loop to reset stats based on the setting
 // of a given duration settings variable. We take in a function to actually do
@@ -1834,7 +1862,9 @@ func (ex *connExecutor) updateTxnRewindPosMaybe(
 	}
 	if advInfo.txnEvent == txnRestart {
 		txn := ex.planner.Txn()
-		txn.PrepareForRetry(ctx, nil)
+		if err := txn.PrepareForRetry(ctx, nil); err != nil {
+			return err
+		}
 	}
 	if advInfo.txnEvent == txnStart || advInfo.txnEvent == txnRestart {
 		var nextPos CmdPos
@@ -2161,9 +2191,12 @@ func (ex *connExecutor) setTransactionModes(
 			return err
 		}
 	}
-	if modes.Isolation != tree.UnspecifiedIsolation && modes.Isolation != tree.SerializableIsolation {
-		return errors.AssertionFailedf(
-			"unknown isolation level: %s", errors.Safe(modes.Isolation))
+	// set isolation level of txn
+	if modes.Isolation != tree.UnspecifiedIsolation {
+		level := ex.txnIsolationLevelToKV(modes.Isolation)
+		if err := ex.state.setIsolationLevel(enginepb.Level(level)); err != nil {
+			return pgerror.WithCandidateCode(err, pgcode.ActiveSQLTransaction)
+		}
 	}
 	rwMode := modes.ReadWriteMode
 	if modes.AsOf.Expr != nil && (asOfTs == hlc.Timestamp{}) {

@@ -28,6 +28,14 @@ package kwbase.storage.enginepb;
 import "util/hlc/timestamp.proto";
 import "gogoproto/gogo.proto";
 
+enum Level {
+  option (gogoproto.goproto_enum_prefix) = false;
+  Unspecified = 0;
+  Serializable = 1;
+  ReadCommitted = 2;
+  RepeatedRead = 3;
+}
+
 // TxnMeta is the metadata of a Transaction record.
 message TxnMeta {
   option (gogoproto.goproto_stringer) = false;
@@ -132,6 +140,7 @@ message TxnMeta {
   int32 sequence = 7 [(gogoproto.casttype) = "TxnSeq"];
   int64 write_key_count = 10;
   int64 batch_write_key_count = 11;
+  Level iso_level = 12;
   reserved 8;
 }
 

@@ -748,7 +748,10 @@ func (r *Replica) AdminMerge(
 		// comment on the retry loop after this closure for details.
 		//
 		// TODO(benesch): expose a proper API for preventing the fast path.
-		_ = txn.CommitTimestamp()
+		_, err := txn.CommitTimestamp()
+		if err != nil {
+			return err
+		}
 
 		// Pipelining might send QueryIntent requests to the RHS after the RHS has
 		// noticed the merge and started blocking all traffic. This causes the merge

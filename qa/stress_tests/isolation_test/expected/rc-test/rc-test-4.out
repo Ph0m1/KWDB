@@ -1,0 +1,11 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s2u1 s1w1 s2c s1r
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s2u1: update kv set k = 2 where k = 1;  finished.
+step s1w1: insert into kv values (2, 1); <waiting ...>
+step s2c: COMMIT;  finished.
+step s1w1: <... completed>
+ERROR:  duplicate key value (k)=(2) violates unique constraint "primary"
+step s1r: ROLLBACK;  finished.

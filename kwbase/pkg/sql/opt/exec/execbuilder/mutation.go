@@ -155,10 +155,6 @@ func (b *Builder) buildInsert(ins *memo.InsertExpr) (execPlan, error) {
 //   - In particular, if we are inserting an instance table and the instance table
 //     does not exist, we need to create the instance table before building node.
 func (b *Builder) buildTSInsert(tsInsert *memo.TSInsertExpr) (execPlan, error) {
-	// TS table doesn't support explicit txn, so raise error if detected
-	if !b.evalCtx.TxnImplicit {
-		return execPlan{}, sqlbase.UnsupportedTSExplicitTxnError()
-	}
 	// create instance table
 	if tsInsert.NeedCreateTable && tsInsert.CT != nil {
 		if err := preCreateInstTable(b, tsInsert); err != nil {
@@ -2705,10 +2701,7 @@ func (b *Builder) buildDelete(del *memo.DeleteExpr) (execPlan, error) {
 
 // buildTSDelete builds time series delete node.
 func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
-	// TS table doesn't support explicit txn, so raise error if detected
-	if !b.evalCtx.TxnImplicit {
-		return execPlan{}, sqlbase.UnsupportedTSExplicitTxnError()
-	}
+
 	// prepare metadata used to construct TS delete node.
 	md := b.mem.Metadata()
 	tab := md.Table(tsDelete.STable)
@@ -2814,10 +2807,6 @@ func (b *Builder) buildTSDelete(tsDelete *memo.TSDeleteExpr) (execPlan, error) {
 
 // buildTSUpdate builds time series update node.
 func (b *Builder) buildTSUpdate(tsUpdate *memo.TSUpdateExpr) (execPlan, error) {
-	// TS table doesn't support explicit txn, so raise error if detected
-	if !b.evalCtx.TxnImplicit {
-		return execPlan{}, sqlbase.UnsupportedTSExplicitTxnError()
-	}
 
 	// if primary tag values in filter don't exist，return update 0
 	if tsUpdate.PTagValueNotExist {
@@ -3288,13 +3277,63 @@ func (b *Builder) shouldApplyImplicitLockingToUpdateInput(upd *memo.UpdateExpr) 
 	return ok
 }
 
+// unwrapProjectExprs unwraps zero or more nested ProjectExprs. It returns the
+// first non-ProjectExpr in the chain, or the input if it is not a ProjectExpr.
+func unwrapProjectExprs(input memo.RelExpr) memo.RelExpr {
+	if proj, ok := input.(*memo.ProjectExpr); ok {
+		return unwrapProjectExprs(proj.Input)
+	}
+	return input
+}
+
 // tryApplyImplicitLockingToUpsertInput determines whether or not the builder
 // should apply a FOR UPDATE row-level locking mode to the initial row scan of
 // an UPSERT statement.
 //
 // TODO(nvanbenschoten): implement this method to match on appropriate Upsert
 // expression trees and apply a row-level locking mode.
+//
+// r-test5 case error fix:
+// The issue occurs because Transaction 2 performs an update operation that
+// hasn't been committed yet, leaving a write intent from Transaction 2.
+// Transaction 1's INSERT ON CONFLICT DO UPDATE operation involves a read
+// and a write operation. During the read, it detects a write intent on the
+// current key and pushes the write intent's timestamp to after the read timestamp.
+// However, during the write operation, it encounters the write intent and gets blocked.
+// After Transaction 2 commits, it discovers that the write timestamp of Transaction 1
+// is earlier than the commit timestamp of Transaction 2. It then pushes
+// Transaction 1's write timestamp to after Transaction 2's timestamp and retries.
+// During the retry, it detects a write operation between the read and write timestamps,
+// leading to an error. To address this, a new check is added: if there is a scan during
+// an upsert operation, a row-level lock is applied, which directly blocks during the read operation.
 func (b *Builder) shouldApplyImplicitLockingToUpsertInput(ups *memo.UpsertExpr) bool {
+	if !b.evalCtx.SessionData.ImplicitSelectForUpdate {
+		return false
+	}
+
+	// Try to match the Upsert's input expression against the pattern:
+	//
+	//   [Project]* (LeftJoin Scan | LookupJoin) [Project]* Values
+	//
+	input := ups.Input
+	input = unwrapProjectExprs(input)
+	switch join := input.(type) {
+	case *memo.LeftJoinExpr:
+		_, ok := join.Right.(*memo.ScanExpr)
+		if !ok {
+			return false
+		}
+		input = join.Left
+
+	case *memo.LookupJoinExpr:
+		input = join.Input
+	default:
+		return false
+	}
+	input = unwrapProjectExprs(input)
+	if _, ok := input.(*memo.ValuesExpr); ok {
+		return true
+	}
 	return false
 }
 

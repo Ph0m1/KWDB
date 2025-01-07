@@ -41,6 +41,29 @@ type MockTransactionalSender struct {
 	txn roachpb.Transaction
 }
 
+// SetIsoLevel is part of the TxnSender interface.
+func (m *MockTransactionalSender) SetIsoLevel(isoLevel enginepb.Level) error {
+	m.txn.IsoLevel = isoLevel
+	return nil
+}
+
+// IsoLevel is part of the TxnSender interface.
+func (m *MockTransactionalSender) IsoLevel() enginepb.Level {
+	return m.txn.IsoLevel
+}
+
+// GetRetryableErr is part of the TxnSender interface.
+func (m *MockTransactionalSender) GetRetryableErr(
+	ctx context.Context,
+) *roachpb.TransactionRetryWithProtoRefreshError {
+	return nil
+}
+
+// ClearRetryableErr is part of the TxnSender interface.
+func (m *MockTransactionalSender) ClearRetryableErr(ctx context.Context) error {
+	return nil
+}
+
 // NewMockTransactionalSender creates a MockTransactionalSender.
 // The passed in txn is cloned.
 func NewMockTransactionalSender(
@@ -122,8 +145,8 @@ func (m *MockTransactionalSender) ProvisionalCommitTimestamp() hlc.Timestamp {
 }
 
 // CommitTimestamp is part of the TxnSender interface.
-func (m *MockTransactionalSender) CommitTimestamp() hlc.Timestamp {
-	return m.txn.ReadTimestamp
+func (m *MockTransactionalSender) CommitTimestamp() (hlc.Timestamp, error) {
+	return m.txn.ReadTimestamp, nil
 }
 
 // CommitTimestampFixed is part of the TxnSender interface.
@@ -151,7 +174,11 @@ func (m *MockTransactionalSender) SetFixedTimestamp(_ context.Context, ts hlc.Ti
 func (m *MockTransactionalSender) ManualRestart(
 	ctx context.Context, pri roachpb.UserPriority, ts hlc.Timestamp,
 ) {
-	m.txn.Restart(pri, 0 /* upgradePriority */, ts)
+	if !(m.txn.IsoLevel == enginepb.ReadCommitted) {
+		m.txn.Restart(pri, 0 /* upgradePriority */, ts)
+	} else {
+		m.txn.BumpReadTimestamp(ts)
+	}
 }
 
 // IsSerializablePushAndRefreshNotPossible is part of the TxnSender interface.

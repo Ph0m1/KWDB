@@ -478,6 +478,7 @@ var nonZeroTxn = Transaction{
 		Sequence:           123,
 		WriteKeyCount:      1,
 		BatchWriteKeyCount: 1,
+		IsoLevel:           enginepb.Serializable,
 	},
 	Name:                    "name",
 	Status:                  COMMITTED,
@@ -515,6 +516,7 @@ func TestTransactionUpdate(t *testing.T) {
 	txn3.Name = "carl"
 	txn3.Priority = 123
 	txn3.UnConsistency = true
+	txn3.IsoLevel = txn.IsoLevel
 	txn3.Update(&txn)
 
 	expTxn3 := txn
@@ -531,6 +533,7 @@ func TestTransactionUpdate(t *testing.T) {
 	txn4.Sequence = txn.Sequence + 10
 	txn4.Name = "carl"
 	txn4.Priority = 123
+	txn4.IsoLevel = txn.IsoLevel
 	txn4.Update(&txn)
 
 	txn4.BatchWriteKeyCount = 1
@@ -576,6 +579,7 @@ func TestTransactionUpdate(t *testing.T) {
 	txn5.BatchWriteKeyCount = 1
 	txn5.WriteKeyCount = 1
 	txn5.UnConsistency = true
+	txn5.IsoLevel = txn.IsoLevel
 	txn5.Update(&txn)
 
 	expTxn5 := txn
@@ -731,14 +735,14 @@ func TestTransactionRestart(t *testing.T) {
 // with the former and contains a subset of its protos.
 //
 // Assertions:
-// 1. Transaction->TransactionRecord->Transaction is lossless for the fields
-//    in TransactionRecord. It drops all other fields.
-// 2. TransactionRecord->Transaction->TransactionRecord is lossless.
-//    Fields not in TransactionRecord are set as zero values.
-// 3. Transaction messages can be decoded as TransactionRecord messages.
-//    Fields not in TransactionRecord are dropped.
-// 4. TransactionRecord messages can be decoded as Transaction messages.
-//    Fields not in TransactionRecord are decoded as zero values.
+//  1. Transaction->TransactionRecord->Transaction is lossless for the fields
+//     in TransactionRecord. It drops all other fields.
+//  2. TransactionRecord->Transaction->TransactionRecord is lossless.
+//     Fields not in TransactionRecord are set as zero values.
+//  3. Transaction messages can be decoded as TransactionRecord messages.
+//     Fields not in TransactionRecord are dropped.
+//  4. TransactionRecord messages can be decoded as Transaction messages.
+//     Fields not in TransactionRecord are decoded as zero values.
 func TestTransactionRecordRoundtrips(t *testing.T) {
 	// Verify that converting from a Transaction to a TransactionRecord
 	// strips out fields but is lossless for the desired fields.

@@ -760,6 +760,10 @@ type ExecutorTestingKnobs struct {
 	// for synchronizing statement execution.
 	BeforeExecute func(ctx context.Context, stmt string)
 
+	// OnReadCommittedStmtRetry, if set, will be called if there is an error
+	// that causes a per-statement retry in a read committed transaction.
+	OnReadCommittedStmtRetry func(retryReason error)
+
 	// AfterExecute is like StatementFilter, but it runs in the same goroutine of the
 	// statement.
 	AfterExecute func(ctx context.Context, stmt string, err error)
@@ -2033,6 +2037,10 @@ func (m *sessionDataMutator) SetTemporarySchemaName(scName string) {
 
 func (m *sessionDataMutator) SetDefaultIntSize(size int) {
 	m.data.DefaultIntSize = size
+}
+
+func (m *sessionDataMutator) SetDefaultTransactionIsolationLevel(val tree.IsolationLevel) {
+	m.data.DefaultTxnIsolationLevel = int64(val)
 }
 
 func (m *sessionDataMutator) SetDefaultReadOnly(val bool) {

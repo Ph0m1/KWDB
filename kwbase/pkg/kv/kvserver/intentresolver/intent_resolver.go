@@ -319,11 +319,14 @@ func (ir *IntentResolver) PushTransaction(
 //
 // Callers are involved with
 // a) conflict resolution for commands being executed at the Store with the
-//    client waiting,
+//
+//	client waiting,
+//
 // b) resolving intents encountered during inconsistent operations, and
 // c) resolving intents upon EndTxn which are not local to the given range.
-//    This is the only path in which the transaction is going to be in
-//    non-pending state and doesn't require a push.
+//
+//	This is the only path in which the transaction is going to be in
+//	non-pending state and doesn't require a push.
 func (ir *IntentResolver) MaybePushTransactions(
 	ctx context.Context,
 	pushTxns map[uuid.UUID]*enginepb.TxnMeta,
@@ -369,7 +372,9 @@ func (ir *IntentResolver) MaybePushTransactions(
 
 	// Attempt to push the transaction(s).
 	b := &kv.Batch{}
+	pushTo := h.Timestamp.Next()
 	b.Header.Timestamp = ir.clock.Now()
+	b.Header.Timestamp.Forward(pushTo)
 	for _, pushTxn := range pushTxns {
 		b.AddRawRequest(&roachpb.PushTxnRequest{
 			RequestHeader: roachpb.RequestHeader{
@@ -377,7 +382,7 @@ func (ir *IntentResolver) MaybePushTransactions(
 			},
 			PusherTxn: pusherTxn,
 			PusheeTxn: *pushTxn,
-			PushTo:    h.Timestamp.Next(),
+			PushTo:    pushTo,
 			PushType:  pushType,
 		})
 	}

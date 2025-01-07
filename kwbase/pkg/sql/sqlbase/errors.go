@@ -167,7 +167,7 @@ func NewTSColInvalidError() error {
 
 // UnsupportedTSExplicitTxnError returns error when there is an explicit transaction in TS mode.
 func UnsupportedTSExplicitTxnError() error {
-	return pgerror.New(pgcode.FeatureNotSupported, "explicit transaction is not supported in TS mode")
+	return pgerror.New(pgcode.FeatureNotSupported, "TS DDL statement is not supported in explicit transaction")
 }
 
 // NewUndefinedRelationError creates an error that represents a missing database table or view.

@@ -192,7 +192,7 @@ func checkTxn(txn *kv.Txn, exp expKVTxn) error {
 	if txn == nil {
 		return errors.Errorf("expected a KV txn but found an uninitialized txn")
 	}
-	if exp.debugName != nil && !strings.HasPrefix(txn.DebugName(), *exp.debugName+" (") {
+	if exp.debugName != nil && !strings.HasPrefix(txn.DebugName(), *exp.debugName+" ") {
 		return errors.Errorf("expected DebugName: %s, but got: %s",
 			*exp.debugName, txn.DebugName())
 	}
@@ -281,7 +281,7 @@ func TestTransitions(t *testing.T) {
 			},
 			ev: eventTxnStart{ImplicitTxn: fsm.True},
 			evPayload: makeEventTxnStartPayload(pri, tree.ReadWrite, timeutil.Now(),
-				nil /* historicalTimestamp */, tranCtx),
+				nil /* historicalTimestamp */, tranCtx, tree.SerializableIsolation),
 			expState: stateOpen{ImplicitTxn: fsm.True},
 			expAdv: expAdvance{
 				// We expect to stayInPlace; upon starting a txn the statement is
@@ -306,7 +306,7 @@ func TestTransitions(t *testing.T) {
 			},
 			ev: eventTxnStart{ImplicitTxn: fsm.False},
 			evPayload: makeEventTxnStartPayload(pri, tree.ReadWrite, timeutil.Now(),
-				nil /* historicalTimestamp */, tranCtx),
+				nil /* historicalTimestamp */, tranCtx, tree.SerializableIsolation),
 			expState: stateOpen{ImplicitTxn: fsm.False},
 			expAdv: expAdvance{
 				expCode: advanceOne,

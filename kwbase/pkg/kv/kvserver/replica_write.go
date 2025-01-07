@@ -875,6 +875,19 @@ func isOnePhaseCommit(ba *roachpb.BatchRequest) bool {
 	if ba.Txn == nil {
 		return false
 	}
+	if ba.Txn.ReadTimestamp != ba.Txn.WriteTimestamp {
+		// If the transaction's read and write timestamp are skewed, one phase
+		// commit is not allowed. This is true even for isolation levels that can
+		// otherwise tolerate write skew. This is because the one phase commit
+		// evaluation logic operates using a non-transactional batch which does not
+		// know how to evaluate with reads and writes at different timestamps. Even
+		// for write-only batches, the non-transactional path would be unable to
+		// detect write-write version conflicts between the transaction's read and
+		// write timestamps.
+		//
+		// NOTE: ba.Timestamp == ba.Txn.ReadTimestamp
+		return false
+	}
 	if !ba.IsCompleteTransaction() {
 		return false
 	}

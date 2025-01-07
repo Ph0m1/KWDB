@@ -9,8 +9,9 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[txnPending-0]
-	_ = x[txnError-1]
-	_ = x[txnFinalized-2]
+	_ = x[txnRetryableError-1]
+	_ = x[txnError-2]
+	_ = x[txnFinalized-3]
 }
 
 const _txnState_name = "txnPendingtxnErrortxnFinalized"

@@ -1,0 +1,36 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1r1 s2w1 s1r2 s1w1 s1r3 s2c s1r4 s1c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r1: SELECT * FROM kv;  finished.
+k|v
+-+-
+1|5
+(1 row)
+
+step s2w1: INSERT INTO kv VALUES(2,6);  finished.
+step s1r2: SELECT * FROM kv;  finished.
+k|v
+-+-
+1|5
+(1 row)
+
+step s1w1: INSERT INTO kv VALUES(3,7);  finished.
+step s1r3: SELECT * FROM kv;  finished.
+k|v
+-+-
+1|5
+3|7
+(2 rows)
+
+step s2c: COMMIT;  finished.
+step s1r4: SELECT * FROM kv;  finished.
+k|v
+-+-
+1|5
+2|6
+3|7
+(3 rows)
+
+step s1c: COMMIT;  finished.

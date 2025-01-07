@@ -32,6 +32,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
+	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/contextutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -67,6 +68,22 @@ type txnState struct {
 
 		// txnStart records the time that txn started.
 		txnStart time.Time
+
+		// The transaction's isolation level.
+		isolationLevel enginepb.Level
+
+		// autoRetryReason records the error causing an auto-retryable error event
+		// if the current transaction is being automatically retried. This is used
+		// in statement traces to give more information in statement diagnostic
+		// bundles, and also is surfaced in the DB Console.
+		autoRetryReason error
+
+		// autoRetryCounter keeps track of the number of automatic retries that have
+		// occurred. It includes per-statement retries performed under READ
+		// COMMITTED as well as transaction retries for serialization failures under
+		// SNAPSHOT and SERIALIZABLE. It's 0 whenever the transaction state is not
+		// stateOpen.
+		autoRetryCounter int32
 	}
 
 	// connCtx is the connection's context. This is the parent of Ctx.
@@ -138,16 +155,22 @@ const (
 // It creates a new client.Txn and initializes it using the session defaults.
 //
 // connCtx: The context in which the new transaction is started (usually a
-// 	 connection's context). ts.Ctx will be set to a child context and should be
-// 	 used for everything that happens within this SQL transaction.
+//
+//	connection's context). ts.Ctx will be set to a child context and should be
+//	used for everything that happens within this SQL transaction.
+//
 // txnType: The type of the starting txn.
 // sqlTimestamp: The timestamp to report for current_timestamp(), now() etc.
 // historicalTimestamp: If non-nil indicates that the transaction is historical
-//   and should be fixed to this timestamp.
+//
+//	and should be fixed to this timestamp.
+//
 // priority: The transaction's priority.
 // readOnly: The read-only character of the new txn.
 // txn: If not nil, this txn will be used instead of creating a new txn. If so,
-//      all the other arguments need to correspond to the attributes of this txn.
+//
+//	all the other arguments need to correspond to the attributes of this txn.
+//
 // tranCtx: A bag of extra execution context.
 func (ts *txnState) resetForNewSQLTxn(
 	connCtx context.Context,
@@ -158,10 +181,24 @@ func (ts *txnState) resetForNewSQLTxn(
 	readOnly tree.ReadWriteMode,
 	txn *kv.Txn,
 	tranCtx transitionCtx,
+	isoLevel tree.IsolationLevel,
 ) {
 	// Reset state vars to defaults.
 	ts.sqlTimestamp = sqlTimestamp
 	ts.isHistorical = false
+
+	// Call NewTxnWithSteppingEnabled here (before the open tracing logic) so that we can
+	// carry txnID in opName, which is also set as txn.mu.debugName.
+	// This name is also used as req.Txn.Name in concurrent manager components.
+	ts.mu.Lock()
+	if txn == nil {
+		ts.mu.txn = kv.NewTxnWithSteppingEnabled(ts.Ctx, tranCtx.db, tranCtx.nodeID)
+		ts.mu.txn.SetDebugName(sqlTxnName + " " + ts.mu.txn.ID().Short())
+	} else {
+		ts.mu.txn = txn
+	}
+	ts.mu.txnStart = timeutil.Now()
+	ts.mu.Unlock()
 
 	// Create a context for this transaction. It will include a root span that
 	// will contain everything executed as part of the upcoming SQL txn, including
@@ -212,20 +249,17 @@ func (ts *txnState) resetForNewSQLTxn(
 	ts.Ctx, ts.cancel = contextutil.WithCancel(txnCtx)
 
 	ts.mon.Start(ts.Ctx, tranCtx.connMon, mon.BoundAccount{} /* reserved */)
-	ts.mu.Lock()
-	if txn == nil {
-		ts.mu.txn = kv.NewTxnWithSteppingEnabled(ts.Ctx, tranCtx.db, tranCtx.nodeID)
-		ts.mu.txn.SetDebugName(opName)
-	} else {
-		ts.mu.txn = txn
-	}
-	ts.mu.txnStart = timeutil.Now()
-	ts.mu.Unlock()
+
 	if historicalTimestamp != nil {
 		ts.setHistoricalTimestamp(ts.Ctx, *historicalTimestamp)
 	}
 	if err := ts.setPriority(priority); err != nil {
 		panic(err)
+	}
+	if txn == nil {
+		if err := ts.setIsolationLevelLocked(enginepb.Level(isoLevel)); err != nil {
+			panic(err)
+		}
 	}
 	if err := ts.setReadOnlyMode(readOnly); err != nil {
 		panic(err)
@@ -465,4 +499,20 @@ func (ts *txnState) consumeAdvanceInfo() advanceInfo {
 	adv := ts.adv
 	ts.adv = advanceInfo{}
 	return adv
+}
+
+// setIsolationLevel set isolation level of txnState
+func (ts *txnState) setIsolationLevel(level enginepb.Level) error {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.setIsolationLevelLocked(level)
+}
+
+// setIsolationLevelLocked set isolationLevel of txnState
+func (ts *txnState) setIsolationLevelLocked(level enginepb.Level) error {
+	if err := ts.mu.txn.SetIsoLevel(level); err != nil {
+		return err
+	}
+	ts.mu.isolationLevel = level
+	return nil
 }

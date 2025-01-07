@@ -130,11 +130,53 @@ func UpdateAbortSpan(
 	return rec.AbortSpan().Put(ctx, readWriter, ms, txn.ID, &curEntry)
 }
 
+// changePriority make normal user priority be a same txn priority because
+// they are equal for pushing.
+func changePriority(p enginepb.TxnPriority) enginepb.TxnPriority {
+	if p == enginepb.MinTxnPriority || p == enginepb.MaxTxnPriority {
+		return p
+	}
+	return enginepb.MinTxnPriority + 1
+}
+
 // CanPushWithPriority returns true if the given pusher can push the pushee
 // based on its priority.
-func CanPushWithPriority(pusher, pushee *roachpb.Transaction) bool {
-	return (pusher.Priority > enginepb.MinTxnPriority && pushee.Priority == enginepb.MinTxnPriority) ||
-		(pusher.Priority == enginepb.MaxTxnPriority && pushee.Priority < pusher.Priority)
+// For write-read conflicts, the read transaction is pusher and the write
+// transaction is pushee, try to push the timestamp.
+// Write-write conflicts and try to abort the transaction.
+// Based on the type of pushee transaction being pushed, the isolation level
+// and priority of the two transactions determine whether it can be pushed
+func CanPushWithPriority(
+	pusher, pushee *roachpb.Transaction,
+	status roachpb.TransactionStatus,
+	pushType roachpb.PushTxnType,
+) bool {
+	pusherPri := changePriority(pusher.Priority)
+	pusheePri := changePriority(pushee.Priority)
+	pusherIso := pusher.IsoLevel
+	pusheeIso := pushee.IsoLevel
+	switch pushType {
+	case roachpb.PUSH_ABORT:
+		return pusherPri > pusheePri
+	case roachpb.PUSH_TIMESTAMP:
+		// If the pushee's transaction state is "staging," the pusher's transaction must have a higher priority to push it.
+		// If the two transactions have the same priority, a PUSH_TIMESTAMP operation must wait until the commit is complete.
+		if status == roachpb.STAGING {
+			return pusherPri > pusheePri
+		}
+		// For pushee transactions that are not in the "staging" state:
+		//
+		// If the pushee transaction's isolation level is RC (Read Committed), its timestamp can be pushed.
+		return pusheeIso == enginepb.ReadCommitted ||
+			// Else, if the pushee transaction does not tolerate write skew but the
+			// pusher transaction does (and expects other to), let the PUSH_TIMESTAMP
+			// proceed as long as the pusher has at least the same priority.
+			(pusherIso == enginepb.ReadCommitted && pusherPri >= pusheePri) ||
+			// Otherwise, if neither transaction tolerates write skew, let the
+			// PUSH_TIMESTAMP proceed only if the pusher has a higher priority.
+			(pusherPri > pusheePri)
+	}
+	return pusherPri > pusheePri
 }
 
 // CanCreateTxnRecord determines whether a transaction record can be created for

@@ -332,7 +332,7 @@ func (txn *Txn) readTimestampLocked() hlc.Timestamp {
 // The start timestamp can get pushed but the use of this
 // method will guarantee that if a timestamp push is needed
 // the commit will fail with a retryable error.
-func (txn *Txn) CommitTimestamp() hlc.Timestamp {
+func (txn *Txn) CommitTimestamp() (hlc.Timestamp, error) {
 	txn.mu.Lock()
 	defer txn.mu.Unlock()
 	return txn.mu.sender.CommitTimestamp()
@@ -939,7 +939,9 @@ func (txn *Txn) exec(ctx context.Context, fn func(context.Context, *Txn) error) 
 			break
 		}
 
-		txn.PrepareForRetry(ctx, err)
+		if err := txn.PrepareForRetry(ctx, err); err != nil {
+			return err
+		}
 	}
 
 	return err
@@ -949,14 +951,120 @@ func (txn *Txn) exec(ctx context.Context, fn func(context.Context, *Txn) error) 
 // book-keeping.
 //
 // TODO(andrei): I think this is called in the wrong place. See #18170.
-func (txn *Txn) PrepareForRetry(ctx context.Context, err error) {
+func (txn *Txn) PrepareForRetry(ctx context.Context, err error) error {
 	if txn.typ != RootTxn {
 		panic(errors.WithContextTags(errors.NewAssertionErrorWithWrappedErrf(err, "PrepareForRetry() called on leaf txn"), ctx))
 	}
 
 	txn.commitTriggers = nil
-	log.VEventf(ctx, 2, "automatically retrying transaction: %s because of error: %s",
-		txn.DebugName(), err)
+
+	// Sanity check that checking if the retry transaction is the current transaction
+	// Used for handle retry error of implicit RC transactions isolation level
+	retryErr := txn.mu.sender.GetRetryableErr(ctx)
+	if retryErr == nil {
+		return nil
+	}
+	if txn.typ != RootTxn {
+		return errors.WithContextTags(errors.NewAssertionErrorWithWrappedErrf(
+			retryErr, "PrepareForRetry() called on leaf txn"), ctx)
+	}
+	if err := txn.checkRetryErrorTxnIDLocked(ctx, retryErr); err != nil {
+		return err
+	}
+
+	log.VEventf(ctx, 2, "retrying transaction: %s because of a retryable error: %s",
+		txn.debugNameLocked(), retryErr)
+	txn.resetDeadlineLocked()
+
+	if !retryErr.PrevTxnAborted() {
+		// If the retryable error doesn't correspond to an aborted transaction,
+		// there's no need to switch out the transaction. We simply clear the
+		// retryable error and proceed.
+		return txn.mu.sender.ClearRetryableErr(ctx)
+	}
+
+	return txn.handleTransactionAbortedErrorLocked(ctx, retryErr)
+}
+
+// handleTransactionAbortedErrorLocked performs bookkeeping to handle
+// TransactionAbortedErrors before the transaction can be retried.
+//
+// For aborted transactions, the supplied error proto contains a new transaction
+// that should be used on the next transaction attempt. The main thing to do
+// here is to create a new sender associated with this transaction, and replace
+// the current one with it.
+func (txn *Txn) handleTransactionAbortedErrorLocked(
+	ctx context.Context, retryErr *roachpb.TransactionRetryWithProtoRefreshError,
+) error {
+	if !retryErr.PrevTxnAborted() {
+		// Sanity check we're dealing with a TransactionAbortedError.
+		return errors.WithContextTags(errors.NewAssertionErrorWithWrappedErrf(
+			retryErr, "cannot replace root sender if txn not aborted"), ctx)
+	}
+
+	// The transaction we had been using thus far has been aborted. The proto
+	// inside the error has been prepared for use by the next transaction attempt.
+	newTxn := &retryErr.Transaction
+	txn.mu.ID = newTxn.ID
+	// Create a new txn sender. We need to preserve the stepping mode, if any.
+	prevSteppingMode := txn.mu.sender.GetSteppingMode(ctx)
+	txn.mu.sender = txn.db.factory.RootTransactionalSender(newTxn, txn.mu.userPriority)
+	txn.mu.sender.ConfigureStepping(ctx, prevSteppingMode)
+	return nil
+}
+
+// PrepareForPartialRetry is like PrepareForRetry, except that it expects the
+// retryable error to not require the transaction to restart from the beginning
+// (see TransactionRetryWithProtoRefreshError.TxnMustRestartFromBeginning). It
+// is called once a partial retryable error has been handled and the caller is
+// ready to continue using the transaction.
+func (txn *Txn) PrepareForPartialRetry(ctx context.Context) error {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	retryErr := txn.mu.sender.GetRetryableErr(ctx)
+	if retryErr == nil {
+		return nil
+	}
+	if txn.typ != RootTxn {
+		return errors.WithContextTags(errors.NewAssertionErrorWithWrappedErrf(
+			retryErr, "PrepareForPartialRetry() called on leaf txn"), ctx)
+	}
+	if err := txn.checkRetryErrorTxnIDLocked(ctx, retryErr); err != nil {
+		return err
+	}
+	// todo: TxnMustRestartFromBeginning
+	if retryErr.PrevTxnAborted() {
+		return errors.WithContextTags(errors.NewAssertionErrorWithWrappedErrf(
+			retryErr, "unexpected retryable error that must restart from beginning"), ctx)
+	}
+
+	log.VEventf(ctx, 2, "partially retrying transaction: %s because of a retryable error: %s",
+		txn.debugNameLocked(), retryErr)
+
+	return txn.mu.sender.ClearRetryableErr(ctx)
+}
+
+// checkRetryErrorTxnIDLocked check if the txn of retryErr is same as Txn.
+func (txn *Txn) checkRetryErrorTxnIDLocked(
+	ctx context.Context, retryErr *roachpb.TransactionRetryWithProtoRefreshError,
+) error {
+	if txn.mu.ID == retryErr.TxnID {
+		return nil
+	}
+	// Sanity check that the retry error we're dealing with is for the current
+	// incarnation of the transaction. Aborted transactions may be retried
+	// transparently in certain cases and such incarnations come with new
+	// txn IDs. However, at no point can both the old and new incarnation of a
+	// transaction be active at the same time -- this would constitute a
+	// programming error.
+	return errors.WithContextTags(
+		errors.NewAssertionErrorWithWrappedErrf(
+			retryErr,
+			"unexpected retryable error for old incarnation of the transaction %s; current incarnation %s",
+			retryErr.TxnID,
+			txn.mu.ID,
+		), ctx)
 }
 
 // IsRetryableErrMeantForTxn returns true if err is a retryable
@@ -1386,4 +1494,23 @@ func (txn *Txn) ReleaseSavepoint(ctx context.Context, s SavepointToken) error {
 	txn.mu.Lock()
 	defer txn.mu.Unlock()
 	return txn.mu.sender.ReleaseSavepoint(ctx, s)
+}
+
+// IsoLevel returns the transaction's isolation level.
+func (txn *Txn) IsoLevel() enginepb.Level {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	return txn.mu.sender.IsoLevel()
+}
+
+// SetIsoLevel sets the transaction's isolation level. Transactions default to
+// Serializable isolation. The isolation must be set before any operations are
+// performed on the transaction.
+func (txn *Txn) SetIsoLevel(isoLevel enginepb.Level) error {
+	if txn.typ != RootTxn {
+		return errors.AssertionFailedf("SetIsoLevel() called on leaf txn")
+	}
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	return txn.mu.sender.SetIsoLevel(isoLevel)
 }

@@ -1,0 +1,27 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1w s2w s1c s2r s2c
+step s1w: INSERT INTO upsert(key, val) VALUES(1, 'insert1') ON CONFLICT (key) DO UPDATE set val = upsert.val || ' updated by insert1';  finished.
+step s2w: INSERT INTO upsert(key, val) VALUES(1, 'insert2') ON CONFLICT (key) DO UPDATE set val = upsert.val || ' updated by insert2'; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2w: <... completed>
+step s2r: SELECT * FROM upsert;  finished.
+key|val                       
+---+--------------------------
+  1|insert1 updated by insert2
+(1 row)
+
+step s2c: COMMIT;  finished.
+
+starting permutation: s1w s2w s1a s2r s2c
+step s1w: INSERT INTO upsert(key, val) VALUES(1, 'insert1') ON CONFLICT (key) DO UPDATE set val = upsert.val || ' updated by insert1';  finished.
+step s2w: INSERT INTO upsert(key, val) VALUES(1, 'insert2') ON CONFLICT (key) DO UPDATE set val = upsert.val || ' updated by insert2'; <waiting ...>
+step s1a: ABORT;  finished.
+step s2w: <... completed>
+step s2r: SELECT * FROM upsert;  finished.
+key|val    
+---+-------
+  1|insert2
+(1 row)
+
+step s2c: COMMIT;  finished.

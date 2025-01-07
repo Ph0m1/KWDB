@@ -1772,7 +1772,7 @@ database                                  test                NULL  user     NUL
 datestyle                                 ISO, MDY            NULL  user     NULL      ISO, MDY            ISO, MDY
 default_int_size                          8                   NULL  user     NULL      8                   8
 default_tablespace                        ·                   NULL  user     NULL      ·                   ·
-default_transaction_isolation             serializable        NULL  user     NULL      default             default
+default_transaction_isolation             serializable        NULL  user     NULL      serializable        serializable
 default_transaction_read_only             off                 NULL  user     NULL      off                 off
 distsql                                   off                 NULL  user     NULL      off                 off
 enable_implicit_select_for_update         on                  NULL  user     NULL      on                  on

@@ -755,6 +755,13 @@ type RestrictedCommandResult interface {
 	// StmtType return stmt type
 	StmtType() tree.StatementType
 
+	// BufferedResultsLen returns the length of the results buffer.
+	BufferedResultsLen() int
+
+	// TruncateBufferedResults clears any results that have been buffered after
+	// given index, and returns true iff any results were actually truncated.
+	TruncateBufferedResults(idx int) bool
+
 	// IncrementRowsAffected increments a counter by n. This is used for all
 	// result types other than tree.Rows.
 	IncrementRowsAffected(n int)
@@ -928,6 +935,19 @@ func (r *bufferedCommandResult) SetColumns(_ context.Context, cols sqlbase.Resul
 // AppendParamStatusUpdate is part of the RestrictedCommandResult interface.
 func (r *bufferedCommandResult) AppendParamStatusUpdate(key string, val string) {
 	panic("unimplemented")
+}
+
+// BufferedResultsLen is part of the RestrictedCommandResult interface.
+func (r *bufferedCommandResult) BufferedResultsLen() int {
+	// Since this implementation is streaming, we cannot truncate some buffered
+	// results. This is achieved by unconditionally returning false in
+	// TruncateBufferedResults, so this return value doesn't actually matter.
+	return 0
+}
+
+// TruncateBufferedResults is part of the RestrictedCommandResult interface.
+func (r *bufferedCommandResult) TruncateBufferedResults(int) bool {
+	return false
 }
 
 // AppendNotice is part of the RestrictedCommandResult interface.

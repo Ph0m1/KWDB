@@ -1,0 +1,23 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1r s2w s2c s1r s1w s1r s1c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r: SELECT * FROM foo where key = 5;  finished.
+key|value
+---+-----
+(0 rows)
+
+step s2w: INSERT INTO foo VALUES(5, 5);  finished.
+step s2c: COMMIT;  finished.
+step s1r: SELECT * FROM foo where key = 5;  finished.
+key|value
+---+-----
+  5|    5
+(1 row)
+
+step s1w: INSERT INTO foo VALUES(5, 5);  finished.
+ERROR:  duplicate key value (key)=(5) violates unique constraint "primary"
+step s1r: SELECT * FROM foo where key = 5;  finished.
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s1c: COMMIT;  finished.

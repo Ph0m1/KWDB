@@ -1,0 +1,43 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 exp s2r s2w s2c exp s1r s1c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step exp: EXPLAIN SELECT data FROM test_dc WHERE data = 34 ORDER BY id,data;  finished.
+tree           |field      |description         
+---------------+-----------+--------------------
+               |distributed|false               
+               |vectorized |false               
+render         |           |                    
+ └── scan|           |                    
+               |table      |test_dc@test_dc_data
+               |spans      |/34-/35             
+(6 rows)
+
+step s2r: SELECT data FROM test_dc WHERE data = 34 ORDER BY id,data;  finished.
+data
+----
+  34
+(1 row)
+
+step s2w: INSERT INTO test_dc(data) SELECT * FROM generate_series(1, 100);  finished.
+step s2c: COMMIT;  finished.
+step exp: EXPLAIN SELECT data FROM test_dc WHERE data = 34 ORDER BY id,data;  finished.
+tree           |field      |description         
+---------------+-----------+--------------------
+               |distributed|false               
+               |vectorized |false               
+render         |           |                    
+ └── scan|           |                    
+               |table      |test_dc@test_dc_data
+               |spans      |/34-/35             
+(6 rows)
+
+step s1r: SELECT data FROM test_dc WHERE data = 34 ORDER BY id,data;  finished.
+data
+----
+  34
+  34
+(2 rows)
+
+step s1c: COMMIT;  finished.

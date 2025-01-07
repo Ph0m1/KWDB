@@ -110,6 +110,12 @@ type Sender interface {
 type TxnSender interface {
 	Sender
 
+	// SetIsoLevel sets the txn's isolation level.
+	SetIsoLevel(enginepb.Level) error
+
+	// IsoLevel returns the txn's isolation level.
+	IsoLevel() enginepb.Level
+
 	// AnchorOnSystemConfigRange ensures that the transaction record,
 	// if/when it will be created, will be created on the system config
 	// range. This is useful because some commit triggers only work when
@@ -235,7 +241,7 @@ type TxnSender interface {
 	// likelihood that a retry error will bubble up to a client.
 	//
 	// See CommitTimestampFixed() below.
-	CommitTimestamp() hlc.Timestamp
+	CommitTimestamp() (hlc.Timestamp, error)
 
 	// CommitTimestampFixed returns true if the commit timestamp has
 	// been fixed to the start timestamp and cannot be pushed forward.
@@ -307,6 +313,16 @@ type TxnSender interface {
 	// GetSteppingMode accompanies ConfigureStepping. It is provided
 	// for use in tests and assertion checks.
 	GetSteppingMode(ctx context.Context) (curMode SteppingMode)
+
+	// GetRetryableErr returns an error if the TxnSender had a retryable error,
+	// otherwise nil. In this state Send() always fails with the same retryable
+	// error. ClearRetryableErr can be called to clear this error and make
+	// TxnSender usable again.
+	GetRetryableErr(ctx context.Context) *roachpb.TransactionRetryWithProtoRefreshError
+	// ClearRetryableErr clears the retryable error. Returns an error if the
+	// TxnSender was not in a retryable error state or if the TxnSender was
+	// aborted.
+	ClearRetryableErr(ctx context.Context) error
 }
 
 // SteppingMode is the argument type to ConfigureStepping.

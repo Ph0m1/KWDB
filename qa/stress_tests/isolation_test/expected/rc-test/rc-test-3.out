@@ -1,0 +1,25 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s2w1 s2u1 s2d1 s2u2 s2u3 s2u4 s1u1 s2c s1r1 s1c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s2w1: INSERT INTO kv VALUES(5,5);  finished.
+step s2u1: UPDATE kv SET v=10 WHERE k=4;  finished.
+step s2d1: DELETE FROM kv WHERE k=3;  finished.
+step s2u2: UPDATE kv SET v=10 WHERE k=2;  finished.
+step s2u3: update kv set v=1 where k=1;  finished.
+step s2u4: update kv set k=10 where k=0;  finished.
+step s1u1: update kv set v = 100 where v >= 5; <waiting ...>
+step s2c: COMMIT;  finished.
+step s1u1: <... completed>
+step s1r1: select * from kv;  finished.
+ k|  v
+--+---
+ 1|  1
+ 2|100
+ 4|100
+ 5|100
+10|100
+(5 rows)
+
+step s1c: COMMIT;  finished.

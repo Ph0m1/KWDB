@@ -1,0 +1,11 @@
+# Local binaries
+/isolationtester
+/*.o
+/output/*
+
+# Local generated source files
+/specparse.h
+/specparse.c
+/specscanner.c
+
+# Generated subdirectories

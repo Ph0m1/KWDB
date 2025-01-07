@@ -65,10 +65,6 @@ func (p *planner) CreateDatabase(ctx context.Context, n *tree.CreateDatabase) (p
 		if sqlbase.ContainsNonAlphaNumSymbol(n.Name.String()) {
 			return nil, sqlbase.NewTSNameInvalidError(n.Name.String())
 		}
-		// explicit txn is not allowed in time-series mode.
-		if !p.extendedEvalCtx.TxnImplicit {
-			return nil, sqlbase.UnsupportedTSExplicitTxnError()
-		}
 		// check if the name is too long
 		if len(n.Name) > MaxTSDBNameLength {
 			return nil, sqlbase.NewTSNameOutOfLengthError("database", MaxTSDBNameLength)

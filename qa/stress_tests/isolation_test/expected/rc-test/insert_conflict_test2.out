@@ -1,0 +1,24 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1w s2w s1c s2r s2c
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2') ON CONFLICT DO NOTHING; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2w: <... completed>
+ERROR:  flow: memory budget exceeded: 10240 bytes requested, 0 currently allocated, 0 bytes in budget
+step s2r: SELECT * FROM ints;  finished.
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2c: COMMIT;  finished.
+
+starting permutation: s1w s2w s1a s2r s2c
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2') ON CONFLICT DO NOTHING; <waiting ...>
+step s1a: ABORT;  finished.
+step s2w: <... completed>
+step s2r: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing2
+(1 row)
+
+step s2c: COMMIT;  finished.

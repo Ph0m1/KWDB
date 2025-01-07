@@ -86,7 +86,10 @@ func TestClusterTimestampConversion(t *testing.T) {
 			),
 		}
 
-		dec := ctx.GetClusterTimestamp()
+		dec, err := ctx.GetClusterTimestamp()
+		if err != nil {
+			t.Fatal(err)
+		}
 		final := dec.Text('f')
 		if final != d.expected {
 			t.Errorf("expected %s, but found %s", d.expected, final)

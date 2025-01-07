@@ -116,6 +116,11 @@ func (n *createViewNode) startExec(params runParams) error {
 	// Inherit permissions from the database descriptor.
 	privs := n.dbDesc.GetPrivileges()
 
+	time, err := params.creationTimeForNewTableDescriptor()
+	if err != nil {
+		return err
+	}
+
 	desc, err := makeViewTableDesc(
 		viewName,
 		n.viewQuery,
@@ -123,7 +128,7 @@ func (n *createViewNode) startExec(params runParams) error {
 		schemaID,
 		id,
 		n.columns,
-		params.creationTimeForNewTableDescriptor(),
+		time,
 		privs,
 		&params.p.semaCtx,
 		isTemporary,

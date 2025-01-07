@@ -2157,7 +2157,7 @@ return without an error.`,
 			Types:      tree.ArgTypes{},
 			ReturnType: tree.FixedReturnType(types.Decimal),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return ctx.GetClusterTimestamp(), nil
+				return ctx.GetClusterTimestamp()
 			},
 			Info: `Returns the logical time of the current transaction.
 

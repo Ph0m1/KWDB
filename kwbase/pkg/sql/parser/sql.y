@@ -3584,7 +3584,7 @@ set_session_stmt:
 // SET [SESSION] TRANSACTION <txnparameters...>
 //
 // Transaction parameters:
-//    ISOLATION LEVEL { SERIALIZABLE }
+//    ISOLATION LEVEL { SERIALIZABLE | REPEATABLE READ | READ COMMITTED }
 //    PRIORITY { LOW | NORMAL | HIGH }
 //
 // %SeeAlso: SHOW TRANSACTION, SET SESSION
@@ -3715,21 +3715,13 @@ var_list:
   }
 
 iso_level:
-  READ UNCOMMITTED
+  READ COMMITTED
   {
-    $$.val = tree.SerializableIsolation
-  }
-| READ COMMITTED
-  {
-    $$.val = tree.SerializableIsolation
-  }
-| SNAPSHOT
-  {
-    $$.val = tree.SerializableIsolation
+    $$.val = tree.ReadCommittedIsolation
   }
 | REPEATABLE READ
   {
-    $$.val = tree.SerializableIsolation
+    $$.val = tree.RepeatedReadIsolation
   }
 | SERIALIZABLE
   {
@@ -7019,7 +7011,7 @@ transaction_stmt:
 // START TRANSACTION [ <txnparameter> [[,] ...] ]
 //
 // Transaction parameters:
-//    ISOLATION LEVEL { SERIALIZABLE }
+//    ISOLATION LEVEL { SERIALIZABLE | REPEATABLE READ | READ COMMITTED }
 //    PRIORITY { LOW | NORMAL | HIGH }
 //
 // %SeeAlso: COMMIT, ROLLBACK

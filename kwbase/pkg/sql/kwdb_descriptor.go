@@ -116,9 +116,13 @@ func writeInstTableMeta(
 	ctx context.Context, txn *kv.Txn, instNames []sqlbase.InstNameSpace, overWrite bool,
 ) error {
 	var rows []tree.Datums
+	var err error
 	for _, name := range instNames {
 		name.Version++
-		name.ModificationTime = txn.CommitTimestamp()
+		name.ModificationTime, err = txn.CommitTimestamp()
+		if err != nil {
+			return err
+		}
 		childDesc, err := protoutil.Marshal(&name.ChildDesc)
 		if err != nil {
 			return err

@@ -455,7 +455,10 @@ func protect(
 	require.NoError(t, txn.Commit(ctx))
 	_, err := p.GetRecord(ctx, nil, r.ID)
 	require.NoError(t, err)
-	createdAt = txn.CommitTimestamp()
+	createdAt, err = txn.CommitTimestamp()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return r, createdAt
 }
 

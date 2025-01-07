@@ -110,13 +110,18 @@ func doCreateSequence(
 		telemetry.Inc(sqltelemetry.CreateTempSequenceCounter)
 	}
 
+	time, err := params.creationTimeForNewTableDescriptor()
+	if err != nil {
+		return err
+	}
+
 	desc, err := MakeSequenceTableDesc(
 		name.Table(),
 		opts,
 		dbDesc.ID,
 		schemaID,
 		id,
-		params.creationTimeForNewTableDescriptor(),
+		time,
 		privs,
 		isTemporary,
 		&params,

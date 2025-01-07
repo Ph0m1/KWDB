@@ -1,0 +1,87 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1r s2w s2c s1r s1c
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s2w: INSERT INTO foo VALUES(5, 5);  finished.
+step s2c: COMMIT;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s1c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1r s2d s2c s1r s1c
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s2d: DELETE FROM foo where key = 4;  finished.
+step s2c: COMMIT;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s1c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1r s2w s2d s2c s1r s1c
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s2w: INSERT INTO foo VALUES(5, 5);  finished.
+step s2d: DELETE FROM foo where key = 4;  finished.
+step s2c: COMMIT;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s1c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1r s2d s2w s2c s1r s1c
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s2d: DELETE FROM foo where key = 4;  finished.
+step s2w: INSERT INTO foo VALUES(5, 5);  finished.
+step s2c: COMMIT;  finished.
+step s1r: SELECT * FROM foo where key > 2;  finished.
+key|value
+---+-----
+  3|    3
+  4|    4
+(2 rows)
+
+step s1c: COMMIT;  finished.

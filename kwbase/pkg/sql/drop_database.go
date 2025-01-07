@@ -79,10 +79,6 @@ func (p *planner) DropDatabase(ctx context.Context, n *tree.DropDatabase) (planN
 		// IfExists was specified and database was not found.
 		return newZeroNode(nil /* columns */), nil
 	}
-	// explicit txn is not allowed in time-series mode.
-	if !p.extendedEvalCtx.TxnImplicit && dbDesc.EngineType == tree.EngineTypeTimeseries {
-		return nil, sqlbase.UnsupportedTSExplicitTxnError()
-	}
 
 	if err := p.CheckPrivilege(ctx, dbDesc, privilege.DROP); err != nil {
 		return nil, err

@@ -504,33 +504,33 @@ func IsEndTxnExceedingDeadline(t hlc.Timestamp, args *roachpb.EndTxnRequest) boo
 // IsEndTxnTriggeringRetryError returns true if the EndTxnRequest cannot be
 // committed and needs to return a TransactionRetryError. It also returns the
 // reason and possibly an extra message to be used for the error.
+// Modified return error judgement because of RC isolation level
 func IsEndTxnTriggeringRetryError(
 	txn *roachpb.Transaction, args *roachpb.EndTxnRequest,
 ) (retry bool, reason roachpb.TransactionRetryReason, extraMsg string) {
 	// If we saw any WriteTooOldErrors, we must restart to avoid lost
 	// update anomalies.
 	if txn.WriteTooOld {
-		retry, reason = true, roachpb.RETRY_WRITE_TOO_OLD
-	} else {
-		readTimestamp := txn.ReadTimestamp
-		isTxnPushed := txn.WriteTimestamp != readTimestamp
-
+		return true, roachpb.RETRY_WRITE_TOO_OLD, ""
+	}
+	isTxnPushed := txn.WriteTimestamp != txn.ReadTimestamp
+	// Since it is allowed to have inconsistent of read and write timestamps when committing RC level,
+	// the judgement of the isolation level is added where RETRY_SERIALIZABLE
+	if (txn.IsoLevel == enginepb.Serializable || txn.IsoLevel == enginepb.RepeatedRead) && isTxnPushed {
 		// Return a transaction retry error if the commit timestamp isn't equal to
 		// the txn timestamp.
-		if isTxnPushed {
-			retry, reason = true, roachpb.RETRY_SERIALIZABLE
-		}
+		return true, roachpb.RETRY_SERIALIZABLE, ""
 	}
 
 	// A transaction must obey its deadline, if set.
-	if !retry && IsEndTxnExceedingDeadline(txn.WriteTimestamp, args) {
+	if IsEndTxnExceedingDeadline(txn.WriteTimestamp, args) {
 		exceededBy := txn.WriteTimestamp.GoTime().Sub(args.Deadline.GoTime())
 		extraMsg = fmt.Sprintf(
 			"txn timestamp pushed too much; deadline exceeded by %s (%s > %s)",
 			exceededBy, txn.WriteTimestamp, args.Deadline)
-		retry, reason = true, roachpb.RETRY_COMMIT_DEADLINE_EXCEEDED
+		return true, roachpb.RETRY_COMMIT_DEADLINE_EXCEEDED, extraMsg
 	}
-	return retry, reason, extraMsg
+	return false, 0, ""
 }
 
 // CanForwardCommitTimestampWithoutRefresh returns whether a txn can be

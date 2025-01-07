@@ -961,7 +961,11 @@ func writeTableDesc(ctx context.Context, db *kv.DB, tableDesc *sqlbase.TableDesc
 		if err := txn.SetSystemConfigTrigger(); err != nil {
 			return err
 		}
-		tableDesc.ModificationTime = txn.CommitTimestamp()
+		var err error
+		tableDesc.ModificationTime, err = txn.CommitTimestamp()
+		if err != nil {
+			return err
+		}
 		return txn.Put(ctx, sqlbase.MakeDescMetadataKey(tableDesc.ID), sqlbase.WrapDescriptor(tableDesc))
 	})
 }

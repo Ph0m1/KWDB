@@ -1,0 +1,22 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1u s2u s1c s2c s1r s2r
+step s1: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s1u: UPDATE foo SET key=key-200;  finished.
+step s2u: UPDATE foo SET key=key+100; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2u: <... completed>
+step s2c: ROLLBACK;  finished.
+step s1r: SELECT * FROM foo;  finished.
+key|value
+---+-----
+800| 1000
+(1 row)
+
+step s2r: SELECT * FROM foo;  finished.
+key|value
+---+-----
+800| 1000
+(1 row)
+

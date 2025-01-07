@@ -230,6 +230,7 @@ func PushTxn(
 		reply.PusheeTxn.InFlightWrites = nil
 	}
 
+	pusheeStatus := reply.PusheeTxn.Status
 	pushType := args.PushType
 	var pusherWins bool
 	var reason string
@@ -245,7 +246,7 @@ func PushTxn(
 		// If just attempting to cleanup old or already-committed txns,
 		// pusher always fails.
 		pusherWins = false
-	case CanPushWithPriority(&args.PusherTxn, &reply.PusheeTxn):
+	case CanPushWithPriority(&args.PusherTxn, &reply.PusheeTxn, pusheeStatus, pushType):
 		reason = "pusher has priority"
 		pusherWins = true
 	case args.Force:

@@ -146,6 +146,7 @@ type eventTxnStartPayload struct {
 	txnSQLTimestamp     time.Time
 	readOnly            tree.ReadWriteMode
 	historicalTimestamp *hlc.Timestamp
+	isoLevel            tree.IsolationLevel
 }
 
 // makeEventTxnStartPayload creates an eventTxnStartPayload.
@@ -155,6 +156,7 @@ func makeEventTxnStartPayload(
 	txnSQLTimestamp time.Time,
 	historicalTimestamp *hlc.Timestamp,
 	tranCtx transitionCtx,
+	isoLevel tree.IsolationLevel,
 ) eventTxnStartPayload {
 	return eventTxnStartPayload{
 		pri:                 pri,
@@ -162,6 +164,7 @@ func makeEventTxnStartPayload(
 		txnSQLTimestamp:     txnSQLTimestamp,
 		historicalTimestamp: historicalTimestamp,
 		tranCtx:             tranCtx,
+		isoLevel:            isoLevel,
 	}
 }
 
@@ -352,11 +355,17 @@ var TxnStateTransitions = fsm.Compile(fsm.Pattern{
 			Next:        stateOpen{ImplicitTxn: fsm.False},
 			Action: func(args fsm.Args) error {
 				ts := args.Extended.(*txnState)
-				func() {
+				err := func() error {
 					ts.mu.Lock()
 					defer ts.mu.Unlock()
-					ts.mu.txn.PrepareForRetry(ts.Ctx, nil)
+					if err := ts.mu.txn.PrepareForRetry(ts.Ctx, nil); err != nil {
+						return err
+					}
+					return nil
 				}()
+				if err != nil {
+					return err
+				}
 				args.Extended.(*txnState).setAdvanceInfo(advanceOne, noRewind, txnRestart)
 				return nil
 			},
@@ -494,6 +503,7 @@ func noTxnToOpen(args fsm.Args) error {
 		payload.readOnly,
 		nil, /* txn */
 		payload.tranCtx,
+		payload.isoLevel,
 	)
 	ts.setAdvanceInfo(advCode, noRewind, txnStart)
 	return nil

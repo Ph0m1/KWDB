@@ -1,0 +1,210 @@
+subtest select_for_update
+
+statement ok
+CREATE TABLE supermarket (
+  person STRING PRIMARY KEY,
+  aisle INT NOT NULL,
+  starts_with STRING,
+  ends_with STRING,
+  INDEX (starts_with),
+  INDEX (ends_with),
+  FAMILY (person, aisle, starts_with, ends_with)
+)
+
+statement ok
+INSERT INTO supermarket (person, aisle)
+  VALUES ('abbie', 1), ('gideon', 2), ('matilda', 3), ('michael', 4)
+
+# Use SELECT FOR UPDATE under serializable isolation.
+statement ok
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE
+
+query I
+SELECT aisle FROM supermarket WHERE person = 'gideon' FOR UPDATE
+----
+2
+
+statement ok
+UPDATE supermarket SET aisle = 2 WHERE person = 'abbie'
+
+statement ok
+COMMIT
+
+# Use SELECT FOR UPDATE under read committed isolation.
+statement ok
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED
+
+query I
+SELECT aisle FROM supermarket WHERE person = 'matilda' FOR UPDATE
+----
+3
+
+statement ok
+ROLLBACK
+
+# Use SELECT FOR UPDATE in a subquery under read committed isolation.
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+statement ok
+UPDATE supermarket
+  SET aisle = (SELECT aisle FROM supermarket WHERE person = 'matilda' FOR UPDATE)
+  WHERE person = 'michael'
+
+statement ok
+ROLLBACK
+
+# Use SELECT FOR UPDATE in a CTE under read committed isolation.
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+query I
+WITH s AS
+  (SELECT aisle FROM supermarket WHERE person = 'matilda' FOR UPDATE)
+SELECT aisle + 1 FROM s
+----
+4
+
+statement ok
+ROLLBACK
+
+statement ok
+SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED
+
+statement ok
+SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE
+
+statement ok
+SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED
+
+# Prepare and execute a SELECT FOR UPDATE under read committed isolation.
+statement ok
+PREPARE psa AS SELECT aisle FROM supermarket WHERE person = $1::STRING FOR UPDATE
+
+query I
+EXECUTE psa('matilda')
+----
+3
+
+statement ok
+DEALLOCATE psa
+
+subtest end
+
+subtest schema_changes_implicit
+
+# Schema changes in implicit READ COMMITTED transactions cause the transaction
+# to be promoted to SERIALIZABLE.
+
+statement ok
+ALTER TABLE supermarket ADD COLUMN age INT
+
+statement ok
+CREATE TABLE foo(a INT)
+
+statement ok
+DROP TABLE supermarket
+
+statement ok
+DROP USER testuser
+
+statement ok
+CREATE USER testuser
+
+statement ok
+GRANT admin TO testuser
+
+statement ok
+GRANT SELECT ON foo TO testuser
+
+statement ok
+CREATE INDEX foo_idx ON foo(a)
+
+statement ok
+CREATE DATABASE foo
+
+statement ok
+ALTER DATABASE foo RENAME TO foo2
+
+statement ok
+CREATE SCHEMA s
+
+subtest schema_changes_multi-stmt
+# Schema changes are prohibited under multi-statement transactions with weak isolation levels.
+# They are allowed in single-statement explicit transactions.
+
+statement error can not use multi-statement transactions involving a schema change under weak isolation levels
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT 1;
+CREATE TABLE foo(a INT)
+
+statement ok
+ROLLBACK
+
+statement error can not use multi-statement transactions involving a schema change under weak isolation levels
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT 1;
+DROP TABLE supermarket
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT 1;
+CREATE USER foo
+
+statement ok
+ROLLBACK
+
+statement error can not use multi-statement transactions involving a schema change under weak isolation levels
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT 1;
+GRANT admin TO testuser
+
+statement ok
+ROLLBACK
+
+statement error can not use multi-statement transactions involving a schema change under weak isolation levels
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT 1;
+GRANT SELECT ON supermarket TO testuser
+
+statement ok
+ROLLBACK
+
+statement error can not use multi-statement transactions involving a schema change under weak isolation levels
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT 1;
+CREATE INDEX foo ON supermarket(ends_with, starts_with)
+
+statement ok
+ROLLBACK
+
+# If the first statement is a schema change, then the transaction isolation
+# level can be upgraded safely.
+statement error can not use multi-statement transactions involving a schema change under weak isolation levels
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+CREATE DATABASE foo;
+CREATE TABLE t (a INT);
+
+statement ok
+ROLLBACK
+
+subtest end
+
+# Ensure FOR SHARE SKIP LOCKED works correctly with read committed.
+
+statement ok
+SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE
+
+query T
+SHOW transaction_isolation;
+----
+serializable

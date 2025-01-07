@@ -653,7 +653,10 @@ func TestTxnCommitTimestampAdvancedByRefresh(t *testing.T) {
 		if !injected {
 			return errors.Errorf("didn't inject err")
 		}
-		commitTS := txn.CommitTimestamp()
+		commitTS, err := txn.CommitTimestamp()
+		if err != nil {
+			t.Fatal(err)
+		}
 		// We expect to have refreshed just after the timestamp injected by the error.
 		expTS := refreshTS.Add(0, 1)
 		if !commitTS.Equal(expTS) {

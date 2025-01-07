@@ -85,7 +85,6 @@ func QueryIntent(
 
 	// Determine if the request is querying an intent in its own transaction.
 	ownTxn := h.Txn != nil && h.Txn.ID == args.Txn.ID
-
 	var curIntentPushed bool
 	if intent != nil {
 		// See comment on QueryIntentRequest.Txn for an explanation of this
@@ -97,8 +96,8 @@ func QueryIntent(
 			(args.Txn.Epoch == intent.Txn.Epoch) &&
 			(args.Txn.Sequence <= intent.Txn.Sequence)
 
-		// If we found a matching intent, check whether the intent was pushed
-		// past its expected timestamp.
+		// If we found a matching intent, check whether the intent was pushed past
+		// its expected timestamp.
 		if reply.FoundIntent {
 			// If the request is querying an intent for its own transaction, forward
 			// the timestamp we compare against to the provisional commit timestamp
@@ -113,7 +112,6 @@ func QueryIntent(
 				curIntentPushed = true
 				log.VEventf(ctx, 2, "found pushed intent")
 				reply.FoundIntent = false
-
 				// If the request was querying an intent in its own transaction, update
 				// the response transaction.
 				if ownTxn {

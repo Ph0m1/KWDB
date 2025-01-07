@@ -47,6 +47,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/fsm"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -414,6 +415,14 @@ func (ex *connExecutor) execStmtInOpenState(
 		}
 	}()
 
+	// set isolation of txn
+	if ex.planner.txn != nil && ex.planner.txn.IsoLevel() == enginepb.Unspecified {
+		level := ex.txnIsolationLevelToKV(tree.UnspecifiedIsolation)
+		if err := ex.state.setIsolationLevel(enginepb.Level(level)); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	p := &ex.planner
 	stmtTS := ex.server.cfg.Clock.PhysicalTime()
 	ex.statsCollector.reset(&ex.server.sqlStats, ex.appStats, &ex.phaseTimes)
@@ -717,17 +726,24 @@ func (ex *connExecutor) execStmtInOpenState(
 			return nil, nil, err
 		}
 	}
-	if err := ex.dispatchToExecutionEngine(ctx, p, res); err != nil {
-		if _, ok := stmt.AST.(*tree.Export); ok {
-			err := ex.server.cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				return ShowJobsUpdate(ctx, ex.server.cfg.InternalExecutor, txn, jobID, int32(ShowJobFail), timeutil.ToUnixMicros(ex.server.cfg.Clock.Now().GoTime()), timeutil.ToUnixMicros(ex.server.cfg.Clock.Now().GoTime()), err.Error())
-			})
-			if err != nil {
-				return nil, nil, err
-			}
+	if ex.executorType != executorTypeInternal && ex.state.mu.txn.IsoLevel() == enginepb.ReadCommitted && !ex.implicitTxn() {
+		if err := ex.dispatchReadCommittedStmtToExecutionEngine(ctx, p, res); err != nil {
+			return nil, nil, err
 		}
-		return nil, nil, err
+	} else {
+		if err := ex.dispatchToExecutionEngine(ctx, p, res); err != nil {
+			if _, ok := stmt.AST.(*tree.Export); ok {
+				err := ex.server.cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+					return ShowJobsUpdate(ctx, ex.server.cfg.InternalExecutor, txn, jobID, int32(ShowJobFail), timeutil.ToUnixMicros(ex.server.cfg.Clock.Now().GoTime()), timeutil.ToUnixMicros(ex.server.cfg.Clock.Now().GoTime()), err.Error())
+				})
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+			return nil, nil, err
+		}
 	}
+
 	if _, ok := stmt.AST.(*tree.Export); ok {
 		var errorTime int64
 		var errorInfo string
@@ -1125,6 +1141,19 @@ func (ex *connExecutor) makeExecPlan(ctx context.Context, planner *planner) erro
 		planner.curPlan.instrumentation.savePlanString = true
 	}
 
+	// if this is an implicit DDL, upgrade txn's iso Level to Serializable
+	if tree.CanModifySchema(planner.stmt.AST) && ex.state.mu.txn.IsoLevel() == enginepb.ReadCommitted {
+		if ex.implicitTxn() {
+			if err := ex.state.setIsolationLevel(enginepb.Serializable); err != nil {
+				return err
+			}
+			log.VEventf(ctx, 2, "transaction isolation level upgrade to serializable when implicit transaction level is read committed")
+		} else {
+			return pgerror.Newf(pgcode.FeatureNotSupported,
+				"can not use multi-statement transactions involving a schema change under weak isolation levels")
+		}
+	}
+
 	if err := planner.makeOptimizerPlan(ctx); err != nil {
 		// Capture stmt hint error. If it is an embedded hint, return err directly
 		if strings.Contains(err.Error(), `Stmt Hint Err:`) && planner.EvalContext().HintStmtEmbed {
@@ -1187,11 +1216,6 @@ Hint_id=$2
 	// time-series table transactions do not require retries
 	if planner.TsInScopeFlag {
 		planner.txn.NotReplyForTS = true
-	}
-
-	// time-series tables do not support explicit transactions
-	if planner.TsInScopeFlag && !ex.machine.GetImplicitTxn() && !planner.extendedEvalCtx.IsInternalSQL {
-		return sqlbase.UnsupportedTSExplicitTxnError()
 	}
 
 	hintID := planner.getHintID()
@@ -1493,7 +1517,9 @@ func (ex *connExecutor) execStmtInNoTxnState(
 			makeEventTxnStartPayload(
 				pri, mode, sqlTs,
 				historicalTs,
-				ex.transitionCtx)
+				ex.transitionCtx,
+				ex.txnIsolationLevelToKV(s.Modes.Isolation),
+			)
 	case *tree.CommitTransaction, *tree.ReleaseSavepoint,
 		*tree.RollbackTransaction, *tree.SetTransaction, *tree.Savepoint:
 		return ex.makeErrEvent(errNoTransactionInProgress, stmt.AST)
@@ -1511,7 +1537,8 @@ func (ex *connExecutor) execStmtInNoTxnState(
 				mode,
 				ex.server.cfg.Clock.PhysicalTime(),
 				nil, /* historicalTimestamp */
-				ex.transitionCtx)
+				ex.transitionCtx,
+				ex.txnIsolationLevelToKV(tree.UnspecifiedIsolation))
 	}
 }
 
@@ -1899,4 +1926,93 @@ func checkPlanNodeType(n planNode) error {
 	default:
 		return errors.Errorf("cannot execute CREATE,INSERT,UPDATE,UPSERT,DELETE,DROP,ALTER,TRUNCATE,RENAME in a read-only transaction")
 	}
+}
+
+// Each statement in an explicit READ COMMITTED transaction has a SAVEPOINT.
+// This allows for TransactionRetry errors to be retried automatically. We don't
+// do this for implicit transactions because the conn_executor state machine
+// already has retry logic for implicit transactions. To avoid having to
+// implement the retry logic in the state machine, we use the KV savepoint API
+// directly.
+// To address errors caused by write-write conflicts under the RC (Read Committed)
+// isolation level: previously, in scenarios where a write-write conflict occurred
+// because the read timestamp of Transaction 1 was earlier than the commit timestamp
+// of data written by Transaction 2, Transaction 1 would still write an intent upon
+// encountering this error. During a subsequent retry, an error would occur when
+// Transaction 1 encountered its own previously written intent while reading.
+// When the retry timestamp was adjusted in the interceptor, incorrect results
+// were produced because the transaction did not re-read the latest data. To resolve this,
+// the approach was changed to statement-level retries. Under the RC isolation level,
+// if the timestamp does not match, the process directly returns an error without writing
+// subsequent intents. Additionally, a new method, dispatchReadCommittedStmtToExecutionEngine,
+// was introduced to enable statement-level retries specifically for the RC isolation level.
+func (ex *connExecutor) dispatchReadCommittedStmtToExecutionEngine(
+	ctx context.Context, p *planner, res RestrictedCommandResult,
+) error {
+	readCommittedSavePointToken, err := ex.state.mu.txn.CreateSavepoint(ctx)
+	if err != nil {
+		return err
+	}
+	maxRetries := 5
+	for attemptNum := 0; ; attemptNum++ {
+		bufferPos := res.BufferedResultsLen()
+		if err = ex.dispatchToExecutionEngine(ctx, p, res); err != nil {
+			return err
+		}
+		maybeRetriableErr := res.Err()
+		if maybeRetriableErr == nil {
+			// If there was no error, then we must release the savepoint and break.
+			if err := ex.state.mu.txn.ReleaseSavepoint(ctx, readCommittedSavePointToken); err != nil {
+				return err
+			}
+			break
+		}
+
+		// If the error does not allow for a partial retry, then stop. The error
+		// is already set on res.Err() and will be returned to the client.
+		var txnRetryErr *roachpb.TransactionRetryWithProtoRefreshError
+		// todo: txnRetryErr.TxnMustRestartFromBeginning()
+		if !errors.As(maybeRetriableErr, &txnRetryErr) || txnRetryErr.PrevTxnAborted() {
+			break
+		}
+		// If we reached the maximum number of retries, then we must stop.
+		if attemptNum == maxRetries {
+			res.SetError(errors.Wrapf(
+				maybeRetriableErr,
+				"read committed retry limit exceeded; set by max_retries_for_read_committed=%d",
+				maxRetries,
+			))
+			break
+		}
+		// In order to retry the statement, we need to clear any results and
+		// errors that were buffered, rollback to the savepoint, then prepare the
+		// kv.txn for the partial txn retry.
+		if ableToClear := res.TruncateBufferedResults(bufferPos); !ableToClear {
+			// If the buffer exceeded the maximum size, then it might have been
+			// flushed and sent back to the client already. In that case, we can't
+			// retry the statement.
+			res.SetError(errors.Wrapf(
+				maybeRetriableErr,
+				"cannot automatically retry since some results were already sent to the client",
+			))
+			break
+		}
+		if knob := ex.server.cfg.TestingKnobs.OnReadCommittedStmtRetry; knob != nil {
+			knob(txnRetryErr)
+		}
+		res.SetError(nil)
+		if err := ex.state.mu.txn.RollbackToSavepoint(ctx, readCommittedSavePointToken); err != nil {
+			return err
+		}
+		if err := ex.state.mu.txn.PrepareForPartialRetry(ctx); err != nil {
+			return err
+		}
+		// todo: ex.state.mu.txn.Step(ctx, false /* allowReadTimestampStep */);
+		if err := ex.state.mu.txn.Step(ctx); err != nil {
+			return err
+		}
+		ex.state.mu.autoRetryCounter++
+		ex.state.mu.autoRetryReason = txnRetryErr
+	}
+	return nil
 }

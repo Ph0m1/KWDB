@@ -1,0 +1,26 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1w s2w s1c s2r s2c
+step s1w: INSERT INTO upsert(key, payload) VALUES('FooFoo', 'insert1') ON CONFLICT (key) DO UPDATE set key = EXCLUDED.key, payload = upsert.payload || ' updated by insert1';  finished.
+step s2w: INSERT INTO upsert(key, payload) VALUES('FOOFOO', 'insert2') ON CONFLICT (key) DO UPDATE set key = EXCLUDED.key, payload = upsert.payload || ' updated by insert2';  finished.
+step s1c: COMMIT;  finished.
+step s2r: SELECT * FROM upsert;  finished.
+key   |payload
+------+-------
+FooFoo|insert1
+FOOFOO|insert2
+(2 rows)
+
+step s2c: COMMIT;  finished.
+
+starting permutation: s1w s2w s1a s2r s2c
+step s1w: INSERT INTO upsert(key, payload) VALUES('FooFoo', 'insert1') ON CONFLICT (key) DO UPDATE set key = EXCLUDED.key, payload = upsert.payload || ' updated by insert1';  finished.
+step s2w: INSERT INTO upsert(key, payload) VALUES('FOOFOO', 'insert2') ON CONFLICT (key) DO UPDATE set key = EXCLUDED.key, payload = upsert.payload || ' updated by insert2';  finished.
+step s1a: ABORT;  finished.
+step s2r: SELECT * FROM upsert;  finished.
+key   |payload
+------+-------
+FOOFOO|insert2
+(1 row)
+
+step s2c: COMMIT;  finished.

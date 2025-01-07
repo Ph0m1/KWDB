@@ -287,10 +287,11 @@ CREATE TABLE
 > begin;
 BEGIN
 > select * from db1.t1;
-ERROR: explicit transaction is not supported in TS mode
-SQLSTATE: 0A000
+  k_timestamp | e1 | code1
+--------------+----+--------
+(0 rows)
 > end;
-ROLLBACK
+COMMIT
 > use defaultdb;
 SET
 > drop database db1;

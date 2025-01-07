@@ -1,0 +1,209 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 at1 sc1 s2 at2 sc2 rx1 wx rx3 c2
+step s1: BEGIN transaction isolation level read committed;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step sc2: COMMIT;  finished.
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step c2: COMMIT;  finished.
+
+starting permutation: s1 at1 sc1 s2 at2 rx1 sc2 wx rx3 c2
+step s1: BEGIN transaction isolation level read committed;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step sc2: COMMIT;  finished.
+step wx: INSERT INTO b VALUES (0);  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step c2: COMMIT;  finished.
+
+starting permutation: s1 at1 sc1 s2 at2 rx1 wx sc2 rx3 c2
+step s1: BEGIN transaction isolation level read committed;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step sc2: COMMIT;  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step c2: COMMIT;  finished.
+
+starting permutation: s1 at1 sc1 s2 at2 rx1 wx rx3 sc2 c2
+step s1: BEGIN transaction isolation level read committed;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step sc2: COMMIT;  finished.
+step c2: COMMIT;  finished.
+
+starting permutation: rx1 wx s1 rx3 c2 at1 sc1 s2 at2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step s1: BEGIN transaction isolation level read committed;  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step c2: COMMIT;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step sc2: COMMIT;  finished.
+
+starting permutation: rx1 wx rx3 s1 at1 c2 sc1 s2 at2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step s1: BEGIN transaction isolation level read committed;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step c2: COMMIT;  finished.
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step sc2: COMMIT;  finished.
+
+starting permutation: rx1 wx rx3 s1 c2 at1 sc1 s2 at2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step s1: BEGIN transaction isolation level read committed;  finished.
+step c2: COMMIT;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step sc2: COMMIT;  finished.
+
+starting permutation: rx1 wx rx3 c2 s1 at1 sc1 s2 at2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
+a_id
+----
+   1
+(1 row)
+
+step wx: INSERT INTO b VALUES (0);  finished.
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;  finished.
+a_id
+----
+   3
+   3
+   3
+(3 rows)
+
+step c2: COMMIT;  finished.
+step s1: BEGIN transaction isolation level read committed;  finished.
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;  finished.
+ERROR:  can not use multi-statement transactions involving a schema change under weak isolation levels
+step sc1: COMMIT;  finished.
+step s2: BEGIN;  finished.
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
+ERROR:  constraint "bfk" does not exist
+step sc2: COMMIT;  finished.

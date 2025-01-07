@@ -1,0 +1,121 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1w s1c s2w s2c show
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s1c: COMMIT;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING;  finished.
+step s2c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing1
+(1 row)
+
+
+starting permutation: s1 s2 s2w s2c s1w s1c show
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING;  finished.
+step s2c: COMMIT;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s1c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing2
+(1 row)
+
+
+starting permutation: s1 s2 s1w s2w s1c s2c show
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2w: <... completed>
+ERROR:  flow: memory budget exceeded: 10240 bytes requested, 0 currently allocated, 0 bytes in budget
+step s2c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing1
+(1 row)
+
+
+starting permutation: s1 s2 s2w s1w s2c s1c show
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING; <waiting ...>
+step s2c: COMMIT;  finished.
+step s1w: <... completed>
+ERROR:  flow: memory budget exceeded: 10240 bytes requested, 0 currently allocated, 0 bytes in budget
+step s1c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing2
+(1 row)
+
+
+starting permutation: s2 s1 s1w s1c s2w s2c show
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s1c: COMMIT;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING;  finished.
+step s2c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing1
+(1 row)
+
+
+starting permutation: s2 s1 s2w s2c s1w s1c show
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING;  finished.
+step s2c: COMMIT;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s1c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing2
+(1 row)
+
+
+starting permutation: s2 s1 s1w s2w s1c s2c show
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2w: <... completed>
+ERROR:  flow: memory budget exceeded: 10240 bytes requested, 0 currently allocated, 0 bytes in budget
+step s2c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing1
+(1 row)
+
+
+starting permutation: s2 s1 s2w s1w s2c s1c show
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2w: INSERT INTO ints(key, val) VALUES(1, 'donothing2'), (1, 'donothing3') ON CONFLICT DO NOTHING;  finished.
+step s1w: INSERT INTO ints(key, val) VALUES(1, 'donothing1') ON CONFLICT DO NOTHING; <waiting ...>
+step s2c: COMMIT;  finished.
+step s1w: <... completed>
+ERROR:  flow: memory budget exceeded: 10240 bytes requested, 0 currently allocated, 0 bytes in budget
+step s1c: COMMIT;  finished.
+step show: SELECT * FROM ints;  finished.
+key|val       
+---+----------
+  1|donothing2
+(1 row)
+

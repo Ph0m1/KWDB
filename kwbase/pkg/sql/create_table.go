@@ -445,7 +445,10 @@ func (n *createTableNode) startExec(params runParams) error {
 	var asCols sqlbase.ResultColumns
 	var desc sqlbase.MutableTableDescriptor
 	var affected map[sqlbase.ID]*sqlbase.MutableTableDescriptor
-	creationTime := params.creationTimeForNewTableDescriptor()
+	creationTime, err := params.creationTimeForNewTableDescriptor()
+	if err != nil {
+		return err
+	}
 	if n.n.As() {
 		asCols = planColumns(n.sourcePlan)
 		if !n.run.fromHeuristicPlanner && !n.n.AsHasUserSpecifiedPrimaryKey() {
@@ -2956,7 +2959,11 @@ func createInstanceTable(
 		crCtable.CTable.PrimaryKeys = [][]byte{payloadVals.PerNodePayloads[0].PrimaryTagKey}
 	}
 
-	cTbNameSpace := InitInstDescriptor(id, tmplTblID, n.Table.Table(), db.Name, tmplTbl.Name, params.creationTimeForNewTableDescriptor())
+	time, err := params.creationTimeForNewTableDescriptor()
+	if err != nil {
+		return err
+	}
+	cTbNameSpace := InitInstDescriptor(id, tmplTblID, n.Table.Table(), db.Name, tmplTbl.Name, time)
 	cTbNameSpace.State = sqlbase.ChildDesc_ADD
 
 	// clear the cache to avoid using cache when querying the template table after creating instance table

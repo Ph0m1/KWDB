@@ -1,0 +1,87 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s1q1 s1p1 s1u1 s1p2 s2q1 s2u1 s1r1 s1q1 s1c s2c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    200
+(2 rows)
+
+step s1p1: SAVEPOINT s1;  finished.
+step s1u1: UPDATE accounts SET balance = balance - 50 WHERE id = 1;  finished.
+step s1p2: SAVEPOINT s2;  finished.
+step s2q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    200
+(2 rows)
+
+step s2u1: UPDATE accounts SET balance = balance + 50 WHERE id = 1; <waiting ...>
+step s1r1: ROLLBACK TO SAVEPOINT s1;  finished.
+step s1q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    200
+(2 rows)
+
+step s1c: COMMIT;  finished.
+step s2u1: <... completed>
+step s2c: COMMIT;  finished.
+
+starting permutation: s1 s2 s1q1 s1p1 s1u1 s1p2 s2q1 s2u1 s1r1 s1q1 s1u2 s1q1 s1r2 s1q1 s1c s2q1 s2u2 s2c
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level read committed;  finished.
+step s1q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    200
+(2 rows)
+
+step s1p1: SAVEPOINT s1;  finished.
+step s1u1: UPDATE accounts SET balance = balance - 50 WHERE id = 1;  finished.
+step s1p2: SAVEPOINT s2;  finished.
+step s2q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    200
+(2 rows)
+
+step s2u1: UPDATE accounts SET balance = balance + 50 WHERE id = 1; <waiting ...>
+step s1r1: ROLLBACK TO SAVEPOINT s1;  finished.
+step s1q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    200
+(2 rows)
+
+step s1u2: UPDATE accounts SET balance = balance + 100 WHERE id = 2;  finished.
+step s1q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    100
+ 2|    300
+(2 rows)
+
+step s1r2: ROLLBACK TO SAVEPOINT s2;  finished.
+ERROR:  savepoint "s2" does not exist
+step s1q1: SELECT * FROM accounts;  finished.
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s1c: COMMIT;  finished.
+step s2u1: <... completed>
+step s2q1: SELECT * FROM accounts;  finished.
+id|balance
+--+-------
+ 1|    150
+ 2|    200
+(2 rows)
+
+step s2u2: UPDATE accounts SET balance = balance - 100 WHERE id = 2;  finished.
+step s2c: COMMIT;  finished.

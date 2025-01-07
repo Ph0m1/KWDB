@@ -1,0 +1,25 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1 s2 s2r s1u s2u s1c s2r s2c s2r
+step s1: BEGIN transaction isolation level read committed;  finished.
+step s2: BEGIN transaction isolation level SERIALIZABLE;  finished.
+step s2r: select * from foo;  finished.
+key|value
+---+-----
+  1|    1
+(1 row)
+
+step s1u: UPDATE foo SET key = 2;  finished.
+step s2u: UPDATE foo SET key = 3; <waiting ...>
+step s1c: COMMIT;  finished.
+step s2u: <... completed>
+ERROR:  restart transaction: TransactionRetryWithProtoRefreshError: WriteTooOldError
+step s2r: select * from foo;  finished.
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step s2c: ROLLBACK;  finished.
+step s2r: select * from foo;  finished.
+key|value
+---+-----
+  2|    1
+(1 row)
+

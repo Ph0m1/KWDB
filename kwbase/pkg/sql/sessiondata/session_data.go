@@ -141,7 +141,8 @@ type SessionData struct {
 	// tsinsert_direct special handling error
 	TsSupportBatch bool
 	// Support GB18030 and GBK
-	ClientEncoding string
+	ClientEncoding           string
+	DefaultTxnIsolationLevel int64
 
 	// MaxPushLimitNumber if number of limit shall not exceed it, limit can push to tsScan
 	MaxPushLimitNumber int64

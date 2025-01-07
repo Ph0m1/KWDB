@@ -1747,6 +1747,10 @@ func mvccPutInternal(
 			// before committing.
 			writeTimestamp.Forward(metaTimestamp.Next())
 			maybeTooOldErr = roachpb.NewWriteTooOldError(readTimestamp, writeTimestamp)
+			// add for rc-test3, return before write intent when write-write conflict
+			if txn != nil && txn.IsoLevel == enginepb.ReadCommitted {
+				return maybeTooOldErr
+			}
 			// If we're in a transaction, always get the value at the orig
 			// timestamp.
 			if txn != nil {

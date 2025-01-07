@@ -1,0 +1,8 @@
+Pre-requisite: 
+  apt install libpq-dev bison flex
+
+Build:
+  make
+
+Usage:
+  ./isolationtester "postgresql://root:123456@127.0.0.1:20221/testdb"  <  specs/rw_conflict.spec

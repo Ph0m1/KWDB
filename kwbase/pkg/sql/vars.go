@@ -45,6 +45,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil/unimplemented"
+	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"github.com/cockroachdb/errors"
@@ -318,19 +319,22 @@ var varGen = map[string]sessionVar{
 	// See https://www.postgresql.org/docs/10/static/runtime-config-client.html#GUC-DEFAULT-TRANSACTION-ISOLATION
 	`default_transaction_isolation`: {
 		Set: func(_ context.Context, m *sessionDataMutator, s string) error {
-			switch strings.ToUpper(s) {
-			case `SERIALIZABLE`, `DEFAULT`:
-				// Do nothing. All transactions execute with serializable isolation.
-			default:
-				return newVarValueError(`default_transaction_isolation`, s, "serializable")
+			level, ok := tree.IsolationLevelMap[strings.ToLower(s)]
+			if !ok || level == tree.UnspecifiedIsolation {
+				var allowedValues = []string{"serializable", "read committed", "repeatable read"}
+				return newVarValueError(`transaction_isolation`, s, allowedValues...)
 			}
-
+			m.SetDefaultTransactionIsolationLevel(level)
 			return nil
 		},
 		Get: func(evalCtx *extendedEvalContext) string {
-			return "serializable"
+			level := tree.IsolationLevel(evalCtx.SessionData.DefaultTxnIsolationLevel)
+			return strings.ToLower(level.String())
 		},
-		GlobalDefault: func(sv *settings.Values) string { return "default" },
+		GlobalDefault: func(sv *settings.Values) string {
+			level := tree.IsolationLevel(clusterTransactionIsolation.Get(sv)).String()
+			return strings.ToLower(level)
+		},
 	},
 	// See https://www.postgresql.org/docs/9.3/static/runtime-config-client.html#GUC-DEFAULT-TRANSACTION-READ-ONLY
 	`default_transaction_read_only`: {
@@ -887,16 +891,27 @@ var varGen = map[string]sessionVar{
 	// See https://github.com/postgres/postgres/blob/REL_10_STABLE/src/backend/utils/misc/guc.c#L3401-L3409
 	`transaction_isolation`: {
 		Get: func(evalCtx *extendedEvalContext) string {
-			return "serializable"
+			level := tree.IsolationLevel(evalCtx.Txn.IsoLevel()).String()
+			return strings.ToLower(level)
 		},
 		RuntimeSet: func(_ context.Context, evalCtx *extendedEvalContext, s string) error {
-			_, ok := tree.IsolationLevelMap[s]
-			if !ok {
-				return newVarValueError(`transaction_isolation`, s, "serializable")
+			level, ok := tree.IsolationLevelMap[strings.ToLower(s)]
+			if !ok || level == tree.UnspecifiedIsolation {
+				var allowedValues = []string{"serializable", "read committed", "repeatable read"}
+				return newVarValueError(`transaction_isolation`, s, allowedValues...)
+			}
+			modes := tree.TransactionModes{
+				Isolation: level,
+			}
+			if err := evalCtx.TxnModesSetter.setTransactionModes(modes, hlc.Timestamp{} /* asOfSystemTime */); err != nil {
+				return err
 			}
 			return nil
 		},
-		GlobalDefault: func(_ *settings.Values) string { return "serializable" },
+		GlobalDefault: func(sv *settings.Values) string {
+			level := tree.IsolationLevel(clusterTransactionIsolation.Get(sv)).String()
+			return strings.ToLower(level)
+		},
 	},
 
 	// CockroachDB extension.
