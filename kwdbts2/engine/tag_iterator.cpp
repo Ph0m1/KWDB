@@ -20,7 +20,7 @@ bool in(kwdbts::k_uint32 hp, const std::vector<kwdbts::k_uint32>& hps);
 KStatus TagPartitionIterator::Next(std::vector<EntityResultIndex>* entity_id_list,
                                      ResultSet* res, k_uint32* count, bool* is_finish) {
   if  (cur_scan_rowid_ > cur_total_row_count_) {
-    LOG_INFO("fetch tag table %s%s, "
+    LOG_DEBUG("fetch tag table %s%s, "
       "cur_scan_rowid[%lu] > cur_total_row_count_[%lu], count: %u",
       m_tag_partition_table_->sandbox().c_str(), m_tag_partition_table_->name().c_str(), cur_scan_rowid_,
       cur_total_row_count_, *count);
@@ -119,7 +119,7 @@ success_end:
       res->push_back(idx, batch);
     }
   } else {
-    LOG_INFO("not required to call GetTagBatchRecord on the tag table %s%s, "
+    LOG_DEBUG("not required to call GetTagBatchRecord on the tag table %s%s, "
       "fetch_count: %u, start_row[%lu] >= row_num[%lu]",
       m_tag_partition_table_->sandbox().c_str(), m_tag_partition_table_->name().c_str(), fetch_count,
       start_row, row_num);
