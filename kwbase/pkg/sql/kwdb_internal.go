@@ -3638,6 +3638,14 @@ CREATE TABLE kwdb_internal.kwdb_attributes (
 		if err != nil {
 			return err
 		}
+		dbNames := make(map[sqlbase.ID]string)
+		// Record database descriptors for name lookups.
+		for _, desc := range descs {
+			db, ok := desc.(*sqlbase.DatabaseDescriptor)
+			if ok {
+				dbNames[db.ID] = db.Name
+			}
+		}
 
 		for _, desc := range descs {
 			table, ok := desc.(*sqlbase.TableDescriptor)
@@ -3647,24 +3655,26 @@ CREATE TABLE kwdb_internal.kwdb_attributes (
 			if table.Dropped() || !canUserSeeTable(ctx, p, table, false) {
 				continue
 			}
-
-			// get database desc from table ID
-			dbDesc, err := getDatabaseDescByID(ctx, p.Txn(), table.GetParentID())
-			if err != nil {
-				return err
+			dbName := dbNames[table.GetParentID()]
+			if dbName == "" {
+				// The parent database was deleted. This is possible e.g. when
+				// a database is dropped with CASCADE, and someone queries
+				// this virtual table before the dropped table descriptors are
+				// effectively deleted.
+				dbName = fmt.Sprintf("[%d]", table.GetParentID())
 			}
 
-			childIDs := make([]sqlbase.ID, 0)
-			childNames := make([]string, 0)
-			var allChild *sqlbase.AllInstTableInfo
-			if table.IsTSTable() {
-				var err error
-				allChild, err = sqlbase.GetAllInstanceByTmplTableID(ctx, p.txn, table.ID, true, p.execCfg.InternalExecutor)
-				if err != nil {
-					return err
-				}
-				childIDs, childNames = allChild.InstTableIDs, allChild.InstTableNames
-			}
+			//childIDs := make([]sqlbase.ID, 0)
+			//childNames := make([]string, 0)
+			//var allChild *sqlbase.AllInstTableInfo
+			//if table.IsTSTable() {
+			//	var err error
+			//	allChild, err = sqlbase.GetAllInstanceByTmplTableID(ctx, p.txn, table.ID, true, p.execCfg.InternalExecutor)
+			//	if err != nil {
+			//		return err
+			//	}
+			//	childIDs, childNames = allChild.InstTableIDs, allChild.InstTableNames
+			//}
 
 			for tagIdx, attribute := range table.Columns {
 				if attribute.IsTagCol() {
@@ -3685,7 +3695,7 @@ CREATE TABLE kwdb_internal.kwdb_attributes (
 						if err := addRow(
 							tree.NewDString(table.Name),                     // table_name
 							tree.NewDInt(tree.DInt(table.ID)),               // table_id
-							tree.NewDString(dbDesc.Name),                    // db_name
+							tree.NewDString(dbName),                         // db_name
 							tree.DNull,                                      // stable_name
 							tree.DNull,                                      // stable_id
 							tree.NewDString(attribute.Name),                 // attribute_name
@@ -3699,47 +3709,47 @@ CREATE TABLE kwdb_internal.kwdb_attributes (
 							return err
 						}
 
-					case tree.TemplateTable:
-						// template table
-						if err := addRow(
-							tree.DNull,                                      // table_name
-							tree.DNull,                                      // table_id
-							tree.NewDString(dbDesc.Name),                    // db_name
-							tree.NewDString(table.Name),                     // stable_name
-							tree.NewDInt(tree.DInt(table.ID)),               // stable_id
-							tree.NewDString(attribute.Name),                 // attribute_name
-							tree.NewDInt(tree.DInt(tagIdx+1)),               // attribute_idx starts from 1
-							tree.NewDString(attributeType),                  // attribute_type
-							tree.NewDInt(tree.DInt(attribute.Type.Oid())),   //attribute_typid
-							tree.NewDInt(tree.DInt(attribute.Type.Width())), // attribute_length
-							tree.MakeDBool(tree.DBool(isPrimary)),           // is_primary
-							tree.MakeDBool(tree.DBool(nullable)),            // nullable
-						); err != nil {
-							return err
-						}
-
-						if len(childIDs) > 0 {
-							for i, childID := range childIDs {
-								childName := childNames[i]
-								// instance table
-								if err := addRow(
-									tree.NewDString(childName),                      // table_name
-									tree.NewDInt(tree.DInt(childID)),                // table_id
-									tree.NewDString(dbDesc.Name),                    // db_name
-									tree.NewDString(table.Name),                     // stable_name
-									tree.NewDInt(tree.DInt(table.ID)),               // stable_id
-									tree.NewDString(attribute.Name),                 // attribute_name
-									tree.NewDInt(tree.DInt(tagIdx+1)),               // attribute_idx starts from 1
-									tree.NewDString(attributeType),                  // attribute_type
-									tree.NewDInt(tree.DInt(attribute.Type.Oid())),   //attribute_typid
-									tree.NewDInt(tree.DInt(attribute.Type.Width())), // attribute_length
-									tree.MakeDBool(tree.DBool(isPrimary)),           // is_primary
-									tree.MakeDBool(tree.DBool(nullable)),            // nullable
-								); err != nil {
-									return err
-								}
-							}
-						}
+					//case tree.TemplateTable:
+					//	// template table
+					//	if err := addRow(
+					//		tree.DNull,                                      // table_name
+					//		tree.DNull,                                      // table_id
+					//		tree.NewDString(dbName),                         // db_name
+					//		tree.NewDString(table.Name),                     // stable_name
+					//		tree.NewDInt(tree.DInt(table.ID)),               // stable_id
+					//		tree.NewDString(attribute.Name),                 // attribute_name
+					//		tree.NewDInt(tree.DInt(tagIdx+1)),               // attribute_idx starts from 1
+					//		tree.NewDString(attributeType),                  // attribute_type
+					//		tree.NewDInt(tree.DInt(attribute.Type.Oid())),   //attribute_typid
+					//		tree.NewDInt(tree.DInt(attribute.Type.Width())), // attribute_length
+					//		tree.MakeDBool(tree.DBool(isPrimary)),           // is_primary
+					//		tree.MakeDBool(tree.DBool(nullable)),            // nullable
+					//	); err != nil {
+					//		return err
+					//	}
+					//
+					//	if len(childIDs) > 0 {
+					//		for i, childID := range childIDs {
+					//			childName := childNames[i]
+					//			// instance table
+					//			if err := addRow(
+					//				tree.NewDString(childName),                      // table_name
+					//				tree.NewDInt(tree.DInt(childID)),                // table_id
+					//				tree.NewDString(dbName),                         // db_name
+					//				tree.NewDString(table.Name),                     // stable_name
+					//				tree.NewDInt(tree.DInt(table.ID)),               // stable_id
+					//				tree.NewDString(attribute.Name),                 // attribute_name
+					//				tree.NewDInt(tree.DInt(tagIdx+1)),               // attribute_idx starts from 1
+					//				tree.NewDString(attributeType),                  // attribute_type
+					//				tree.NewDInt(tree.DInt(attribute.Type.Oid())),   //attribute_typid
+					//				tree.NewDInt(tree.DInt(attribute.Type.Width())), // attribute_length
+					//				tree.MakeDBool(tree.DBool(isPrimary)),           // is_primary
+					//				tree.MakeDBool(tree.DBool(nullable)),            // nullable
+					//			); err != nil {
+					//				return err
+					//			}
+					//		}
+					//	}
 
 					default:
 						// do nothing
