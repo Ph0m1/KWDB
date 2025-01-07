@@ -2,6 +2,10 @@
 CREATE DATABASE
 > CREATE DATABASE reldb2 WITH ENCODING = 'UTF8';
 CREATE DATABASE
+> CREATE DATABASE reldb3;
+CREATE DATABASE
+> CREATE DATABASE "RELDB3";
+CREATE DATABASE
 > SHOW CREATE DATABASE reldb1;
   database_name |    create_statement
 ----------------+-------------------------
@@ -11,6 +15,16 @@ CREATE DATABASE
   database_name |    create_statement
 ----------------+-------------------------
   reldb2        | CREATE DATABASE reldb2
+(1 row)
+> SHOW CREATE DATABASE reldb3;
+  database_name |    create_statement
+----------------+-------------------------
+  reldb3        | CREATE DATABASE reldb3
+(1 row)
+> SHOW CREATE DATABASE "RELDB3";
+  database_name |     create_statement
+----------------+---------------------------
+  "RELDB3"      | CREATE DATABASE "RELDB3"
 (1 row)
 > CREATE TS DATABASE tsdb1;
 CREATE TS DATABASE
@@ -23,6 +37,10 @@ CREATE TS DATABASE
 > CREATE TS DATABASE tsdb5 PARTITION INTERVAL 10d;
 CREATE TS DATABASE
 > CREATE TS DATABASE tsdb6 RETENTIONS 9d PARTITION INTERVAL 9d;
+CREATE TS DATABASE
+> CREATE TS DATABASE tsdb7 RETENTIONS 9d PARTITION INTERVAL 9d;
+CREATE TS DATABASE
+> CREATE TS DATABASE "TSDB7" RETENTIONS 9d PARTITION INTERVAL 9d;
 CREATE TS DATABASE
 > SHOW CREATE DATABASE tsdb1;
   database_name |       create_statement
@@ -63,6 +81,20 @@ CREATE TS DATABASE
   database_name |      create_statement
 ----------------+------------------------------
   tsdb6         | CREATE TS DATABASE tsdb6
+                |      retentions 777600s
+                |      partition interval 9d
+(1 row)
+> SHOW CREATE DATABASE tsdb7;
+  database_name |      create_statement
+----------------+------------------------------
+  tsdb7         | CREATE TS DATABASE tsdb7
+                |      retentions 777600s
+                |      partition interval 9d
+(1 row)
+> SHOW CREATE DATABASE "TSDB7";
+  database_name |      create_statement
+----------------+------------------------------
+  "TSDB7"       | CREATE TS DATABASE "TSDB7"
                 |      retentions 777600s
                 |      partition interval 9d
 (1 row)
@@ -154,6 +186,10 @@ CREATE TABLE
 DROP DATABASE
 > DROP DATABASE reldb2 CASCADE;
 DROP DATABASE
+> DROP DATABASE reldb3 CASCADE;
+DROP DATABASE
+> DROP DATABASE "RELDB3" CASCADE;
+DROP DATABASE
 > DROP DATABASE tsdb1 CASCADE;
 DROP DATABASE
 > DROP DATABASE tsdb2 CASCADE;
@@ -165,4 +201,8 @@ DROP DATABASE
 > DROP DATABASE tsdb5 CASCADE;
 DROP DATABASE
 > DROP DATABASE tsdb6 CASCADE;
+DROP DATABASE
+> DROP DATABASE tsdb7 CASCADE;
+DROP DATABASE
+> DROP DATABASE "TSDB7" CASCADE;
 DROP DATABASE

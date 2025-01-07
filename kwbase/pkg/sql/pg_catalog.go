@@ -3137,7 +3137,7 @@ func showCreateDatabase(db *DatabaseDescriptor) string {
 	f.WriteString("CREATE ")
 	if db.EngineType == tree.EngineTypeTimeseries {
 		f.WriteString("TS DATABASE ")
-		f.WriteString(db.Name)
+		f.FormatNameP(&db.Name)
 		f.WriteString("\n\t")
 		f.WriteString(" retentions ")
 		f.WriteString(strconv.Itoa(int(db.TsDb.Lifetime)))
@@ -3148,7 +3148,7 @@ func showCreateDatabase(db *DatabaseDescriptor) string {
 		f.WriteString("d ")
 	} else if db.EngineType == tree.EngineTypeRelational {
 		f.WriteString("DATABASE ")
-		f.WriteString(db.Name)
+		f.FormatNameP(&db.Name)
 	}
 	return f.CloseAndGetString()
 }

@@ -374,17 +374,17 @@ func ShowCreateInstanceTable(
 // database_name, create_statement from pg_catalog.pg_database
 func (d *delegator) delegateShowCreateDatabase(n *tree.ShowCreateDatabase) (tree.Statement, error) {
 	sqltelemetry.IncrementShowCounter(sqltelemetry.Create)
-	const showCreateQuery = `select datname as database_name, datstatement as create_statement from pg_catalog.pg_database where datname = '%[1]s'`
+	const showCreateQuery = `select %[1]s as database_name, datstatement as create_statement from pg_catalog.pg_database where datname = %[2]s`
 
 	flags := cat.Flags{AvoidDescriptorCaches: true, NoTableStats: true}
-	database, err := d.catalog.ResolveDatabase(d.ctx, flags, n.Database.String())
+	database, err := d.catalog.ResolveDatabase(d.ctx, flags, string(n.Database))
 	if err != nil {
 		return nil, err
 	}
 	if err := d.catalog.CheckAnyPrivilege(d.ctx, database); err != nil {
 		return nil, err
 	}
-	query := fmt.Sprintf(showCreateQuery, n.Database.String())
+	query := fmt.Sprintf(showCreateQuery, lex.EscapeSQLString(n.Database.String()), lex.EscapeSQLString(string(n.Database)))
 
 	return parse(query)
 }
