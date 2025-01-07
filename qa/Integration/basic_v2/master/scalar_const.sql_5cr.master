@@ -1407,7 +1407,7 @@ INSERT 2
   synchronizer      |             |
    └── render       |             |
         │           | engine type | time series
-        │           | extract     | 2024.0
+        │           | extract     | 2025.0
         └── ts scan |             |
                     | ts-table    | ts_table
                     | access mode | metaTable
@@ -1418,7 +1418,7 @@ INSERT 2
                          | distributed | true
                          | vectorized  | false
   render                 |             |
-   │                     | extract     | 2024.0
+   │                     | extract     | 2025.0
    └── distinct          |             |
         │                | distinct on | e1
         └── synchronizer |             |
@@ -1433,7 +1433,7 @@ INSERT 2
                                    | distributed | true
                                    | vectorized  | false
   render                           |             |
-   │                               | extract     | 2024.0
+   │                               | extract     | 2025.0
    └── limit                       |             |
         │                          | engine type | time series
         │                          | offset      | 1
@@ -1453,7 +1453,7 @@ INSERT 2
                                    | distributed | true
                                    | vectorized  | false
   render                           |             |
-   │                               | extract     | 2024.0
+   │                               | extract     | 2025.0
    └── limit                       |             |
         │                          | engine type | time series
         │                          | offset      | 1
@@ -1475,7 +1475,7 @@ INSERT 2
   synchronizer      |             |
    └── render       |             |
         │           | engine type | time series
-        │           | extract     | 2024.0
+        │           | extract     | 2025.0
         └── ts scan |             |
                     | ts-table    | ts_table
                     | access mode | metaTable
@@ -1489,7 +1489,7 @@ INSERT 2
   synchronizer      |             |
    └── render       |             |
         │           | engine type | time series
-        │           | extract     | 2024.0
+        │           | extract     | 2025.0
         └── ts scan |             |
                     | ts-table    | ts_table
                     | access mode | metaTable
@@ -1503,7 +1503,7 @@ INSERT 2
   synchronizer      |             |
    └── render       |             |
         │           | engine type | time series
-        │           | extract     | 2024.0
+        │           | extract     | 2025.0
         └── ts scan |             |
                     | ts-table    | ts_table
                     | access mode | metaTable
@@ -1517,7 +1517,7 @@ INSERT 2
   synchronizer      |               |
    └── render       |               |
         │           | engine type   | time series
-        │           | extract       | 2024.0
+        │           | extract       | 2025.0
         └── ts scan |               |
                     | ts-table      | ts_table
                     | access mode   | tableTableMeta
@@ -1531,7 +1531,7 @@ INSERT 2
   synchronizer      |               |
    └── render       |               |
         │           | engine type   | time series
-        │           | extract       | 2024.0
+        │           | extract       | 2025.0
         └── ts scan |               |
                     | ts-table      | ts_table
                     | access mode   | tableTableMeta
@@ -1546,14 +1546,14 @@ INSERT 2
    ├── synchronizer      |             |
    │    └── render       |             |
    │         │           | engine type | time series
-   │         │           | extract     | 2024.0
+   │         │           | extract     | 2025.0
    │         └── ts scan |             |
    │                     | ts-table    | ts_table2
    │                     | access mode | metaTable
    └── synchronizer      |             |
         └── render       |             |
              │           | engine type | time series
-             │           | extract     | 2024.0
+             │           | extract     | 2025.0
              └── ts scan |             |
                          | ts-table    | ts_table
                          | access mode | metaTable
@@ -1568,7 +1568,7 @@ INSERT 2
    └── sort                             |             |
         │                               | order       | +e2
         └── render                      |             |
-             │                          | extract     | 2024.0
+             │                          | extract     | 2025.0
              │                          | e2          | e2
              └── union                  |             |
                   ├── union             |             |
@@ -1594,7 +1594,7 @@ INSERT 2
                                              | distributed | true
                                              | vectorized  | false
   render                                     |             |
-   │                                         | extract     | 2024.0
+   │                                         | extract     | 2025.0
    └── limit                                 |             |
         │                                    | offset      | 1
         └── limit                            |             |
@@ -1625,7 +1625,7 @@ INSERT 2
                                         | distributed        | true
                                         | vectorized         | false
   render                                |                    |
-   │                                    | extract            | 2024.0
+   │                                    | extract            | 2025.0
    └── render                           |                    |
         │                               | e1                 | e1
         │                               | e2                 | e2
@@ -1656,7 +1656,7 @@ INSERT 2
    └── sort                             |                    |
         │                               | order              | +e2
         └── render                      |                    |
-             │                          | extract            | 2024.0
+             │                          | extract            | 2025.0
              │                          | e2                 | e2
              └── hash-join              |                    |
                   │                     | type               | semi
@@ -1684,7 +1684,7 @@ INSERT 2
    └── sort                                       |             |
         │                                         | order       | +e2
         └── render                                |             |
-             │                                    | extract     | 2024.0
+             │                                    | extract     | 2025.0
              │                                    | e2          | e2
              └── hash-join                        |             |
                   │                               | type        | semi
@@ -1716,7 +1716,7 @@ INSERT 2
    └── sort                                       |                    |
         │                                         | order              | +e2
         └── render                                |                    |
-             │                                    | extract            | 2024.0
+             │                                    | extract            | 2025.0
              │                                    | e2                 | e2
              └── distinct                         |                    |
                   │                               | distinct on        | e2
@@ -1744,7 +1744,7 @@ INSERT 2
                                                   | distributed        | true
                                                   | vectorized         | false
   render                                          |                    |
-   │                                              | extract            | 2024.0
+   │                                              | extract            | 2025.0
    └── limit                                      |                    |
         │                                         | offset             | 1
         └── limit                                 |                    |
@@ -1775,7 +1775,7 @@ INSERT 2
                                         | distributed        | true
                                         | vectorized         | false
   render                                |                    |
-   │                                    | extract            | 2024.0
+   │                                    | extract            | 2025.0
    └── render                           |                    |
         │                               | e1                 | e1
         │                               | e2                 | e2
@@ -1807,7 +1807,7 @@ INSERT 2
    │    └── sort                                            |                    |
    │         │                                              | order              | +e2
    │         └── render                                     |                    |
-   │              │                                         | extract            | 2024.0
+   │              │                                         | extract            | 2025.0
    │              │                                         | e2                 | e2
    │              └── distinct                              |                    |
    │                   │                                    | distinct on        | e2
@@ -1858,7 +1858,7 @@ INSERT 2
                                                             | vectorized         | false
   root                                                      |                    |
    ├── render                                               |                    |
-   │    │                                                   | extract            | 2024.0
+   │    │                                                   | extract            | 2025.0
    │    └── limit                                           |                    |
    │         │                                              | offset             | 1
    │         └── limit                                      |                    |
@@ -1914,7 +1914,7 @@ INSERT 2
    ├── synchronizer                |              |
    │    └── render                 |              |
    │         │                     | engine type  | time series
-   │         │                     | ?column?     | 2024.0 = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
+   │         │                     | ?column?     | 2025.0 = (SELECT e4 FROM test_ts.ts_table2 LIMIT 1)
    │         └── ts scan           |              |
    │                               | ts-table     | ts_table
    │                               | access mode  | metaTable
@@ -1942,7 +1942,7 @@ INSERT 2
    ├── synchronizer                |              |
    │    └── render                 |              |
    │         │                     | engine type  | time series
-   │         │                     | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2 WHERE e2 > 1000000 GROUP BY e4)
+   │         │                     | ?column?     | 2025.0 = ANY (SELECT e4 FROM test_ts.ts_table2 WHERE e2 > 1000000 GROUP BY e4)
    │         └── ts scan           |              |
    │                               | ts-table     | ts_table
    │                               | access mode  | metaTable
@@ -1970,7 +1970,7 @@ INSERT 2
    ├── synchronizer                          |              |
    │    └── render                           |              |
    │         │                               | engine type  | time series
-   │         │                               | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
+   │         │                               | ?column?     | 2025.0 = ANY (SELECT e4 FROM test_ts.ts_table2 ORDER BY e3 DESC LIMIT 10 OFFSET 1)
    │         └── ts scan                     |              |
    │                                         | ts-table     | ts_table
    │                                         | access mode  | metaTable
@@ -2000,7 +2000,7 @@ INSERT 2
                                         | vectorized   | false
   root                                  |              |
    ├── render                           |              |
-   │    │                               | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2)
+   │    │                               | ?column?     | 2025.0 = ANY (SELECT e4 FROM test_ts.ts_table2)
    │    └── limit                       |              |
    │         │                          | engine type  | time series
    │         │                          | offset       | 1
@@ -2029,7 +2029,7 @@ INSERT 2
                                         | vectorized   | false
   root                                  |              |
    ├── render                           |              |
-   │    │                               | ?column?     | 2024.0 = ANY (SELECT e4 FROM test_ts.ts_table2)
+   │    │                               | ?column?     | 2025.0 = ANY (SELECT e4 FROM test_ts.ts_table2)
    │    │                               | case         | CASE e2 WHEN 1000000 THEN 10 WHEN 2000000 THEN 20 END
    │    └── limit                       |              |
    │         │                          | engine type  | time series
@@ -2062,7 +2062,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | inner
@@ -2086,7 +2086,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | inner
@@ -2112,7 +2112,7 @@ INSERT 2
    └── sort                                  |             |
         │                                    | order       | +e2
         └── render                           |             |
-             │                               | extract     | 2024.0
+             │                               | extract     | 2025.0
              │                               | e2          | e2
              └── distinct                    |             |
                   │                          | distinct on | e2
@@ -2141,7 +2141,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | left outer
@@ -2165,7 +2165,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | inner
@@ -2191,7 +2191,7 @@ INSERT 2
    └── sort                                  |             |
         │                                    | order       | +e2
         └── render                           |             |
-             │                               | extract     | 2024.0
+             │                               | extract     | 2025.0
              │                               | e2          | e2
              └── distinct                    |             |
                   │                          | distinct on | e2
@@ -2220,7 +2220,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | left outer
@@ -2244,7 +2244,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | inner
@@ -2270,7 +2270,7 @@ INSERT 2
    └── sort                                  |             |
         │                                    | order       | +e2
         └── render                           |             |
-             │                               | extract     | 2024.0
+             │                               | extract     | 2025.0
              │                               | e2          | e2
              └── distinct                    |             |
                   │                          | distinct on | e2
@@ -2299,7 +2299,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | full outer
@@ -2323,7 +2323,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e2
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e2          | e2
              └── hash-join         |             |
                   │                | type        | inner
@@ -2349,7 +2349,7 @@ INSERT 2
    └── sort                                  |             |
         │                                    | order       | +e2
         └── render                           |             |
-             │                               | extract     | 2024.0
+             │                               | extract     | 2025.0
              │                               | e2          | e2
              └── distinct                    |             |
                   │                          | distinct on | e2
@@ -2374,7 +2374,7 @@ INSERT 2
                          | distributed | true
                          | vectorized  | false
   render                 |             |
-   │                     | extract     | 2024.0
+   │                     | extract     | 2025.0
    └── cross-join        |             |
         │                | type        | cross
         ├── synchronizer |             |
@@ -2396,7 +2396,7 @@ INSERT 2
    └── sort                        |             |
         │                          | order       | +e1
         └── render                 |             |
-             │                     | extract     | 2024.0
+             │                     | extract     | 2025.0
              │                     | e1          | e1
              └── cross-join        |             |
                   │                | type        | cross
@@ -2421,7 +2421,7 @@ INSERT 2
    └── sort                             |             |
         │                               | order       | +e1
         └── render                      |             |
-             │                          | extract     | 2024.0
+             │                          | extract     | 2025.0
              │                          | e1          | e1
              └── distinct               |             |
                   │                     | distinct on | e1, e1
@@ -2443,7 +2443,7 @@ INSERT 2
                                         | distributed | true
                                         | vectorized  | false
   render                                |             |
-   │                                    | extract     | 2024.0
+   │                                    | extract     | 2025.0
    └── limit                            |             |
         │                               | offset      | 1
         └── limit                       |             |
@@ -2467,7 +2467,7 @@ INSERT 2
                                         | distributed | true
                                         | vectorized  | false
   render                                |             |
-   │                                    | extract     | 2024.0
+   │                                    | extract     | 2025.0
    └── limit                            |             |
         │                               | offset      | 1
         └── limit                       |             |
@@ -2969,7 +2969,7 @@ INSERT 2
                               | distributed       | true
                               | vectorized        | false
   render                      |                   |
-   │                          | extract           | 2024.0
+   │                          | extract           | 2025.0
    └── limit                  |                   |
         │                     | count             | 1
         └── merge-join        |                   |
