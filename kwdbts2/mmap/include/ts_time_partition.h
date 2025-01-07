@@ -580,7 +580,7 @@ class TsTimePartition : public TSObject {
                               size_t start_in_payload, size_t num, kwdbts::DedupInfo& dedup_info);
 
   /**
-   * mergeToPayload merges duplicate row data into the target row.
+   * updatePayload merges duplicate row data into the target row.
    * Based on whether the column values are null or not, select and merge the corresponding latest non-null values
    * from duplicate rows or a database table, and update the bitmap of the target row.
    * The function first retrieves the timestamp of the target row and finds all rows with
@@ -592,11 +592,10 @@ class TsTimePartition : public TSObject {
    * if there is a change in the data type of the merged data, and if there is, it converts the data type accordingly.
    *
    * @param payload The result of the merge will be written here.
-   * @param merge_row The target line number to be merged
    * @param dedup_info Deduplication information, including the line numbers for deduplication, etc
    * @return Returning 0 indicates success, non 0 indicates failure
    */
-  int mergeToPayload(kwdbts::Payload* payload, size_t merge_row, kwdbts::DedupInfo& dedup_info);
+  int updatePayload(kwdbts::Payload* payload, kwdbts::DedupInfo& dedup_info);
 
   /**
    * waitBlockItemDataFilled is used to wait for the completion of writing all data for a specified

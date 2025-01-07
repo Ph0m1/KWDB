@@ -1974,94 +1974,96 @@ int TsTimePartition::PrepareDup(kwdbts::DedupRule dedup_rule, uint32_t entity_id
 
 const size_t PAYLOAD_VARCOLUMN_TUPLE_LEN = 8;
 
-int TsTimePartition::mergeToPayload(kwdbts::Payload* payload, size_t merge_row, kwdbts::DedupInfo& dedup_info) {
-  KTimestamp cur_ts = KTimestamp(payload->GetColumnAddr(merge_row, 0));
-  // Check the timestamp. If it is not present in the deduplication set, simply return.
-  if (dedup_info.payload_rows.find(cur_ts) == dedup_info.payload_rows.end()) {
-    // filtered by entity min and max ts.
+int TsTimePartition::updatePayload(kwdbts::Payload* payload, kwdbts::DedupInfo& dedup_info) {
+  if (payload->dedup_rule_ != DedupRule::MERGE) {
+    // no need merge.
     return 0;
   }
   auto schema_info = payload->GetSchemaInfo();
   auto payload_valid_cols = payload->GetValidCols();
-  const std::vector<size_t>& payload_dedup = dedup_info.payload_rows[cur_ts];
-  for (size_t column = 0; column < payload_valid_cols.size(); ++column) {
-    if (!payload->IsNull(column, merge_row)) {
-      // column value is not null, so no need merge from duplicate rows.
-      continue;
-    }
-    if (payload_dedup.size() > 1) {
-      // payload has duplicate rows of this ts.
-      for (int i = payload_dedup.size() - 1; i >= 0; i--) {
-        // find begin from the latest rows.
-        if (payload_dedup[i] >= merge_row || payload->IsNull(column, payload_dedup[i])) {
-          continue;
-        }
-        if (schema_info[column].type != DATATYPE::VARSTRING && schema_info[column].type != DATATYPE::VARBINARY) {
-          memcpy(payload->GetColumnAddr(merge_row, column),
-                 payload->GetColumnAddr(payload_dedup[i], column),
-              schema_info[column].size);
-        } else {
-          memcpy(payload->GetColumnAddr(merge_row, column),
-                 payload->GetColumnAddr(payload_dedup[i], column), PAYLOAD_VARCOLUMN_TUPLE_LEN);
-        }
-        // The merged column now contains values; the bitmap needs to be updated accordingly
-        setRowValid(payload->GetNullBitMapAddr(column), merge_row + 1);
-        break;
+  for (auto& kv : dedup_info.payload_rows) {
+    auto cur_ts = kv.first;
+    auto &payload_dedup = kv.second;
+    auto merge_row = payload_dedup.back();
+    for (size_t column = 0; column < payload_valid_cols.size(); ++column) {
+      if (!payload->IsNull(column, merge_row)) {
+        // column value is not null, so no need merge from duplicate rows.
+        continue;
       }
-    }
-    if (!payload->IsNull(column, merge_row)) {
-      continue;
-    }
-    // find from table entity, start from latest.
-    if (dedup_info.table_real_rows.find(cur_ts) != dedup_info.table_real_rows.end()) {
-      for (int i = dedup_info.table_real_rows[cur_ts].size() - 1; i >= 0; i--) {
-        // The actual row number of the stored data
-        MetricRowID dup_row = dedup_info.table_real_rows[cur_ts][i];
-        if (dup_row.block_id == 0) {
-          continue;
-        }
-        std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(dup_row.block_id);
-        if (segment_tbl == nullptr) {
-          LOG_ERROR("Segment [%s] is null", (db_path_ + segment_tbl_sub_path(dup_row.block_id)).c_str());
-          return -1;
-        }
-        if (segment_tbl->isNullValue(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column])) {
-          continue;
-        }
-        // Verify the column types for compatibility, and perform type conversion if they do not match
-        if (segment_tbl->getSchemaInfo()[column].type != schema_info[column].type
-            || segment_tbl->getSchemaInfo()[column].size != schema_info[column].size) {
-          MergeValueInfo merge_value;
-          merge_value.attr = segment_tbl->getSchemaInfo()[payload_valid_cols[column]];
-          if (merge_value.attr.type == VARSTRING || merge_value.attr.type == VARBINARY) {
-            merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
-          } else {
-            void* segment_merge_data = segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
-            CopyFixedData(static_cast<DATATYPE>(segment_tbl->getSchemaInfo()[payload_valid_cols[column]].type),
-                          static_cast<char*>(segment_merge_data), &merge_value.value);
+      if (payload_dedup.size() > 1) {
+        // payload has duplicate rows of this ts.
+        for (int i = payload_dedup.size() - 1; i >= 0; i--) {
+          // find begin from the latest rows.
+          if (payload_dedup[i] >= merge_row || payload->IsNull(column, payload_dedup[i])) {
+            continue;
           }
-          if (payload->tmp_col_values_4_dedup_merge_.find(column) == payload->tmp_col_values_4_dedup_merge_.end()) {
-            payload->tmp_col_values_4_dedup_merge_.insert({column, {}});
-          }
-          payload->tmp_col_values_4_dedup_merge_[column].insert({merge_row, merge_value});
-        } else {
           if (schema_info[column].type != DATATYPE::VARSTRING && schema_info[column].type != DATATYPE::VARBINARY) {
             memcpy(payload->GetColumnAddr(merge_row, column),
-                   segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]),
-              schema_info[column].size);
+                  payload->GetColumnAddr(payload_dedup[i], column),
+                schema_info[column].size);
           } else {
+            memcpy(payload->GetColumnAddr(merge_row, column),
+                  payload->GetColumnAddr(payload_dedup[i], column), PAYLOAD_VARCOLUMN_TUPLE_LEN);
+          }
+          // The merged column now contains values; the bitmap needs to be updated accordingly
+          setRowValid(payload->GetNullBitMapAddr(column), merge_row + 1);
+          break;
+        }
+      }
+      if (!payload->IsNull(column, merge_row)) {
+        continue;
+      }
+      // find from table entity, start from latest.
+      if (dedup_info.table_real_rows.find(cur_ts) != dedup_info.table_real_rows.end()) {
+        for (int i = dedup_info.table_real_rows[cur_ts].size() - 1; i >= 0; i--) {
+          // The actual row number of the stored data
+          MetricRowID dup_row = dedup_info.table_real_rows[cur_ts][i];
+          if (dup_row.block_id == 0) {
+            continue;
+          }
+          std::shared_ptr<MMapSegmentTable> segment_tbl = getSegmentTable(dup_row.block_id);
+          if (segment_tbl == nullptr) {
+            LOG_ERROR("Segment [%s] is null", (db_path_ + segment_tbl_sub_path(dup_row.block_id)).c_str());
+            return -1;
+          }
+          if (segment_tbl->isNullValue(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column])) {
+            continue;
+          }
+          // Verify the column types for compatibility, and perform type conversion if they do not match
+          if (segment_tbl->getSchemaInfo()[column].type != schema_info[column].type
+              || segment_tbl->getSchemaInfo()[column].size != schema_info[column].size) {
             MergeValueInfo merge_value;
             merge_value.attr = segment_tbl->getSchemaInfo()[payload_valid_cols[column]];
-            merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
+            if (merge_value.attr.type == VARSTRING || merge_value.attr.type == VARBINARY) {
+              merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
+            } else {
+              void* segment_merge_data = segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
+              CopyFixedData(static_cast<DATATYPE>(segment_tbl->getSchemaInfo()[payload_valid_cols[column]].type),
+                            static_cast<char*>(segment_merge_data), &merge_value.value);
+            }
             if (payload->tmp_col_values_4_dedup_merge_.find(column) == payload->tmp_col_values_4_dedup_merge_.end()) {
               payload->tmp_col_values_4_dedup_merge_.insert({column, {}});
             }
             payload->tmp_col_values_4_dedup_merge_[column].insert({merge_row, merge_value});
+          } else {
+            if (schema_info[column].type != DATATYPE::VARSTRING && schema_info[column].type != DATATYPE::VARBINARY) {
+              memcpy(payload->GetColumnAddr(merge_row, column),
+                    segment_tbl->columnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]),
+                schema_info[column].size);
+            } else {
+              MergeValueInfo merge_value;
+              merge_value.attr = segment_tbl->getSchemaInfo()[payload_valid_cols[column]];
+              merge_value.value = segment_tbl->varColumnAddr(dedup_info.table_real_rows[cur_ts][i], payload_valid_cols[column]);
+              if (payload->tmp_col_values_4_dedup_merge_.find(column) == payload->tmp_col_values_4_dedup_merge_.end()) {
+                payload->tmp_col_values_4_dedup_merge_.insert({column, {}});
+              }
+              payload->tmp_col_values_4_dedup_merge_[column].insert({merge_row, merge_value});
+            }
           }
+          // The merged column now contains values; the bitmap needs to be updated accordingly
+          setRowValid(payload->GetNullBitMapAddr(column), merge_row + 1);
+          break;
         }
-        // The merged column now contains values; the bitmap needs to be updated accordingly
-        setRowValid(payload->GetNullBitMapAddr(column), merge_row + 1);
-        break;
       }
     }
   }
@@ -2102,18 +2104,13 @@ int TsTimePartition::updatePayloadUsingDedup(uint32_t entity_id, const BlockSpan
       return err_code;
     }
   }
-
-  if (payload->dedup_rule_ == DedupRule::MERGE) {
-    // If the deduplication rule is MERGE and the current payload column is empty,
-    // traverse the duplicate data to find the latest duplicate, and update the payload.
-    // When updating the payload, it is necessary to check for any type changes in the merge data and perform type conversion.
-    // update payload.
-    for (size_t i = start_in_payload; i < start_in_payload + num; i++) {
-      err_code = mergeToPayload(payload, i, dedup_info);
-      if (err_code < 0) {
-        return err_code;
-      }
-    }
+  // If the deduplication rule is MERGE and the current payload column is empty,
+  // traverse the duplicate data to find the latest duplicate, and update the payload.
+  // When updating the payload, it is necessary to check for any type changes in the merge data and perform type conversion.
+  // update payload.
+  err_code = updatePayload(payload, dedup_info);
+  if (err_code < 0) {
+    return err_code;
   }
   return err_code;
 }
@@ -2198,7 +2195,7 @@ void TsTimePartition::waitBlockItemDataFilled(uint entity_id, BlockItem* block_i
 
 int TsTimePartition::GetDedupRows(uint entity_id, const BlockSpan& first_span, kwdbts::DedupInfo& dedup_info, bool has_lsn) {
   int err_code = 0;
-  timestamp64 ts_min = INT64_MAX, ts_max = 0;
+  timestamp64 ts_min = INT64_MAX, ts_max = INT64_MIN;
   // filter blockItem with payload min and max ts.
   for (auto kv : dedup_info.payload_rows) {
     if (kv.first > ts_max) {
@@ -2208,24 +2205,26 @@ int TsTimePartition::GetDedupRows(uint entity_id, const BlockSpan& first_span, k
       ts_min = kv.first;
     }
   }
-
   const KwTsSpan& payload_span = {ts_min, ts_max};
-
   std::deque<BlockItem*> block_items;
   // Get all the block items belonging to the specified entity_id.
-  meta_manager_.GetAllBlockItems(entity_id, block_items);
+  meta_manager_.GetAllBlockItems(entity_id, block_items, true);
 
-  bool find_newest_block = false;
+  auto has_disorder_row = getEntityItem(entity_id)->is_disordered;
 
   // Traverse each block item to determine if there are any duplicate records that need to be removed.
   for (size_t i = 0; i < block_items.size(); i++) {
     BlockItem* block_item = block_items[i];
+    if (block_item->block_id > first_span.block_item->block_id) {
+      continue;;
+    }
     int read_count = block_item->publish_row_count;
-
     // If the current block item matches the specified first span, update the number of records read.
     if (block_item == first_span.block_item) {
-      find_newest_block = true;
       read_count = first_span.start_row;
+    }
+    if (read_count == 0) {
+      continue;
     }
     // Wait for the block item to be filled completely.
     waitBlockItemDataFilled(entity_id, block_item, read_count, has_lsn);
@@ -2239,15 +2238,17 @@ int TsTimePartition::GetDedupRows(uint entity_id, const BlockSpan& first_span, k
     TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), block_min_ts, block_max_ts);
     const KwTsSpan& ts_span = {block_min_ts, block_max_ts};
     if (ts_span.begin > payload_span.end || ts_span.end < payload_span.begin) {
-    // no match rows. so no need do anything.
+      // no match rows. so no need do anything.
+      if (ts_span.end < payload_span.begin && !has_disorder_row) {
+        // if entity all row ts is ordered. no need scan before rows.
+        return err_code;
+      }
     } else {
       // If there are records that can be read from the block item, obtain the deduplication information for these records.
-      if (read_count > 0) {
-        err_code = GetDedupRowsInBlk(entity_id, block_item, read_count, dedup_info, has_lsn);
-      }
+      err_code = GetDedupRowsInBlk(entity_id, block_item, read_count, dedup_info, has_lsn);
     }
     // Encounter an error or find the latest block item, then return the operational results.
-    if (err_code < 0 || find_newest_block) {
+    if (err_code < 0) {
       return err_code;
     }
   }
