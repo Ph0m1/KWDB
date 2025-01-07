@@ -1319,7 +1319,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
             void* new_sum_base;
             void* sum_base = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
             bool is_new = ChangeSumType(DATATYPE(attrs_[col_idx].type), sum_base, &new_sum_base);
-            b = CreateAggBatch(new_sum_base, nullptr);
+            b = CreateAggBatch(new_sum_base, segment_tbl);
             b->is_new = is_new;
           } else if (scan_agg_types_[i] == Sumfunctype::COUNT) {
             void* agg_res = segment_tbl->columnAggAddr(first_real_row.block_id, col_idx, scan_agg_types_[i]);
