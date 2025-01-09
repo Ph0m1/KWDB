@@ -290,12 +290,13 @@ TSStatus TSCompressTsTable(TSEngine* engine, TSTableID table_id, timestamp64 ts)
     return kTsSuccess;
   }
   ErrorInfo err_info;
-  s = table->Compress(ctx_p, ts, err_info);
+  uint32_t compressed_num = 0;
+  s = table->Compress(ctx_p, ts, compressed_num, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("CompressTsTable Error!");
   }
-  LOG_INFO("compress table[%lu] succeeded", table_id);
+  LOG_INFO("compress table[%lu] end, the number of compressed segment is %u", table_id, compressed_num);
   return kTsSuccess;
 }
 
@@ -316,12 +317,13 @@ TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID ta
     return kTsSuccess;
   }
   ErrorInfo err_info;
-  s = table->Compress(ctx_p, INT64_MAX, err_info);
+  uint32_t compressed_num = 0;
+  s = table->Compress(ctx_p, INT64_MAX, compressed_num, err_info);
   if (s != KStatus::SUCCESS) {
     LOG_ERROR("compress table[%lu] failed", table_id);
     return ToTsStatus("compress error, reason: " + err_info.errmsg);
   }
-  LOG_INFO("compress table[%lu] succeeded", table_id);
+  LOG_INFO("compress table[%lu] end, the number of compressed segment is %u", table_id, compressed_num);
   return kTsSuccess;
 }
 

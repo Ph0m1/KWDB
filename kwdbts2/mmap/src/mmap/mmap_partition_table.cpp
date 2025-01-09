@@ -1130,7 +1130,7 @@ std::vector<std::shared_ptr<MMapSegmentTable>> TsTimePartition::GetAllSegmentsFo
   return segment_tables;
 }
 
-void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
+void TsTimePartition::ImmediateCompress(uint32_t& compressed_num, ErrorInfo& err_info){
   auto segment_tables = GetAllSegmentsForCompressing();
   int num_of_active_segments = 0;
   for (const auto& segment : segment_tables) {
@@ -1168,6 +1168,7 @@ void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
       LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->GetPath().c_str());
       return;
     }
+    ++compressed_num;
     segment_tbl->setSqfsIsExists();
 
     // Mount the compressed segment
@@ -1181,7 +1182,7 @@ void TsTimePartition::ImmediateCompress(ErrorInfo& err_info){
   }
 }
 
-void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_info) {
+void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, uint32_t& compressed_num, ErrorInfo& err_info) {
   auto segment_tables = GetAllSegmentsForCompressing();
   // Traverse the segments that need to be processed
   // There are three types of processing for segments
@@ -1242,6 +1243,7 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, ErrorInfo& err_
           LOG_ERROR("MMapSegmentTable[%s] compress failed", segment_tbl->GetPath().c_str());
           return;
         }
+        ++compressed_num;
         segment_tbl->setSqfsIsExists();
         // Check if it is mounted. If it is not, try cleaning up the original data directory before compression.
         // It is necessary to ensure that the original data directory is not used by other threads before cleaning up.
@@ -1285,14 +1287,14 @@ void TsTimePartition::ResetCompVacuumStatus() {
   comp_vacuum_status_.store(CompVacuumStatus::NONE);
 }
 
-void TsTimePartition::Compress(const timestamp64& compress_ts, ErrorInfo& err_info){
+void TsTimePartition::Compress(const timestamp64& compress_ts, uint32_t& compressed_num, ErrorInfo& err_info){
   if (!TrySetCompVacuumStatus(CompVacuumStatus::COMPRESSING)) {
     return;
   }
   if (compress_ts == INT64_MAX){
-    ImmediateCompress(err_info);
+    ImmediateCompress(compressed_num, err_info);
   } else {
-    ScheduledCompress(compress_ts, err_info);
+    ScheduledCompress(compress_ts, compressed_num, err_info);
   }
   ResetCompVacuumStatus();
 }

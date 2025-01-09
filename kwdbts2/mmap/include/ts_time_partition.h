@@ -68,9 +68,9 @@ class TsTimePartition : public TSObject {
   // collect all segments with status ActiveSegment and ImmuSegment
   std::vector<std::shared_ptr<MMapSegmentTable>> GetAllSegmentsForCompressing();
 
-  void ImmediateCompress(ErrorInfo& err_info);
+  void ImmediateCompress(uint32_t& compressed_num, ErrorInfo& err_info);
 
-  void ScheduledCompress(timestamp64 ts, ErrorInfo& err_info);
+  void ScheduledCompress(timestamp64 ts, uint32_t& compressed_num, ErrorInfo& err_info);
 
   bool TrySetCompVacuumStatus(CompVacuumStatus desired);
 
@@ -366,7 +366,7 @@ class TsTimePartition : public TSObject {
    *
    * @return void
    */
-  void Compress(const timestamp64& compress_ts, ErrorInfo& err_info);
+  void Compress(const timestamp64& compress_ts, uint32_t& compressed_num, ErrorInfo& err_info);
 
   int Sync(kwdbts::TS_LSN check_lsn, ErrorInfo& err_info);
 

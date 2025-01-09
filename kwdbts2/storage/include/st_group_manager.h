@@ -136,7 +136,7 @@ class SubEntityGroupManager : public TSObject {
    *
    * @return void
    */
-  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info);
+  void Compress(kwdbContext_p ctx, const timestamp64& compress_ts, uint32_t& compressed_num, ErrorInfo& err_info);
 
   void Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info);
 

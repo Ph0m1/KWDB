@@ -288,7 +288,8 @@ int SubEntityGroupManager::DropAll(bool is_force, ErrorInfo& err_info) {
   return 0;
 }
 
-void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts, ErrorInfo& err_info) {
+void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compress_ts,
+                                     uint32_t& compressed_num, ErrorInfo& err_info) {
   std::unordered_map<TsTimePartition*, TsSubEntityGroup*> compress_tables;
   // Gets all the compressible partitions in the [INT64_MIN, ts] time range under subgroup
   rdLock();
@@ -313,22 +314,17 @@ void SubEntityGroupManager::Compress(kwdbContext_p ctx, const timestamp64& compr
     }
     TsTimePartition* p_table = it->first;
     if (p_table != nullptr && !compress_error) {
-      p_table->Compress(compress_ts, err_info);
+      p_table->Compress(compress_ts, compressed_num, err_info);
       if (err_info.errcode < 0) {
         LOG_ERROR("MMapPartitionTable[%s] compress error : %s", p_table->path().c_str(), err_info.errmsg.c_str());
         compress_error = true;
       }
     }
     ReleaseTable(p_table);
+    // Call partition table lru cache to eliminate after compression
+    it->second->PartitionCacheEvict();
     ++it;
   }
-
-  // Call partition table lru cache to eliminate after compression
-  rdLock();
-  for (auto & subgroup : subgroups_) {
-    subgroup.second->PartitionCacheEvict();
-  }
-  unLock();
 }
 
 void SubEntityGroupManager::Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo &err_info) {
@@ -368,15 +364,10 @@ void SubEntityGroupManager::Vacuum(kwdbContext_p ctx, uint32_t ts_version, Error
       }
     }
     ReleaseTable(p_table);
+    // Call partition table lru cache to eliminate after compression
+    it->second->PartitionCacheEvict();
     ++it;
   }
-
-  // Call partition table lru cache to eliminate after compression
-  rdLock();
-  for (auto & subgroup : subgroups_) {
-    subgroup.second->PartitionCacheEvict();
-  }
-  unLock();
 }
 
 int SubEntityGroupManager::removeDir(string path) {

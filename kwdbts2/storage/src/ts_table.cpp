@@ -686,10 +686,10 @@ KStatus TsEntityGroup::Drop(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info) {
+KStatus TsEntityGroup::Compress(kwdbContext_p ctx, const KTimestamp& ts, uint32_t& compressed_num, ErrorInfo& err_info) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
-  ebt_manager_->Compress(ctx, ts, err_info);
+  ebt_manager_->Compress(ctx, ts, compressed_num, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("TsEntityGroup::Compress error : %s", err_info.errmsg.c_str());
     return FAIL;
@@ -1643,7 +1643,8 @@ KStatus TsTable::DropAll(kwdbContext_p ctx, bool is_force) {
   return KStatus::SUCCESS;
 }
 
-KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& err_info) {
+KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, uint32_t& compressed_num, ErrorInfo& err_info) {
+  compressed_num = 0;
   if (entity_bt_manager_ == nullptr) {
     LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
     err_info.setError(KWENOOBJ, "table not created");
@@ -1687,7 +1688,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, ErrorInfo& er
     if (!entity_group) {
       continue;
     }
-    s = entity_group->Compress(ctx, ts, err_info);
+    s = entity_group->Compress(ctx, ts, compressed_num, err_info);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("TsTableRange compress failed : %s", tbl_sub_path_.c_str());
       break;

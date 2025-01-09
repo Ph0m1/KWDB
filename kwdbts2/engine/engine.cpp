@@ -209,7 +209,8 @@ KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_
   }
 
   ErrorInfo err_info;
-  s = table->Compress(ctx, ts, err_info);
+  uint32_t compressed_num = 0;
+  s = table->Compress(ctx, ts, compressed_num, err_info);
   if (s == KStatus::FAIL) {
     LOG_ERROR("table[%lu] compress failed", table_id);
   }
