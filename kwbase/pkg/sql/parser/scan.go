@@ -79,6 +79,29 @@ type Shortinsert struct {
 	PrepareMode        bool
 }
 
+var intervalUnit = map[string]struct{}{
+	"microsecond": {},
+	"us":          {},
+	"nanosecond":  {},
+	"ns":          {},
+	"millisecond": {},
+	"ms":          {},
+	"second":      {},
+	"s":           {},
+	"minute":      {},
+	"m":           {},
+	"hour":        {},
+	"h":           {},
+	"day":         {},
+	"d":           {},
+	"week":        {},
+	"w":           {},
+	"month":       {},
+	"mon":         {},
+	"year":        {},
+	"y":           {},
+}
+
 func (s *Shortinsert) init() {
 	s.isTsTable = false
 	s.isInsert = false
@@ -753,6 +776,18 @@ func (s *scanner) scanNumber(lval *sqlSymType, ch int) {
 		s.shortinsert.InsertValues = append(s.shortinsert.InsertValues, s.in[start:s.pos])
 		s.shortinsert.ValuesType = append(s.shortinsert.ValuesType, NUMTYPE)
 		return
+	}
+	var tempLval sqlSymType
+	// Disallow identifier after numerical constants e.g. "124foo".
+	if lex.IsIdentStart(s.peek()) {
+		s.scan(&tempLval)
+		_, exists := intervalUnit[strings.ToLower(tempLval.str)]
+		s.pos = int(tempLval.pos)
+		if !exists {
+			lval.id = ERROR
+			lval.str = fmt.Sprintf("trailing junk after numeric literal at or near %q", s.in[start:s.pos+1])
+			return
+		}
 	}
 
 	lval.str = s.in[start:s.pos]
