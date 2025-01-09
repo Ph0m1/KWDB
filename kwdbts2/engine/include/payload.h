@@ -55,10 +55,10 @@ class Payload {
     TAG_ONLY = 2,
   };
   /*  header part
-  ______________________________________________________________________________________________________________
-  |    16    |       2       |         4        |   4  |    8    |       4        |   4    |    1    |    1    |
-  |----------|---------------|------------------|------|---------|----------------|--------|---------|---------|
-  |  txnID   | range groupID |  payloadVersion  | dbID |  tbID   |    TSVersion   | rowNum | rowType | withWAL |
+  ____________________________________________________________________________________________________
+  |    16    |       2       |         4        |   4  |    8    |       4        |   4    |    1    |
+  |----------|---------------|------------------|------|---------|----------------|--------|---------|
+  |  txnID   | range groupID |  payloadVersion  | dbID |  tbID   |    TSVersion   | rowNum | rowType |
   */
   const static uint8_t txn_id_offset_ = 0;  // NOLINT
   const static uint8_t txn_id_size_ = 16;  // NOLINT
@@ -84,10 +84,7 @@ class Payload {
   const static uint8_t row_type_offset_ = 42;  // NOLINT
   const static uint8_t row_type_size_ = 1;  // NOLINT
 
-  const static uint8_t with_wal_offset_ = 43;  // NOLINT
-  const static uint8_t with_wal_size = 1;  // NOLINT
-
-  const static int header_size_ = with_wal_offset_ + with_wal_size;  // NOLINT
+  const static int header_size_ = row_type_offset_ + row_type_size_;  // NOLINT
 
   // TODO(jiadx): schema primary\tag\schema
   // data row first column is timestamp type
@@ -306,7 +303,6 @@ class Payload {
   }
 
   inline uint8_t GetFlag() { return flag_; }
-  inline uint8_t WithWAL() {return with_wal_; }
 
   inline bool HasMergeData(size_t col_idx) {
     return dedup_rule_ == DedupRule::MERGE && tmp_col_values_4_dedup_merge_.find(col_idx) !=
@@ -345,7 +341,6 @@ class Payload {
   int32_t data_offset_;
   int32_t tag_len_;
   uint8_t flag_;  // 0:data+tag_val 1: primary_tag + data 2: primary_tag + tag
-  uint8_t with_wal_;  // 0:put data without wal; 1:put data with wal
   // data offset
   int32_t data_len_;
   int32_t bitmap_len_;

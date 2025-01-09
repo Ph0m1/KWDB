@@ -393,7 +393,6 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_le
   } else {
     KUint32(value + Payload::ts_version_offset_) = meta->ts_table().ts_version();
   }
-  KUint8(value + Payload::with_wal_offset_) = 1;
   // set primary_len_len
   KInt16(value + g_header_size) = primary_tag_len;
   // set tag_len_len

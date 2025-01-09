@@ -181,7 +181,6 @@ func makeImportReaderSpecs(
 	format roachpb.IOFileFormat,
 	nodes []roachpb.NodeID,
 	walltime int64,
-	writeWAL bool,
 ) []*execinfrapb.ReadImportDataSpec {
 	// For each input file, assign it to a node.
 	inputSpecs := make([]*execinfrapb.ReadImportDataSpec, 0, len(nodes))
@@ -203,7 +202,6 @@ func makeImportReaderSpecs(
 				Uri:               make(map[int32]string),
 				ResumePos:         make(map[int32]int64),
 				OptimizedDispatch: optimizedDispatch,
-				WriteWAL:          writeWAL,
 			}
 			inputSpecs = append(inputSpecs, spec)
 		}
@@ -260,7 +258,7 @@ func DistIngest(
 	if err != nil {
 		return roachpb.BulkOpSummary{}, err
 	}
-	inputSpecs := makeImportReaderSpecs(job, table, from, details.Format, nodes, details.Walltime, details.WriteWAL)
+	inputSpecs := makeImportReaderSpecs(job, table, from, details.Format, nodes, details.Walltime)
 
 	var p PhysicalPlan
 	// Setup a one-stage plan with one proc per input spec.

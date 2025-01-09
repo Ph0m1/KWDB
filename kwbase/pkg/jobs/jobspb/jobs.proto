@@ -252,7 +252,6 @@ message ImportDetails {
   bool ts_dispatch = 14;
   bool with_comment = 15;
   string database_comment = 16;
-  bool writeWAL = 17;
 }
 
 message ImportProgress {

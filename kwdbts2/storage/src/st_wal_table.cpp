@@ -264,7 +264,7 @@ KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice payload, TS_LSN 
   }
 
   TS_LSN entry_lsn = 0;
-  if (write_wal && pd.WithWAL() == 1) {
+  if (write_wal) {
     // lock current lsn: Lock the current LSN until the log is written to the cache
     wal_manager_->Lock();
     TS_LSN current_lsn = wal_manager_->FetchCurrentLSN();

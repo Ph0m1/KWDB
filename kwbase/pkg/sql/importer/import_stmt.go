@@ -64,7 +64,6 @@ const (
 	csvOptionBatchRows  = "batch_rows"
 	csvOptionAutoShrink = "auto_shrink"
 	csvOptionCharset    = "charset"
-	optionWriteWAL      = "writewal"
 )
 
 var importOptionExpectValues = map[string]sql.KVStringOptValidate{
@@ -80,7 +79,6 @@ var importOptionExpectValues = map[string]sql.KVStringOptValidate{
 	csvOptionBatchRows:  sql.KVStringOptRequireValue,
 	csvOptionAutoShrink: sql.KVStringOptRequireNoValue,
 	csvOptionCharset:    sql.KVStringOptRequireValue,
-	optionWriteWAL:      sql.KVStringOptRequireNoValue,
 }
 
 // importHeader is the header for RESTORE stmt results.
@@ -136,7 +134,6 @@ func importPlanHook(
 		}
 	}
 	_, hasComment := opts[optionComment]
-	_, writeWAL := opts[optionWriteWAL]
 
 	fn := func(ctx context.Context, _ []sql.PlanNode, resultsCh chan<- tree.Datums) error {
 		// TODO(dan): Move this span into sql.
@@ -284,7 +281,6 @@ func importPlanHook(
 			OnlyMeta:         importStmt.OnlyMeta,
 			WithComment:      hasComment,
 			DatabaseComment:  databaseComment,
-			WriteWAL:         writeWAL,
 		}
 		walltime := p.ExecCfg().Clock.Now().WallTime
 		// Prepare the protected timestamp record.

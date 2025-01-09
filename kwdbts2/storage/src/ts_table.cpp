@@ -9,7 +9,6 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
-#include <sys/mman.h>
 #include <dirent.h>
 #include <iostream>
 #if defined(__GNUC__) && (__GNUC__ < 8)

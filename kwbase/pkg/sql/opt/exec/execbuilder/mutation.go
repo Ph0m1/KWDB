@@ -415,12 +415,8 @@ const (
 	RowTypeOffset = 42
 	// RowTypeSize length of row_type in the payload header
 	RowTypeSize = 1
-	// WriteWALOffset offset of with_wal in the payload header
-	WriteWALOffset = 43
-	// WriteWALSize length of with_wal in the paylaod header
-	WriteWALSize = 1
 	// HeadSize is the payload fixed header length of insert ts table
-	HeadSize = WriteWALOffset + WriteWALSize
+	HeadSize = RowTypeOffset + RowTypeSize
 	// PTagLenSize length of primary tag
 	PTagLenSize = 2
 	// AllTagLenSize length of ordinary tag
@@ -446,8 +442,6 @@ type PayloadArgs struct {
 	PTagNum, AllTagNum, DataColNum int
 	// RowType identifies the type that the write column contains:
 	RowType string
-	// WriteWAL represents whether write WAL logs while writng payload.
-	WriteWAL bool
 	// PrimaryTagSize represents the fixed length of primary tag column.
 	PrimaryTagSize int
 	// AllTagSize represents the fixed length of all tag column.
@@ -480,7 +474,6 @@ func (p PayloadArgs) DeepCopy() PayloadArgs {
 		PreAllocColSize: p.PreAllocColSize,
 		PayloadSize:     p.PayloadSize,
 		RowType:         p.RowType,
-		WriteWAL:        p.WriteWAL,
 	}
 }
 
@@ -509,7 +502,6 @@ type PayloadHeader struct {
 	TSVersion      uint32
 	RowNum         uint32
 	RowType        string
-	WriteWAL       bool
 
 	groupIDOffset int // offset of groupID start
 
@@ -566,16 +558,15 @@ func (ts *TsPayload) SetHeader(header PayloadHeader) {
 	ts.header.TBID = header.TBID
 	ts.header.TSVersion = header.TSVersion
 	ts.header.RowNum = header.RowNum
-	ts.header.WriteWAL = header.WriteWAL
 }
 
 // fillHeader fills the header of TsPayload with the obtained parameters.
 func (ts *TsPayload) fillHeader() {
 	/*header part
-	  ________________________________________________________________________________________________________
-	  |    16    |    2    |         4        |   4  |    8    |       4        |   4    |    1    |	1	 |
-	  |----------|---------|------------------|------|---------|----------------|--------|---------|---------|
-	  |  txnID   | groupID |  payloadVersion  | dbID |  tbID   |    TSVersion   | rowNum | rowType |WriteWAL |
+	  ______________________________________________________________________________________________
+	  |    16    |    2    |         4        |   4  |    8    |       4        |   4    |    1    |
+	  |----------|---------|------------------|------|---------|----------------|--------|---------|
+	  |  txnID   | groupID |  payloadVersion  | dbID |  tbID   |    TSVersion   | rowNum | rowType |
 	*/
 	ts.header.offset = TxnIDOffset
 	copy(ts.payload[ts.header.offset:], ts.header.TxnID.GetBytes())
@@ -603,14 +594,6 @@ func (ts *TsPayload) fillHeader() {
 		ts.payload[ts.header.offset] = RowType[OnlyTag]
 	default:
 		ts.payload[ts.header.offset] = RowType[BothTagAndData]
-	}
-	ts.header.offset++
-
-	//use byte to represent bool
-	if ts.header.WriteWAL {
-		ts.payload[ts.header.offset] = byte(1)
-	} else {
-		ts.payload[ts.header.offset] = byte(0)
 	}
 	ts.header.offset++
 
@@ -1072,7 +1055,6 @@ func (ts *TsPayload) BuildRowBytesForTsImport(
 			pArgs,
 			dbID,
 			tableID,
-			ts.header.WriteWAL,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -1157,7 +1139,6 @@ func BuildPrePayloadForTsImport(
 	pArgs PayloadArgs,
 	dbID uint32,
 	tableID uint32,
-	writeWAL bool,
 ) ([]byte, []byte, error) {
 	rowNum := len(primaryTagRowIdx)
 	tsPayload := NewTsPayload()
@@ -1169,7 +1150,6 @@ func BuildPrePayloadForTsImport(
 		TBID:           uint64(tableID),
 		TSVersion:      pArgs.TSVersion,
 		RowNum:         uint32(rowNum),
-		WriteWAL:       writeWAL,
 	})
 	groupDatums := make([]tree.Datums, rowNum)
 	for i := range groupDatums {
@@ -1263,7 +1243,6 @@ func BuildPayloadForTsInsert(
 		TBID:           uint64(tableID),
 		TSVersion:      pArgs.TSVersion,
 		RowNum:         uint32(rowNum),
-		WriteWAL:       true,
 	})
 	groupDatums := make([]tree.Datums, rowNum)
 	for i := range groupDatums {
@@ -1564,10 +1543,10 @@ func BuildPreparePayloadForTsInsert(
 	var offset int
 	// encode payload head
 	/*header part
-	________________________________________________________________________________________________________
-	|    16    |    2    |        4        |   4  |      8       |   4       |   4    |    1    |    1     |
-	|----------|---------|-----------------|------|--------------|-----------|--------|---------|----------|
-	|  txnID   | groupID | payload version | dbID |     tbID     | tsVersion | rowNum | rowType | writeWAL |
+	_____________________________________________________________________________________________
+	|    16    |    2    |        4        |   4  |      8       |   4       |   4    |    1    |
+	|----------|---------|-----------------|------|--------------|-----------|--------|---------|
+	|  txnID   | groupID | payload version | dbID |     tbID     | tsVersion | rowNum | rowType |
 	*/
 	copy(payload[offset:], txn.ID().GetBytes())
 	offset += TxnIDSize
@@ -1608,13 +1587,6 @@ func BuildPreparePayloadForTsInsert(
 		default:
 			payload[offset] = RowType[BothTagAndData]
 		}
-	}
-	offset++
-
-	if pArgs.WriteWAL {
-		payload[offset] = byte(1)
-	} else {
-		payload[offset] = byte(0)
 	}
 	offset++
 
