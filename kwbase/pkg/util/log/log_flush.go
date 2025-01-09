@@ -30,8 +30,17 @@ import (
 	"io"
 	"time"
 
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/sysutil"
+)
+
+var (
+	// LogSyncEnable controls whether the log is synchronized or not.
+	LogSyncEnable = settings.RegisterPublicBoolSetting(
+		"log.sync.enabled",
+		"control whether the log is synchronized or not",
+		true)
 )
 
 // flushSyncWriter is the interface satisfied by logging destinations.
@@ -166,17 +175,28 @@ func (l *loggerT) flushAndSync(doSync bool) {
 		return
 	}
 
+	logSync := true
+	if sv := settings.TODO(); sv != nil {
+		logSync = LogSyncEnable.Get(sv)
+	}
+
 	// If we can't sync within this duration, exit the process.
 	t := time.AfterFunc(maxSyncDuration, func() {
 		// NB: the disk-stall-detected roachtest matches on this message.
-		Shout(context.Background(), Severity_FATAL, fmt.Sprintf(
-			"disk stall detected: unable to sync log files within %s", maxSyncDuration,
-		))
+		if logSync {
+			Shout(context.Background(), Severity_FATAL, fmt.Sprintf(
+				"disk stall detected: unable to sync log files within %s", maxSyncDuration,
+			))
+		} else {
+			Shout(context.Background(), Severity_WARNING, fmt.Sprintf(
+				"disk stall detected: unable to sync log files within %s", maxSyncDuration,
+			))
+		}
 	})
 	defer t.Stop()
 
 	_ = l.mu.file.Flush() // ignore error
-	if doSync {
+	if doSync && logSync {
 		_ = l.mu.file.Sync() // ignore error
 	}
 }

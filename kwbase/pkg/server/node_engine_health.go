@@ -74,13 +74,14 @@ func guaranteedExitFatal(ctx context.Context, msg string, args ...interface{}) {
 func (n *Node) assertEngineHealth(
 	ctx context.Context, engines []storage.Engine, maxDuration time.Duration,
 ) {
+	logSync := log.LogSyncEnable.Get(&n.storeCfg.Settings.SV)
 	for _, eng := range engines {
 		func() {
 			t := time.AfterFunc(maxDuration, func() {
 				n.metrics.DiskStalls.Inc(1)
 				stats := "\n" + eng.GetCompactionStats()
 				logger := log.Warningf
-				if maxSyncDurationFatalOnExceeded {
+				if maxSyncDurationFatalOnExceeded && logSync {
 					logger = guaranteedExitFatal
 				}
 				// NB: the disk-stall-detected roachtest matches on this message.
@@ -90,7 +91,11 @@ func (n *Node) assertEngineHealth(
 			})
 			defer t.Stop()
 			if err := storage.WriteSyncNoop(ctx, eng); err != nil {
-				log.Fatal(ctx, err)
+				if logSync {
+					log.Fatal(ctx, err)
+				} else {
+					log.Warning(ctx, err)
+				}
 			}
 		}()
 	}
