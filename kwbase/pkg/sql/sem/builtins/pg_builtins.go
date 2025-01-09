@@ -841,7 +841,7 @@ var pgBuiltins = map[string]builtinDefinition{
 		},
 	),
 
-	"col_description": makeBuiltin(defProps(),
+	"col_description": makeBuiltin(tree.FunctionProperties{DistsqlBlacklist: true},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"table_oid", types.Oid}, {"column_number", types.Int}},
 			ReturnType: tree.FixedReturnType(types.String),
