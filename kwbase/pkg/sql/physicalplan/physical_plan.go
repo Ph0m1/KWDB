@@ -2500,16 +2500,19 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 		scanPost.Renders = make([]string, 0)
 
 		for i, agg := range aggSpecs.Aggregations {
-			if agg.Func == execinfrapb.AggregatorSpec_AVG {
+			switch agg.Func {
+			case execinfrapb.AggregatorSpec_AVG:
 				varIdxs := make([]int, 2)
 				v, ok := sumMap[agg.ColIdx[0]]
 				if !ok {
-					return pgerror.New(pgcode.Internal, "statistic table could not find sum col")
+					return pgerror.New(pgcode.Internal, fmt.Sprintf("statistic table could not find sum col %d",
+						agg.ColIdx[0]))
 				}
 				varIdxs[0] = v
 				v1, ok1 := countMap[agg.ColIdx[0]]
 				if !ok1 {
-					return pgerror.New(pgcode.Internal, "statistic table could not find count col")
+					return pgerror.New(pgcode.Internal, fmt.Sprintf("statistic table could not find count col %d",
+						agg.ColIdx[0]))
 				}
 				varIdxs[1] = v1
 
@@ -2520,7 +2523,19 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 					return err2
 				}
 				scanPost.Renders = append(scanPost.Renders, render.String())
-			} else {
+			case execinfrapb.AggregatorSpec_SUM:
+				v, ok := sumMap[agg.ColIdx[0]]
+				if !ok {
+					v = i
+				}
+				scanPost.Renders = append(scanPost.Renders, fmt.Sprintf("@%d", v+1))
+			case execinfrapb.AggregatorSpec_COUNT:
+				v, ok := countMap[agg.ColIdx[0]]
+				if !ok {
+					v = i
+				}
+				scanPost.Renders = append(scanPost.Renders, fmt.Sprintf("@%d", v+1))
+			default:
 				scanPost.Renders = append(scanPost.Renders, fmt.Sprintf("@%d", i+1))
 			}
 		}
