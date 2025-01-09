@@ -462,6 +462,7 @@ func (ex *connExecutor) execPreparedirectBind(
 				return err
 			}
 			di.RowNum, di.ColNum = len(bindCmd.Args), len(di.IDMap)
+			di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
 			ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
 			// Calculate rowTimestamps and save the value of the timestamp column
 			inputValues, rowTimestamps, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, ps.PrepareInsertDirect.Dit.ColsDesc, di)
