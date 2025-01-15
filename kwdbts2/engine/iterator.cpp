@@ -92,7 +92,7 @@ TsIterator::~TsIterator() {
 }
 
 void TsIterator::fetchBlockItems(k_uint32 entity_id) {
-  cur_partition_table_->GetAllBlockItems(entity_id, block_item_queue_);
+  cur_partition_table_->GetAllBlockItems(entity_id, block_item_queue_, is_reversed_);
 }
 
 KStatus TsIterator::Init(bool is_reversed) {
@@ -343,9 +343,11 @@ void TsFirstLastRow::Reset() {
   first_row_pair_.partion_tbl = nullptr;
   first_row_pair_.segment_tbl.reset();
   first_row_pair_.row_ts = INVALID_TS;
+  first_row_pair_.is_null.assign(scan_agg_types_.size(), true);
   last_row_pair_.partion_tbl = nullptr;
   last_row_pair_.segment_tbl.reset();
   last_row_pair_.row_ts = INVALID_TS;
+  last_row_pair_.is_null.assign(scan_agg_types_.size(), true);
 }
 
 KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partiton_table,
@@ -384,7 +386,11 @@ KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTim
       partiton_table->incRefCount();
       ReleaseTable(first_row_pair_.partion_tbl);
     }
-    first_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+    vector<bool> is_null;
+    for (int i = 0; i < scan_agg_types_.size(); ++i) {
+      is_null.emplace_back(col_bitmap.IsColNull(i, row_id.offset_row));
+    }
+    first_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id, is_null});
     if (first_row_ts == INVALID_TS) {
       first_agg_valid_++;
     }
@@ -435,7 +441,11 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
       partiton_table->incRefCount();
       ReleaseTable(last_row_pair_.partion_tbl);
     }
-    last_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id});
+    vector<bool> is_null;
+    for (int i = 0; i < scan_agg_types_.size(); ++i) {
+      is_null.emplace_back(col_bitmap.IsColNull(i, row_id.offset_row));
+    }
+    last_row_pair_ = std::move(TsRowTableInfo{partiton_table, segment_tbl, ts, row_id, is_null});
     if (last_row_ts == INVALID_TS)
       last_agg_valid_++;
     ts_using = true;
@@ -527,25 +537,15 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
         MetricRowID real_row = first_row_pair_.row_id;
         timestamp64 first_row_ts = first_row_pair_.row_ts;
         if (segment_tbl->isColExist(col_idx)) {
-          void* bitmap = nullptr;
-          bool need_free_bitmap = false;
-          if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_attr, col_idx, 1,
-                                &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
-            return KStatus::FAIL;
-          }
-          if (IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1)) {
+          if (first_row_pair_.is_null[agg_idx]) {
             std::shared_ptr<void> first_row_data(nullptr);
             *agg_batch = new AggBatch(first_row_data, 1, nullptr);
           } else {
-            // *agg_batch = CreateAggBatch(nullptr, nullptr);
             int err_code = getActualColAggBatch(cur_pt, segment_tbl, real_row, ts_scan_cols_[agg_idx], col_attr, agg_batch);
             if (err_code < 0) {
               LOG_ERROR("getActualColBatch failed.");
               return FAIL;
             }
-          }
-          if (need_free_bitmap) {
-            free(bitmap);
           }
         } else {
           *agg_batch = CreateAggBatch(nullptr, nullptr);
@@ -596,20 +596,7 @@ KStatus TsFirstLastRow::GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size
           MetricRowID real_row = last_row_pair_.row_id;
           timestamp64 last_row_ts = last_row_pair_.row_ts;
           if (segment_tbl->isColExist(col_idx)) {
-            bool col_bitmap_valid = true;
-            if (!col_attr.isFlag(AINFO_NOT_NULL)) {
-              void* bitmap = nullptr;
-              bool need_free_bitmap = false;
-              if (getActualColBitmap(segment_tbl, real_row.block_id, real_row.offset_row, col_attr, col_idx, 1,
-                                    &bitmap, need_free_bitmap) != KStatus::SUCCESS) {
-                return KStatus::FAIL;
-              }
-              col_bitmap_valid = !IsObjectColNull(static_cast<char*>(bitmap), real_row.offset_row - 1);
-              if (need_free_bitmap) {
-                free(bitmap);
-              }
-            }
-            if (!col_bitmap_valid) {
+            if (last_row_pair_.is_null[agg_idx]) {
               std::shared_ptr<void> last_row_data(nullptr);
               *agg_batch = new AggBatch(last_row_data, 1, nullptr);
             } else {

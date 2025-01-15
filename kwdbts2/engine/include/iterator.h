@@ -213,6 +213,7 @@ class TsFirstLastRow {
     std::shared_ptr<MMapSegmentTable> segment_tbl = nullptr;
     timestamp64 row_ts;
     MetricRowID row_id;
+    vector<bool> is_null;
   };
 
  private:
