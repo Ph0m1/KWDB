@@ -485,6 +485,14 @@ struct TSEngine {
   * @return KStatus
   */
   virtual KStatus GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) = 0;
+
+
+  /**
+   * @brief Alter table cache capacity.
+   * @param ctx
+   * @param capacity
+   */
+  virtual void AlterTableCacheCapacity(int capacity) = 0;
 };
 
 namespace kwdbts {
@@ -644,6 +652,13 @@ class TSEngineImpl : public TSEngine {
    * @return KStatus
   */
   KStatus GetClusterSetting(kwdbContext_p ctx, const std::string& key, std::string* value);
+
+  /**
+   * @brief Alter table cache capacity.
+   * @param ctx
+   * @param capacity
+   */
+  void AlterTableCacheCapacity(int capacity);
 
   int IsSingleNode();
 

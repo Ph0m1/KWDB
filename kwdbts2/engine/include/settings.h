@@ -74,6 +74,7 @@ struct EngineOptions {
   static int64_t max_anon_memory_size_;
   static string home_;  // NOLINT
   static bool is_single_node_;
+  static int table_cache_capacity_;
   static const string & dateFormat() { return s_defaultDateFormat(); }
   static const string & dateTimeFormat() { return s_defaultDateTimeFormat(); }
   static size_t pageSize() { return ps_; }

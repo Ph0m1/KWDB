@@ -253,6 +253,18 @@ func checkCapacityStatsPeriod(encodedValue string) error {
 	return nil
 }
 
+// checkTsTableCacheCapacity checks whether the table cache capacity value set is valid
+func checkTsTableCacheCapacity(encodedValue string) error {
+	value, err := strconv.ParseInt(encodedValue, 10, 64)
+	if err != nil {
+		return err
+	}
+	if value < 1 || value > math.MaxInt32 {
+		return errors.New("invalid value, the range of ts.table_cache.capacity is [1, 2147483647]")
+	}
+	return nil
+}
+
 // CheckClusterSetting map of checking methods for saving cluster settings
 var CheckClusterSetting = map[string]CheckOperation{
 	"ts.dedup.rule":      checkTsDedupRule,
@@ -268,6 +280,7 @@ var CheckClusterSetting = map[string]CheckOperation{
 	"ts.sql.query_opt_mode":                       checkTsQueryOptMode,
 	"ts.count.use_statistics.enabled":             checkTsCountUseStatistics,
 	"capacity.stats.period":                       checkCapacityStatsPeriod,
+	"ts.table_cache.capacity":                     checkTsTableCacheCapacity,
 }
 
 func (n *setClusterSettingNode) startExec(params runParams) error {

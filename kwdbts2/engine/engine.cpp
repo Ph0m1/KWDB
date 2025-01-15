@@ -52,6 +52,7 @@ const char BigObjectConfig::slash_ = '\\';
 const char EngineOptions::slash_ = '/';
 #endif
 bool EngineOptions::is_single_node_ = false;
+int EngineOptions::table_cache_capacity_ = 1000;
 std::atomic<int64_t> kw_used_anon_memory_size;
 
 void EngineOptions::init() {
@@ -72,7 +73,7 @@ TSEngineImpl::TSEngineImpl(kwdbContext_p ctx, std::string dir_path,
                            const EngineOptions& engine_options) : options_(engine_options) {
   LogInit();
   tables_lock_ = new KLatch(LATCH_ID_TSTABLE_CACHE_LOCK);
-  tables_cache_ = new SharedLruUnorderedMap<KTableKey, TsTable>(1000, true);
+  tables_cache_ = new SharedLruUnorderedMap<KTableKey, TsTable>(EngineOptions::table_cache_capacity_, true);
 }
 
 TSEngineImpl::~TSEngineImpl() {
@@ -572,15 +573,18 @@ KStatus TSEngineImpl::CreateCheckpoint(kwdbts::kwdbContext_p ctx) {
 
   // Traverse all EntityGroups in each timeline of the current node
   // For each EntityGroup, call the interface of WALMgr to start the timing library checkpoint operation
-  tables_cache_->Traversal([&](KTableKey table_id, std::shared_ptr<TsTable> table) -> bool {
-    if (!table || table->IsDropped()) {
-      return true;
+  std::list<std::pair<KTableKey, std::shared_ptr<TsTable>>> tables = tables_cache_->GetAllValues();
+  auto iter = tables.begin();
+  while (iter != tables.end()) {
+    if (!iter->second || iter->second->IsDropped()) {
+      iter++;
+      continue;
     }
     // ignore checkpoint error here, will continue to do the checkpoint for next TS table.
     // for the failed one, will do checkpoint again in next interval.
-    table->CreateCheckpoint(ctx);
-    return true;
-  });
+    iter->second->CreateCheckpoint(ctx);
+    iter++;
+  }
 
   return KStatus::SUCCESS;
 }
@@ -754,14 +758,17 @@ KStatus TSEngineImpl::FlushBuffer(kwdbContext_p ctx) {
     return s;
   }
 
-  tables_cache_->Traversal([&](KTableKey table_id, std::shared_ptr<TsTable> table) -> bool {
-    if (!table || table->IsDropped()) {
-      return true;
+  std::list<std::pair<KTableKey, std::shared_ptr<TsTable>>> tables = tables_cache_->GetAllValues();
+  auto iter = tables.begin();
+  while (iter != tables.end()) {
+    if (!iter->second || iter->second->IsDropped()) {
+      iter++;
+      continue;
     }
     // ignore the recover error, record it into ts engine log.
-    table->FlushBuffer(ctx);
-    return true;
-  });
+    iter->second->FlushBuffer(ctx);
+    iter++;
+  }
 
   return SUCCESS;
 }
@@ -1117,6 +1124,10 @@ KStatus TSEngineImpl::GetClusterSetting(kwdbContext_p ctx, const std::string& ke
   } else {
     return KStatus::FAIL;
   }
+}
+
+void TSEngineImpl::AlterTableCacheCapacity(int capacity) {
+  tables_cache_->SetCapacity(capacity);
 }
 
 KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,

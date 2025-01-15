@@ -244,6 +244,8 @@ struct BlockItem {
 
   int setDeleted(size_t row_idx) {
     if (row_idx > alloc_row_count) {
+      LOG_ERROR("BlockItem setDeleted failed, block_item id: %d, alloc_row_count: %d, row_idx: %zu",
+                block_id, alloc_row_count, row_idx)
       return -1;
     }
     if (is_agg_res_available) {

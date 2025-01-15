@@ -4,13 +4,17 @@ create table test.t1 (k_timestamp timestamp not null,ser_id timestamp(6) not nul
 create table test.t1 (k_timestamp timestamp not null,ser_id timestamptz(6) not null ,logon_date float not null)attributes (t1_attribute varchar not null) primary tags(t1_attribute);
 create table test.t1 (k_timestamp timestamp not null,ser_id timestamptz(7) not null ,logon_date float not null)attributes (t1_attribute varchar not null) primary tags(t1_attribute);
 create table test.logon (k_timestamp timestamp not null,ser_id INT4 not null ,logon_date float not null)attributes (t1_attribute varchar not null) primary tags(t1_attribute);
+select count(*) from kwdb_internal.ranges where database_name='test' and table_name='logon';
 create table test.sjgx03(k_timestamp timestamp not null,A VARCHAR(10) not null,B VARCHAR(10) not null)attributes (t1_attribute varchar not null) primary tags(t1_attribute);
 create table test.sjcx01(k_timestamp timestamp not null,A INT4 not null,B INT4 not null,C VARCHAR(10) not null,D VARCHAR(10) not null)attributes (t1_attribute varchar not null) primary tags(t1_attribute);
+select count(*) from kwdb_internal.ranges where database_name='test' and table_name='sjcx01';
 insert into test.sjcx01 values (1681111110000,1,1,'A','DFFDARG', 'qqq'),(1681111110000,6,3,'B','ABCDEFV', 'qqq'),(1681111110000,4,1,'C','VDWFSF', 'qqq'),(1681111110000,6,4,'D','GDSDFDS', 'qqq'),(1681111110000,8,3,'E','DFDSFFF', 'qqq'),(1681111110000,11,5,'F','DFSFFDS', 'qqq'),(1681111110000,1,13,'G','FGACFG', 'qqq'),(1681111110000,0,21,'H','DDDVF', 'qqq'),(1681111110000,NULL,NULL,NULL,NULL, 'qqq');
 insert into test.sjcx01 values (1681111110000,1,1,'A','DFFDARG', 'qqq'),(1681111110000,6,3,'B','ABCDEFV', 'qqq'),(1681111110000,4,1,'C','VDWFSF', 'qqq'),(1681111110000,6,4,'D','GDSDFDS', 'qqq'),(1681111110000,8,3,'E','DFDSFFF', 'qqq'),(1681111110000,11,5,'F','DFSFFDS', 'qqq'),(1681111110000,1,13,'G','FGACFG', 'qqq'),(1681111110000,0,21,'H','DDDVF', 'qqq');
+select count(*) from kwdb_internal.ranges where database_name='test' and table_name='sjcx01';
 -- select * from test.sjcx01;
 create table test.ti(dt timestamp not null ,id int4 not null)attributes (t1_attribute varchar not null) primary tags(t1_attribute);
 -- select * from test.ti;
+select count(*) from kwdb_internal.ranges where database_name='test';
 drop database test cascade;
 
 

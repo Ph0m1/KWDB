@@ -857,6 +857,16 @@ class SharedLruUnorderedMap {
   }
 
   /**
+   * @brief Get all values in the cache.
+   * @return std::vector<std::shared_ptr<value_t>>
+   */
+  std::list<key_value_pair_t> GetAllValues() {
+    rdLock();
+    Defer defer{[&]() { unLock(); }};
+    return cache_items_list_;
+  }
+
+  /**
    * @brief Traverse cache items and apply the given function.
    *
    * @param func If the function returns false for each cache item, the traversal terminates.

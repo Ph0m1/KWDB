@@ -2176,10 +2176,10 @@ KStatus TsTable::DeleteTotalRange(kwdbContext_p ctx, uint64_t begin_hash, uint64
   }
 #ifdef K_DEBUG
   GetRangeRowCount(ctx, begin_hash, end_hash, ts_span, &row_num_aft);
-#endif
   if (row_num_bef != total_del_rows) {
     LOG_ERROR("DeleteTotalRange failed. rows: %lu, deleted:%lu", row_num_bef, total_del_rows);
   }
+#endif
   LOG_DEBUG("DeleteTotalRange range{hash[%lu - %lu] ts[%ld - %ld]} delete rows [%lu], del before:%lu, del after: %lu.",
             begin_hash, end_hash, ts_span.begin, ts_span.end,
             total_del_rows, row_num_bef, row_num_aft);

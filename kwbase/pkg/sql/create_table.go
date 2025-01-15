@@ -652,7 +652,7 @@ func (n *createTableNode) startExec(params runParams) error {
 		if splitInfo, err = distributeAndDuplicateOfCreateTSTable(params, desc); err != nil {
 			return err
 		}
-		if splitInfo != nil {
+		if splitInfo != nil && params.ExecCfg().StartMode == StartSingleReplica {
 			var wg sync.WaitGroup
 			log.Infof(params.ctx, "will relocate for MPP mode, location: %+v", splitInfo)
 			for i := range splitInfo {

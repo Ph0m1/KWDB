@@ -211,6 +211,10 @@ var (
 		"ts.count.use_statistics.enabled",
 		"use row written when querying count",
 		true)
+	tsTableCacheCapacity = settings.RegisterPublicIntSetting(
+		"ts.table_cache.capacity",
+		"maximum limit of ts table cache",
+		1000)
 )
 
 // TODO(peter): Until go1.11, ServeMux.ServeHTTP was not safe to call

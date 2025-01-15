@@ -31,6 +31,7 @@ std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
 std::shared_mutex g_settings_mutex;
 bool g_engine_initialized = false;
+TSEngine* g_engine_ = nullptr;
 extern int64_t g_vacuum_interval;
 
 TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
@@ -121,6 +122,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
     return ToTsStatus("OpenTSEngine Internal Error!");
   }
   *engine = ts_engine;
+  g_engine_ = ts_engine;
   g_engine_initialized = true;
   return kTsSuccess;
 }
@@ -682,6 +684,11 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     }
   } else if ("ts.disk_free_space.alert_threshold" == key) {
     g_free_space_alert_threshold = atoll(value.c_str());
+  } else if ("ts.table_cache.capacity" == key) {
+    EngineOptions::table_cache_capacity_ = atoi(value.c_str());
+    if (g_engine_) {
+      g_engine_->AlterTableCacheCapacity(EngineOptions::table_cache_capacity_);
+    }
   }
 #ifndef KWBASE_OSS
   else if ("ts.storage.autonomy.mode" == key) {  // NOLINT
