@@ -1067,11 +1067,13 @@ KStatus LoggedTsEntityGroup::undoPutTag(kwdbContext_p ctx, TS_LSN log_lsn, TSSli
   uint32_t entity_id, group_id;
   ErrorInfo err_info;
   if (!new_tag_bt_->hasPrimaryKey(p_tag.data, p_tag.len, entity_id, group_id)) {
-    return KStatus::FAIL;
+    LOG_WARN("undoPutTag: can not find primary tag[%s].", p_tag.data)
+    return KStatus::SUCCESS;
   }
 
   int res = new_tag_bt_->InsertForUndo(group_id, entity_id, p_tag);
   if (res < 0) {
+    LOG_ERROR("undoPutTag: InsertForUndo failed, primary tag[%s]", p_tag.data)
     return KStatus::FAIL;
   }
 
@@ -1105,10 +1107,12 @@ KStatus LoggedTsEntityGroup::undoUpdateTag(kwdbContext_p ctx, TS_LSN log_lsn, TS
   uint32_t entity_id, group_id;
   ErrorInfo err_info;
   if (!new_tag_bt_->hasPrimaryKey(p_tag.data, p_tag.len, entity_id, group_id)) {
+    LOG_ERROR("undoUpdateTag: can not find primary tag[%s].", p_tag.data)
     return KStatus::FAIL;
   }
 
   if (new_tag_bt_->UpdateForUndo(group_id, entity_id, p_tag, old_payload) < 0) {
+    LOG_ERROR("undoUpdateTag: UpdateForUndo failed, primary tag[%s].", p_tag.data)
     return KStatus::FAIL;
   }
 
@@ -1121,13 +1125,15 @@ KStatus LoggedTsEntityGroup::redoUpdateTag(kwdbContext_p ctx, kwdbts::TS_LSN log
 
   uint32_t entity_id, group_id;
   ErrorInfo err_info;
-  int res;
   if (!new_tag_bt_->hasPrimaryKey(p_tag.data, p_tag.len, entity_id, group_id)) {
+    LOG_ERROR("redoUpdateTag has not primary tag[%s].", p_tag.data)
     return KStatus::FAIL;
   }
 
+  int res;
   res = new_tag_bt_->UpdateForRedo(group_id, entity_id, p_tag, pd);
   if (res < 0) {
+    LOG_ERROR("redoUpdateTag: UpdateForRedo failed, primary tag[%s].", p_tag.data)
     return KStatus::FAIL;
   }
 
@@ -1155,6 +1161,7 @@ KStatus LoggedTsEntityGroup::undoDeleteTag(kwdbContext_p ctx, TSSlice& primary_t
   }};
   res = sub_group->UndoDeleteEntity(entity_id, log_lsn, &count, err_info);
   if (res) {
+    LOG_ERROR("undoDeleteTag: UndoDeleteEntity failed, errcode:%d", res)
     return KStatus::FAIL;
   }
 
