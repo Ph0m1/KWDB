@@ -730,7 +730,7 @@ if [ "$g_kw_cmd" = "upgrade" ];then
       echo "version#compare:50" >&10
       func_info=$(version_compare)
       if [ $? -ne 0 ];then
-        log_err "$ret"
+        log_err "$func_info"
       fi
     fi
     # check kwbase whether running
