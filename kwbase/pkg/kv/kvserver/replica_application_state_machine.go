@@ -691,6 +691,7 @@ func (r *Replica) stageTsBatchRequest(
 			*roachpb.TsDeleteRequest,
 			*roachpb.TsDeleteMultiEntitiesDataRequest,
 			*roachpb.TsDeleteEntityRequest,
+			*roachpb.ClearRangeRequest,
 			*roachpb.TsTagUpdateRequest:
 			tableID = uint64(r.Desc().TableId)
 			isTsRequest = true

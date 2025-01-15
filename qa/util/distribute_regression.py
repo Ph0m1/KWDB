@@ -414,6 +414,22 @@ if __name__ == "__main__":
                     "echo cost $count s".format(kwbin_path, url, ts,ts,kwbin_path, url,ts)
                 cmds.append(cmd)
 
+        elif re.match('-- wait-clear', sql):
+            strs = sql.split(':')
+            if len(strs) < 2:
+                continue
+            ts = strs[1]
+            ts = re.sub('s','',ts)
+            for node_id in last_exec_node:
+                url = get_url_from_node_id(1)
+                cmd = "count=0;" \
+                  "while [ $(ls $store_dir\/c1\/tsdb | wc -l ) -ne 2 ] && [ $count -lt {} ]; do" \
+                  "    count=$((count+1));" \
+                  "    sleep 1;" \
+                  "done\n" \
+                    "echo cost $count s".format(ts)
+                cmds.append(cmd)
+
         elif re.match('-- upgrade-complete', sql):
             node_ids = get_nodes(sql)
             for node_id in node_ids:
