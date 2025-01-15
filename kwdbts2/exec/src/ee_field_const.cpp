@@ -195,6 +195,8 @@ k_int64 getTimeFormTimestamp(KString *value_) {
   if (value_->at(startPos) == '-') {
     negative = KTRUE;
     startPos++;
+  } else if (value_->length() >= 2 && value_->substr(value_->length() - 2) == "BC") {
+    negative = KTRUE;
   }
   getYMDFormTimestamp(value_, &startPos, &ltm.tm_year, &ltm.tm_mon, &ltm.tm_mday);
   getHMSFormTimestamp(value_, &startPos, &ltm.tm_hour, &ltm.tm_min, &ltm.tm_sec, &intervalMS);
