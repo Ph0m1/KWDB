@@ -114,8 +114,6 @@ var (
 	reWaitForSuccess, _ = regexp.Compile(`^pq:.* Please wait for success$`)
 	// indicate errors that already exist in the table
 	reRelationAlreadyExists, _ = regexp.Compile(`^pq: relation .* already exists$`)
-	// initialize the time of the first retry
-	retryDelayBase = 1 * time.Second
 )
 
 const (
@@ -1618,7 +1616,7 @@ func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		teleResult, err = s.executeWithRetry(db, insertTelegraphStmt, createTelegrafStmt)
+		teleResult, err = executeWithRetry(db, insertTelegraphStmt, createTelegrafStmt)
 		if err != nil {
 			desc += err.Error() + ";"
 			code = RestfulResponseCodeFail
@@ -1690,7 +1688,7 @@ func (s *restfulServer) handleOpenTSDBTelnet(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 
-		teleResult, err = s.executeWithRetry(db, insertStatement, createStatement)
+		teleResult, err = executeWithRetry(db, insertStatement, createStatement)
 		if err != nil {
 			desc += err.Error() + ";"
 			code = RestfulResponseCodeFail
@@ -1771,7 +1769,7 @@ func (s *restfulServer) handleOpenTSDBJson(w http.ResponseWriter, r *http.Reques
 			continue
 		}
 
-		teleResult, err = s.executeWithRetry(db, insertTelegraphStmt, createTelegrafStmt)
+		teleResult, err = executeWithRetry(db, insertTelegraphStmt, createTelegrafStmt)
 		if err != nil {
 			desc += err.Error() + ";"
 			code = RestfulResponseCodeFail
@@ -1811,11 +1809,11 @@ func resfreshRequestTime(connCache *pgConnection) {
 }
 
 // executeWithRetry handles retries in the event of a failure to write without a pattern
-func (s *restfulServer) executeWithRetry(
-	db *gosql.DB, insertStmt, createStmt string,
-) (gosql.Result, error) {
+func executeWithRetry(db *gosql.DB, insertStmt, createStmt string) (gosql.Result, error) {
 	var execResult gosql.Result
 	var execErr error
+	// initialize the time of the first retry
+	retryDelay := 1 * time.Second
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		execResult, execErr = db.Exec(insertStmt)
 		if execErr == nil {
@@ -1823,10 +1821,8 @@ func (s *restfulServer) executeWithRetry(
 		}
 
 		schemalessError := execErr.Error()
-		if !reRelationNotExist.MatchString(schemalessError) && !reWaitForSuccess.MatchString(schemalessError) {
-			return nil, execErr
-		}
 		if reRelationNotExist.MatchString(schemalessError) {
+			// reRelationNotExist performs the following operations
 			_, createTableErr := db.Exec(createStmt)
 			if createTableErr != nil {
 				createTableError := createTableErr.Error()
@@ -1834,9 +1830,15 @@ func (s *restfulServer) executeWithRetry(
 					return nil, createTableErr
 				}
 			}
+			time.Sleep(retryDelay)
+			retryDelay *= 2
 		} else if reWaitForSuccess.MatchString(schemalessError) {
-			time.Sleep(retryDelayBase)
-			retryDelayBase *= 2
+			// reWaitForSuccess performs the following operations
+			time.Sleep(retryDelay)
+			retryDelay *= 2
+		} else {
+			// other errors can be returned directly
+			return nil, execErr
 		}
 	}
 
