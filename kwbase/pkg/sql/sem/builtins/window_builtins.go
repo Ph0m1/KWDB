@@ -27,6 +27,7 @@ package builtins
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
@@ -894,9 +895,19 @@ func (dw *DiffWindowInt) Compute(
 		return tree.DNull, nil
 	}
 
+	var MinInt tree.DInt
+	MinInt = math.MinInt64
+
+	var MaxInt tree.DInt
+	MaxInt = math.MaxInt64
+
 	diffValue := tree.MustBeDInt(currentValue) - tree.MustBeDInt(prevValue)
 	if err != nil {
 		return nil, err
+	}
+
+	if diffValue.Compare(evalCtx, &MinInt) < 0 || diffValue.Compare(evalCtx, &MaxInt) > 0 {
+		return nil, tree.ErrIntOutOfRange
 	}
 
 	return &diffValue, nil
