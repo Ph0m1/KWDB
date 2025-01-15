@@ -287,10 +287,11 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 	for ttr.State == execinfra.StateRunning {
 		if (len(ttr.Rev) == 0) || (ttr.value0 && ttr.rowNum == 0) {
 			var tsQueryInfo = tse.TsQueryInfo{
-				ID:      int(ttr.sid),
-				Handle:  ttr.tsHandle,
-				Buf:     []byte("exec next"),
-				Fetcher: tse.TsFetcher{Collected: ttr.collected},
+				ID:       int(ttr.sid),
+				Handle:   ttr.tsHandle,
+				TimeZone: ttr.timeZone,
+				Buf:      []byte("exec next"),
+				Fetcher:  tse.TsFetcher{Collected: ttr.collected},
 			}
 			// Init analyse fetcher.
 			if ttr.collected {
