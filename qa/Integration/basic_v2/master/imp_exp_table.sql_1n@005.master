@@ -77,34 +77,34 @@ CREATE TABLE
 > CREATE TABLE cpu6 (k_timestamp TIMESTAMPTZ NOT NULL, usage_user INT8) TAGS (hostname CHAR(30) NOT NULL, os CHAR(30)) PRIMARY TAGS(hostname);
 CREATE TABLE
 > IMPORT INTO cpu1 CSV DATA ('nodelocal://1/tbtest5/csv1');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > IMPORT INTO cpu2 CSV DATA ('nodelocal://1/tbtest5/csv2');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > IMPORT INTO cpu3 CSV DATA ('nodelocal://1/tbtest5/csv3');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > IMPORT INTO cpu4 CSV DATA ('nodelocal://1/tbtest5/csv4');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > IMPORT INTO cpu5 CSV DATA ('nodelocal://1/tbtest5/csv5');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > IMPORT INTO cpu6 CSV DATA ('nodelocal://1/tbtest5/csv6');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > SELECT * FROM cpu1 order by hostname;
          k_timestamp        | usage_user | hostname |     os

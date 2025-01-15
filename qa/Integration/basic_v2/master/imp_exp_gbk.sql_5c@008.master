@@ -80,9 +80,9 @@ INSERT 1
 > drop table tb;
 DROP TABLE
 > IMPORT TABLE CREATE USING 'nodelocal://1/geometry/table/meta.sql' csv data ("nodelocal://1/geometry/table/") with escaped='"', enclosed='"', delimiter=';';
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    9 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    9 | 0            | 0           | None
 (1 row)
 > select * from test_geometry.tb order by k_timestamp;
            k_timestamp          | id |   e1   |    e2     |      e3       |       e4       |           e5           |  e6   |              e7               |         e8          |         e9          |         e10         | e11  |         e12         | e13  |         e14         |         e15         |         e16         |         e17         |         e18         | e19  |                   e20                    |         e21         |         e22         |                        e23                        |                              e24                               |                                                           e25                                                           | code1  |   code2   |     code3     |   code4    |         code5         | code6 |        code7        |                                                           code8                                                           | code9 |                  code10                  |       code11        |       code12        | code13 |                      code14                      | code15 |                      code16

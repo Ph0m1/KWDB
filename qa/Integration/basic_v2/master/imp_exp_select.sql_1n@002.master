@@ -6,9 +6,9 @@
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int not null, tag2 int, tag3 int) primary tags(tag1);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb9");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    9 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    9 | 0            | 0           | None
 (1 row)
 > select * from tb2 order by a;
              ts             | a  | tag1 | tag2 | tag3
@@ -33,9 +33,9 @@ DROP TABLE
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int, tag2 int, tag3 int not null) primary tags(tag3);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb10");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    9 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    9 | 0            | 0           | None
 (1 row)
 > select * from tb2 order by a;
              ts             | a  | tag1 | tag2 | tag3
@@ -60,9 +60,9 @@ DROP TABLE
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int not null) primary tags(tag1);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb11");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    9 | 0            | 8
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows |                        note
+---------+-----------+--------------------+------+--------------+-------------+-----------------------------------------------------
+  -      | succeeded |                  1 |    9 | 0            | 8           | There is a REJECT FILE, please read and resolve it
 (1 row)
 > select * from tb2 order by tag1;
              ts             | a  | tag1
@@ -87,9 +87,9 @@ DROP TABLE
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int not null) primary tags(tag1);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb12");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |   18 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |   18 | 0            | 0           | None
 (1 row)
 > select * from tb2 order by a;
              ts             | a  | tag1
@@ -123,9 +123,9 @@ DROP TABLE
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int not null) primary tags(tag1);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb13");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    5 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    5 | 0            | 0           | None
 (1 row)
 > select * from tb2 order by a;
              ts             | a  | tag1
@@ -146,9 +146,9 @@ DROP TABLE
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int not null) primary tags(tag1);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb14");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    9 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    9 | 0            | 0           | None
 (1 row)
 > select * from tb2 order by a;
              ts             | a  | tag1
@@ -173,9 +173,9 @@ DROP TABLE
 > create table ts_db.tb2(ts timestamp not null, a int) tags(tag1 int not null) primary tags(tag1);
 CREATE TABLE
 > IMPORT INTO tb2 CSV DATA ("nodelocal://1/tb16");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    4 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    4 | 0            | 0           | None
 (1 row)
 > select * from tb2 order by a;
              ts             | a  | tag1

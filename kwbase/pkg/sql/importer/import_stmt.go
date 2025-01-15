@@ -89,6 +89,7 @@ var importHeader = sqlbase.ResultColumns{
 	{Name: "rows", Typ: types.Int},
 	{Name: "abandon_rows", Typ: types.String},
 	{Name: "reject_rows", Typ: types.String},
+	{Name: "note", Typ: types.String},
 }
 
 var escapedMap = map[rune]bool{'"': true, '\\': true}
@@ -1065,6 +1066,10 @@ func showResult(
 	} else {
 		jobIDStr = strconv.FormatInt(jobID, 10)
 	}
+	note := "None"
+	if rejectRows != 0 {
+		note = "There is a REJECT FILE, please read and resolve it"
+	}
 	resultsCh <- tree.Datums{
 		tree.NewDString(jobIDStr),
 		tree.NewDString(string(jobs.StatusSucceeded)),
@@ -1072,6 +1077,7 @@ func showResult(
 		tree.NewDInt(tree.DInt(rows)),
 		tree.NewDString(strconv.Itoa(abandonRows)),
 		tree.NewDString(strconv.Itoa(rejectRows)),
+		tree.NewDString(note),
 	}
 }
 

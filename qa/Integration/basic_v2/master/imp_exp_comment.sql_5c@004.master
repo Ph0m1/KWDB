@@ -28,9 +28,9 @@ COMMENT ON COLUMN
 > drop table deftb;
 DROP TABLE
 > import table create using 'nodelocal://1/dbcomment/db4/meta.sql' csv data ('nodelocal://1/dbcomment/db4') with comment;
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    7 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    7 | 0            | 0           | None
 (1 row)
 > show tables with comment;
   table_name |    table_type     | comment

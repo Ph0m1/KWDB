@@ -72,9 +72,9 @@ CREATE TABLE
   succeed
 (1 row)
 > IMPORT INTO test_impexp.tb1 CSV DATA ("nodelocal://1/export_column/test_1/");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    5 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    5 | 0            | 0           | None
 (1 row)
 > SELECT * FROM test_impexp.tb1 ORDER BY k_timestamp;
          k_timestamp        | e1 |   e2    |  e3  |  e4  | e5  |  e6  |            e7             |      e8       |      e9       |               e10               | e11 |              e12               | e13 |      e14       |      e15       |                   e16                    |      e17      |                 e18                  | e19  |                                  e20                                   |                               e21                                |                                  e22                                   |      e23      |     e24     | code1 | code2 | code3 | flag  | val1 | val2 |       location       |   color    | name |    state     | tall | screen | age | sex | year | type
@@ -104,9 +104,9 @@ CREATE TABLE
   succeed
 (1 row)
 > IMPORT INTO test_impexp.tb1(k_timestamp, e1, code1) CSV DATA ("nodelocal://1/export_column/test_2/");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    5 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    5 | 0            | 0           | None
 (1 row)
 > SELECT * FROM test_impexp.tb1 ORDER BY k_timestamp;
          k_timestamp        | e1 |  e2  | code1
@@ -136,9 +136,9 @@ CREATE TABLE
   succeed
 (1 row)
 > IMPORT INTO test_impexp.tb1(k_timestamp, e1, code1) CSV DATA ("nodelocal://1/export_column/test_3/");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    5 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    5 | 0            | 0           | None
 (1 row)
 > SELECT * FROM test_impexp.tb1 ORDER BY k_timestamp;
          k_timestamp        |               e1               |  e2  | code1 | code2
@@ -168,9 +168,9 @@ CREATE TABLE
   succeed
 (1 row)
 > IMPORT INTO test_impexp.tb1(k_timestamp, code1, code2, code3, flag, val1, val2, location, color, name, state, tall, screen, age, sex, year, type) CSV DATA ("nodelocal://1/export_column/test_4");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    5 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    5 | 0            | 0           | None
 (1 row)
 > SELECT * FROM test_impexp.tb1 order by k_timestamp;
          k_timestamp        |  e1  |  e2  |  e3  | code1 | code2 | code3 | flag  | val1 | val2 |       location       |   color    | name |    state     | tall | screen | age | sex | year | type
@@ -205,9 +205,9 @@ SQLSTATE: 42703
 > import into test_impexp.tb1(k_timestamp, a, b, c) csv data ("nodelocal://1/export_column/test_5/");
 ERROR: target column a is not in table tb1
 > import into test_impexp.tb1(k_timestamp,e2,e1,e3,code1) csv data ("nodelocal://1/export_column/test_5");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    0 | 0            | 5
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows |                        note
+---------+-----------+--------------------+------+--------------+-------------+-----------------------------------------------------
+  -      | succeeded |                  1 |    0 | 0            | 5           | There is a REJECT FILE, please read and resolve it
 (1 row)
 > select * from test_impexp.tb1 order by k_timestamp;
   k_timestamp | e1 | e2 | e3 | code1 | code2
@@ -229,9 +229,9 @@ CREATE TABLE
 > import into test_impexp.tb1 (k_timestamp,e3,e3,e3,code1,code2) csv data ("nodelocal://1/export_column/test_6/");
 ERROR: multiple assignments to the same column e3
 > import into test_impexp.tb1(k_timestamp,e3,e2,e1,code1,code2) csv data("nodelocal://1/export_column/test_6/");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    5 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    5 | 0            | 0           | None
 (1 row)
 > select * from test_impexp.tb1 order by k_timestamp;
          k_timestamp        | e1  |  e2  | e3 | code1 | code2

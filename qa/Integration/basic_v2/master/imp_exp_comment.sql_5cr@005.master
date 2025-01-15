@@ -8,9 +8,9 @@ COMMENT ON TABLE
 > drop table deftb;
 DROP TABLE
 > import table create using 'nodelocal://1/dbcomment/db5/meta.sql' csv data ('nodelocal://1/dbcomment/db5') with comment;
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    7 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    7 | 0            | 0           | None
 (1 row)
 > show databases with comment;
   database_name | engine_type | comment

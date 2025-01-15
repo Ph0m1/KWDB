@@ -43,9 +43,9 @@ DROP TABLE
 > set time zone 8;
 SET
 > import table create using 'nodelocal://1/tbtest6/tb3/meta.sql' csv data ('nodelocal://1/tbtest6/tb3');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    7 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    7 | 0            | 0           | None
 (1 row)
 > select k_timestamp from test.tb3 order by k_timestamp;
          k_timestamp

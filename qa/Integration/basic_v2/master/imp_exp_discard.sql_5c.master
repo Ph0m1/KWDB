@@ -43,9 +43,9 @@ INSERT 1
 > SET CLUSTER SETTING ts.dedup.rule = 'keep';
 SET CLUSTER SETTING
 > import into test.tb1 csv data ('nodelocal://1/tbKeep/tb1');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    2 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    2 | 0            | 0           | None
 (1 row)
 > select * from test.tb1 order by k_timestamp, hostname;
          k_timestamp        | usage_user | usage_system | usage_idle | usage_nice | usage_iowait | usage_irq | usage_softirq | usage_steal | usage_guest | usage_guest_nice | hostname
@@ -75,9 +75,9 @@ CREATE TABLE
 > insert into test.tb1 values('2024-01-01 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_0');
 INSERT 1
 > import into test.tb1 csv data ('nodelocal://1/tbDiscard/tb1');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    1 | 1            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    1 | 1            | 0           | None
 (1 row)
 > select * from test.tb1 order by k_timestamp, hostname;
          k_timestamp        | usage_user | usage_system | usage_idle | usage_nice | usage_iowait | usage_irq | usage_softirq | usage_steal | usage_guest | usage_guest_nice | hostname
@@ -105,9 +105,9 @@ CREATE TABLE
 > insert into test.tb1 values('2024-01-01 00:00:01+00:00',null,null,null,null,null,null,null,null,null,null,'host_0');
 INSERT 1
 > import into test.tb1 csv data ('nodelocal://1/tbReject/tb1');
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    0 | 2            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    0 | 2            | 0           | None
 (1 row)
 > select * from test.tb1 order by k_timestamp, hostname;
          k_timestamp        | usage_user | usage_system | usage_idle | usage_nice | usage_iowait | usage_irq | usage_softirq | usage_steal | usage_guest | usage_guest_nice | hostname

@@ -50,7 +50,7 @@ func RejectedFilename(datafile string, nodeID int, prefix int) (string, error) {
 		return "", err
 	}
 	dir := filepath.Dir(parsedURI.Path)
-	parsedURI.Path = fmt.Sprintf("%s/reject.n%d.%d.csv", dir, nodeID, prefix)
+	parsedURI.Path = fmt.Sprintf("%s/reject.n%d.%d.txt", dir, nodeID, prefix)
 	return parsedURI.String(), nil
 }
 
@@ -115,8 +115,8 @@ func runTimeSeriesImport(
 	close(tsInfo.rejectedHandler)
 	err = gr.Wait()
 	if tsInfo.hasSwap {
-		return nil, errors.Errorf("The CSV file contains line breaks, so the IMPORT failed this time. " +
-			"The imported database/table needs to be deleted and REIMPORT with thread_concurrency='1'")
+		return nil, errors.Errorf("The CSV file: %s, contains line breaks, so the IMPORT failed this time. "+
+			"The imported database/table needs to be deleted and REIMPORT with thread_concurrency='1'", tsInfo.filename)
 	}
 	return &roachpb.BulkOpSummary{TimeSeriesCounts: tsInfo.result.seq, RejectedCounts: tsInfo.RejectedCount, AbandonCounts: tsInfo.AbandonCount}, err
 }
@@ -205,7 +205,8 @@ type timeSeriesImportInfo struct {
 	tsColTypeMap map[int]oid.Oid
 	m1           syncutil.RWMutex
 	// Does the CSV file contain line breaks
-	hasSwap bool
+	hasSwap  bool
+	filename string
 }
 
 // datumsInfo channel passed datums between readAndConvert and buildPayloadAndSend. which canbe assaigned by priVal
@@ -360,6 +361,10 @@ func (t *timeSeriesImportInfo) readAndConvertTimeSeriesFiles(
 		if err := ctxgroup.GroupWorkers(ctx, len(t.fileSplitInfos[dataFileIdx]), func(ctx context.Context, id int) error {
 			return t.readAndConvertTimeSeriesFile(ctx, flowCtx, dataFile, t.fileSplitInfos[dataFileIdx][id], spec.Table.IntoCols, stopChan)
 		}); err != nil {
+			if t.filename != "" {
+				log.Infof(ctx, "The CSV file: %s, contains line breaks, so import failed", t.filename)
+				return nil
+			}
 			log.Infof(ctx, "[import] read file failed,file %s, errmsg %s", dataFile, err.Error())
 		}
 	}
@@ -569,6 +574,7 @@ func (t *timeSeriesImportInfo) readAndConvertTimeSeriesFile(
 			log.Warningf(ctx, "The line being processed by the current thread [%d] contains line breaks. "+
 				"Stop all threads of IMPORT")
 			t.hasSwap = true
+			t.filename = filename
 			stopChan <- true
 			return errors.Errorf("The thread processed contains line breaks, stop all threads")
 		}

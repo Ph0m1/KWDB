@@ -34,9 +34,9 @@ SET
 > drop database test cascade;
 DROP DATABASE
 > import database csv data ("nodelocal://1/dbtest3/db1") with delimiter = '.';
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    9 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    9 | 0            | 0           | None
 (1 row)
 > select * from test.tb1 order by tag1, k_timestamp;
          k_timestamp        |  e1  |  e2  |  e3  |      e4      |         e5          |  e6   |  e7  |  e8  |       e9       |         e10         | tag1 | tag2 | tag3 |    tag4     |        tag5        | tag6 | tag7 | tag8 | tag9 |       tag10

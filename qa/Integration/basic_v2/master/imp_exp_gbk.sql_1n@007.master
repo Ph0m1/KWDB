@@ -36,9 +36,9 @@ CREATE TABLE
 > alter table tsdb1.t2 add col2 varchar(50);
 ALTER TABLE
 > import into tsdb1.t2 csv data ("nodelocal://1/addcol/");
-  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows
----------+-----------+--------------------+------+--------------+--------------
-  -      | succeeded |                  1 |    1 | 0            | 0
+  job_id |  status   | fraction_completed | rows | abandon_rows | reject_rows | note
+---------+-----------+--------------------+------+--------------+-------------+-------
+  -      | succeeded |                  1 |    1 | 0            | 0           | None
 (1 row)
 > select * from tsdb1.t2;
              ts             |  col1   |  col2   | tag1 | tag2
