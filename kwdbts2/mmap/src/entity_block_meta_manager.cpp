@@ -32,6 +32,7 @@ EntityBlockMetaManager::~EntityBlockMetaManager() {
 
 int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_path, const string& tbl_sub_path,
                                  bool alloc_block_item) {
+  meta_num_ = 0;  // reset meta number
   table_id_ = std::atoi(getTsObjectName(file_path).c_str());
   file_path_base_ = file_path;
   db_path_ = db_path;
@@ -88,30 +89,27 @@ int EntityBlockMetaManager::Open(const string& file_path, const std::string& db_
     // There is a meta file but not meta.0
     return KWENOOBJ;
   } else {
+    meta_num_ = meta_map.size();
     bool success = true;
     for (auto& it: meta_map) {
-      const uint64_t& num = it.first;
+      const uint64_t& idx = it.first;
       string& file_name = it.second;
-      if (meta_num_ < num + 1) {
-        // Because the meta number starts from 0, +1 is the amount of metas that the system considers
-        meta_num_ = num + 1;
-      }
       int flags = MMAP_OPEN_NORECURSIVE;
-      auto entity_meta = new MMapEntityBlockMeta(false, num == 0);
+      auto entity_meta = new MMapEntityBlockMeta(false, idx == 0);
       err_code = entity_meta->init(file_name, db_path, tbl_sub_path, flags, alloc_block_item, max_entities_per_subgroup);
       if (err_code < 0) {
         success = false;
         break;
       }
-      if (num != 0) {
+      if (idx != 0) {
         entity_meta->SetEntityItemOffset(GetFirstMeta()->entity_item_offset_);
         // We will take entity_metas_[0] to get offset here, so be sure to do it in order
-        entity_meta->block_item_offset_num_ = num * META_BLOCK_ITEM_MAX;
+        entity_meta->block_item_offset_num_ = idx * META_BLOCK_ITEM_MAX;
       }
       resizeMeta();
       // Since num is not necessarily continuous, we should check whether resize is required first,
       // otherwise, the num is too large and the read entity_metas_ will crash
-      entity_block_metas_[num] = entity_meta;
+      entity_block_metas_[idx] = entity_meta;
     }
     if (!success) {
       for (auto& ptr: entity_block_metas_) {

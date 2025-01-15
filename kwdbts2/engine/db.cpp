@@ -33,6 +33,7 @@ std::shared_mutex g_settings_mutex;
 bool g_engine_initialized = false;
 TSEngine* g_engine_ = nullptr;
 extern int64_t g_vacuum_interval;
+std::atomic<bool> g_is_vacuuming{false};
 
 TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
                 AppliedRangeIndex* applied_indexes, size_t range_num) {
@@ -330,13 +331,18 @@ TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID ta
 }
 
 TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_version) {
+  bool expected = false;
+  if (!g_is_vacuuming.compare_exchange_strong(expected, true)) {
+    LOG_INFO("The engine is vacuuming, ignore vacuum request");
+    return kTsSuccess;
+  }
+  Defer defer([&](){ g_is_vacuuming.store(false); });
   kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("InitServerKWDBContext Error!");
   }
-  LOG_INFO("vacuum table[%lu] start", table_id);
   std::shared_ptr<TsTable> table;
   s = engine->GetTsTable(ctx_p, table_id, table);
   if (s != KStatus::SUCCESS) {
@@ -346,10 +352,8 @@ TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_versi
   ErrorInfo err_info;
   s = table->Vacuum(ctx_p, ts_version, err_info);
   if (s != KStatus::SUCCESS) {
-    LOG_ERROR("vacuum table[%lu] failed", table_id);
-    return ToTsStatus("VacuumTsTable Error!");
+    return ToTsStatus("VacuumTsTable Error");
   }
-  LOG_INFO("vacuum table[%lu] succeeded", table_id);
   return kTsSuccess;
 }
 

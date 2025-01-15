@@ -633,6 +633,7 @@ KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint3
   tmp_dir[tmp_dir.size() - 1] = '_';
   // if tmp_dir exists, remove the garbage files left over from the last vacuum
   if (IsExists(tmp_dir)) {
+    LOG_WARN("temp partition [%s] exists, remove it first", tmp_dir.c_str());
     Remove(tmp_dir);
   }
   // Create a temporary partition and segment to store the data after vacuum
@@ -646,7 +647,7 @@ KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint3
   (*dest_pt)->open(file_path_, db_path_, tmp_partition_sub_path, MMAP_CREAT_EXCL, err_info);
   if (!err_info.isOK()) {
     delete *dest_pt;
-    LOG_ERROR("couldn't open temporary table [%s]", tmp_dir.c_str());
+    LOG_ERROR("couldn't open temporary partition table [%s]", tmp_dir.c_str());
     return FAIL;
   }
   // create segment use max_rows_per_block and max_blocks_per_seg
@@ -767,7 +768,11 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
   }
   // allocate block item
   std::vector<BlockSpan> dst_spans;
-  dest_pt->AllocateAllDataSpace(entity_id, row_count, &dst_spans, dest_segment->schemaVersion());
+  auto err_code = dest_pt->AllocateAllDataSpace(entity_id, row_count, &dst_spans, dest_segment->schemaVersion());
+  if (err_code < 0) {
+    LOG_ERROR("AllocateAllDataSpace failed: %s", ErrorInfo::errorCodeString(err_code));
+    return FAIL;
+  }
   vector<uint32_t> cols_idx = dest_segment->getIdxForValidCols();
   vector<AttributeInfo> cols_info = dest_segment->GetColsInfoWithoutHidden();
   for (int i = 0; i < cols_idx.size(); ++i) {
@@ -1068,17 +1073,18 @@ KStatus TsTimePartition::Vacuum(uint32_t ts_version, VacuumStatus &vacuum_result
     LOG_ERROR("Drop original segments failed");
     return FAIL;
   }
-
+  if (meta_manager_.remove() < 0) {
+    LOG_ERROR("Drop original meta files failed");
+    return FAIL;
+  }
   std::string cmd = "mv " + tmp_partition_path + "* " + GetPath();
   if (!System(cmd)) {
     LOG_ERROR("mv tmp partition dir failed");
     // mv failed, still need to reload meta and segments, not return fail
     vacuum_result = VacuumStatus::FAILED;
   }
-
-  // Step 7: Reload partition & reopen meta.0
+  // Step 7: Reload partition & reopen .meta files
   ErrorInfo err_info;
-  meta_manager_.release(); // avoid memory leak
   if (openBlockMeta(MMAP_OPEN_NORECURSIVE, err_info) < 0) {
     LOG_ERROR("Reopen block meta failed, error: %s", err_info.errmsg.c_str());
     return FAIL;

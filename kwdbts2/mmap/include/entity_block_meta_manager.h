@@ -109,5 +109,5 @@ class EntityBlockMetaManager {
   uint16_t block_null_bitmap_size_;
   pthread_mutex_t obj_mutex_;
   std::shared_mutex entity_block_item_mutex_;  // control entity item / block item
-  uint32_t meta_num_ = 1;  // number of meta, not meta's amount
+  uint32_t meta_num_ = 0;  // number of meta, not meta's amount
 };
