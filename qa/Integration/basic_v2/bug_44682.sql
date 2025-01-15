@@ -1,0 +1,240 @@
+drop database if EXISTS test_vacuum;
+create ts database test_vacuum;
+use test_vacuum;
+set cluster setting ts.parallel_degree = 8;
+
+create table test_vacuum.t1 (
+	k_timestamp timestamptz not null,
+	id int not null,
+	e1 int2,
+	e2 int,
+	e3 int8,
+	e4 float4,
+	e5 float8,
+	e6 bool,
+	e7 timestamptz,
+	e8 char(1023),
+	e9 nchar(255),
+	e10 varchar(4096),
+	e11 char,
+	e12 char(255),
+	e13 nchar,
+	e14 nvarchar(4096),
+	e15 varchar(1023),
+	e16 nvarchar(200),
+	e17 nchar(255),
+	e18 char(200),
+	e19 varbytes,
+	e20 varbytes(60),
+	e21 varchar,
+	e22 nvarchar
+) tags (
+	code1 int2 not null,
+	code2 int,
+	code3 int8,
+	code4 float4,
+	code5 float8,
+	code6 bool,
+	code7 varchar,
+	code8 varchar(128) not null,
+	code9 varbytes,
+	code10 varbytes(60),
+	code11 varchar,
+	code12 varchar(60),
+	code13 char(2),
+	code14 char(1023) not null,
+	code15 nchar,
+	code16 nchar(254) not null
+) primary tags (code1) activetime 2d partition interval 1d;
+
+-- insert data
+INSERT INTO test_vacuum.t1 (k_timestamp, id, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, e17, e18, e19, e20, e21, e22, code1, code2, code3, code4, code5, code6, code7, code8, code9, code10, code11, code12, code13, code14, code15, code16) VALUES ('2024-06-17 01:40:39', 3, NULL, NULL, 4454905094816277526, -546.1563015466311, -350273.7207891615, False, '2023-07-23 16:54:08.429569', '积分操作会员新闻之间因为.日期标题不是完成怎么不是的人.虽然一下重要密码手机.喜欢可能使用开发国家经验.
+只有记者他的.而且孩子主题类型.只要网络资料地址发生关系一次图片.', '一样欢迎一样.
+根据他的都是但是完全下载市场法律.我的出来希望密码你们是否.
+网络密码管理免费图片你们发布.方法等级介绍运行得到.
+可以商品比较.
+部门更多一下信息他们商品管理软件.因此知道一起通过最大.说明还是包括安全事情处理.经济必须发展日本管理这种联系.
+作品使用政府我的设计基本参加.准备学习包括是一中文.合作只有同时影响文件社区.
+为了根据成为解决一起最后.免费一点也是到了.会员来自程序社会.
+网络显示环境研究.不同关于东西以下计划查看.
+地址时候完成功能最后看到.需要正在登录以及.', '东西可以这里电话.简介一点发现深圳对于数据要求.
+公司各种管理参加.管理直接我们一下.关系更多时候方式开始选择这样应该.
+作品推荐什么商品.人员价格最大软件地区.我们科技是否谢谢.服务选择产品成为登录.
+更新解决位置记者的人中文活动.直接今年如何这是最后.论坛工程地方发布.
+只是工具没有上海看到来源根据.
+方法可以东西电影北京论坛.经济发现发布所有同时认为.孩子投资可能相关如何很多.
+时间使用大家电脑如此设计.的人中文进行包括.
+一点图片以下一些建设.这里建设女人没有.其他工程知道系列我们支持安全.
+部门新闻品牌是一一切名称.进入两个应用以上为什.
+以上那些日本.分析免费标准影响大学程序.运行系统因此如果过程能够.但是环境还是结果次数.
+文件当然文化时候.不同积分信息中国.两个男人全部电话.
+同时一个日期信息有关感觉.解决更多手机威望.
+市场女人技术作者介绍作者谢谢.中国任何你的一起发现学校公司.', 'a', 'wRdGmDbOOnomVbjQrvcWVyopoafvKfHwNfifnYbdwThoIJzKxPfGSFbJkIzVUvFxiZJZkGqNgcZVNwVrvwPDxqMsWrJznaVqEBDBvgpaEglaMOSqHeExcEydxvsAjjQfxuFRRytdJKgKvicbAMgJUZcYsNoatcIVtgEmdSYbUXwEePVBhYwdxYmKfOAsQBatLGRnpOisfyzTVSSLGuxTOOIfHdPdDXmRcHgqGxvOdLVzbHMGZTsJBQjsRMaxtJI', 'C', '那些阅读分析学校客户程序能够.以下制作只有专业.
+运行以及说明得到留言.公司时候必须朋友美国.法律经验新闻.
+支持更多您的以上已经很多以下.电脑国家世界开始国际.一样来源只要男人选择通过阅读我们.', '说明功能支持知道或者运行.运行最新其他到了女人当前语言.工作经验可能产品而且网站.
+应该标准软件点击如果.东西可以生产可以投资电脑.为什社会两个.', '市场计划现在学校因为技术.两个如此报告在线他的.
+完全使用社区应该这样有限.进入无法觉得类别就是全国.应该无法社会发展记者.
+使用完成生产.要求游戏还有免费.搜索开发为了影响部门.
+类型东西认为目前.工具社会完成朋友.支持作为完全汽车网络.
+系统根据部门一点还有.他们语言情况发现其他介绍.应用基本那个资料推荐积分需要.', '欢迎决定参加开发.网络世界作者一直.要求名称一样社会一些免费一点本站.
+的人详细环境个人.首页通过参加那么进入业务因此你的.教育具有日期通过主要您的发表以及.继续这种时间觉得你的登录.
+提供你的出现系列图片.或者操作地址关于到了信息.
+的人自己次数所有点击.
+为了留言觉得其他社会由于.也是其他现在喜欢谢谢.大学国家完成文件两个公司比较.
+喜欢实现应用品牌结果.责任同时她的公司教育.
+基本投资因为专业.
+成功各种希望方面.特别方法学校没有提供.', 'GTrvJvvYksTtftPsQvgUILAJYRDRRRbaEaZcjsYuBwUYEIoIwRRebskuawaXcmGSvpOeUGUQDMOcRzPlLVyLiGBdkvrznvDCVlIAbNkvhnlroriRrTNGlzCWrobYlPKdxxTuGafrWDoYoIyncjxxNABjmEjRjioWCaqfhynGKhdVVrFiZxhbGEXIfXzqdwSCUIMUSIuN', 'g+B_iCjTuRF&rIVctg8H', 'L**H5A0mWR', '的话广告品牌部门说明地方方法部分提供.', '正在欢迎有些发现首页过程注意过程特别.', 3, 784291998, NULL, NULL, 624000.8571989778, True, '问题法律事情一点拥有详细处理她的已经.', '公司是否评论欢迎决定信息拥有工程准备.', '^L^v2wAgJ@UJoWiy2k_$', '#n3VRzL2)o', '你们计划经营这么报告处理问题女人完成.', '在线注意地区解决事情地方计划建设发展.', 'Eq', '发表出来标准上海合作的话.名称解决来源看到.
+通过不过正在.可以文章部分.投资就是作者阅读最后.
+出现必须责任成功应用孩子位置相关.一种以后市场为了情况各种.经验地址行业注意类别这样免费.', 'P', '作者留言自己得到看到阅读.影响发展注册.
+进行事情所有日本投资推荐目前.
+关于也是现在社会一点过程.这是显示只要可是.浏览为了新闻决定成为更新得到.
+游戏控制发布电影工程工具.一种系统专业当然.
+当前喜欢商品名称记者搜索客户.到了销售进行个人合作决定情况如果.
+作品销售为什社区出来.得到法律只有城市处理大学也是.
+地区应该帮助感觉相关类别.男人行业这是新闻如此大小数据.电子等级进入以上方式起来.
+还有比较作者特别同时一点知道.手机男人时候继续注意事情.电脑都是设备成为不过.电话电子投资会员.');
+INSERT INTO test_vacuum.t1 (k_timestamp, id, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10, e11, e12, e13, e14, e15, e16, e17, e18, e19, e20, e21, e22, code1, code2, code3, code4, code5, code6, code7, code8, code9, code10, code11, code12, code13, code14, code15, code16) VALUES ('2024-06-17 01:41:09', 4, 6163, 902736631, NULL, NULL, NULL, NULL, '2021-03-26 03:36:31.629082', '网站公司中文项目然后活动回复.今天发现都是还是新闻学习一定.
+经营准备电子作为.类别等级或者社会标题操作网站.
+不会影响出来资源部门最大谢谢.不要制作如何经济都是技术等级.', '政府完成学校.文章东西一样论坛学习的是.
+类型服务问题学生大小.世界进行公司信息作者.正在为什所有信息名称我们.品牌资源如此论坛.
+加入手机那个部分.评论生活非常最大完全标题.全部拥有阅读会员.
+可以成功大家学习你的问题网站由于.来自能够重要广告次数两个作品一次.以上网上如此游戏.
+目前系列帖子都是精华论坛她的各种.日期部分次数都是工具.之间标准一定最大应该一样.之间要求看到音乐为什也是所有.
+只有注册朋友国家世界一种.活动还是最后功能日本或者.还是两个说明研究不是主要.', '类别问题资源行业重要点击.继续合作由于全部可是.
+国内来源应用发布比较更多.他的推荐新闻安全.资源准备看到软件内容公司因此学校.一样历史国内工具提供支持公司.
+一起因此都是音乐.电话起来只要.
+显示会员作为内容国内类型.分析系列全部帮助因为选择还是.作品电影内容.科技学生看到手机.
+希望更多登录不能所有经营为了社区.大小一些他的关系市场为了.我们比较感觉处理完全进入.
+论坛什么积分状态.或者是一地址客户.网络电脑只是最大以及直接以后发表.状态他们销售如果.
+关于网络精华次数品牌.这个的话更多回复这些完成.
+客户她的她的记者经济.虽然一起提供就是.留言不断世界重要研究进入国家.
+谢谢觉得结果精华需要.看到评论出现电脑.
+其中生产只有现在中国.很多因为国际手机帮助这么信息发表.
+地区上海单位点击名称.出现这么进行上海本站.学生科技所有如何认为游戏.', 'X', 'QPhUloXzzIDjPahQfTUEQnTBSLnaNFCRPjiXeuwAQcpQhRztQLmEwBMUMIIzRVTewbLRvILLfUlnyjrTrbqsDLiJeYzHhITBOHNGPCZwAPoyPwtbIJEedZFlCVPBFZqbRPjmhzCLEkhCsoQqrhRazwJiyAGnCIyiFBVSvRpEWBqzaCQFHzCxtSIxLMAHZYvqDwCNGIImJVTROUVEpgoaSwQrhqgyfYSIcxFxzzRZtwzPdUwmzXGYEmkLMZjceIc', 's', '之后只有方面开发计划.因为电话目前.中心部门这样根据欢迎以后是否.中心汽车设备方式感觉认为.
+网上已经怎么在线可能作为具有.更多类别可能之后都是.', '文化还是行业教育美国.全部其他提高商品这些.汽车如何只要要求出现一种.
+程序电脑一样怎么介绍.
+发现支持手机更多由于.那个管理因此自己以及支持程序回复.', '组织不能知道文化学习需要.很多实现非常组织.自己活动只要那么.
+发表中国业务所以公司.其他进行这里重要可能城市.
+成功记者类别品牌.实现可以然后这里一下应该.大学精华准备以下.价格男人说明.
+企业标准文件中心帮助更新一定重要.欢迎产品如果密码提供.大小组织使用现在深圳关于.
+之后记者选择生活主题以上还有.今天重要有限不是提供发展经济.信息知道一般程序.', '浏览日期已经作为处理你们.其他选择公司的话.来自报告手机科技上海具有东西工具.
+法律可能登录阅读质量其中您的.作者社会大小介绍.
+文件分析最新不要.等级都是安全.当然新闻一般到了.
+来自看到之间次数一次以上.登录品牌类型.
+内容不能规定.一般软件专业.
+正在自己介绍情况投资您的人员.有关非常一次经济点击浏览.
+音乐制作成功作品.他的事情设计内容资料由于.方法朋友的话.
+服务大小程序主要.空间可能服务你们世界.
+需要时间回复怎么发展部门工程.发表虽然方面以及实现不断以及事情.', 'hRxzEeXeSAuivUnwYZEDKXPkMyJLIRxjohAMyVeWyDQISzmPLhdxDqXvgwKYgzIygLJbogDtxtFVBHWzvQwqIbrbsCGgytVePYiJesnAjCWLAsjZTrhrkxSjEFtGAyCSvaARtwBhEHXYCRxxStTqFnQVbukkPfGRooPzxtLSeLVjRnUCDeQbzOqIvNuYCynHFexPmiKo', 'rWpXF^I_8#3#P)JR+o#m', 'zY4PSgprA_', '注意一般已经系列全部项目服务服务而且.', '都是表示东西工具科技使用电脑留言使用.', 4, 370168341, NULL, 291.2195920236211, -808966.726066892, True, '比较更新认为感觉关系具有方面开发功能.', '到了其实这是浏览一起设备查看最后合作.', '#+Ho7FlA^7$kmhDvQiSk', '%8Slsyb07d', '更多价格留言资料不是网上回复控制上海.', '合作更新成为应该所有论坛电话进行类别.', 'xY', '谢谢之间帖子特别制作都是.最新产品选择一切当然.
+可以不过的是网站文件.一个要求文件继续日本.如此公司实现其实他们.
+成为单位说明提高支持.不能进入管理的人这个这里.', 'd', '然后查看这种自己其中.我的类型参加来自功能.大家大家主要.
+而且计划网站一种合作为什提高.原因大学地区.在线次数记者建设其他安全要求.
+资料开发质量.查看不同因此今天可能次数发表什么.希望自己美国只要.
+女人责任但是她的国际今年空间.
+国内地区网站因为我的.以下这些目前教育中国.
+这个技术程序以上阅读次数不同.在线类型使用他们.说明市场所以论坛如何表示密码用户.
+一直一点主题活动.一直特别部门谢谢.说明大家积分.
+之间无法本站历史可以安全直接.质量作为选择进行任何学生.功能他的希望如何历史自己部分.');
+
+select
+  subq_0.c2 as c0,
+  ref_0.id as c1,
+  ref_0.code15 as c2
+from
+  public.t1 as ref_0,
+  lateral (select
+        ref_1.e3 as c0,
+        ref_0.code9 as c1,
+        15 as c2,
+        ref_0.e7 as c3,
+        ref_1.e22 as c4,
+        ref_0.code14 as c5,
+        ref_1.e9 as c6,
+        ref_2.code12 as c7,
+        ref_1.e8 as c8,
+        ref_2.code12 as c9,
+        ref_2.id as c10,
+        ref_1.code7 as c11
+      from
+        public.t1 as ref_1
+          left join public.t1 as ref_2
+          on (cast(null as _bytea) IS DISTINCT FROM cast(null as _bytea))
+      where EXISTS (
+        select
+            (select e20 from public.t1 limit 1 offset 1)
+               as c0,
+            (select e20 from public.t1 limit 1 offset 4)
+               as c1,
+            ref_3.e18 as c2,
+            ref_2.e4 as c3,
+            ref_3.e13 as c4,
+            ref_3.e18 as c5,
+            (select e18 from public.t1 limit 1 offset 48)
+               as c6,
+            ref_0.code2 as c7,
+            ref_4.code4 as c8,
+            ref_1.e11 as c9,
+            ref_0.e6 as c10,
+            ref_4.code3 as c11,
+            ref_4.e2 as c12,
+            ref_2.code12 as c13,
+            ref_1.e14 as c14,
+            ref_3.code15 as c15,
+            (select e19 from public.t1 limit 1 offset 43)
+               as c16,
+            (select e14 from public.t1 limit 1 offset 43)
+               as c17,
+            ref_2.e9 as c18,
+            (select id from public.t1 limit 1 offset 59)
+               as c19,
+            ref_1.code11 as c20,
+            ref_3.e12 as c21,
+            ref_3.code12 as c22
+          from
+            public.t1 as ref_3
+              inner join public.t1 as ref_4
+              on (ref_0.e16 is not NULL)
+          where (EXISTS (
+              select
+                  ref_4.e21 as c0,
+                  ref_3.e16 as c1,
+                  ref_2.e13 as c2,
+                  (select code4 from public.t1 limit 1 offset 1)
+                     as c3,
+                  ref_3.k_timestamp as c4,
+                  ref_3.e1 as c5,
+                  ref_4.k_timestamp as c6
+                from
+                  public.t1 as ref_5
+                where EXISTS (
+                  select
+                      ref_4.code15 as c0,
+                      ref_4.code16 as c1,
+                      ref_1.code14 as c2,
+                      ref_0.e6 as c3,
+                      ref_3.k_timestamp as c4
+                    from
+                      public.t1 as ref_6
+                    where EXISTS (
+                      select
+                          ref_6.code7 as c0,
+                          ref_6.e12 as c1,
+                          ref_3.code2 as c2,
+                          ref_5.code3 as c3,
+                          (select e22 from public.t1 limit 1 offset 5)
+                             as c4,
+                          ref_3.code3 as c5,
+                          ref_1.code4 as c6,
+                          ref_3.e2 as c7
+                        from
+                          public.t1 as ref_7
+                        where true)
+                    limit 172)))
+            or (ref_3.e3 <= ref_1.e5)
+          limit 37)) as subq_0
+where ref_0.e5 != pg_catalog.cluster_logical_timestamp()
+limit 107;
+
+set cluster setting ts.parallel_degree=default;
+use defaultdb;
+drop database test_vacuum cascade;

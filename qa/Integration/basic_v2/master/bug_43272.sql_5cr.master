@@ -255,7 +255,9 @@ where EXISTS (
     where cast(null as "timestamp") = cast(null as date)
     limit 99)
     limit 84) as subq_7;
-ERROR: invalid cast: bool -> timestamptz[], Expr: CAST(false AS TIMESTAMPTZ[]) IS NOT DISTINCT FROM CAST(NULL AS TIMESTAMPTZ[]) 
+  c0 | c1 | c2
+-----+----+-----
+(0 rows)
 > set cluster setting ts.parallel_degree=default;
 SET CLUSTER SETTING
 > use defaultdb;

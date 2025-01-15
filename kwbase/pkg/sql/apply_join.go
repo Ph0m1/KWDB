@@ -335,18 +335,28 @@ func runPlanInsidePlan(
 	)
 	defer recv.Release()
 
-	if !params.p.extendedEvalCtx.ExecCfg.DistSQLPlanner.PlanAndRunSubqueries(
-		params.ctx,
-		params.p,
-		params.extendedEvalCtx.copy,
-		plan.subqueryPlans,
-		recv,
-		true,
-	) {
-		if err := rowResultWriter.Err(); err != nil {
-			return err
+	if len(plan.subqueryPlans) > 0 {
+		// curPlan.subqueryPlans are the subqueries from the outer plan.
+		// curPlan must refer to the inner subqueries If the inner plan refer to the subqueries(plan.subqueryPlan).
+		// we should replace the subqueries on the curPlan and restore the original state before exiting.
+		oldSubqueries := params.p.curPlan.subqueryPlans
+		params.p.curPlan.subqueryPlans = plan.subqueryPlans
+		defer func() {
+			params.p.curPlan.subqueryPlans = oldSubqueries
+		}()
+		if !params.p.extendedEvalCtx.ExecCfg.DistSQLPlanner.PlanAndRunSubqueries(
+			params.ctx,
+			params.p,
+			params.extendedEvalCtx.copy,
+			plan.subqueryPlans,
+			recv,
+			true,
+		) {
+			if err := rowResultWriter.Err(); err != nil {
+				return err
+			}
+			return recv.commErr
 		}
-		return recv.commErr
 	}
 
 	// Make a copy of the EvalContext so it can be safely modified.
