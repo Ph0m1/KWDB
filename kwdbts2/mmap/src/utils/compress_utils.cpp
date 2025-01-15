@@ -183,7 +183,7 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
   struct stat buffer;
   if (stat(sqfs_file_path.c_str(), &buffer) != 0) {
     err_info.errcode = KWENOOBJ;
-    err_info.errmsg = sqfs_file_path + " is not exist";
+    err_info.errmsg = sqfs_file_path + " does not exist";
     return false;
   }
   // check mount directory exists.

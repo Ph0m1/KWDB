@@ -2566,7 +2566,7 @@ func (p *PhysicalPlan) PushAggToTableReader(
 		r.AggregatorPost = tsPost
 		p.Processors[idx].TSSpec.Post.OutputTypes = tsPost.OutputTypes
 	} else {
-		str := fmt.Sprintf("PushAggToTableReader table reader is not exists, sub is %v", p.Processors[idx].TSSpec.Core)
+		str := fmt.Sprintf("PushAggToTableReader table reader does not exist, sub is %v", p.Processors[idx].TSSpec.Core)
 		panic(str)
 	}
 }

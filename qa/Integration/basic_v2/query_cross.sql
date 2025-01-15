@@ -4017,3 +4017,80 @@ AND d.installDate = ms.ts::date
 reset extra_float_digits;
 drop DATABASE rdb;
 drop DATABASE tsdb cascade;
+
+create ts database iot_gas_meter;
+USE iot_gas_meter;
+CREATE TABLE iot_gas_meter.meter_detail_info (
+create_time                     TIMESTAMPTZ     NOT NULL,
+read_time                   TIMESTAMPTZ     NOT NULL,
+std_sum_vol             FLOAT4                  NOT NULL,
+meter_status                INT8                    NULL,
+event_code                  INT8                    NULL,
+meter_time                  TIMESTAMPTZ             NOT NULL,
+main_voltage                FLOAT4                  NULL,
+eng_sum_vol                 FLOAT4                  NULL,
+com_sum_vol                 FLOAT4                  NULL,
+temperature                 FLOAT4                  NULL,
+pressure                    INT8                    NULL,
+acoustic_velocity   INT4                    NULL,
+measure_voltage         FLOAT4                  NULL,
+update_time                 TIMESTAMPTZ     NOT NULL
+) TAGS (
+meter_id                    INT8                    NOT NULL,
+ou_id                           INT4                    NOT NULL,
+mnft_code                       INT2                    NOT NULL
+) PRIMARY TAGS(mnft_code, meter_id)
+retentions 30d
+ACTIVETIME 30d
+partition interval 10d ;
+
+
+CREATE TABLE iot_gas_meter.bill_abs_info (
+ create_time                             TIMESTAMPTZ     NOT NULL,
+ charge_time                                 TIMESTAMPTZ     NOT NULL,
+ calc_amount                                     FLOAT8                  NULL,
+ calc_volume                                 FLOAT8                  NULL,
+ accumulate_volume                   FLOAT8                  NULL,
+ meter_balance                               FLOAT8                  NULL,
+ update_time                                 TIMESTAMPTZ     NOT NULL
+) TAGS (
+meter_id                                        INT8                    NOT NULL,
+ou_id                                           INT4                    NOT NULL,
+mnft_code                                       INT2                    NOT NULL
+) PRIMARY TAGS(mnft_code, meter_id) retentions 30d partition interval 10d;
+
+
+create database statistics;
+create table statistics.tmp_uniq_id_lost (last_time TIMESTAMPTZ not null, meter_id int8 not null unique, ou_id int4, mnft_code int2);
+
+explain select *
+from meter_detail_info
+where meter_id = '1252011120050116'
+  and mnft_code = '125'
+    limit 10;
+
+explain select *
+from meter_detail_info
+where create_time >= TIMESTAMPTZ '2024-12-13 00:00:00.000+00:00'
+  and meter_id = '1252011120050116'
+  and mnft_code = '125'
+limit 10;
+
+explain select count(1)
+from meter_detail_info
+where create_time >=date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-2h
+  and create_time <date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-1h;
+
+set cluster setting sql.stats.ts_automatic_collection.enabled=true;
+
+explain select meter_id, mnft_code, ou_id, count(1) as num
+from meter_detail_info
+where create_time >=date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-2h
+  and create_time <date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-1h
+  and ou_id = '138800'
+group by meter_id, mnft_code , ou_id having count(1)>1;
+
+reset cluster setting sql.stats.ts_automatic_collection.enabled;
+
+drop database iot_gas_meter cascade;
+drop database statistics cascade;

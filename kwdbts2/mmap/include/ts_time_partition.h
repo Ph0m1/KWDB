@@ -248,7 +248,7 @@ class TsTimePartition : public TSObject {
       }
       if (UNLIKELY(value->getObjectStatus() == OBJ_READY && segment_id >= value->segment_id() + value->getBlockMaxNum())) {
         // this segment may not satisfy, means we not found segment.
-        LOG_ERROR("getSegmentTable segment[%u] is not exists", segment_id);
+        LOG_ERROR("getSegmentTable segment[%u] does not exist", segment_id);
         return nullptr;
       }
       return value;

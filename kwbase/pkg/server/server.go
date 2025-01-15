@@ -1450,7 +1450,7 @@ func (s *Server) CheckClusterStartMode() error {
 	file := filepath.Join(string(storePath), "kwbase.start_mode")
 
 	if _, err := os.Stat(file); os.IsNotExist(err) {
-		err := fmt.Errorf("cluster start mode file is not exist")
+		err := fmt.Errorf("cluster start mode file does not exist")
 		return err
 	}
 	fileContext, err := ioutil.ReadFile(file)

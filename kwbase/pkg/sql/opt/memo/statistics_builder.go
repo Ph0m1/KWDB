@@ -41,7 +41,8 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-var statsAnnID = opt.NewTableAnnID()
+// StatsAnnID is a unique identifier for table statistics annotations.
+var StatsAnnID = opt.NewTableAnnID()
 
 // statisticsBuilder is responsible for building the statistics that are
 // used by the coster to estimate the cost of expressions.
@@ -513,7 +514,7 @@ func (sb *statisticsBuilder) colStatLeaf(
 // be accessed multiple times during query optimization. For more details, see
 // props.Statistics.
 func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Statistics {
-	stats, ok := sb.md.TableAnnotation(tabID, statsAnnID).(*props.Statistics)
+	stats, ok := sb.md.TableAnnotation(tabID, StatsAnnID).(*props.Statistics)
 	if ok {
 		// Already made.
 		return stats
@@ -601,7 +602,7 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 			}
 		}
 	}
-	sb.md.SetTableAnnotation(tabID, statsAnnID, stats)
+	sb.md.SetTableAnnotation(tabID, StatsAnnID, stats)
 	return stats
 }
 

@@ -34,6 +34,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/ordering"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -404,7 +405,15 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	}
 
 	// pTagRowCount is all rows of tag table
-	var pTagRowCount float64
+	var pTagRowCount, needPtagRow float64
+	// Get original table statistics
+	// When selectExpr->constrained tsScanExpr, the relational properties will change,
+	// So get original table statistics by metadata.
+	oriStats, ok := c.mem.Metadata().TableAnnotation(tsScan.Table, memo.StatsAnnID).(*props.Statistics)
+	if ok {
+		// row count of full tag table.
+		pTagRowCount = oriStats.PTagCount // table ptag count
+	}
 
 	// talbeCountFact is the selection factors for scanning full table data,change through needPtagRow
 	// when talbeCountFact 1.0, full scan table
@@ -422,20 +431,6 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 			disorderRowCount = stats.SortDistribution.UnorderedRowCount
 		}
 	}
-	colStat, ok := stats.ColStats.Lookup(pTagColIDs)
-	if ok {
-		// row count of full tag table.
-		pTagRowCount = stats.PTagCount // table ptag count
-
-		// needPtagRow is needed Ptag rows obtained through selection rate
-		needPtagRow := colStat.DistinctCount // ptag count after filter
-
-		if pTagRowCount == 0 {
-			talbeCountFactor = cpuCostFactor
-		} else {
-			talbeCountFactor = math.Min(needPtagRow/pTagRowCount, 1) * cpuCostFactor
-		}
-	}
 
 	// row count of full table.
 	rowCount := stats.RowCount
@@ -450,10 +445,18 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	var cost memo.Cost
 	if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter == nil {
 		// case: TagIndex
+		if len(tsScan.PrimaryTagValues) > 0 {
+			needPtagRow = float64(len(tsScan.PrimaryTagValues[0]))
+		}
+		talbeCountFactor = math.Min(needPtagRow/pTagRowCount, 1) * cpuCostFactor
 		cost = memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount +
 			talbeCountFactor*fullScanTblCost)
 	} else if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter != nil {
 		// case: TagIndexTable
+		if len(tsScan.PrimaryTagValues) > 0 {
+			needPtagRow = float64(len(tsScan.PrimaryTagValues[0]))
+		}
+		talbeCountFactor = math.Min(needPtagRow/pTagRowCount, 1) * cpuCostFactor
 		cost = memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount*tableScanCostUnit +
 			talbeCountFactor*fullScanTagTblCost +
 			talbeCountFactor*fullScanTblCost)

@@ -1205,9 +1205,10 @@ func (m *Memo) isTsColumnOrConst(src opt.ScalarExpr) uint32 {
 				return 1
 			}
 		}
-		return 0
-	case *ConstExpr:
-		return 2
+	default:
+		if src.CheckConstDeductionEnabled() {
+			return 2
+		}
 	}
 	return 0
 }

@@ -173,6 +173,17 @@ func (b *Builder) BuildScalar(ivh *tree.IndexedVarHelper) (tree.TypedExpr, error
 	return b.buildScalar(&ctx, scalar)
 }
 
+// BuildScalarByExpr converts a scalar expression to a TypedExpr By Expr. Variables are mapped
+// according to the IndexedVarHelper.
+func BuildScalarByExpr(
+	expr opt.ScalarExpr, ivh *tree.IndexedVarHelper, evalCtx *tree.EvalContext,
+) (tree.TypedExpr, error) {
+	var b Builder
+	b.evalCtx = evalCtx
+	b.e = expr
+	return b.BuildScalar(ivh)
+}
+
 func (b *Builder) decorrelationError() error {
 	return errors.Errorf("could not decorrelate subquery")
 }

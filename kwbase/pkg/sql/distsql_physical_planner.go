@@ -3589,7 +3589,11 @@ func pushAggToScan(
 	for _, idx := range resultRouters {
 		if n.optType.UseStatisticOpt() {
 			var constValues []int64
-			if v, ok := n.plan.(*renderNode); ok {
+			tempPlan := n.plan
+			if s, ok := n.plan.(*synchronizerNode); ok {
+				tempPlan = s.plan
+			}
+			if v, ok := tempPlan.(*renderNode); ok {
 				constValues = make([]int64, len(v.render))
 				for i, val := range v.render {
 					if ti, ok1 := val.(*tree.DTimestampTZ); ok1 {

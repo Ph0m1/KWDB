@@ -208,7 +208,7 @@ function(generate_proto protofile)
          COMMAND rm -rf ${CMAKE_BINARY_DIR}/tmp
       )
   else()
-      message("${protoname}.pb.cc is not exists")
+      message("${protoname}.pb.cc does not exist")
       EXECUTE_PROCESS(
           COMMAND ${PROTOBUF_C} ${protofile} --cpp_out=${protofolder} -I ${protofolder}
       )

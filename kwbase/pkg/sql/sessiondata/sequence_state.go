@@ -86,7 +86,7 @@ func (ss *SequenceState) GetLastValue() (int64, error) {
 		return v, nil
 	}
 
-	// if lastValue is not exist, return error
+	// if lastValue does not exist, return error
 	return 0, pgerror.New(
 		pgcode.ObjectNotInPrerequisiteState, "lastval is not yet defined in this session")
 }

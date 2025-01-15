@@ -63,7 +63,7 @@ function version_compare() {
     old_basic_version=$(sed -n '1p' /etc/kaiwudb/info/.version)
     old_extend_version=$(sed -n '2p' /etc/kaiwudb/info/.version)
   else
-    # if version file is not exist, considered the version to be lower
+    # if version file does not exist, considered the version to be lower
     return 0
   fi
   current_basic_version=$(sed -n '1p' $base_dir/packages/.version)

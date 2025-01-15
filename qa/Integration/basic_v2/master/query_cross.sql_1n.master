@@ -8027,3 +8027,171 @@ SET
 DROP DATABASE
 > drop DATABASE tsdb cascade;
 DROP DATABASE
+> create ts database iot_gas_meter;
+CREATE TS DATABASE
+> USE iot_gas_meter;
+SET
+> CREATE TABLE iot_gas_meter.meter_detail_info (
+create_time                     TIMESTAMPTZ     NOT NULL,
+read_time                   TIMESTAMPTZ     NOT NULL,
+std_sum_vol             FLOAT4                  NOT NULL,
+meter_status                INT8                    NULL,
+event_code                  INT8                    NULL,
+meter_time                  TIMESTAMPTZ             NOT NULL,
+main_voltage                FLOAT4                  NULL,
+eng_sum_vol                 FLOAT4                  NULL,
+com_sum_vol                 FLOAT4                  NULL,
+temperature                 FLOAT4                  NULL,
+pressure                    INT8                    NULL,
+acoustic_velocity   INT4                    NULL,
+measure_voltage         FLOAT4                  NULL,
+update_time                 TIMESTAMPTZ     NOT NULL
+) TAGS (
+meter_id                    INT8                    NOT NULL,
+ou_id                           INT4                    NOT NULL,
+mnft_code                       INT2                    NOT NULL
+) PRIMARY TAGS(mnft_code, meter_id)
+retentions 30d
+ACTIVETIME 30d
+partition interval 10d ;
+CREATE TABLE
+> CREATE TABLE iot_gas_meter.bill_abs_info (
+ create_time                             TIMESTAMPTZ     NOT NULL,
+ charge_time                                 TIMESTAMPTZ     NOT NULL,
+ calc_amount                                     FLOAT8                  NULL,
+ calc_volume                                 FLOAT8                  NULL,
+ accumulate_volume                   FLOAT8                  NULL,
+ meter_balance                               FLOAT8                  NULL,
+ update_time                                 TIMESTAMPTZ     NOT NULL
+) TAGS (
+meter_id                                        INT8                    NOT NULL,
+ou_id                                           INT4                    NOT NULL,
+mnft_code                                       INT2                    NOT NULL
+) PRIMARY TAGS(mnft_code, meter_id) retentions 30d partition interval 10d;
+CREATE TABLE
+> create database statistics;
+CREATE DATABASE
+> create table statistics.tmp_uniq_id_lost (last_time TIMESTAMPTZ not null, meter_id int8 not null unique, ou_id int4, mnft_code int2);
+CREATE TABLE
+> explain select *
+from meter_detail_info
+where meter_id = '1252011120050116'
+  and mnft_code = '125'
+    limit 10;
+           tree          |     field      |         description
+-------------------------+----------------+------------------------------
+                         | distributed    | true
+                         | vectorized     | false
+  limit                  |                |
+   │                     | engine type    | time series
+   │                     | count          | 10
+   └── synchronizer      |                |
+        └── limit        |                |
+             │           | engine type    | time series
+             │           | count          | 10
+             └── ts scan |                |
+                         | ts-table       | meter_detail_info
+                         | access mode    | tagIndexTable
+                         | ptag filter[0] | meter_id = 1252011120050116
+                         | ptag filter[1] | mnft_code = 125
+(14 rows)
+> explain select *
+from meter_detail_info
+where create_time >= TIMESTAMPTZ '2024-12-13 00:00:00.000+00:00'
+  and meter_id = '1252011120050116'
+  and mnft_code = '125'
+limit 10;
+           tree          |     field      |          description
+-------------------------+----------------+--------------------------------
+                         | distributed    | true
+                         | vectorized     | false
+  limit                  |                |
+   │                     | engine type    | time series
+   │                     | count          | 10
+   └── synchronizer      |                |
+        └── limit        |                |
+             │           | engine type    | time series
+             │           | count          | 10
+             └── ts scan |                |
+                         | ts-table       | meter_detail_info
+                         | access mode    | tagIndexTable
+                         | spans:fromTime | 2024-12-13 00:00:00 +0000 UTC
+                         | spans:toTime   | 2970-01-01 00:00:00 +0000 UTC
+                         | ptag filter[0] | meter_id = 1252011120050116
+                         | ptag filter[1] | mnft_code = 125
+(16 rows)
+> explain select count(1)
+from meter_detail_info
+where create_time >=date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-2h
+  and create_time <date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-1h;
+        tree        |        field        |            description
+--------------------+---------------------+------------------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | count(1)
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | 1                   | 1
+        └── ts scan |                     |
+                    | ts-table            | meter_detail_info
+                    | access mode         | metaTable
+                    | use statistic       | true
+                    | spans:fromTime      | 2023-12-31 22:00:00 +0000 UTC
+                    | spans:toTime        | 2023-12-31 22:59:59.999 +0000 UTC
+(17 rows)
+> set cluster setting sql.stats.ts_automatic_collection.enabled=true;
+SET CLUSTER SETTING
+> explain select meter_id, mnft_code, ou_id, count(1) as num
+from meter_detail_info
+where create_time >=date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-2h
+  and create_time <date_trunc('day', '2024-01-01 10:00:00'::timestamptz)-1h
+  and ou_id = '138800'
+group by meter_id, mnft_code , ou_id having count(1)>1;
+                tree               |        field        |            description
+-----------------------------------+---------------------+------------------------------------
+                                   | distributed         | true
+                                   | vectorized          | false
+  render                           |                     |
+   │                               | engine type         | time series
+   │                               | meter_id            | meter_id
+   │                               | mnft_code           | mnft_code
+   │                               | ou_id               | any_not_null
+   │                               | num                 | count
+   └── filter                      |                     |
+        │                          | engine type         | time series
+        │                          | filter              | count > 1
+        └── group                  |                     |
+             │                     | engine type         | time series
+             │                     | aggregate 0         | meter_id
+             │                     | aggregate 1         | mnft_code
+             │                     | aggregate 2         | count(1)
+             │                     | aggregate 3         | any_not_null(ou_id)
+             │                     | group by            | meter_id, mnft_code
+             │                     | pushLocalAggToScan  | true
+             │                     | pruneFinalAgg       | true
+             └── synchronizer      |                     |
+                  └── render       |                     |
+                       │           | engine type         | time series
+                       │           | 1                   | 1
+                       │           | meter_id            | meter_id
+                       │           | ou_id               | ou_id
+                       │           | mnft_code           | mnft_code
+                       └── ts scan |                     |
+                                   | ts-table            | meter_detail_info
+                                   | access mode         | tableTableMeta
+                                   | use statistic       | true
+                                   | spans:fromTime      | 2023-12-31 22:00:00 +0000 UTC
+                                   | spans:toTime        | 2023-12-31 22:59:59.999 +0000 UTC
+                                   | tag filter[0]       | ou_id = 138800
+(34 rows)
+> reset cluster setting sql.stats.ts_automatic_collection.enabled;
+SET CLUSTER SETTING
+> drop database iot_gas_meter cascade;
+DROP DATABASE
+> drop database statistics cascade;
+DROP DATABASE

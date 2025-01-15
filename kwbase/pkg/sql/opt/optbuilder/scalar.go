@@ -30,6 +30,8 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/server/telemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/constraint"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/norm"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
@@ -43,6 +45,23 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 )
+
+// check whether expr convert const and set IsConstForLogicPlan
+func (b *Builder) setConstDeductionEnabled(scalar opt.ScalarExpr, flag bool) opt.ScalarExpr {
+	if flag {
+		scalar.SetConstDeductionEnabled(flag)
+		if f, ok1 := scalar.(*memo.FunctionExpr); ok1 {
+			if _, ok2 := constraint.ConstScalarWhitelist[f.FunctionPrivate.Name]; !ok2 {
+				ivh := tree.MakeIndexedVarHelper(nil /* container */, 0)
+				tExpr, err := execbuilder.BuildScalarByExpr(scalar, &ivh, b.evalCtx)
+				if _, ok := tExpr.(tree.Datum); !ok || err != nil {
+					scalar.SetConstDeductionEnabled(false)
+				}
+			}
+		}
+	}
+	return scalar
+}
 
 // buildScalar builds a set of memo groups that represent the given scalar
 // expression. If outScope is not nil, then this is a projection context, and
@@ -136,7 +155,7 @@ func (b *Builder) buildScalar(
 		right := b.buildScalar(t.TypedRight(), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructAnd(left, right)
 		if left.CheckConstDeductionEnabled() && right.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -157,12 +176,12 @@ func (b *Builder) buildScalar(
 			}
 		}
 		out = b.factory.ConstructArray(els, arrayType)
-		out.SetConstDeductionEnabled(flag)
+		out = b.setConstDeductionEnabled(out, flag)
 
 	case *tree.CollateExpr:
 		in := b.buildScalar(t.Expr.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructCollate(in, t.Locale)
-		out.SetConstDeductionEnabled(in.CheckConstDeductionEnabled())
+		out = b.setConstDeductionEnabled(out, in.CheckConstDeductionEnabled())
 
 	case *tree.ArrayFlatten:
 		if b.AllowUnsupportedExpr {
@@ -232,7 +251,7 @@ func (b *Builder) buildScalar(
 		}
 		out = b.factory.ConstructIfErr(cond, orElse, errCode)
 		if cond.CheckConstDeductionEnabled() && orElse.CheckConstDeductionEnabled() && errCode.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -259,7 +278,7 @@ func (b *Builder) buildScalar(
 			t.ResolvedType(),
 		)
 		if leftRes.CheckConstDeductionEnabled() && rightRes.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -291,7 +310,7 @@ func (b *Builder) buildScalar(
 		}
 		out = b.factory.ConstructCase(input, whens, orElse)
 		if input.CheckConstDeductionEnabled() && whens.CheckConstDeductionEnabled() && orElse.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -302,7 +321,7 @@ func (b *Builder) buildScalar(
 		out = b.factory.ConstructCast(arg, t.Type)
 		// if CastExpr can convert ConstExpr, set flag to true, else set flag to false
 		if _, ok := out.(*memo.ConstExpr); ok {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -317,12 +336,12 @@ func (b *Builder) buildScalar(
 			}
 		}
 		out = b.factory.ConstructCoalesce(args)
-		out.SetConstDeductionEnabled(flag)
+		out = b.setConstDeductionEnabled(out, flag)
 
 	case *tree.ColumnAccessExpr:
 		input := b.buildScalar(t.Expr.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructColumnAccess(input, memo.TupleOrdinal(t.ColIndex))
-		out.SetConstDeductionEnabled(input.CheckConstDeductionEnabled())
+		out = b.setConstDeductionEnabled(out, input.CheckConstDeductionEnabled())
 
 	case *tree.ComparisonExpr:
 		if sub, ok := t.Right.(*subquery); ok && sub.isMultiRow() {
@@ -339,7 +358,7 @@ func (b *Builder) buildScalar(
 			right := b.buildScalar(t.TypedRight(), inScope, nil, nil, colRefs)
 			out = b.constructComparison(t.Operator, left, right)
 			if left.CheckConstDeductionEnabled() && right.CheckConstDeductionEnabled() {
-				out.SetConstDeductionEnabled(true)
+				out = b.setConstDeductionEnabled(out, true)
 			} else {
 				out.SetConstDeductionEnabled(false)
 			}
@@ -355,7 +374,7 @@ func (b *Builder) buildScalar(
 			}
 		}
 		out = b.factory.ConstructTuple(els, t.ResolvedType())
-		out.SetConstDeductionEnabled(flag)
+		out = b.setConstDeductionEnabled(out, flag)
 
 	case *tree.FuncExpr:
 		return b.buildFunction(t, inScope, outScope, outCol, colRefs)
@@ -367,7 +386,7 @@ func (b *Builder) buildScalar(
 		orElse := b.buildScalar(t.Else.(tree.TypedExpr), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructCase(input, whens, orElse)
 		if input.CheckConstDeductionEnabled() && whens.CheckConstDeductionEnabled() && orElse.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -383,7 +402,7 @@ func (b *Builder) buildScalar(
 	case *tree.NotExpr:
 		input := b.buildScalar(t.TypedInnerExpr(), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructNot(input)
-		out.SetConstDeductionEnabled(input.CheckConstDeductionEnabled())
+		out = b.setConstDeductionEnabled(out, input.CheckConstDeductionEnabled())
 
 	case *tree.NullIfExpr:
 		// Ensure that the type of the first expression matches the resolved type
@@ -396,7 +415,7 @@ func (b *Builder) buildScalar(
 		whens := memo.ScalarListExpr{b.factory.ConstructWhen(cond, memo.NullSingleton)}
 		out = b.factory.ConstructCase(input, whens, input)
 		if input.CheckConstDeductionEnabled() && whens.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -406,7 +425,7 @@ func (b *Builder) buildScalar(
 		right := b.buildScalar(t.TypedRight(), inScope, nil, nil, colRefs)
 		out = b.factory.ConstructOr(left, right)
 		if left.CheckConstDeductionEnabled() && right.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -424,7 +443,7 @@ func (b *Builder) buildScalar(
 				panic(err)
 			}
 			out = b.factory.ConstructConstVal(d, t.ResolvedType())
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out = b.factory.ConstructPlaceholder(t)
 		}
@@ -437,7 +456,7 @@ func (b *Builder) buildScalar(
 		out = b.buildRangeCond(t.Not, t.Symmetric, inputFrom, from, inputTo, to)
 		if inputFrom.CheckConstDeductionEnabled() && from.CheckConstDeductionEnabled() &&
 			inputTo.CheckConstDeductionEnabled() && to.CheckConstDeductionEnabled() {
-			out.SetConstDeductionEnabled(true)
+			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out.SetConstDeductionEnabled(false)
 		}
@@ -462,7 +481,7 @@ func (b *Builder) buildScalar(
 			}
 		}
 		out = b.factory.ConstructTuple(els, t.ResolvedType())
-		out.SetConstDeductionEnabled(flag)
+		out = b.setConstDeductionEnabled(out, flag)
 
 	case *subquery:
 		out, _ = b.buildSingleRowSubquery(t, inScope)
@@ -480,12 +499,12 @@ func (b *Builder) buildScalar(
 			}
 		}
 		out = b.factory.ConstructTuple(els, t.ResolvedType())
-		out.SetConstDeductionEnabled(flag)
+		out = b.setConstDeductionEnabled(out, flag)
 
 	case *tree.UnaryExpr:
 		input := b.buildScalar(t.TypedInnerExpr(), inScope, nil, nil, colRefs)
 		out = b.constructUnary(t.Operator, input, t.ResolvedType())
-		out.SetConstDeductionEnabled(input.CheckConstDeductionEnabled())
+		out = b.setConstDeductionEnabled(out, input.CheckConstDeductionEnabled())
 
 	case *tree.IsOfTypeExpr:
 		// IsOfTypeExpr is a little strange because its value can be determined
@@ -505,14 +524,14 @@ func (b *Builder) buildScalar(
 		} else {
 			out = b.factory.ConstructFalse()
 		}
-		out.SetConstDeductionEnabled(true)
+		out = b.setConstDeductionEnabled(out, true)
 
 	// NB: this is the exception to the sorting of the case statements. The
 	// tree.Datum case needs to occur after *tree.Placeholder which implements
 	// Datum.
 	case tree.Datum:
 		out = b.factory.ConstructConstVal(t, t.ResolvedType())
-		out.SetConstDeductionEnabled(true)
+		out = b.setConstDeductionEnabled(out, true)
 
 	default:
 		if b.AllowUnsupportedExpr {
@@ -599,7 +618,7 @@ func (b *Builder) buildFunction(
 		Overload:   f.ResolvedOverload(),
 	})
 
-	out.SetConstDeductionEnabled(isConstForLogicPlanArg)
+	out = b.setConstDeductionEnabled(out, isConstForLogicPlanArg)
 
 	if isGenerator(def) {
 		return b.finishBuildGeneratorFunction(f, out, inScope, outScope, outCol)

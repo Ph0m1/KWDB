@@ -79,7 +79,7 @@ ALTER TABLE
   t-s-scan
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1, distinct(8)=1, null(8)=0, filteredRowCount=1000.001, disorderRowCount=0]
-   ├── cost: 0.01170544
+   ├── cost: 0.034
    ├── fd: ()-->(8)
    └── prune: (1-7,9-13)
 (6 rows)
@@ -101,7 +101,7 @@ ALTER TABLE
   t-s-scan
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=10, distinct(8)=10, null(8)=0, filteredRowCount=10000.01, disorderRowCount=0]
-   ├── cost: 0.0270544
+   ├── cost: 0.034
    └── prune: (1-7,9-13)
 (5 rows)
 > explain select * from order_table where attr1 > 500;
@@ -190,13 +190,13 @@ ALTER TABLE
   select
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1.11111111, distinct(1)=1.11111111, null(1)=0, distinct(8)=1.11111111, null(8)=0]
-   ├── cost: 1170.54
+   ├── cost: 1000.044
    ├── prune: (2-7,9-13)
    ├── t-s-scan
    │    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    │    ├── stats: [rows=100000, distinct(1)=100000, null(1)=0, distinct(8)=100000, null(8)=0, filteredRowCount=1000.00001, disorderRowCount=0]
    │    │   histogram(8)=
-   │    ├── cost: 170.53
+   │    ├── cost: 0.034
    │    ├── key: (1)
    │    └── fd: (1)-->(2-13)
    └── filters
@@ -222,13 +222,13 @@ ALTER TABLE
   select
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1.11111111, distinct(1)=1.11111111, null(1)=0, distinct(8)=1.11111111, null(8)=0]
-   ├── cost: 1170.54
+   ├── cost: 1000.044
    ├── prune: (2-7,9-13)
    ├── t-s-scan
    │    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    │    ├── stats: [rows=100000, distinct(1)=100000, null(1)=0, distinct(8)=100000, null(8)=0, filteredRowCount=444.444444, disorderRowCount=0]
    │    │   histogram(8)=
-   │    ├── cost: 170.53
+   │    ├── cost: 0.034
    │    ├── key: (1)
    │    └── fd: (1)-->(2-13)
    └── filters
@@ -254,13 +254,13 @@ ALTER TABLE
   select
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1.11111111, distinct(1)=1.11111111, null(1)=0, distinct(8)=1.11111111, null(8)=0]
-   ├── cost: 1170.54
+   ├── cost: 1000.044
    ├── prune: (2-7,9-13)
    ├── t-s-scan
    │    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    │    ├── stats: [rows=100000, distinct(1)=100000, null(1)=0, distinct(8)=100000, null(8)=0, filteredRowCount=0, disorderRowCount=0]
    │    │   histogram(8)=
-   │    ├── cost: 170.53
+   │    ├── cost: 0.034
    │    ├── key: (1)
    │    └── fd: (1)-->(2-13)
    └── filters
@@ -336,7 +336,7 @@ ALTER TABLE
   t-s-scan
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1, distinct(8)=1, null(8)=0, filteredRowCount=1000.001, disorderRowCount=999.000999]
-   ├── cost: 69.0893373
+   ├── cost: 69.1116319
    ├── fd: ()-->(8)
    └── prune: (1-7,9-13)
 (6 rows)
@@ -357,7 +357,7 @@ ALTER TABLE
   t-s-scan
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=10, distinct(8)=10, null(8)=0, filteredRowCount=10000.01, disorderRowCount=9990.00999]
-   ├── cost: 921.062113
+   ├── cost: 921.069058
    └── prune: (1-7,9-13)
 (5 rows)
 > explain select * from unordered_table where attr1 > 500;
@@ -443,13 +443,13 @@ ALTER TABLE
   select
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1.11111111, distinct(1)=1.11111111, null(1)=0, distinct(8)=1.11111111, null(8)=0]
-   ├── cost: 1239.61755
+   ├── cost: 1069.12155
    ├── prune: (2-7,9-13)
    ├── t-s-scan
    │    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    │    ├── stats: [rows=100000, distinct(1)=100000, null(1)=0, distinct(8)=100000, null(8)=0, filteredRowCount=1000.00001, disorderRowCount=1000]
    │    │   histogram(8)=
-   │    ├── cost: 239.607554
+   │    ├── cost: 69.1115537
    │    ├── key: (1)
    │    └── fd: (1)-->(2-13)
    └── filters
@@ -474,13 +474,13 @@ ALTER TABLE
   select
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1.11111111, distinct(1)=1.11111111, null(1)=0, distinct(8)=1.11111111, null(8)=0]
-   ├── cost: 1197.637
+   ├── cost: 1027.141
    ├── prune: (2-7,9-13)
    ├── t-s-scan
    │    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    │    ├── stats: [rows=100000, distinct(1)=100000, null(1)=0, distinct(8)=100000, null(8)=0, filteredRowCount=444.444444, disorderRowCount=444.444444]
    │    │   histogram(8)=
-   │    ├── cost: 197.627001
+   │    ├── cost: 27.1310003
    │    ├── key: (1)
    │    └── fd: (1)-->(2-13)
    └── filters
@@ -506,13 +506,13 @@ ALTER TABLE
   select
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=1.11111111, distinct(1)=1.11111111, null(1)=0, distinct(8)=1.11111111, null(8)=0]
-   ├── cost: 1170.54
+   ├── cost: 1000.044
    ├── prune: (2-7,9-13)
    ├── t-s-scan
    │    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    │    ├── stats: [rows=100000, distinct(1)=100000, null(1)=0, distinct(8)=100000, null(8)=0, filteredRowCount=0, disorderRowCount=0]
    │    │   histogram(8)=
-   │    ├── cost: 170.53
+   │    ├── cost: 0.034
    │    ├── key: (1)
    │    └── fd: (1)-->(2-13)
    └── filters
@@ -581,7 +581,7 @@ ALTER TABLE
   t-s-scan
    ├── columns: time:1 e1:2 e2:3 e3:4 e4:5 e5:6 e6:7 attr1:8 attr2:9 attr3:10 attr4:11 attr5:12 attr6:13
    ├── stats: [rows=100, distinct(8)=1, null(8)=0, distinct(9)=1, null(9)=0, distinct(10)=1, null(10)=0, filteredRowCount=100000.1, disorderRowCount=39229.2276]
-   ├── cost: 4284.09466
+   ├── cost: 4267.54666
    ├── fd: ()-->(8-10)
    └── prune: (1-7,11-13)
 (6 rows)

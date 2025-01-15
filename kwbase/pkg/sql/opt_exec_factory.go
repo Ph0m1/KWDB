@@ -39,6 +39,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/constraint"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/row"
@@ -2457,9 +2458,13 @@ func (ef *execFactory) makeSpansForSingleColumn(
 		out.Spans = spans
 		return true
 	}
-
-	if opt.IsConstValueOp(val) {
-		return ef.makeSpansForSingleColumnDatum(op, memo.ExtractConstDatum(val), out)
+	scalar, ok := val.(opt.ScalarExpr)
+	if opt.IsConstValueOp(val) || (ok && scalar.CheckConstDeductionEnabled()) {
+		ivh := tree.MakeIndexedVarHelper(nil /* container */, 0)
+		tExpr, err := execbuilder.BuildScalarByExpr(val.(opt.ScalarExpr), &ivh, ef.planner.EvalContext())
+		if datum, ok := tExpr.(tree.Datum); ok && err == nil {
+			return ef.makeSpansForSingleColumnDatum(op, datum, out)
+		}
 	}
 
 	unconstrained(out)
