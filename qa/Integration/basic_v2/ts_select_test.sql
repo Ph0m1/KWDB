@@ -1574,6 +1574,12 @@ explain select count(e1+e2) from test_ts.ts_table;
 -- ZDP-40021
 select count(localtime()) from test_ts.ts_table;
 
+-- ZDP-44520
+use test_ts;
+create table ts_table3(time timestamp not null, e1 smallint) attributes (attr1 smallint not null) primary attributes (attr1);
+insert into ts_table3 values('2025-01-01 10:00:00', 1, 1), ('2025-01-01 11:00:00', 2, 2),('2025-01-01 12:00:00', 3, 3);
+select count(EXISTS (select t1.e1 from ts_table as t1, lateral (select t1.e2, t2.e1 from ts_table2 as t2) as t3)) from ts_table3;
+
 -- ZDP-33026
 CREATE TS DATABASE tsmtest;
 

@@ -238,6 +238,7 @@ func (s *subquery) buildSubquery(desiredTypes []*types.T) {
 	// outside the subquery.
 	outScope.setTableAlias("")
 	outScope.removeHiddenCols()
+	s.outerCols = outScope.expr.Relational().OuterCols
 
 	if s.desiredNumColumns > 0 && len(outScope.cols) != s.desiredNumColumns {
 		n := len(outScope.cols)
