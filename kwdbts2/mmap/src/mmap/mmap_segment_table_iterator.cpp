@@ -307,7 +307,7 @@ std::shared_ptr<void> ConvertToVarLen(std::shared_ptr<MMapSegmentTable> segment_
 KStatus getActualColBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
                            AttributeInfo attr, uint32_t col_idx, k_uint32 count, void** bitmap, bool& need_free_bitmap) {
   *bitmap = segment_tbl->columnNullBitmapAddr(block_id, col_idx);
-  auto schema_info = segment_tbl->getSchemaInfo();
+  auto& schema_info = segment_tbl->getSchemaInfo();
   if (!isVarLenType(attr.type)) {
     if (schema_info[col_idx].type != attr.type) {
       // Conversion from other types to fixed length types.
@@ -382,7 +382,7 @@ KStatus MMapSegmentTableIterator::GetFullBlock(BlockItem* cur_block_item, TsBloc
 KStatus MMapSegmentTableIterator::GetBatch(BlockItem* cur_block_item, size_t block_start_idx,
                                          ResultSet* res, k_uint32 count) {
   // add all column data to res
-  auto schema_info = segment_table_->getSchemaInfo();
+  auto& schema_info = segment_table_->getSchemaInfo();
   ErrorInfo err_info;
   for (k_uint32 i = 0; i < kw_scan_cols_.size(); ++i) {
     k_int32 col_idx = -1;

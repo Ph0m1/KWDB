@@ -2227,7 +2227,7 @@ KStatus TsTable::GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIn
     }
   }};
 
-  auto actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
+  auto& actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
   std::vector<k_uint32> ts_scan_cols;
   for (auto col : scan_cols) {
     if (col >= actual_cols.size()) {
@@ -2299,7 +2299,7 @@ KStatus TsTable::GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityR
     }
   }};
 
-  auto actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
+  auto& actual_cols = entity_bt_manager_->GetIdxForValidCols(table_version);
   std::vector<k_uint32> ts_scan_cols;
   for (auto col : scan_cols) {
     if (col >= actual_cols.size()) {

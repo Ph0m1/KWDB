@@ -202,7 +202,7 @@ KStatus TsSnapshotProductor::Init(kwdbContext_p ctx, const TsSnapshotInfo& info)
   }
 
   k_uint32 num_col = pl_metric_attribute_info_.size();
-  auto actual_cols = root_bt->GetIdxForValidCols(using_storage_schema_version_);
+  auto& actual_cols = root_bt->GetIdxForValidCols(using_storage_schema_version_);
   for (int i = 0; i < num_col; i++) {
     kw_scan_cols_.push_back(i);
     ts_scan_cols_.emplace_back(actual_cols[i]);

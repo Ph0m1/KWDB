@@ -802,7 +802,7 @@ int MMapSegmentTable::PushPayload(uint32_t entity_id, MetricRowID start_row, kwd
   }
 
   // compatibility process : payload version may lower segment version
-  auto payload_valid_cols = payload->GetValidCols();
+  const std::vector<uint32_t>& payload_valid_cols = payload->GetValidCols();
   int payload_col_idx = 1;  // skip ts column
   for (size_t i = 1; i < idx_for_valid_cols_.size(); ++i) {
     // payload columns may have been dropped, skip them

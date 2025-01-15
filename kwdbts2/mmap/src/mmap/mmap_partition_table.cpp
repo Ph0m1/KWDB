@@ -670,14 +670,14 @@ KStatus TsTimePartition::PrepareTempPartition(uint32_t max_rows_per_block, uint3
 KStatus TsTimePartition::GetVacuumData(const std::shared_ptr<MMapSegmentTable>& origin_segment_tbl,
                                        BlockItem* cur_block_item, size_t block_start_idx, k_uint32 row_count,
                                        uint32_t ts_version, ResultSet* res) {
-  auto origin_segment_schema = origin_segment_tbl->getSchemaInfo();
+  auto& origin_segment_schema = origin_segment_tbl->getSchemaInfo();
   std::vector<AttributeInfo> dst_segment_schema;
   KStatus s = root_table_manager_->GetSchemaInfoExcludeDropped(&dst_segment_schema, ts_version);
   if (s != SUCCESS) {
     LOG_ERROR("Couldn't get schema info of version %u", ts_version);
     return s;
   }
-  std::vector<uint32_t> valid_cols = root_table_manager_->GetIdxForValidCols(ts_version);
+  const std::vector<uint32_t>& valid_cols = root_table_manager_->GetIdxForValidCols(ts_version);
 
   Batch* b;
   for (int i = 0; i < valid_cols.size(); i++) {
@@ -1981,8 +1981,8 @@ int TsTimePartition::updatePayload(kwdbts::Payload* payload, kwdbts::DedupInfo& 
     // no need merge.
     return 0;
   }
-  auto schema_info = payload->GetSchemaInfo();
-  auto payload_valid_cols = payload->GetValidCols();
+  const std::vector<AttributeInfo>& schema_info = payload->GetSchemaInfo();
+  const std::vector<uint32_t>& payload_valid_cols = payload->GetValidCols();
   for (auto& kv : dedup_info.payload_rows) {
     auto cur_ts = kv.first;
     auto &payload_dedup = kv.second;

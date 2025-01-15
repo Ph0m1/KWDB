@@ -1361,7 +1361,7 @@ KStatus
 TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
                                         uint32_t col_idx, k_uint32 count, std::shared_ptr<void>* mem,
                                         std::vector<std::shared_ptr<void>>& var_mem, void** bitmap, bool& need_free_bitmap) {
-  auto schema_info = segment_tbl->getSchemaInfo();
+  auto& schema_info = segment_tbl->getSchemaInfo();
   // There are two situations to handle:
   // 1. convert to fixed length types,  which can be further divided into:
   //    (1) other types to fixed length types
@@ -1683,7 +1683,7 @@ KStatus TsSortedRowDataIterator::Init(bool is_reversed) {
 KStatus TsSortedRowDataIterator::GetBatch(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
                                           size_t block_start_idx, ResultSet* res, k_uint32 count) {
   // Put data from all columns to the res result
-  auto schema_info = segment_tbl->getSchemaInfo();
+  auto& schema_info = segment_tbl->getSchemaInfo();
   ErrorInfo err_info;
   for (k_uint32 i = 0; i < kw_scan_cols_.size(); ++i) {
     k_int32 ts_col = -1;
