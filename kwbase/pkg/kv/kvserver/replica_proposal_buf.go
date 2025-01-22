@@ -678,5 +678,8 @@ func (rp *replicaProposer) registerProposalLocked(p *ProposalData) {
 	// Record when the proposal was submitted to Raft so that we can later
 	// decide if/when to re-propose it.
 	p.proposedAtTicks = rp.mu.ticks
+	if _p, ok := rp.mu.proposals[p.idKey]; ok && _p != p {
+		log.Warningf(p.ctx, "meet different proposal with same idKey %s, (%p-%p)", p.idKey, _p, p)
+	}
 	rp.mu.proposals[p.idKey] = p
 }

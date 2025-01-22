@@ -155,7 +155,8 @@ func (r *Replica) prepareLocalResult(ctx context.Context, cmd *replicatedCmd) {
 			// new one. This is important for pipelined writes, since they don't
 			// have a client watching to retry, so a failure to eventually apply
 			// the proposal would be a user-visible error.
-			log.Infof(ctx, "r%d repropose rejected %v, isLocal %v, proposalData %p", r.Desc().RangeID, cmd.Rejected(), cmd.IsLocal(), cmd.proposal)
+			log.Infof(ctx, "r%d repropose rejected %v, isLocal %v, proposalData [%s] %p",
+				r.Desc().RangeID, cmd.Rejected(), cmd.IsLocal(), cmd.proposal.idKey, cmd.proposal)
 			pErr = r.tryReproposeWithNewLeaseIndex(ctx, cmd)
 			if pErr != nil {
 				log.Warningf(ctx, "failed to repropose with new lease index: %s", pErr)

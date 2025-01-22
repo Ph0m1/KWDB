@@ -1475,8 +1475,8 @@ func (sm *replicaStateMachine) ApplySideEffects(
 					}
 				}
 			}
-			log.Fatalf(ctx, "finishing proposal %p with outstanding reproposal at a higher max lease index, %d-%d",
-				cmd.proposal, cmd.raftCmd.MaxLeaseIndex, cmd.proposal.command.MaxLeaseIndex)
+			log.Fatalf(ctx, "finishing proposal [%s,%s] %p with outstanding reproposal at a higher max lease index, %d-%d",
+				cmd.idKey, cmd.proposal.idKey, cmd.proposal, cmd.raftCmd.MaxLeaseIndex, cmd.proposal.command.MaxLeaseIndex)
 		}
 		if !rejected && cmd.proposal.applied {
 			// If the command already applied then we shouldn't be "finishing" its
