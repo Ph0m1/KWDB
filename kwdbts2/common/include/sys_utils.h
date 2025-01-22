@@ -32,6 +32,14 @@ bool IsExists(const string& path);
  */
 bool Remove(const string& path, ErrorInfo& error_info = getDummyErrorInfo());
 
+/**
+ * @Description: remove directory contents
+ * @param dir_path the path of directory
+ * @param error_info
+ * @return
+ */
+bool RemoveDirContents(const string& dir_path, ErrorInfo& error_info = getDummyErrorInfo());
+
 /*
  * @Description: recursively create a directory (mkdir -p xxx)
  * @IN: path: the path of directory

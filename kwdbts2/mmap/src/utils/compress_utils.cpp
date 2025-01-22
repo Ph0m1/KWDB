@@ -194,7 +194,7 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
     if (!ret && sfs.f_type == SQUASHFS_MAGIC) {
       return true;
     } else {
-      if (!Remove(dir_path, err_info)) {
+      if (!RemoveDirContents(dir_path, err_info)) {
         return false;
       }
     }
@@ -212,8 +212,7 @@ bool mount(const string& sqfs_file_path, const string& dir_path, ErrorInfo& err_
     }
     sleep(1);
     --retry;
-    Remove(dir_path, err_info);
-    MakeDirectory(dir_path, err_info);
+    RemoveDirContents(dir_path, err_info);
   }
   if (!isMounted(dir_path)) {
     getErrorInfo(cmd, dir_path, "_log_mount_err");
@@ -252,11 +251,6 @@ bool umount(const string& sqfs_file_path, const string& dir_name, ErrorInfo& err
         return false;
       } else {
         g_cur_mount_cnt_--;
-        if (!Remove(dir_path)) {
-          err_info.errcode = KWEOTHER;
-          err_info.errmsg = dir_path + " umount succeed, rm failed";
-          return false;
-        }
       }
     }
   }

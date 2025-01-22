@@ -146,10 +146,8 @@ int TsTimePartition::loadSegments(ErrorInfo& err_info) {
         std::string full_path = real_path + entry->d_name;
         struct stat file_stat{};
         if (stat(full_path.c_str(), &file_stat) != 0) {
-          LOG_ERROR("stat[%s] failed", full_path.c_str());
-          err_info.setError(KWENFILE, "stat[" + full_path + "] failed");
-          closedir(dir_ptr);
-          return err_info.errcode;
+          LOG_WARN("stat[%s] failed", full_path.c_str());
+          continue;
         }
         if (S_ISREG(file_stat.st_mode)) {
           int dn_len = strlen(entry->d_name);

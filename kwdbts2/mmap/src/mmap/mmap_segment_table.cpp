@@ -292,7 +292,7 @@ int MMapSegmentTable::open(EntityBlockMetaManager* meta_manager, BLOCK_ID segmen
   bool is_mounted = isMounted(segment_dir);
   if (!(flags & O_CREAT) && lazy_open) {
     if (is_compressed_ && !is_mounted && IsExists(segment_dir)) {
-      Remove(segment_dir);
+      RemoveDirContents(segment_dir);
     }
     return 0;
   }
@@ -413,7 +413,7 @@ int MMapSegmentTable::close(ErrorInfo& err_info) {
   if (s_status == ImmuSegment) {
     string segment_dir = db_path_ + tbl_sub_path_;
     if (!isMounted(segment_dir)) {
-      Remove(segment_dir);
+      RemoveDirContents(segment_dir);
     }
   }
 
@@ -1016,9 +1016,8 @@ int MMapSegmentTable::remove() {
     umount(db_path_, tbl_sub_path_, err_info);
     // try remove sqfs file
     Remove(sqfs_file_path);
-  } else {
-    Remove(db_path_ + tbl_sub_path_);
   }
+  Remove(db_path_ + tbl_sub_path_);
   return err_info.errcode;
 }
 
