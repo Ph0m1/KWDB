@@ -196,17 +196,17 @@ class TsFirstLastRow {
   }
 
   KStatus UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
-                        std::shared_ptr<MMapSegmentTable> segment_tbl, ColBlockBitmaps& col_bitmap);
+                         std::shared_ptr<MMapSegmentTable>& segment_tbl, ColBlockBitmaps& col_bitmap);
 
   KStatus UpdateLastRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partition_table,
-                        std::shared_ptr<MMapSegmentTable> segment_tbl, ColBlockBitmaps& col_bitmap);
+                        std::shared_ptr<MMapSegmentTable>& segment_tbl, ColBlockBitmaps& col_bitmap);
 
   KStatus GetAggBatch(TsAggIterator* iter, u_int32_t col_idx, size_t col_id,
                       const AttributeInfo& col_attr, Batch** agg_batch);
 
-  int getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable> segment_tbl,
-                          MetricRowID real_row, uint32_t ts_col,
-                          const AttributeInfo& col_attr, Batch** b);
+  int getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable>& segment_tbl,
+                           MetricRowID real_row, uint32_t ts_col,
+                           const AttributeInfo& col_attr, Batch** b);
 
   struct TsRowTableInfo {
     TsTimePartition* partion_tbl = nullptr;
@@ -241,7 +241,7 @@ class TsFirstLastRow {
  */
 class TsIterator {
  public:
-  TsIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+  TsIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
              vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
              std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
              uint32_t table_version);
@@ -302,7 +302,7 @@ class TsIterator {
   // ts is used for block filter for orderbylimit queries
   int nextBlockItem(k_uint32 entity_id, timestamp64 ts = INVALID_TS);
 
-  bool getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable> segment_tbl, uint32_t* first_row,
+  bool getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable>& segment_tbl, uint32_t* first_row,
                        uint32_t* count);
 
   void fetchBlockItems(k_uint32 entity_id);
@@ -347,7 +347,7 @@ class TsIterator {
 // used for raw data queries
 class TsRawDataIterator : public TsIterator {
  public:
-  TsRawDataIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+  TsRawDataIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                     vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
                     std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols, uint32_t table_version) :
                     TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
@@ -368,7 +368,7 @@ class TsRawDataIterator : public TsIterator {
 
 class TsSortedRowDataIterator : public TsIterator {
  public:
-  TsSortedRowDataIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+  TsSortedRowDataIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                           vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
                           std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
                           uint32_t table_version, SortOrder order_type = ASC) :
@@ -390,7 +390,7 @@ class TsSortedRowDataIterator : public TsIterator {
   int nextBlockSpan(k_uint32 entity_id);
   void fetchBlockSpans(k_uint32 entity_id);
 
-  KStatus GetBatch(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item, size_t block_start_idx,
+  KStatus GetBatch(std::shared_ptr<MMapSegmentTable>& segment_tbl, BlockItem* cur_block_item, size_t block_start_idx,
                    ResultSet* res, k_uint32 count);
 
   std::deque<BlockSpan> block_spans_;
@@ -401,7 +401,7 @@ class TsSortedRowDataIterator : public TsIterator {
 // used for aggregate queries
 class TsAggIterator : public TsIterator {
  public:
-  TsAggIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+  TsAggIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                 vector<uint32_t>& entity_ids, vector<KwTsSpan>& ts_spans,
                 std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
                 std::vector<Sumfunctype>& scan_agg_types, std::vector<timestamp64>& ts_points, uint32_t table_version) :
@@ -540,7 +540,7 @@ class TsAggIterator : public TsIterator {
 
   KStatus findFirstData(ResultSet* res, k_uint32* count, timestamp64 ts);
 
-  KStatus countDataUseStatitics(ResultSet* res, k_uint32* count, timestamp64 ts);
+  KStatus countDataUseStatistics(ResultSet* res, k_uint32* count, timestamp64 ts);
 
   KStatus countDataAllBlocks(ResultSet* res, k_uint32* count, timestamp64 ts);
 
@@ -558,7 +558,7 @@ class TsAggIterator : public TsIterator {
 
   KStatus findFirstLastData(ResultSet* res, k_uint32* count, timestamp64 ts);
 
-  KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item, int type);
+  KStatus getBlockBitmap(std::shared_ptr<MMapSegmentTable>& segment_tbl, BlockItem* block_item, int type);
 
   /**
    * @brief Used internally in the Next function, which returns the aggregated result of the most consecutive data in a BlockItem
@@ -582,7 +582,7 @@ class TsAggIterator : public TsIterator {
    * @param bitmap          memory address of bitmap for the data
    * @param need_free_bitmap need free bitmap if the bitmap address is generated using malloc
    */
-  KStatus getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+  KStatus getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable>& segment_tbl, BLOCK_ID block_id, size_t start_row,
                                    uint32_t col_idx, k_uint32 count, std::shared_ptr<void>* mem,
                                    std::vector<std::shared_ptr<void>>& var_mem, void** bitmap, bool& need_free_bitmap);
   /**

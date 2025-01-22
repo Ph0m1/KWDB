@@ -23,7 +23,7 @@ enum NextBlkStatus {
 
 namespace kwdbts {
 
-Batch* CreateAggBatch(void* mem, std::shared_ptr<MMapSegmentTable> segment_table) {
+Batch* CreateAggBatch(void* mem, const std::shared_ptr<MMapSegmentTable>& segment_table) {
   if (mem) {
     return new AggBatch(mem, 1, segment_table);
   } else {
@@ -31,7 +31,7 @@ Batch* CreateAggBatch(void* mem, std::shared_ptr<MMapSegmentTable> segment_table
   }
 }
 
-Batch* CreateAggBatch(std::shared_ptr<void> mem, std::shared_ptr<MMapSegmentTable> segment_table) {
+Batch* CreateAggBatch(const std::shared_ptr<void>& mem, const std::shared_ptr<MMapSegmentTable>& segment_table) {
   if (mem) {
     return new AggBatch(mem, 1, segment_table);
   } else {
@@ -68,7 +68,7 @@ bool ChangeSumType(DATATYPE type, void* base, void** new_base) {
   return true;
 }
 
-TsIterator::TsIterator(std::shared_ptr<TsEntityGroup> entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+TsIterator::TsIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
                        vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
                        std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
                        uint32_t table_version)
@@ -172,7 +172,7 @@ int TsIterator::nextBlockItem(k_uint32 entity_id, timestamp64 ts) {
   }
 }
 
-bool TsIterator::getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable> segment_tbl, uint32_t* first_row,
+bool TsIterator::getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable>& segment_tbl, uint32_t* first_row,
                                  uint32_t* count) {
   bool has_data = false;
   *count = 0;
@@ -351,7 +351,7 @@ void TsFirstLastRow::Reset() {
 }
 
 KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTimePartition* partiton_table,
-                                      std::shared_ptr<MMapSegmentTable> segment_tbl,
+                                      std::shared_ptr<MMapSegmentTable>& segment_tbl,
                                       ColBlockBitmaps& col_bitmap) {
   bool ts_using = false;
   if (FirstAggRowValid() && first_max_ts_ != INVALID_TS && first_max_ts_ <= ts) {
@@ -404,7 +404,7 @@ KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTim
 
 KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
                           TsTimePartition* partiton_table,
-                          std::shared_ptr<MMapSegmentTable> segment_tbl,
+                          std::shared_ptr<MMapSegmentTable>& segment_tbl,
                           ColBlockBitmaps& col_bitmap) {
   bool ts_using = false;
   if (LastAggRowValid() && last_min_ts_ != INVALID_TS && last_min_ts_ >= ts) {
@@ -456,7 +456,7 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
   return KStatus::SUCCESS;
 }
 
-int TsFirstLastRow::getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable> segment_tbl,
+int TsFirstLastRow::getActualColAggBatch(TsTimePartition* p_bt, shared_ptr<MMapSegmentTable>& segment_tbl,
                                         MetricRowID real_row, uint32_t ts_col,
                                         const AttributeInfo& attr, Batch** b) {
   uint32_t actual_col_type = segment_tbl->GetColInfo(ts_col).type;
@@ -943,14 +943,14 @@ KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timest
   return KStatus::SUCCESS;
 }
 
-KStatus TsAggIterator::countDataUseStatitics(ResultSet* res, k_uint32* count, timestamp64 ts) {
+KStatus TsAggIterator::countDataUseStatistics(ResultSet* res, k_uint32* count, timestamp64 ts) {
   *count = 0;
   partition_table_iter_->Reset();
   std::vector<timestamp64> partition_need_traverse;
   while (partition_table_iter_->Valid()) {
     KStatus s = partition_table_iter_->Next(&cur_partition_table_);
     if (s != KStatus::SUCCESS) {
-      LOG_ERROR("countDataUseStatitics failed. next partition at entitygroup [%lu]", entity_group_id_);
+      LOG_ERROR("countDataUseStatistics failed. next partition at entitygroup [%lu]", entity_group_id_);
       return KStatus::FAIL;
     }
     if (cur_partition_table_ == nullptr) {
@@ -1071,7 +1071,7 @@ KStatus TsAggIterator::countDataAllBlocks(ResultSet* res, k_uint32* count, times
   return SUCCESS;
 }
 
-KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* block_item, int type) {
+KStatus TsAggIterator::getBlockBitmap(std::shared_ptr<MMapSegmentTable>& segment_tbl, BlockItem* block_item, int type) {
   for (int i = 0; i < ts_scan_cols_.size(); i++) {
     auto& col_idx = ts_scan_cols_[i];
     if (!segment_tbl->isColExist(col_idx)) {
@@ -1345,7 +1345,7 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
 
 // Convert the obtained continuous data into a query type and write it into the new application space.
 KStatus
-TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable> segment_tbl, BLOCK_ID block_id, size_t start_row,
+TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable>& segment_tbl, BLOCK_ID block_id, size_t start_row,
                                         uint32_t col_idx, k_uint32 count, std::shared_ptr<void>* mem,
                                         std::vector<std::shared_ptr<void>>& var_mem, void** bitmap, bool& need_free_bitmap) {
   auto& schema_info = segment_tbl->getSchemaInfo();
@@ -1667,7 +1667,7 @@ KStatus TsSortedRowDataIterator::Init(bool is_reversed) {
   return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
 }
 
-KStatus TsSortedRowDataIterator::GetBatch(std::shared_ptr<MMapSegmentTable> segment_tbl, BlockItem* cur_block_item,
+KStatus TsSortedRowDataIterator::GetBatch(std::shared_ptr<MMapSegmentTable>& segment_tbl, BlockItem* cur_block_item,
                                           size_t block_start_idx, ResultSet* res, k_uint32 count) {
   // Put data from all columns to the res result
   auto& schema_info = segment_tbl->getSchemaInfo();

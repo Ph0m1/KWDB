@@ -94,16 +94,16 @@ enum SortOrder {
 struct Batch {
   Batch() = delete;
 
-  Batch(void* m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t)
+  Batch(void* m, k_uint32 c, const std::shared_ptr<MMapSegmentTable>& t)
       : mem(m), count(c), segment_table(t) {}
 
-  Batch(void* m, k_uint32 c, void* b, std::shared_ptr<MMapSegmentTable> t)
+  Batch(void* m, k_uint32 c, void* b, const std::shared_ptr<MMapSegmentTable>& t)
       : mem(m), bitmap(b), count(c), segment_table(t) {}
 
-  Batch(void* m, k_uint32 c, void* b, k_uint32 o, std::shared_ptr<MMapSegmentTable> t)
+  Batch(void* m, k_uint32 c, void* b, k_uint32 o, const std::shared_ptr<MMapSegmentTable>& t)
       : mem(m), bitmap(b), count(c), offset(o), segment_table(t) {}
 
-  Batch(k_uint32 c, void* b, k_uint32 o, std::shared_ptr<MMapSegmentTable> t)
+  Batch(k_uint32 c, void* b, k_uint32 o, const std::shared_ptr<MMapSegmentTable>& t)
       : bitmap(b), count(c), offset(o), segment_table(t) {}
 
   // Record whether mem_ is the memory space requested on the heap
@@ -114,7 +114,8 @@ struct Batch {
   void* bitmap = nullptr;
   k_uint32 count = 0;
   k_uint32 offset = 0;
-  std::shared_ptr<MMapSegmentTable> segment_table;  // Holding smart pointers to avoid switching between segments in use
+  // Holding smart pointers to avoid switching between segments in use
+  std::shared_ptr<MMapSegmentTable> segment_table = nullptr;
 
   virtual ~Batch() {
     if (is_new && mem) {
@@ -132,7 +133,7 @@ struct Batch {
 
   virtual uint16_t getVarColDataLen(k_uint32 row_idx) const { return 0; }
 
-  virtual void push_back(std::shared_ptr<void> data) { return; }
+  virtual void push_back(const std::shared_ptr<void>& data) { return; }
 
   // row_idx  start from 0
   virtual KStatus isNull(k_uint32 row_idx, bool* is_null) const {
@@ -333,9 +334,10 @@ struct VarTagBatch : public Batch {
 const uint32_t k_default_block_size = 4 * 1024;  // 4K
 
 struct AggBatch : public Batch {
-  AggBatch(void* m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t) : Batch(m, c, t) {}
+  AggBatch(void* m, k_uint32 c, const std::shared_ptr<MMapSegmentTable>& t) : Batch(m, c, t) {}
 
-  AggBatch(std::shared_ptr<void> m, k_uint32 c, std::shared_ptr<MMapSegmentTable> t) : Batch(m.get(), c, t), var_mem_(m) {}
+  AggBatch(const std::shared_ptr<void>& m, k_uint32 c, const std::shared_ptr<MMapSegmentTable>& t)
+           : Batch(m.get(), c, t), var_mem_(m) {}
 
   // row_idx  start from 0
   KStatus isNull(k_uint32 row_idx, bool* is_null) const override {
@@ -357,7 +359,7 @@ struct AggBatch : public Batch {
 };
 
 struct VarColumnBatch : public Batch {
-  VarColumnBatch(k_uint32 c, void* b, k_uint32 o, std::shared_ptr<MMapSegmentTable> t) : Batch(c, b, o, t) {}
+  VarColumnBatch(k_uint32 c, void* b, k_uint32 o, const std::shared_ptr<MMapSegmentTable>& t) : Batch(c, b, o, t) {}
 
   ~VarColumnBatch() override {
     var_data_mem_.clear();
@@ -378,7 +380,7 @@ struct VarColumnBatch : public Batch {
     return *reinterpret_cast<uint16_t*>((intptr_t)var_data_mem_[row_idx].get());
   }
 
-  void push_back(std::shared_ptr<void> data) override { var_data_mem_.emplace_back(data); }
+  void push_back(const std::shared_ptr<void>& data) override { var_data_mem_.emplace_back(data); }
 
   std::vector<std::shared_ptr<void>> var_data_mem_;
 };
