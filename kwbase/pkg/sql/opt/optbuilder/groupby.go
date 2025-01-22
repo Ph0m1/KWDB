@@ -51,7 +51,9 @@ package optbuilder
 
 import (
 	"strings"
+	"unsafe"
 
+	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
@@ -64,6 +66,49 @@ import (
 )
 
 // groupby information stored in scopes.
+
+// aggInfoKey records hash values of aggregateInfo for check repeate agg project
+
+//	type aggregateInfo struct {
+//		*tree.FuncExpr                  ---> not use
+//		def      memo.FunctionPrivate   ---> funcAddress(function overload point)
+//		distinct bool                   ---> distinct
+//		args     memo.ScalarListExpr    ---> param
+//		filter   opt.ScalarExpr         ---> filterhash
+//		col *scopeColumn                ---> not use
+//		colRefs opt.ColSet              ---> not use
+//		aggOfInterpolate string         ---> not use
+//	}
+type aggInfoKey struct {
+	funcAddress unsafe.Pointer // agg function overload address
+	distinct    bool           // agg function is distinct
+	filterhash  uint64         // agg function filter hash value
+	param       [3]uint64      // agg function param column hash value
+	order       string         // agg function order string
+}
+
+// getAggInfoKey gets hash value from aggregateInfo to create aggInfoKey
+func getAggInfoKey(evalCtx *tree.EvalContext, input *aggregateInfo) aggInfoKey {
+	ret := aggInfoKey{
+		funcAddress: unsafe.Pointer(input.def.Overload),
+		distinct:    input.distinct,
+	}
+
+	if input.filter != nil {
+		ret.filterhash = memo.GetScalarExprHash(input.filter)
+	}
+
+	for i := range input.args {
+		ret.param[i] = memo.GetScalarExprHash(input.args[i])
+	}
+
+	fmtCtx := execinfrapb.ExprFmtCtxBase(evalCtx)
+	input.OrderBy.Format(fmtCtx)
+	ret.order += fmtCtx.String()
+
+	return ret
+}
+
 type groupby struct {
 	// We use two scopes:
 	//   - aggInScope contains columns that are used as input by the
@@ -98,6 +143,8 @@ type groupby struct {
 
 	// aggs contains information about aggregate functions encountered.
 	aggs []aggregateInfo
+
+	aggsMap map[aggInfoKey]int
 
 	// groupStrs contains a string representation of each GROUP BY expression
 	// using symbolic notation. These strings are used to determine if SELECT
@@ -170,48 +217,15 @@ func (g *groupby) hasAggregates() bool {
 
 // findAggregate finds the given aggregate among the bound variables
 // in this scope. Returns nil if the aggregate is not found.
-func (g *groupby) findAggregate(agg aggregateInfo) *scopeColumn {
+func (g *groupby) findAggregate(agg aggregateInfo, key *aggInfoKey) *scopeColumn {
 	if g.aggs == nil {
 		return nil
 	}
-
-	for i, a := range g.aggs {
-		// Find an existing aggregate that uses the same function overload.
-		if a.def.Overload == agg.def.Overload && a.distinct == agg.distinct && a.filter == agg.filter {
-			// Now check that the arguments are identical.
-			if len(a.args) == len(agg.args) {
-				match := true
-				for j, arg := range a.args {
-					if arg != agg.args[j] {
-						match = false
-						break
-					}
-				}
-
-				// If agg is ordering sensitive, check if the orders match as well.
-				if match && !agg.isCommutative() {
-					if len(a.OrderBy) != len(agg.OrderBy) {
-						match = false
-					} else {
-						for j := range a.OrderBy {
-							if !a.OrderBy[j].Equal(agg.OrderBy[j]) {
-								match = false
-								break
-							}
-						}
-					}
-				}
-
-				if match {
-					if getAggName(a) == Interpolate {
-						return nil
-					}
-					// Aggregate already exists, so return information about the
-					// existing column that computes it.
-					return &g.aggregateResultCols()[i]
-				}
-			}
+	if v, ok := g.aggsMap[*key]; ok {
+		if getAggName(agg) == Interpolate {
+			return nil
 		}
+		return &g.aggregateResultCols()[v]
 	}
 
 	return nil
@@ -466,7 +480,8 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 	// aggregate arguments, as well as any additional order by columns.
 	b.constructProjectForScope(fromScope, g.aggInScope)
 
-	g.aggOutScope.expr = b.constructGroupBy(g.aggInScope.expr.(memo.RelExpr), groupingColSet, aggCols, g.aggInScope.ordering, timeBucketGapFillColID)
+	g.aggOutScope.expr = b.constructGroupBy(g.aggInScope.expr, groupingColSet, aggCols,
+		g.aggInScope.ordering, timeBucketGapFillColID)
 	if len(aggFuncs) != 0 {
 		if g, ok := g.aggOutScope.expr.(*memo.ScalarGroupByExpr); ok {
 			g.GroupingPrivate.Func = aggFuncs
@@ -820,7 +835,11 @@ func (b *Builder) buildAggregateFunction(
 	// If we already have the same aggregation, reuse it. Otherwise add it
 	// to the list of aggregates that need to be computed by the groupby
 	// expression and synthesize a column for the aggregation result.
-	info.col = g.findAggregate(info)
+	if len(info.args) > 3 {
+		panic(pgerror.New(pgcode.Warning, "%s have %d param, agg function need have less than three param"))
+	}
+	key := getAggInfoKey(b.evalCtx, &info)
+	info.col = g.findAggregate(info, &key)
 	if info.col == nil {
 		// Use 0 as the group for now; it will be filled in later by the
 		// buildAggregation method.
@@ -834,6 +853,10 @@ func (b *Builder) buildAggregateFunction(
 
 		// Add the aggregate to the list of aggregates that need to be computed by
 		// the groupby expression.
+		if g.aggsMap == nil {
+			g.aggsMap = make(map[aggInfoKey]int)
+		}
+		g.aggsMap[key] = len(g.aggs)
 		g.aggs = append(g.aggs, info)
 	} else {
 		// Undo the adding of the args.

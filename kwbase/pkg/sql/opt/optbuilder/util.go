@@ -1028,21 +1028,34 @@ func (b *Builder) addLastFunction(
 	inScope, outScope *scope,
 	funcExpr tree.Expr,
 ) {
-	for j, e := range exprs {
-		lastCol := &tree.FuncExpr{
-			Func: tree.ResolvableFunctionReference{
-				FunctionReference: &tree.UnresolvedName{
-					NumParts: 1,
-					Parts:    tree.NameParts{funcName}}},
-			Exprs: tree.Exprs{e},
+	var twiceParam tree.Expr
+	if f, ok := funcExpr.(*tree.FuncExpr); ok && checkLastOrLastTsAgg(funcName) && len(f.Exprs) == 2 {
+		twiceParam = f.Exprs[1]
+	}
+
+	unresolveExpr := &tree.UnresolvedName{NumParts: 1, Parts: tree.NameParts{funcName}}
+
+	if twiceParam != nil {
+		for j, e := range exprs {
+			lastCol := &tree.FuncExpr{
+				Func: tree.ResolvableFunctionReference{
+					FunctionReference: unresolveExpr},
+				Exprs: tree.Exprs{e},
+			}
+			lastCol.Exprs = append(lastCol.Exprs, twiceParam)
+			resolvedLast := inScope.resolveType(lastCol, types.Any)
+			b.addColumn(outScope, funcName+"("+aliases[j]+")", resolvedLast, false)
 		}
-		if f, ok := funcExpr.(*tree.FuncExpr); ok &&
-			checkLastOrLastTsAgg(funcName) &&
-			len(f.Exprs) == 2 {
-			lastCol.Exprs = append(lastCol.Exprs, f.Exprs[1])
+	} else {
+		for j, e := range exprs {
+			lastCol := &tree.FuncExpr{
+				Func: tree.ResolvableFunctionReference{
+					FunctionReference: unresolveExpr},
+				Exprs: tree.Exprs{e},
+			}
+			resolvedLast := inScope.resolveType(lastCol, types.Any)
+			b.addColumn(outScope, funcName+"("+aliases[j]+")", resolvedLast, false)
 		}
-		resolvedLast := inScope.resolveType(lastCol, types.Any)
-		b.addColumn(outScope, funcName+"("+aliases[j]+")", resolvedLast, false)
 	}
 }
 

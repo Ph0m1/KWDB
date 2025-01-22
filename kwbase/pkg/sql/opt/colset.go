@@ -24,14 +24,12 @@
 
 package opt
 
-import (
-	"gitee.com/kwbasedb/kwbase/pkg/util"
-	"github.com/cockroachdb/errors"
-)
+import "github.com/cockroachdb/errors"
 
 // ColSet efficiently stores an unordered set of column ids.
 type ColSet struct {
-	set util.FastIntSet
+	// set util.FastIntSet
+	set FastSet
 }
 
 // MakeColSet returns a set initialized with the given values.
@@ -45,6 +43,9 @@ func MakeColSet(vals ...ColumnID) ColSet {
 
 // Add adds a column to the set. No-op if the column is already in the set.
 func (s *ColSet) Add(col ColumnID) { s.set.Add(int(col)) }
+
+// AddInt adds int to the set
+func (s *ColSet) AddInt(col int) { s.set.Add(col) }
 
 // Remove removes a column from the set. No-op if the column is not in the set.
 func (s *ColSet) Remove(col ColumnID) { s.set.Remove(int(col)) }
@@ -101,9 +102,6 @@ func (s ColSet) Equals(rhs ColSet) bool { return s.set.Equals(rhs.set) }
 // SubsetOf returns true if rhs contains all the elements in s.
 func (s ColSet) SubsetOf(rhs ColSet) bool { return s.set.SubsetOf(rhs.set) }
 
-// GetSet returns the columns' id
-func (s *ColSet) GetSet() util.FastIntSet { return s.set }
-
 // String returns a list representation of elements. Sequential runs of positive
 // numbers are shown as ranges. For example, for the set {1, 2, 3  5, 6, 10},
 // the output is "(1-3,5,6,10)".
@@ -126,14 +124,16 @@ func (s ColSet) SingleColumn() ColumnID {
 // relations with a defined column mapping).
 //
 // For example, suppose we have a UNION with the following column mapping:
-//   Left:  1, 2, 3
-//   Right: 4, 5, 6
-//   Out:   7, 8, 9
+//
+//	Left:  1, 2, 3
+//	Right: 4, 5, 6
+//	Out:   7, 8, 9
 //
 // Here are some possible calls to TranslateColSet and their results:
-//   TranslateColSet(ColSet{1, 2}, Left, Right) -> ColSet{4, 5}
-//   TranslateColSet(ColSet{5, 6}, Right, Out)  -> ColSet{8, 9}
-//   TranslateColSet(ColSet{9}, Out, Right)     -> ColSet{6}
+//
+//	TranslateColSet(ColSet{1, 2}, Left, Right) -> ColSet{4, 5}
+//	TranslateColSet(ColSet{5, 6}, Right, Out)  -> ColSet{8, 9}
+//	TranslateColSet(ColSet{9}, Out, Right)     -> ColSet{6}
 //
 // Note that for the output of TranslateColSet to be correct, colSetIn must be
 // a subset of the columns in `from`. TranslateColSet does not check that this
@@ -144,7 +144,7 @@ func (s ColSet) SingleColumn() ColumnID {
 // colSetOut could have different lengths and still be valid. Consider the
 // following case:
 //
-//   SELECT x, x, y FROM xyz UNION SELECT a, b, c FROM abc
+//	SELECT x, x, y FROM xyz UNION SELECT a, b, c FROM abc
 //
 // TranslateColSet(ColSet{x, y}, Left, Right) correctly returns
 // ColSet{a, b, c}, even though ColSet{x, y}.Len() != ColSet{a, b, c}.Len().

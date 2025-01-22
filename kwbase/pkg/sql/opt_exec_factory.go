@@ -156,8 +156,8 @@ func (ef *execFactory) ConstructTSScan(
 	defer func() { ef.planner.skipSelectPrivilegeChecks = false }()
 
 	// Calculate the physical column ID and record it in the ScanSource.
-	private.Cols.GetSet().ForEach(func(i int) {
-		tsScan.ScanSource.Add(i - int(private.Table.ColumnID(0)) + 1)
+	private.Cols.ForEach(func(i opt.ColumnID) {
+		tsScan.ScanSource.Add(int(i) - int(private.Table.ColumnID(0)) + 1)
 	})
 	tsScan.Table = table
 	resultCols := make(sqlbase.ResultColumns, 0)

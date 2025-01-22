@@ -606,6 +606,14 @@ func (h *hasher) HashScalarListExpr(val ScalarListExpr) {
 	}
 }
 
+// GetScalarExprHash gets opt.ScalarExpr hash value
+func GetScalarExprHash(val opt.ScalarExpr) uint64 {
+	var tmp hasher
+	tmp.Init()
+	tmp.HashScalarExpr(val)
+	return uint64(tmp.hash)
+}
+
 func (h *hasher) HashFiltersExpr(val FiltersExpr) {
 	for i := range val {
 		h.HashScalarExpr(val[i].Condition)

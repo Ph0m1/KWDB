@@ -129,6 +129,29 @@ type DistSQLPlanner struct {
 	RowStats execinfra.RowStats
 }
 
+// aggHashElement records hash values of execinflapb.AggregatorSpec_Aggregation
+// the structural variables come from execinflapb.AggregatorSpec_Aggregation
+//
+//	type AggregatorSpec_Aggregation struct {
+//		Func AggregatorSpec_Func ---> funcID
+//		Distinct bool  			 ---> distinct
+//		ColIdx []uint32          ---> colIdx
+//		FilterColIdx *uint32     ---> filterColIdx
+//		Arguments []Expression   ---> not used
+//	}
+//
+// The key of the map cannot be an indefinite length slice, so colIdx needs to be fixed
+type aggHashElement struct {
+	funcID       int8      // agg function id
+	distinct     bool      // is distinct agg
+	filterColIdx *uint32   // filter col index
+	colCount     int8      // agg column param count
+	colIdx       [3]uint32 // param: column id, agg max param is 3
+}
+
+// aggSpecPosHashMap saves all agg for check repeate, key is agg spec hash, value is output position
+type aggSpecPosHashMap map[aggHashElement]int
+
 // UintSlice is uint32 slice
 type UintSlice []uint32
 
@@ -2780,11 +2803,11 @@ func (dsp *DistSQLPlanner) addSorters(p *PhysicalPlan, n *sortNode) {
 
 // checkHas check aggregator spec has in all spec
 func checkHas(
-	src execinfrapb.AggregatorSpec_Aggregation,
-	dst []execinfrapb.AggregatorSpec_Aggregation,
+	src *execinfrapb.AggregatorSpec_Aggregation,
+	dst *[]execinfrapb.AggregatorSpec_Aggregation,
 	reIndex *uint32,
 ) bool {
-	for j, prevLocalAgg := range dst {
+	for j, prevLocalAgg := range *dst {
 		if src.Equals(prevLocalAgg) {
 			// Found existing, equivalent local agg. Map the relative index (i)
 			// for the current local agg to the absolute index (j) of the existing local agg.
@@ -2822,6 +2845,7 @@ func getFinalAggFuncAndType(
 	intermediateTypes *[]types.T,
 ) error {
 	finalIdx := 0
+	aggMap := make(aggSpecPosHashMap)
 	for _, e := range aggregations {
 		info := physicalplan.DistAggregationTable[e.Func]
 
@@ -2833,7 +2857,7 @@ func getFinalAggFuncAndType(
 		// operations are relatively expensive.
 		relToAbsLocalIdx := make([]uint32, len(info.LocalStage))
 
-		if err := dealWithLocal(&info, e, inputTypes, localAggs, intermediateTypes, &relToAbsLocalIdx); err != nil {
+		if err := dealWithLocal(&info, e, inputTypes, localAggs, intermediateTypes, &relToAbsLocalIdx, &aggMap); err != nil {
 			return err
 		}
 
@@ -2864,7 +2888,9 @@ func dealWithLocal(
 	outputAggArray *[]execinfrapb.AggregatorSpec_Aggregation,
 	outputTypes *[]types.T,
 	relToAbsLocalIdx *[]uint32,
+	allAggSpecPosMap *aggSpecPosHashMap,
 ) error {
+	// func int8 8bit, distinct 1bit,
 	for i, localFunc := range distAggInfo.LocalStage {
 		localAgg := execinfrapb.AggregatorSpec_Aggregation{
 			Func: localFunc, FilterColIdx: inputAgg.FilterColIdx,
@@ -2877,10 +2903,15 @@ func dealWithLocal(
 		} else {
 			localAgg.ColIdx = inputAgg.ColIdx
 		}
-
-		if !checkHas(localAgg, *outputAggArray, &(*relToAbsLocalIdx)[i]) {
+		key := aggHashElement{funcID: int8(localFunc), distinct: localAgg.Distinct, filterColIdx: inputAgg.FilterColIdx, colCount: int8(len(localAgg.ColIdx))}
+		if key.colCount > 3 {
+			return errors.Errorf("aggregate param column id len more than three")
+		}
+		copy(key.colIdx[:key.colCount], localAgg.ColIdx[:key.colCount])
+		if val, ok := (*allAggSpecPosMap)[key]; !ok {
 			// Append the new local aggregation and map to its index in localAggs.
 			(*relToAbsLocalIdx)[i] = uint32(len(*outputAggArray))
+			(*allAggSpecPosMap)[key] = len(*outputAggArray)
 			*outputAggArray = append(*outputAggArray, localAgg)
 
 			// Keep track of the new local aggregation's output type.
@@ -2894,6 +2925,8 @@ func dealWithLocal(
 				return err
 			}
 			*outputTypes = append(*outputTypes, *outputType)
+		} else {
+			(*relToAbsLocalIdx)[i] = uint32(val)
 		}
 	}
 
@@ -2949,7 +2982,7 @@ func dealWithFinalAgg(
 		finalAgg := execinfrapb.AggregatorSpec_Aggregation{Func: finalInfo.Fn, ColIdx: argIdxs}
 
 		// Append the final agg if there is no existing equivalent.
-		if !checkHas(finalAgg, *outputAggArray, &(*finalIdxMap)[*finalIdx]) {
+		if !checkHas(&finalAgg, outputAggArray, &(*finalIdxMap)[*finalIdx]) {
 			(*finalIdxMap)[*finalIdx] = uint32(len(*outputAggArray))
 			*outputAggArray = append(*outputAggArray, finalAgg)
 
@@ -2991,6 +3024,7 @@ func getLocalAggAndType(
 	inputTypes []types.T,
 	aggs *[]execinfrapb.AggregatorSpec_Aggregation,
 ) (outputTypes []types.T, colIndex opt.StatisticIndex, err error) {
+	aggMap := make(aggSpecPosHashMap)
 	for _, e := range aggregations {
 		info := physicalplan.DistAggregationTable[e.Func]
 
@@ -3001,8 +3035,7 @@ func getLocalAggAndType(
 		// We use a slice here instead of a map because we have a small, bounded domain to map and runtime hash
 		// operations are relatively expensive.
 		relToAbsLocalIdx := make([]uint32, len(info.LocalStage))
-
-		if err = dealWithLocal(&info, e, inputTypes, aggs, &outputTypes, &relToAbsLocalIdx); err != nil {
+		if err = dealWithLocal(&info, e, inputTypes, aggs, &outputTypes, &relToAbsLocalIdx, &aggMap); err != nil {
 			return outputTypes, colIndex, err
 		}
 
@@ -3054,7 +3087,7 @@ func getMiddleAggAndType(
 
 			agg := execinfrapb.AggregatorSpec_Aggregation{Func: stageInfo.Fn, ColIdx: argIdxs}
 
-			if !checkHas(agg, *aggs, &relToAbsLocalIdx[i]) {
+			if !checkHas(&agg, aggs, &relToAbsLocalIdx[i]) {
 				// Append the new local aggregation and map to its index in localAggs.
 				relToAbsLocalIdx[i] = uint32(len(*aggs))
 				*aggs = append(*aggs, agg)
@@ -3149,7 +3182,7 @@ func getLocalAggAndTypeAndFinalGroupCols(
 		}
 		// See if there already is an aggregation like the one we want to add.
 		var idx uint32
-		if !checkHas(agg, *localAggs, &idx) {
+		if !checkHas(&agg, localAggs, &idx) {
 			// Not already there, add it.
 			idx = uint32(len(*localAggs))
 			*localAggs = append(*localAggs, agg)
