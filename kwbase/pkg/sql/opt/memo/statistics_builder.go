@@ -2554,9 +2554,15 @@ func (sb *statisticsBuilder) copyColStat(
 	colSet opt.ColSet, s *props.Statistics, inputColStat *props.ColumnStatistic,
 ) *props.ColumnStatistic {
 	if !inputColStat.Cols.SubsetOf(colSet) {
-		panic(errors.AssertionFailedf(
-			"copyColStat colSet: %v inputColSet: %v\n", log.Safe(colSet), log.Safe(inputColStat.Cols),
-		))
+		var newSet opt.ColSet
+		colSet.ForEach(func(col opt.ColumnID) {
+			newSet.Add(col)
+		})
+		if !inputColStat.Cols.SubsetOf(newSet) {
+			panic(errors.AssertionFailedf(
+				"copyColStat colSet: %v inputColSet: %v\n", log.Safe(colSet), log.Safe(inputColStat.Cols),
+			))
+		}
 	}
 	colStat, _ := s.ColStats.Add(colSet)
 	colStat.DistinctCount = inputColStat.DistinctCount
