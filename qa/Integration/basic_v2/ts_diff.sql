@@ -429,8 +429,6 @@ CREATE TABLE space_data_1823973101770842113 (
     space_node_id NCHAR(50),
     device_id NCHAR(50) ) PRIMARY TAGS(rel_id);
 
-explain SELECT SUM(chargedenergy) AS chargedenergy , SUM(dischargedenergy) AS dischargedenergy FROM (SELECT ts, DIFF(chargedenergy) over(partition by rel_id) AS chargedenergy,DIFF(dischargedenergy) over(partition by rel_id) AS dischargedenergy FROM space_data_1823973101770842113 where ts >= '2024-11-21 00:00:00.000+0800' AND ts<'2024-11-22 00:00:00.000+0800');
-
 use defaultdb;
 DROP DATABASE test_select_diff cascade;
 

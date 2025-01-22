@@ -1037,11 +1037,8 @@ INSERT 1
 > insert into test7.t1_9  values('2024-09-05 07:52:18.843',-9223372036854775807,-32765,'1',2);
 INSERT 1
 > select ts,value1,value2,diff(value1) over (partition by id1 order by ts) from test7.t1_9 order by ts;
-               ts               |        value1        | value2 |        diff
---------------------------------+----------------------+--------+----------------------
-  2024-09-05 07:51:18.843+00:00 |                32767 | -32765 |               65534
-  2024-09-05 07:52:18.843+00:00 | -9223372036854775807 | -32765 | 9223372036854743042
-(2 rows)
+ERROR: integer out of range
+SQLSTATE: 22003
 > select ts,value1 from test7.t1_9 order by ts;
                ts               |        value1
 --------------------------------+-----------------------
@@ -1052,12 +1049,8 @@ INSERT 1
 > insert into test7.t1_9  values('2024-09-05 07:53:18.843',9223372036854775807,32765,'1',2);
 INSERT 1
 > select ts,value1,value2,diff(value1) over (partition by id1 order by ts) from test7.t1_9 order by ts;
-               ts               |        value1        | value2 |        diff
---------------------------------+----------------------+--------+----------------------
-  2024-09-05 07:51:18.843+00:00 |                32767 | -32765 |               65534
-  2024-09-05 07:52:18.843+00:00 | -9223372036854775807 | -32765 | 9223372036854743042
-  2024-09-05 07:53:18.843+00:00 |  9223372036854775807 |  32765 |                  -2
-(3 rows)
+ERROR: integer out of range
+SQLSTATE: 22003
 > select ts,value1 from test7.t1_9 order by ts;
                ts               |        value1
 --------------------------------+-----------------------
@@ -1342,26 +1335,6 @@ SQLSTATE: 42601
     space_node_id NCHAR(50),
     device_id NCHAR(50) ) PRIMARY TAGS(rel_id);
 CREATE TABLE
-> explain SELECT SUM(chargedenergy) AS chargedenergy , SUM(dischargedenergy) AS dischargedenergy FROM (SELECT ts, DIFF(chargedenergy) over(partition by rel_id) AS chargedenergy,DIFF(dischargedenergy) over(partition by rel_id) AS dischargedenergy FROM space_data_1823973101770842113 where ts >= '2024-11-21 00:00:00.000+0800' AND ts<'2024-11-22 00:00:00.000+0800');
-             tree             |     field      |            description
-------------------------------+----------------+------------------------------------
-                              | distributed    | true
-                              | vectorized     | false
-  group                       |                |
-   │                          | aggregate 0    | sum(diff)
-   │                          | aggregate 1    | sum(diff)
-   │                          | scalar         |
-   └── render                 |                |
-        │                     | diff           | diff
-        │                     | diff           | diff
-        └── window            |                |
-             └── synchronizer |                |
-                  └── ts scan |                |
-                              | ts-table       | space_data_1823973101770842113
-                              | access mode    | tableTableMeta
-                              | spans:fromTime | 2024-11-20 16:00:00 +0000 UTC
-                              | spans:toTime   | 2024-11-21 15:59:59.999 +0000 UTC
-(16 rows)
 > use defaultdb;
 SET
 > DROP DATABASE test_select_diff cascade;

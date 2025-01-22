@@ -895,19 +895,9 @@ func (dw *DiffWindowInt) Compute(
 		return tree.DNull, nil
 	}
 
-	var MinInt tree.DInt
-	MinInt = math.MinInt64
-
-	var MaxInt tree.DInt
-	MaxInt = math.MaxInt64
-
-	diffValue := tree.MustBeDInt(currentValue) - tree.MustBeDInt(prevValue)
+	diffValue, err := safeSub(tree.MustBeDInt(currentValue), tree.MustBeDInt(prevValue))
 	if err != nil {
 		return nil, err
-	}
-
-	if diffValue.Compare(evalCtx, &MinInt) < 0 || diffValue.Compare(evalCtx, &MaxInt) > 0 {
-		return nil, tree.ErrIntOutOfRange
 	}
 
 	return &diffValue, nil
@@ -1035,3 +1025,12 @@ func (dw *DiffWindowFloat) Reset(context.Context) {}
 
 // Close is for DiffWindowFloat close
 func (dw *DiffWindowFloat) Close(context.Context, *tree.EvalContext) {}
+
+// safeSub saf sub
+func safeSub(a, b tree.DInt) (tree.DInt, error) {
+	// 检查减法是否会导致溢出
+	if (b < 0 && a > math.MaxInt64+b) || (b > 0 && a < math.MinInt64+b) {
+		return 0, tree.ErrIntOutOfRange
+	}
+	return a - b, nil
+}
