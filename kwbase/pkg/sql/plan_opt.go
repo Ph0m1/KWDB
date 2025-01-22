@@ -126,6 +126,7 @@ func (p *planner) prepareUsingOptimizer(ctx context.Context) (planFlags, error) 
 					stmt.Prepared.Columns = pm.Columns
 					stmt.Prepared.Types = pm.Types
 					stmt.Prepared.Memo = cachedData.Memo
+					stmt.Prepared.needTSTypeCheck = cachedData.Memo.CheckFlag(opt.NeedTSTypeCheck)
 					return opc.flags, nil
 				}
 				opc.log(ctx, "query cache hit but memo is stale (prepare)")

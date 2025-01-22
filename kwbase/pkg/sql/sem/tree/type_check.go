@@ -1374,24 +1374,41 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 	switch typ.Family() {
 	case types.StringFamily:
 		switch typ.Oid() {
-		case oid.T_text, oid.T_varchar, oid.T_bpchar, types.T_geometry:
-			if typ.Oid() == types.T_geometry {
-				_, err := geos.FromWKT(expr.s)
-				if err != nil {
-					if strings.Contains(err.Error(), "load error") {
-						return nil, err
-					}
-					return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", expr.s, typ.SQLString())
+		case types.T_geometry:
+			_, err := geos.FromWKT(expr.s)
+			if err != nil {
+				if strings.Contains(err.Error(), "load error") {
+					return nil, err
+				}
+				return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", expr.s, typ.SQLString())
+			}
+		case oid.T_bpchar, oid.T_text, oid.T_varchar:
+			width := int(typ.Width())
+			if width == 0 {
+				// varchar or string type default width
+				width = 254
+				if typ.Oid() == oid.T_bpchar {
+					// char type default width
+					width = 1
 				}
 			}
 			// string(n)/char(n)/varchar(n) Calculates the length in bytes
-			if len(expr.s) > int(typ.Width()) {
+			if len(expr.s) > width {
 				return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
 					"value '%s' too long for type %s", expr.s, typ.SQLString())
 			}
 		case types.T_nchar, types.T_nvarchar:
+			width := int(typ.Width())
+			if width == 0 {
+				// nvarchar type default width
+				width = 63
+				if typ.Oid() == types.T_nchar {
+					// nchar type default width
+					width = 1
+				}
+			}
 			// nchar(n)/nvarchar(n) Calculates the length by character
-			if utf8.RuneCountInString(expr.s) > int(typ.Width()) {
+			if utf8.RuneCountInString(expr.s) > width {
 				return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
 					"value '%s' too long for type %s", expr.s, typ.SQLString())
 			}
@@ -1406,8 +1423,17 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 		if err != nil {
 			return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
 		}
+		width := int(typ.Width())
+		if width == 0 {
+			// varbytes type default width
+			width = 254
+			if typ.Oid() == oid.T_bytea {
+				// bytes type default width
+				width = 1
+			}
+		}
 		// bytes(n)/varbytes(n) Calculates the length in bytes
-		if len(string(*v)) > int(typ.Width()) {
+		if len(string(*v)) > width {
 			return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
 				"value '%s' too long for type %s", expr.s, typ.SQLString())
 		}
