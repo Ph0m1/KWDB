@@ -160,8 +160,7 @@ type RestfulUser struct {
 	LoginTime int64
 }
 
-// A restfulServer provides a RESTful HTTP API to administration of
-// the kwbase cluster.
+// restfulServer provides a RESTful HTTP API to administration of the kwbase cluster
 type restfulServer struct {
 	server        *Server
 	insertNotices *pq.Error
@@ -333,8 +332,7 @@ func (ddlStr ddlResponse) MarshalJSON() ([]byte, error) {
 		ddlStr.Time)), nil
 }
 
-// newRestfulServer allocates and returns a new REST server for
-// Restful APIs.
+// newRestfulServer allocates and returns a new REST server for Restful APIs
 func newRestfulServer(s *Server) *restfulServer {
 	server := &restfulServer{server: s, connCache: make(map[string]*pgConnection)}
 	return server
@@ -541,7 +539,7 @@ func (s *restfulServer) handleDDL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate the execution time if needed
-	executionTime := float64(0)
+	var executionTime float64
 	// split the stmts.
 	ddlStmts := parseSQL(restDDL)
 	for _, stmt := range ddlStmts {
@@ -566,7 +564,7 @@ func (s *restfulServer) handleDDL(w http.ResponseWriter, r *http.Request) {
 			desc = desc + "success" + ","
 		}
 		duration := timeutil.Now().Sub(DDLStartTime)
-		executionTime = float64(duration) / float64(time.Second)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
 	}
 
 	ddldesc := parseDesc(desc)
@@ -580,7 +578,7 @@ func (s *restfulServer) handleDDL(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	s.sendJSONResponse(ctx, w, RestfulResponseCodeSuccess, response, ddldesc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
@@ -615,7 +613,7 @@ func (s *restfulServer) handleInsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate the execution time if needed
-	executionTime := float64(0)
+	var executionTime float64
 	var rowsAffected int64
 	rowsAffected = 0
 	notice := ""
@@ -636,7 +634,7 @@ func (s *restfulServer) handleInsert(w http.ResponseWriter, r *http.Request) {
 		InsertStartTime := timeutil.Now()
 		result, err = db.Exec(stmt)
 		duration := timeutil.Now().Sub(InsertStartTime)
-		executionTime = float64(duration) / float64(time.Second)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
 		if err != nil {
 			errStr := strings.ReplaceAll(err.Error(), `"`, `\"`)
 			desc = desc + errStr + ","
@@ -678,7 +676,7 @@ func (s *restfulServer) handleInsert(w http.ResponseWriter, r *http.Request) {
 		Rows:   rowsAffected,
 	}
 	s.sendJSONResponse(ctx, w, RestfulResponseCodeSuccess, response, insertdesc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
@@ -706,7 +704,7 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 	resultsCount := 0
 	var columnMeta = []colMetaInfo{}
 	var restData [][]string
-	executionTime := float64(0)
+	var executionTime float64
 	var cloLength int64
 	mistakeTypeCount := 0
 
@@ -717,17 +715,20 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if queryStmtCount > 1 {
 		desc = "only support single statement for each query interface, please check."
 		s.sendJSONResponse(ctx, w, RestfulResponseCodeFail, nil, desc)
+		clear(ctx, db)
 		return
 	}
 	if createFlag == true && !showCreateFlag {
 		desc = "do not support create statement for query interface, please check."
 		s.sendJSONResponse(ctx, w, RestfulResponseCodeFail, nil, desc)
+		clear(ctx, db)
 		return
 	}
 
 	if ifKey, keyword := startsWithKeywords(restQuery); ifKey {
 		desc = "do not support " + keyword + " statement for query interface, please check."
 		s.sendJSONResponse(ctx, w, RestfulResponseCodeFail, nil, desc)
+		clear(ctx, db)
 		return
 	}
 
@@ -740,7 +741,7 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 	} else {
 		defer rows.Close()
 		duration := timeutil.Now().Sub(QueryStartTime)
-		executionTime = float64(duration) / float64(time.Second)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
 
 		// Get column meta.
 		colTypes, err := rows.ColumnTypes()
@@ -749,13 +750,13 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 			code = RestfulResponseCodeFail
 		}
 		for _, colMeta := range colTypes {
-			colName := colMeta.Name()
 			colType := colMeta.DatabaseTypeName()
 			if colType == "BYTEA" {
 				colType = "BYTES"
 			} else if colType == "VARBYTEA" {
 				colType = "VARBYTES"
 			}
+			colName := strings.ReplaceAll(colMeta.Name(), `"`, `\"`)
 			originalLen, hasLen := colMeta.Length()
 			if hasLen {
 				cloLength = originalLen
@@ -818,7 +819,7 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendJSONResponse(ctx, w, code, response, desc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
@@ -826,7 +827,7 @@ func (s *restfulServer) handleQuery(w http.ResponseWriter, r *http.Request) {
 func (s *restfulServer) handleTelegraf(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	code := RestfulResponseCodeSuccess
-	desc := "success"
+	desc := ""
 
 	if err := s.checkFormat(ctx, w, r, "POST"); err != nil {
 		return
@@ -842,50 +843,55 @@ func (s *restfulServer) handleTelegraf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Calculate the execution time if needed
+	var executionTime float64
 	var rowsAffected int64
 	rowsAffected = 0
 	var teleResult gosql.Result
-	// Calculate the execution time if needed
-	executionTime := float64(0)
 	// the program will get a batch of data at once, so it needs to handle it first
 	statements := strings.Split(strings.ReplaceAll(restTelegraph, "\r\n", "\n"), "\n")
-	numOfStmts := len(statements)
-	for i := 0; i < numOfStmts; i++ {
-		insertTelegraphStmt := makeInsertStmt(statements[i])
+	for _, stmt := range statements {
+		insertTelegraphStmt := makeInsertStmt(stmt)
 
-		TeleInsertStartTime := timeutil.Now()
 		insertflag := strings.HasPrefix(strings.ToLower(insertTelegraphStmt), insertTypeStrLowercase)
 		if insertTelegraphStmt == "" {
-			desc = "wrong telegraf insert statement, please check."
+			desc = desc + "wrong telegraf insert statement and please check;"
 			code = RestfulResponseCodeFail
-		} else if !insertflag {
-			desc = "can not find insert statement, please check."
+			continue
+		}
+		if !insertflag {
+			desc = desc + "can not find insert statement and please check;"
+			code = RestfulResponseCodeFail
+			continue
+		}
+
+		teleStmtCount := strings.Count(insertTelegraphStmt, ";")
+		if teleStmtCount > 1 {
+			desc = desc + "only support single statement for each telegraf interface and please check;"
+			code = RestfulResponseCodeFail
+			continue
+		}
+
+		TeleInsertStartTime := timeutil.Now()
+		teleResult, err = db.Exec(insertTelegraphStmt)
+		duration := timeutil.Now().Sub(TeleInsertStartTime)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
+		if err != nil {
+			desc = desc + err.Error() + ";"
 			code = RestfulResponseCodeFail
 		} else {
-			teleStmtCount := strings.Count(insertTelegraphStmt, ";")
-			if teleStmtCount > 1 {
-				desc = "only support single statement for each telegraf interface, please check."
+			curRowsAffected, err := teleResult.RowsAffected()
+			if err != nil {
+				desc = desc + err.Error() + ";"
 				code = RestfulResponseCodeFail
 			} else {
-				teleResult, err = db.Exec(insertTelegraphStmt)
-				if err != nil {
-					desc = err.Error()
-					code = RestfulResponseCodeFail
-				} else {
-					rowsAffected, err = teleResult.RowsAffected()
-					if err != nil {
-						desc = err.Error()
-						code = RestfulResponseCodeFail
-						rowsAffected = 0
-					} else {
-						duration := timeutil.Now().Sub(TeleInsertStartTime)
-						executionTime = float64(duration) / float64(time.Second)
-					}
-				}
+				desc = desc + "success;"
+				rowsAffected += curRowsAffected
 			}
 		}
 	}
 
+	// Create the response struct
 	response := teleInsertResponse{
 		baseResponse: &baseResponse{
 			Code: code,
@@ -894,9 +900,8 @@ func (s *restfulServer) handleTelegraf(w http.ResponseWriter, r *http.Request) {
 		},
 		Rows: rowsAffected,
 	}
-
 	s.sendJSONResponse(ctx, w, RestfulResponseCodeSuccess, response, desc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
@@ -920,6 +925,7 @@ func (s *restfulServer) checkConn(
 		paraDbName = "defaultdb"
 	}
 
+	paraDbName = "\"" + paraDbName + "\""
 	if _, err := db.Exec("USE " + paraDbName); err != nil {
 		desc := err.Error()
 		clear(ctx, db)
@@ -940,7 +946,6 @@ func (s *restfulServer) checkConn(
 		s.sendJSONResponse(ctx, w, RestfulResponseCodeFail, nil, desc)
 		return &pgConnection{}, nil, err
 	}
-
 	return connCache, db, nil
 }
 
@@ -1099,8 +1104,8 @@ func (s *restfulServer) handleUserShow(w http.ResponseWriter, r *http.Request) {
 
 // addSessionInfo adds session infos
 func (s *restfulServer) addSessionInfo(tokens *[]sessionInfo, value pgConnection, token string) {
-	lastLoginTime := transtUnixTime(value.lastLoginTime)
-	expirationTime := transtUnixTime(value.lastLoginTime + value.maxLifeTime)
+	lastLoginTime := transUnixTime(value.lastLoginTime)
+	expirationTime := transUnixTime(value.lastLoginTime + value.maxLifeTime)
 	truncated := token[:8]
 
 	showtoken := truncated + strings.Repeat("*", 1)
@@ -1321,8 +1326,8 @@ func makeInsertStmt(stmtOriginal string) (teleInsertStmt string) {
 	return stmtRet
 }
 
-// transtUnixTime formats display time.
-func transtUnixTime(timestamp int64) string {
+// transUnixTime formats display time.
+func transUnixTime(timestamp int64) string {
 	t := timeutil.Unix(timestamp, 0)
 
 	return t.Format("2006-01-02 15:04:05")
@@ -1435,25 +1440,24 @@ func (s *restfulServer) getUserWIthPass(
 // determineType returns the corresponding type based on the input string
 func determineType(input string) (string, string) {
 	input = strings.TrimSpace(input)
-	if val, ok := isBool[input]; ok {
-		return fmt.Sprintf("%t", val), "bool"
-	}
-
-	switch {
-	case len(input) > 1 && input[0] == '"' && input[len(input)-1] == '"':
+	if len(input) > 1 && input[0] == '"' && input[len(input)-1] == '"' {
 		length := len(input) - 2
 		if length > varcharlen {
 			return "'" + input[1:len(input)-1] + "'", "varchar" + "(" + strconv.Itoa(length) + ")"
 		}
 		return "'" + input[1:len(input)-1] + "'", "varchar"
-	case isNumericWithU.MatchString(input), isNumericWithI.MatchString(input):
+	}
+	if isFloat.MatchString(input) {
+		return input, "float8"
+	}
+	if isNumericWithU.MatchString(input) || isNumericWithI.MatchString(input) {
 		input = input[:len(input)-1]
 		return input, "int8"
-	case isFloat.MatchString(input):
-		return input, "float8"
-	default:
-		return "", "UNKNOWN"
 	}
+	if val, ok := isBool[input]; ok {
+		return fmt.Sprintf("%t", val), "bool"
+	}
+	return "", "UNKNOWN"
 }
 
 // makeInfluxDBStmt makes insert statement when telegraf.
@@ -1470,7 +1474,8 @@ func makeInfluxDBStmt(
 	}
 	slice := splitStringQuotes(stmtOriginal, ' ')
 	attribute := strings.Split(slice[0], ",")
-	tblName := attribute[0]
+	// wrap the table name in quotation marks
+	tblName := "\"" + attribute[0] + "\""
 
 	var colKey, colValue, coltagName, coltagType, colvalueType, colvalueName, hashtag []string
 
@@ -1478,6 +1483,7 @@ func makeInfluxDBStmt(
 		if index >= 1 {
 			hashtag = append(hashtag, keyWithValue)
 			initObj := strings.Split(keyWithValue, "=")
+			initObj[0] = "\"" + initObj[0] + "\""
 			colKey = append(colKey, initObj[0])
 			coltagName = append(coltagName, initObj[0])
 			if len(initObj[1]) > varcharlen {
@@ -1503,6 +1509,7 @@ func makeInfluxDBStmt(
 	colkeyValue := splitStringQuotes(slice[1], ',')
 	for _, keyValue := range colkeyValue {
 		obj := strings.SplitN(keyValue, "=", 2)
+		obj[0] = "\"" + obj[0] + "\""
 		colKey = append(colKey, obj[0])
 		colvalueName = append(colvalueName, obj[0])
 		value, col := determineType(obj[1])
@@ -1570,7 +1577,7 @@ func makeInfluxDBStmt(
 	return stmtRet, createRet
 }
 
-// handleTelegraf handle telegraf interface
+// handleInfluxDB handles for influxdb format
 func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	code := RestfulResponseCodeSuccess
@@ -1580,7 +1587,7 @@ func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	restTelegraph, err := s.checkInput(ctx, w, r)
+	restInfluxdb, err := s.checkInput(ctx, w, r)
 	if err != nil {
 		return
 	}
@@ -1594,9 +1601,9 @@ func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 	rowsAffected = 0
 	var teleResult gosql.Result
 	// Calculate the execution time if needed
-	executionTime := float64(0)
+	var executionTime float64
 	// the program will get a batch of data at once, so it needs to handle it first
-	statements := strings.Split(strings.ReplaceAll(restTelegraph, "\r\n", "\n"), "\n")
+	statements := strings.Split(strings.ReplaceAll(restInfluxdb, "\r\n", "\n"), "\n")
 	numOfStmts := len(statements)
 
 	for i := 0; i < numOfStmts; i++ {
@@ -1632,7 +1639,7 @@ func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 		}
 
 		duration := timeutil.Now().Sub(TeleInsertStartTime)
-		executionTime = float64(duration) / float64(time.Second)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
 		desc += "success;"
 		rowsAffected += curRowsAffected
 	}
@@ -1647,7 +1654,7 @@ func (s *restfulServer) handleInfluxDB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendJSONResponse(ctx, w, RestfulResponseCodeSuccess, response, desc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
@@ -1660,7 +1667,7 @@ func (s *restfulServer) handleOpenTSDBTelnet(w http.ResponseWriter, r *http.Requ
 	if err := s.checkFormat(ctx, w, r, "POST"); err != nil {
 		return
 	}
-	restTelegraph, err := s.checkInput(ctx, w, r)
+	restTelnet, err := s.checkInput(ctx, w, r)
 	if err != nil {
 		return
 	}
@@ -1673,9 +1680,9 @@ func (s *restfulServer) handleOpenTSDBTelnet(w http.ResponseWriter, r *http.Requ
 	rowsAffected = 0
 	var teleResult gosql.Result
 	// Calculate the execution time if needed
-	executionTime := float64(0)
+	var executionTime float64
 	// the program will get a batch of data at once, so it needs to handle it first
-	statements := strings.Split(strings.ReplaceAll(restTelegraph, "\r\n", "\n"), "\n")
+	statements := strings.Split(strings.ReplaceAll(restTelnet, "\r\n", "\n"), "\n")
 	numOfStmts := len(statements)
 
 	for i := 0; i < numOfStmts; i++ {
@@ -1704,7 +1711,7 @@ func (s *restfulServer) handleOpenTSDBTelnet(w http.ResponseWriter, r *http.Requ
 		}
 
 		duration := timeutil.Now().Sub(TeleInsertStartTime)
-		executionTime = float64(duration) / float64(time.Second)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
 		desc += "success;"
 		rowsAffected += curRowsAffected
 	}
@@ -1719,7 +1726,7 @@ func (s *restfulServer) handleOpenTSDBTelnet(w http.ResponseWriter, r *http.Requ
 	}
 
 	s.sendJSONResponse(ctx, w, RestfulResponseCodeSuccess, response, desc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
@@ -1733,7 +1740,7 @@ func (s *restfulServer) handleOpenTSDBJson(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	restTelegraph, err := s.checkInput(ctx, w, r)
+	restJSON, err := s.checkInput(ctx, w, r)
 	if err != nil {
 		return
 	}
@@ -1747,16 +1754,18 @@ func (s *restfulServer) handleOpenTSDBJson(w http.ResponseWriter, r *http.Reques
 	rowsAffected = 0
 	var teleResult gosql.Result
 	// Calculate the execution time if needed
-	executionTime := float64(0)
-	stmt, err := makeOpenTSDBJson(ctx, restTelegraph)
+	var executionTime float64
+	stmt, err := makeOpenTSDBJson(ctx, restJSON)
 	if err != nil {
 		desc = err.Error()
 		s.sendJSONResponse(ctx, w, RestfulResponseCodeFail, nil, desc)
+		clear(ctx, db)
 		return
 	}
 	if len(stmt) == 0 {
 		desc = "invalid data for opentsdb json protocol, please check the format."
 		s.sendJSONResponse(ctx, w, RestfulResponseCodeFail, nil, desc)
+		clear(ctx, db)
 		return
 	}
 	// there are cases of inserting multiple pieces of data under this protocol
@@ -1785,7 +1794,7 @@ func (s *restfulServer) handleOpenTSDBJson(w http.ResponseWriter, r *http.Reques
 		}
 
 		duration := timeutil.Now().Sub(TeleInsertStartTime)
-		executionTime = float64(duration) / float64(time.Second)
+		executionTime = executionTime + float64(duration)/float64(time.Second)
 		desc += "success;"
 		rowsAffected += curRowsAffected
 	}
@@ -1800,11 +1809,11 @@ func (s *restfulServer) handleOpenTSDBJson(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.sendJSONResponse(ctx, w, RestfulResponseCodeSuccess, response, desc)
-	resfreshRequestTime(connCache)
+	refreshRequestTime(connCache)
 	clear(ctx, db)
 }
 
-func resfreshRequestTime(connCache *pgConnection) {
+func refreshRequestTime(connCache *pgConnection) {
 	connCache.lastLoginTime = timeutil.Now().Unix()
 }
 
@@ -1828,10 +1837,11 @@ func executeWithRetry(db *gosql.DB, insertStmt, createStmt string) (gosql.Result
 				createTableError := createTableErr.Error()
 				if !reRelationAlreadyExists.MatchString(createTableError) && !reWaitForSuccess.MatchString(createTableError) {
 					return nil, createTableErr
+				} else if reWaitForSuccess.MatchString(createTableError) {
+					time.Sleep(retryDelay)
+					retryDelay *= 2
 				}
 			}
-			time.Sleep(retryDelay)
-			retryDelay *= 2
 		} else if reWaitForSuccess.MatchString(schemalessError) {
 			// reWaitForSuccess performs the following operations
 			time.Sleep(retryDelay)
@@ -1841,7 +1851,6 @@ func executeWithRetry(db *gosql.DB, insertStmt, createStmt string) (gosql.Result
 			return nil, execErr
 		}
 	}
-
 	return nil, execErr
 }
 
@@ -1857,7 +1866,7 @@ func generateHashString(hashtag []string) string {
 	return fmt.Sprintf("%x", hashSum)
 }
 
-// startsWithKeywords check key words
+// startsWithKeywords check keywords
 func startsWithKeywords(s string) (bool, string) {
 	s = strings.ToLower(s)
 
@@ -1936,7 +1945,9 @@ func makeOpenTSDBTelnet(ctx context.Context, telnetStr string) (string, string, 
 
 	for k, v := range tags {
 		insertKeyStmt.WriteString(",")
+		insertKeyStmt.WriteString("\"")
 		insertKeyStmt.WriteString(k)
+		insertKeyStmt.WriteString("\"")
 		if len(v) > varcharlen {
 			insertKeyStmt.WriteString(" varchar")
 			insertKeyStmt.WriteString("(")
@@ -1951,7 +1962,9 @@ func makeOpenTSDBTelnet(ctx context.Context, telnetStr string) (string, string, 
 		tagValue := "'" + v + "'"
 		insertValue.WriteString(tagValue)
 		createTag.WriteString(",")
+		createTag.WriteString("\"")
 		createTag.WriteString(k)
+		createTag.WriteString("\"")
 		createTag.WriteString(" varchar")
 	}
 
@@ -2042,14 +2055,18 @@ func makeOpenTSDBJson(ctx context.Context, jsonStr string) (map[string]string, e
 				return jsonData, fmt.Errorf("tags type is not support")
 			}
 			insertKeyStmt.WriteString(",")
+			insertKeyStmt.WriteString("\"")
 			insertKeyStmt.WriteString(k)
+			insertKeyStmt.WriteString("\"")
 			insertKeyStmt.WriteString(" ")
 			insertKeyStmt.WriteString(typ)
 			insertKeyStmt.WriteString(" tag")
 			insertValue.WriteString(",")
 			insertValue.WriteString(col)
 			createTag.WriteString(",")
+			createTag.WriteString("\"")
 			createTag.WriteString(k)
+			createTag.WriteString("\"")
 			createTag.WriteString(" ")
 			createTag.WriteString(typ)
 		}
