@@ -24,7 +24,7 @@ namespace kwdbts {
 typedef KStatus (*_to_signed_func)(Field *, k_int64 &);
 typedef KStatus (*_to_real_func)(Field *, k_double64 &);
 typedef KStatus (*_to_string_func)(Field *, char *, k_uint32);
-typedef KStatus (*_to_timestamp_func)(Field *, k_int64 &, k_int8);
+typedef KStatus (*_to_timestamp_func)(Field *, k_int64 &, k_int64, k_int64, roachpb::DataType);
 typedef KStatus (*_to_bool_func)(Field *, k_bool &);
 
 // inline KStatus integerToString(Field *field, )
@@ -99,7 +99,7 @@ class FieldTypeCastTimestamptz2String : public FieldTypeCast {
 };
 class FieldTypeCastTimestampTz : public FieldTypeCast {
  public:
-  explicit FieldTypeCastTimestampTz(Field *field, k_int8 timezone);
+  explicit FieldTypeCastTimestampTz(Field *field, k_int8 type_num, k_int8 timezone);
 
   k_int64 ValInt() override;
   k_double64 ValReal() override;
@@ -107,7 +107,8 @@ class FieldTypeCastTimestampTz : public FieldTypeCast {
 
   Field *field_to_copy() { return new FieldTypeCastTimestampTz(*this); }
   _to_timestamp_func func_;
-  k_int8 timezone_;
+  k_int64 timezone_diff_;
+  k_int64 type_scale_{1};
 };
 
 class FieldTypeCastBool : public FieldTypeCast {

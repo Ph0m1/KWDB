@@ -2,14 +2,14 @@
          table_name         |                    create_statement
 ----------------------------+---------------------------------------------------------
   test_select_col.public.t1 | CREATE TABLE t1 (
-                            |     k_timestamp TIMESTAMPTZ NOT NULL,
+                            |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
                             |     e1 INT2 NOT NULL,
                             |     e2 INT4 NULL,
                             |     e3 INT8 NOT NULL,
                             |     e4 FLOAT4 NULL,
                             |     e5 FLOAT8 NOT NULL,
                             |     e6 BOOL NULL,
-                            |     e7 TIMESTAMPTZ NOT NULL,
+                            |     e7 TIMESTAMPTZ(3) NOT NULL,
                             |     e8 CHAR(1023) NULL,
                             |     e9 NCHAR(255) NOT NULL,
                             |     e10 VARCHAR(4096) NULL,

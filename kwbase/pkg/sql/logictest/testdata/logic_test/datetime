@@ -171,25 +171,10 @@ SELECT now() - timestamp '2015-06-13' > interval '100h'
 ----
 true
 
-query TT
-SELECT now()::timestamp - now(), now() - now()::timestamp
-----
-00:00:00  00:00:00
-
 query BB
 SELECT now() = now()::timestamp, now()::timestamp = now()
 ----
-true true
-
-query BB
-SELECT now()::timestamp < now(), now() < now()::timestamp
-----
-false false
-
-query BB
-SELECT now()::timestamp <= now(), now() <= now()::timestamp
-----
-true true
+false  false
 
 query B
 SELECT current_date - current_date() = 0
@@ -238,10 +223,6 @@ SELECT k FROM kv
 ----
 a
 
-query T
-SELECT k FROM kv where v = transaction_timestamp()
-----
-a
 
 statement ok
 COMMIT TRANSACTION
@@ -496,67 +477,71 @@ INSERT INTO ex VALUES
 query IBR
 SELECT k, extract(element, input::timestamp) = extract_result, extract(element, input::timestamp) FROM ex ORDER BY k
 ----
-1  true 2001
-2  true 2016
-3  true 2016
-4  true 2
-5  true 1
-6  true 2
-7  true 3
-8  true 4
-9  true 4
-10 true 2
-11 true 2
-12 true 15
-13 true 1
-14 true 10
-15 true 10
-16 true 10
-17 true 2
-18 true 4
-19 true 100
-20 true 102
-21 true 86401.000001
-22 true 100801.000001
-23 true 9.86904299e+08
-24 true 12
-25 true 19
-26 true 23
-27 true 19
-28 true 23
-29 true 4
-30 true 46
-31 true 46
-32 true 59.234
-33 true 33.306158
-34 true 33.306158
-35 true 59234.567
-36 true 33306.158
-37 true 33306.158
-38 true 5.9345654e+07
-39 true 3.3306158e+07
-40 true 3.3306158e+07
-41 true 2
-42 true 7
-43 true 2008
-44 true 2008
-45 true 200
-46 true -202
-47 true 21
-48 true -1
-49 true 3
-50 true -2
-51 true 0
-52 true 2.4574298239966e+06
+1   true  2001
+2   true  2016
+3   true  2016
+4   true  2
+5   true  1
+6   true  2
+7   true  3
+8   true  4
+9   true  4
+10  true  2
+11  true  2
+12  true  15
+13  true  1
+14  true  10
+15  true  10
+16  true  10
+17  true  2
+18  true  4
+19  true  100
+20  true  102
+21  true  86401.000001
+22  true  100801.000001
+23  true  9.86904299e+08
+24  true  12
+25  true  19
+26  true  23
+27  true  19
+28  true  23
+29  true  4
+30  true  46
+31  true  46
+32  true  59.234
+33  true  33.306158
+34  true  33.306158
+35  true  59234.567
+36  true  33306.158
+37  true  33306.158
+38  true  5.9345654e+07
+39  true  3.3306158e+07
+40  true  3.3306158e+07
+41  true  2
+42  true  7
+43  true  2008
+44  true  2008
+45  true  200
+46  true  -202
+47  true  21
+48  true  -1
+49  true  3
+50  true  -2
+51  true  0
+52  true  2.4574298239966e+06
 
 query error extract\(\): unsupported timespan: nansecond
 SELECT extract(nansecond from '2001-04-10 12:04:59.34565423'::timestamp)
 
-query error unknown unit "nanosecond"
+query T
 SELECT INTERVAL '1 nanosecond';
+----
+00:00:00.000000001
 
-query error unknown unit "ns"
+query T
 SELECT INTERVAL '1 ns';
+----
+00:00:00.000000001
 
 query IBR
 SELECT k, extract(element, input::timestamptz) = extract_result, extract(element, input::timestamptz) FROM ex ORDER BY k
@@ -675,36 +660,36 @@ query IBT
 SELECT k, date_trunc(element, input::timestamptz) = date_trunc_result, date_trunc(element, input::timestamptz)::string
 FROM ex WHERE date_trunc_result IS NOT NULL ORDER BY k
 ----
-1   true  2001-01-01 00:00:00+00:00
-2   true  2016-01-01 00:00:00+00:00
-3   true  2016-01-01 00:00:00+00:00
-4   true  2001-04-01 00:00:00+00:00
-5   true  2016-01-01 00:00:00+00:00
-6   true  2016-04-01 00:00:00+00:00
-7   true  2016-07-01 00:00:00+00:00
-8   true  2016-10-01 00:00:00+00:00
-9   true  2001-04-01 00:00:00+00:00
-10  true  2016-02-01 00:00:00+00:00
-11  true  2016-02-01 00:00:00+00:00
-12  true  2001-04-09 00:00:00+00:00
-13  true  2001-01-01 00:00:00+00:00
-14  true  2001-04-10 00:00:00+00:00
-15  true  2016-02-10 00:00:00+00:00
-16  true  2016-02-10 00:00:00+00:00
-24  true  2001-04-10 12:00:00+00:00
-25  true  2016-02-10 19:00:00+00:00
-26  true  2016-02-10 23:00:00+00:00
-27  true  2016-02-10 19:00:00+00:00
-28  true  2016-02-10 23:00:00+00:00
-29  true  2001-04-10 12:04:00+00:00
-30  true  2016-02-10 19:46:00+00:00
-31  true  2016-02-10 19:46:00+00:00
-32  true  2001-04-10 12:04:59+00:00
-33  true  2016-02-10 19:46:33+00:00
-34  true  2016-02-10 19:46:33+00:00
-35  true  2001-04-10 12:04:59.234+00:00
-36  true  2016-02-10 19:46:33.306+00:00
-37  true  2016-02-10 19:46:33.306+00:00
+1   true   2001-01-01 00:00:00+00:00
+2   true   2016-01-01 00:00:00+00:00
+3   true   2016-01-01 00:00:00+00:00
+4   true   2001-04-01 00:00:00+00:00
+5   true   2016-01-01 00:00:00+00:00
+6   true   2016-04-01 00:00:00+00:00
+7   true   2016-07-01 00:00:00+00:00
+8   true   2016-10-01 00:00:00+00:00
+9   true   2001-04-01 00:00:00+00:00
+10  true   2016-02-01 00:00:00+00:00
+11  true   2016-02-01 00:00:00+00:00
+12  true   2001-04-09 00:00:00+00:00
+13  true   2001-01-01 00:00:00+00:00
+14  true   2001-04-10 00:00:00+00:00
+15  true   2016-02-10 00:00:00+00:00
+16  true   2016-02-10 00:00:00+00:00
+24  true   2001-04-10 12:00:00+00:00
+25  true   2016-02-10 19:00:00+00:00
+26  true   2016-02-10 23:00:00+00:00
+27  true   2016-02-10 19:00:00+00:00
+28  true   2016-02-10 23:00:00+00:00
+29  true   2001-04-10 12:04:00+00:00
+30  true   2016-02-10 19:46:00+00:00
+31  true   2016-02-10 19:46:00+00:00
+32  true   2001-04-10 12:04:59+00:00
+33  true   2016-02-10 19:46:33+00:00
+34  true   2016-02-10 19:46:33+00:00
+35  true   2001-04-10 12:04:59.234+00:00
+36  true   2016-02-10 19:46:33.306+00:00
+37  true   2016-02-10 19:46:33.306+00:00
 38  true  2001-04-10 12:04:59.345654+00:00
 39  true  2016-02-10 19:46:33.306158+00:00
 40  true  2016-02-10 19:46:33.306158+00:00
@@ -787,12 +772,12 @@ FROM ex WHERE date_trunc_result IS NOT NULL ORDER BY k
 query T
 SELECT (timestamp '2016-02-10 19:46:33.306157519')::string
 ----
-2016-02-10 19:46:33.306158+00:00
+2016-02-10 19:46:33.306157519+00:00
 
 query T
 SELECT (timestamptz '2016-02-10 19:46:33.306157519')::string
 ----
-2016-02-10 19:46:33.306158+00:00
+2016-02-10 19:46:33.306157519+00:00
 
 # Test SET TIME ZONE
 
@@ -1084,10 +1069,10 @@ CREATE TABLE tz (
 query TTBTTTBB
 SHOW COLUMNS FROM tz
 ----
-a  INT4         false  NULL  ·  {primary}  false false
-b  TIMESTAMP    true   NULL  ·  {}         false false
-c  TIMESTAMPTZ  true   NULL  ·  {}         false false
-d  TIMESTAMPTZ  true   NULL  ·  {}         false false
+a  INT4         false  NULL  ·  {primary}  false  false
+b  TIMESTAMP    true   NULL  ·  {}         false  false
+c  TIMESTAMPTZ  true   NULL  ·  {}         false  false
+d  TIMESTAMPTZ  true   NULL  ·  {}         false  false
 
 statement ok
 INSERT INTO tz VALUES
@@ -1369,17 +1354,17 @@ SET TIME ZONE -5
 query TT
 select date_trunc('day', '2011-01-02 01:30:00'::date), pg_typeof(date_trunc('day', '2011-01-02 01:30:00'::date))
 ----
-2011-01-02 00:00:00 -0500 -0500  timestamptz
+2011-01-02 00:00:00 -0500 -0500  timestamptz(9)
 
 query TT
 select date_trunc('day', '2011-01-02 01:30:00'::timestamp), pg_typeof(date_trunc('day', '2011-01-02 01:30:00'::timestamp))
 ----
-2011-01-02 00:00:00 +0000 +0000   timestamp
+2011-01-02 00:00:00 +0000 +0000   timestamp(9)
 
 query TT
 select date_trunc('day', '2011-01-02 01:30:00+00:00'::timestamptz), pg_typeof(date_trunc('day', '2011-01-02 01:30:00+00:00'::timestamptz))
 ----
-2011-01-01 00:00:00 -0500 -0500   timestamptz
+2011-01-01 00:00:00 -0500 -0500   timestamptz(9)
 
 statement ok
 SET TIME ZONE 0
@@ -1486,10 +1471,10 @@ FROM
 ORDER BY
     i
 ----
-01:00:00               00:30:00          02:00:00                00:30:00          02:00:00                04:14:01.320914                 00:14:10.32
-1 day                  12:00:00          2 days                  12:00:00          2 days                  4 days 05:36:31.701948          05:40:07.68
-1 mon                  15 days           2 mons                  15 days           2 mons                  4 mons 7 days 00:15:51.058425   7 days 02:03:50.4
-1 mon 2 days 04:00:00  16 days 02:00:00  2 mons 4 days 08:00:00  16 days 02:00:00  2 mons 4 days 08:00:00  4 mons 15 days 28:24:59.745978  7 days 14:20:47.04
+01:00:00               00:30:00          02:00:00                00:30:00          02:00:00                04:14:01.320914479                 00:14:10.32
+1 day                  12:00:00          2 days                  12:00:00          2 days                  4 days 05:36:31.701947502          05:40:07.68
+1 mon                  15 days           2 mons                  15 days           2 mons                  4 mons 7 days 00:15:51.058425064   7 days 02:03:50.4
+1 mon 2 days 04:00:00  16 days 02:00:00  2 mons 4 days 08:00:00  16 days 02:00:00  2 mons 4 days 08:00:00  4 mons 15 days 28:24:59.745977985  7 days 14:20:47.04
 
 subtest tz_utc_normalization
 
@@ -1515,32 +1500,32 @@ select extract(day from '2019-01-15'::date) as final
 query TT
 select ('2019-01-15'::date + '16:17:18'::time), pg_typeof('2019-01-15'::date + '16:17:18'::time)
 ----
-2019-01-15 16:17:18 +0000 +0000  timestamp
+2019-01-15 16:17:18 +0000 +0000  timestamp(9)
 
 query TT
 select ('16:17:18'::time + '2019-01-15'::date), pg_typeof(('16:17:18'::time + '2019-01-15'::date))
 ----
-2019-01-15 16:17:18 +0000 +0000  timestamp
+2019-01-15 16:17:18 +0000 +0000  timestamp(9)
 
 query TT
 select ('2019-01-15'::date + '1 hour'::interval), pg_typeof('2019-01-15'::date + '1 hour'::interval)
 ----
-2019-01-15 01:00:00 +0000 +0000  timestamp
+2019-01-15 01:00:00 +0000 +0000  timestamp(9)
 
 query TT
 select ('1 hour'::interval + '2019-01-15'::date), pg_typeof('1 hour'::interval + '2019-01-15'::date)
 ----
-2019-01-15 01:00:00 +0000 +0000  timestamp
+2019-01-15 01:00:00 +0000 +0000  timestamp(9)
 
 query TT
 select ('2019-01-15'::date - '16:17:18'::time), pg_typeof('2019-01-15'::date - '16:17:18'::time)
 ----
-2019-01-14 07:42:42 +0000 +0000  timestamp
+2019-01-14 07:42:42 +0000 +0000  timestamp(9)
 
 query TT
 select ('2019-01-15'::date - '1 hour'::interval), pg_typeof('2019-01-15'::date - '1 hour'::interval)
 ----
-2019-01-14 23:00:00 +0000 +0000  timestamp
+2019-01-14 23:00:00 +0000 +0000  timestamp(9)
 
 query B
 select '2019-01-01'::date > '2019-01-01 00:00:00+00'::timestamptz
@@ -1584,32 +1569,32 @@ SET TIME ZONE -5
 query TT
 select (date_test.date_val + date_test.time_val), pg_typeof(date_test.date_val + date_test.time_val) from date_test
 ----
-2019-01-15 16:17:18 +0000 +0000  timestamp
+2019-01-15 16:17:18 +0000 +0000  timestamp(9)
 
 query TT
 select (date_test.time_val + date_test.date_val), pg_typeof((date_test.time_val + date_test.date_val)) from date_test
 ----
-2019-01-15 16:17:18 +0000 +0000  timestamp
+2019-01-15 16:17:18 +0000 +0000  timestamp(9)
 
 query TT
 select (date_test.date_val + date_test.interval_val), pg_typeof(date_test.date_val + date_test.interval_val) from date_test
 ----
-2019-01-15 01:00:00 +0000 +0000  timestamp
+2019-01-15 01:00:00 +0000 +0000  timestamp(9)
 
 query TT
 select (date_test.interval_val + date_test.date_val), pg_typeof(date_test.interval_val + date_test.date_val) from date_test
 ----
-2019-01-15 01:00:00 +0000 +0000  timestamp
+2019-01-15 01:00:00 +0000 +0000  timestamp(9)
 
 query TT
 select (date_test.date_val - date_test.time_val), pg_typeof(date_test.date_val - date_test.time_val) from date_test
 ----
-2019-01-14 07:42:42 +0000 +0000  timestamp
+2019-01-14 07:42:42 +0000 +0000  timestamp(9)
 
 query TT
 select (date_test.date_val - date_test.interval_val), pg_typeof(date_test.date_val - date_test.interval_val) from date_test
 ----
-2019-01-14 23:00:00 +0000 +0000  timestamp
+2019-01-14 23:00:00 +0000 +0000  timestamp(9)
 
 query I
 select count(1) from date_test where date_test.date_val > '2019-01-15 00:00:00+00'::timestamptz

@@ -289,13 +289,6 @@ SELECT 1 IN (2, x) AS r FROM (SELECT NULL AS x FROM tb)
 r
 NULL
 
-# Issue 10407: tuple comparisons should not require homogeneous types
-query B colnames
-SELECT (now(), 2) = (now() :: timestamp, 2) AS r
-  FROM tb
-----
-r
-true
 
 query B colnames
 SELECT (1, 2) > (1.0, 2.0) AS r

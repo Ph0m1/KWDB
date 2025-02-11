@@ -681,10 +681,10 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %token <str> LOCALTIME LOCALTIMESTAMP LOCATION LOCKED LOGIN LOOKUP LOW LSHIFT
 %token <str> ACTIVETIME LUA
 
-%token <str> M MATCH MATERIALIZED MB MEMCAPACITY MEMORY MERGE MILLISECOND MINVALUE MAXVALUE MINUTE MON MONTH MS
+%token <str> M MATCH MATERIALIZED MB MEMCAPACITY MEMORY MERGE MICROSECOND MILLISECOND MINVALUE MAXVALUE MINUTE MON MONTH MS
 
-%token <str> NAN NAME NAMES NATURAL NCHAR NEVER NEXT NO NOCREATEROLE NOLOGIN NO_INDEX_JOIN
-%token <str> NONE NORMAL NOT NOTHING NOTNULL NOWAIT NULL NULLIF NULLS NUMERIC NVARCHAR
+%token <str> NAN NAME NAMES NANOSECOND NATURAL NCHAR NEVER NEXT NO NOCREATEROLE NOLOGIN NO_INDEX_JOIN
+%token <str> NONE NORMAL NOT NOTHING NOTNULL NOWAIT NS NULL NULLIF NULLS NUMERIC NVARCHAR
 
 %token <str> OF OFF OFFSET OID OIDS OIDVECTOR ON ONLY OPT OPTION OPTIONS OR
 %token <str> ORDER ORDINALITY OTHERS OUT OUTER OVER OVERLAPS OVERLAY OWNED OPERATOR
@@ -715,7 +715,7 @@ func (u *sqlSymUnion) roleType() tree.RoleType {
 %token <str> TRACING TS
 
 %token <str> UNBOUNDED UNCOMMITTED UNDER UNION UNIQUE UNKNOWN UNLOGGED UNSPLIT
-%token <str> UPDATE UPSERT UNTIL USAGE USE USER USERS USING UUID
+%token <str> UPDATE UPSERT UNTIL US USAGE USE USER USERS USING UUID
 
 %token <str> VALID VALIDATE VALUE VALUES VARBIT VARBYTES VARCHAR VARIADIC VIEW VARYING VIRTUAL
 
@@ -9453,7 +9453,7 @@ const_datetime:
 | TIMESTAMP '(' iconst32 ')' opt_timezone
   {
     prec := $3.int32()
-    if prec < 0 || prec > 6 {
+    if prec < 0 || prec > 9 {
       sqllex.Error(fmt.Sprintf("precision %d out of range", prec))
       return 1
     }
@@ -9470,7 +9470,7 @@ const_datetime:
 | TIMESTAMPTZ '(' iconst32 ')'
   {
     prec := $3.int32()
-    if prec < 0 || prec > 6 {
+    if prec < 0 || prec > 9 {
       sqllex.Error(fmt.Sprintf("precision %d out of range", prec))
       return 1
     }
@@ -9494,7 +9494,7 @@ interval_type:
 | INTERVAL '(' iconst32 ')'
   {
     prec := $3.int32()
-    if prec < 0 || prec > 6 {
+    if prec < 0 || prec > 9 {
       sqllex.Error(fmt.Sprintf("precision %d out of range", prec))
       return 1
     }
@@ -9623,7 +9623,7 @@ interval_second:
 | SECOND '(' iconst32 ')'
   {
     prec := $3.int32()
-    if prec < 0 || prec > 6 {
+    if prec < 0 || prec > 9 {
       sqllex.Error(fmt.Sprintf("precision %d out of range", prec))
       return 1
     }
@@ -10308,7 +10308,23 @@ d_expr:
 | GROUPING '(' expr_list ')' { return unimplemented(sqllex, "d_expr grouping") }
 
 interval_unit:
-  MILLISECOND
+	MICROSECOND
+	{
+		$$ = $1
+	}
+| US
+	{
+		$$ = $1
+	}
+| NANOSECOND
+	{
+		$$ = $1
+	}
+| NS
+	{
+		$$ = $1
+	}
+| MILLISECOND
   {
 		$$ = $1
 	}
@@ -11136,6 +11152,8 @@ extract_arg:
 | DAY
 | HOUR
 | MILLISECOND
+| MICROSECOND
+| NANOSECOND
 | MINUTE
 | SECOND
 | SCONST
@@ -11537,7 +11555,7 @@ interval_value:
 | INTERVAL '(' iconst32 ')' SCONST
   {
     prec := $3.int32()
-    if prec < 0 || prec > 6 {
+    if prec < 0 || prec > 9 {
       sqllex.Error(fmt.Sprintf("precision %d out of range", prec))
       return 1
     }
@@ -11999,6 +12017,7 @@ unreserved_keyword:
 | MEMCAPACITY
 | MEMORY
 | MERGE
+| MICROSECOND
 | MILLISECOND
 | MINUTE
 | MINVALUE
@@ -12007,6 +12026,7 @@ unreserved_keyword:
 | MS
 | NAMES
 | NAN
+| NANOSECOND
 | NAME
 | NEXT
 | NO
@@ -12015,6 +12035,7 @@ unreserved_keyword:
 | NOCREATEROLE
 | NOLOGIN
 | NOWAIT
+| NS
 | NULLS
 | IGNORE_FOREIGN_KEYS
 | OF
@@ -12148,6 +12169,7 @@ unreserved_keyword:
 | UPDATE
 | UPSERT
 | UUID
+| US
 | USAGE
 | USE
 | USERS

@@ -142,14 +142,14 @@ INSERT 1
   table_name |                         create_statement
 -------------+--------------------------------------------------------------------
   tb1        | CREATE TABLE tb1 (
-             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
              |     e1 INT2 NULL,
              |     e2 INT4 NULL,
              |     e3 INT8 NULL,
              |     e4 FLOAT4 NULL,
              |     e5 FLOAT8 NULL,
              |     e6 BOOL NULL,
-             |     e7 TIMESTAMP NULL,
+             |     e7 TIMESTAMP(3) NULL,
              |     e8 CHAR(1023) NULL,
              |     e9 NCHAR(255) NULL,
              |     e10 VARBYTES(255) NULL
@@ -173,14 +173,14 @@ INSERT 1
   table_name |                         create_statement
 -------------+--------------------------------------------------------------------
   tb1_1      | CREATE TABLE tb1_1 (
-             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
              |     e1 INT2 NULL,
              |     e2 INT4 NULL,
              |     e3 INT8 NULL,
              |     e4 FLOAT4 NULL,
              |     e5 FLOAT8 NULL,
              |     e6 BOOL NULL,
-             |     e7 TIMESTAMP NULL,
+             |     e7 TIMESTAMP(3) NULL,
              |     e8 CHAR(1023) NULL,
              |     e9 NCHAR(255) NULL,
              |     e10 VARBYTES(255) NULL
@@ -204,14 +204,14 @@ INSERT 1
   table_name |                         create_statement
 -------------+-------------------------------------------------------------------
   tb2        | CREATE TABLE tb2 (
-             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
              |     e1 INT2 NULL,
              |     e2 INT4 NULL,
              |     e3 INT8 NULL,
              |     e4 FLOAT4 NULL,
              |     e5 FLOAT8 NULL,
              |     e6 BOOL NULL,
-             |     e7 TIMESTAMP NULL,
+             |     e7 TIMESTAMP(3) NULL,
              |     e8 CHAR(1023) NULL,
              |     e9 NCHAR(255) NULL,
              |     e10 VARBYTES(255) NULL
@@ -233,14 +233,14 @@ INSERT 1
   table_name |                      create_statement
 -------------+--------------------------------------------------------------
   tb2_1      | CREATE TABLE tb2_1 (
-             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
              |     e1 INT2 NULL,
              |     e2 INT4 NULL,
              |     e3 INT8 NULL,
              |     e4 FLOAT4 NULL,
              |     e5 FLOAT8 NULL,
              |     e6 BOOL NULL,
-             |     e7 TIMESTAMP NULL,
+             |     e7 TIMESTAMP(3) NULL,
              |     e8 CHAR(1023) NULL,
              |     e9 NCHAR(255) NULL,
              |     e10 VARBYTES(255) NULL
@@ -259,104 +259,104 @@ INSERT 1
              |     partition interval 10d
 (1 row)
 > show columns from tb1;
-  column_name |   data_type   | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
---------------+---------------+-------------+----------------+-----------------------+-----------+-----------+---------
-  k_timestamp | TIMESTAMPTZ   |    false    | NULL           |                       | {primary} |   false   | false
-  e1          | INT2          |    true     | NULL           |                       | {}        |   false   | false
-  e2          | INT4          |    true     | NULL           |                       | {}        |   false   | false
-  e3          | INT8          |    true     | NULL           |                       | {}        |   false   | false
-  e4          | FLOAT4        |    true     | NULL           |                       | {}        |   false   | false
-  e5          | FLOAT8        |    true     | NULL           |                       | {}        |   false   | false
-  e6          | BOOL          |    true     | NULL           |                       | {}        |   false   | false
-  e7          | TIMESTAMP     |    true     | NULL           |                       | {}        |   false   | false
-  e8          | CHAR(1023)    |    true     | NULL           |                       | {}        |   false   | false
-  e9          | NCHAR(255)    |    true     | NULL           |                       | {}        |   false   | false
-  e10         | VARBYTES(255) |    true     | NULL           |                       | {}        |   false   | false
-  tag1        | CHAR(63)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag2        | CHAR(10)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag3        | INT2          |    false    | NULL           |                       | {}        |   false   |  true
-  tag4        | INT4          |    false    | NULL           |                       | {}        |   false   |  true
-  tag5        | INT8          |    false    | NULL           |                       | {}        |   false   |  true
-  tag6        | FLOAT4        |    false    | NULL           |                       | {}        |   false   |  true
-  tag7        | FLOAT8        |    false    | NULL           |                       | {}        |   false   |  true
-  tag8        | BOOL          |    false    | NULL           |                       | {}        |   false   |  true
-  tag9        | CHAR(1023)    |    false    | NULL           |                       | {}        |   false   |  true
-  tag10       | NCHAR(64)     |    false    | NULL           |                       | {}        |   false   |  true
-  tag11       | VARBYTES(255) |    false    | NULL           |                       | {}        |   false   |  true
+  column_name |   data_type    | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
+--------------+----------------+-------------+----------------+-----------------------+-----------+-----------+---------
+  k_timestamp | TIMESTAMPTZ(3) |    false    | NULL           |                       | {primary} |   false   | false
+  e1          | INT2           |    true     | NULL           |                       | {}        |   false   | false
+  e2          | INT4           |    true     | NULL           |                       | {}        |   false   | false
+  e3          | INT8           |    true     | NULL           |                       | {}        |   false   | false
+  e4          | FLOAT4         |    true     | NULL           |                       | {}        |   false   | false
+  e5          | FLOAT8         |    true     | NULL           |                       | {}        |   false   | false
+  e6          | BOOL           |    true     | NULL           |                       | {}        |   false   | false
+  e7          | TIMESTAMP(3)   |    true     | NULL           |                       | {}        |   false   | false
+  e8          | CHAR(1023)     |    true     | NULL           |                       | {}        |   false   | false
+  e9          | NCHAR(255)     |    true     | NULL           |                       | {}        |   false   | false
+  e10         | VARBYTES(255)  |    true     | NULL           |                       | {}        |   false   | false
+  tag1        | CHAR(63)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag2        | CHAR(10)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag3        | INT2           |    false    | NULL           |                       | {}        |   false   |  true
+  tag4        | INT4           |    false    | NULL           |                       | {}        |   false   |  true
+  tag5        | INT8           |    false    | NULL           |                       | {}        |   false   |  true
+  tag6        | FLOAT4         |    false    | NULL           |                       | {}        |   false   |  true
+  tag7        | FLOAT8         |    false    | NULL           |                       | {}        |   false   |  true
+  tag8        | BOOL           |    false    | NULL           |                       | {}        |   false   |  true
+  tag9        | CHAR(1023)     |    false    | NULL           |                       | {}        |   false   |  true
+  tag10       | NCHAR(64)      |    false    | NULL           |                       | {}        |   false   |  true
+  tag11       | VARBYTES(255)  |    false    | NULL           |                       | {}        |   false   |  true
 (22 rows)
 > show columns from tb2;
-  column_name |   data_type   | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
---------------+---------------+-------------+----------------+-----------------------+-----------+-----------+---------
-  k_timestamp | TIMESTAMPTZ   |    false    | NULL           |                       | {primary} |   false   | false
-  e1          | INT2          |    true     | NULL           |                       | {}        |   false   | false
-  e2          | INT4          |    true     | NULL           |                       | {}        |   false   | false
-  e3          | INT8          |    true     | NULL           |                       | {}        |   false   | false
-  e4          | FLOAT4        |    true     | NULL           |                       | {}        |   false   | false
-  e5          | FLOAT8        |    true     | NULL           |                       | {}        |   false   | false
-  e6          | BOOL          |    true     | NULL           |                       | {}        |   false   | false
-  e7          | TIMESTAMP     |    true     | NULL           |                       | {}        |   false   | false
-  e8          | CHAR(1023)    |    true     | NULL           |                       | {}        |   false   | false
-  e9          | NCHAR(255)    |    true     | NULL           |                       | {}        |   false   | false
-  e10         | VARBYTES(255) |    true     | NULL           |                       | {}        |   false   | false
-  tag1        | CHAR(63)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag2        | CHAR(10)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag3        | INT2          |    false    | NULL           |                       | {}        |   false   |  true
-  tag4        | INT4          |    false    | NULL           |                       | {}        |   false   |  true
-  tag5        | INT8          |    false    | NULL           |                       | {}        |   false   |  true
-  tag8        | BOOL          |    false    | NULL           |                       | {}        |   false   |  true
-  tag9        | VARCHAR(1023) |    false    | NULL           |                       | {}        |   false   |  true
-  tag10       | VARCHAR(255)  |    false    | NULL           |                       | {}        |   false   |  true
-  tag11       | VARCHAR(255)  |    false    | NULL           |                       | {}        |   false   |  true
+  column_name |   data_type    | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
+--------------+----------------+-------------+----------------+-----------------------+-----------+-----------+---------
+  k_timestamp | TIMESTAMPTZ(3) |    false    | NULL           |                       | {primary} |   false   | false
+  e1          | INT2           |    true     | NULL           |                       | {}        |   false   | false
+  e2          | INT4           |    true     | NULL           |                       | {}        |   false   | false
+  e3          | INT8           |    true     | NULL           |                       | {}        |   false   | false
+  e4          | FLOAT4         |    true     | NULL           |                       | {}        |   false   | false
+  e5          | FLOAT8         |    true     | NULL           |                       | {}        |   false   | false
+  e6          | BOOL           |    true     | NULL           |                       | {}        |   false   | false
+  e7          | TIMESTAMP(3)   |    true     | NULL           |                       | {}        |   false   | false
+  e8          | CHAR(1023)     |    true     | NULL           |                       | {}        |   false   | false
+  e9          | NCHAR(255)     |    true     | NULL           |                       | {}        |   false   | false
+  e10         | VARBYTES(255)  |    true     | NULL           |                       | {}        |   false   | false
+  tag1        | CHAR(63)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag2        | CHAR(10)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag3        | INT2           |    false    | NULL           |                       | {}        |   false   |  true
+  tag4        | INT4           |    false    | NULL           |                       | {}        |   false   |  true
+  tag5        | INT8           |    false    | NULL           |                       | {}        |   false   |  true
+  tag8        | BOOL           |    false    | NULL           |                       | {}        |   false   |  true
+  tag9        | VARCHAR(1023)  |    false    | NULL           |                       | {}        |   false   |  true
+  tag10       | VARCHAR(255)   |    false    | NULL           |                       | {}        |   false   |  true
+  tag11       | VARCHAR(255)   |    false    | NULL           |                       | {}        |   false   |  true
 (20 rows)
 > show columns from tb1_1;
-  column_name |   data_type   | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
---------------+---------------+-------------+----------------+-----------------------+-----------+-----------+---------
-  k_timestamp | TIMESTAMPTZ   |    false    | NULL           |                       | {primary} |   false   | false
-  e1          | INT2          |    true     | NULL           |                       | {}        |   false   | false
-  e2          | INT4          |    true     | NULL           |                       | {}        |   false   | false
-  e3          | INT8          |    true     | NULL           |                       | {}        |   false   | false
-  e4          | FLOAT4        |    true     | NULL           |                       | {}        |   false   | false
-  e5          | FLOAT8        |    true     | NULL           |                       | {}        |   false   | false
-  e6          | BOOL          |    true     | NULL           |                       | {}        |   false   | false
-  e7          | TIMESTAMP     |    true     | NULL           |                       | {}        |   false   | false
-  e8          | CHAR(1023)    |    true     | NULL           |                       | {}        |   false   | false
-  e9          | NCHAR(255)    |    true     | NULL           |                       | {}        |   false   | false
-  e10         | VARBYTES(255) |    true     | NULL           |                       | {}        |   false   | false
-  tag1        | CHAR(63)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag2        | CHAR(10)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag3        | INT2          |    false    | NULL           |                       | {}        |   false   |  true
-  tag4        | INT4          |    false    | NULL           |                       | {}        |   false   |  true
-  tag5        | INT8          |    false    | NULL           |                       | {}        |   false   |  true
-  tag6        | FLOAT4        |    false    | NULL           |                       | {}        |   false   |  true
-  tag7        | FLOAT8        |    false    | NULL           |                       | {}        |   false   |  true
-  tag8        | BOOL          |    false    | NULL           |                       | {}        |   false   |  true
-  tag9        | CHAR(1023)    |    false    | NULL           |                       | {}        |   false   |  true
-  tag10       | NCHAR(64)     |    false    | NULL           |                       | {}        |   false   |  true
-  tag11       | VARBYTES(255) |    false    | NULL           |                       | {}        |   false   |  true
+  column_name |   data_type    | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
+--------------+----------------+-------------+----------------+-----------------------+-----------+-----------+---------
+  k_timestamp | TIMESTAMPTZ(3) |    false    | NULL           |                       | {primary} |   false   | false
+  e1          | INT2           |    true     | NULL           |                       | {}        |   false   | false
+  e2          | INT4           |    true     | NULL           |                       | {}        |   false   | false
+  e3          | INT8           |    true     | NULL           |                       | {}        |   false   | false
+  e4          | FLOAT4         |    true     | NULL           |                       | {}        |   false   | false
+  e5          | FLOAT8         |    true     | NULL           |                       | {}        |   false   | false
+  e6          | BOOL           |    true     | NULL           |                       | {}        |   false   | false
+  e7          | TIMESTAMP(3)   |    true     | NULL           |                       | {}        |   false   | false
+  e8          | CHAR(1023)     |    true     | NULL           |                       | {}        |   false   | false
+  e9          | NCHAR(255)     |    true     | NULL           |                       | {}        |   false   | false
+  e10         | VARBYTES(255)  |    true     | NULL           |                       | {}        |   false   | false
+  tag1        | CHAR(63)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag2        | CHAR(10)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag3        | INT2           |    false    | NULL           |                       | {}        |   false   |  true
+  tag4        | INT4           |    false    | NULL           |                       | {}        |   false   |  true
+  tag5        | INT8           |    false    | NULL           |                       | {}        |   false   |  true
+  tag6        | FLOAT4         |    false    | NULL           |                       | {}        |   false   |  true
+  tag7        | FLOAT8         |    false    | NULL           |                       | {}        |   false   |  true
+  tag8        | BOOL           |    false    | NULL           |                       | {}        |   false   |  true
+  tag9        | CHAR(1023)     |    false    | NULL           |                       | {}        |   false   |  true
+  tag10       | NCHAR(64)      |    false    | NULL           |                       | {}        |   false   |  true
+  tag11       | VARBYTES(255)  |    false    | NULL           |                       | {}        |   false   |  true
 (22 rows)
 > show columns from tb2_1;
-  column_name |   data_type   | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
---------------+---------------+-------------+----------------+-----------------------+-----------+-----------+---------
-  k_timestamp | TIMESTAMPTZ   |    false    | NULL           |                       | {primary} |   false   | false
-  e1          | INT2          |    true     | NULL           |                       | {}        |   false   | false
-  e2          | INT4          |    true     | NULL           |                       | {}        |   false   | false
-  e3          | INT8          |    true     | NULL           |                       | {}        |   false   | false
-  e4          | FLOAT4        |    true     | NULL           |                       | {}        |   false   | false
-  e5          | FLOAT8        |    true     | NULL           |                       | {}        |   false   | false
-  e6          | BOOL          |    true     | NULL           |                       | {}        |   false   | false
-  e7          | TIMESTAMP     |    true     | NULL           |                       | {}        |   false   | false
-  e8          | CHAR(1023)    |    true     | NULL           |                       | {}        |   false   | false
-  e9          | NCHAR(255)    |    true     | NULL           |                       | {}        |   false   | false
-  e10         | VARBYTES(255) |    true     | NULL           |                       | {}        |   false   | false
-  tag1        | CHAR(63)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag2        | CHAR(10)      |    false    | NULL           |                       | {}        |   false   |  true
-  tag3        | INT2          |    false    | NULL           |                       | {}        |   false   |  true
-  tag4        | INT4          |    false    | NULL           |                       | {}        |   false   |  true
-  tag5        | INT8          |    false    | NULL           |                       | {}        |   false   |  true
-  tag8        | BOOL          |    false    | NULL           |                       | {}        |   false   |  true
-  tag9        | VARCHAR(1023) |    false    | NULL           |                       | {}        |   false   |  true
-  tag10       | VARCHAR(64)   |    false    | NULL           |                       | {}        |   false   |  true
-  tag11       | VARCHAR(64)   |    false    | NULL           |                       | {}        |   false   |  true
+  column_name |   data_type    | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
+--------------+----------------+-------------+----------------+-----------------------+-----------+-----------+---------
+  k_timestamp | TIMESTAMPTZ(3) |    false    | NULL           |                       | {primary} |   false   | false
+  e1          | INT2           |    true     | NULL           |                       | {}        |   false   | false
+  e2          | INT4           |    true     | NULL           |                       | {}        |   false   | false
+  e3          | INT8           |    true     | NULL           |                       | {}        |   false   | false
+  e4          | FLOAT4         |    true     | NULL           |                       | {}        |   false   | false
+  e5          | FLOAT8         |    true     | NULL           |                       | {}        |   false   | false
+  e6          | BOOL           |    true     | NULL           |                       | {}        |   false   | false
+  e7          | TIMESTAMP(3)   |    true     | NULL           |                       | {}        |   false   | false
+  e8          | CHAR(1023)     |    true     | NULL           |                       | {}        |   false   | false
+  e9          | NCHAR(255)     |    true     | NULL           |                       | {}        |   false   | false
+  e10         | VARBYTES(255)  |    true     | NULL           |                       | {}        |   false   | false
+  tag1        | CHAR(63)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag2        | CHAR(10)       |    false    | NULL           |                       | {}        |   false   |  true
+  tag3        | INT2           |    false    | NULL           |                       | {}        |   false   |  true
+  tag4        | INT4           |    false    | NULL           |                       | {}        |   false   |  true
+  tag5        | INT8           |    false    | NULL           |                       | {}        |   false   |  true
+  tag8        | BOOL           |    false    | NULL           |                       | {}        |   false   |  true
+  tag9        | VARCHAR(1023)  |    false    | NULL           |                       | {}        |   false   |  true
+  tag10       | VARCHAR(64)    |    false    | NULL           |                       | {}        |   false   |  true
+  tag11       | VARCHAR(64)    |    false    | NULL           |                       | {}        |   false   |  true
 (20 rows)
 > show tags from tb1;
    tag  |     type      | is_primary | nullable
@@ -537,7 +537,7 @@ CREATE TABLE
   table_name |                 create_statement
 -------------+----------------------------------------------------
   s11        | CREATE TABLE s11 (
-             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
              |     "1e" INT8 NULL
              | ) TAGS (
              |     primary_tag VARCHAR(64) NOT NULL,
@@ -552,7 +552,7 @@ CREATE TABLE
   table_name |              create_statement
 -------------+---------------------------------------------
   s12        | CREATE TABLE s12 (
-             |     k_timestamp TIMESTAMPTZ NOT NULL,
+             |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
              |     "1e" INT8 NULL
              | ) TAGS (
              |     "1p" VARCHAR(64) NOT NULL,

@@ -160,6 +160,13 @@ public:
   uint32_t GetCurrentTableVersion() const;
 
   /**
+   * @brief Gets the data type of table first column.
+   *
+   * @return datatype in storage engine.
+   */
+  DATATYPE GetTsColDataType();
+
+  /**
    * @brief Gets the name of the table.
    *
    * @return string Name of the table.

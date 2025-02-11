@@ -548,9 +548,9 @@ const (
 )
 
 const (
-	// defaultTimePrecision is the default precision to return for time families
+	// DefaultTimePrecision is the default precision to return for time families
 	// if time is not set.
-	defaultTimePrecision = 6
+	DefaultTimePrecision = 6
 )
 
 var (
@@ -1093,7 +1093,7 @@ func (t *T) Precision() int32 {
 	switch t.InternalType.Family {
 	case IntervalFamily, TimestampFamily, TimestampTZFamily, TimeFamily, TimeTZFamily:
 		if t.InternalType.Precision == 0 && !t.InternalType.TimePrecisionIsSet {
-			return defaultTimePrecision
+			return DefaultTimePrecision
 		}
 	}
 	return t.InternalType.Precision

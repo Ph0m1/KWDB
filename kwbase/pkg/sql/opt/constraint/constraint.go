@@ -691,54 +691,38 @@ func (c *Constraint) CalculateMaxResults(
 }
 
 // TransformSpansToTsSpans convert spans in constraint to TsSpans.
-func (c *Constraint) TransformSpansToTsSpans() []execinfrapb.TsSpan {
+func (c *Constraint) TransformSpansToTsSpans(precision int32) []execinfrapb.TsSpan {
 	var tsSpans []execinfrapb.TsSpan
 	var s execinfrapb.TsSpan
 
-	assign := func(k Key, target string, boundary SpanBoundary) int64 {
-		if k.firstVal != nil {
-			if t, ok := k.firstVal.(*tree.DTimestampTZ); ok {
-				nanosecond := t.Time.Nanosecond()
-				second := t.Time.Unix()
-				timeNew := second*1000 + int64(nanosecond/1000000)
-
-				//Opening interval, requires adding or subtracting 1
-				if boundary {
-					if target == "from" {
-						timeNew++
-					} else {
-						// (< 2024-10-10 20:10:10.123456789) -> (< 2024-10-10 20:10:10.123)
-						// (< 2024-10-10 20:10:10.123000000) -> (< 2024-10-10 20:10:10.122)
-						if nanosecond%1000000 == 0 {
-							timeNew--
-						}
-					}
-				}
-				return timeNew
-			}
+	assign := func(start Key, startBoundary bool, end Key, endBoundary bool) (int64, int64) {
+		var startNew int64
+		var endNew int64
+		var prec int64
+		switch precision {
+		case 3:
+			prec = 1e3
+		case 6:
+			prec = 1e6
+		default:
+			prec = 1e9
 		}
-
-		// When there is no value, the default value of FromTimeStamp is 0,
-		// the default value of ToTimeStamp is 1<<64 - 1.
-		if target == "from" {
-			return math.MinInt64
-		}
-		return math.MaxInt64
+		startNew, endNew = assignPrecision(start, startBoundary, end, endBoundary, prec)
+		return startNew, endNew
 	}
 
 	first := c.Spans.firstSpan
 	others := c.Spans.otherSpans
 
-	s.FromTimeStamp = assign(first.start, "from", first.startBoundary)
-	s.ToTimeStamp = assign(first.end, "to", first.endBoundary)
-
+	//s.FromTimeStamp = assign(first.start, "from", first.startBoundary)
+	//s.ToTimeStamp = assign(first.end, "to", first.endBoundary)
+	s.FromTimeStamp, s.ToTimeStamp = assign(first.start, bool(first.startBoundary), first.end, bool(first.endBoundary))
 	if s.FromTimeStamp != math.MinInt64 || s.ToTimeStamp != math.MaxInt64 {
 		tsSpans = append(tsSpans, s)
 	}
 
 	for i := range others {
-		s.FromTimeStamp = assign(others[i].start, "from", others[i].startBoundary)
-		s.ToTimeStamp = assign(others[i].end, "to", others[i].endBoundary)
+		s.FromTimeStamp, s.ToTimeStamp = assign(others[i].start, bool(others[i].startBoundary), others[i].end, bool(others[i].endBoundary))
 
 		if s.FromTimeStamp != math.MinInt64 || s.ToTimeStamp != math.MaxInt64 {
 			tsSpans = append(tsSpans, s)
@@ -746,6 +730,67 @@ func (c *Constraint) TransformSpansToTsSpans() []execinfrapb.TsSpan {
 	}
 
 	return tsSpans
+}
+
+// assignPrecision converts the datum type time to an integer according to precision
+//
+// in parameter:
+//		start            - the start value of the interval for filtering time
+//		startBoundary		 - startBoundary indicates whether the span contains the start key value
+//		end              - the end value of the interval for filtering time
+//		endBoundary      - endBoundary indicates whether the span contains the end key value
+//		precision        - precision represents time precision
+//
+// out parameter:
+//    startNew         - startNew represents the integer corresponding to the start time,
+//   										 and its units depend on precision
+//    endNew           - endNew represents the integer corresponding to the end time,
+//                       and its units depend on precision
+func assignPrecision(
+	start Key, startBoundary bool, end Key, endBoundary bool, precision int64,
+) (startNew int64, endNew int64) {
+	if start.firstVal != nil {
+		if t, ok := start.firstVal.(*tree.DTimestampTZ); ok {
+			nanosecond := t.Time.Nanosecond()
+			second := t.Time.Unix()
+			if second < math.MinInt64/precision {
+				startNew = math.MinInt64
+			} else {
+				startNew = second*precision + int64(nanosecond)/(1e9/precision)
+				if startBoundary {
+					startNew++
+				}
+			}
+		}
+	}
+
+	if end.firstVal != nil {
+		if t, ok := end.firstVal.(*tree.DTimestampTZ); ok {
+			nanosecond := t.Time.Nanosecond()
+			second := t.Time.Unix()
+			if second > math.MaxInt64/precision {
+				endNew = math.MaxInt64
+			} else {
+				if second*precision <= (math.MaxInt64 - int64(nanosecond)/(1e9/precision)) {
+					endNew = second*precision + int64(nanosecond)/(1e9/precision)
+					if endBoundary {
+						if nanosecond%int(1e9/precision) == 0 {
+							endNew--
+						}
+					}
+				} else {
+					endNew = math.MaxInt64
+				}
+			}
+		}
+	}
+	if start.firstVal == nil {
+		startNew = math.MinInt64
+	}
+	if end.firstVal == nil {
+		endNew = math.MaxInt64
+	}
+	return startNew, endNew
 }
 
 var (

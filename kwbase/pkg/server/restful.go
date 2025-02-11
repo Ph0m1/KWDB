@@ -1524,13 +1524,10 @@ func makeInfluxDBStmt(
 	timeStamp := "now()"
 	if len(slice) >= 3 {
 		timeStamp = slice[2]
-		if len(timeStamp) > 13 {
-			timeStamp = timeStamp[0:13]
-		}
 	}
 
 	createColStmt := strings.Builder{}
-	createColStmt.WriteString("(k_timestamp timestamptz not null")
+	createColStmt.WriteString("(k_timestamp timestamptz(9) not null")
 	for index, createKey := range colvalueName {
 		createColStmt.WriteString(",")
 		createColStmt.WriteString(createKey)
@@ -1540,7 +1537,7 @@ func makeInfluxDBStmt(
 	createColStmt.WriteString(")")
 
 	insertKeyStmt := strings.Builder{}
-	insertKeyStmt.WriteString("(primary_tag varchar tag,k_timestamp timestamptz column")
+	insertKeyStmt.WriteString("(primary_tag varchar tag,k_timestamp timestamptz(9) column")
 	for index, insertKey := range colKey {
 		if index < tagNum {
 			insertKeyStmt.WriteString(",")

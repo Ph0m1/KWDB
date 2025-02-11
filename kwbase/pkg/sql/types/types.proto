@@ -377,6 +377,8 @@ enum IntervalDurationType {
   // of milliseconds, which is useful for some internal use cases like
   // statement_timeout.
   MILLISECOND = 7;
+  MICROSECOND = 8;
+  NANOSECOND = 9;
 }
 
 // IntervalDurationField represents precisions in intervals which are

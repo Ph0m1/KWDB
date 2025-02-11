@@ -873,10 +873,10 @@ TsTimePartition::WriteVacuumData(TsTimePartition* dest_pt, uint32_t entity_id, R
       block_span.block_item->min_ts_in_block = KTimestamp(addresses.min);
       // Update the maximum and minimum timestamp information of the current segment,
       // which will be used for subsequent compression and other operations
-      if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {
+      if (KTimestamp(addresses.max) > dest_segment->maxTimestamp() || dest_segment->maxTimestamp() == INVALID_TS) {
         dest_segment->maxTimestamp() = KTimestamp(addresses.max);
       }
-      if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
+      if (KTimestamp(addresses.min) > dest_segment->minTimestamp() || dest_segment->minTimestamp() == INVALID_TS) {
         dest_segment->minTimestamp() = KTimestamp(addresses.min);
       }
     }
@@ -1186,7 +1186,7 @@ void TsTimePartition::ImmediateCompress(uint32_t& compressed_num, ErrorInfo& err
   }
 }
 
-void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, uint32_t& compressed_num, ErrorInfo& err_info) {
+void TsTimePartition::ScheduledCompress(timestamp64 compress_ts_p, uint32_t& compressed_num, ErrorInfo& err_info) {
   auto segment_tables = GetAllSegmentsForCompressing();
   // Traverse the segments that need to be processed
   // There are three types of processing for segments
@@ -1196,15 +1196,16 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, uint32_t& compr
   //     Attempt to truncate files, compress data, and clean up the original data directory for inactive segments
   //   3.ImmuSegment
   //     Attempting to clean up the original data directory for compressed segments
+  auto ts_type = getSchemaInfoExcludeDropped()[0].type;
   for (auto& segment_tbl : segment_tables) {
     switch (segment_tbl->getSegmentStatus()) {
       case ActiveSegment:
-        if (maxTimestamp() >= compress_ts) {
+        if (convertSecondToPrecisionTS(maxTimestamp(), (DATATYPE)ts_type) >= compress_ts_p) {
           // For segments in partitions where the timestamp of some data is less than compress_ts,
           // if the following two conditions are met, they can be set as inactive segment.
           //   1. the maximum timestamp of the data saved by the segment is less than compress_ts
           //   2. the pre allocated space of the segment is 90% full
-          if (segment_tbl->maxTimestamp() / 1000 < compress_ts
+          if (segment_tbl->maxTimestamp() < compress_ts_p
               && segment_tbl->size() >= 0.9 * segment_tbl->getReservedRows()) {
             segment_tbl->setSegmentStatus(InActiveSegment);
             MUTEX_LOCK(active_segment_lock_);
@@ -1219,8 +1220,9 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts, uint32_t& compr
           //   1. segment did not perform data writing within one compression cycle
           //   2. the last write time of segment data is less than or equal to compress_ts
           string ts_file_path = db_path_ + segment_tbl->tbl_sub_path() + name_ + ".0";
-          int64_t modify_time = ModifyTime(ts_file_path);
-          if (modify_time <= now() - g_compress_interval || modify_time <= compress_ts) {
+          int64_t modify_time = ModifyTime(ts_file_path);  // ts unit: second
+          if (modify_time <= now() - g_compress_interval ||
+              convertSecondToPrecisionTS(modify_time, (DATATYPE)ts_type) <= compress_ts_p) {
             segment_tbl->setSegmentStatus(InActiveSegment);
             MUTEX_LOCK(active_segment_lock_);
             if (active_segment_ && active_segment_->segment_id() == segment_tbl->segment_id()) {
@@ -1483,7 +1485,7 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
       block_item_id = block_item->prev_block_id;
       continue;
     }
-    if (segment_tbl->getSchemaInfo()[0].type != DATATYPE::TIMESTAMP64_LSN) {
+    if (!isTsWithLSNType((DATATYPE)segment_tbl->getSchemaInfo()[0].type)) {
       LOG_ERROR("The data type in the first column is not TIMESTAMP64_LSN.");
       return KWEDATATYPEMISMATCH;
     }
@@ -1753,6 +1755,7 @@ int TsTimePartition::AllocateAllDataSpace(uint entity_id, size_t batch_num, std:
   if (err_code < 0) {
     for (auto & span : *spans) {
       meta_manager_.MarkSpaceDeleted(entity_id, &span);
+      span.block_item->publish_row_count += span.row_num;
     }
     spans->clear();
   }
@@ -1829,6 +1832,7 @@ int TsTimePartition::GetAndAllocateAllDataSpace(uint entity_id, size_t batch_num
   if (err_code < 0) {
     for (size_t i = 0; i < spans->size(); i++) {
       meta_manager_.MarkSpaceDeleted(entity_id, &(spans->at(i)));
+      span.block_item->publish_row_count += span.row_num;
     }
     spans->clear();
   }
@@ -2084,7 +2088,7 @@ int TsTimePartition::updatePayloadUsingDedup(uint32_t entity_id, const BlockSpan
   if (payload->dedup_rule_ == DedupRule::KEEP) {
     return err_code;
   }
-  bool ts_with_lsn = payload->GetSchemaInfo()[0].type == DATATYPE::TIMESTAMP64_LSN;
+  bool ts_with_lsn = isTsWithLSNType((DATATYPE)(payload->GetSchemaInfo()[0].type));
 
   void* ts_begin = payload->GetColumnAddr(0, 0);
   dedup_info.need_dup = true;

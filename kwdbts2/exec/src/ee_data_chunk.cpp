@@ -13,7 +13,7 @@
 #include "ee_data_chunk.h"
 #include "cm_func.h"
 #include "ee_common.h"
-
+#include "ee_timestamp_utils.h"
 namespace kwdbts {
 
 DataChunk::DataChunk(vector<ColumnInfo>& col_info, k_uint32 capacity) :
@@ -154,6 +154,10 @@ KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, Field** renders)
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         k_int64 val = field->ValInt();
@@ -234,6 +238,10 @@ KStatus DataChunk::InsertData(kwdbContext_p ctx, IChunk* value, std::vector<Fiel
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         k_int64 val = field->ValInt();
@@ -523,15 +531,7 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
       DatumPtr raw = GetData(row, col);
       k_int64 val;
       std::memcpy(&val, raw, sizeof(k_int64));
-      CKTime ck_time;
-      if (val < 0) {
-        ck_time.t_timespec.tv_sec = floor(val / 1000.0);
-        ck_time.t_timespec.tv_nsec = ((val % 1000) ? (val % 1000) + 1000 : 0) * 1000000;
-      } else {
-        ck_time.t_timespec.tv_sec = (val / 1000);
-        ck_time.t_timespec.tv_nsec = val % 1000 * 1000000;
-      }
-      ck_time.UpdateSecWithTZ(ctx->timezone);
+      CKTime ck_time = getCKTime(val, col_info_[col].storage_type, ctx->timezone);
       k_int32 len = ValueEncoding::EncodeComputeLenTime(0, ck_time);
       ret = ee_enlargeStringInfo(info, len);
       if (ret != SUCCESS) {
@@ -550,6 +550,10 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
         case roachpb::DataType::BIGINT:
         case roachpb::DataType::TIMESTAMP:
         case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
           std::memcpy(&val, raw, sizeof(k_int64));
           break;
@@ -611,6 +615,10 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
         }
         case roachpb::DataType::TIMESTAMP:
         case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT: {
           DatumPtr ptr = GetData(row, col);
@@ -651,7 +659,19 @@ KStatus DataChunk::EncodingValue(kwdbContext_p ctx, k_uint32 row, k_uint32 col, 
       std::memcpy(&val, raw, sizeof(k_int64));
 
       struct KWDuration duration;
-      duration.format(val);
+      switch (col_info_[col].storage_type) {
+        case roachpb::TIMESTAMP_MICRO:
+        case roachpb::TIMESTAMPTZ_MICRO:
+          duration.format(val, 1000);
+          break;
+        case roachpb::TIMESTAMP_NANO:
+        case roachpb::TIMESTAMPTZ_NANO:
+          duration.format(val, 1);
+          break;
+        default:
+          duration.format(val, 1000000);
+          break;
+      }
       k_int32 len = ValueEncoding::EncodeComputeLenDuration(0, duration);
       ret = ee_enlargeStringInfo(info, len);
       if (ret != SUCCESS) {
@@ -805,27 +825,19 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
       case KWDBTypeFamily::TimestampTZFamily: {
         char ts_format_buf[32] = {0};
         // format timestamps as strings
-        time_t ms;
-        time_t sec;
+        k_int64 val;
         DatumPtr raw = GetData(row, col);
-        std::memcpy(&ms, raw, sizeof(k_int64));
-        if (ms < 0) {
-          sec = floor(ms / 1000.0);
-          ms = (ms % 1000) ? (ms % 1000) + 1000 : 0;
-        } else {
-          sec = ms / 1000;
-          ms = ms % 1000;
-        }
-
+        std::memcpy(&val, raw, sizeof(k_int64));
+        CKTime ck_time = getCKTime(val, col_info_[col].storage_type, ctx->timezone);
         if (return_type == KWDBTypeFamily::TimestampTZFamily) {
-          sec += ctx->timezone * 3600;
+          ck_time.t_timespec.tv_sec += ck_time.t_abbv;
         }
         tm ts{};
-        gmtime_r(&sec, &ts);
+        gmtime_r(&ck_time.t_timespec.tv_sec, &ts);
         strftime(ts_format_buf, 32, "%F %T", &ts);
         k_uint8 format_len = strlen(ts_format_buf);
-        if (ms != 0) {
-          snprintf(&ts_format_buf[format_len], sizeof(char[5]), ".%03ld", ms);
+        if (ck_time.t_timespec.tv_nsec != 0) {
+          snprintf(&ts_format_buf[format_len], sizeof(char[11]), ".%09ld", ck_time.t_timespec.tv_nsec);
         }
         format_len = strlen(ts_format_buf);
         // encode the time Zone Information
@@ -899,6 +911,10 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
           }
           case roachpb::DataType::TIMESTAMP:
           case roachpb::DataType::TIMESTAMPTZ:
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
           case roachpb::DataType::DATE:
           case roachpb::DataType::BIGINT: {
             DatumPtr ptr = GetData(row, col);
@@ -944,7 +960,21 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
         std::memcpy(&ms, raw, sizeof(k_int64));
         char buf[32] = {0};
         struct KWDuration duration;
-        size_t n = duration.format_pg_result(ms, buf, 32);
+        size_t n;
+        switch (col_info_[col].storage_type) {
+          case roachpb::TIMESTAMP_MICRO:
+          case roachpb::TIMESTAMPTZ_MICRO:
+            n = duration.format_pg_result(ms, buf, 32, 1000);
+            break;
+          case roachpb::TIMESTAMP_NANO:
+          case roachpb::TIMESTAMPTZ_NANO:
+            n = duration.format_pg_result(ms, buf, 32, 1);
+            break;
+          default:
+            n = duration.format_pg_result(ms, buf, 32, 1000000);
+            break;
+        }
+
         // write the length of column value
         if (ee_sendint(info, n, 4) != SUCCESS) {
           Return(FAIL);
@@ -973,6 +1003,10 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
           case roachpb::DataType::BIGINT:
           case roachpb::DataType::TIMESTAMP:
           case roachpb::DataType::TIMESTAMPTZ:
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
           case roachpb::DataType::DATE:
             std::memcpy(&val, raw, sizeof(k_int64));
             break;
@@ -1041,6 +1075,10 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
@@ -1177,6 +1215,10 @@ KStatus DataChunk::AddRecordByColumn(kwdbContext_p ctx, RowBatch* row_batch, Fie
         case roachpb::DataType::BOOL:
         case roachpb::DataType::TIMESTAMP:
         case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT:
         case roachpb::DataType::INT:

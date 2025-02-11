@@ -274,8 +274,8 @@ INSERT 1
 (1 row)
 > select min(e1) from spanBoundary.t1 where tag1 = 10 and ts > '2021-01-01 12:12:12.122999999+00:00';
   min
---------
-  NULL
+-------
+    1
 (1 row)
 > select min(e1) from spanBoundary.t1 where tag1 = 10 and ts <= '2021-01-01 12:12:12.123+00:00';
   min
@@ -299,8 +299,8 @@ INSERT 1
 (1 row)
 > select min(e1) from spanBoundary.t1 where tag1 = 10 and ts < '2021-01-01 12:12:12.123000001+00:00';
   min
---------
-  NULL
+-------
+    1
 (1 row)
 > drop database spanBoundary cascade;
 DROP DATABASE

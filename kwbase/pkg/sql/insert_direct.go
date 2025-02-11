@@ -139,19 +139,20 @@ func getSingleRecord(
 		case oid.T_timestamptz:
 			var dVal *tree.DInt
 			if valueType == parser.STRINGTYPE {
-				t, err := tree.ParseDTimestampTZ(ptCtx, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
+				dVal, err = tree.ParseTimestampTZForTS(ptCtx, rawValue, &column.Type, column.Name)
 				if err != nil {
 					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
-				dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
-				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-					return pgerror.Newf(pgcode.StringDataLengthMismatch,
-						"value '%s' out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
+				if err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name); err != nil {
+					return err
 				}
 			} else {
 				if rawValue == "now" {
-					currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
-					inputValues[row][col] = tree.NewDInt(tree.DInt(currentTime))
+					dVal, err = tree.LimitTsTimestampWidth(timeutil.Now(), &column.Type, "", column.Name)
+					if err != nil {
+						return err
+					}
+					inputValues[row][col] = tree.NewDInt(*dVal)
 					continue
 				}
 				in, err2 := strconv.ParseInt(rawValue, 10, 64)
@@ -162,10 +163,8 @@ func getSingleRecord(
 					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal = (*tree.DInt)(&in)
-				// consistent with the timestamp range supported by savedata
-				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						errOutOfRange, rawValue, column.Type.SQLString(), column.Name)
+				if err = tree.CheckTsTimestampWidth(&column.Type, *dVal, "", column.Name); err != nil {
+					return err
 				}
 			}
 			inputValues[row][col] = dVal
@@ -173,19 +172,20 @@ func getSingleRecord(
 		case oid.T_timestamp:
 			var dVal *tree.DInt
 			if valueType == parser.STRINGTYPE {
-				t, err := tree.ParseDTimestamp(nil, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
+				dVal, err = tree.ParseTimestampForTS(nil, rawValue, &column.Type, column.Name)
 				if err != nil {
 					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
-				dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
-				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-					return pgerror.Newf(pgcode.StringDataLengthMismatch,
-						"value '%s' out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
+				if err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name); err != nil {
+					return err
 				}
 			} else {
 				if rawValue == "now" {
-					currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
-					inputValues[row][col] = tree.NewDInt(tree.DInt(currentTime))
+					dVal, err = tree.LimitTsTimestampWidth(timeutil.Now(), &column.Type, "", column.Name)
+					if err != nil {
+						return err
+					}
+					inputValues[row][col] = tree.NewDInt(*dVal)
 					continue
 				}
 				in, err2 := strconv.ParseInt(rawValue, 10, 64)
@@ -196,10 +196,8 @@ func getSingleRecord(
 					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal = (*tree.DInt)(&in)
-				// consistent with the timestamp range supported by savedata
-				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						errOutOfRange, rawValue, column.Type.SQLString(), column.Name)
+				if err = tree.CheckTsTimestampWidth(&column.Type, *dVal, "", column.Name); err != nil {
+					return err
 				}
 			}
 			inputValues[row][col] = dVal
@@ -1635,8 +1633,10 @@ func GetSingleDatum(
 					return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestampTZ).UnixMilli()))
-				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-					return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString(), column.Name)
+
+				err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name)
+				if err != nil {
+					return nil, err
 				}
 				return dVal, nil
 			}
@@ -1645,8 +1645,9 @@ func GetSingleDatum(
 				return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestamp).UnixMilli()))
-			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString(), column.Name)
+			err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name)
+			if err != nil {
+				return nil, err
 			}
 			return dVal, nil
 		}
@@ -1664,8 +1665,9 @@ func GetSingleDatum(
 		}
 
 		dVal := tree.DInt(in)
-		if dVal < tree.TsMinTimestamp || dVal > tree.TsMaxTimestamp {
-			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errValueOutofRange, rawValue, column.Type.SQLString(), column.Name)
+		err = tree.CheckTsTimestampWidth(&column.Type, dVal, rawValue, column.Name)
+		if err != nil {
+			return nil, err
 		}
 		return &dVal, nil
 

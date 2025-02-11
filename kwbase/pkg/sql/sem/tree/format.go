@@ -398,7 +398,7 @@ func (ctx *FmtCtx) FormatNode(n NodeFormatter) {
 				// p.typ will be nil if the placeholder has not been type-checked yet.
 				typ = p.typ
 			} else if d.AmbiguousFormat() {
-				typ = d.ResolvedType()
+				typ = ctx.AsTSType(d)
 			}
 		}
 		if typ != nil {
@@ -406,6 +406,39 @@ func (ctx *FmtCtx) FormatNode(n NodeFormatter) {
 			ctx.WriteString(typ.SQLString())
 		}
 	}
+}
+
+// AsTSType return ts type for datum.
+func (ctx *FmtCtx) AsTSType(d Datum) (typ *types.T) {
+	if !ctx.ExecInTSEngine {
+		typ = d.ResolvedType()
+		return typ
+	}
+
+	var precision int32
+	switch dt := d.(type) {
+	case *DTimestamp:
+		if dt.Nanosecond()%1000000 == 0 {
+			precision = 3
+		} else if dt.Nanosecond()%1000 == 0 {
+			precision = 6
+		} else {
+			precision = 9
+		}
+		typ = types.MakeTimestamp(precision)
+	case *DTimestampTZ:
+		if dt.Nanosecond()%1000000 == 0 {
+			precision = 3
+		} else if dt.Nanosecond()%1000 == 0 {
+			precision = 6
+		} else {
+			precision = 9
+		}
+		typ = types.MakeTimestampTZ(precision)
+	default:
+		typ = d.ResolvedType()
+	}
+	return typ
 }
 
 // AsStringWithFlags pretty prints a node to a string given specific flags; only

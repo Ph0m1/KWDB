@@ -1092,7 +1092,7 @@ UPDATE 1
 ERROR: value too long for type VARBYTES(254) (column "t13")
 SQLSTATE: 22001
 > update update_tag.tb set t2 =1  where e1 = 1 and e4 = false;
-ERROR: unsupported comparison operator: <timestamptz> = <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> = <int>
 SQLSTATE: 22023
 > prepare p27 as update update_tag.tb set t2 =$1  where e1 = $2 and e4 = $3;
 ERROR: unsupported conditions in update: unsupported binary operator or mismatching tag filter

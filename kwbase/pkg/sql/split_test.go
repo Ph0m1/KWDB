@@ -164,8 +164,7 @@ func TestSplitAt(t *testing.T) {
 			error: "SPLIT AT: expiration time should be greater than or equal to current time",
 		},
 		{
-			in:    "ALTER TABLE d.i SPLIT AT VALUES (17) WITH EXPIRATION '0.1us'",
-			error: "SPLIT AT: interval value '0.1us' too small, absolute value must be >= 1µs",
+			in: "ALTER TABLE d.i SPLIT AT VALUES (17) WITH EXPIRATION '0.1us'",
 		},
 	}
 

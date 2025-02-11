@@ -2072,7 +2072,7 @@ CockroachDB supports the following flags:
 			Types:      tree.ArgTypes{{"val", types.TimestampTZ}},
 			ReturnType: tree.FixedReturnType(types.Interval),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return tree.TimestampDifference(ctx, ctx.GetTxnTimestamp(time.Microsecond), args[0])
+				return tree.TimestampDifference(ctx, ctx.GetTxnTimestamp(time.Nanosecond), args[0])
 			},
 			Info: "Calculates the interval between `val` and the current time.",
 		},
@@ -2109,7 +2109,7 @@ CockroachDB supports the following flags:
 			ReturnType:        tree.FixedReturnType(types.TimestampTZ),
 			PreferredOverload: true,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return tree.MakeDTimestampTZ(ctx.GetStmtTimestamp(), time.Microsecond), nil
+				return tree.MakeDTimestampTZ(ctx.GetStmtTimestamp(), time.Nanosecond), nil
 			},
 			Info: "Returns the start time of the current statement.",
 		},
@@ -2117,7 +2117,7 @@ CockroachDB supports the following flags:
 			Types:      tree.ArgTypes{},
 			ReturnType: tree.FixedReturnType(types.Timestamp),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return tree.MakeDTimestamp(ctx.GetStmtTimestamp(), time.Microsecond), nil
+				return tree.MakeDTimestamp(ctx.GetStmtTimestamp(), time.Nanosecond), nil
 			},
 			Info: "Returns the start time of the current statement.",
 		},
@@ -2199,7 +2199,7 @@ may increase either contention or retry errors, or both.`,
 				ctxTime := ctx.GetRelativeParseTime()
 				// From postgres@a166d408eb0b35023c169e765f4664c3b114b52e src/backend/utils/adt/timestamp.c#L1637,
 				// we should support "%a %b %d %H:%M:%S.%%06d %Y %Z".
-				return tree.NewDString(ctxTime.Format("Mon Jan 2 15:04:05.000000 2006 -0700")), nil
+				return tree.NewDString(ctxTime.Format("Mon Jan 2 15:04:05.000000000 2006 -0700")), nil
 			},
 			Info: "Returns the current system time on one of the cluster nodes as a string.",
 		},
@@ -2331,6 +2331,9 @@ may increase either contention or retry errors, or both.`,
 				case "microsecond", "microseconds":
 					return tree.NewDInt(tree.DInt(fromInterval.Nanos() / int64(time.Microsecond))), nil
 
+				case "nanosecond", "nanoseconds":
+					return tree.NewDInt(tree.DInt(fromInterval.Nanos())), nil
+
 				default:
 					return nil, pgerror.Newf(
 						pgcode.InvalidParameterValue, "unsupported timespan: %s", timeSpan)
@@ -2389,7 +2392,7 @@ may increase either contention or retry errors, or both.`,
 				if err != nil {
 					return nil, err
 				}
-				return tree.MakeDTimestamp(tsTZ.Time, time.Microsecond), nil
+				return tree.MakeDTimestamp(tsTZ.Time, time.Nanosecond), nil
 			},
 			Info: "Truncates `input` to precision `element`.  Sets all fields that are less\n" +
 				"significant than `element` to zero (or one, for day and month)\n\n" +
@@ -2877,7 +2880,7 @@ may increase either contention or retry errors, or both.`,
 					{args[1], args[0]},
 				} {
 					ts, err := tree.ParseDTimestampTZ(
-						ctx, string(tree.MustBeDString(attempt.ts)), time.Microsecond,
+						ctx, string(tree.MustBeDString(attempt.ts)), time.Nanosecond,
 					)
 					if err != nil {
 						continue
@@ -2915,7 +2918,7 @@ may increase either contention or retry errors, or both.`,
 				_, beforeOffsetSecs := ts.Time.Zone()
 				_, afterOffsetSecs := ts.Time.In(loc).Zone()
 				durationDelta := time.Duration(beforeOffsetSecs-afterOffsetSecs) * time.Second
-				return tree.MakeDTimestampTZ(ts.Time.Add(durationDelta), time.Microsecond), nil
+				return tree.MakeDTimestampTZ(ts.Time.Add(durationDelta), time.Nanosecond), nil
 			},
 			Info: "Treat given time stamp without time zone as located in the specified time zone.",
 		},
@@ -3006,7 +3009,7 @@ may increase either contention or retry errors, or both.`,
 				_, beforeOffsetSecs := ts.Time.Zone()
 				_, afterOffsetSecs := ts.Time.In(loc).Zone()
 				durationDelta := time.Duration(beforeOffsetSecs-afterOffsetSecs) * time.Second
-				return tree.MakeDTimestampTZ(ts.Time.Add(durationDelta), time.Microsecond), nil
+				return tree.MakeDTimestampTZ(ts.Time.Add(durationDelta), time.Nanosecond), nil
 			},
 			Info: "Treat given time stamp without time zone as located in the specified time zone.\n" +
 				"This is deprecated in favor of timezone(str, timestamp)",
@@ -4728,7 +4731,7 @@ func txnTSOverloads(preferTZOverload bool) []tree.Overload {
 			ReturnType:        tree.FixedReturnType(types.TimestampTZ),
 			PreferredOverload: preferTZOverload,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return ctx.GetTxnTimestamp(time.Microsecond), nil
+				return ctx.GetTxnTimestamp(time.Nanosecond), nil
 			},
 			Info: txnTSDoc + tzAdditionalDesc,
 		},
@@ -4737,7 +4740,7 @@ func txnTSOverloads(preferTZOverload bool) []tree.Overload {
 			ReturnType:        tree.FixedReturnType(types.Timestamp),
 			PreferredOverload: !preferTZOverload,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return ctx.GetTxnTimestampNoZone(time.Microsecond), nil
+				return ctx.GetTxnTimestampNoZone(time.Nanosecond), nil
 			},
 			Info: txnTSDoc + noTZAdditionalDesc,
 		},
@@ -4760,7 +4763,7 @@ func txnTSWithPrecisionOverloads(preferTZOverload bool) []tree.Overload {
 				PreferredOverload: preferTZOverload,
 				Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 					prec := int32(tree.MustBeDInt(args[0]))
-					if prec < 0 || prec > 6 {
+					if prec < 0 || prec > 9 {
 						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "precision %d out of range", prec)
 					}
 					return ctx.GetTxnTimestamp(tree.TimeFamilyPrecisionToRoundDuration(prec)), nil
@@ -4773,7 +4776,7 @@ func txnTSWithPrecisionOverloads(preferTZOverload bool) []tree.Overload {
 				PreferredOverload: !preferTZOverload,
 				Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 					prec := int32(tree.MustBeDInt(args[0]))
-					if prec < 0 || prec > 6 {
+					if prec < 0 || prec > 9 {
 						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "precision %d out of range", prec)
 					}
 					return ctx.GetTxnTimestampNoZone(tree.TimeFamilyPrecisionToRoundDuration(prec)), nil
@@ -4785,7 +4788,7 @@ func txnTSWithPrecisionOverloads(preferTZOverload bool) []tree.Overload {
 				ReturnType: tree.FixedReturnType(types.Date),
 				Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 					prec := int32(tree.MustBeDInt(args[0]))
-					if prec < 0 || prec > 6 {
+					if prec < 0 || prec > 9 {
 						return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "precision %d out of range", prec)
 					}
 					return currentDate(ctx, args)
@@ -5981,6 +5984,8 @@ func extractTimeSpanFromInterval(
 
 	case "microsecond", "microseconds":
 		return tree.NewDFloat(tree.DFloat(float64(fromInterval.Nanos()%int64(time.Minute)) / float64(time.Microsecond))), nil
+	case "nanosecond", "nanoseconds":
+		return tree.NewDFloat(tree.DFloat(float64(fromInterval.Nanos() % int64(time.Minute)))), nil
 	case "epoch":
 		return tree.NewDFloat(tree.DFloat(fromInterval.AsFloat64())), nil
 	default:
@@ -6077,6 +6082,13 @@ func extractTimeSpanFromTimestamp(
 				float64(fromTime.Second()*duration.MillisPerSec*duration.MicrosPerMilli) + float64(fromTime.Nanosecond())/
 					float64(time.Microsecond),
 			),
+		), nil
+
+	case "nanosecond", "nanoseconds":
+		return tree.NewDFloat(
+			tree.DFloat(
+				float64(fromTime.Second()*duration.MillisPerSec*duration.MicrosPerMilli*duration.NanosPerMicro) +
+					float64(fromTime.Nanosecond())),
 		), nil
 
 	case "epoch":
@@ -6324,12 +6336,14 @@ func truncateTimestamp(
 		microseconds := (nsec / int(time.Microsecond)) * int(time.Microsecond)
 		nsec = microseconds
 
+	case "nanosecond", "nanoseconds":
+
 	default:
 		return nil, pgerror.Newf(pgcode.InvalidParameterValue, "unsupported timespan: %s", timeSpan)
 	}
 
 	toTime := time.Date(year, month, day, hour, min, sec, nsec, loc)
-	return tree.MakeDTimestampTZ(toTime, time.Microsecond), nil
+	return tree.MakeDTimestampTZ(toTime, time.Nanosecond), nil
 }
 
 // Converts a scalar Datum to its string representation

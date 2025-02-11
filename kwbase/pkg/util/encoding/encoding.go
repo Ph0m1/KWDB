@@ -1128,12 +1128,13 @@ func DecodeDurationDescending(b []byte) ([]byte, duration.Duration, error) {
 // backing word array as a byte array, using byte array encoding and escaped
 // special bytes (via  `encodeBytesAscendingWithoutTerminatorOrPrefix`).
 // There are two arguments against this alternative:
-// - the bytes must be encoded big endian, but the most common architectures
-//   running CockroachDB are little-endian, so the bytes would need
-//   to be reordered prior to encoding.
-// - when decoding or skipping over a value, the decoding/sizing loop
-//   would need to look at every byte of the encoding to find the
-//   terminator.
+//   - the bytes must be encoded big endian, but the most common architectures
+//     running CockroachDB are little-endian, so the bytes would need
+//     to be reordered prior to encoding.
+//   - when decoding or skipping over a value, the decoding/sizing loop
+//     would need to look at every byte of the encoding to find the
+//     terminator.
+//
 // In contrast, the chosen encoding using varints is endianness-agnostic
 // and enables fast decoding/skipping thanks ot the tag bytes.
 func EncodeBitArrayAscending(b []byte, d bitarray.BitArray) []byte {
@@ -1256,6 +1257,7 @@ func DecodeBitArrayDescending(b []byte) ([]byte, bitarray.BitArray, error) {
 
 // Type represents the type of a value encoded by
 // Encode{Null,NotNull,Varint,Uvarint,Float,Bytes}.
+//
 //go:generate stringer -type=Type
 type Type int
 
@@ -1502,12 +1504,12 @@ func prettyPrintValueImpl(valDirs []Direction, b []byte, sep string) (string, bo
 // for table keys), then !NULL will be used. Otherwise, # will be used.
 //
 // We prove that the default # will only be used for interleaved sentinels:
-//  - For non-table keys, we never have NotNull.
-//  - For table keys, we always explicitly pass in Ascending and Descending for
-//    all key values, including NotNulls. The only case we do not pass in
-//    direction is during a SHOW RANGES ON TABLE parent and there exists
-//    an interleaved split key. Note that interleaved keys cannot have NotNull
-//    values except for the interleaved sentinel.
+//   - For non-table keys, we never have NotNull.
+//   - For table keys, we always explicitly pass in Ascending and Descending for
+//     all key values, including NotNulls. The only case we do not pass in
+//     direction is during a SHOW RANGES ON TABLE parent and there exists
+//     an interleaved split key. Note that interleaved keys cannot have NotNull
+//     values except for the interleaved sentinel.
 //
 // Defaulting to Ascending for all other value types is fine since all
 // non-table keys encode values with Ascending.
@@ -1687,8 +1689,8 @@ func prettyPrintFirstValue(dir Direction, b []byte) ([]byte, string, error) {
 //
 // Formally:
 //
-//     PrefixEnd(UndoPrefixEnd(p)) = p for all non-minimal prefixes p
-//     UndoPrefixEnd(PrefixEnd(p)) = p for all non-maximal prefixes p
+//	PrefixEnd(UndoPrefixEnd(p)) = p for all non-minimal prefixes p
+//	UndoPrefixEnd(PrefixEnd(p)) = p for all non-maximal prefixes p
 //
 // A minimal prefix is any prefix that consists only of one or more 0x00 bytes;
 // analogously, a maximal prefix is any prefix that consists only of one or more
@@ -1736,10 +1738,10 @@ const NonsortingUvarintMaxLen = 10
 // EncodeNonsortingUvarint encodes a uint64, appends it to the supplied buffer,
 // and returns the final buffer. The encoding used is similar to
 // encoding/binary, but with the most significant bits first:
-// - Unsigned integers are serialized 7 bits at a time, starting with the
-//   most significant bits.
-// - The most significant bit (msb) in each output byte indicates if there
-//   is a continuation byte (msb = 1).
+//   - Unsigned integers are serialized 7 bits at a time, starting with the
+//     most significant bits.
+//   - The most significant bit (msb) in each output byte indicates if there
+//     is a continuation byte (msb = 1).
 func EncodeNonsortingUvarint(appendTo []byte, x uint64) []byte {
 	switch {
 	case x < (1 << 7):
@@ -2038,12 +2040,16 @@ func EncodeJSONValue(appendTo []byte, colID uint32, data []byte) []byte {
 // returned colID should be discarded.)
 //
 // Concretely:
-//     b := ...
-//     typeOffset, _, colID, typ, err := DecodeValueTag(b)
-//     _, _, _, typ, err := DecodeValueTag(b[typeOffset:])
+//
+//	b := ...
+//	typeOffset, _, colID, typ, err := DecodeValueTag(b)
+//	_, _, _, typ, err := DecodeValueTag(b[typeOffset:])
+//
 // will return the same typ and err and
-//     DecodeFooValue(b)
-//     DecodeFooValue(b[typeOffset:])
+//
+//	DecodeFooValue(b)
+//	DecodeFooValue(b[typeOffset:])
+//
 // will return the same thing. PeekValueLength works as expected with either of
 // `b` or `b[typeOffset:]`.
 func DecodeValueTag(b []byte) (typeOffset int, dataOffset int, colID uint32, typ Type, err error) {

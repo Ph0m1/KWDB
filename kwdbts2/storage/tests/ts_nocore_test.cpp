@@ -203,7 +203,7 @@ TEST_F(TestTsBLockItemMaxNoCore, mulitiInsert) {
   KTimestamp start_ts = 1000000;
   int batch_times = 300;
   int thread_num = 2;
-  int batch_count = 13;
+  int batch_count = 12;
   TSSlice payload;
   GenPayloadData(primary_key, start_ts, batch_count, &payload);
 

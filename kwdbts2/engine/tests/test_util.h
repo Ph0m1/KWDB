@@ -118,7 +118,7 @@ const k_uint32 g_testcase_col_count = 20;
 
 // all kind of column types.
 std::vector<ZTableColumnMeta> g_all_col_types({
-  {roachpb::DataType::TIMESTAMP, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMP_NANO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
   {roachpb::DataType::SMALLINT, 2, 2, roachpb::VariableLengthType::ColStorageTypeTuple},
   {roachpb::DataType::INT, 4, 4, roachpb::VariableLengthType::ColStorageTypeTuple},
   {roachpb::DataType::VARCHAR, 8, 19, roachpb::VariableLengthType::ColStorageTypeTuple},
@@ -131,7 +131,12 @@ std::vector<ZTableColumnMeta> g_all_col_types({
   {roachpb::DataType::NCHAR, 17, 17, roachpb::VariableLengthType::ColStorageTypeTuple},
   {roachpb::DataType::NVARCHAR, 8, 21, roachpb::VariableLengthType::ColStorageTypeTuple},  // 11
   {roachpb::DataType::VARBINARY, 8, 23, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMP, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
   {roachpb::DataType::TIMESTAMPTZ, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMP_MICRO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMP_NANO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMPTZ_MICRO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
+  {roachpb::DataType::TIMESTAMPTZ_NANO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple},
   // {roachpb::DataType::SDECHAR, 4, 4, roachpb::VariableLengthType::ColStorageTypeTuple},
   // {roachpb::DataType::SDEVARCHAR, 4, 4, roachpb::VariableLengthType::ColStorageTypeTuple},
 });
@@ -147,12 +152,12 @@ void ConstructColumnMetas(std::vector<ZTableColumnMeta>* metas, int col_num = 4)
   }
 }
 void ConstructTagMetas(std::vector<ZTableColumnMeta>* metas) {
-  metas->push_back({roachpb::DataType::TIMESTAMP, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple});
+  metas->push_back({roachpb::DataType::TIMESTAMP_NANO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple});
   metas->push_back({roachpb::DataType::INT, 4, 4, roachpb::VariableLengthType::ColStorageTypeTuple});
   metas->push_back({roachpb::DataType::VARCHAR, 8, 32, roachpb::VariableLengthType::ColStorageTypeTuple});
 }
 void ConstructVarColumnMetas(std::vector<ZTableColumnMeta>* metas) {
-  metas->push_back({roachpb::DataType::TIMESTAMP, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple});
+  metas->push_back({roachpb::DataType::TIMESTAMP_NANO, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple});
   metas->push_back({roachpb::DataType::CHAR, 8, 8, roachpb::VariableLengthType::ColStorageTypeTuple});
   metas->push_back({roachpb::DataType::VARCHAR, 8, 32, roachpb::VariableLengthType::ColStorageTypeTuple});
   metas->push_back({roachpb::DataType::VARCHAR, 8, 32, roachpb::VariableLengthType::ColStorageTypeTuple});
@@ -199,6 +204,10 @@ void ConstructRoachpbTable(roachpb::CreateTsTable* meta, const KString& prefix_t
     }
     column->set_name("tag" + std::to_string(i + 1));
   }
+}
+
+KwTsSpan ConvertMsToPrecision(KwTsSpan& span, DATATYPE ts_type) {
+  return {convertMSToPrecisionTS(span.begin, ts_type), convertMSToPrecisionTS(span.end, ts_type)};
 }
 
 void ConstructVarRoachpbTable(roachpb::CreateTsTable* meta, const KString& prefix_table_name, KTableKey table_id,
@@ -284,6 +293,8 @@ void GenPayloadTagData(Payload& payload, std::vector<AttributeInfo>& tag_schema,
        test_value = 0;
        switch (tag_schema[i].type) {
          case DATATYPE::TIMESTAMP64:
+         case DATATYPE::TIMESTAMP64_NANO:
+         case DATATYPE::TIMESTAMP64_MICRO:
              KTimestamp(primary_start_ptr) = start_ts;
              primary_start_ptr +=tag_schema[i].size;
            break;
@@ -310,6 +321,8 @@ void GenPayloadTagData(Payload& payload, std::vector<AttributeInfo>& tag_schema,
     // generating other tags
     switch (tag_schema[i].type) {
       case DATATYPE::TIMESTAMP64:
+      case DATATYPE::TIMESTAMP64_NANO:
+      case DATATYPE::TIMESTAMP64_MICRO:
           KTimestamp(tag_data_start_ptr) = start_ts + test_value;
           tag_data_start_ptr +=tag_schema[i].size;
         break;
@@ -340,6 +353,99 @@ void GenPayloadTagData(Payload& payload, std::vector<AttributeInfo>& tag_schema,
     test_value = backup_test_value;
   }
   return;
+}
+
+void fillTSIntoPayload(Payload &p, int col_id, DATATYPE type, int count,  bool rand, KTimestamp &start_ts, k_uint32 ms_interval) {
+  KTimestamp precision = 1;
+  bool is_lsn =false;
+  switch (type) {
+    case DATATYPE::TIMESTAMP:
+    case DATATYPE::TIMESTAMP64:
+      is_lsn = false;
+      precision = 1;
+      break;
+    case DATATYPE::TIMESTAMP64_MICRO:
+      is_lsn = false;
+      precision = 1000;
+      break;
+    case DATATYPE::TIMESTAMP64_NANO:
+      is_lsn = false;
+      precision = 1000000;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN:
+      is_lsn = true;
+      precision = 1;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_MICRO:
+      is_lsn = true;
+      precision = 1000;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_NANO:
+      is_lsn = true;
+      precision = 1000000;
+      break;
+    default:
+      break;
+  }
+  if (!is_lsn) {
+    for (int j = 0; j < count; j++) {
+      KTimestamp(p.GetColumnAddr(j, col_id)) = start_ts * precision;
+      start_ts += ms_interval;
+    }
+  } else {
+    for (int j = 0; j < count; j++) {
+      if (rand) {
+        uint64_t r = GetRandomNumber(ms_interval);
+        KTimestamp(p.GetColumnAddr(j, col_id)) = (start_ts + r) *precision;
+        KTimestamp(p.GetColumnAddr(j, col_id) + 8) = (start_ts + r);
+      } else {
+        KTimestamp(p.GetColumnAddr(j, col_id)) = start_ts * precision;
+        KTimestamp(p.GetColumnAddr(j, col_id) + 8) = 1;
+        start_ts += ms_interval;
+      }
+    }
+  }
+}
+
+
+void fillTSData(DATATYPE type,  KTimestamp m_ts, char* dest_ts) {
+  KTimestamp precision = 1;
+  bool is_lsn =false;
+  switch (type) {
+    case DATATYPE::TIMESTAMP:
+    case DATATYPE::TIMESTAMP64:
+      is_lsn = false;
+      precision = 1;
+      break;
+    case DATATYPE::TIMESTAMP64_MICRO:
+      is_lsn = false;
+      precision = 1000;
+      break;
+    case DATATYPE::TIMESTAMP64_NANO:
+      is_lsn = false;
+      precision = 1000000;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN:
+      is_lsn = true;
+      precision = 1;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_MICRO:
+      is_lsn = true;
+      precision = 1000;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_NANO:
+      is_lsn = true;
+      precision = 1000000;
+      break;
+    default:
+      break;
+  }
+  if (!is_lsn) {
+    KTimestamp(dest_ts) = m_ts * precision;
+  } else {
+    KTimestamp(dest_ts) = m_ts * precision;
+    KTimestamp(dest_ts + 8) = 1;
+  }
 }
 
 char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_length, KTimestamp start_ts,
@@ -404,26 +510,11 @@ char* GenSomePayloadData(kwdbContext_p ctx, k_uint32 count, k_uint32& payload_le
   GenPayloadTagData(p, tag_schema, start_ts, fix_entity_id, test_value);
   uint64_t var_exist_len = 0;
   for (int i = 0; i < schema.size(); i++) {
+    if (isTsType((DATATYPE)schema[i].type)) {
+      fillTSIntoPayload(p, i, (DATATYPE)schema[i].type, count, random_ts, start_ts, ms_interval);
+      continue;
+    }
     switch (schema[i].type) {
-      case DATATYPE::TIMESTAMP64:
-        for (int j = 0; j < count; j++) {
-          KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
-          start_ts += ms_interval;
-        }
-        break;
-      case DATATYPE::TIMESTAMP64_LSN:
-        for (int j = 0; j < count; j++) {
-          if (random_ts) {
-            uint64_t r = GetRandomNumber(ms_interval);
-            KTimestamp(p.GetColumnAddr(j, i)) = (start_ts + r);
-            KTimestamp(p.GetColumnAddr(j, i) + 8) = (start_ts + r);
-          } else {
-            KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
-            KTimestamp(p.GetColumnAddr(j, i) + 8) = 1;
-            start_ts += ms_interval;
-          }
-        }
-        break;
       case DATATYPE::INT16:
         for (int j = 0; j < count; j++) {
           KInt16(p.GetColumnAddr(j, i)) = 11;
@@ -556,7 +647,6 @@ TSSlice GenSomePayloadDataRowBased(kwdbContext_p ctx, k_uint32 count, KTimestamp
   int16_t len = 0;
   GenPayloadTagData(p, tag_schema, start_ts, fix_entityid, test_value);
 
-
   char* cur_row_mem = value + (data_length - data_len);
   for (size_t i = 0; i < count; i++) {
     size_t cur_row_len = row_based_tuple_size + bitmap_len;
@@ -565,16 +655,12 @@ TSSlice GenSomePayloadDataRowBased(kwdbContext_p ctx, k_uint32 count, KTimestamp
       size_t col_store_len = isVarLenType(schema[col].type) ? sizeof(intptr_t) : schema[col].size;
       char* column_addr = cur_row_mem + 4 + cur_col_offset_in_row_mem;
       cur_col_offset_in_row_mem += col_store_len;
+      if (isTsType((DATATYPE)schema[col].type)) {
+        fillTSData((DATATYPE)schema[col].type, start_ts, column_addr);
+        start_ts += ms_interval;
+        continue;
+      }
       switch (schema[col].type) {
-        case DATATYPE::TIMESTAMP64:
-          KTimestamp(column_addr) = start_ts;
-          start_ts += ms_interval;
-          break;
-        case DATATYPE::TIMESTAMP64_LSN:
-            KTimestamp(column_addr) = start_ts;
-            KTimestamp(column_addr + 8) = 1;
-            start_ts += ms_interval;
-          break;
         case DATATYPE::INT16:
             KInt16(column_addr) = 11;
           break;
@@ -668,14 +754,11 @@ char* GenSomePayloadDataWithBigValue(kwdbContext_p ctx, k_uint32 count, k_uint32
   GenPayloadTagData(p, tag_schema, start_ts, fix_entity_id, test_value);
   uint64_t var_exist_len = 0;
   for (int i = 0; i < schema.size(); i++) {
+    if (isTsType((DATATYPE)schema[i].type)) {
+      fillTSIntoPayload(p, i, (DATATYPE)schema[i].type, count, false, start_ts, ms_interval);
+      continue;
+    }
     switch (schema[i].type) {
-      case DATATYPE::TIMESTAMP64:
-      case DATATYPE::TIMESTAMP64_LSN:
-        for (int j = 0; j < count; j++) {
-          KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
-          start_ts += ms_interval;
-        }
-        break;
       case DATATYPE::INT16:
         for (int j = 0; j < count; j++) {
           KInt16(p.GetColumnAddr(j, i)) = INT16_MAX / count + 1;
@@ -719,38 +802,74 @@ char* GenSomePayloadDataWithBigValue(kwdbContext_p ctx, k_uint32 count, k_uint32
   return value;
 }
 
+void checkTSData(KTimestamp a_ts, KTimestamp e_ts, DATATYPE type) {
+  KTimestamp precision = 1;
+  bool is_lsn = false;
+  switch (type) {
+    case DATATYPE::TIMESTAMP:
+    case DATATYPE::TIMESTAMP64:
+      is_lsn = false;
+      precision = 1;
+      break;
+    case DATATYPE::TIMESTAMP64_MICRO:
+      is_lsn = false;
+      precision = 1000;
+      break;
+    case DATATYPE::TIMESTAMP64_NANO:
+      is_lsn = false;
+      precision = 1000000;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN:
+      is_lsn = true;
+      precision = 1;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_MICRO:
+      is_lsn = true;
+      precision = 1000;
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_NANO:
+      is_lsn = true;
+      precision = 1000000;
+      break;
+    default:
+      break;
+  }
+  ASSERT_EQ(a_ts, e_ts * precision);
+}
+
 void CheckgenSomePayloadData(kwdbContext_p ctx, Payload* payload, KTimestamp start_ts,
                              const std::vector<AttributeInfo>& schema, k_uint32 ms_interval = 10, int test_value = 0) {
   string test_str = "abcdefghijklmnopqrstuvwxyz";
   for (size_t j = 0; j < schema.size(); j++) {
     for (size_t i = 0; i < payload->GetRowCount(); i++) {
       char* value = payload->GetColumnAddr(i, j);
+      if (isTsType((DATATYPE)schema[j].type)) {
+        checkTSData(KTimestamp(value), start_ts, (DATATYPE)schema[j].type);
+        start_ts += ms_interval;
+        continue;
+      }
       switch (schema[j].type) {
-        case DATATYPE::TIMESTAMP64:
-          EXPECT_EQ(KTimestamp(value), start_ts);
-          start_ts += ms_interval;
-          break;
         case DATATYPE::INT16:
-          EXPECT_EQ(KInt16(value), 11);
+          ASSERT_EQ(KInt16(value), 11);
           break;
         case DATATYPE::INT32:
-          EXPECT_EQ(KInt32(value), 2222);
+          ASSERT_EQ(KInt32(value), 2222);
           break;
         case DATATYPE::CHAR:
-          EXPECT_TRUE(memcmp(value, test_str.c_str(), schema[j].size) == 0);
+          ASSERT_TRUE(memcmp(value, test_str.c_str(), schema[j].size) == 0);
           break;
         case DATATYPE::BINARY:
-          EXPECT_TRUE(memcmp(value, test_str.c_str(), schema[j].size) == 0);
+          ASSERT_TRUE(memcmp(value, test_str.c_str(), schema[j].size) == 0);
           break;
         case DATATYPE::VARSTRING:
         case DATATYPE::VARBINARY:
         {
-          EXPECT_EQ(payload->GetVarColumnLen(i, j), test_str.size());
+          ASSERT_EQ(payload->GetVarColumnLen(i, j), test_str.size());
           int cmp_len = test_str.size();
           if (cmp_len < schema[j].size) {
             cmp_len = schema[j].size;
           }
-          EXPECT_TRUE(memcmp(payload->GetVarColumnAddr(i, j) + 2, test_str.c_str(), cmp_len) == 0);
+          ASSERT_TRUE(memcmp(payload->GetVarColumnAddr(i, j) + 2, test_str.c_str(), cmp_len) == 0);
           break;
         }
         default:
@@ -780,11 +899,12 @@ void CheckBatchData(kwdbContext_p ctx, ResultSet &rs, KTimestamp start_ts,
     int cmp_len = 0;
     for (size_t i = 0; i < batch->count; i++) {
       char* value = reinterpret_cast<char*>(batch->mem) + i * schema[j].size;
+      if (isTsType((DATATYPE)schema[i].type)) {
+        checkTSData(KTimestamp(value), start_ts, (DATATYPE)schema[j].type);
+        start_ts += ms_interval;
+        continue;
+      }
       switch (schema[j].type) {
-        case DATATYPE::TIMESTAMP64:
-          EXPECT_EQ(KTimestamp(value), start_ts);
-          start_ts += ms_interval;
-          break;
         case DATATYPE::INT16:
           EXPECT_EQ(KInt16(value), 11);
           break;
@@ -875,14 +995,11 @@ char* GenPayloadDataWithNull(kwdbContext_p ctx, k_uint32 count, k_uint32& payloa
   GenPayloadTagData(p, tag_schema, start_ts, fix_entityid);
   uint64_t var_exist_len = 0;
   for (int i = 0; i < schema.size(); i++) {
+    if (isTsType((DATATYPE)schema[i].type)) {
+      fillTSIntoPayload(p, i, (DATATYPE)schema[i].type, count, false, start_ts, ms_interval);
+      continue;
+    }
     switch (schema[i].type) {
-      case DATATYPE::TIMESTAMP64:
-      case DATATYPE::TIMESTAMP64_LSN:
-        for (int j = 0; j < count; j++) {
-          KTimestamp(p.GetColumnAddr(j, i)) = start_ts;
-          start_ts += ms_interval;
-        }
-        break;
       case DATATYPE::INT16:
         for (int j = 0; j < count; j++) {
           *(static_cast<k_int8*>(static_cast<void*>(p.GetColumnAddr(j, i)))) = 11;

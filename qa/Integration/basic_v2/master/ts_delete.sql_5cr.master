@@ -1112,7 +1112,7 @@ PREPARE
 > execute p27(1);
 INSERT 1
 > execute p26(1);
-ERROR: expected EXECUTE parameter expression to have type timestamptz, but '1' has type int
+ERROR: expected EXECUTE parameter expression to have type timestamptz(3), but '1' has type int
 SQLSTATE: 42809
 > drop database test_delete1;
 DROP DATABASE
@@ -1141,31 +1141,31 @@ code5 INT4 NOT NULL, code6 VARCHAR(128) NOT NULL, code7 CHAR(200) NOT NULL, code
 PRIMARY TAGS (code1,code2);
 CREATE TABLE
 > delete from test_delete.tb1 where k_timestamp >0;
-ERROR: unsupported comparison operator: <timestamptz> > <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> > <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp =0;
-ERROR: unsupported comparison operator: <timestamptz> = <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> = <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp <0;
-ERROR: unsupported comparison operator: <timestamptz> < <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> < <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp >=0;
-ERROR: unsupported comparison operator: <timestamptz> >= <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> >= <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp <=0;
-ERROR: unsupported comparison operator: <timestamptz> <= <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> <= <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp >0 or k_timestamp =0;
-ERROR: unsupported comparison operator: <timestamptz> > <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> > <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp >0 and k_timestamp =0;
-ERROR: unsupported comparison operator: <timestamptz> > <int>
+ERROR: unsupported comparison operator: <timestamptz(3)> > <int>
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp in(123);
-ERROR: unsupported comparison operator: k_timestamp IN (123,): expected 123 to be of type timestamptz, found type int
+ERROR: unsupported comparison operator: k_timestamp IN (123,): expected 123 to be of type timestamptz(3), found type int
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp not in(123);
-ERROR: unsupported comparison operator: k_timestamp NOT IN (123,): expected 123 to be of type timestamptz, found type int
+ERROR: unsupported comparison operator: k_timestamp NOT IN (123,): expected 123 to be of type timestamptz(3), found type int
 SQLSTATE: 22023
 > delete from test_delete.tb1 where k_timestamp in('test');
 ERROR: unsupported comparison operator: k_timestamp IN ('test',): parsing as type timestamp: could not parse "test"

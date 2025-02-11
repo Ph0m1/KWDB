@@ -52,6 +52,9 @@ type tsScanNode struct {
 	// time frame
 	tsSpans []execinfrapb.TsSpan
 
+	// tsSpansPre represents the precision of the tsSpans
+	tsSpansPre int32
+
 	// There is a 1-1 correspondence between cols and resultColumns.
 	resultColumns sqlbase.ResultColumns
 

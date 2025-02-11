@@ -233,14 +233,14 @@ func mustParseDTimeTZ(t *testing.T, s string) tree.Datum {
 	return d
 }
 func mustParseDTimestamp(t *testing.T, s string) tree.Datum {
-	d, err := tree.ParseDTimestamp(nil, s, time.Millisecond)
+	d, err := tree.ParseDTimestamp(nil, s, time.Nanosecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return d
 }
 func mustParseDTimestampTZ(t *testing.T, s string) tree.Datum {
-	d, err := tree.ParseDTimestampTZ(nil, s, time.Millisecond)
+	d, err := tree.ParseDTimestampTZ(nil, s, time.Nanosecond)
 	if err != nil {
 		t.Fatal(err)
 	}

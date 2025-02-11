@@ -28,3 +28,21 @@ INSERT INTO TS_DB.d1 values (1679883006000, 21, '2970-01-01 00:00:00.001', 1);
 select * from TS_DB.d1 order by e1;
 
 drop DATABASE TS_DB cascade;
+
+--ZDP-44417
+create ts database test_timebucket_gapfill_ns;
+create table test_timebucket_gapfill_ns.tb(k_timestamp timestamptz(3) not null,e1 timestamp(3),
+    e2 int2,e3 int,e4 int8,e5 float4,e6 float8,e7 bool,e8 char,e9 char(100),e10 nchar,
+    e11 nchar(255),e12 varchar,e13 varchar(254),e14 varchar(4096),e15 nvarchar,e16 nvarchar(255),
+    e17 nvarchar(4096),e18 varbytes,e19 varbytes(100),e20 varbytes,e21 varbytes(254),
+    e22 varbytes(4096),e23 timestamp(6),e24 timestamp(9),e25 timestamptz(6),e26 timestamptz(9))
+    tags (t1 int2 not null,t2 int,t3 int8,t4 bool not null,t5 float4,t6 float8,t7 char,
+    t8 char(100) not null,t9 nchar,t10 nchar(254),t11 varchar,t12 varchar(128) not null,
+    t13 varbytes,t14 varbytes(100),t15 varbytes,t16 varbytes(255)) primary tags(t1,t4,t8,t12);
+insert into test_timebucket_gapfill_ns.tb values('0001-11-06 17:10:55.1231','1970-01-01 08:00:00.1234',
+    700,7000,70000,700000.707,7000000.1010101,true,null,null,null,
+    null,null,null,null,null,null,null,null,null,null,
+    null,null,'1970-01-01 08:00:00.3453321','1973-10-10 18:00:00.1111111111',
+    '2070-01-01 15:15:15.78812','1570-05-10 10:55:20.3457778',1,null,7000,false,70.7077,
+    700.5675675,'a','test测试！！！@TEST1','e','\a',null,'vvvaa64_1','b','test测试1023_1','vwwws测试_1','aaabbb');
+drop DATABASE test_timebucket_gapfill_ns cascade;

@@ -82,8 +82,14 @@ func ParseAndRequireString(t *types.T, s string, ctx ParseTimeContext) (Datum, e
 	case types.TimeTZFamily:
 		return ParseDTimeTZ(ctx, s, TimeFamilyPrecisionToRoundDuration(t.Precision()))
 	case types.TimestampFamily:
+		if t.InternalType.Precision == 0 && !t.InternalType.TimePrecisionIsSet {
+			return ParseDTimestamp(ctx, s, TimeFamilyPrecisionToRoundDuration(9))
+		}
 		return ParseDTimestamp(ctx, s, TimeFamilyPrecisionToRoundDuration(t.Precision()))
 	case types.TimestampTZFamily:
+		if t.InternalType.Precision == 0 && !t.InternalType.TimePrecisionIsSet {
+			return ParseDTimestampTZ(ctx, s, TimeFamilyPrecisionToRoundDuration(9))
+		}
 		return ParseDTimestampTZ(ctx, s, TimeFamilyPrecisionToRoundDuration(t.Precision()))
 	case types.UuidFamily:
 		return ParseDUuidFromString(s)

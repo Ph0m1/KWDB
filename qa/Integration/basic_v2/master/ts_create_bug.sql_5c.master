@@ -234,7 +234,7 @@ SQLSTATE: 0A000
 ERROR: SERIAL column is not supported in timeseries table
 SQLSTATE: 0A000
 > create table db1.t1 (k_timestamp timestamptz not null,e1 TIME)attributes(code1 int not null)PRIMARY TAGS(code1);
-ERROR: column e1: unsupported column type time in timeseries table
+ERROR: column e1: unsupported column type time(3) in timeseries table
 SQLSTATE: 42809
 > create table db1.t1 (k_timestamp timestamptz not null,e1 DATE)attributes(code1 int not null)PRIMARY TAGS(code1);
 ERROR: column e1: unsupported column type date in timeseries table
@@ -308,7 +308,7 @@ CREATE TABLE
     table_name    |                      create_statement
 ------------------+--------------------------------------------------------------
   db1.public.tb01 | CREATE TABLE tb01 (
-                  |     k_timestamp TIMESTAMPTZ NOT NULL,
+                  |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
                   |     e1 INT2 NULL
                   | ) TAGS (
                   |     code1 BOOL NOT NULL,
@@ -321,7 +321,7 @@ CREATE TABLE
     table_name    |               create_statement
 ------------------+-----------------------------------------------
   db1.public.tb02 | CREATE TABLE tb02 (
-                  |     k_timestamp TIMESTAMPTZ NOT NULL,
+                  |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
                   |     e1 INT2 NULL
                   | ) TAGS (
                   |     code1 BOOL NOT NULL,
@@ -336,7 +336,7 @@ CREATE TABLE
        table_name       |               create_statement
 ------------------------+------------------------------------------------
   db1.public.tb_varchar | CREATE TABLE tb_varchar (
-                        |     k_timestamp TIMESTAMPTZ NOT NULL,
+                        |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
                         |     e1 VARCHAR(254) NULL,
                         |     e2 VARCHAR(30) NULL
                         | ) TAGS (
@@ -346,12 +346,12 @@ CREATE TABLE
                         |     partition interval 10d
 (1 row)
 > show columns from db1.tb_varchar;
-  column_name |  data_type   | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
---------------+--------------+-------------+----------------+-----------------------+-----------+-----------+---------
-  k_timestamp | TIMESTAMPTZ  |    false    | NULL           |                       | {primary} |   false   | false
-  e1          | VARCHAR(254) |    true     | NULL           |                       | {}        |   false   | false
-  e2          | VARCHAR(30)  |    true     | NULL           |                       | {}        |   false   | false
-  code1       | BOOL         |    false    | NULL           |                       | {}        |   false   |  true
+  column_name |   data_type    | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
+--------------+----------------+-------------+----------------+-----------------------+-----------+-----------+---------
+  k_timestamp | TIMESTAMPTZ(3) |    false    | NULL           |                       | {primary} |   false   | false
+  e1          | VARCHAR(254)   |    true     | NULL           |                       | {}        |   false   | false
+  e2          | VARCHAR(30)    |    true     | NULL           |                       | {}        |   false   | false
+  code1       | BOOL           |    false    | NULL           |                       | {}        |   false   |  true
 (4 rows)
 > drop database db1;
 DROP DATABASE

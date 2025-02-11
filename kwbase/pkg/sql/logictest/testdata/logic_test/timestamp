@@ -43,11 +43,15 @@ SELECT TIMESTAMP '2001-02-16 20:38:40' AT TIME ZONE 'MST', timezone(TIMESTAMP '2
 # Test timestamp precisions
 subtest timestamp_precision
 
-query error precision 7 out of range
+query T
 select '1-1-18 1:00:00.001':::TIMESTAMP(7)
+----
+2001-01-18 01:00:00.001 +0000 +0000
 
-query error precision 7 out of range
+query T
 select '1-1-18 1:00:00.001':::TIMESTAMPTZ(7)
+----
+2001-01-18 01:00:00.001 -0800 PST
 
 query T
 select '1-1-18 1:00:00.001':::TIMESTAMP(0)
@@ -258,7 +262,7 @@ subtest localtimestamp_test
 query TTTT
 select pg_typeof(localtimestamp), pg_typeof(current_timestamp), pg_typeof(localtimestamp(3)), pg_typeof(current_timestamp(3))
 ----
-timestamp  timestamptz  timestamp  timestamptz
+timestamp(9)  timestamptz(9)  timestamp(9)  timestamptz(9)
 
 query B
 select localtimestamp(3) - localtimestamp <= '1ms'::interval

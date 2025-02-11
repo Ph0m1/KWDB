@@ -2229,7 +2229,7 @@ var dMinTimestamp = &DTimestamp{}
 // time.Time formats.
 const (
 	// TimestampOutputFormat is used to output all timestamps.
-	TimestampOutputFormat = "2006-01-02 15:04:05.999999-07:00"
+	TimestampOutputFormat = "2006-01-02 15:04:05.999999999-07:00"
 )
 
 // ParseDTimestamp parses and returns the *DTimestamp Datum value represented by
@@ -2277,7 +2277,7 @@ func (d *DTimestamp) Round(precision time.Duration) *DTimestamp {
 
 // ResolvedType implements the TypedExpr interface.
 func (*DTimestamp) ResolvedType() *types.T {
-	return types.Timestamp
+	return types.MakeTimestamp(9)
 }
 
 // timeFromDatumForComparison gets the time from a datum object to use
@@ -2472,39 +2472,111 @@ func ParseDTimestampTZ(
 
 // ParseTimestampForTS parses and returns the DInt Datum value represented by
 // the provided string in the provided location, or an error if parsing is unsuccessful.
-func ParseTimestampForTS(ctx ParseTimeContext, s string) (*DInt, error) {
+func ParseTimestampForTS(
+	ctx ParseTimeContext, s string, typ *types.T, colName string,
+) (*DInt, error) {
 	now := relativeParseTime(ctx)
 	t, err := pgdate.ParseTimestamp(now, pgdate.ParseModeYMD, s)
 	if err != nil {
-		return nil, err
+		return nil, NewDatatypeMismatchError(colName, s, typ.SQLString())
 	}
 	// Truncate the timezone. DTimestamp doesn't carry its timezone around.
 	_, offset := t.Zone()
 	t = t.Add(time.Duration(offset) * time.Second).UTC()
-	roundNanSec := int64(t.Nanosecond() / 1e6)
-	next := t.Nanosecond()/1e5 - int(roundNanSec*10)
-	if next > 4 {
-		// Round up
-		roundNanSec++
-	}
-	return NewDInt(DInt(t.Unix()*1e3 + roundNanSec)), nil
+	resDatum, err := LimitTsTimestampWidth(t, typ, s, colName)
+	return resDatum, err
 }
 
 // ParseTimestampTZForTS parses and returns the DInt Datum value represented by
 // the provided string in the provided location, or an error if parsing is unsuccessful.
-func ParseTimestampTZForTS(ctx ParseTimeContext, s string) (*DInt, error) {
+func ParseTimestampTZForTS(
+	ctx ParseTimeContext, s string, typ *types.T, colName string,
+) (*DInt, error) {
 	now := relativeParseTime(ctx)
 	t, err := pgdate.ParseTimestamp(now, pgdate.ParseModeYMD, s)
 	if err != nil {
-		return nil, err
+		return nil, NewDatatypeMismatchError(colName, s, typ.SQLString())
 	}
-	roundNanSec := int64(t.Nanosecond() / 1e6)
-	next := t.Nanosecond()/1e5 - int(roundNanSec*10)
-	if next > 4 {
-		// Round up
-		roundNanSec++
+
+	resDatum, err := LimitTsTimestampWidth(t, typ, s, colName)
+	return resDatum, err
+}
+
+// LimitTsTimestampWidth checks that the width (for Timestamp/TimestampTZ) of the value fits the
+// specified column type.
+func LimitTsTimestampWidth(t time.Time, typ *types.T, oriString, colName string) (*DInt, error) {
+	var res *DInt
+	unixSec := t.Unix()
+	switch typ.Precision() {
+	case MilliTimestampWidth, DefaultTimestampWidth:
+		if unixSec < TsMinSecondTimestamp || unixSec > TsMaxSecondTimestamp {
+			if oriString != "" {
+				return nil, NewValueOutOfRangeError(typ, oriString, colName)
+			}
+			return nil, NewValueOutOfRangeError(typ, t.String(), colName)
+		}
+		roundSec := int64(t.Nanosecond() / 1e6)
+		next := t.Nanosecond()/1e5 - int(roundSec*10)
+		if next > 4 {
+			// Round up
+			roundSec++
+		}
+		res = NewDInt(DInt(t.Unix()*1e3 + roundSec))
+	case MicroTimestampWidth:
+		if unixSec < TsMinSecondTimestamp || unixSec > TsMaxSecondTimestamp {
+			if oriString != "" {
+				return nil, NewValueOutOfRangeError(typ, oriString, colName)
+			}
+			return nil, NewValueOutOfRangeError(typ, t.String(), colName)
+		}
+		roundSec := int64(t.Nanosecond() / 1e3)
+		next := t.Nanosecond()/1e2 - int(roundSec*10)
+		if next > 4 {
+			// Round up
+			roundSec++
+		}
+		res = NewDInt(DInt(t.Unix()*1e6 + roundSec))
+	case NanoTimestampWidth:
+		if unixSec < 0 || unixSec > TsMaxNanoTimestamp/1e9 {
+			if oriString != "" {
+				return nil, NewValueOutOfRangeError(typ, oriString, colName)
+			}
+			return nil, NewValueOutOfRangeError(typ, t.String(), colName)
+		}
+		res = NewDInt(DInt(t.UnixNano()))
+	default:
+		return nil, NewUnexpectedWidthError(typ, colName)
 	}
-	return NewDInt(DInt(t.Unix()*1e3 + roundNanSec)), nil
+	err := CheckTsTimestampWidth(typ, *res, oriString, colName)
+	return res, err
+}
+
+// CheckTsTimestampWidth checks whether the value exceeds the type width (for Timestamp/TimestampTZ).
+func CheckTsTimestampWidth(typ *types.T, res DInt, oriString, colName string) error {
+	outOfRange := false
+	switch typ.Precision() {
+	case MilliTimestampWidth, DefaultTimestampWidth:
+		if res < TsMinMilliTimestamp || res > TsMaxMilliTimestamp {
+			outOfRange = true
+		}
+	case MicroTimestampWidth:
+		if res < TsMinMicroTimestamp || res > TsMaxMicroTimestamp {
+			outOfRange = true
+		}
+	case NanoTimestampWidth:
+		if res < TsMinNanoTimestamp || res > TsMaxNanoTimestamp {
+			outOfRange = true
+		}
+	default:
+		return NewUnexpectedWidthError(typ, colName)
+	}
+	if outOfRange {
+		if oriString != "" {
+			return NewValueOutOfRangeError(typ, oriString, colName)
+		}
+		return NewValueOutOfRangeError(typ, res.String(), colName)
+	}
+	return nil
 }
 
 // UnixMilli returns t as a Unix time, the number of milliseconds elapsed since
@@ -2555,7 +2627,7 @@ func (d *DTimestampTZ) Round(precision time.Duration) *DTimestampTZ {
 
 // ResolvedType implements the TypedExpr interface.
 func (*DTimestampTZ) ResolvedType() *types.T {
-	return types.TimestampTZ
+	return types.MakeTimestampTZ(9)
 }
 
 // Compare implements the Datum interface.
@@ -2637,7 +2709,7 @@ func (d *DTimestampTZ) stripTimeZone(ctx *EvalContext) *DTimestamp {
 func (d *DTimestampTZ) EvalAtTimeZone(ctx *EvalContext, loc *time.Location) *DTimestamp {
 	_, locOffset := d.Time.In(loc).Zone()
 	t := d.Time.UTC().Add(time.Duration(locOffset) * time.Second).UTC()
-	return MakeDTimestamp(t, time.Microsecond)
+	return MakeDTimestamp(t, time.Nanosecond)
 }
 
 // DInterval is the interval Datum.

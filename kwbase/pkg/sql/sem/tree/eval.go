@@ -742,7 +742,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 			ReturnType: types.Timestamp,
 			Fn: func(_ *EvalContext, left Datum, right Datum) (Datum, error) {
 				return MakeDTimestamp(duration.Add(
-					left.(*DTimestamp).Time, right.(*DInterval).Duration), time.Microsecond), nil
+					left.(*DTimestamp).Time, right.(*DInterval).Duration), time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -751,7 +751,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 			ReturnType: types.Timestamp,
 			Fn: func(_ *EvalContext, left Datum, right Datum) (Datum, error) {
 				return MakeDTimestamp(duration.Add(
-					right.(*DTimestamp).Time, left.(*DInterval).Duration), time.Microsecond), nil
+					right.(*DTimestamp).Time, left.(*DInterval).Duration), time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -761,7 +761,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 			Fn: func(ctx *EvalContext, left Datum, right Datum) (Datum, error) {
 				// Convert time to be in the given timezone, as math relies on matching timezones..
 				t := duration.Add(left.(*DTimestampTZ).Time.In(ctx.GetLocation()), right.(*DInterval).Duration)
-				return MakeDTimestampTZ(t, time.Microsecond), nil
+				return MakeDTimestampTZ(t, time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -771,7 +771,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 			Fn: func(ctx *EvalContext, left Datum, right Datum) (Datum, error) {
 				// Convert time to be in the given timezone, as math relies on matching timezones..
 				t := duration.Add(right.(*DTimestampTZ).Time.In(ctx.GetLocation()), left.(*DInterval).Duration)
-				return MakeDTimestampTZ(t, time.Microsecond), nil
+				return MakeDTimestampTZ(t, time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -792,7 +792,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 					return nil, err
 				}
 				t := duration.Add(leftTime, right.(*DInterval).Duration)
-				return MakeDTimestamp(t, time.Microsecond), nil
+				return MakeDTimestamp(t, time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -805,7 +805,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 					return nil, err
 				}
 				t := duration.Add(rightTime, left.(*DInterval).Duration)
-				return MakeDTimestamp(t, time.Microsecond), nil
+				return MakeDTimestamp(t, time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -1064,7 +1064,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 			ReturnType: types.Timestamp,
 			Fn: func(_ *EvalContext, left Datum, right Datum) (Datum, error) {
 				return MakeDTimestamp(duration.Add(
-					left.(*DTimestamp).Time, right.(*DInterval).Duration.Mul(-1)), time.Microsecond), nil
+					left.(*DTimestamp).Time, right.(*DInterval).Duration.Mul(-1)), time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -1076,7 +1076,7 @@ var BinOps = map[BinaryOperator]binOpOverload{
 					left.(*DTimestampTZ).Time.In(ctx.GetLocation()),
 					right.(*DInterval).Duration.Mul(-1),
 				)
-				return MakeDTimestampTZ(t, time.Microsecond), nil
+				return MakeDTimestampTZ(t, time.Nanosecond), nil
 			},
 		},
 		&BinOp{
@@ -3855,7 +3855,7 @@ func PerformCast(ctx *EvalContext, d Datum, t *types.T) (Datum, error) {
 		case *DTimestampTZ:
 			// Convert to context timezone for correct display.
 			s = AsStringWithFlags(
-				MakeDTimestampTZ(t.In(ctx.GetLocation()), time.Microsecond),
+				MakeDTimestampTZ(t.In(ctx.GetLocation()), time.Nanosecond),
 				FmtBareStrings,
 			)
 		case *DTuple:

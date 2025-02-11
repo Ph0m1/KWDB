@@ -15,12 +15,12 @@ SQLSTATE: 42809
 ERROR: "tag2" is a tag
 SQLSTATE: 42809
 > show columns from tsdb.test1;
-  column_name |  data_type  | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
---------------+-------------+-------------+----------------+-----------------------+-----------+-----------+---------
-  ts1         | TIMESTAMPTZ |    false    | NULL           |                       | {primary} |   false   | false
-  b           | INT4        |    true     | NULL           |                       | {}        |   false   | false
-  tag1        | INT4        |    false    | NULL           |                       | {}        |   false   |  true
-  tag2        | INT4        |    true     | NULL           |                       | {}        |   false   |  true
+  column_name |   data_type    | is_nullable | column_default | generation_expression |  indices  | is_hidden | is_tag
+--------------+----------------+-------------+----------------+-----------------------+-----------+-----------+---------
+  ts1         | TIMESTAMPTZ(3) |    false    | NULL           |                       | {primary} |   false   | false
+  b           | INT4           |    true     | NULL           |                       | {}        |   false   | false
+  tag1        | INT4           |    false    | NULL           |                       | {}        |   false   |  true
+  tag2        | INT4           |    true     | NULL           |                       | {}        |   false   |  true
 (4 rows)
 > select * from tsdb.test1 order by tag1;
              ts1            | b | tag1 | tag2

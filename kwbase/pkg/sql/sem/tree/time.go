@@ -39,6 +39,12 @@ func TimeFamilyPrecisionToRoundDuration(precision int32) time.Duration {
 		return time.Microsecond * 10
 	case 6:
 		return time.Microsecond
+	case 7:
+		return time.Nanosecond * 100
+	case 8:
+		return time.Nanosecond * 10
+	case 9:
+		return time.Nanosecond
 	}
 	panic(errors.Newf("unsupported precision: %d", precision))
 }

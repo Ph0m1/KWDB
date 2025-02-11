@@ -43,6 +43,10 @@ std::string CombinedGroupKey::to_string() {
           break;
         case roachpb::DataType::TIMESTAMP:
         case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT:
           if (const k_int64* pval = get_if<k_int64>(&group_key_values_[i])) {
@@ -127,6 +131,10 @@ bool CombinedGroupKey::operator==(const CombinedGroupKey& other) const {
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE: {
         const k_int64* left = get_if<k_int64>(&group_key_values_[i]);
         const k_int64* right = get_if<k_int64>(&other.group_key_values_[i]);
@@ -268,6 +276,10 @@ bool CombinedGroupKey::IsNewGroup(
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         k_int64* left = get_if<k_int64>(&group_key_values_[i]);
@@ -337,6 +349,10 @@ void CombinedGroupKey::AddGroupKey(DatumPtr ptr, roachpb::DataType type) {
     }
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       k_int64 val = *reinterpret_cast<k_int64*>(ptr);

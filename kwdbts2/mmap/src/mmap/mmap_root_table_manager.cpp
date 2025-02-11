@@ -266,6 +266,12 @@ uint32_t MMapRootTableManager::GetCurrentTableVersion() const {
   return cur_table_version_;
 }
 
+DATATYPE MMapRootTableManager::GetTsColDataType() {
+  rdLock();
+  Defer defer([&]() { unLock(); });
+  return (DATATYPE)(cur_root_table_->getSchemaInfoExcludeDropped()[0].type);
+}
+
 string MMapRootTableManager::GetTableName() {
   return name_;
 }

@@ -378,7 +378,9 @@ func (h *batchLookupJoiner) buildAndConsumeStoredSide() (
 const stringWide = 2
 
 // InsertData is used to add a row to datachunk
-func InsertData(dc tse.DataChunkGo, row uint32, col uint32, coldata sqlbase.EncDatum) {
+func InsertData(
+	dc tse.DataChunkGo, row uint32, col uint32, colPrecision int32, coldata sqlbase.EncDatum,
+) {
 	colOffset := row*dc.ColInfo[col].FixedStorageLen + dc.ColOffset[col]
 	switch d := coldata.Datum.(type) {
 	case *tree.DBool:
@@ -430,9 +432,31 @@ func InsertData(dc tse.DataChunkGo, row uint32, col uint32, coldata sqlbase.EncD
 			copy(dc.Data[colOffset+stringWide:], *d)                   // add value
 		}
 	case *tree.DTimestamp:
-		binary.LittleEndian.PutUint64(dc.Data[colOffset:], uint64(d.UnixMilli()))
+		var value int64
+		switch colPrecision {
+		case 0, 3:
+			value = d.UnixMilli()
+		case 6:
+			value = d.UnixNano() / 1000
+		case 9:
+			value = d.UnixNano()
+		default:
+			value = d.UnixMilli()
+		}
+		binary.LittleEndian.PutUint64(dc.Data[colOffset:], uint64(value))
 	case *tree.DTimestampTZ:
-		binary.LittleEndian.PutUint64(dc.Data[colOffset:], uint64(d.UnixMilli()))
+		var value int64
+		switch colPrecision {
+		case 0, 3:
+			value = d.UnixMilli()
+		case 6:
+			value = d.UnixNano() / 1000
+		case 9:
+			value = d.UnixNano()
+		default:
+			value = d.UnixMilli()
+		}
+		binary.LittleEndian.PutUint64(dc.Data[colOffset:], uint64(value))
 	}
 	// SetNotNull(row, col)
 	// get cur col's offset
@@ -619,7 +643,7 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 				if err != nil {
 					return bljStateUnknown, nil, meta
 				}
-				InsertData(dataChunk, rowID, uint32(colID), row[colID])
+				InsertData(dataChunk, rowID, uint32(colID), outputType[colID].Precision(), row[colID])
 			}
 			i.Next()
 			rowID++

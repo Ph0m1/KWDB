@@ -54,6 +54,8 @@ class TestEngineWAL : public TestBigTableInstance {
     k_uint32 total_rows = 0;
     std::shared_ptr<TsTable> table;
     ts_engine_->GetTsTable(ctx_, table_id, table);
+    auto ts_type = table->GetRootTableManager()->GetTsColDataType();
+    ts_span = ConvertMsToPrecision(ts_span, ts_type);
 
     for (auto& rg : rgs) {
       std::shared_ptr<TsEntityGroup> entity_group;
@@ -342,6 +344,11 @@ TEST_F(TestEngineWAL, DeleteData) {
   std::vector<RangeGroup> ranges{kTestRange};
   s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  std::shared_ptr<kwdbts::TsTable>  ts_table;
+  ErrorInfo err_info;
+  s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table, err_info);
+  ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
 
   KTimestamp ts = TestBigTableInstance::iot_interval_ * 3 * 1000;  // millisecond
   k_uint32 p_len = 0;
@@ -372,7 +379,7 @@ TEST_F(TestEngineWAL, DeleteData) {
   uint64_t count = 0;
   KwTsSpan span{1, ts + 10,};
   auto pt = getPrimaryTag(meta, payload);
-  s = ts_engine_->DeleteData(ctx_, cur_table_id, kTestRange.range_group_id, pt, {span}, &count, mtr_id);
+  s = ts_engine_->DeleteData(ctx_, cur_table_id, kTestRange.range_group_id, pt, {ConvertMsToPrecision(span, ts_type)}, &count, mtr_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2 + row_num_);  // delete 12 rows
 
@@ -404,6 +411,11 @@ TEST_F(TestEngineWAL, DeleteDataRollback) {
   std::vector<RangeGroup> ranges{kTestRange};
   s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  std::shared_ptr<kwdbts::TsTable>  ts_table;
+  ErrorInfo err_info;
+  s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table, err_info);
+  ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
 
   KTimestamp ts = TestBigTableInstance::iot_interval_ * 3 * 1000;  // millisecond
   k_uint32 p_len = 0;
@@ -434,7 +446,7 @@ TEST_F(TestEngineWAL, DeleteDataRollback) {
   uint64_t count = 0;
   KwTsSpan span{1, ts + 10,};
   auto pt = getPrimaryTag(meta, payload);
-  s = ts_engine_->DeleteData(ctx_, cur_table_id, kTestRange.range_group_id, pt, {span}, &count, mtr_id);
+  s = ts_engine_->DeleteData(ctx_, cur_table_id, kTestRange.range_group_id, pt, {ConvertMsToPrecision(span, ts_type)}, &count, mtr_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2 + row_num_);
   // after delete
@@ -674,6 +686,11 @@ TEST_F(TestEngineWAL, EngineApi) {
 
   s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  std::shared_ptr<kwdbts::TsTable>  ts_table;
+  ErrorInfo err_info;
+  s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table, err_info);
+  ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
 
   KTimestamp start_ts = std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
@@ -705,7 +722,7 @@ TEST_F(TestEngineWAL, EngineApi) {
   uint64_t count = 0;
   KwTsSpan span{1, start_ts + 10,};
 
-  s = ts_engine_->DeleteData(ctx_, cur_table_id, kTestRange.range_group_id, pt, {span}, &count, mtr_id);
+  s = ts_engine_->DeleteData(ctx_, cur_table_id, kTestRange.range_group_id, pt, {ConvertMsToPrecision(span, ts_type)}, &count, mtr_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2);
   ASSERT_EQ(GetTableRows(cur_table_id, ranges, {1, start_ts + 10000}, 2), row_num_ * 2 - 2);

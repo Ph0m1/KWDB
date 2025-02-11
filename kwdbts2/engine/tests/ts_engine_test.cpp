@@ -373,7 +373,8 @@ TEST_F(TestEngine, DeleteEntities) {
 
   // check result
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + row_num_ * 10};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + row_num_ * 10, ts_type)};
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
@@ -451,7 +452,8 @@ TEST_F(TestEngine, DeleteData) {
   std::string primary_tag(pd.GetPrimaryTag().data, pd.GetPrimaryTag().len);
 
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {1, ts + row_num_ * 10};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {1, convertMSToPrecisionTS(ts + row_num_ * 10, ts_type)};
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter1;
@@ -471,7 +473,8 @@ TEST_F(TestEngine, DeleteData) {
 
   // delete
   count = 0;
-  KwTsSpan span{1, ts + 10,};
+  KwTsSpan span{1, ts + 10};
+  span = ConvertMsToPrecision(span, ts_type);
   s = tbl_range->DeleteData(ctx_, primary_tag, 0, {span}, nullptr, &count, 0, false);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2 + row_num_);  // delete 7 rows
@@ -529,6 +532,8 @@ TEST_F(TestEngine, DeleteExpiredData) {
   KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
@@ -540,7 +545,7 @@ TEST_F(TestEngine, DeleteExpiredData) {
   bool is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, block_item_row_max);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * kwdbts::EngineOptions::iot_interval * 1000);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(2 * kwdbts::EngineOptions::iot_interval * 1000, ts_type));
 
   delete iter;
   // delete expired data
@@ -551,7 +556,7 @@ TEST_F(TestEngine, DeleteExpiredData) {
   is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, block_item_row_max);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), 2 * kwdbts::EngineOptions::iot_interval * 1000);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(2 * kwdbts::EngineOptions::iot_interval * 1000, ts_type));
 
   delete iter;
 
@@ -621,7 +626,8 @@ TEST_F(TestEngine, CompressTsTable) {
 
   KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS((partition_num + 1) * start_ts, ts_type)};
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
@@ -794,6 +800,8 @@ TEST_F(TestEngine, LazyMount) {
   KTimestamp start_ts = kwdbts::EngineOptions::iot_interval * 1000;
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, (partition_num + 1) * start_ts};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
@@ -869,7 +877,9 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = 0;
   k_uint32 entity_id = 1;
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   KwTsSpan ts_span = {start_ts, 4 * 3600 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
@@ -913,6 +923,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = 0;
   ts_span = {start_ts, 16400 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3, scan_cols.size()));
@@ -955,6 +966,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = -1 * 22400 * 1000;
   ts_span = {start_ts, 22400 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3 + 16 * 3, scan_cols.size()));
@@ -970,6 +982,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = -1 * 22400 * 1000;
   ts_span = {start_ts, 22400 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3 + 16 * 3, scan_cols.size()));
@@ -1004,6 +1017,7 @@ TEST_F(TestEngine, partition_interval) {
   // Data query
   start_ts = -1 * 22400 * 1000;
   ts_span = {start_ts, 22400 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 10 * 2 + 13 * 3 + 16 * 3 + 1 * 2, scan_cols.size()));
@@ -1011,7 +1025,8 @@ TEST_F(TestEngine, partition_interval) {
 
   // Verify partition status
   ErrorInfo err_info;
-  std::vector<TsTimePartition*> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({-22400, 22400}, group_id, err_info);
+  ts_span = {convertSecondToPrecisionTS(-22400, ts_type), convertSecondToPrecisionTS(22400, ts_type)};
+  std::vector<TsTimePartition*> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables(ts_span, group_id, err_info);
   EXPECT_EQ(p_tables.size(), 9);
   EXPECT_EQ(p_tables[0]->minTimestamp(), -1400);
   EXPECT_EQ(p_tables[0]->maxTimestamp(), 1599);
@@ -1124,7 +1139,9 @@ TEST_F(TestEngine, ClusterSetting) {
 
   // Check query results
   k_uint32 entity_id = 1;
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   KwTsSpan ts_span = {0, 2 * 3600 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   TsIterator* iter;
@@ -1141,8 +1158,9 @@ TEST_F(TestEngine, ClusterSetting) {
 
   // Check configuration information
   {
-    std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
-                                                                                                        1, err_info);
+    ts_span = {0, convertSecondToPrecisionTS(3 * 3600, ts_type)};
+    std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables(
+      ts_span, 1, err_info);
     EXPECT_EQ(p_tables.size(), 1);
     EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxRows(), CLUSTER_SETTING_MAX_ROWS_PER_BLOCK);
     EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxNum(), CLUSTER_SETTING_MAX_BLOCKS_PER_SEGMENT);
@@ -1184,6 +1202,7 @@ TEST_F(TestEngine, ClusterSetting) {
   }
 
   ts_span = {0, 3 * 3600 * 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
             KStatus::SUCCESS);
   EXPECT_TRUE(CheckIterRows(iter, 55, scan_cols.size()));
@@ -1191,7 +1210,9 @@ TEST_F(TestEngine, ClusterSetting) {
 
   // Check configuration information
   {
-    std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables({0, 3 * 3600},
+    ts_span = {0, 3 * 3600 * 1000};
+    ts_span = ConvertMsToPrecision(ts_span, ts_type);
+    std::vector<TsTimePartition *> p_tables = tbl_range->GetSubEntityGroupManager()->GetPartitionTables(ts_span,
                                                                                                         1, err_info);
     EXPECT_EQ(p_tables.size(), 2);
     EXPECT_EQ(p_tables[0]->getSegmentTable(1)->getBlockMaxRows(), 10);

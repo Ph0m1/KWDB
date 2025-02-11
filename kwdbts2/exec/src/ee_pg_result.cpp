@@ -221,7 +221,21 @@ KStatus pg_result_data(kwdbContext_p ctx, EE_StringInfo strinfo,
         time_t ms = f->ValInt();
         char buf[32] = {0};
         struct KWDuration duration;
-        size_t n = duration.format_pg_result(ms, buf, 32);
+        size_t n;
+        switch (f->get_storage_type()) {
+          case roachpb::TIMESTAMP_MICRO:
+          case roachpb::TIMESTAMPTZ_MICRO:
+            n = duration.format_pg_result(ms, buf, 32, 1000);
+            break;
+          case roachpb::TIMESTAMP_NANO:
+          case roachpb::TIMESTAMPTZ_NANO:
+            n = duration.format_pg_result(ms, buf, 32, 1);
+            break;
+          default:
+            n = duration.format_pg_result(ms, buf, 32, 1000000);
+            break;
+        }
+
         // write size
         if (ee_sendint(strinfo, n, 4) != SUCCESS) {
           Return(FAIL);

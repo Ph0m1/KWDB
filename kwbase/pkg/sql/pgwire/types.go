@@ -652,10 +652,11 @@ func (b *writeBuffer) writeBinaryDatum(
 }
 
 const (
-	pgTimeFormat              = "15:04:05.999999"
-	pgTimeTZFormat            = pgTimeFormat + "-07:00"
+	pgTime6Format             = "15:04:05.999999"
+	pgTime9Format             = "15:04:05.999999999"
+	pgTimeTZFormat            = pgTime6Format + "-07:00"
 	pgDateFormat              = "2006-01-02"
-	pgTimeStampFormatNoOffset = pgDateFormat + " " + pgTimeFormat
+	pgTimeStampFormatNoOffset = pgDateFormat + " " + pgTime9Format
 	pgTimeStampFormat         = pgTimeStampFormatNoOffset + "-07:00"
 )
 
@@ -663,7 +664,7 @@ const (
 // provided tmp buffer and reallocating if needed. The function will then return
 // the resulting buffer.
 func formatTime(t timeofday.TimeOfDay, tmp []byte) []byte {
-	return t.ToTime().AppendFormat(tmp, pgTimeFormat)
+	return t.ToTime().AppendFormat(tmp, pgTime6Format)
 }
 
 // formatTimeTZ formats t into a format lib/pq understands, appending to the

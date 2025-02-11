@@ -153,7 +153,7 @@ class TsSubEntityGroup : public TSObject {
 
   /**
  * @brief  Filter partition table instances based on ts span
- * @param[in] ts_span
+ * @param[in] ts_span   timestamp using precision of schema.
  *
  * @return
  */

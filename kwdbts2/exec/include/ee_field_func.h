@@ -18,6 +18,7 @@
 
 #include "ee_field.h"
 #include "ee_field_const.h"
+#include "ee_timestamp_utils.h"
 
 namespace kwdbts {
 
@@ -42,6 +43,10 @@ class FieldFuncOp : public FieldFunc {
   }
 
   void CalcStorageType();
+ protected:
+  // Only used in FieldFuncMinus::ValInt, Initialize in CalcStorgeType().
+  // Convert different timestamp precision to the same.
+  std::list<k_int64> time_scales_;
 };
 
 class FieldFuncPlus : public FieldFuncOp {
@@ -229,13 +234,29 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
   using FieldFuncOp::FieldFuncOp;
   explicit FieldFuncTimeBucket(std::list<Field *> fields, k_int8 tz) : FieldFuncOp(fields) {
     time_zone_ = tz;
-    interval_seconds_ = getIntervalSeconds(var_interval_, year_bucket_, error_info_);
-    if (!var_interval_ && interval_seconds_ > 0) {
-      time_diff_ = time_zone_ * 3600000 + BASE_CONSTANT;
-      if (time_diff_ % interval_seconds_ == 0) {
-        divisible_ = true;
+    // getIntervalSeconds(var_interval_, year_bucket_, error_info_);
+    KString unit = "";
+    KString interval = replaceTimeUnit({args_[1]->ValStr().getptr(),
+                            args_[1]->ValStr().length_});
+    interval_seconds_ = getIntervalSeconds(var_interval_, year_bucket_, &unit, interval, error_info_);
+    k_int64 time_diff = time_zone_;
+    sql_type_ = getTimeFieldType(args_[0]->get_storage_type(), unit, &time_diff, &type_scale_, &type_scale_multi_or_divde_);
+    storage_type_ = sql_type_;
+    storage_len_ = sizeof(k_int64);
+    k_int64 mo = 0;
+    if (interval_seconds_ != 0) {
+      if (storage_type_ == roachpb::DataType::TIMESTAMP_NANO || storage_type_ == roachpb::DataType::TIMESTAMPTZ_NANO) {
+        mo = ((BASE_CONSTANT % interval_seconds_) * (1000000 % interval_seconds_)) % interval_seconds_;
+      } else if (storage_type_ == roachpb::DataType::TIMESTAMP_MICRO ||
+                 storage_type_ == roachpb::DataType::TIMESTAMPTZ_MICRO) {
+        mo = (BASE_CONSTANT * 1000) % interval_seconds_;
+      } else {
+        mo = BASE_CONSTANT % interval_seconds_;
       }
+      time_diff_mo_ = (time_diff % interval_seconds_ + mo) % interval_seconds_;
     }
+
+    nullable_ = false;
   }
   enum Functype functype() override { return TIME_BUCKET_FUNC; }
 
@@ -245,10 +266,7 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
 
   Field *field_to_copy() override;
 
-  // Replace keywords in the timestring
-  std::string replaceKeywords(const std::string& timestring);
-
-  k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info_);
+  // void getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info_);
 
   KTimestampTz getOriginalTimestamp() {
     auto val_ptr = args_[0]->get_ptr();
@@ -256,11 +274,14 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
   }
   k_int8 time_zone_{0};
   k_int64 interval_seconds_{0};
+  k_int64 time_diff_mo_{0};
+  // for the first arg, type_scale_multi_or_divde means muiltply or divide the scale. true is muiltply and false is divide.
+  k_int64 type_scale_{1};
+  k_bool type_scale_multi_or_divde_{true};
   k_bool var_interval_{false};
   k_bool year_bucket_{false};
   std::string error_info_{""};
   k_int64 last_time_bucket_value_{INT64_MIN};
-  k_bool divisible_{false};
   k_int64 time_diff_{0};
 };
 
@@ -308,10 +329,10 @@ class FieldFuncCurrentTimeStamp : public FieldFunc {
       arg_count_ = 1;
     }
     type_ = FIELD_ARITHMETIC;
-    sql_type_ = roachpb::DataType::TIMESTAMP;
-    storage_type_ = roachpb::DataType::TIMESTAMP;
+    sql_type_ = roachpb::DataType::TIMESTAMP_NANO;
+    storage_type_ = roachpb::DataType::TIMESTAMP_NANO;
     storage_len_ = sizeof(k_int64);
-    time_zone = tz;
+    time_zone_ = tz;
   }
   enum Functype functype() override { return CURRENT_TIMESTAMP_FUNC; }
 
@@ -321,17 +342,20 @@ class FieldFuncCurrentTimeStamp : public FieldFunc {
 
   Field *field_to_copy() override;
 
-  k_int8 time_zone{0};
+  k_int8 time_zone_{0};
 };
 
 class FieldFuncDateTrunc : public FieldFunc {
  public:
   FieldFuncDateTrunc(Field *a, Field *b, k_int8 tz) : FieldFunc(a, b) {
     type_ = FIELD_ARITHMETIC;
-    sql_type_ = b->get_sql_type();
-    storage_type_ = b->get_storage_type();
+    unit_ = replaceTimeUnit({a->ValStr().getptr(), a->ValStr().length_});
+    sql_type_ = getTimeFieldType(b->get_storage_type(), unit_, &time_diff_,
+                                  &type_scale_, &type_scale_multi_or_divde_);
+    storage_type_ = sql_type_;
+
     storage_len_ = b->get_storage_length();
-    time_zone = tz;
+    time_zone_ = tz;
   }
   enum Functype functype() override { return DATE_TRUNC_FUNC; }
 
@@ -340,8 +364,12 @@ class FieldFuncDateTrunc : public FieldFunc {
   String ValStr() override;
 
   Field *field_to_copy() override;
-
-  k_int8 time_zone;
+  KString unit_;
+  // for the first arg, type_scale_multi_or_divde means muiltply or divide the scale. true is muiltply and false is divide.
+  k_int64 type_scale_{1};
+  k_bool type_scale_multi_or_divde_{true};
+  k_int64 time_diff_;
+  k_int8 time_zone_;
 };
 
 class FieldFuncExtract : public FieldFunc {
@@ -351,7 +379,7 @@ class FieldFuncExtract : public FieldFunc {
     sql_type_ = roachpb::DataType::DOUBLE;
     storage_type_ = roachpb::DataType::DOUBLE;
     storage_len_ = sizeof(double);
-    time_zone = tz;
+    time_zone_ = tz;
   }
   enum Functype functype() override { return EXTRACT_FUNC; }
 
@@ -361,7 +389,7 @@ class FieldFuncExtract : public FieldFunc {
 
   Field *field_to_copy() override;
 
-  k_int8 time_zone;
+  k_int8 time_zone_;
 };
 
 class FieldFuncExpStrftime : public FieldFunc {
@@ -446,7 +474,7 @@ class FieldFuncTimeOfDay : public FieldFunc {
     type_ = FIELD_ARITHMETIC;
     sql_type_ = roachpb::DataType::CHAR;
     storage_type_ = roachpb::DataType::CHAR;
-    storage_len_ = 42;
+    storage_len_ = 48;
     time_zone = tz;
   }
   enum Functype functype() override { return TIME_OF_DAY_FUNC; }
@@ -465,8 +493,8 @@ class FieldFuncNow : public FieldFunc {
   using FieldFunc::FieldFunc;
   FieldFuncNow() {
     type_ = FIELD_ARITHMETIC;
-    sql_type_ = roachpb::DataType::TIMESTAMP;
-    storage_type_ = roachpb::DataType::TIMESTAMP;
+    sql_type_ = roachpb::DataType::TIMESTAMP_NANO;
+    storage_type_ = roachpb::DataType::TIMESTAMP_NANO;
     storage_len_ = sizeof(k_int64);
   }
   enum Functype functype() override { return NOW_FUNC; }
@@ -516,14 +544,14 @@ class FieldFuncAge : public FieldFunc {
  public:
   FieldFuncAge(Field *a, Field *b) : FieldFunc(a, b) {
     type_ = FIELD_ARITHMETIC;
-    sql_type_ = roachpb::DataType::TIMESTAMP;
-    storage_type_ = roachpb::DataType::TIMESTAMP;
+    sql_type_ = GET_HIGHER_PRECISION_TIME_TYPE(a->get_storage_type(), b->get_storage_type());
+    storage_type_ = GET_HIGHER_PRECISION_TIME_TYPE(a->get_storage_type(), b->get_storage_type());
     storage_len_ = sizeof(k_int64);
   }
   explicit FieldFuncAge(Field *a) : FieldFunc(a) {
     type_ = FIELD_ARITHMETIC;
-    sql_type_ = roachpb::DataType::TIMESTAMP;
-    storage_type_ = roachpb::DataType::TIMESTAMP;
+    sql_type_ = a->get_sql_type();
+    storage_type_ = a->get_storage_type();
     storage_len_ = sizeof(k_int64);
   }
   enum Functype functype() override { return AGE_FUNC; }

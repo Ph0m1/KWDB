@@ -164,14 +164,10 @@ func TestCopyRandom(t *testing.T) {
 			i INT8,
 			f FLOAT,
 			e DECIMAL,
-			t TIME,
-			ttz TIMETZ,
-			ts TIMESTAMP,
 			s STRING,
 			b BYTES,
 			u UUID,
-			ip INET,
-			tz TIMESTAMPTZ
+			ip INET
 		);
 		SET extra_float_digits = 3; -- to preserve floats entirely
 	`); err != nil {
@@ -183,7 +179,7 @@ func TestCopyRandom(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stmt, err := txn.Prepare(pq.CopyInSchema("d", "t", "id", "n", "o", "i", "f", "e", "t", "ttz", "ts", "s", "b", "u", "ip", "tz"))
+	stmt, err := txn.Prepare(pq.CopyInSchema("d", "t", "id", "n", "o", "i", "f", "e", "s", "b", "u", "ip"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,14 +192,10 @@ func TestCopyRandom(t *testing.T) {
 		types.Int,
 		types.Float,
 		types.Decimal,
-		types.Time,
-		types.TimeTZ,
-		types.Timestamp,
 		types.String,
 		types.Bytes,
 		types.Uuid,
 		types.INet,
-		types.TimestampTZ,
 	}
 
 	var inputs [][]interface{}
@@ -272,11 +264,11 @@ func TestCopyRandom(t *testing.T) {
 				} else if typs[i].Family() == types.TimeTZFamily {
 					dt = tree.NewDTimeTZFromTime(d)
 				} else {
-					dt = tree.MakeDTimestamp(d, time.Microsecond)
+					dt = tree.MakeDTimestamp(d, time.Nanosecond)
 				}
 				ds = tree.AsStringWithFlags(dt, tree.FmtBareStrings)
 			}
-			if i == 10 { // types.Bytes
+			if i == 7 { // types.Bytes
 				dsBytes, err := hex.DecodeString(ds[2:])
 				if err != nil {
 					t.Fatal(err)

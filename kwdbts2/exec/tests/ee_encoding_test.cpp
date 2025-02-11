@@ -158,7 +158,7 @@ TEST_F(TestEncoding, TestEncodingDuration) {
   info = kwdbts::ee_makeStringInfo();
   kwdbts::k_int64 input = 8787878787;
   struct kwdbts::KWDuration duration;
-  duration.format(input);
+  duration.format(input, 1000);
   kwdbts::k_int32 colID = 1;
   kwdbts::k_int32 len =
       kwdbts::ValueEncoding::EncodeComputeLenDuration(colID, duration);

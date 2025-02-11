@@ -1,13 +1,13 @@
 // Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd.
 //
 // This software (KWDB) is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
+// You can use this software according to the terms and conditions of the Mulan
+// PSL v2. You may obtain a copy of Mulan PSL v2 at:
 //          http://license.coscl.org.cn/MulanPSL2
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY
+// KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+// NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. See the
+// Mulan PSL v2 for more details.
 
 #include "ee_field_func.h"
 
@@ -23,23 +23,90 @@
 #include "ee_field_common.h"
 #include "ee_fnv.h"
 #include "ee_global.h"
-#include "ts_time_partition.h"
+#include "ee_timestamp_utils.h"
 #include "pgcode.h"
+#include "ts_time_partition.h"
 
 namespace kwdbts {
 
 void FieldFuncOp::CalcStorageType() {
+  k_bool is_all_timestamp = KTRUE;
+  sql_type_ = roachpb::DataType::TIMESTAMP;
   for (k_int32 i = 0; i < arg_count_; ++i) {
-    if (roachpb::DataType::FLOAT == args_[i]->get_storage_type() ||
-        roachpb::DataType::DOUBLE == args_[i]->get_storage_type()) {
+    auto arg_storage_type = args_[i]->get_storage_type();
+    if (roachpb::DataType::FLOAT == arg_storage_type ||
+        roachpb::DataType::DOUBLE == arg_storage_type) {
       sql_type_ = roachpb::DataType::DOUBLE;
       storage_type_ = roachpb::DataType::DOUBLE;
       storage_len_ = sizeof(k_double64);
       return;
+    } else if (is_all_timestamp &&
+               (arg_storage_type == roachpb::DataType::TIMESTAMP ||
+                arg_storage_type == roachpb::DataType::TIMESTAMPTZ ||
+                arg_storage_type == roachpb::DataType::TIMESTAMP_MICRO ||
+                arg_storage_type == roachpb::DataType::TIMESTAMPTZ_MICRO ||
+                arg_storage_type == roachpb::DataType::TIMESTAMP_NANO ||
+                arg_storage_type == roachpb::DataType::TIMESTAMPTZ_NANO)) {
+      if (sql_type_ < arg_storage_type) {
+        sql_type_ = arg_storage_type;
+        storage_type_ = arg_storage_type;
+      }
+    } else {
+      is_all_timestamp = KFALSE;
     }
   }
-  sql_type_ = roachpb::DataType::BIGINT;
-  storage_type_ = roachpb::DataType::BIGINT;
+
+  switch (storage_type_) {
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      for (k_int32 i = 0; i < arg_count_; ++i) {
+        switch (args_[i]->get_storage_type()) {
+          case roachpb::DataType::TIMESTAMP:
+          case roachpb::DataType::TIMESTAMPTZ:
+            time_scales_.push_back(1000);
+            break;
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+            time_scales_.push_back(1);
+            break;
+          default:
+            break;
+        }
+      }
+      break;
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
+      for (k_int32 i = 0; i < arg_count_; ++i) {
+        switch (args_[i]->get_storage_type()) {
+          case roachpb::DataType::TIMESTAMP:
+          case roachpb::DataType::TIMESTAMPTZ:
+            time_scales_.push_back(1000000);
+            break;
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+            time_scales_.push_back(1000);
+            break;
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
+            time_scales_.push_back(1);
+            break;
+          default:
+            break;
+        }
+      }
+      break;
+    default:
+      for (k_int32 i = 0; i < arg_count_; ++i) {
+        time_scales_.push_back(1);
+      }
+      break;
+  }
+
+  if (!is_all_timestamp) {
+    sql_type_ = roachpb::DataType::BIGINT;
+    storage_type_ = roachpb::DataType::BIGINT;
+  }
+
   storage_len_ = sizeof(k_int64);
 }
 
@@ -125,12 +192,26 @@ k_int64 FieldFuncMinus::ValInt() {
     return FieldFuncOp::ValInt(ptr);
   } else {
     k_int64 val = 0;
+    std::list<k_int64>::iterator it = time_scales_.begin();
     val = args_[0]->ValInt();
+    if (!I64_SAFE_MUL_CHECK(val, (*it))) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                    "Timestamp/TimestampTZ out of range");
+      return 0;
+    }
+    val *= (*it);
     for (size_t i = 1; i < arg_count_; ++i) {
+      ++it;
       if (args_[i]->get_field_type() == FIELD_INTERVAL) {
         val = args_[i]->ValInt(&val, KTRUE);
       } else {
-        val -= args_[i]->ValInt();
+        k_int64 val2 = args_[i]->ValInt();
+        if (!I64_SAFE_MUL_CHECK(val2, (*it))) {
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                        "Timestamp/TimestampTZ out of range");
+          return 0;
+        }
+        val -= val2 * (*it);
       }
     }
     return val;
@@ -690,27 +771,42 @@ k_int64 FieldFuncTimeBucket::ValInt() {
                                   "time_bucket(): first arg can not be null.");
     return 0;
   }
+  auto original_timestamp = args_[0]->ValInt();
+  if (type_scale_ != 1) {
+    // multi
+    if (type_scale_multi_or_divde_) {
+      if (!I64_SAFE_MUL_CHECK(original_timestamp, type_scale_)) {
+        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                      "Timestamp/TimestampTZ out of range");
+        return 0;
+      }
+      original_timestamp *= type_scale_;
+      // divide
+    } else {
+      original_timestamp /= type_scale_;
+    }
+  }
   if (!var_interval_) {
-    auto original_timestamp = args_[0]->ValInt();
-    if (divisible_ && last_time_bucket_value_ != INT64_MIN && original_timestamp > last_time_bucket_value_ &&
+    if (last_time_bucket_value_ != INT64_MIN &&
+        original_timestamp > last_time_bucket_value_ &&
         original_timestamp < (last_time_bucket_value_ + interval_seconds_)) {
       return last_time_bucket_value_;
     } else {
       // use 0000-01-01 00:00:00 as start
       // -62135596800000 is the timestamp of 0000-01-01 00:00:00
-      KTimestampTz bucket_start = (original_timestamp + time_diff_) / interval_seconds_ * interval_seconds_;
-      // Negative timestamp needs to be rounded down
-      if (original_timestamp + time_diff_ < 0 && (original_timestamp + time_diff_) % interval_seconds_ != 0) {
-        bucket_start -= interval_seconds_;
+      k_int64 interval =
+          ((original_timestamp % interval_seconds_) + time_diff_mo_) %
+          interval_seconds_;
+      if (interval < 0) {
+        interval = interval_seconds_ + interval;
       }
-      last_time_bucket_value_ = bucket_start - time_diff_;
+      last_time_bucket_value_ = original_timestamp - interval;
       return last_time_bucket_value_;
     }
   } else {
     // construct_variable calculate the start of time_bucket for year and month
     // use 0000-01-01 00:00:00 as start
-    auto original_timestamp = args_[0]->ValInt();
-    std::time_t tt = (std::time_t)original_timestamp/1000;
+    std::time_t tt = (std::time_t)original_timestamp / 1000;
     struct std::tm tm;
     gmtime_r(&tt, &tm);
     tm.tm_sec = 0;
@@ -719,17 +815,20 @@ k_int64 FieldFuncTimeBucket::ValInt() {
     tm.tm_mday = 1;
     if (year_bucket_) {
       tm.tm_mon = 0;
-      tm.tm_year = (int32_t)( (tm.tm_year + 1899) / static_cast<int>(interval_seconds_)
-       * static_cast<int>(interval_seconds_) - 1899);
+      tm.tm_year =
+          (int32_t)((tm.tm_year + 1899) / static_cast<int>(interval_seconds_) *
+                        static_cast<int>(interval_seconds_) -
+                    1899);
       tm.tm_hour -= time_zone_;
     } else {
       int32_t mon = (tm.tm_year + 1899) * 12 + tm.tm_mon;
-      mon = (int32_t)(mon / static_cast<int>(interval_seconds_) * static_cast<int>(interval_seconds_));
+      mon = (int32_t)(mon / static_cast<int>(interval_seconds_) *
+                      static_cast<int>(interval_seconds_));
       tm.tm_year = (mon / 12) - 1899;
       tm.tm_mon = mon % 12;
       tm.tm_hour -= time_zone_;
     }
-    return (KTimestampTz)(timegm(&tm)  * 1000);
+    return (KTimestampTz)(timegm(&tm) * 1000);
   }
 }
 
@@ -749,114 +848,6 @@ Field *FieldFuncTimeBucket::field_to_copy() {
   return field;
 }
 
-std::string FieldFuncTimeBucket::replaceKeywords(const std::string& timestring) {
-    static const std::vector<std::pair<std::string, std::string>> replacements = {
-        {"milliseconds", "ms"}, {"millisecond", "ms"}, {"msecs", "ms"}, {"msec", "ms"},
-        {"seconds", "s"}, {"second", "s"}, {"secs", "s"}, {"sec", "s"},
-        {"minutes", "m"}, {"minute", "m"}, {"mins", "m"}, {"min", "m"},
-        {"hours", "h"}, {"hour", "h"}, {"hrs", "h"}, {"hr", "h"},
-        {"days", "d"}, {"day", "d"},
-        {"weeks", "w"}, {"week", "w"},
-        {"months", "n"}, {"month", "n"}, {"mons", "n"}, {"mon", "n"},
-        {"years", "y"}, {"year", "y"}, {"yrs", "y"}, {"yr", "y"}
-    };
-
-    std::string result = timestring;
-    for (const auto& pair : replacements) {
-      if (timestring.find(pair.first) != std::string::npos) {
-        result = std::regex_replace(result, std::regex(pair.first), pair.second);
-        break;
-      }
-    }
-    return result;
-}
-
-k_int64 FieldFuncTimeBucket::getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info) {
-  std::string timestring = {args_[1]->ValStr().getptr(),
-                            args_[1]->ValStr().length_};
-  std::string raw_string = timestring;
-  // uppercase to lowcase
-  std::transform(timestring.begin(), timestring.end(),
-    timestring.begin(), [](unsigned char c){ return std::tolower(c); });
-
-  // Replace time unit keywords
-  timestring = replaceKeywords(timestring);
-
-  k_uint32 code = ERRCODE_INVALID_DATETIME_FORMAT;
-  std::string intervalStr;
-  std::string unit;
-  do {
-    if (timestring.length() < 2) {
-      error_info =
-          "invalid input interval time for time_bucket or "
-          "time_bucket_gapfill.";
-      code = ERRCODE_INVALID_PARAMETER_VALUE;
-      break;
-    }
-
-    unit = timestring.back();
-    if (unit != "y" && unit != "n" && unit != "w" && unit != "d" &&
-        unit != "h" && unit != "m" && unit != "s") {
-      error_info = "interval: invalid input syntax: " + raw_string + ".";
-      break;
-    }
-    if (unit == "s" && timestring[timestring.length() - 2] == 'm') {
-      intervalStr = timestring.substr(0, timestring.size() - 2);
-      unit = timestring[timestring.length() - 2] + unit;
-    } else {
-      intervalStr = timestring.substr(0, timestring.size() - 1);
-    }
-    try {
-      if (std::stol(intervalStr) <= 0) {
-        error_info = "second arg should be a positive interval.";
-        code = ERRCODE_INVALID_PARAMETER_VALUE;
-        break;
-      }
-    } catch (...) {
-      error_info = "interval: invalid input syntax: " + raw_string + ".";
-      break;
-    }
-
-    for (char c : intervalStr) {
-      if (c > '9' || c < '0') {
-        error_info =
-            "invalid input interval time for time_bucket or "
-            "time_bucket_gapfill.";
-        code = ERRCODE_INVALID_PARAMETER_VALUE;
-        break;
-      }
-    }
-  } while (false);
-  if (error_info != "") {
-    EEPgErrorInfo::SetPgErrorInfo(code, error_info_.c_str());
-    return 0;
-  }
-  k_int64 interval_seconds_ = stoll(intervalStr);
-
-  // Convert interval to milliseconds based on unit
-  if (unit == "y") {
-    year_bucket = true;
-    var_interval = true;
-    // Do not convert interval_seconds_ as it is a variable interval
-  } else if (unit == "n") {
-    var_interval = true;
-    // Do not convert interval_seconds_ as it is a variable interval
-  } else if (unit == "s") {
-    interval_seconds_ *= 1000;
-  } else if (unit == "m") {
-    interval_seconds_ *= 60000;
-  } else if (unit == "h") {
-    interval_seconds_ *= 3600000;
-  } else if (unit == "d") {
-    interval_seconds_ *= 86400000;
-  } else if (unit == "w") {
-    interval_seconds_ *= 604800000;
-  }
-
-  nullable_ = false;
-  return interval_seconds_;
-}
-
 FieldFuncCastCheckTs::FieldFuncCastCheckTs(Field *left, Field *right)
     : FieldFunc(left, right) {
   sql_type_ = roachpb::DataType::BOOL;
@@ -868,7 +859,8 @@ FieldFuncCastCheckTs::FieldFuncCastCheckTs(Field *left, Field *right)
 k_int64 FieldFuncCastCheckTs::ValInt() {
   String str = args_[0]->ValStr();
   ErrorInfo err;
-  int ret = TsTimePartition::tryAlterType({str.ptr_, str.length_}, datatype_, err);
+  int ret =
+      TsTimePartition::tryAlterType({str.ptr_, str.length_}, datatype_, err);
   return 0 == ret ? 1 : 0;
 }
 
@@ -884,15 +876,19 @@ Field *FieldFuncCastCheckTs::field_to_copy() {
 
 void FieldFuncCastCheckTs::CalcDataType() {
   String str = args_[1]->ValStr();
-  if (0 == str.compare("int2", strlen("int2")) || 0 == str.compare("smallint", strlen("smallint"))) {
+  if (0 == str.compare("int2", strlen("int2")) ||
+      0 == str.compare("smallint", strlen("smallint"))) {
     datatype_ = DATATYPE::INT16;
-  } else if (0 == str.compare("int4", strlen("int4")) || 0 == str.compare("int", strlen("int"))
-                        || 0 == str.compare("integer", strlen("integer"))) {
+  } else if (0 == str.compare("int4", strlen("int4")) ||
+             0 == str.compare("int", strlen("int")) ||
+             0 == str.compare("integer", strlen("integer"))) {
     datatype_ = DATATYPE::INT32;
-  } else if (0 == str.compare("int8", strlen("int8")) || 0 == str.compare("bigint", strlen("bigint")) ||
-                        0 == str.compare("int64", strlen("int64"))) {
+  } else if (0 == str.compare("int8", strlen("int8")) ||
+             0 == str.compare("bigint", strlen("bigint")) ||
+             0 == str.compare("int64", strlen("int64"))) {
     datatype_ = DATATYPE::INT64;
-  } else if (0 == str.compare("real", strlen("real")) || 0 == str.compare("float4", strlen("float4"))) {
+  } else if (0 == str.compare("real", strlen("real")) ||
+             0 == str.compare("float4", strlen("float4"))) {
     datatype_ = DATATYPE::FLOAT;
   } else {
     datatype_ = DATATYPE::DOUBLE;
@@ -931,27 +927,26 @@ Field *FieldFuncCurrentDate::field_to_copy() {
 
 k_int64 FieldFuncCurrentTimeStamp::ValInt() {
   auto duration_since_epoch =
-      std::chrono::system_clock::now().time_since_epoch();
-  auto ms_since_epoch = std::chrono::duration_cast<std::chrono::microseconds>(
-                            duration_since_epoch)
-                            .count();
-  ms_since_epoch /= 1000;
+      std::chrono::high_resolution_clock::now().time_since_epoch();
+  auto ns_since_epoch =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch)
+          .count();
   time_t t = time(nullptr);
   struct tm ltm;
   gmtime_r(&t, &ltm);
-  ms_since_epoch -= ltm.tm_gmtoff - time_zone * 3600;
+  ns_since_epoch += (ltm.tm_gmtoff - time_zone_ * 3600) * 1000000000;
   // add precision handle
   if (arg_count_ > 0) {
-    k_int64 prec = 3 - args_[0]->ValInt();
+    k_int64 prec = 9 - args_[0]->ValInt();
     if (prec < 0) {
       prec = 0;
-    } else if (prec > 3) {
-      prec = 3;
+    } else if (prec > 9) {
+      prec = 9;
     }
     int64_t mask = pow(10, prec);
-    ms_since_epoch = ms_since_epoch / mask * mask;
+    ns_since_epoch = ns_since_epoch / mask * mask;
   }
-  return ms_since_epoch;
+  return ns_since_epoch;
 }
 
 k_double64 FieldFuncCurrentTimeStamp::ValReal() { return ValInt(); }
@@ -972,11 +967,11 @@ Field *FieldFuncCurrentTimeStamp::field_to_copy() {
 
 k_int64 FieldFuncNow::ValInt() {
   auto duration_since_epoch =
-      std::chrono::system_clock::now().time_since_epoch();
-  auto ms_since_epoch = std::chrono::duration_cast<std::chrono::microseconds>(
-                            duration_since_epoch)
-                            .count();
-  return ms_since_epoch / 1000;
+      std::chrono::high_resolution_clock::now().time_since_epoch();
+  auto ns_since_epoch =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch)
+          .count();
+  return ns_since_epoch;
 }
 
 k_double64 FieldFuncNow::ValReal() { return ValInt(); }
@@ -1000,36 +995,48 @@ k_int64 FieldFuncDateTrunc::ValInt() {
   if (nullptr != ptr) {
     return FieldFunc::ValInt(ptr);
   } else {
-    k_int64 ti = args_[1]->ValInt();
-    k_int64 tim = ti / 1000;
+    k_int64 original_timestamp = args_[1]->ValInt();
+    CKTime ck_time =
+        getCKTime(args_[1]->ValInt(), args_[1]->get_storage_type(), time_zone_);
+    // k_int64 ti = args_[1]->ValInt();
     struct tm ltm;
     if (this->return_type_ == KWDBTypeFamily::TimestampTZFamily) {
-      tim += time_zone * 3600;
+      ck_time.t_timespec.tv_sec += ck_time.t_abbv;
+      original_timestamp += time_diff_;
     }
-    gmtime_r(&tim, &ltm);
-    std::string code = {args_[0]->ValStr().getptr(),
-                        args_[0]->ValStr().length_};
-    if (code == "microsecond") {
-      return ti * 1000;
-    } else if (code == "millisecond" || code == "milliseconds" ||
-               code == "ms") {
-      return ti;
-    } else if (code == "second" || code == "seconds" || code == "s") {
-      return ti - ti % 1000;
-    } else if (code == "minute" || code == "minutes" || code == "m") {
-      return ti - ti % (1000 * 60);
+    gmtime_r(&ck_time.t_timespec.tv_sec, &ltm);
+    if (type_scale_ != 1) {
+      // multi
+      if (type_scale_multi_or_divde_) {
+        if (!I64_SAFE_MUL_CHECK(original_timestamp, type_scale_)) {
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                        "Timestamp/TimestampTZ out of range");
+          return 0;
+        }
+        original_timestamp *= type_scale_;
+        // divide
+      } else {
+        original_timestamp /= type_scale_;
+      }
+    }
+    if (unit_ == "ns" || unit_ == "us" || unit_ == "ms") {
+      return original_timestamp;
+    } else if (unit_ == "s") {
+      return original_timestamp / 1000 * 1000;
+    } else if (unit_ == "m") {
+      return original_timestamp / 60000 * 60000;
     }
     ltm.tm_sec = 0;
     ltm.tm_min = 0;
     while (KTRUE) {
-      if (code == "hour" || code == "hours") {
+      if (unit_ == "h") {
         break;
       }
       ltm.tm_hour = 0;
-      if (code == "day" || code == "days" || code == "d") {
+      if (unit_ == "d") {
         break;
       }
-      if (code == "week" || code == "weeks" || code == "w") {
+      if (unit_ == "w") {
         if (ltm.tm_wday == 0) {
           // Sunday
           ltm.tm_mday -= 6;
@@ -1039,10 +1046,10 @@ k_int64 FieldFuncDateTrunc::ValInt() {
         break;
       }
       ltm.tm_mday = 1;
-      if (code == "month" || code == "months" || code == "mon") {
+      if (unit_ == "n") {
         break;
       }
-      if (code == "quarter") {
+      if (unit_ == "quarter") {
         if (ltm.tm_mon <= 2) {
           ltm.tm_mon = 0;
         } else if (ltm.tm_mon <= 5) {
@@ -1055,15 +1062,14 @@ k_int64 FieldFuncDateTrunc::ValInt() {
         break;
       }
       ltm.tm_mon = 0;
-      if (code == "year" || code == "years" || code == "y") {
+      if (unit_ == "y") {
         break;
       }
-      if (code == "decade" || code == "decades") {
+      if (unit_ == "decade") {
         ltm.tm_year -= ltm.tm_year % 12;
-      } else if (code == "centuries" || code == "century") {
+      } else if (unit_ == "century") {
         ltm.tm_year -= ltm.tm_year % 100;
-      } else if (code == "millennia" || code == "millennium" ||
-                 code == "millenniums") {
+      } else if (unit_ == "millennium") {
         ltm.tm_year -= ltm.tm_year % 1000;
       } else {
         return 0;
@@ -1071,7 +1077,7 @@ k_int64 FieldFuncDateTrunc::ValInt() {
       break;
     }
     if (this->return_type_ == KWDBTypeFamily::TimestampTZFamily) {
-      return (mktime(&ltm) + ltm.tm_gmtoff - time_zone * 3600) * 1000;
+      return (mktime(&ltm) + ltm.tm_gmtoff - time_zone_ * 3600) * 1000;
     }
     return (mktime(&ltm) + ltm.tm_gmtoff) * 1000;
   }
@@ -1100,34 +1106,38 @@ k_double64 FieldFuncExtract::ValReal() {
   if (nullptr != ptr) {
     return FieldFunc::ValReal(ptr);
   } else {
-    k_int64 ti = args_[1]->ValInt();
-    k_int64 tim = ti / 1000;
-    k_double64 ms = static_cast<double>(ti % 1000);
+    k_int64 val = args_[1]->ValInt();
+    CKTime ckTime = getCKTime(val, args_[1]->get_storage_type(), time_zone_);
     k_int64 res = 0;
     struct tm ltm;
     if (args_[1]->get_return_type() == KWDBTypeFamily::TimestampTZFamily) {
-      tim += time_zone * 3600;
+      ckTime.t_timespec.tv_sec += ckTime.t_abbv;
     }
-    gmtime_r(&tim, &ltm);
-    KString item = {args_[0]->ValStr().getptr(), args_[0]->ValStr().length_};
-    if (item ==
-        "millisecond") {  //  second field, in milliseconds, containing decimals
-      return ms;
-    } else if (item == "second") {  // containing decimals，in
-                                    // secondes，containing decimals
-      res = ltm.tm_sec;
-      return static_cast<double>(res) + ms / 1000;
+    gmtime_r(&ckTime.t_timespec.tv_sec, &ltm);
+    KString item = replaceTimeUnit(
+        {args_[0]->ValStr().getptr(), args_[0]->ValStr().length_});
+    if (item == "ns") {
+      return ckTime.t_timespec.tv_nsec;
+    } else if (item == "us") {
+      return static_cast<double>(ckTime.t_timespec.tv_nsec) / 1000;
+    } else if (item ==
+               "ms") {  //  second field, in milliseconds, containing decimals
+      return static_cast<double>(ckTime.t_timespec.tv_nsec) / 1000000;
+    } else if (item == "s") {  // containing decimals，in
+                               // secondes，containing decimals
+      return static_cast<double>(ltm.tm_sec) +
+             ckTime.t_timespec.tv_nsec / 1000000000;
     } else if (item == "epoch") {  // seconds since 1970-01-01 00:00:00 UTC
-      res = tim;
-    } else if (item == "minute") {  // minute (0-59)
+      res = ckTime.t_timespec.tv_sec;
+    } else if (item == "m") {  // minute (0-59)
       res = ltm.tm_min;
-    } else if (item == "hour") {  // hour (0-23)
+    } else if (item == "h") {  // hour (0-23)
       res = ltm.tm_hour;
-    } else if (item == "day") {  // on the day of the month (1-31)
+    } else if (item == "d") {  // on the day of the month (1-31)
       res = ltm.tm_mday;
     } else if (item == "dow" ||
-               item == "dayofweek") {  // what day of the week, Sunday (0) to
-                                       // Saturday (6)
+               item == "dofweek") {  // what day of the week, Sunday (0) to
+                                     // Saturday (6)
       res = ltm.tm_wday;
     } else if (item == "isodow") {  // Day of the week based on ISO 8601, Monday
                                     // (1) to Sunday (7)
@@ -1137,8 +1147,8 @@ k_double64 FieldFuncExtract::ValReal() {
         res = ltm.tm_wday;
       }
     } else if (item == "doy" ||
-               item == "dayofyear") {  // on which day of the year, ranging from
-                                       // 1 to 366
+               item == "dofyear") {  // on which day of the year, ranging from
+                                     // 1 to 366
       res = ltm.tm_yday + 1;
     } else if (item == "julian") {
       if (ltm.tm_mon > 2) {
@@ -1154,8 +1164,8 @@ k_double64 FieldFuncExtract::ValReal() {
       res += ltm.tm_year / 4 - century + century / 4;
       res += 7834 * ltm.tm_mon / 256 + ltm.tm_yday;
       res += ltm.tm_hour * 3600 + ltm.tm_min * 60 + ltm.tm_sec;
-      return static_cast<double>(res) + ms / 1000;
-    } else if (item == "week") {  // ISO 8601
+      return static_cast<double>(res) + ckTime.t_timespec.tv_nsec / 1000000000;
+    } else if (item == "w") {  // ISO 8601
       k_int32 weekday = 0;
       if (ltm.tm_wday == 0) {
         weekday = 7;
@@ -1164,7 +1174,7 @@ k_double64 FieldFuncExtract::ValReal() {
       }
       k_int64 wd = ltm.tm_yday + 4 - weekday;
       res = (wd / 7) + 1;
-    } else if (item == "month") {  // month，1-12
+    } else if (item == "n") {  // month，1-12
       res = ltm.tm_mon + 1;
     } else if (item == "quarter") {  // quarter
       if (ltm.tm_mon <= 2) {
@@ -1176,9 +1186,9 @@ k_double64 FieldFuncExtract::ValReal() {
       } else {
         res = 4;
       }
-    } else if (item == "year") {  // yes
+    } else if (item == "y") {  // yes
       res = ltm.tm_year + 1900;
-    } else if (item == "isoyear") {  // year based on ISO 8601
+    } else if (item == "isoy") {  // year based on ISO 8601 "isoyear"
       res = ltm.tm_year + 1900;
       // The last week of each year is the week of the last Thursday of the year
       k_int32 weekday = 0;
@@ -1201,11 +1211,11 @@ k_double64 FieldFuncExtract::ValReal() {
       res = (ltm.tm_year + 1900) / 1000 + 1;
     } else if (item == "timezone") {  // time zone offset from UTC, in seconds
       res = ltm.tm_gmtoff;
-    } else if (item == "timezone_minute") {  // The minute portion of the time
-                                             // zone offset
+    } else if (item == "timezone_m") {  // The minute portion of the time
+                                        // zone offset "timezone_minute"
       res = ltm.tm_gmtoff / 60;
-    } else if (item ==
-               "timezone_hour") {  // The hourly portion of the time zone offset
+    } else if (item == "timezone_h") {  // The hourly portion of the time zone
+                                        // offset "timezone_hour"
       res = ltm.tm_gmtoff / 60 * 60;
     }
 
@@ -1229,11 +1239,11 @@ Field *FieldFuncExtract::field_to_copy() {
 
 k_int64 FieldFuncTimeOfDay::ValInt() {
   auto duration_since_epoch =
-      std::chrono::system_clock::now().time_since_epoch();
-  auto ms_since_epoch = std::chrono::duration_cast<std::chrono::microseconds>(
-                            duration_since_epoch)
-                            .count();
-  return ms_since_epoch / 1000;
+      std::chrono::high_resolution_clock::now().time_since_epoch();
+  auto ns_since_epoch =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch)
+          .count();
+  return ns_since_epoch;
 }
 
 k_double64 FieldFuncTimeOfDay::ValReal() { return ValInt(); }
@@ -1247,16 +1257,19 @@ String FieldFuncTimeOfDay::ValStr() {
   memset(&t, 0, sizeof(t));
   gmtime_r(&timestamp, &t);
   t.tm_gmtoff = time_zone * 3600;
-  std::strftime(s.ptr_, kArraySize, "%a %b %d %H:%M:%S.xxx %Y %z", &t);
+  std::strftime(s.ptr_, kArraySize, "%a %b %d %H:%M:%S.xxxxxxxxx %Y %z", &t);
   std::string formattedTime(s.ptr_);
-  auto pos = formattedTime.find("xxx");
+  auto pos = formattedTime.find("xxxxxxxxx");
   if (pos != std::string::npos) {
-    formattedTime.replace(pos, 3, "%d");
+    formattedTime.replace(pos, 3, "%ld");
   }
   auto duration_since_epoch =
-      std::chrono::system_clock::now().time_since_epoch().count();
+      std::chrono::high_resolution_clock::now().time_since_epoch();
+  auto ns_since_epoch =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch)
+          .count();
   std::snprintf(s.ptr_, kArraySize, formattedTime.c_str(),
-                (duration_since_epoch / 1000000) % 1000);
+                ns_since_epoch % 1000000000);
 
   s.length_ = strlen(s.ptr_);
   return s;
@@ -1278,10 +1291,10 @@ Field *FieldFuncExpStrftime::field_to_copy() {
   return field;
 }
 String FieldFuncExpStrftime::ValStr() {
-  k_int64 ti = args_[0]->ValInt();
-  k_int64 tim = ti / 1000;
+  CKTime ck_time =
+      getCKTime(args_[0]->ValInt(), args_[0]->get_storage_type(), 0);
   struct tm ltm;
-  gmtime_r(&tim, &ltm);
+  gmtime_r(&ck_time.t_timespec.tv_sec, &ltm);
   const int kArraySize = this->storage_len_;
   String s(kArraySize);
   try {
@@ -1365,13 +1378,26 @@ Field *FieldFuncWidthBucket::field_to_copy() {
 k_int64 FieldFuncAge::ValInt() {
   if (arg_count_ == 1) {
     auto duration_since_epoch =
-        std::chrono::system_clock::now().time_since_epoch();
-    auto ms_since_epoch = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch();
+    auto ns_since_epoch = std::chrono::duration_cast<std::chrono::nanoseconds>(
                               duration_since_epoch)
                               .count();
-    return ms_since_epoch / 1000 - args_[0]->ValInt();
+    convertTimePrecision(&ns_since_epoch, roachpb::DataType::TIMESTAMP_NANO,
+                         storage_type_);
+    return ns_since_epoch - args_[0]->ValInt();
   }
-  return args_[0]->ValInt() - args_[1]->ValInt();
+  k_int64 val_a = args_[0]->ValInt();
+  k_int64 val_b = args_[1]->ValInt();
+  if (convertTimePrecision(&val_a, args_[0]->get_storage_type(),
+                           storage_type_) &&
+      convertTimePrecision(&val_b, args_[1]->get_storage_type(),
+                           storage_type_)) {
+    return val_a - val_b;
+  } else {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                  "Timestamp/TimestampTZ out of range");
+    return 0;
+  }
 }
 
 k_double64 FieldFuncAge::ValReal() { return ValInt(); }

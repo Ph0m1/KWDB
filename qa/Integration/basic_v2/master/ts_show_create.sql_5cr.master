@@ -114,7 +114,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb1.public.t | CREATE TABLE t (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -126,7 +126,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb2.public.t | CREATE TABLE t (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -138,7 +138,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb3.public.t | CREATE TABLE t (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -150,7 +150,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb4.public.t | CREATE TABLE t (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -162,7 +162,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb5.public.t | CREATE TABLE t (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -174,7 +174,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb6.public.t | CREATE TABLE t (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)

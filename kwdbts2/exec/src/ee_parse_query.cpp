@@ -14,6 +14,7 @@
 
 #include "ee_parse_query.h"
 #include "lg_api.h"
+#include "ee_cast_utils.h"
 
 namespace kwdbts {
 k_int16 forwardToTimeStringEnd(k_char *str) {
@@ -166,22 +167,22 @@ k_int64 getGMT(KString *value_) {
     return unixMs;
   } else if (val == '.') {
     pos++;
-    k_int16 millCount = 0;
+    k_int16 nanoCOunt = 0;
     k_int16 position = pos;
     while ((*value_)[position] >= '0' && (*value_)[position] <= '9') {
       position++;
-      if (millCount < 3) {
-        millCount++;
+      if (nanoCOunt < 9) {
+        nanoCOunt++;
       }
     }
-    int64_t milliSecond =
-        strtol(value_->substr(pos, millCount).c_str(), &endptr, 10);
+    int64_t nanoSecond =
+        strtol(value_->substr(pos, nanoCOunt).c_str(), &endptr, 10);
     pos = position;
-    while (millCount < 3) {
-      milliSecond *= 10;
-      millCount++;
+    while (nanoCOunt < 9) {
+      nanoSecond *= 10;
+      nanoCOunt++;
     }
-    unixMs += milliSecond;
+    unixMs += nanoSecond;
   }
   k_char seg = (*value_)[pos];
   if (seg == '+' || seg == '-') {
@@ -192,13 +193,13 @@ k_int64 getGMT(KString *value_) {
     hour = strtol(value_->substr(pos, 2).c_str(), &endptr, 10);
 
     if (seg == '+') {
-      unixMs -= hour * 3600 * 1000;
+      unixMs -= hour * 3600 * 1000000000;
     } else {
-      unixMs += hour * 3600 * 1000;
+      unixMs += hour * 3600 * 1000000000;
     }
     // change UTC to GMT
-    auto offset = t.tm_gmtoff;
-    unixMs += t.tm_gmtoff * 1000;
+    // auto offset = t.tm_gmtoff;
+    unixMs += t.tm_gmtoff * 1000000000;
   }
   return unixMs;
 }
@@ -286,19 +287,45 @@ k_bool ParseQuery::ParseNumber(k_int64 factor) {
           return true;
         } else if (data_str.find("TIMESTAMPTZ") != std::string::npos) {
           read_buffer = read_buffer.substr(1, read_buffer.size() - 2);
-          k_int64 tz = getGMT(&read_buffer);
+          // k_int64 tz = getGMT(&read_buffer);
+          k_int64 tz = 0;
+          k_int64 scale = 0;
+          AstEleType ele_type = TIMESTAMPTZ_TYPE;
+          char type = data_str[data_str.size() - 2];
+          if (type == '6') {
+            scale = 1000;
+            ele_type = TIMESTAMPTZ_MICRO_TYPE;
+          } else if (type == '9') {
+            scale = 1000000;
+            ele_type = TIMESTAMPTZ_NANO_TYPE;
+          } else {  // default or 3
+            scale = 1;
+          }
+          if (convertStringToTimestamp(read_buffer, scale, &tz) != SUCCESS) return false;
           auto ele = Element(tz);
-          ele.SetType(INT_TYPE);
+          ele.SetType(ele_type);
           node_list_.push_back(std::make_shared<Element>(ele));
+
           return true;
         } else if (data_str.find("TIMESTAMP") != std::string::npos) {
-          //          struct tm tm;
-          //          strptime(read_buffer.c_str(), "%Y-%m-%d %H:%M:%S", &tm);
-          //          time_t timestamp = mktime(&tm);
-          //          auto node_value = timestamp;
           read_buffer = read_buffer.substr(1, read_buffer.size() - 2);
-          auto ele = Element(read_buffer);
-          ele.SetType(TIMESTAMP_TYPE);
+          // k_int64 tz = getGMT(&read_buffer);
+          k_int64 tz = 0;
+          k_int64 scale = 0;
+          AstEleType ele_type = TIMESTAMP_TYPE;
+          char type = data_str[data_str.size() - 2];
+          if (type == '6') {
+            scale = 1000;
+            ele_type = TIMESTAMP_MICRO_TYPE;
+          } else if (type == '9') {
+            scale = 1000000;
+            ele_type = TIMESTAMP_NANO_TYPE;
+          } else {  // default or 3
+            scale = 1;
+          }
+          if (convertStringToTimestamp(read_buffer, scale, &tz) != SUCCESS) return false;
+          auto ele = Element(tz);
+          ele.SetType(ele_type);
           node_list_.push_back(std::make_shared<Element>(ele));
           return true;
         } else if (data_str.find("DATE") != std::string::npos) {
@@ -987,6 +1014,10 @@ KStatus ParseQuery::ConstructTree(std::size_t *i, ExprPtr *head_node) {
       case AstEleType::STRING_TYPE:
       case AstEleType::TIMESTAMP_TYPE:
       case AstEleType::TIMESTAMPTZ_TYPE:
+      case AstEleType::TIMESTAMP_MICRO_TYPE:
+      case AstEleType::TIMESTAMPTZ_MICRO_TYPE:
+      case AstEleType::TIMESTAMP_NANO_TYPE:
+      case AstEleType::TIMESTAMPTZ_NANO_TYPE:
       case AstEleType::DATE_TYPE:
       case AstEleType::INTERVAL_TYPE:
       case AstEleType::BYTES_TYPE:

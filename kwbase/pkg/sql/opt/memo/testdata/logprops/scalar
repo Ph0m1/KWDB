@@ -239,7 +239,7 @@ group-by
  │         │         └── filters
  │         │              └── gt [type=bool, side-effects]
  │         │                   ├── function: now [type=timestamptz]
- │         │                   └── const: '2018-01-01 00:00:00+00:00' [type=timestamptz]
+ │         │                   └── const: '2018-01-01 00:00:00+00:00' [type=timestamptz(9)]
  │         └── filters
  │              └── eq [type=bool, outer=(1,4), constraints=(/1: (/NULL - ]; /4: (/NULL - ]), fd=(1)==(4), (4)==(1)]
  │                   ├── variable: x:1 [type=int4]

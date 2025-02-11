@@ -991,16 +991,20 @@ func handleLastAgg(s *scope, e tree.Expr, funcName string) {
 		if col, ok := f.Exprs[0].(*scopeColumn); ok {
 			tblID := s.builder.factory.Metadata().ColumnMeta(col.id).Table
 			tbl := s.builder.factory.Metadata().Table(tblID)
-			checkBoundary(s, *f, funcName)
+			typ := tbl.Column(0).DatumType()
+			checkBoundary(s, *f, funcName, typ)
 			// add const bound
 			if (funcName == sqlbase.LastAgg || funcName == sqlbase.LastTSAgg) && len(f.Exprs) == 1 {
 				boundary := tree.DString(tree.TsMaxTimestampString)
-				cast, _ := tree.NewTypedCastExpr(&boundary, types.TimestampTZ)
+				if typ.Precision() == 9 {
+					boundary = tree.TsMaxNanoTimestampString
+				}
+				cast, _ := tree.NewTypedCastExpr(&boundary, types.MakeTimestampTZ(typ.Precision()))
 				f.Exprs = append(f.Exprs, cast)
 			}
 			// add ts column as param3
 			f.Exprs = append(f.Exprs, &scopeColumn{name: tbl.Column(0).ColName(),
-				table: col.table, typ: types.TimestampTZ, id: tblID.ColumnID(0),
+				table: col.table, typ: typ, id: tblID.ColumnID(0),
 			})
 		}
 	}
@@ -1046,14 +1050,18 @@ func (b *Builder) addLastFunction(
 }
 
 // checkBoundary checks if the second parameter of last is greater than '2970-01-01 00:00:00+00:00'
-func checkBoundary(s *scope, f tree.FuncExpr, funcName string) {
+func checkBoundary(s *scope, f tree.FuncExpr, funcName string, t *types.T) {
 	if funcName == sqlbase.LastAgg && len(f.Exprs) == 2 {
-		typedExpr, err := tree.TypeCheck(f.Exprs[1], s.builder.semaCtx, types.TimestampTZ)
+		maxTsString := tree.TsMaxTimestampString
+		if t.Precision() == 9 {
+			maxTsString = tree.TsMaxNanoTimestampString
+		}
+		typedExpr, err := tree.TypeCheck(f.Exprs[1], s.builder.semaCtx, types.MakeTimestampTZ(9))
 		if err != nil || typedExpr == nil {
 			panic(pgerror.Newf(pgcode.DatatypeMismatch, "the second parameter of last must be of timestamptz type"))
 		}
 		if datum, ok2 := typedExpr.(*tree.DTimestampTZ); ok2 {
-			maxDatum, _ := tree.ParseDTimestampTZ(s.builder.evalCtx, tree.TsMaxTimestampString, time.Millisecond)
+			maxDatum, _ := tree.ParseDTimestampTZ(s.builder.evalCtx, maxTsString, time.Nanosecond)
 			res := datum.Compare(s.builder.evalCtx, maxDatum)
 			if res > 0 {
 				panic(pgerror.Newf(pgcode.FeatureNotSupported, "the second parameter of last is out of range"))

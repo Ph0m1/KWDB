@@ -105,7 +105,7 @@ func DatumToHLC(evalCtx *EvalContext, stmtTimestamp time.Time, d Datum) (hlc.Tim
 		// Attempt to parse as an interval.
 		if iv, err := ParseDInterval(s); err == nil {
 			if (iv.Duration == duration.Duration{}) {
-				convErr = errors.Errorf("interval value %v too small, absolute value must be >= %v", d, time.Microsecond)
+				convErr = errors.Errorf("interval value %v too small, absolute value must be >= %v", d, time.Nanosecond)
 			}
 			ts.WallTime = duration.Add(stmtTimestamp, iv.Duration).UnixNano()
 			break

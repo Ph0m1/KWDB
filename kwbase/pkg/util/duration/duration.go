@@ -39,6 +39,8 @@ import (
 )
 
 const (
+	// NanosPerMicro is the amount of nanoseconds in a microsecond.
+	NanosPerMicro = 1000
 	// MicrosPerMilli is the amount of microseconds in a millisecond.
 	MicrosPerMilli = 1000
 	// MillisPerSec is the amount of seconds in a millisecond.
@@ -166,12 +168,12 @@ func (d Duration) rounded() int64 {
 // rounded returns nanos rounded to the nearest microsecond.
 func rounded(nanos int64) int64 {
 	dur := time.Duration(nanos) * time.Nanosecond
-	v := dur.Round(time.Microsecond).Nanoseconds()
+	v := dur.Round(time.Nanosecond).Nanoseconds()
 	// Near the boundaries of int64 will return the argument unchanged. Check
 	// for those cases and truncate instead of round so that we never have nanos.
-	if m := v % nanosInMicro; m != 0 {
-		v -= m
-	}
+	//if m := v % nanosInMicro; m != 0 {
+	//	v -= m
+	//}
 	return v
 }
 
@@ -331,7 +333,7 @@ func (d Duration) Format(buf *bytes.Buffer) {
 
 	wrotePrev(wrote, buf)
 
-	if d.nanos/nanosInMicro < 0 {
+	if d.nanos < 0 {
 		buf.WriteString("-")
 	} else if negDays {
 		buf.WriteString("+")
@@ -353,9 +355,9 @@ func (d Duration) Format(buf *bytes.Buffer) {
 	nanos %= secondNanos
 	fmt.Fprintf(buf, "%02d:%02d:%02d", hn, mn, sn)
 
-	micros := nanos / nanosInMicro
-	if micros != 0 {
-		s := fmt.Sprintf(".%06d", micros)
+	//micros := nanos / nanosInMicro
+	if nanos != 0 {
+		s := fmt.Sprintf(".%09d", nanos)
 		buf.WriteString(strings.TrimRight(s, "0"))
 	}
 }
@@ -516,9 +518,12 @@ func (d Duration) Div(x int64) Duration {
 func (d Duration) MulFloat(x float64) Duration {
 	monthInt, monthFrac := math.Modf(float64(d.Months) * x)
 	dayInt, dayFrac := math.Modf((float64(d.Days) * x) + (monthFrac * DaysPerMonth))
+	nano := math.Round(float64(d.nanos) * x)
+	dayNano := math.Round(dayFrac * float64(nanosInDay))
+	nanos := int64(nano + dayNano)
 
 	return MakeDuration(
-		int64((float64(d.nanos)*x)+(dayFrac*float64(nanosInDay))),
+		nanos,
 		int64(dayInt),
 		int64(monthInt),
 	)

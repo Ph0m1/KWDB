@@ -822,8 +822,8 @@ KStatus LoggedTsEntityGroup::undoPut(kwdbContext_p ctx, TS_LSN log_lsn, TSSlice 
   timestamp64 p_time = 0;
 
   // Examine the timestamp of the first piece of data within the payload to verify the partition being written to
-  KTimestamp first_ts_ms = pd.GetTimestamp(pd.GetStartRowId());
-  KTimestamp first_ts = first_ts_ms / 1000;
+  KTimestamp first_ts_p = pd.GetTimestamp(pd.GetStartRowId());
+  KTimestamp first_ts = convertTsToPTime(first_ts_p, root_bt_manager_->GetTsColDataType());
   timestamp64 first_max_ts;
 
   last_p_time = sub_group->PartitionTime(first_ts, first_max_ts);
@@ -901,8 +901,8 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   std::unordered_set<timestamp64> dup_set;
 
   // Examine the timestamp of the first piece of data within the payload to verify the partition being written to
-  KTimestamp first_ts_ms = pd.GetTimestamp(pd.GetStartRowId());
-  KTimestamp first_ts = first_ts_ms / 1000;
+  KTimestamp first_ts_p = pd.GetTimestamp(pd.GetStartRowId());
+  KTimestamp first_ts = convertTsToPTime(first_ts_p, root_bt_manager_->GetTsColDataType());
   timestamp64 first_max_ts;
 
   last_p_time = sub_group->PartitionTime(first_ts, first_max_ts);

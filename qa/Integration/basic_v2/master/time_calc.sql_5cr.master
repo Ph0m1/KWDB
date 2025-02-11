@@ -26,7 +26,7 @@ SET
   1980-01-01 00:05:00+00:00 | 1971-01-01 00:05:00+00:00 | 1970-01-29 00:05:00+00:00 | 1970-02-02 00:05:00+00:00 | 1970-01-02 00:05:00+00:00 | 1970-01-01 01:05:00+00:00 | 1970-01-01 00:06:00+00:00 | 1970-01-01 00:05:01+00:00 | 1980-03-27 10:25:12.6+00:00 | 1981-08-04 00:05:00+00:00 | 1958-05-31 00:05:00+00:00 | 1981-01-06 00:05:00+00:00 | 1981-01-01 12:05:00+00:00 | 1981-01-01 00:17:00+00:00 | 1981-01-01 00:05:12+00:00 | 1981-01-01 00:05:00.012+00:00 | 1970-01-01 10:25:12+00:00 | 1970-01-01 10:25:00.012+00:00 | 1969-12-31 13:44:59.988+00:00 | 1970-01-01 00:05:00.012+00:00 | 1970-01-01 00:05:00.012+00:00 | 1980-01-01 00:05:00.012+00:00 | 1980-03-01 00:05:00.012+00:00
 (5 rows)
 > SELECT k_timestamp-'10y',k_timestamp-'12mon',k_timestamp-'4w',k_timestamp-'32d',k_timestamp-'24h',k_timestamp-'60m',k_timestamp-'60s',k_timestamp-'1000ms',k_timestamp-'10y2mon3w5d10h20m12s600ms',k_timestamp-'10y12mon30w5d',k_timestamp-'-10y-12mon-30w-5d',k_timestamp-'10y12mon5d',k_timestamp-'10y12mon12h',k_timestamp-'10y12mon12m',k_timestamp-'10y12mon12s',k_timestamp-'10y12mon12ms',k_timestamp-'10h20m12s',k_timestamp-'10h20m12ms',k_timestamp-'-10h-20m-12ms',k_timestamp-'0m12ms',k_timestamp-'0h12ms',k_timestamp-'10y12ms',k_timestamp-'10y2mon12ms' FROM ts_db.st ORDER BY k_timestamp;
-ERROR: unsupported binary operator: <timestamptz> - <string>
+ERROR: unsupported binary operator: <timestamptz(3)> - <string>
 SQLSTATE: 22023
 > SELECT k_timestamp+10y, k_timestamp+12mon,k_timestamp+4w,k_timestamp+32d,k_timestamp+24h,k_timestamp+60m,k_timestamp+60s,k_timestamp+1000ms FROM ts_db.st ORDER BY k_timestamp;
           ?column?          |         ?column?          |         ?column?          |         ?column?          |         ?column?          |         ?column?          |         ?column?          |         ?column?
@@ -126,7 +126,7 @@ HINT: try \hf first
   2030-02-02 04:00:00.111+00:00 | 2021-02-02 04:00:00.111+00:00 | 2020-03-01 04:00:00.111+00:00 | 2020-03-05 04:00:00.111+00:00 | 2020-02-03 04:00:00.111+00:00 | 2020-02-02 05:00:00.111+00:00 | 2020-02-02 04:01:00.111+00:00 | 2020-02-02 04:00:01.111+00:00 | 2030-04-28 14:20:12.711+00:00 | 2031-09-05 04:00:00.111+00:00 | 2008-07-02 04:00:00.111+00:00 | 2031-02-07 04:00:00.111+00:00 | 2031-02-02 16:00:00.111+00:00 | 2031-02-02 04:12:00.111+00:00 | 2031-02-02 04:00:12.111+00:00 | 2031-02-02 04:00:00.123+00:00 | 2020-02-02 14:20:12.111+00:00 | 2020-02-02 14:20:00.123+00:00 | 2020-02-01 17:40:00.099+00:00 | 2020-02-02 04:00:00.123+00:00 | 2020-02-02 04:00:00.123+00:00 | 2030-02-02 04:00:00.123+00:00 | 2030-04-02 04:00:00.123+00:00
 (5 rows)
 > SELECT ts-'10y',ts-'12mon',ts-'4w',ts-'32d',ts-'24h',ts-'60m',ts-'60s',ts-'1000ms',ts-'10y2mon3w5d10h20m12s600ms',ts-'10y12mon30w5d',ts-'-10y-12mon-30w-5d',ts-'10y12mon5d',ts-'10y12mon12h',ts-'10y12mon12m',ts-'10y12mon12s',ts-'10y12mon12ms',ts-'10h20m12s',ts-'10h20m12ms',ts-'-10h-20m-12ms',ts-'0m12ms',ts-'0h12ms',ts-'10y12ms',ts-'10y2mon12ms' FROM ts_db.st ORDER BY ts;
-ERROR: unsupported binary operator: <timestamptz> - <string>
+ERROR: unsupported binary operator: <timestamptz(3)> - <string>
 SQLSTATE: 22023
 > SELECT ts+10y, ts+12mon,ts+4w,ts+32d,ts+24h,ts+60m,ts+60s,ts+1000ms FROM ts_db.st ORDER BY ts;
             ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?
@@ -225,14 +225,8 @@ HINT: try \hf first
   18294 days 01:57:20.333
 (4 rows)
 > SELECT (TIMESTAMP'1970-1-1 12:12:12.121'+99999y) FROM ts_db.st ORDER BY k_timestamp;
-             ?column?
------------------------------------
-  101969-01-01 12:12:12.121+00:00
-  101969-01-01 12:12:12.121+00:00
-  101969-01-01 12:12:12.121+00:00
-  101969-01-01 12:12:12.121+00:00
-  101969-01-01 12:12:12.121+00:00
-(5 rows)
+ERROR: Timestamp/TimestampTZ out of range
+SQLSTATE: 22023
 > SELECT (TIMESTAMP'1970-1-1 12:12:12.121'+'20y')::TIMESTAMP FROM ts_db.st ORDER BY k_timestamp;
             timestamp
 ---------------------------------
@@ -243,14 +237,8 @@ HINT: try \hf first
   1990-01-01 12:12:12.121+00:00
 (5 rows)
 > SELECT (TIMESTAMP'1970-1-1 12:12:12.121'-INTERVAL'99999years')::TIMESTAMP FROM ts_db.st ORDER BY k_timestamp;
-             timestamp
------------------------------------
-  -98029-01-01 12:12:12.121+00:00
-  -98029-01-01 12:12:12.121+00:00
-  -98029-01-01 12:12:12.121+00:00
-  -98029-01-01 12:12:12.121+00:00
-  -98029-01-01 12:12:12.121+00:00
-(5 rows)
+ERROR: Timestamp/TimestampTZ out of range
+SQLSTATE: 22023
 > SELECT max(TIMESTAMP'1970-1-1 12:12:12.121'+'20y'),max(TIMESTAMP'1970-1-1 12:12:12.121'+'12mon'),max(TIMESTAMP'1970-1-1 12:12:12.121'+'8w') FROM ts_db.st GROUP BY k_timestamp ORDER BY k_timestamp;
                max              |              max              |              max
 --------------------------------+-------------------------------+--------------------------------
@@ -374,7 +362,7 @@ HINT: try \hf first
   2030-02-02 12:00:00.111+08:00 | 2021-02-02 12:00:00.111+08:00 | 2020-03-01 12:00:00.111+08:00 | 2020-03-05 12:00:00.111+08:00 | 2020-02-03 12:00:00.111+08:00 | 2020-02-02 13:00:00.111+08:00 | 2020-02-02 12:01:00.111+08:00 | 2020-02-02 12:00:01.111+08:00 | 2030-04-28 22:20:12.711+08:00 | 2031-09-05 12:00:00.111+08:00 | 2008-07-02 12:00:00.111+08:00 | 2031-02-07 12:00:00.111+08:00 | 2031-02-03 00:00:00.111+08:00 | 2031-02-02 12:12:00.111+08:00 | 2031-02-02 12:00:12.111+08:00 | 2031-02-02 12:00:00.123+08:00 | 2020-02-02 22:20:12.111+08:00 | 2020-02-02 22:20:00.123+08:00 | 2020-02-02 01:40:00.099+08:00 | 2020-02-02 12:00:00.123+08:00 | 2020-02-02 12:00:00.123+08:00 | 2030-02-02 12:00:00.123+08:00 | 2030-04-02 12:00:00.123+08:00
 (5 rows)
 > SELECT ts-'10y',ts-'12mon',ts-'4w',ts-'32d',ts-'24h',ts-'60m',ts-'60s',ts-'1000ms',ts-'10y2mon3w5d10h20m12s600ms',ts-'10y12mon30w5d',ts-'-10y-12mon-30w-5d',ts-'10y12mon5d',ts-'10y12mon12h',ts-'10y12mon12m',ts-'10y12mon12s',ts-'10y12mon12ms',ts-'10h20m12s',ts-'10h20m12ms',ts-'-10h-20m-12ms',ts-'0m12ms',ts-'0h12ms',ts-'10y12ms',ts-'10y2mon12ms' FROM ts_db.st ORDER BY ts;
-ERROR: unsupported binary operator: <timestamptz> - <string>
+ERROR: unsupported binary operator: <timestamptz(3)> - <string>
 SQLSTATE: 22023
 > SELECT ts+10y, ts+12mon,ts+4w,ts+32d,ts+24h,ts+60m,ts+60s,ts+1000ms FROM ts_db.st ORDER BY ts;
             ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?            |           ?column?
@@ -467,14 +455,14 @@ HINT: try \hf first
 > DROP DATABASE ts_db;
 DROP DATABASE
 > SELECT timestamp'2970-01-01 00:00:00' - timestamp'2000-01-01 00:00:00' ;
-           ?column?
--------------------------------
-  106751 days 23:47:16.854776
+             ?column?
+----------------------------------
+  106751 days 23:47:16.854775807
 (1 row)
 > SELECT '0000-01-01 00:00:00+00:00'::timestamptz - '2020-01-01 12:00:00+00:00'::timestamptz;
-            ?column?
----------------------------------
-  -106751 days -23:47:16.854776
+              ?column?
+------------------------------------
+  -106751 days -23:47:16.854775808
 (1 row)
 > set time zone -15;
 ERROR: invalid value for parameter "timezone": "fixed offset:-54000 (-15)"

@@ -529,11 +529,20 @@ inline void getMaxAndMinTs(std::vector<KwTsSpan>& spans, timestamp64* min_ts,
 }
 
 inline bool isTsType(DATATYPE type) {
-  if (type == TIMESTAMP || type == TIMESTAMP64 || type == TIMESTAMP64_LSN) {
+  if (type == TIMESTAMP || type == TIMESTAMP64 || type == TIMESTAMP64_MICRO || type == TIMESTAMP64_NANO
+      || type == TIMESTAMP64_LSN || type == TIMESTAMP64_LSN_MICRO || type == TIMESTAMP64_LSN_NANO) {
     return true;
   }
   return false;
 }
+
+inline bool isTsWithLSNType(DATATYPE type) {
+  if (type == TIMESTAMP64_LSN || type == TIMESTAMP64_LSN_MICRO || type == TIMESTAMP64_LSN_NANO) {
+    return true;
+  }
+  return false;
+}
+
 
 inline bool isSumType(DATATYPE type) {
   if (type == INT8 || type == INT16 || type == INT32 || type == INT64 || type == FLOAT || type == DOUBLE) {
@@ -1037,14 +1046,85 @@ inline int numDigit(double v) {
   return d + (v < 0);
 }
 
-inline timestamp64 convertTsToPTime(timestamp64 ts) {
+inline timestamp64 convertTsToPTime(timestamp64 ts, DATATYPE ts_type) {
+  if (ts == INT64_MAX || ts == INT64_MIN) {
+    return ts;
+  }
+  int64_t precision = 0;
+  switch (ts_type) {
+    case TIMESTAMP64_LSN:
+    case TIMESTAMP64:
+      precision = 1000;
+      break;
+    case TIMESTAMP64_LSN_MICRO:
+    case TIMESTAMP64_MICRO:
+      precision = 1000000;
+      break;
+    case TIMESTAMP64_LSN_NANO:
+    case TIMESTAMP64_NANO:
+      precision = 1000000000;
+      break;
+    default:
+      assert(false);
+      break;
+  }
   timestamp64 ret;
   if (ts < 0 && ts != INT64_MIN) {
-    ret = (ts - 999) / 1000;
+    ret = (ts - precision + 1) / precision;
   } else {
-    ret = ts / 1000;
+    ret = ts / precision;
   }
   return ret;
+}
+
+inline timestamp64 convertSecondToPrecisionTS(timestamp64 ts, DATATYPE ts_type) {
+  if (ts == INT64_MAX || ts == INT64_MIN) {
+    return ts;
+  }
+  int64_t precision = 0;
+  switch (ts_type) {
+    case TIMESTAMP64_LSN:
+    case TIMESTAMP64:
+      precision = 1000;
+      break;
+    case TIMESTAMP64_LSN_MICRO:
+    case TIMESTAMP64_MICRO:
+      precision = 1000000;
+      break;
+    case TIMESTAMP64_LSN_NANO:
+    case TIMESTAMP64_NANO:
+      precision = 1000000000;
+      break;
+    default:
+      assert(false);
+      break;
+  }
+  return ts * precision;
+}
+
+inline timestamp64 convertMSToPrecisionTS(timestamp64 ts, DATATYPE ts_type) {
+  if (ts == INT64_MAX || ts == INT64_MIN) {
+    return ts;
+  }
+  int64_t precision = 0;
+  switch (ts_type) {
+    case TIMESTAMP64_LSN:
+    case TIMESTAMP64:
+      precision = 1;
+      break;
+    case TIMESTAMP64_LSN_MICRO:
+    case TIMESTAMP64_MICRO:
+      precision = 1000;
+      break;
+    case TIMESTAMP64_LSN_NANO:
+    case TIMESTAMP64_NANO:
+      precision = 1000000;
+      break;
+    default:
+      assert(false);
+      break;
+  }
+  return ts * precision;
 }
 
 }  //  namespace kwdbts

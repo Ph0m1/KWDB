@@ -48,7 +48,7 @@ func TestTimeFamilyPrecisionToRoundDuration(t *testing.T) {
 		{precision: 6, expected: time.Duration(1000)},
 
 		{precision: -2, expectedPanic: true},
-		{precision: 7, expectedPanic: true},
+		{precision: 10, expectedPanic: true},
 	}
 
 	for _, tc := range testCases {

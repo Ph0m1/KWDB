@@ -38,6 +38,10 @@ KStatus CreateAggField(k_int32 i, Field* input_field, BaseOperator *agg_op, Fiel
             break;
         case roachpb::DataType::TIMESTAMP:
         case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT:
             *func_field = new FieldAggLonglong(i, input_field->get_storage_type(), sizeof(k_int64), agg_op);
@@ -89,6 +93,10 @@ void FieldsToChunk(Field **fields, k_uint32 field_num, k_uint32 row, DataChunkPt
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         k_int64 val = field->ValInt();

@@ -6,10 +6,10 @@ code1 int2 not null,
 code2 int4) PRIMARY TAGS(code1);
 CREATE TABLE
 > show create table test_geometry.t1;
-        table_name        |           create_statement
---------------------------+----------------------------------------
+        table_name        |             create_statement
+--------------------------+-------------------------------------------
   test_geometry.public.t1 | CREATE TABLE t1 (
-                          |     k_timestamp TIMESTAMPTZ NOT NULL,
+                          |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
                           |     e1 GEOMETRY NULL
                           | ) TAGS (
                           |     code1 INT2 NOT NULL,

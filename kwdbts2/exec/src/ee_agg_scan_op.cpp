@@ -363,6 +363,10 @@ k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         if (col == col_idx_) {
@@ -444,6 +448,10 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
             break;
           case roachpb::DataType::TIMESTAMP:
           case roachpb::DataType::TIMESTAMPTZ:
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
           case roachpb::DataType::DATE:
           case roachpb::DataType::BIGINT:
             agg_func = make_unique<MaxAggregate<k_int64>>
@@ -488,6 +496,10 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
             break;
           case roachpb::DataType::TIMESTAMP:
           case roachpb::DataType::TIMESTAMPTZ:
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
           case roachpb::DataType::DATE:
           case roachpb::DataType::BIGINT:
             agg_func = make_unique<MinAggregate<k_int64>>(i, argIdx, len);
@@ -554,6 +566,10 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
             break;
           case roachpb::DataType::TIMESTAMP:
           case roachpb::DataType::TIMESTAMPTZ:
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
           case roachpb::DataType::DATE:
           case roachpb::DataType::BIGINT:
             agg_func = make_unique<AnyNotNullAggregate<k_int64>>

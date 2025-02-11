@@ -15,7 +15,7 @@ CREATE TABLE
   table_name |              create_statement
 -------------+----------------------------------------------
   t          | CREATE TABLE t (
-             |     ts TIMESTAMPTZ NOT NULL,
+             |     ts TIMESTAMPTZ(3) NOT NULL,
              |     a INT4 NULL,
              |     b INT4 NOT NULL DEFAULT 1,
              |     c VARCHAR(254) NULL DEFAULT 'aaa'
@@ -96,11 +96,11 @@ INSERT 1
   table_name |              create_statement
 -------------+----------------------------------------------
   t          | CREATE TABLE t (
-             |     ts TIMESTAMPTZ NOT NULL,
+             |     ts TIMESTAMPTZ(3) NOT NULL,
              |     a INT4 NULL,
              |     b INT4 NOT NULL DEFAULT 1,
              |     c VARCHAR(254) NULL DEFAULT 'aaa',
-             |     d TIMESTAMP NULL
+             |     d TIMESTAMP(3) NULL
              | ) TAGS (
              |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
              |     retentions 0s
@@ -114,7 +114,7 @@ SQLSTATE: 42804
 ERROR: null value in column "b" violates not-null constraint
 SQLSTATE: 23502
 > create table t1(ts timestamp not null default current_timestamp(), a int) tags(ptag int not null) primary tags(ptag);
-ERROR: column ts with type TIMESTAMPTZ can only be set now() as default function
+ERROR: column ts with type TIMESTAMPTZ(3) can only be set now() as default function
 SQLSTATE: 42611
 > create table t1(ts timestamp not null default now(), a int default abs(-2)) tags(ptag int not null) primary tags(ptag);
 ERROR: column a with type INT4 can only be set constant as default value
@@ -122,10 +122,10 @@ SQLSTATE: 0A000
 > create table t1(ts timestamp not null default now(), a int) tags(ptag int not null) primary tags(ptag);
 CREATE TABLE
 > show create t1;
-  table_name |                     create_statement
--------------+-----------------------------------------------------------
+  table_name |                      create_statement
+-------------+--------------------------------------------------------------
   t1         | CREATE TABLE t1 (
-             |     ts TIMESTAMPTZ NOT NULL DEFAULT now():::TIMESTAMPTZ,
+             |     ts TIMESTAMPTZ(3) NOT NULL DEFAULT now():::TIMESTAMPTZ,
              |     a INT4 NULL
              | ) TAGS (
              |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -134,7 +134,7 @@ CREATE TABLE
              |     partition interval 10d
 (1 row)
 > alter table t1 alter column ts set default current_timestamp();
-ERROR: column ts with type TIMESTAMPTZ can only be set now() as default function
+ERROR: column ts with type TIMESTAMPTZ(3) can only be set now() as default function
 SQLSTATE: 42611
 > alter table t1 alter column ts drop default;
 ALTER TABLE
@@ -148,7 +148,7 @@ SQLSTATE: 0A000
   table_name |              create_statement
 -------------+----------------------------------------------
   t1         | CREATE TABLE t1 (
-             |     ts TIMESTAMPTZ NOT NULL,
+             |     ts TIMESTAMPTZ(3) NOT NULL,
              |     a INT4 NULL
              | ) TAGS (
              |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)

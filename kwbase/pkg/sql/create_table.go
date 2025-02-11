@@ -1655,13 +1655,18 @@ func checkAndMakeTSColDesc(
 	var err error
 	var expr tree.TypedExpr
 	if isFirstTSCol {
-		if d.Type != types.Timestamp && d.Type != types.TimestampTZ {
-			return nil, pgerror.Newf(
-				pgcode.DatatypeMismatch, "column %s: the 1st column's type in timeseries table must be TimestampTZ", d.Name)
+		if d.Type.Family() != types.TimestampFamily && d.Type.Family() != types.TimestampTZFamily {
+			return nil, pgerror.Newf(pgcode.DatatypeMismatch, "column %s: the 1st column's type in timeseries table must be TimestampTZ", d.Name)
 		} else if d.Nullable.Nullability != tree.NotNull {
 			return nil, pgerror.Newf(pgcode.NotNullViolation, "the 1st TimestampTZ column %s must be not null", string(d.Name))
 		}
-		d.Type = types.TimestampTZ
+		if d.Type.InternalType.TimePrecisionIsSet {
+			d.Type = types.MakeTimestampTZ(d.Type.Precision())
+		} else {
+			d.Type = types.MakeTimestampTZ(3)
+		}
+	} else {
+		d.Type = sqlbase.UpdateTimeColPrecision(d.Type, tree.TimeseriesTable)
 	}
 	if err = checkTSColValidity(d); err != nil {
 		return nil, err
@@ -1825,7 +1830,7 @@ func addColToTblDesc(
 			return err
 		}
 	} else {
-		col, idx, expr, err = sqlbase.MakeColumnDefDescs(d, semaCtx)
+		col, idx, expr, err = sqlbase.MakeColumnDefDescs(d, semaCtx, tree.RelationalTable)
 		if err != nil {
 			return err
 		}

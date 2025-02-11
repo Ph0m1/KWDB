@@ -217,6 +217,10 @@ EEIteratorErrCode AggregatorSpecParam<T>::MakeGroupCache(kwdbContext_p ctx) {
     switch (field->get_sql_type()) {
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::SMALLINT:
       case roachpb::DataType::INT:

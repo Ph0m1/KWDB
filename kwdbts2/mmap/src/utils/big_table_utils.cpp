@@ -124,8 +124,12 @@ int getDataTypeSize(int type) {
     case INT64:
     case TIME64:
     case TIMESTAMP64:
+    case TIMESTAMP64_MICRO:
+    case TIMESTAMP64_NANO:
       return sizeof(int64_t);
     case TIMESTAMP64_LSN:
+    case TIMESTAMP64_LSN_MICRO:
+    case TIMESTAMP64_LSN_NANO:
       return sizeof(TimeStamp64LSN);
     case FLOAT:
       return sizeof(float);
@@ -164,6 +168,8 @@ int getDataTypeSize(AttributeInfo &info) {
     case INT64:
     case TIME64:
     case TIMESTAMP64:
+    case TIMESTAMP64_MICRO:
+    case TIMESTAMP64_NANO:
       return sizeof(int64_t);
     case FLOAT:
       return sizeof(float);
@@ -184,7 +190,10 @@ int getDataTypeSize(AttributeInfo &info) {
       return sizeof(int32_t);
     case TIME:          return sizeof(int32_t);
     case NULL_TYPE:     return 0;
-    case TIMESTAMP64_LSN: return sizeof(TimeStamp64LSN);
+    case TIMESTAMP64_LSN:
+    case TIMESTAMP64_LSN_MICRO:
+    case TIMESTAMP64_LSN_NANO:
+    return sizeof(TimeStamp64LSN);
   }
   return 0;
 }

@@ -185,6 +185,8 @@ TEST_F(TestTSWALTable, PutData) {
 
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, start_ts + 2 * 10};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2, 3};
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
@@ -197,7 +199,7 @@ TEST_F(TestTSWALTable, PutData) {
   bool is_finished = false;
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 3);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(KInt16((res.data)[1][0]->mem), 11);
   ASSERT_EQ(KInt32((res.data)[2][0]->mem), 2222);
 
@@ -230,6 +232,8 @@ TEST_F(TestTSWALTable, batchPutData) {
 
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, start_ts + 100000};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
@@ -242,7 +246,7 @@ TEST_F(TestTSWALTable, batchPutData) {
   bool is_finished = false;
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, payload_num * row_num);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(KInt16((res.data)[1][0]->mem), 11);
   ASSERT_EQ(KInt32((res.data)[2][0]->mem), 2222);
 
@@ -303,6 +307,8 @@ TEST_F(TestTSWALTable, mulitiInsert) {
 
   k_uint32 entity_id = 1;
   KwTsSpan ts_span = {start_ts, start_ts + 100000};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
@@ -315,7 +321,7 @@ TEST_F(TestTSWALTable, mulitiInsert) {
   k_uint32 count;
   bool is_finished = false;
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(KInt16((res.data)[1][0]->mem), 11);
   ASSERT_EQ(KInt32((res.data)[2][0]->mem), 2222);
   total += count;
@@ -367,7 +373,10 @@ TEST_F(TestTSWALTable, DeleteData) {
   s = log_eg->PutData(ctx_, payload, 0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num * 2);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {1, ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num * 2);
 
   // delete
   Payload pd(getSchema(), getValidCols(), payload);
@@ -375,6 +384,7 @@ TEST_F(TestTSWALTable, DeleteData) {
 
   uint64_t  count = 0;
   KwTsSpan span{1, ts + 10};
+  span = ConvertMsToPrecision(span, ts_type);
   vector<DelRowSpan> rows;
 
   // use mtr id 0 for redo case.
@@ -383,7 +393,9 @@ TEST_F(TestTSWALTable, DeleteData) {
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2 + row_num);  // delete 12 rows
   // after delete
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num - 2);
+  ts_span = {1, ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num - 2);
 
   delete[] data_value;
   delete[] data_value2;
@@ -406,7 +418,10 @@ TEST_F(TestTSWALTable, putRollback) {
   s = log_eg->PutData(ctx_, &payload, 1, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + 1000}), 10);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {start_ts, start_ts + 1000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), 10);
 
   ASSERT_EQ(log_eg->MtrRollback(ctx_, mtr_id), KStatus::SUCCESS);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + 1000}), 0);
@@ -440,7 +455,10 @@ TEST_F(TestTSWALTable, DeleteDataRollback) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   uint64_t count = 0;
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num * 2);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span{1, ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num * 2);
 
   // delete
   Payload pd(getSchema(), getValidCols(), payload);
@@ -449,19 +467,22 @@ TEST_F(TestTSWALTable, DeleteDataRollback) {
   TS_LSN mtr_id = 0;
   ASSERT_EQ(log_eg->MtrBegin(ctx_, range_group_id_, 1, mtr_id), KStatus::SUCCESS);
   count = 0;
-  KwTsSpan span{1, ts + 10,};
+  ts_span = {1, ts + 10,};;
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   vector<DelRowSpan> rows;
   // use mtr id 0 for redo case.
-  s = log_eg->DeleteData(ctx_, primary_tag, 0, {span}, &rows, &count, mtr_id, false);
+  s = log_eg->DeleteData(ctx_, primary_tag, 0, {ts_span}, &rows, &count, mtr_id, false);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2 + row_num);  // delete
 
   // after delete
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num - 2);
+  ts_span = {1, ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num - 2);
 
   // rollback
   ASSERT_EQ(log_eg->MtrRollback(ctx_, mtr_id), KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + row_num * 10}), row_num * 2);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num * 2);
 
   delete[] data_value;
   delete[] data_value2;
@@ -503,26 +524,32 @@ TEST_F(TestTSWALTable, putDeleteRollback) {
   uint32_t inc_unordered_cnt;
   s = log_eg->PutData(ctx_, payloads.data(), 2, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num * 2);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span{1, ts + 5000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);  
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num * 2);
 
   count = 0;
   // delete
-  KwTsSpan span{1, ts + 10,};
+  ts_span = {1, ts + 10,};;
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   vector<DelRowSpan> rows;
   // use mtr id 0 for redo case.
-  s = log_eg->DeleteData(ctx_, primary_tag, 0, {span}, &rows, &count, mtr_id, false);
+  s = log_eg->DeleteData(ctx_, primary_tag, 0, {ts_span}, &rows, &count, mtr_id, false);
   ASSERT_EQ(s, KStatus::SUCCESS);
   ASSERT_EQ(count, 2 + row_num);  // delete
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num - 2);
+  ts_span = {1, ts + 5000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num - 2);
 
   // insert
   s = log_eg->PutData(ctx_, payload3, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num - 2 + row_num);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num - 2 + row_num);
 
   // rollback
   ASSERT_EQ(log_eg->MtrRollback(ctx_, mtr_id), KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), 0);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), 0);
 
   delete[] data_value;
   delete[] data_value2;
@@ -549,7 +576,10 @@ TEST_F(TestTSWALTable, DeleteEntitiesRollback) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // check result
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span{start_ts, start_ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num);
 
   Payload pd(getSchema(), getValidCols(), payload);
   std::vector<string> primary_tags;
@@ -560,12 +590,11 @@ TEST_F(TestTSWALTable, DeleteEntitiesRollback) {
   s = log_eg->DeleteEntities(ctx_, primary_tags, &del_cnt, x_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
   EXPECT_EQ(del_cnt, row_num);
-
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), 0);
-
-  k_uint32 count = 0;
+  ts_span = {start_ts, start_ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), 0);
   ASSERT_EQ(log_eg->MtrRollback(ctx_, x_id), KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num);
 
   delete[] data_value;
 }
@@ -601,7 +630,10 @@ TEST_F(TestTSWALTable, putDeleteEntityRollback) {
   uint32_t inc_unordered_cnt;
   s = log_eg->PutData(ctx_, payloads.data(), 2, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}), row_num * 2);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span{1, ts + 5000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num * 2);
 
   // delete
   std::vector<string> primary_tags;
@@ -615,11 +647,13 @@ TEST_F(TestTSWALTable, putDeleteEntityRollback) {
   // insert
   s = log_eg->PutData(ctx_, payload3, mtr_id, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result_);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}, 2), row_num);
+  ts_span = {1, ts + 5000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span, 2), row_num);
 
   // rollback
   ASSERT_EQ(log_eg->MtrRollback(ctx_, mtr_id), KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {1, ts + 5000}, 2), 0);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span, 2), 0);
 
   delete[] data_value;
   delete[] data_value2;
@@ -636,6 +670,8 @@ TEST_F(TestTSWALTable, putRecover) {
   KTimestamp start_ts = std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
   KwTsSpan ts_span = {start_ts, start_ts + 5000};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
 
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_);
@@ -839,6 +875,8 @@ TEST_F(TestTSWALTable, deleteDataRecover) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {ts_span}), 10);
   table_->CreateCheckpoint(ctx_);
 
@@ -852,6 +890,7 @@ TEST_F(TestTSWALTable, deleteDataRecover) {
   string pt = string(pd1.GetPrimaryTag().data, pd1.GetPrimaryTag().len);
   std::vector<DelRowSpan> dtp_list;
   KwTsSpan span{1, start_ts + 1000};
+  span = ConvertMsToPrecision(span, ts_type);
   s = log_eg->EvaluateDeleteData(ctx_, pt, {span}, dtp_list, mtr_id);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
@@ -973,6 +1012,8 @@ TEST_F(TestTSWALTable, incompleteRollbackRecover) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {ts_span}), 10);
   table_->CreateCheckpoint(ctx_);
 
@@ -987,6 +1028,7 @@ TEST_F(TestTSWALTable, incompleteRollbackRecover) {
 
   std::vector<DelRowSpan> dtp_list;
   KwTsSpan span{1, start_ts + 1000};
+  span = ConvertMsToPrecision(span, ts_type);
   s = log_eg->EvaluateDeleteData(ctx_, pt, {span}, dtp_list, mtr_id);
   EXPECT_EQ(s, KStatus::SUCCESS);
 
@@ -1049,6 +1091,8 @@ TEST_F(TestTSWALTable, deleteRollbackRecover) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   ASSERT_EQ(GetTableRows(table_id_, ranges_, {ts_span}), 10);
 
   // No checkpoint is performed, only wal is written, and the inserted data is repeatedly restored
@@ -1148,10 +1192,10 @@ TEST_F(TestTSWALTable, putEntityRecover) {
   KStatus s = table_->GetEntityGroup(ctx_, range_group_id_, &entity_group);
   ASSERT_EQ(s, KStatus::SUCCESS);
   std::shared_ptr<LoggedTsEntityGroup> log_eg = std::static_pointer_cast<LoggedTsEntityGroup>(entity_group);
-  k_uint32 entity_id = 1;
   KTimestamp start_ts = 1700000000;
   KwTsSpan ts_span = {start_ts, start_ts + 1000};
-  SubGroupID group_id = 1;
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
 
   k_uint32 p_len = 0;
   char* data_value = GenSomePayloadData(ctx_, 10, p_len, start_ts, &meta_, 10, 0, false);
@@ -1263,7 +1307,10 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // check result
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span{start_ts, start_ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num);
   // tagiterator
   std::vector<EntityResultIndex> entity_id_list;
   std::vector<k_uint32> scan_tags = {1, 2};
@@ -1315,8 +1362,9 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   TSSlice payload1{data_value1, p_len};
   s = log_eg->PutEntity(ctx_, payload1, mtr_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
-
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
+  ts_span = {start_ts, start_ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num);
 
   count = 0;
   TagIterator *iter1;
@@ -1346,7 +1394,9 @@ TEST_F(TestTSWALTable, putEntityRollback) {
   // rollback
   count = 0;
   ASSERT_EQ(log_eg->MtrRollback(ctx_, mtr_id), KStatus::SUCCESS);
-  ASSERT_EQ(GetTableRows(table_id_, ranges_, {start_ts, start_ts + row_num * 10}), row_num);
+  ts_span = {start_ts, start_ts + row_num * 10};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
+  ASSERT_EQ(GetTableRows(table_id_, ranges_, ts_span), row_num);
   TagIterator *iter2;
   ResultSet res2{(k_uint32) scan_tags.size()};
   // std::vector<k_uint32> hps = {0,1,2,3,4,5,6,7,8,9};

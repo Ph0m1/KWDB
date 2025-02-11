@@ -469,6 +469,7 @@ var unitMap = func(
 }(map[string]duration.Duration{
 	// Use DecodeDuration here because ns is the only unit for which we do not
 	// want to round nanoseconds since it is only used for multiplication.
+	"nanosecond":  duration.MakeDuration(1, 0, 0),
 	"microsecond": duration.MakeDuration(time.Microsecond.Nanoseconds(), 0, 0),
 	"millisecond": duration.MakeDuration(time.Millisecond.Nanoseconds(), 0, 0),
 	"second":      duration.MakeDuration(time.Second.Nanoseconds(), 0, 0),
@@ -484,6 +485,7 @@ var unitMap = func(
 	//
 	// µ = U+00B5 = micro symbol
 	// μ = U+03BC = Greek letter mu
+	"nanosecond":  {"ns", "nsec", "nsecs", "nsecond", "nseconds"},
 	"microsecond": {"us", "µs", "μs", "usec", "usecs", "usecond", "useconds"},
 	"millisecond": {"ms", "msec", "msecs", "msecond", "mseconds"},
 	"second":      {"s", "sec", "secs"},

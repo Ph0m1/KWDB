@@ -1286,11 +1286,15 @@ int AggCalculator::cmp(void* l, void* r) {
       return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
     }
     case DATATYPE::INT64:
-    case DATATYPE::TIMESTAMP64: {
+    case DATATYPE::TIMESTAMP64:
+    case DATATYPE::TIMESTAMP64_MICRO:
+    case DATATYPE::TIMESTAMP64_NANO: {
       double diff = (*(static_cast<k_int64*>(l))) - (*(static_cast<k_int64*>(r)));
       return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
     }
-    case DATATYPE::TIMESTAMP64_LSN: {
+    case DATATYPE::TIMESTAMP64_LSN:
+    case DATATYPE::TIMESTAMP64_LSN_MICRO:
+    case DATATYPE::TIMESTAMP64_LSN_NANO: {
       double diff = (*(static_cast<TimeStamp64LSN*>(l))).ts64 - (*(static_cast<TimeStamp64LSN*>(r))).ts64;
       return diff >= 0 ? (diff > 0 ? 1 : 0) : -1;
     }

@@ -123,7 +123,7 @@ func SanitizeVarFreeExpr(
 
 // ValidateColumnDefType returns an error if the type of a column definition is
 // not valid. It is checked when a column is created or altered.
-func ValidateColumnDefType(t *types.T) error {
+func ValidateColumnDefType(t *types.T, tableType tree.TableType) error {
 	switch t.Family() {
 	case types.StringFamily, types.CollatedStringFamily:
 		if t.Family() == types.CollatedStringFamily {
@@ -150,11 +150,23 @@ func ValidateColumnDefType(t *types.T) error {
 		if err := types.CheckArrayElementType(t.ArrayContents()); err != nil {
 			return err
 		}
-		return ValidateColumnDefType(t.ArrayContents())
-
+		return ValidateColumnDefType(t.ArrayContents(), tableType)
+	case types.TimeFamily, types.TimeTZFamily, types.IntervalFamily, types.TimestampFamily, types.TimestampTZFamily:
+		switch tableType {
+		case tree.RelationalTable:
+			if t.Precision() > 6 {
+				return pgerror.Newf(pgcode.InvalidColumnDefinition, "precision %d out of range", t.Precision())
+			}
+		case tree.TimeseriesTable, tree.TemplateTable, tree.InstanceTable:
+			switch t.Precision() {
+			case 3, 6, 9:
+				// These precisions are OK.
+			default:
+				return pgerror.Newf(pgcode.InvalidColumnDefinition, "precision %d out of range", t.Precision())
+			}
+		}
 	case types.BitFamily, types.IntFamily, types.FloatFamily, types.BoolFamily, types.BytesFamily, types.DateFamily,
-		types.INetFamily, types.IntervalFamily, types.JsonFamily, types.OidFamily, types.TimeFamily,
-		types.TimestampFamily, types.TimestampTZFamily, types.UuidFamily, types.TimeTZFamily:
+		types.INetFamily, types.JsonFamily, types.OidFamily, types.UuidFamily:
 		// These types are OK.
 
 	default:
@@ -180,7 +192,7 @@ func ValidateColumnDefType(t *types.T) error {
 // The DEFAULT expression is returned in TypedExpr form for analysis (e.g. recording
 // sequence dependencies).
 func MakeColumnDefDescs(
-	d *tree.ColumnTableDef, semaCtx *tree.SemaContext,
+	d *tree.ColumnTableDef, semaCtx *tree.SemaContext, tableType tree.TableType,
 ) (*ColumnDescriptor, *IndexDescriptor, tree.TypedExpr, error) {
 	if d.IsSerial {
 		// To the reader of this code: if control arrives here, this means
@@ -207,7 +219,7 @@ func MakeColumnDefDescs(
 	}
 
 	// Validate and assign column type.
-	err := ValidateColumnDefType(d.Type)
+	err := ValidateColumnDefType(d.Type, tree.RelationalTable)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -295,6 +307,46 @@ func MakeColumnDefDescs(
 	return col, idx, typedExpr, nil
 }
 
+// UpdateTimeColPrecision update time column precision.
+// When tableType is relational, the type is not updated.
+// When tableType is time_series and the precision of the time type is 0 and the precision is not specified,
+// the precision is updated to 3.
+func UpdateTimeColPrecision(oldTyp *types.T, tableType tree.TableType) *types.T {
+	newTyp := oldTyp
+	var precision int32
+	switch tableType {
+	case tree.TimeseriesTable, tree.TemplateTable, tree.InstanceTable:
+		precision = 3
+	default:
+		return newTyp
+	}
+	if oldTyp.InternalType.Precision == 0 && !oldTyp.InternalType.TimePrecisionIsSet {
+		switch oldTyp.Oid() {
+		case oid.T_time:
+			newTyp = types.MakeTime(precision)
+		case oid.T_timetz:
+			newTyp = types.MakeTimeTZ(precision)
+		case oid.T_timestamp:
+			newTyp = types.MakeTimestamp(precision)
+		case oid.T_timestamptz:
+			newTyp = types.MakeTimestampTZ(precision)
+		case oid.T__time:
+			n := types.MakeTime(precision)
+			newTyp = types.MakeArray(n)
+		case oid.T__timetz:
+			n := types.MakeTimeTZ(precision)
+			newTyp = types.MakeArray(n)
+		case oid.T__timestamp:
+			n := types.MakeTimestamp(precision)
+			newTyp = types.MakeArray(n)
+		case oid.T__timestamptz:
+			n := types.MakeTimestampTZ(precision)
+			newTyp = types.MakeArray(n)
+		}
+	}
+	return newTyp
+}
+
 // MaxTSColumnNameLength represents the maximum length of timeseries table column name.
 const MaxTSColumnNameLength = 128
 
@@ -321,9 +373,6 @@ func MakeTSColumnDefDescs(
 	}
 	if ContainsNonAlphaNumSymbol(name) {
 		return nil, nil, NewTSColInvalidError(name)
-	}
-	if (typ.Oid() == oid.T_timestamp || typ.Oid() == oid.T_timestamptz) && typ.InternalType.TimePrecisionIsSet {
-		return nil, nil, pgerror.Newf(pgcode.InvalidColumnDefinition, "timeseries table can not use %v type with precision", typ.Name())
 	}
 	if typ.Width() == 0 {
 		switch typ.Oid() {
@@ -372,8 +421,8 @@ func MakeTSColumnDefDescs(
 
 		if funcExpr, ok := typedExpr.(*tree.FuncExpr); ok {
 			isFuncDefault = true
-			switch typ {
-			case types.Timestamp, types.TimestampTZ:
+			switch typ.Oid() {
+			case oid.T_timestamp, oid.T_timestamptz:
 				if strings.ToLower(funcExpr.Func.String()) != "now" {
 					return nil, nil, pgerror.Newf(pgcode.InvalidColumnDefinition,
 						"column %s with type %s can only be set now() as default function", col.Name, typ.SQLString())
@@ -396,7 +445,8 @@ func MakeTSColumnDefDescs(
 	}
 
 	// Validate and assign column type.
-	err := ValidateColumnDefType(typ)
+	typ = UpdateTimeColPrecision(typ, tree.TimeseriesTable)
+	err := ValidateColumnDefType(typ, tree.TimeseriesTable)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -865,6 +915,16 @@ func GetTSDataType(typ *types.T) DataType {
 	}
 	switch typ.Name() {
 	case "timestamp":
+		switch typ.Precision() {
+		case 0, 3:
+			return DataType_TIMESTAMP
+		case 6:
+			return DataType_TIMESTAMP_MICRO
+		case 9:
+			return DataType_TIMESTAMP_NANO
+		default:
+			return DataType_TIMESTAMP
+		}
 		return DataType_TIMESTAMP
 	case "int2":
 		return DataType_SMALLINT
@@ -889,6 +949,16 @@ func GetTSDataType(typ *types.T) DataType {
 	case "varbytes":
 		return DataType_VARBYTES
 	case "timestamptz":
+		switch typ.Precision() {
+		case 0, 3:
+			return DataType_TIMESTAMPTZ
+		case 6:
+			return DataType_TIMESTAMPTZ_MICRO
+		case 9:
+			return DataType_TIMESTAMPTZ_NANO
+		default:
+			return DataType_TIMESTAMPTZ
+		}
 		return DataType_TIMESTAMPTZ
 	default:
 		return DataType_UNKNOWN
@@ -898,7 +968,8 @@ func GetTSDataType(typ *types.T) DataType {
 // GetStorageLenForFixedLenTypes returns KColumn's storage length
 func GetStorageLenForFixedLenTypes(dataType DataType) uint32 {
 	switch dataType {
-	case DataType_TIMESTAMP, DataType_TIMESTAMPTZ:
+	case DataType_TIMESTAMP, DataType_TIMESTAMP_MICRO, DataType_TIMESTAMP_NANO,
+		DataType_TIMESTAMPTZ, DataType_TIMESTAMPTZ_MICRO, DataType_TIMESTAMPTZ_NANO:
 		return 8
 	case DataType_BOOL:
 		return 1

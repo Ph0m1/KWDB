@@ -48,7 +48,7 @@ INSERT 1
 INSERT 1
 > insert into t1 values('2023-07-29 03:35:59.688', 6.0, 6, 1, 'b');
 INSERT 1
-> select first(x),first(y) from t1 group by b having b = 'a'; 
+> select first(x),first(y) from t1 group by b having b = 'a';
   first | first
 --------+--------
     0.1 |     2

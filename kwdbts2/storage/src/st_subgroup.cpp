@@ -76,14 +76,17 @@ std::vector <timestamp64> TsSubEntityGroup::GetPartitionTsInSpan(KwTsSpan ts_spa
   rdLock();
   Defer defer{[&]() { unLock(); }};
   timestamp64 tmp_max_ts;
+  auto type = root_tbl_manager_->GetTsColDataType();
+  auto span_begin_second = convertTsToPTime(ts_span.begin, type);
+  auto span_end_second = convertTsToPTime(ts_span.end, type);
 
-  auto start_it = partitions_ts_.find(PartitionTime(ts_span.begin, tmp_max_ts));
+  auto start_it = partitions_ts_.find(PartitionTime(span_begin_second, tmp_max_ts));
   if (start_it == partitions_ts_.end()) {
     start_it = partitions_ts_.begin();
   }
 
   // To include ts_span.end, so the next partition must be the endpoint
-  auto end_it = partitions_ts_.find(PartitionTime(ts_span.end, tmp_max_ts));
+  auto end_it = partitions_ts_.find(PartitionTime(span_end_second, tmp_max_ts));
   if (end_it != partitions_ts_.end()) {
     // ts_span.end fall into partition, so we take the next partition as endpoint
     end_it++;
@@ -319,11 +322,12 @@ TsTimePartition* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInfo& 
 
 vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts_span, ErrorInfo& err_info) {
   std::vector<int64_t> p_times;
+  auto type = root_tbl_manager_->GetTsColDataType();
   {
     // First, traverse the partitions that meet the criteria: the start and end ranges of the partitions are within ts_span
     timestamp64 max_ts;
-    timestamp64 pts_begin = PartitionTime(ts_span.begin, max_ts);
-    timestamp64 pts_end = PartitionTime(ts_span.end, max_ts);
+    timestamp64 pts_begin = PartitionTime(convertTsToPTime(ts_span.begin, type), max_ts);
+    timestamp64 pts_end = PartitionTime(convertTsToPTime(ts_span.end, type), max_ts);
     rdLock();
     Defer defer{[&]() { unLock(); }};
     for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
@@ -336,7 +340,7 @@ vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts
   for (int i = 0 ; i < p_times.size() ; i++) {
     wrLock();
     Defer defer{[&]() { unLock(); }};
-    TsTimePartition* p_table = getPartitionTable(p_times[i], p_times[i], err_info, false, false);
+    TsTimePartition* p_table = getPartitionTable(p_times[i], 0, err_info, false, false);
     if (!err_info.isOK() && err_info.errcode != KWEDROPPEDOBJ) {
       break;
     }
@@ -357,13 +361,15 @@ vector<TsTimePartition*> TsSubEntityGroup::GetPartitionTables(const KwTsSpan& ts
 std::shared_ptr<TsSubGroupPTIterator> TsSubEntityGroup::GetPTIterator(const std::vector<KwTsSpan>& ts_spans) {
   std::vector<timestamp64> p_times;
   {
+    std::vector<AttributeInfo> schema;
+    auto ts_type = root_tbl_manager_->GetTsColDataType();
     // filter all partition time that match ts_spans.
     timestamp64 max_ts, pts_begin, pts_end;
     rdLock();
     for (auto it = partitions_ts_.begin() ; it != partitions_ts_.end() ; it++) {
       for (auto& ts_span : ts_spans) {
-        pts_begin = ts_span.begin / 1000;
-        pts_end = ts_span.end / 1000;
+        pts_begin = convertTsToPTime(ts_span.begin, ts_type);
+        pts_end = convertTsToPTime(ts_span.end, ts_type);
         if (!(it->first > pts_end || it->second <= pts_begin)) {
           p_times.emplace_back(it->first);
           break;
@@ -512,7 +518,7 @@ TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path,
     delete mt_table;
     return nullptr;
   }
-
+  // min and max timsstamp precision is second.
   mt_table->minTimestamp() = p_time;
   mt_table->maxTimestamp() = max_ts;
   return mt_table;

@@ -1885,10 +1885,10 @@ ERROR: negative value for LIMIT
   2023-05-10 09:15:10+00:00 | 5000 |     1 |     1 | \x74
 (6 rows)
 > select time_bucket(k_timestamp,'10s') as tb,max(k_timestamp+e1) from test_select_timebucket.tb group by tb order by tb;
-ERROR: max(): unsupported binary operator: <timestamptz> + <timestamptz>
+ERROR: max(): unsupported binary operator: <timestamptz(3)> + <timestamptz(3)>
 SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10s') as tb,max(k_timestamp+k_timestamp) from test_select_timebucket.tb group by tb order by tb;
-ERROR: max(): unsupported binary operator: <timestamptz> + <timestamptz>
+ERROR: max(): unsupported binary operator: <timestamptz(3)> + <timestamptz(3)>
 SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10s') as tb,max(e2-e3),sum(e4*e3) from test_select_timebucket.tb group by tb order by tb;
              tb             |  max  |    sum
@@ -2074,7 +2074,7 @@ SQLSTATE: 22023
   2023-05-10 09:15:10+00:00 |     1
 (6 rows)
 > select time_bucket(k_timestamp,'10s') as tb,max(k_timestamp)+min(e1) from test_select_timebucket.tb group by tb order by tb;
-ERROR: unsupported binary operator: <timestamptz> + <timestamptz>
+ERROR: unsupported binary operator: <timestamptz(3)> + <timestamptz(3)>
 SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10s') as tb,max(e2)-min(e3) from test_select_timebucket.tb group by tb order by tb;
              tb             | ?column?
@@ -2182,7 +2182,7 @@ SQLSTATE: 22023
   2024-05-10 23:23:20+00:00 |        0
 (2 rows)
 > select time_bucket(k_timestamp,'10s') as tb,max(e1)+min(t1),max(t2)-min(e3) from test_select_timebucket.tb group by tb order by tb;
-ERROR: unsupported binary operator: <timestamptz> + <int2>
+ERROR: unsupported binary operator: <timestamptz(3)> + <int2>
 SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10s') as tb,sum(t5)*avg(e6),sum(e5)/avg(t6) from test_select_timebucket.tb group by tb order by tb;
              tb             |        ?column?        |      ?column?
@@ -2259,7 +2259,10 @@ SQLSTATE: 22007
 ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
 SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10ns') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
-ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
-SQLSTATE: 22023
+               tb
+---------------------------------
+  2023-05-10 09:15:15.783+00:00
+  2024-05-10 23:23:23.783+00:00
+(2 rows)
 > use defaultdb;drop database test_select_timebucket cascade;
 DROP DATABASE

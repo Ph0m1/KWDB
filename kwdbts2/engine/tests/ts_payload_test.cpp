@@ -76,6 +76,7 @@ TEST_F(TestPayload, insert) {
   std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -85,6 +86,7 @@ TEST_F(TestPayload, insert) {
 
   // Verify the correctness of written data
   KwTsSpan ts_span = {start_ts, start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -127,6 +129,7 @@ TEST_F(TestPayload, insertNull) {
   std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -136,6 +139,7 @@ TEST_F(TestPayload, insertNull) {
 
   // Verify the correctness of written data
   KwTsSpan ts_span = {start_ts, start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -187,6 +191,7 @@ TEST_F(TestPayload, columnInsert) {
 
   // Verify the correctness of written data
   KwTsSpan ts_span = {start_ts, start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -237,7 +242,9 @@ TEST_F(TestPayload, columnInsertNull) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // Verify the correctness of written data
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   KwTsSpan ts_span = {start_ts, start_ts + 1000000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -251,7 +258,7 @@ TEST_F(TestPayload, columnInsertNull) {
   bool is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
 //  ASSERT_EQ(count, 100);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(*(static_cast<k_int16*>(static_cast<void*>(res.data[1][0]->mem))), 11);
   ASSERT_EQ(res.data[0][0]->isNull(0, &is_null), KStatus::SUCCESS);
   ASSERT_TRUE(!is_null);
@@ -296,7 +303,9 @@ TEST_F(TestPayload, varColumnInsert) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // Verify the correctness of written data
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   KwTsSpan ts_span = {start_ts, start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2, 4};
@@ -310,7 +319,7 @@ TEST_F(TestPayload, varColumnInsert) {
   string test_str1 = "abcdefgh";
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, row_num_);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(memcmp(res.data[1][0]->mem, test_str1.c_str(), test_str1.size()), 0);
 
   string test_str2 = "abcdefghijklmnopqrstuvwxyz";
@@ -370,6 +379,7 @@ TEST_F(TestPayload, varColumnInsert1) {
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   KwTsSpan ts_span = {get_start_ts, get_start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -422,7 +432,9 @@ TEST_F(TestPayload, varColumnInsertNull) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // Verify the correctness of written data
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   KwTsSpan ts_span = {start_ts, start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_type);
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2, 4};
@@ -435,7 +447,7 @@ TEST_F(TestPayload, varColumnInsertNull) {
   bool is_finished = false;
   ASSERT_EQ(iter->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, row_num_);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
 
   string test_str2 = "abcdefghijklmnopqrstuvwxyz";
   bool is_null;
@@ -496,6 +508,7 @@ TEST_F(TestPayload, columnInsertTimestamp) {
 
   // Verify the correctness of written data
   KwTsSpan ts_span = {start_ts, start_ts + 10000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -565,7 +578,6 @@ TEST_F(TestPayload, multityVarColumnInsert1) {
   }
 
   // Verify the correctness of written data
-  KwTsSpan ts_span = {start_ts_iter, start_ts_iter + 10000000};
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -574,6 +586,8 @@ TEST_F(TestPayload, multityVarColumnInsert1) {
   std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  KwTsSpan ts_span = {start_ts_iter, start_ts_iter + 10000000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -647,7 +661,6 @@ TEST_F(TestPayload, multityColumnInsert) {
   KTimestamp start_ts_iter = std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
   // Verify the correctness of written data
-  KwTsSpan ts_span = {0, start_ts_iter + 10000000};
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -656,6 +669,8 @@ TEST_F(TestPayload, multityColumnInsert) {
   std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  KwTsSpan ts_span = {0, start_ts_iter + 10000000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -730,7 +745,6 @@ TEST_F(TestPayload, multityColumnInsert1) {
   KTimestamp start_ts_iter = std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
   // Verify the correctness of written data
-  KwTsSpan ts_span = {0, start_ts_iter + 10000000};
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};
@@ -739,6 +753,8 @@ TEST_F(TestPayload, multityColumnInsert1) {
   std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  KwTsSpan ts_span = {0, start_ts_iter + 10000000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -812,7 +828,6 @@ TEST_F(TestPayload, multityVarColumnInsert) {
   KTimestamp start_ts_iter = std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
   // Verify the correctness of written data
-  KwTsSpan ts_span = {0, start_ts_iter + 10000000};
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1};
@@ -821,6 +836,8 @@ TEST_F(TestPayload, multityVarColumnInsert) {
   std::shared_ptr<TsTable> ts_table;
   s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  KwTsSpan ts_span = {0, start_ts_iter + 10000000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   std::shared_ptr<TsEntityGroup> tbl_range;
   s = ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -877,6 +894,7 @@ TEST_F(TestPayload, partitionRowsInsert) {
       (std::chrono::system_clock::now().time_since_epoch()).count();
   // Verify the correctness of written data
   KwTsSpan ts_span = {0, end_ts + 10000000};
+  ts_span = ConvertMsToPrecision(ts_span, ts_table->GetRootTableManager()->GetTsColDataType());
   SubGroupID group_id = 1;
   k_uint32 entity_id = 1;
   std::vector<k_uint32> scan_cols = {0, 1, 2};

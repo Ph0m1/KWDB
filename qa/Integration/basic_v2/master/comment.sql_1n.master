@@ -2254,7 +2254,7 @@ SQLSTATE: 42809
         table_name       |                                    create_statement
 -------------------------+-----------------------------------------------------------------------------------------
   test_comment.public.t1 | CREATE TABLE t1 (
-                         |     k_timestamp TIMESTAMPTZ NOT NULL,
+                         |     k_timestamp TIMESTAMPTZ(3) NOT NULL,
                          |     id INT4 NOT NULL
                          | ) TAGS (
                          |     code1 INT2 NOT NULL,

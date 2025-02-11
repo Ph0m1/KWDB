@@ -333,7 +333,7 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
 
   // Examine the timestamp of the first piece of data within the payload to verify the partition being written to
   KTimestamp first_ts_ms = payload.GetTimestamp(payload.GetStartRowId());
-  KTimestamp first_ts = convertTsToPTime(first_ts_ms);
+  KTimestamp first_ts = convertTsToPTime(first_ts_ms, root_bt_manager_->GetTsColDataType());
   timestamp64 first_max_ts;
   uint32_t hash_point = payload.getHashPoint();
   last_p_time = sub_group->PartitionTime(first_ts, first_max_ts);
@@ -502,7 +502,7 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
   }
   ErrorInfo err_info;
   vector<TsTimePartition*> p_tables =
-      ebt_manager_->GetPartitionTables({convertTsToPTime(min_ts), convertTsToPTime(max_ts)}, subgroup_id, err_info);
+      ebt_manager_->GetPartitionTables({min_ts, max_ts}, subgroup_id, err_info);
   if (err_info.errcode < 0) {
     LOG_ERROR("GetPartitionTable error : %s", err_info.errmsg.c_str());
     return KStatus::FAIL;
@@ -751,8 +751,7 @@ KStatus TsEntityGroup::GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts
     k_uint32 total_entity_cnt = 0;
     k_uint32 unordered_entity_cnt = 0;
     std::vector<uint32_t> entities = subgroup->GetEntities();
-    KwTsSpan p_span{ts_span.begin / 1000, ts_span.end / 1000};
-    vector<TsTimePartition*> partitions = ebt_manager_->GetPartitionTables(p_span, i, err_info);
+    vector<TsTimePartition*> partitions = ebt_manager_->GetPartitionTables(ts_span, i, err_info);
     for (auto entity_id : entities) {
       bool is_in_span = false;
       bool is_disordered = false;
@@ -900,6 +899,24 @@ TsEntityGroup::GetColAttributeInfo(kwdbContext_p ctx, const roachpb::KWDBKTSColu
       }
       attr_info.max_len = 3;
       break;
+    case roachpb::TIMESTAMP_MICRO:
+    case roachpb::TIMESTAMPTZ_MICRO:
+    if (first_col) {
+        attr_info.type = DATATYPE::TIMESTAMP64_LSN_MICRO;
+      } else {
+        attr_info.type = DATATYPE::TIMESTAMP64_MICRO;
+      }
+      attr_info.max_len = 6;
+      break;
+    case roachpb::TIMESTAMP_NANO:
+    case roachpb::TIMESTAMPTZ_NANO:
+      if (first_col) {
+        attr_info.type = DATATYPE::TIMESTAMP64_LSN_NANO;
+      } else {
+        attr_info.type = DATATYPE::TIMESTAMP64_NANO;
+      }
+      attr_info.max_len = 9;
+      break;
     case roachpb::SMALLINT:
       attr_info.type = DATATYPE::INT16;
       break;
@@ -969,8 +986,20 @@ TsEntityGroup::GetMetricColumnInfo(kwdbContext_p ctx, struct AttributeInfo& attr
     case DATATYPE::TIMESTAMP64_LSN:
       col.set_storage_type(roachpb::TIMESTAMPTZ);
       break;
+    case DATATYPE::TIMESTAMP64_LSN_MICRO:
+      col.set_storage_type(roachpb::TIMESTAMPTZ_MICRO);
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_NANO:
+      col.set_storage_type(roachpb::TIMESTAMPTZ_NANO);
+      break;
     case DATATYPE::TIMESTAMP64:
       col.set_storage_type(roachpb::TIMESTAMP);
+      break;
+    case DATATYPE::TIMESTAMP64_MICRO:
+      col.set_storage_type(roachpb::TIMESTAMP_MICRO);
+      break;
+    case DATATYPE::TIMESTAMP64_NANO:
+      col.set_storage_type(roachpb::TIMESTAMP_NANO);
       break;
     case DATATYPE::INT16:
       col.set_storage_type(roachpb::SMALLINT);
@@ -1045,8 +1074,20 @@ TsEntityGroup::GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roa
     case DATATYPE::TIMESTAMP64_LSN:
       col.set_storage_type(roachpb::TIMESTAMPTZ);
       break;
+    case DATATYPE::TIMESTAMP64_LSN_MICRO:
+      col.set_storage_type(roachpb::TIMESTAMPTZ_MICRO);
+      break;
+    case DATATYPE::TIMESTAMP64_LSN_NANO:
+      col.set_storage_type(roachpb::TIMESTAMPTZ_NANO);
+      break;
     case DATATYPE::TIMESTAMP64:
       col.set_storage_type(roachpb::TIMESTAMP);
+      break;
+    case DATATYPE::TIMESTAMP64_MICRO:
+      col.set_storage_type(roachpb::TIMESTAMP_MICRO);
+      break;
+    case DATATYPE::TIMESTAMP64_NANO:
+      col.set_storage_type(roachpb::TIMESTAMP_NANO);
       break;
     case DATATYPE::INT16:
       col.set_storage_type(roachpb::SMALLINT);
@@ -1684,11 +1725,14 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, uint32_t& com
       compress_entity_groups.push_back(entity_group.second);
     }
   }
+
+  timestamp64 precision_ts = convertSecondToPrecisionTS(ts, GetRootTableManager()->GetTsColDataType());
+  LOG_DEBUG("Compressing table[%lu] , end ts is : %ld. ts: %ld", table_id_, precision_ts, ts);
   for (auto& entity_group : compress_entity_groups) {
     if (!entity_group) {
       continue;
     }
-    s = entity_group->Compress(ctx, ts, compressed_num, err_info);
+    s = entity_group->Compress(ctx, precision_ts, compressed_num, err_info);
     if (s != KStatus::SUCCESS) {
       LOG_ERROR("TsTableRange compress failed : %s", tbl_sub_path_.c_str());
       break;
@@ -1830,7 +1874,7 @@ KStatus TsTable::GetAvgTableRowSize(kwdbContext_p ctx, uint64_t* row_size) {
     if (col.type == DATATYPE::VARSTRING || col.type == DATATYPE::VARBINARY) {
       row_length += col.max_len;
     } else {
-      row_length += col.length;
+      row_length += col.size;
     }
   }
   // todo(liangbo01): make precise estimate if needed.
@@ -1878,8 +1922,7 @@ KStatus TsTable::GetDataVolume(kwdbContext_p ctx, uint64_t begin_hash, uint64_t 
         LOG_ERROR("cannot get subgroup [%u] in entitygroup [%lu]", sub_grp.first, entity_grp.first);
         return KStatus::FAIL;
       }
-      partitions = cur_sub_group->GetPartitionTables({convertTsToPTime(ts_span.begin), convertTsToPTime(ts_span.end)},
-                                                     err_info);
+      partitions = cur_sub_group->GetPartitionTables(ts_span, err_info);
       if (err_info.errcode < 0) {
           LOG_ERROR("cannot get partitions [%lu - %u]", entity_grp.first, sub_grp.first);
           return KStatus::FAIL;
@@ -1944,6 +1987,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
   TsSubEntityGroup* cur_sub_group = nullptr;
   ErrorInfo err_info;
   std::vector<TsTimePartition*> partitions;
+  auto ts_type = GetRootTableManager()->GetTsColDataType();
   for (auto entity_grp : entities) {
     s = GetEntityGroup(ctx, entity_grp.first, &cur_entity_group);
     if (s != KStatus::SUCCESS) {
@@ -1958,8 +2002,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
         LOG_ERROR("cannot get subgroup [%u] in entitygroup [%lu]", sub_grp.first, entity_grp.first);
         return KStatus::FAIL;
       }
-      partitions = cur_sub_group->GetPartitionTables({convertTsToPTime(ts_span.begin), convertTsToPTime(ts_span.end)},
-                                                     err_info);
+      partitions = cur_sub_group->GetPartitionTables(ts_span, err_info);
       if (err_info.errcode < 0) {
           LOG_ERROR("cannot get partitions [%lu - %u]", entity_grp.first, sub_grp.first);
           return KStatus::FAIL;
@@ -2000,7 +2043,8 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
             if (p_min_ts >= p_max_ts) {
               continue;
             }
-            if (p_min_ts < partition->minTimestamp() * 1000 || p_max_ts > partition->maxTimestamp() * 1000) {
+            if (p_min_ts < convertSecondToPrecisionTS(partition->minTimestamp(), ts_type)
+                || p_max_ts > convertSecondToPrecisionTS(partition->maxTimestamp(), ts_type)) {
               continue;
             }
             if (partitions_mid_ts.find(partition_time) != partitions_mid_ts.end()) {
@@ -2031,7 +2075,7 @@ KStatus TsTable::GetDataVolumeHalfTS(kwdbContext_p ctx, uint64_t begin_hash, uin
   for (auto &iter : partitions_rows) {
     find_min_ts = iter.first;
     if (scan_pt_rows + iter.second > total_rows / 2) {
-      *half_ts = iter.first * 1000;
+      *half_ts = convertSecondToPrecisionTS(iter.first, ts_type);
       break;
     } else {
       scan_pt_rows += iter.second;
@@ -2149,8 +2193,7 @@ KStatus TsTable::DeleteTotalRange(kwdbContext_p ctx, uint64_t begin_hash, uint64
         return KStatus::FAIL;
       }
       std::vector<TsTimePartition*> partitions;
-      partitions = cur_sub_group->GetPartitionTables({convertTsToPTime(ts_span.begin), convertTsToPTime(ts_span.end)},
-                                                     err_info);
+      partitions = cur_sub_group->GetPartitionTables(ts_span, err_info);
       if (err_info.errcode < 0) {
           LOG_ERROR("cannot get partitions [%u]", sub_grp.first);
           return KStatus::FAIL;
@@ -2880,7 +2923,6 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
   ErrorInfo err_info;
   timestamp64 block_min_ts = INT64_MAX;
   timestamp64 block_max_ts = INT64_MIN;
-  KwTsSpan p_span{convertTsToPTime(ts_span.begin), convertTsToPTime(ts_span.end)};
   // Traverse all entity groups
   for (int entity_group_idx = 0; entity_group_idx < entity_groups.size(); ++entity_group_idx) {
     auto& entity_group = entity_groups[entity_group_idx];
@@ -2893,7 +2935,7 @@ KStatus TsTable::GetDataRowNum(kwdbContext_p ctx, const KwTsSpan& ts_span, uint6
         err_info.clear();
         continue;
       }
-      auto partition_tables = subgroup->GetPartitionTables(p_span, err_info);
+      auto partition_tables = subgroup->GetPartitionTables(ts_span, err_info);
       if (err_info.errcode < 0) {
         LOG_ERROR("GetPartitionTables failed, error_info: %s", err_info.errmsg.c_str());
         break;
@@ -3000,7 +3042,7 @@ bool TsEntityGroup::payloadNextSlice(TsSubEntityGroup* sub_group, Payload& paylo
   // Search through the rows in the payload to locate the next partition time with a different timestamp
   for (int32_t row_id = start_row; row_id < payload.GetRowCount(); row_id++) {
     KTimestamp cur_ts_ms = payload.GetTimestamp(row_id);
-    KTimestamp cur_ts = convertTsToPTime(cur_ts_ms);
+    KTimestamp cur_ts = convertTsToPTime(cur_ts_ms, root_bt_manager_->GetTsColDataType());
 
     timestamp64 max_ts;
 
@@ -3028,7 +3070,7 @@ bool TsEntityGroup::findPartitionPayload(TsSubEntityGroup* sub_group, Payload& p
   // Inspect whether the initial row falls outside the data range
   int start_row = payload.GetStartRowId();
   KTimestamp first_ts_ms = payload.GetTimestamp(payload.GetStartRowId());
-  KTimestamp first_ts = first_ts_ms / 1000;
+  KTimestamp first_ts = convertTsToPTime(first_ts_ms, root_bt_manager_->GetTsColDataType());
   timestamp64 first_max_ts;
 
   timestamp64 last_p_time = sub_group->PartitionTime(first_ts, first_max_ts);
@@ -3040,7 +3082,7 @@ bool TsEntityGroup::findPartitionPayload(TsSubEntityGroup* sub_group, Payload& p
   // Search through the rows in the payload to locate the next partition time with a different timestamp
   for (int32_t row_id = payload.GetStartRowId(); row_id < payload.GetRowCount(); row_id++) {
     KTimestamp cur_ts_ms = payload.GetTimestamp(row_id);
-    KTimestamp cur_ts = convertTsToPTime(cur_ts_ms);
+    KTimestamp cur_ts = convertTsToPTime(cur_ts_ms, root_bt_manager_->GetTsColDataType());
 
     timestamp64 max_ts;
     // Calculate the partition time for the current row and compare it with the previous partition time.

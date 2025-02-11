@@ -43,7 +43,7 @@ query TTBTTTBBT colnames
 SHOW COLUMNS FROM t WITH COMMENT
 ----
 column_name  data_type  is_nullable  column_default     generation_expression  indices    is_hidden  is_tag  comment
-a            INT8       false        42          ·                      {primary}  false      false   a
+a            INT8       false        42                 ·                      {primary}  false      false   a
 b            TIMESTAMP  true         now():::TIMESTAMP  ·                      {}         false      false   NULL
 c            FLOAT8     true         random()           ·                      {}         false      false   NULL
 d            DATE       true         now():::DATE       ·                      {}         false      false   NULL

@@ -219,7 +219,7 @@ SQLSTATE: 22023
 ERROR: unsupported binary operator: <varchar> * <varbytes>
 SQLSTATE: 22023
 > select t1+e1 from test_select_tag9.tb order by k_timestamp;
-ERROR: unsupported binary operator: <int2> + <timestamptz>
+ERROR: unsupported binary operator: <int2> + <timestamptz(3)>
 SQLSTATE: 22023
 > select t2+e2 from test_select_tag9.tb order by k_timestamp;
    ?column?
@@ -394,7 +394,7 @@ SQLSTATE: 22023
 ERROR: unsupported binary operator: <varchar> / <varchar>
 SQLSTATE: 22023
 > select t1+e1 from test_select_tag9.tb order by k_timestamp;
-ERROR: unsupported binary operator: <int2> + <timestamptz>
+ERROR: unsupported binary operator: <int2> + <timestamptz(3)>
 SQLSTATE: 22023
 > select t1-e2 from test_select_tag9.tb order by k_timestamp;
   ?column?

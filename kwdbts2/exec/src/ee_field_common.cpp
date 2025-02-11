@@ -25,8 +25,12 @@
 namespace kwdbts {
 
 std::unordered_map<roachpb::DataType, Field_result> reslut_map = {
-    {roachpb::DataType::TIMESTAMP, Field_result::INT_RESULT},
-    {roachpb::DataType::TIMESTAMPTZ, Field_result::INT_RESULT},
+    {roachpb::DataType::TIMESTAMP, Field_result::TIMESTAMP_RESULT},
+    {roachpb::DataType::TIMESTAMPTZ, Field_result::TIMESTAMP_RESULT},
+    {roachpb::DataType::TIMESTAMP_MICRO, Field_result::TIMESTAMP_RESULT},
+    {roachpb::DataType::TIMESTAMPTZ_MICRO, Field_result::TIMESTAMP_RESULT},
+    {roachpb::DataType::TIMESTAMP_NANO, Field_result::TIMESTAMP_RESULT},
+    {roachpb::DataType::TIMESTAMPTZ_NANO, Field_result::TIMESTAMP_RESULT},
     {roachpb::DataType::DATE, Field_result::INT_RESULT},
     {roachpb::DataType::SMALLINT, Field_result::INT_RESULT},
     {roachpb::DataType::INT, Field_result::INT_RESULT},
@@ -66,6 +70,10 @@ Field_result ResolveResultType(roachpb::DataType type) {
   switch (type) {
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::SMALLINT:
     case roachpb::DataType::INT:
@@ -144,6 +152,16 @@ Field_result field_cmp_type(roachpb::DataType a, roachpb::DataType b) {
     return Field_result::STRING_RESULT;
   }
 
+  if (result_a == Field_result::TIMESTAMP_RESULT &&
+      result_b == Field_result ::TIMESTAMP_RESULT) {
+    return TIMESTAMP_RESULT;
+  }
+
+  if (result_a == Field_result::TIMESTAMP_RESULT ||
+      result_b == Field_result::TIMESTAMP_RESULT) {
+    return INT_RESULT;
+  }
+
   if (b == roachpb::NULLVAL && a == roachpb::NULLVAL) {
     return Field_result::NULL_RESULT;
   }
@@ -194,6 +212,64 @@ bool ArgComparator::set_cmp_func(Field **left, Field **right) {
         func_ = &ArgComparator::compare_binary_string;
       }
       break;
+    }
+    case Field_result::TIMESTAMP_RESULT: {
+      func_ = &ArgComparator::compare_timestamp;
+      switch (sql_type_a) {
+      case roachpb::DataType::TIMESTAMP:
+      case roachpb::DataType::TIMESTAMPTZ:
+        switch (sql_type_b) {
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+            timestamp_scale_a_ = 1000;
+            timestamp_scale_b_ = 1;
+            break;
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
+            timestamp_scale_a_ = 1000000;
+            timestamp_scale_b_ = 1;
+            break;
+        default:
+          break;
+        }
+        break;
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        switch (sql_type_b) {
+          case roachpb::DataType::TIMESTAMP:
+          case roachpb::DataType::TIMESTAMPTZ:
+            timestamp_scale_a_ = 1;
+            timestamp_scale_b_ = 1000;
+            break;
+          case roachpb::DataType::TIMESTAMP_NANO:
+          case roachpb::DataType::TIMESTAMPTZ_NANO:
+            timestamp_scale_a_ = 1000;
+            timestamp_scale_b_ = 1;
+            break;
+        default:
+          break;
+        }
+        break;
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
+        switch (sql_type_b) {
+          case roachpb::DataType::TIMESTAMP:
+          case roachpb::DataType::TIMESTAMPTZ:
+            timestamp_scale_a_ = 1;
+            timestamp_scale_b_ = 1000000;
+            break;
+          case roachpb::DataType::TIMESTAMP_MICRO:
+          case roachpb::DataType::TIMESTAMPTZ_MICRO:
+            timestamp_scale_a_ = 1;
+            timestamp_scale_b_ = 1000;
+            break;
+        default:
+          break;
+        }
+        break;
+      default:
+        break;
+      }
     }
   }
 
@@ -273,6 +349,32 @@ k_int32 ArgComparator::compare_binary_string(char *ptr1, char *ptr2,
   String s1 = ptr1 ? (*left_)->ValStr(ptr1) : (*left_)->ValStr();
   String s2 = ptr2 ? (*right_)->ValStr(ptr2) : (*right_)->ValStr();
   return compare_binary_string(s1, s2);
+}
+
+int ArgComparator::compare_timestamp(char *ptr1, char *ptr2, k_bool is_null1,
+                                     k_bool is_null2) {
+  if (is_null1 || is_null2) {
+    return compare_null(is_null1, is_null2);
+  }
+
+  k_int64 val1 = ptr1 ? (*left_)->ValInt(ptr1) : (*left_)->ValInt();
+  k_int64 val2 = ptr2 ? (*right_)->ValInt(ptr2) : (*right_)->ValInt();
+
+  return compare_timestamp(val1, val2);
+}
+
+int ArgComparator::compare_timestamp(k_int64 val1, k_int64 val2) {
+  if (I64_SAFE_MUL_CHECK(val1, timestamp_scale_a_) &&
+      I64_SAFE_MUL_CHECK(val2, timestamp_scale_b_)) {
+        val1 *= timestamp_scale_a_;
+        val2 *= timestamp_scale_b_;
+    if (val1 < val2) return -1;
+    if (val1 == val2) return 0;
+    return 1;
+  }
+  EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                "Timestamp/TimestampTZ out of range");
+  return 0;
 }
 
 int ArgComparator::compare_null(k_bool is_null1, k_bool is_null2) {

@@ -59,7 +59,7 @@ class FieldConstInterval : public FieldConst {
   FieldConstInterval(roachpb::DataType datatype, const KString &str)
   : FieldConst(datatype, str.size()) {
     value_ = str;
-    storage_type_ = roachpb::DataType::TIMESTAMP;
+    // storage_type_ = roachpb::DataType::TIMESTAMP;
     storage_len_ = sizeof(k_int64);
     return_type_ = KWDBTypeFamily::IntervalFamily;
     type_ = FIELD_INTERVAL;

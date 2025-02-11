@@ -390,6 +390,12 @@ func GenerateRandInterestingTable(db *gosql.DB, dbName, tableName string) error 
 	numRows := 0
 	for _, v := range randInterestingDatums {
 		colTyp := v[0].ResolvedType()
+		switch v[0].(type) {
+		case *tree.DTimestamp:
+			colTyp = types.Timestamp
+		case *tree.DTimestampTZ:
+			colTyp = types.TimestampTZ
+		}
 		randTypes = append(randTypes, colTyp)
 		colNames = append(colNames, colTyp.Name())
 		if len(v) > numRows {
@@ -750,7 +756,7 @@ func randType(rng *rand.Rand, typs []*types.T) *types.T {
 func RandColumnType(rng *rand.Rand) *types.T {
 	for {
 		typ := RandType(rng)
-		if err := ValidateColumnDefType(typ); err == nil {
+		if err := ValidateColumnDefType(typ, tree.RelationalTable); err == nil {
 			return typ
 		}
 	}
@@ -837,7 +843,7 @@ func RandEncodableColumnTypes(rng *rand.Rand, numCols int) []types.T {
 	for i := range types {
 		for {
 			types[i] = *RandEncodableType(rng)
-			if err := ValidateColumnDefType(&types[i]); err == nil {
+			if err := ValidateColumnDefType(&types[i], tree.RelationalTable); err == nil {
 				break
 			}
 		}
@@ -911,9 +917,9 @@ func RandEncDatumRowsOfTypes(rng *rand.Rand, numRows int, types []types.T) EncDa
 //
 // The value types must match the primary key columns (or a prefix of them);
 // supported types are: - Datum
-//  - bool (converts to DBool)
-//  - int (converts to DInt)
-//  - string (converts to DString)
+//   - bool (converts to DBool)
+//   - int (converts to DInt)
+//   - string (converts to DString)
 func TestingMakePrimaryIndexKey(desc *TableDescriptor, vals ...interface{}) (roachpb.Key, error) {
 	index := &desc.PrimaryIndex
 	if len(vals) > len(index.ColumnIDs) {

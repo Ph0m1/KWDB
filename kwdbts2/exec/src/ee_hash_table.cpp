@@ -130,6 +130,10 @@ void LinearProbingHashTable::HashColumn(const DatumPtr ptr,
     }
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       k_int64 val = *reinterpret_cast<k_int64*>(ptr);
@@ -348,6 +352,10 @@ bool CompareColumn(DatumPtr left_ptr, DatumPtr right_ptr,
     }
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       k_int64 left = *reinterpret_cast<k_int64*>(left_ptr);

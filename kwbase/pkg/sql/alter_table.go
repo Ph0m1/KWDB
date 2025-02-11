@@ -287,7 +287,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			d = newDef
 			incTelemetryForNewColumn(d)
 
-			col, idx, expr, err := sqlbase.MakeColumnDefDescs(d, &params.p.semaCtx)
+			col, idx, expr, err := sqlbase.MakeColumnDefDescs(d, &params.p.semaCtx, tree.RelationalTable)
 			if err != nil {
 				return err
 			}
@@ -1683,7 +1683,8 @@ func applyColumnMutation(
 			}
 		}
 
-		err := sqlbase.ValidateColumnDefType(typ)
+		typ = sqlbase.UpdateTimeColPrecision(typ, tableDesc.TableType)
+		err := sqlbase.ValidateColumnDefType(typ, tableDesc.TableType)
 		if err != nil {
 			return false, err
 		}
@@ -2076,6 +2077,10 @@ func validateAlterTSType(
 		return false, validateTextType(colName, oldType, newType, colType)
 		// timestamp type
 	case oid.T_timestamp, oid.T_timestamptz:
+		newType = sqlbase.UpdateTimeColPrecision(newType, tree.TimeseriesTable)
+		if newType.Precision() != oldType.Precision() {
+			return false, newTypeConvertError(colName, oldType, newType)
+		}
 		if newType.Oid() == oid.T_timestamp || newType.Oid() == oid.T_timestamptz {
 			return true, nil
 		}

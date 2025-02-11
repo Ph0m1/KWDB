@@ -592,22 +592,22 @@ eval
 eval
 '12:01:02.123456789'::interval::text
 ----
-'12:01:02.123457'
+'12:01:02.123456789'
 
 eval
 '12:01:02.1234564'::interval
 ----
-'12:01:02.123456'
+'12:01:02.1234564'
 
 eval
 '12:01:02.1234565'::interval
 ----
-'12:01:02.123457'
+'12:01:02.1234565'
 
 eval
 '12:01:02.1234566'::interval
 ----
-'12:01:02.123457'
+'12:01:02.1234566'
 
 eval
 interval '1'
@@ -853,7 +853,7 @@ eval
 eval
 7203.000004005::decimal::interval
 ----
-'02:00:03.000004'
+'02:00:03.000004005'
 
 eval
 '2h3s4us'::interval::decimal::interval
@@ -878,7 +878,7 @@ eval
 eval
 (-2775604.000005006)::decimal::interval
 ----
-'-1 mons -2 days -03:00:04.000005'
+'-1 mons -2 days -03:00:04.000005006'
 
 eval
 '-1mon-2d-3h-4s-5us'::interval::decimal::interval
@@ -889,13 +889,13 @@ eval
 eval
 (decimal '9223372036854775807.000000001')::interval::decimal
 ----
-9223372036854775807.000000000
+9223372036854775807.000000001
 
 # MinInt64
 eval
 (decimal '-9223372036854775808.000000001')::interval::decimal
 ----
--9223372036854775808.000000000
+-9223372036854775808.000000001
 
 # MaxInt64
 eval
@@ -942,17 +942,17 @@ eval
 eval
 '1mon2d3h4s5us'::interval::float::interval
 ----
-'1 mon 2 days 03:00:04.000005'
+'1 mon 2 days 03:00:04.000004999'
 
 eval
 (-2775604.000005006)::float::interval
 ----
-'-1 mons -2 days -03:00:04.000005'
+'-1 mons -2 days -03:00:04.000005005'
 
 eval
 '-1mon-2d-3h-4s-5us'::interval::float::interval
 ----
-'-1 mons -2 days -03:00:04.000005'
+'-1 mons -2 days -03:00:04.000004999'
 
 eval
 10::int8::date

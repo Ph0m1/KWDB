@@ -132,7 +132,10 @@ struct GroupKeyHasher {
           break;
         }
         case roachpb::DataType::TIMESTAMP:
-        case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT: {
           if (const k_int64* pval = get_if<k_int64>(&gkc.group_key_values_[i])) {

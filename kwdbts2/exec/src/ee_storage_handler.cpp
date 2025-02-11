@@ -450,11 +450,15 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
           }
           memcpy(ptr, &val, sizeof(k_int32));
         } break;
-        case roachpb::DataType::TIMESTAMP: {
+        case roachpb::DataType::TIMESTAMP:
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO: {
           k_uint64 val = std::stoll(str);
           memcpy(ptr, &val, sizeof(KTimestamp));
         } break;
-        case roachpb::DataType::TIMESTAMPTZ: {
+        case roachpb::DataType::TIMESTAMPTZ:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO: {
           k_uint64 val = std::stoll(str);
           memcpy(ptr, &val, sizeof(KTimestampTz));
         }

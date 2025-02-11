@@ -2271,7 +2271,7 @@ func TestPrettyPrintValueEncoded(t *testing.T) {
 		{EncodeTimeTZValue(nil, NoColumnID,
 			timetz.MakeTimeTZ(timeofday.New(10, 11, 12, 0), 5*60*60+24)), "10:11:12-05:00:24"},
 		{EncodeDurationValue(nil, NoColumnID,
-			duration.DecodeDuration(1, 2, 3)), "1 mon 2 days 00:00:00+3ns"},
+			duration.DecodeDuration(1, 2, 3)), "1 mon 2 days 00:00:00.000000003+3ns"},
 		{EncodeBytesValue(nil, NoColumnID, []byte{0x1, 0x2, 0xF, 0xFF}), "0x01020fff"},
 		{EncodeBytesValue(nil, NoColumnID, []byte("foo")), "foo"}, // printable bytes
 		{EncodeBytesValue(nil, NoColumnID, []byte{0x89}), "0x89"}, // non-printable bytes

@@ -243,11 +243,11 @@ TEST_F(TestWALManager, TestWALInsert) {
   TSSlice sl = pd2.GetColumnValue(0, 0);
   KTimestamp ts_chk = 0;
   memcpy(&ts_chk, sl.data, sizeof(KTimestamp));
-  EXPECT_EQ(ts_chk, start_ts);
+  EXPECT_EQ(ts_chk, convertMSToPrecisionTS(start_ts, mbt_->GetTsColDataType()));
 
   sl = pd2.GetTagValue(0);
   memcpy(&ts_chk, sl.data, sl.len);
-  EXPECT_EQ(ts_chk, start_ts);
+  EXPECT_EQ(ts_chk, convertMSToPrecisionTS(start_ts, mbt_->GetTsColDataType()));
 
   s = wal_->CreateCheckpoint(ctx_);
   EXPECT_EQ(s, KStatus::SUCCESS);

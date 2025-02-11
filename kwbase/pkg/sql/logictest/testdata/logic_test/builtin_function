@@ -1865,7 +1865,7 @@ bool
 unknown
 interval
 date
-timestamptz
+timestamptz(9)
 bytes
 int[]
 

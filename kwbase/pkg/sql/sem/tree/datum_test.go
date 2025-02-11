@@ -125,20 +125,20 @@ func TestDatumOrdering(t *testing.T) {
 
 		// Intervals
 		{`'1 day':::interval`, noPrev, noNext,
-			`'-768614336404564650 years -8 mons -9223372036854775808 days -2562047:47:16.854775'`,
-			`'768614336404564650 years 7 mons 9223372036854775807 days 2562047:47:16.854775'`},
+			`'-768614336404564650 years -8 mons -9223372036854775808 days -2562047:47:16.854775808'`,
+			`'768614336404564650 years 7 mons 9223372036854775807 days 2562047:47:16.854775807'`},
 		// Max interval: we use Postgres syntax, because Go doesn't accept
 		// months/days and ISO8601 doesn't accept nanoseconds.
 		{`'9223372036854775807 months 9223372036854775807 days ` +
-			`2562047 hours 47 minutes 16 seconds 854775 us':::interval`,
+			`2562047 hours 47 minutes 16 seconds 854775807 ns':::interval`,
 			noPrev, valIsMax,
-			`'-768614336404564650 years -8 mons -9223372036854775808 days -2562047:47:16.854775'`,
-			`'768614336404564650 years 7 mons 9223372036854775807 days 2562047:47:16.854775'`},
+			`'-768614336404564650 years -8 mons -9223372036854775808 days -2562047:47:16.854775808'`,
+			`'768614336404564650 years 7 mons 9223372036854775807 days 2562047:47:16.854775807'`},
 		{`'-9223372036854775808 months -9223372036854775808 days ` +
-			`-2562047 h -47 m -16 s -854775 us':::interval`,
+			`-2562047 h -47 m -16 s -854775808 ns':::interval`,
 			valIsMin, noNext,
-			`'-768614336404564650 years -8 mons -9223372036854775808 days -2562047:47:16.854775'`,
-			`'768614336404564650 years 7 mons 9223372036854775807 days 2562047:47:16.854775'`},
+			`'-768614336404564650 years -8 mons -9223372036854775808 days -2562047:47:16.854775808'`,
+			`'768614336404564650 years 7 mons 9223372036854775807 days 2562047:47:16.854775807'`},
 
 		// UUIDs
 		{`'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid`, `'ffffffff-ffff-ffff-ffff-fffffffffffe'`, valIsMax,
@@ -900,12 +900,12 @@ func TestNewDefaultDatum(t *testing.T) {
 		{t: types.Decimal, expected: "0:::DECIMAL"},
 		{t: types.MakeDecimal(10, 5), expected: "0:::DECIMAL"},
 		{t: types.Date, expected: "'2000-01-01':::DATE"},
-		{t: types.Timestamp, expected: "'0001-01-01 00:00:00+00:00':::TIMESTAMP"},
+		{t: types.Timestamp, expected: "'0001-01-01 00:00:00+00:00':::TIMESTAMP(9)"},
 		{t: types.Interval, expected: "'00:00:00':::INTERVAL"},
 		{t: types.String, expected: "'':::STRING"},
 		{t: types.MakeChar(3), expected: "'':::STRING"},
 		{t: types.Bytes, expected: "'\\x':::BYTES"},
-		{t: types.TimestampTZ, expected: "'0001-01-01 00:00:00+00:00':::TIMESTAMPTZ"},
+		{t: types.TimestampTZ, expected: "'0001-01-01 00:00:00+00:00':::TIMESTAMPTZ(9)"},
 		{t: types.MakeCollatedString(types.MakeVarChar(10, 0), "de"), expected: "'' COLLATE de"},
 		{t: types.MakeCollatedString(types.VarChar, "en_US"), expected: "'' COLLATE en_US"},
 		{t: types.Oid, expected: "26:::OID"},

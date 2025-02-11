@@ -168,7 +168,7 @@ statement error type TIMETZ is not supported until version upgrade is finalized
 CREATE TABLE regression_47110(a TIMETZ)
 
 statement ok
-CREATE TABLE regression_47110(a TIME)
+CREATE TABLE regression_47110(a TIME(6))
 
 statement error type TIMETZ is not supported until version upgrade is finalized
 ALTER TABLE regression_47110 ADD COLUMN b TIMETZ
@@ -180,13 +180,13 @@ ALTER TABLE regression_47110 ALTER a SET DATA TYPE timetz
 
 # default statements ok
 statement ok
-CREATE TABLE regression_47110_tt(tt_ok TIMESTAMP)
+CREATE TABLE regression_47110_tt(tt_ok TIMESTAMP(6))
 
 statement ok
-CREATE TABLE regression_47110_ttz(ttz_ok TIMESTAMPTZ)
+CREATE TABLE regression_47110_ttz(ttz_ok TIMESTAMPTZ(6))
 
 statement ok
-CREATE TABLE regression_47110_t(ttz_ok TIME)
+CREATE TABLE regression_47110_t(ttz_ok TIME(6))
 
 statement ok
 CREATE TABLE regression_47110_interval_ok(interval_ok INTERVAL)

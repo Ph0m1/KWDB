@@ -1335,7 +1335,7 @@ select time_bucket_gapfill(k_timestamp,) as tb from test_select_timebucket_gapfi
                                        ^
 HINT: try \hf time_bucket_gapfill
 > select time_bucket_gapfill(k_timestamp) as tb from test_select_timebucket_gapfill.tb group by tb order by tb limit 10;
-ERROR: unknown signature: time_bucket_gapfill_internal(TIMESTAMPTZ)
+ERROR: unknown signature: time_bucket_gapfill_internal(TIMESTAMPTZ(3))
 SQLSTATE: 42883
 > set time zone 8;
 SET

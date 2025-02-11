@@ -182,14 +182,16 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotAndInsertOther) {
 
   // scan table ,check if data is correct in table 1008.
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + row_num * 10};
+  std::shared_ptr<TsTable> ts_table_dest;
+  s = ts_engine_->GetTsTable(ctx_, desc_table_id, ts_table_dest);
+  ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table_dest->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type),
+                      convertMSToPrecisionTS( start_ts + row_num * 10, ts_type)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
   SubGroupID group_id = 1;
-  std::shared_ptr<TsTable> ts_table_dest;
-  s = ts_engine_->GetTsTable(ctx_, desc_table_id, ts_table_dest);
-  ASSERT_EQ(s, KStatus::SUCCESS);
   std::shared_ptr<TsEntityGroup> tbl_range_desc;
   s = ts_table_dest->GetEntityGroup(ctx_, test_range.range_group_id, &tbl_range_desc);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -200,7 +202,7 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotAndInsertOther) {
   bool is_finished = false;
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, row_num);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 0);
   delete iter1;
@@ -282,7 +284,6 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyData) {
 
   // scan table ,check if data is correct in table 1008.
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + (int64_t)(partition_num * iot_interval_ * 1000)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
@@ -290,6 +291,9 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyData) {
   std::shared_ptr<TsTable> ts_table_dest;
   s = ts_engine_->GetTsTable(ctx_, desc_table_id, ts_table_dest);
   ASSERT_EQ(s, KStatus::SUCCESS);
+  auto ts_type = ts_table_dest->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type),
+                      convertMSToPrecisionTS(start_ts + (int64_t)(partition_num * iot_interval_ * 1000), ts_type)};
   std::shared_ptr<TsEntityGroup> tbl_range_desc;
   s = ts_table_dest->GetEntityGroup(ctx_, test_range.range_group_id, &tbl_range_desc);
   ASSERT_EQ(s, KStatus::SUCCESS);
@@ -387,12 +391,13 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataDiffEntities) {
   std::shared_ptr<TsEntityGroup> tbl_range_desc;
   s = ts_table_dest->GetEntityGroup(ctx_, test_range.range_group_id, &tbl_range_desc);
   ASSERT_EQ(s, KStatus::SUCCESS);
-
+  auto ts_type = ts_table_dest->GetRootTableManager()->GetTsColDataType();
   // scan table ,check if data is correct in table 1008.
   for (size_t i = 0; i < partition_num; i++) {
-     k_uint32 entity_id = 1 + i;
-    KwTsSpan ts_span = {start_ts + (int64_t)(i * iot_interval_ * 1000),
-                      start_ts + (int64_t)((i + 1) * iot_interval_ * 1000)};
+    k_uint32 entity_id = 1 + i;
+    KwTsSpan ts_span =
+      {convertMSToPrecisionTS(start_ts + (int64_t)(i * iot_interval_ * 1000), ts_type),
+      convertMSToPrecisionTS(start_ts + (int64_t)((i + 1) * iot_interval_ * 1000), ts_type)};
     std::vector<k_uint32> scancols = {0, 1};
     std::vector<Sumfunctype> scanaggtypes;
     TsIterator* iter1;
@@ -532,11 +537,13 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataSameEntityDestNoEmpty) {
   KStatus s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
+  DATATYPE ts_type;
   // input data to  table 1007
   {
     std::shared_ptr<TsTable> ts_table;
     s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
     ASSERT_EQ(s, KStatus::SUCCESS);
+    ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
     std::shared_ptr<TsEntityGroup> tbl_range;
     s = ts_table->GetEntityGroup(ctx_, test_range.range_group_id, &tbl_range);
     ASSERT_EQ(s, KStatus::SUCCESS);
@@ -550,7 +557,7 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataSameEntityDestNoEmpty) {
 
   uint64_t snapshot_id;
   s = ts_engine_->CreateSnapshotForRead(ctx_, cur_table_id, 0, UINT64_MAX,
-                                        {INT64_MIN, start_ts + batch_num * 10}, &snapshot_id);
+                                        {INT64_MIN, convertMSToPrecisionTS(start_ts + batch_num * 10, ts_type)}, &snapshot_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // create table 1008
@@ -561,7 +568,7 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataSameEntityDestNoEmpty) {
   ASSERT_EQ(s, KStatus::SUCCESS);
   uint64_t desc_snapshot_id;
   s = ts_engine_->CreateSnapshotForWrite(ctx_, desc_table_id, 0, UINT64_MAX,
-                                      {INT64_MIN, start_ts + batch_num * 10}, &desc_snapshot_id);
+                                      {INT64_MIN, convertMSToPrecisionTS(start_ts + batch_num * 10, ts_type)}, &desc_snapshot_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
   // input data to  table 1008
   {
@@ -647,11 +654,13 @@ TEST_P(TestEngineSnapshotConvert, DestNoEmptyThreeTimes) {
   KStatus s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
+  DATATYPE ts_type;
   // input data to  table 1007
   {
     std::shared_ptr<TsTable> ts_table;
     s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
     ASSERT_EQ(s, KStatus::SUCCESS);
+    ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
     std::shared_ptr<TsEntityGroup> tbl_range;
     s = ts_table->GetEntityGroup(ctx_, test_range.range_group_id, &tbl_range);
     ASSERT_EQ(s, KStatus::SUCCESS);
@@ -686,11 +695,11 @@ TEST_P(TestEngineSnapshotConvert, DestNoEmptyThreeTimes) {
   for (int i = 0; i < 3; i++) {
     uint64_t snapshot_id;
     s = ts_engine_->CreateSnapshotForRead(ctx_, cur_table_id, 0, UINT64_MAX,
-                                          {INT64_MIN, start_ts + batch_num * 10 - 1}, &snapshot_id);
+                                          {INT64_MIN, convertMSToPrecisionTS(start_ts + batch_num * 10 - 1, ts_type)}, &snapshot_id);
     ASSERT_EQ(s, KStatus::SUCCESS);
     uint64_t desc_snapshot_id;
     s = ts_engine_->CreateSnapshotForWrite(ctx_, desc_table_id, 0, UINT64_MAX,
-                                        {INT64_MIN, start_ts + batch_num * 10 - 1}, &desc_snapshot_id);
+                                        {INT64_MIN, convertMSToPrecisionTS(start_ts + batch_num * 10 - 1, ts_type)}, &desc_snapshot_id);
     ASSERT_EQ(s, KStatus::SUCCESS);
 
     // migrate data from 1007 to 1008
@@ -721,7 +730,7 @@ TEST_P(TestEngineSnapshotConvert, DestNoEmptyThreeTimes) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // scan table ,check if data is correct in table 1008.
-  KwTsSpan ts_span = {start_ts, start_ts + batch_num * 10 - 1};
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + batch_num * 10 - 1, ts_type)};
   std::vector<k_uint32> scancols = {0, 1};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
@@ -740,7 +749,7 @@ TEST_P(TestEngineSnapshotConvert, DestNoEmptyThreeTimes) {
   }
   EXPECT_EQ(total_count, batch_num);
   delete iter1;
-  ts_span = {start_ts + batch_num * 10, INT64_MAX};
+  ts_span = {convertMSToPrecisionTS(start_ts + batch_num * 10, ts_type), INT64_MAX};
   ASSERT_EQ(tbl_range_desc->GetIterator(ctx_, 1, {1}, {ts_span}, scancols, scancols, scanaggtypes,
               1, &iter1, tbl_range_desc, {}, false, false), KStatus::SUCCESS);
   total_count = 0;
@@ -773,12 +782,13 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataSameEntityDestNoEmptyRollback) 
   std::vector<RangeGroup> ranges{test_range};
   KStatus s = ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges);
   ASSERT_EQ(s, KStatus::SUCCESS);
-
+  DATATYPE ts_type;
   // input data to  table 1007
   {
     std::shared_ptr<TsTable> ts_table;
     s = ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table);
     ASSERT_EQ(s, KStatus::SUCCESS);
+    ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
     std::shared_ptr<TsEntityGroup> tbl_range;
     s = ts_table->GetEntityGroup(ctx_, test_range.range_group_id, &tbl_range);
     ASSERT_EQ(s, KStatus::SUCCESS);
@@ -792,7 +802,7 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataSameEntityDestNoEmptyRollback) 
 
   uint64_t snapshot_id;
   s = ts_engine_->CreateSnapshotForRead(ctx_, cur_table_id, 0, UINT64_MAX,
-                                        {INT64_MIN, start_ts + batch_num * 10}, &snapshot_id);
+                                        {INT64_MIN, convertMSToPrecisionTS(start_ts + batch_num * 10, ts_type)}, &snapshot_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // create table 1008
@@ -803,7 +813,7 @@ TEST_P(TestEngineSnapshotConvert, ConvertManyDataSameEntityDestNoEmptyRollback) 
   ASSERT_EQ(s, KStatus::SUCCESS);
   uint64_t desc_snapshot_id;
   s = ts_engine_->CreateSnapshotForWrite(ctx_, desc_table_id, 0, UINT64_MAX,
-                                      {INT64_MIN, start_ts + batch_num * 10}, &desc_snapshot_id);
+                                      {INT64_MIN, convertMSToPrecisionTS(start_ts + batch_num * 10, ts_type)}, &desc_snapshot_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
   // input data to  table 1008
   {
@@ -933,8 +943,9 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDescNoTable) {
   ASSERT_EQ(s, KStatus::SUCCESS);
 
   // scan table ,check if data is correct in table 1008.
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + row_num * 10};
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + row_num * 10, ts_type)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
@@ -957,7 +968,7 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDescNoTable) {
       break;
     }
     if (total_count == 0) {
-      ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+      ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
     }
     total_count += count;
     res.clear();
@@ -1068,7 +1079,8 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDestTableVersionLow) {
 
   // scan table ,check if data is correct in table 1008.
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + row_num * 10};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + row_num * 10, ts_type)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
@@ -1091,7 +1103,7 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDestTableVersionLow) {
       break;
     }
     if (total_count == 0) {
-      ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+      ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
     }
     total_count += count;
     res.clear();
@@ -1203,7 +1215,8 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDestTableVersionHigh) {
 
   // scan table ,check if data is correct in table 1008.
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + row_num * 10};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + row_num * 10, ts_type)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
@@ -1221,7 +1234,7 @@ TEST_P(TestEngineSnapshotConvert, CreateSnapshotDestTableVersionHigh) {
   bool is_finished = false;
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, row_num);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 0);
   delete iter1;

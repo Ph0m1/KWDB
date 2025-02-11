@@ -88,7 +88,8 @@ TEST_F(TestEngineSnapshotTable, CreateSnapshot) {
 
   // scan table ,check if data is correct.
   k_uint32 entity_id = 1;
-  KwTsSpan ts_span = {start_ts, start_ts + 5 * 10};
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + 5 * 10, ts_type)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
   TsIterator* iter1;
@@ -101,7 +102,7 @@ TEST_F(TestEngineSnapshotTable, CreateSnapshot) {
   bool is_finished = false;
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, row_num);
-  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), start_ts);
+  ASSERT_EQ(KTimestamp(res.data[0][0]->mem), convertMSToPrecisionTS(start_ts, ts_type));
   ASSERT_EQ(iter1->Next(&res, &count, &is_finished), KStatus::SUCCESS);
   ASSERT_EQ(count, 0);
   delete iter1;

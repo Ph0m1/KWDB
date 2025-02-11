@@ -35,5 +35,5 @@ KStatus strToDouble(char *input, double &output);
 KStatus strToInt64(char *input, int64_t &output);
 KStatus doubleToStr(double input, char *str, int32_t length);
 
-KStatus convertStringToTimestamp(KString inputData, int64_t* timeVal);
+KStatus convertStringToTimestamp(KString inputData, k_int64 scale, k_int64* timeVal);
 }  // namespace kwdbts

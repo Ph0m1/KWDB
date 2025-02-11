@@ -277,13 +277,13 @@ func DecodeOidDatum(
 			}
 			return tree.NewDBytes(tree.DBytes(res)), nil
 		case oid.T_timestamp:
-			d, err := tree.ParseDTimestamp(ctx, string(b), time.Microsecond)
+			d, err := tree.ParseDTimestamp(ctx, string(b), time.Nanosecond)
 			if err != nil {
 				return nil, pgerror.Newf(pgcode.Syntax, "could not parse string %q as timestamp", b)
 			}
 			return d, nil
 		case oid.T_timestamptz:
-			d, err := tree.ParseDTimestampTZ(ctx, string(b), time.Microsecond)
+			d, err := tree.ParseDTimestampTZ(ctx, string(b), time.Nanosecond)
 			if err != nil {
 				return nil, pgerror.Newf(pgcode.Syntax, "could not parse string %q as timestamptz", b)
 			}
@@ -576,13 +576,13 @@ func DecodeOidDatum(
 				return nil, pgerror.Newf(pgcode.Syntax, "timestamp requires 8 bytes for binary format")
 			}
 			i := int64(binary.BigEndian.Uint64(b))
-			return tree.MakeDTimestamp(pgBinaryToTime(i), time.Microsecond), nil
+			return tree.MakeDTimestamp(pgBinaryToTime(i), time.Nanosecond), nil
 		case oid.T_timestamptz:
 			if len(b) < 8 {
 				return nil, pgerror.Newf(pgcode.Syntax, "timestamptz requires 8 bytes for binary format")
 			}
 			i := int64(binary.BigEndian.Uint64(b))
-			return tree.MakeDTimestampTZ(pgBinaryToTime(i), time.Microsecond), nil
+			return tree.MakeDTimestampTZ(pgBinaryToTime(i), time.Nanosecond), nil
 		case oid.T_date:
 			if len(b) < 4 {
 				return nil, pgerror.Newf(pgcode.Syntax, "date requires 4 bytes for binary format")

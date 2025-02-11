@@ -127,15 +127,15 @@ struct KWDuration {
   k_int64 days = 0;
   k_int64 nanos = 0;
 
-  void format(k_int64 ms) {
-    k_int64 extraDays = ms / (Day / Millisecond);
+  void format(k_int64 ms, k_int64 scale) {
+    k_int64 extraDays = ms / (Day / scale);
     days += extraDays;
-    ms -= extraDays * (Day / Millisecond);
-    nanos = ms * Millisecond;
+    ms -= extraDays * (Day / scale);
+    nanos = ms * scale;
   }
 
-  size_t format_pg_result(k_int64 ms, char *buf, size_t sz) {
-    format(ms);
+  size_t format_pg_result(k_int64 ms, char *buf, size_t sz, k_int64 scale) {
+    format(ms, scale);
     size_t n = 0;
     if (days) {
       n += snprintf(buf + n, sz - n, "%ld %s", days,

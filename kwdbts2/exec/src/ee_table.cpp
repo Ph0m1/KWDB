@@ -161,11 +161,15 @@ KStatus TABLE::InitField(kwdbContext_p ctx, const TSCol &col, k_uint32 index,
   KStatus ret = SUCCESS;
   roachpb::DataType sql_type = col.storage_type();
   switch (sql_type) {
-    case roachpb::DataType::TIMESTAMPTZ: {
+    case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO: {
       *field = new FieldTimestampTZ();
       break;
     }
-    case roachpb::DataType::TIMESTAMP: {
+    case roachpb::DataType::TIMESTAMP:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO: {
       *field = new FieldTimestamp();
       break;
     }

@@ -378,6 +378,10 @@ void TsSamplerOperator::AddData(const vector<optional<DataVariant>>& row_data, D
     switch (outStorageTypes_[col]) {
       case roachpb::DataType::TIMESTAMPTZ:
       case roachpb::DataType::TIMESTAMP:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         const k_int64* val = std::get_if<k_int64>(&row_data[col].value());

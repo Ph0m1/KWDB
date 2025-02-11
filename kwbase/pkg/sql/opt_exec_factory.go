@@ -52,6 +52,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
 	"github.com/cockroachdb/errors"
+	"github.com/lib/pq/oid"
 )
 
 type execFactory struct {
@@ -2300,7 +2301,15 @@ func (ef *execFactory) MakeTSSpans(e opt.Expr, n exec.Node, m *memo.Memo) (tight
 	if tn, ok := n.(*tsScanNode); ok {
 		tabID := m.Metadata().GetTableIDByObjectID(tn.Table.ID())
 		tight := ef.MakeTSSpansForExpr(e, out, tabID)
-		tn.tsSpans = out.TransformSpansToTsSpans()
+		typ := tn.Table.Column(0).DatumType()
+		var precision int32
+		if !typ.InternalType.TimePrecisionIsSet && typ.InternalType.Precision == 0 {
+			precision = 3
+		} else {
+			precision = typ.Precision()
+		}
+		tn.tsSpans = out.TransformSpansToTsSpans(precision)
+		tn.tsSpansPre = precision
 		return tight
 	}
 	return false
@@ -2476,7 +2485,8 @@ func (ef *execFactory) makeSpansForSingleColumn(
 func (ef *execFactory) makeSpansForSingleColumnDatum(
 	op opt.Operator, datum tree.Datum, out *constraint.Constraint,
 ) (tight bool) {
-	if !(datum.ResolvedType() == types.TimestampTZ) {
+	if !(datum.ResolvedType().Oid() == oid.T_timestamptz &&
+		datum.ResolvedType().Precision() == 9) {
 		unconstrained(out)
 		return false
 	}

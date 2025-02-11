@@ -266,21 +266,14 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 			}
 			//timeTmp1 and timeTmp2 need to synchronize changes due to tsspan conversion to zero zone time
 			if nil != n.tsSpans {
-				var timeTmp1 time.Time
-				if n.tsSpans[0].FromTimeStamp > math.MinInt64 {
-					timeTmp1 = timeutil.Unix(n.tsSpans[0].FromTimeStamp/1000, n.tsSpans[0].FromTimeStamp%1000*1000000)
-				} else {
-					timeTmp1 = timeutil.Unix(tree.TsMinTimestamp/1000, tree.TsMaxTimestamp%1000*1000000)
+				switch n.tsSpansPre {
+				case 3:
+					v.printTsSpans(n, name, 1e3)
+				case 6:
+					v.printTsSpans(n, name, 1e6)
+				default:
+					v.printTsSpans(n, name, 1e9)
 				}
-				var timeTmp2 time.Time
-				if n.tsSpans[0].ToTimeStamp < math.MaxInt64 {
-					timeTmp2 = timeutil.Unix(n.tsSpans[0].ToTimeStamp/1000, n.tsSpans[0].ToTimeStamp%1000*1000000)
-				} else {
-					timeTmp2 = timeutil.Unix(tree.TsMaxTimestamp/1000, tree.TsMaxTimestamp%1000*1000000)
-				}
-
-				v.observer.attr(name, "spans:fromTime", timeTmp1.String())
-				v.observer.attr(name, "spans:toTime", timeTmp2.String())
 			}
 
 		}
@@ -874,6 +867,32 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 		}
 		n.source = v.visit(n.source)
 	}
+}
+
+func (v *planVisitor) printTsSpans(n *tsScanNode, name string, precision int64) {
+	var timeTmp1 time.Time
+	if n.tsSpans[0].FromTimeStamp > math.MinInt64 {
+		timeTmp1 = timeutil.Unix(n.tsSpans[0].FromTimeStamp/precision, n.tsSpans[0].FromTimeStamp%precision*(1e9/precision))
+	} else {
+		if precision == 1e9 {
+			timeTmp1 = timeutil.Unix(tree.TsMinNanoTimestamp/precision, tree.TsMinNanoTimestamp%precision*(1e9/precision))
+		} else {
+			timeTmp1 = timeutil.Unix(tree.TsMinTimestamp/1000, tree.TsMinTimestamp%1000*1000000)
+		}
+	}
+	var timeTmp2 time.Time
+	if n.tsSpans[0].ToTimeStamp < math.MaxInt64 {
+		timeTmp2 = timeutil.Unix(n.tsSpans[0].ToTimeStamp/precision, n.tsSpans[0].ToTimeStamp%precision*(1e9/precision))
+	} else {
+		if precision == 1e9 {
+			timeTmp2 = timeutil.Unix(tree.TsMaxNanoTimestamp/precision, tree.TsMaxNanoTimestamp%precision*(1e9/precision))
+		} else {
+			timeTmp2 = timeutil.Unix(tree.TsMaxTimestamp/1000, tree.TsMaxTimestamp%1000*1000000)
+		}
+	}
+
+	v.observer.attr(name, "spans:fromTime", timeTmp1.String())
+	v.observer.attr(name, "spans:toTime", timeTmp2.String())
 }
 
 // expr wraps observer.expr() and provides it with the current node's

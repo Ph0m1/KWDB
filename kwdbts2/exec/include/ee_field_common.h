@@ -30,7 +30,8 @@ enum Field_result {
   REAL_RESULT,         /** double */
   INT_RESULT,          /** long long */
   DECIMAL_RESULT,      /** char *, to be converted to/from a decimal */
-  NULL_RESULT          /** NULL */
+  NULL_RESULT,          /** NULL */
+  TIMESTAMP_RESULT,    /** long long , Unified timestamp accuracy */
 };
 
 bool IsStorageString(roachpb::DataType a);
@@ -96,6 +97,7 @@ class ArgComparator {
                           k_bool is_null2);  // compare args[0] & args[1]
   int compare_binary_string(char *ptr1, char *ptr2, k_bool is_null1,
                             k_bool is_null2);  // compare args[0] & args[1]
+  int compare_timestamp(char *ptr1, char *ptr2, k_bool is_null1, k_bool is_null2);
 
  private:
   int compare_null(k_bool is_null1, k_bool is_null2);
@@ -104,11 +106,16 @@ class ArgComparator {
   int compare_string(const String &str1, const String &str2);
   int compare_binary_char(const String &str1, const String &str2);
   int compare_binary_string(const String &str1, const String &str2);
+  int compare_timestamp(k_int64 val1, k_int64 val2);
 
  private:
   Field **left_{nullptr};
   Field **right_{nullptr};
   arg_cmp_func func_{nullptr};
+
+  // Used for unifying time accuracy
+  k_int64 timestamp_scale_a_{1};
+  k_int64 timestamp_scale_b_{1};
 };
 
 typedef int (LikeComparator::*like_cmp_func)();

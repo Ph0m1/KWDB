@@ -23,6 +23,10 @@ struct CKDecimal Field::ValDecimal() {
   switch (storage_type_) {
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::SMALLINT:
     case roachpb::DataType::INT:
@@ -857,6 +861,10 @@ k_bool FieldFunc::fill_template_field(char *ptr) {
     case roachpb::DataType::BIGINT:
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE: {
       k_int64 val = ValInt();
       memcpy(ptr, &val, storage_len_);

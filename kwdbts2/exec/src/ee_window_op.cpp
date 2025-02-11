@@ -541,6 +541,10 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       for (int row = 0; row < row_batch->Count(); ++row) {

@@ -81,6 +81,10 @@ bool OrderColumnCompare::operator()(k_uint32 a, k_uint32 b) {
       }
       case roachpb::DataType::TIMESTAMP:
       case roachpb::DataType::TIMESTAMPTZ:
+      case roachpb::DataType::TIMESTAMP_MICRO:
+      case roachpb::DataType::TIMESTAMP_NANO:
+      case roachpb::DataType::TIMESTAMPTZ_MICRO:
+      case roachpb::DataType::TIMESTAMPTZ_NANO:
       case roachpb::DataType::DATE:
       case roachpb::DataType::BIGINT: {
         auto* a_data = reinterpret_cast<k_int64*>(container_->GetData(a, col_idx));

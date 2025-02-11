@@ -103,13 +103,13 @@ EEIteratorErrCode PostResolve::ResolveOutputFields(kwdbContext_p ctx,
           new_field = KNEW FieldInt(i, field->get_storage_type(), field->get_storage_length());
           break;
         case roachpb::DataType::TIMESTAMP:
-        case roachpb::DataType::BIGINT:
-          new_field = KNEW FieldLonglong(i, field->get_storage_type(), field->get_storage_length());
-        break;
         case roachpb::DataType::TIMESTAMPTZ:
-          new_field = KNEW FieldLonglong(i, field->get_storage_type(), field->get_storage_length());
-          break;
+        case roachpb::DataType::TIMESTAMP_MICRO:
+        case roachpb::DataType::TIMESTAMP_NANO:
+        case roachpb::DataType::TIMESTAMPTZ_MICRO:
+        case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
+        case roachpb::DataType::BIGINT:
           new_field = KNEW FieldLonglong(i, field->get_storage_type(), field->get_storage_length());
           break;
         case roachpb::DataType::CHAR:
@@ -550,8 +550,39 @@ EEIteratorErrCode PostResolve::ResolveConst(kwdbContext_p ctx,
       break;
     }
     case AstEleType::TIMESTAMP_TYPE: {
-      *field = KNEW FieldConstString(roachpb::DataType::TIMESTAMP,
-                                     const_ptr->value.string_type);
+      *field =
+          new FieldConstInt(roachpb::DataType::TIMESTAMP,
+                            const_ptr->value.number.int_type, sizeof(k_int64));
+      break;
+    }
+    case AstEleType::TIMESTAMPTZ_TYPE: {
+      *field =
+          new FieldConstInt(roachpb::DataType::TIMESTAMPTZ,
+                            const_ptr->value.number.int_type, sizeof(k_int64));
+      break;
+    }
+    case AstEleType::TIMESTAMP_MICRO_TYPE: {
+      *field =
+          new FieldConstInt(roachpb::DataType::TIMESTAMP_MICRO,
+                            const_ptr->value.number.int_type, sizeof(k_int64));
+      break;
+    }
+    case AstEleType::TIMESTAMPTZ_MICRO_TYPE: {
+      *field =
+          new FieldConstInt(roachpb::DataType::TIMESTAMPTZ_MICRO,
+                            const_ptr->value.number.int_type, sizeof(k_int64));
+      break;
+    }
+    case AstEleType::TIMESTAMP_NANO_TYPE: {
+      *field =
+          new FieldConstInt(roachpb::DataType::TIMESTAMP_NANO,
+                            const_ptr->value.number.int_type, sizeof(k_int64));
+      break;
+    }
+    case AstEleType::TIMESTAMPTZ_NANO_TYPE: {
+      *field =
+          new FieldConstInt(roachpb::DataType::TIMESTAMPTZ_NANO,
+                            const_ptr->value.number.int_type, sizeof(k_int64));
       break;
     }
     case AstEleType::DATE_TYPE: {
@@ -1128,8 +1159,12 @@ Field *PostResolve::ResolveCast(kwdbContext_p ctx, Field *left,
     } else {
       field = KNEW FieldTypeCastString(left, len, output_type);
     }
-  } else if (output_type == "TIMESTAMP" || output_type == "TIMESTAMPTZ" || output_type == "DATE") {
-    field = KNEW FieldTypeCastTimestampTz(left, ctx->timezone);
+  } else if (output_type.find("TIMESTAMPTZ") != std::string::npos) {
+    k_uint32 type_num = extractNumInBrackets(output_type);
+    field = KNEW FieldTypeCastTimestampTz(left, type_num, 0);
+  } else if (output_type.find("TIMESTAMP") != std::string::npos || output_type == "DATE") {
+    k_uint32 type_num = extractNumInBrackets(output_type);
+    field = KNEW FieldTypeCastTimestampTz(left, type_num, ctx->timezone);
   } else if (output_type == "BOOL") {
     field = KNEW FieldTypeCastBool(left);
   } else if (output_type.find("BYTES") != std::string::npos) {

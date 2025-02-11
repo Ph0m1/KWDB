@@ -482,6 +482,8 @@ DataToStringPtr getDataToStringHandler(const AttributeInfo &col_info,
       vs = getDataToString(col_info.type, max_len);
       break;
     case TIMESTAMP64:
+    case TIMESTAMP64_MICRO:
+    case TIMESTAMP64_NANO:
       vs = new TimeStamp64ToString(col_info.max_len);
       break;
     case FLOAT_ARRAY:
@@ -499,6 +501,8 @@ DataToStringPtr getDataToStringHandler(const AttributeInfo &col_info,
       break;
     }
     case TIMESTAMP64_LSN:
+    case TIMESTAMP64_LSN_MICRO:
+    case TIMESTAMP64_LSN_NANO:
       vs = new TimeStamp64LSNToString();
       break;
     case DATE32:

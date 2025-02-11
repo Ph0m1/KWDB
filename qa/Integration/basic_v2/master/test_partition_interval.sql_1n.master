@@ -139,7 +139,7 @@ CREATE TABLE
    table_name   |              create_statement
 ----------------+----------------------------------------------
   tsdb.public.t | CREATE TABLE t (
-                |     ts TIMESTAMPTZ NOT NULL,
+                |     ts TIMESTAMPTZ(3) NOT NULL,
                 |     a INT4 NULL
                 | ) TAGS (
                 |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -151,7 +151,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -170,7 +170,7 @@ ALTER TS DATABASE
    table_name   |              create_statement
 ----------------+----------------------------------------------
   tsdb.public.t | CREATE TABLE t (
-                |     ts TIMESTAMPTZ NOT NULL,
+                |     ts TIMESTAMPTZ(3) NOT NULL,
                 |     a INT4 NULL
                 | ) TAGS (
                 |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -182,7 +182,7 @@ ALTER TS DATABASE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -198,7 +198,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -210,7 +210,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t2 | CREATE TABLE t2 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -225,7 +225,7 @@ SQLSTATE: 22023
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t2 | CREATE TABLE t2 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -248,7 +248,7 @@ CREATE TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -298,7 +298,7 @@ ALTER TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -338,7 +338,7 @@ ALTER TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -364,7 +364,7 @@ ALTER TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)
@@ -398,7 +398,7 @@ ALTER TABLE
     table_name   |              create_statement
 -----------------+----------------------------------------------
   tsdb.public.t1 | CREATE TABLE t1 (
-                 |     ts TIMESTAMPTZ NOT NULL,
+                 |     ts TIMESTAMPTZ(3) NOT NULL,
                  |     a INT4 NULL
                  | ) TAGS (
                  |     ptag INT4 NOT NULL ) PRIMARY TAGS(ptag)

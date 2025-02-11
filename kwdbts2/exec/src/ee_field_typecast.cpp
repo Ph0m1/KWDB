@@ -15,6 +15,7 @@
 #include "ee_global.h"
 #include "ee_table.h"
 #include "me_metadata.pb.h"
+#include "ee_timestamp_utils.h"
 
 namespace kwdbts {
 
@@ -233,13 +234,17 @@ inline KStatus stringToString(Field *field, char *output, k_uint32 length) {
   return SUCCESS;
 }
 
-inline KStatus integerToTimestampTz(Field *field, k_int64 &output,
-                                    k_int8 time_zone) {
-  output = field->ValInt() + time_zone * 3600 * 1000;
+inline KStatus integerToTimestampTz(Field *field, k_int64 &output, k_int64 scale,
+                                    k_int64 time_zone_diff, roachpb::DataType out_type) {
+  output = field->ValInt();
+  if (!I64_SAFE_ADD_CHECK(out_type, time_zone_diff)) {
+    return FAIL;
+  }
+  output += time_zone_diff;
   return SUCCESS;
 }
-inline KStatus stringToTimestampTz(Field *field, k_int64 &output,
-                                   k_int8 time_zone) {
+inline KStatus stringToTimestampTz(Field *field, k_int64 &output, k_int64 scale,
+                                   k_int64 time_zone_diff, roachpb::DataType out_type) {
   String str = field->ValStr();
   if (str.empty()) {
     EEPgErrorInfo::SetPgErrorInfo(
@@ -247,10 +252,20 @@ inline KStatus stringToTimestampTz(Field *field, k_int64 &output,
         "parsing as type timestamp: empty or blank input");
     return FAIL;
   }
-  convertStringToTimestamp(std::string(str.getptr(), str.length_), &output);
+  convertStringToTimestamp(std::string(str.getptr(), str.length_), scale, &output);
   return SUCCESS;
 }
-
+inline KStatus timestamptzToTimestampTz(Field *field, k_int64 &output, k_int64 scale,
+                                    k_int64 time_zone_diff, roachpb::DataType out_type) {
+  output = field->ValInt();
+  if (!I64_SAFE_ADD_CHECK(out_type, time_zone_diff)) {
+    return FAIL;
+  }
+  output += time_zone_diff;
+  return convertTimePrecision(&output, field->get_storage_type(), out_type)
+             ? SUCCESS
+             : FAIL;
+}
 inline KStatus numToBool(Field *field, k_bool &output) {
   output = field->ValInt() != 0 ? 1 : 0;
   return SUCCESS;
@@ -293,6 +308,10 @@ FieldTypeCastSigned<T>::FieldTypeCastSigned(Field *field)
   switch (field_->get_storage_type()) {
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
       storage_len_ = sizeof(k_int64);
     case roachpb::DataType::SMALLINT:
@@ -369,6 +388,10 @@ FieldTypeCastReal<T>::FieldTypeCastReal(Field *field) : FieldTypeCast(field) {
   switch (field_->get_storage_type()) {
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::SMALLINT:
     case roachpb::DataType::INT:
@@ -584,15 +607,50 @@ String FieldTypeCastTimestamptz2String::ValStr() {
 }
 
 FieldTypeCastTimestampTz::FieldTypeCastTimestampTz(Field *field,
+                                                   k_int8 type_num,
                                                    k_int8 timezone)
     : FieldTypeCast(field) {
   return_type_ = KWDBTypeFamily::TimestampFamily;
-  storage_type_ = roachpb::DataType::TIMESTAMP;
+  switch (type_num) {
+    case 3:
+      sql_type_ = roachpb::DataType::TIMESTAMP;
+      storage_type_ = roachpb::DataType::TIMESTAMP;
+      type_scale_ = 1;
+      timezone_diff_ = timezone * 3600 * 1000;
+      break;
+    case 6:
+      sql_type_ = roachpb::DataType::TIMESTAMP_MICRO;
+      storage_type_ = roachpb::DataType::TIMESTAMP_MICRO;
+      type_scale_ = 1000;
+      timezone_diff_ = timezone * 3600 * 1000000;
+      break;
+    case 9:
+      sql_type_ = roachpb::DataType::TIMESTAMP_NANO;
+      storage_type_ = roachpb::DataType::TIMESTAMP_NANO;
+      type_scale_ = 1000000;
+      timezone_diff_ = timezone * 3600 * 1000000000;
+
+      break;
+    default:
+      sql_type_ = roachpb::DataType::TIMESTAMP;
+      storage_type_ = roachpb::DataType::TIMESTAMP;
+      type_scale_ = 1;
+      timezone_diff_ = timezone * 3600 * 1000;
+      break;
+  }
   storage_len_ = sizeof(k_int64);
-  timezone_ = timezone;
   switch (field_->get_storage_type()) {
     case roachpb::DataType::TIMESTAMP:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+      func_ = timestamptzToTimestampTz;
+      timezone_diff_ = 0;
+      break;
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
+      func_ = timestamptzToTimestampTz;
+      break;
     case roachpb::DataType::DATE:
     case roachpb::DataType::SMALLINT:
     case roachpb::DataType::INT:
@@ -621,7 +679,7 @@ k_int64 FieldTypeCastTimestampTz::ValInt() {
     return FieldTypeCast::ValInt(ptr);
   } else {
     k_int64 in_v = 0;
-    auto err = func_(field_, in_v, timezone_);
+    auto err = func_(field_, in_v, type_scale_, timezone_diff_, storage_type_);
     if (err != SUCCESS) {
       return 0;
     }
@@ -645,6 +703,10 @@ FieldTypeCastBool::FieldTypeCastBool(Field *field) : FieldTypeCast(field) {
   switch (field_->get_storage_type()) {
     case roachpb::DataType::TIMESTAMP:
     case roachpb::DataType::TIMESTAMPTZ:
+    case roachpb::DataType::TIMESTAMP_MICRO:
+    case roachpb::DataType::TIMESTAMP_NANO:
+    case roachpb::DataType::TIMESTAMPTZ_MICRO:
+    case roachpb::DataType::TIMESTAMPTZ_NANO:
     case roachpb::DataType::DATE:
     case roachpb::DataType::SMALLINT:
     case roachpb::DataType::INT:

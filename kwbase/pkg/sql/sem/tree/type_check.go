@@ -1273,8 +1273,52 @@ const TsMinTimestamp = -62167219200000
 // 2970-01-01 00:00:00+00:00
 const TsMaxTimestamp = 31556995200000
 
-// TsMaxTimestampString is the string form of the maximum value supported by the ts column
+const (
+	// DefaultTimestampWidth is millisecond precision.
+	DefaultTimestampWidth = 0
+	// MilliTimestampWidth is millisecond precision.
+	MilliTimestampWidth = 3
+	// MicroTimestampWidth is microseconds precision.
+	MicroTimestampWidth = 6
+	// NanoTimestampWidth is nanoseconds precision.
+	NanoTimestampWidth = 9
+
+	// TsMinSecondTimestamp is the minimum precision of the timestamp in second.
+	// 0000-01-01 00:00:00
+	TsMinSecondTimestamp = -62167219200
+	// TsMaxSecondTimestamp is the maximum precision of the timestamp in second.
+	// 2970-01-01 00:00:00
+	TsMaxSecondTimestamp = 31556995200
+
+	// TsMinMilliTimestamp is the minimum precision of the timestamp in milliseconds.
+	// 0000-01-01 00:00:00.000+00:00
+	TsMinMilliTimestamp = -62167219200000
+	// TsMaxMilliTimestamp is the maximum precision of the timestamp in milliseconds.
+	// 2970-01-01 00:00:00.000+00:00
+	TsMaxMilliTimestamp = 31556995200000
+
+	// TsMinMicroTimestamp is the minimum precision of the timestamp in microseconds.
+	// 0000-01-01 00:00:00.000000+00:00
+	TsMinMicroTimestamp = -62167219200000000
+	// TsMaxMicroTimestamp is the maximum precision of the timestamp in microseconds.
+	// 2970-01-01 00:00:00.000000+00:00
+	TsMaxMicroTimestamp = 31556995200000000
+
+	// TsMinNanoTimestamp is the minimum precision of the timestamp in nanoseconds.
+	// 1970-01-01 00:00:00.000000000+00:00
+	TsMinNanoTimestamp = 0
+	// TsMaxNanoTimestamp is the maximum precision of the timestamp in nanoseconds.
+	// 2262-01-01 00:00:00.000000000+00:00
+	TsMaxNanoTimestamp = 9214646400000000000
+)
+
+// TsMaxTimestampString is the string form of the maximum value
+// supported by the ts column in milliseconds and microseconds.
 const TsMaxTimestampString = "2970-01-01 00:00:00+00:00"
+
+// TsMaxNanoTimestampString is the string form of the maximum value
+// supported by the ts column in nanoseconds.
+const TsMaxNanoTimestampString = "2262-01-01 00:00:00+00:00"
 
 // TSTypeCheck checks the value of the input numeric type against the expected type.
 func (expr *NumVal) TSTypeCheck(colName string, typ *types.T) (Datum, error) {
@@ -1313,9 +1357,9 @@ func (expr *NumVal) TSTypeCheck(colName string, typ *types.T) (Datum, error) {
 			return nil, err
 		}
 		// Check the maximum and minimum value of the timestamp
-		if expr.resInt < TsMinTimestamp || expr.resInt > TsMaxTimestamp {
-			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s (column %s)", expr.resInt, typ.SQLString(), colName)
+		checkErr := CheckTsTimestampWidth(typ, expr.resInt, "", colName)
+		if checkErr != nil {
+			return nil, checkErr
 		}
 		return &expr.resInt, nil
 
@@ -1440,25 +1484,15 @@ func (expr *StrVal) TSTypeCheck(colName string, typ *types.T, ctx ParseTimeConte
 		return v, nil
 
 	case types.TimestampFamily:
-		dVal, err := ParseTimestampForTS(ctx, expr.s)
+		dVal, err := ParseTimestampForTS(ctx, expr.s, typ, colName)
 		if err != nil {
-			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
-		}
-		// Check the maximum and minimum value of the timestamp
-		if *dVal < TsMinTimestamp || *dVal > TsMaxTimestamp {
-			return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-				"value '%s' out of range for type %s (column %s)", expr.s, typ.SQLString(), colName)
+			return nil, err
 		}
 		return dVal, nil
 	case types.TimestampTZFamily:
-		dVal, err := ParseTimestampTZForTS(ctx, expr.s)
+		dVal, err := ParseTimestampTZForTS(ctx, expr.s, typ, colName)
 		if err != nil {
-			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
-		}
-		// Check the maximum and minimum value of the timestamp
-		if *dVal < TsMinTimestamp || *dVal > TsMaxTimestamp {
-			return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-				"value '%s' out of range for type %s (column %s)", expr.s, typ.SQLString(), colName)
+			return nil, err
 		}
 		return dVal, nil
 	case types.BoolFamily:
@@ -1471,6 +1505,17 @@ func (expr *StrVal) TSTypeCheck(colName string, typ *types.T, ctx ParseTimeConte
 		return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 	}
 	return nil, nil
+}
+
+// NewValueOutOfRangeError returns an error if input value is out of range
+func NewValueOutOfRangeError(typ *types.T, value, colName string) error {
+	return pgerror.Newf(pgcode.StringDataLengthMismatch,
+		"value \"%s\" out of range for type %s (column %s)", value, typ.SQLString(), colName)
+}
+
+// NewUnexpectedWidthError returns an error if type has an unexpected width.
+func NewUnexpectedWidthError(typ *types.T, colName string) error {
+	return pgerror.Newf(pgcode.StringDataLengthMismatch, "unexpected width for type %s (column %s)", typ.SQLString(), colName)
 }
 
 // TypeCheck implements the Expr interface.

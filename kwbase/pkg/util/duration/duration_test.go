@@ -542,12 +542,12 @@ func TestNanos(t *testing.T) {
 	if expect, actual := int64(1), d.nanos; expect != actual {
 		t.Fatalf("expected %d, got %d", expect, actual)
 	}
-	if expect, actual := "00:00:00+1ns", d.StringNanos(); expect != actual {
+	if expect, actual := "00:00:00.000000001+1ns", d.StringNanos(); expect != actual {
 		t.Fatalf("expected %s, got %s", expect, actual)
 	}
 	// Add, even of a 0-duration interval, should call round.
 	d = d.Add(Duration{})
-	if expect, actual := int64(0), d.nanos; expect != actual {
+	if expect, actual := int64(1), d.nanos; expect != actual {
 		t.Fatalf("expected %d, got %d", expect, actual)
 	}
 	d, err = Decode(500, 0, 0)
@@ -557,14 +557,14 @@ func TestNanos(t *testing.T) {
 	if expect, actual := int64(500), d.nanos; expect != actual {
 		t.Fatalf("expected %d, got %d", expect, actual)
 	}
-	if expect, actual := "00:00:00+500ns", d.StringNanos(); expect != actual {
+	if expect, actual := "00:00:00.0000005+500ns", d.StringNanos(); expect != actual {
 		t.Fatalf("expected %s, got %s", expect, actual)
 	}
 	d = d.Add(Duration{})
-	if expect, actual := int64(1000), d.nanos; expect != actual {
+	if expect, actual := int64(500), d.nanos; expect != actual {
 		t.Fatalf("expected %d, got %d", expect, actual)
 	}
-	if expect, actual := "00:00:00.000001", d.StringNanos(); expect != actual {
+	if expect, actual := "00:00:00.0000005+500ns", d.StringNanos(); expect != actual {
 		t.Fatalf("expected %s, got %s", expect, actual)
 	}
 }

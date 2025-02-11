@@ -77,7 +77,7 @@ TEST_F(TestEngineRangeVolume, OneColumn) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, row_num * 8);
+  ASSERT_EQ(volume_range, row_num * 16);
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -114,14 +114,14 @@ TEST_F(TestEngineRangeVolume, TwoColumns) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, row_num * entities_num * 10);
+  ASSERT_EQ(volume_range, row_num * entities_num * 18);
 
   // one entity data volume
   uint64_t primary_key = start_ts;
   uint64_t tag_hash = TsTable::GetConsistentHashId((char*)(&primary_key), 8);
   s = ts_table->GetDataVolume(ctx_, tag_hash, tag_hash, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, row_num * 10);
+  ASSERT_EQ(volume_range, row_num * 18);
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -158,14 +158,16 @@ TEST_F(TestEngineRangeVolume, OneColumnHalf) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, row_num * paritition_num * 8);
+  ASSERT_EQ(volume_range, row_num * paritition_num * 16);
 
   uint64_t primary_key = 100;
   uint64_t tag_hash = TsTable::GetConsistentHashId((char*)(&primary_key), 8);
   timestamp64 half_ts;
   s = ts_table->GetDataVolumeHalfTS(ctx_, tag_hash, tag_hash, {INT64_MIN, INT64_MAX}, &half_ts);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(half_ts, start_ts + paritition_num / 2 * iot_interval_ * 1000);
+  auto start_ts_precision = convertMSToPrecisionTS(start_ts + paritition_num / 2 * iot_interval_ * 1000,
+                                                  ts_table->GetRootTableManager()->GetTsColDataType());
+  ASSERT_EQ(half_ts, start_ts_precision);
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -210,14 +212,16 @@ TEST_F(TestEngineRangeVolume, OneColumnHalfDiffPartition) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, total_rows * 8);
+  ASSERT_EQ(volume_range, total_rows * 16);
 
   uint64_t primary_key = 100;
   uint64_t tag_hash = TsTable::GetConsistentHashId((char*)(&primary_key), 8);
   timestamp64 half_ts;
   s = ts_table->GetDataVolumeHalfTS(ctx_, tag_hash, tag_hash, {INT64_MIN, INT64_MAX}, &half_ts);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(half_ts, start_ts + (paritition_num - 1) * iot_interval_ * 1000);
+  auto start_ts_precision = convertMSToPrecisionTS(start_ts + (paritition_num - 1) * iot_interval_ * 1000,
+                                                  ts_table->GetRootTableManager()->GetTsColDataType());
+  ASSERT_EQ(half_ts, start_ts_precision);
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -258,7 +262,7 @@ TEST_F(TestEngineRangeVolume, RowBasedPayloadFixedType) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, row_num * 14);
+  ASSERT_EQ(volume_range, row_num * 22);
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -299,7 +303,7 @@ TEST_F(TestEngineRangeVolume, RowBasedPayloadVarType) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, row_num * 21);
+  ASSERT_EQ(volume_range, row_num * 29);
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -370,14 +374,15 @@ TEST_F(TestEngineRangeVolume, OneColumnHalfOnePartition) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, total_rows * 8);
+  ASSERT_EQ(volume_range, total_rows * 16);
 
   uint64_t primary_key = 100;
   uint64_t tag_hash = TsTable::GetConsistentHashId((char*)(&primary_key), 8);
   timestamp64 half_ts;
   s = ts_table->GetDataVolumeHalfTS(ctx_, tag_hash, tag_hash, {INT64_MIN, INT64_MAX}, &half_ts);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(half_ts, start_ts + (0 + total_rows - 1) / 2 * 10);
+  ASSERT_EQ(half_ts, convertMSToPrecisionTS(start_ts + (0 + total_rows - 1) / 2 * 10,
+              ts_table->GetRootTableManager()->GetTsColDataType()));
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
   ASSERT_EQ(s, KStatus::SUCCESS);
 }
@@ -420,7 +425,7 @@ TEST_F(TestEngineRangeVolume, ThreePartitionsHalfTs) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, total_rows * 8);
+  ASSERT_EQ(volume_range, total_rows * 16);
 
   // first partition entity start_ts
   for (size_t i = 0; i < row_nums_per_partition.size(); i++) {
@@ -429,7 +434,9 @@ TEST_F(TestEngineRangeVolume, ThreePartitionsHalfTs) {
     timestamp64 half_ts;
     s = ts_table->GetDataVolumeHalfTS(ctx_, tag_hash, tag_hash, {INT64_MIN, INT64_MAX}, &half_ts);
     ASSERT_EQ(s, KStatus::SUCCESS);
-    ASSERT_EQ(half_ts, start_ts + i * iot_interval_ * 1000 + row_nums_per_partition[i] / 2 * 10);
+    auto start_ts_precision = convertMSToPrecisionTS(start_ts + i * iot_interval_ * 1000 + row_nums_per_partition[i] / 2 * 10,
+                                                  ts_table->GetRootTableManager()->GetTsColDataType());
+    ASSERT_EQ(half_ts, start_ts_precision);
   }
 
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);
@@ -495,7 +502,7 @@ TEST_F(TestEngineRangeVolume, ThreePartitionsHalfTsSameHash) {
   uint64_t volume_range;
   s = ts_table->GetDataVolume(ctx_, 0, UINT64_MAX, {INT64_MIN, INT64_MAX}, &volume_range);
   ASSERT_EQ(s, KStatus::SUCCESS);
-  ASSERT_EQ(volume_range, total_rows * 8);
+  ASSERT_EQ(volume_range, total_rows * 16);
 
   // three entity with same hash.
   for (size_t i = 0; i < row_nums_per_partition.size(); i++) {
@@ -504,7 +511,9 @@ TEST_F(TestEngineRangeVolume, ThreePartitionsHalfTsSameHash) {
     timestamp64 half_ts;
     s = ts_table->GetDataVolumeHalfTS(ctx_, tag_hash, tag_hash, {INT64_MIN, INT64_MAX}, &half_ts);
     ASSERT_EQ(s, KStatus::SUCCESS);
-    ASSERT_EQ(half_ts, start_ts + partition_index[1] * iot_interval_ * 1000 + row_nums_per_partition[1] / 2 * 10);
+    auto start_ts_precision = convertMSToPrecisionTS(start_ts + partition_index[1] * iot_interval_ * 1000 + row_nums_per_partition[1] / 2 * 10,
+                                                  ts_table->GetRootTableManager()->GetTsColDataType());
+    ASSERT_EQ(half_ts, start_ts_precision);
   }
 
   s = ts_engine_->DropTsTable(ctx_, cur_table_id);

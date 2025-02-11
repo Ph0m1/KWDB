@@ -479,7 +479,7 @@ int32_t parseFraction(char *str, char **end) {
   int32_t i = 0;
   int64_t fraction = 0;
 
-  const int32_t MILLI_SEC_FRACTION_LEN = 3;
+  const int32_t NANO_SEC_FRACTION_LEN = 9;
 
   int32_t factor[9] = {1,      10,      100,      1000,     10000,
                        100000, 1000000, 10000000, 100000000};
@@ -496,10 +496,10 @@ int32_t parseFraction(char *str, char **end) {
 
   /* parse the fraction */
   /* only use the initial 3 bits */
-  if (i >= MILLI_SEC_FRACTION_LEN) {
-    i = MILLI_SEC_FRACTION_LEN;
+  if (i >= NANO_SEC_FRACTION_LEN) {
+    i = NANO_SEC_FRACTION_LEN;
   }
-  times = MILLI_SEC_FRACTION_LEN - i;
+  times = NANO_SEC_FRACTION_LEN - i;
 
   fraction = strnatoi(str, i) * factor[times];
   *end = str + totalLen;
@@ -576,9 +576,9 @@ KStatus parseTimezone(char *str, int64_t *tzOffset) {
  * 2013-04-12T15:52:01+0800
  * 2013-04-12T15:52:01.123+0800
  */
-KStatus parseTimeWithTz(KString timestr, int64_t *time, char delim) {
+KStatus parseTimeWithTz(KString timestr, k_int64 scale, k_int64 *time, char delim) {
   // int64_t factor = TSDB_TICK_PER_SECOND(timePrec);
-  int64_t factor = 1000;
+  int64_t factor = 1000 * scale;
   int64_t tzOffset = 0;
 
   struct tm tm = {0};
@@ -593,6 +593,18 @@ KStatus parseTimeWithTz(KString timestr, int64_t *time, char delim) {
   }
 
   if (str == NULL) {
+    size_t pos = timestr.find('-');
+    if (pos == 0) {
+        pos = timestr.find('-', 1);
+    }
+    if (pos!= std::string::npos) {
+        std::string num_str = timestr.substr(0, pos);
+        int year = std::stoi(num_str);
+        if (year > 2970 || year < 0) {
+          EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                        "Timestamp/TimestampTZ out of range");
+        }
+    }
     return FAIL;
   }
 
@@ -601,6 +613,11 @@ KStatus parseTimeWithTz(KString timestr, int64_t *time, char delim) {
   int64_t fraction = 0;
   str = forward2TimeStringEnd(timestr.data());
 
+  if (!I64_SAFE_MUL_CHECK(seconds, factor)) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                  "Timestamp/TimestampTZ out of range");
+    return FAIL;
+  }
   if ((str[0] == 'Z' || str[0] == 'z') && str[1] == '\0') {
     /* utc time, no millisecond, return directly*/
     *time = seconds * factor;
@@ -609,6 +626,7 @@ KStatus parseTimeWithTz(KString timestr, int64_t *time, char delim) {
     if ((fraction = parseFraction(str, &str)) < 0) {
       return FAIL;
     }
+    fraction /= (1000000 / scale);
 
     *time = seconds * factor + fraction;
 
@@ -683,7 +701,7 @@ static inline bool validateTm(struct tm *pTm) {
   return true;
 }
 
-KStatus parseLocaltimeDst(KString timestr, int64_t *utime, char delim) {
+KStatus parseLocaltimeDst(KString timestr, k_int64 scale, k_int64 *utime, char delim) {
   *utime = 0;
   struct tm tm = {0};
   tm.tm_isdst = -1;
@@ -717,35 +735,40 @@ KStatus parseLocaltimeDst(KString timestr, int64_t *utime, char delim) {
       return FAIL;
     }
   }
+  fraction /= (1000000 / scale);
 
+  if (!I64_SAFE_MUL_CHECK(seconds, scale)) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
+                                  "Timestamp/TimestampTZ out of range");
+  }
   // *utime = TSDB_TICK_PER_SECOND(timePrec) * seconds + fraction;
-  *utime = 1000 * seconds + fraction;
+  *utime = scale * seconds + fraction;
   return SUCCESS;
 }
 
-KStatus kwdbParseTime(KString &timestr, int64_t *utime) {
+KStatus kwdbParseTime(KString &timestr, k_int64 scale, k_int64 *utime) {
   /* parse datatime string in with tz */
   if (timestr.find('T') != std::string::npos) {
     if (checkTzPresent(timestr)) {
-      return parseTimeWithTz(timestr, utime, 'T');
+      return parseTimeWithTz(timestr, scale, utime, 'T');
     } else {
-      return parseLocaltimeDst(timestr, utime, 'T');
+      return parseLocaltimeDst(timestr, scale, utime, 'T');
     }
   } else {
     if (checkTzPresent(timestr)) {
-      return parseTimeWithTz(timestr, utime, 0);
+      return parseTimeWithTz(timestr, scale, utime, 0);
     } else {
-      return parseLocaltimeDst(timestr, utime, 0);
+      return parseLocaltimeDst(timestr, scale, utime, 0);
     }
   }
 }
 
-KStatus convertStringToTimestamp(KString inputData, int64_t *timeVal) {
+KStatus convertStringToTimestamp(KString inputData, k_int64 scale, k_int64 *timeVal) {
   // int32_t charLen = varDataLen(inputData);
   if (inputData.empty()) {
     return FAIL;
   }
-  KStatus ret = kwdbParseTime(inputData, timeVal);
+  KStatus ret = kwdbParseTime(inputData, scale, timeVal);
   if (ret != SUCCESS) {
     EEPgErrorInfo::SetPgErrorInfo(
         ERRCODE_INVALID_DATETIME_FORMAT,

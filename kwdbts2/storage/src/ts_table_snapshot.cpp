@@ -709,7 +709,7 @@ KStatus TsSnapshotConsumerByBlock::writeBlocks(kwdbContext_p ctx, TSSlice data) 
     char* first_ts_addr = blockitem->col_block_addr[0].data + ts_block_header_size;
     // todo(liangbo01) we will using max min ts in block to check if all rows in bloc belong to same partition later.
     timestamp64 cur_ts = KInt64(first_ts_addr);
-    auto p_time = sub_grp->PartitionTime(cur_ts / 1000, first_max_ts);
+    auto p_time = sub_grp->PartitionTime(convertTsToPTime(cur_ts, (DATATYPE)(data_schema[0].type)), first_max_ts);
     std::string key = intToString(entity_grp_id) + "_" + intToString(sub_grp_id) + "_" + convertTsToDirectoryName(p_time);
     std::string tmp_partition_name = key + "_" + intToString(snapshot_info_.id) + "/";
     auto cur_tmp_table = tmp_partition_tables_[key];

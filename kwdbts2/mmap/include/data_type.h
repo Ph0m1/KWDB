@@ -174,6 +174,10 @@ enum DATATYPE {
   INT8_ARRAY = 34,
   DATETIME32 = 50,          // 32-bit date time.
   TIME64 = 58,              // 8 bytes integer time with microsecond
+  TIMESTAMP64_MICRO = 59,
+  TIMESTAMP64_NANO = 60,
+  TIMESTAMP64_LSN_MICRO = 61,
+  TIMESTAMP64_LSN_NANO = 62,
   NULL_TYPE = 999,
   ROWID = 1000,			    /// ROWID item
   STRING_CONST = 20002,
