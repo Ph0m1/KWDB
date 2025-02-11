@@ -119,7 +119,7 @@ type Parser struct {
 	scanner        scanner
 	lexer          lexer
 	parserImpl     sqlParserImpl
-	tokBuf         [8]sqlSymType
+	tokBuf         [10]sqlSymType
 	stmtBuf        [1]Statement
 	Dudgetstable   func(dbName *string, tableName string) bool
 	IsShortcircuit bool
@@ -240,29 +240,21 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 			if lval.id == '.' {
 				dot++
 			}
-			if lval.id == VALUES {
-				if (len(tokens) > 5 && tokens[5].str == "tag") || len(tokens) < 3 || tokens[1].id != INTO {
-					// len(tokens) > 5 : insert into benchmark.host_0 tag..... values is not support
-					// len(tokens) < 3 : in case of error: insert into values()
+			if len(tokens) == 9 || p.scanner.shortinsert.isValues {
+				if len(tokens) > 5 && tokens[5].str == "tag" || len(tokens) < 3 || tokens[1].id != INTO && tokens[3].id != INTO {
 					p.scanner.shortinsert.isInsert = false
 					tokens = append(tokens, lval)
 					continue
 				}
-				p.scanner.shortinsert.bracket = -1
-				p.scanner.shortinsert.RowCount = 0
-				if dot == 0 {
-					// 1) insert into table values (...)
-					p.scanner.shortinsert.tb = tokens[2].str
-				} else if dot == 1 {
-					// 2) insert into database.table values (...); insert into database.table(...) values (...)
-					// 3) insert into schema.table values (...); insert into schema.table(...) values (...)  The actualDBName is provided in the Dudgetstable
-					p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[4].str
-				} else if dot == 2 {
-					// 4) insert into database.schema.table values (...) insert into database.schema.table (...) values (...)
-					p.scanner.shortinsert.db, p.scanner.shortinsert.tb = tokens[2].str, tokens[6].str
-				}
+				db, tb := extractDBAndTable(tokens, dot, &p.scanner.shortinsert.NoSchema)
+				p.scanner.shortinsert.db, p.scanner.shortinsert.tb = db, tb
 			}
-			if p.scanner.shortinsert.isTsTable {
+			if lval.id == VALUES {
+				p.scanner.shortinsert.RowCount = 0
+				p.scanner.shortinsert.isValues = true
+			}
+
+			if p.scanner.shortinsert.isValues && p.scanner.shortinsert.isTsTable {
 				continue
 			}
 			// "insert into database.table": len(tokens) == 4
@@ -281,6 +273,63 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 	}
 }
 
+// Function for tsinsert_direct database and table names extraction
+func extractDBAndTable(tokens []sqlSymType, dot int, NoSchema *bool) (db, tb string) {
+	*NoSchema = tokens[1].str == "without" && tokens[2].str == "schema"
+	boolAsInt := 0
+	if *NoSchema {
+		boolAsInt = 1
+	}
+	switch dot {
+	case 0:
+		// Case 1: insert into table values; insert without schema into table values
+		tb = tokens[2+2*boolAsInt].str
+	case 1:
+		// Case 2: insert into database.table values; insert without schema into database.table values
+		// Case 3: insert into schema.table values; insert without schema into schema.table values; The actualDBName is provided in the Dudgetstable
+		db, tb = tokens[2+2*boolAsInt].str, tokens[4+2*boolAsInt].str
+	case 2:
+		// Case 4: insert into database.schema.table values; insert without schema into database.schema.table values
+		db, tb = tokens[2+2*boolAsInt].str, tokens[6+2*boolAsInt].str
+	}
+	return db, tb
+}
+
+// MakeDirectSTmt constructs the stmt structure required for tsinsert_direct
+func makeDirectStmt(p *Parser, NoScheNameList tree.NoSchemaNameList, sql string) Statement {
+	if p.scanner.shortinsert.NoSchema {
+		NoScheNameList = make(tree.NoSchemaNameList, 0, len(p.scanner.shortinsert.InsertValues))
+		for i := 0; i < len(p.scanner.shortinsert.Columnsname); i += 3 {
+			noScheName := tree.NoSchemaName{
+				Name:    p.scanner.shortinsert.Columnsname[i],
+				StrType: string(p.scanner.shortinsert.Columnsname[i+1]),
+				IsTag:   p.scanner.shortinsert.Columnsname[i+2] == "tag",
+			}
+			if typelen, ok := p.scanner.shortinsert.ColumnsLengthMap[noScheName.Name]; ok {
+				noScheName.TypeLen = typelen
+			}
+			NoScheNameList = append(NoScheNameList, noScheName)
+		}
+	}
+	stmt := Statement{
+		AST: &tree.Insert{
+			Table:           tree.NewTableName(tree.Name(p.scanner.shortinsert.db), tree.Name(p.scanner.shortinsert.tb)),
+			Returning:       &tree.NoReturningClause{},
+			IsNoSchema:      p.scanner.shortinsert.NoSchema,
+			NoSchemaColumns: NoScheNameList,
+			Columns:         p.scanner.shortinsert.Columnsname},
+		SQL: sql,
+		Insertdirectstmt: Insertdirectstmt{
+			InsertValues:       p.scanner.shortinsert.InsertValues,
+			ValuesType:         p.scanner.shortinsert.ValuesType,
+			RowsAffected:       int64(p.scanner.shortinsert.RowCount),
+			PreparePlaceholder: p.scanner.shortinsert.Prepareplaceholder,
+		},
+		NumPlaceholders: p.scanner.shortinsert.Prepareplaceholder,
+	}
+	return stmt
+}
+
 /* parseWithDepth
  * @Description：construct SQL to AST Trees;
  * @In depth: construct depth;
@@ -296,24 +345,12 @@ func (p *Parser) parseWithDepth(depth int, sql string, nakedIntType *types.T) (S
 	p.scanner.init(sql)
 	defer p.scanner.cleanup()
 	for {
+		p.scanner.shortinsert.isValues, p.scanner.shortinsert.isInsert = false, false
 		// loop parse sql
 		sql, tokens, done := p.scanOneStmt()
 		if p.scanner.shortinsert.isInsert && p.scanner.shortinsert.isTsTable {
-			stmt := Statement{
-				AST: &tree.Insert{
-					Table:     tree.NewTableName(tree.Name(p.scanner.shortinsert.db), tree.Name(p.scanner.shortinsert.tb)),
-					Returning: &tree.NoReturningClause{},
-					Columns:   p.scanner.shortinsert.Columnsname},
-				SQL: sql,
-				Insertdirectstmt: Insertdirectstmt{
-					InsertValues:       p.scanner.shortinsert.InsertValues,
-					ValuesType:         p.scanner.shortinsert.ValuesType,
-					RowsAffected:       int64(p.scanner.shortinsert.RowCount),
-					PreparePlaceholder: p.scanner.shortinsert.Prepareplaceholder,
-				},
-
-				NumPlaceholders: p.scanner.shortinsert.Prepareplaceholder,
-			}
+			var NoScheNameList tree.NoSchemaNameList
+			stmt := makeDirectStmt(p, NoScheNameList, sql)
 			if sql != "" {
 				stmts = append(stmts, stmt)
 			}

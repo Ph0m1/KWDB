@@ -412,7 +412,6 @@ func (ex *connExecutor) execBind(
 func (ex *connExecutor) execPreparedirectBind(
 	ctx context.Context, bindCmd BindStmt,
 ) (fsm.Event, fsm.EventPayload) {
-
 	retErr := func(err error) (fsm.Event, fsm.EventPayload) {
 		return eventNonRetriableErr{IsCommit: fsm.False}, eventNonRetriableErrPayload{err: err}
 	}
@@ -435,16 +434,19 @@ func (ex *connExecutor) execPreparedirectBind(
 			pgcode.InvalidSQLStatementName,
 			"unknown prepared statement %q", bindCmd.PreparedStatementName))
 	}
+
 	if ins, ok := ps.PrepareMetadata.Statement.AST.(*tree.Insert); ok {
 		var di DirectInsert
 		copy(ins.Columns, ps.PrepareInsertDirect.Dit.Desc)
+
 		ie := ex.server.GetCFG().InternalExecutor
 		cfg := ie.GetServer().GetCFG()
+
 		err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
 			tables := GetTableCollection(cfg, ie)
 			defer tables.ReleaseTSTables(ctx)
-			var flags tree.ObjectLookupFlags
-			flags.Required = false
+
+			flags := tree.ObjectLookupFlags{}
 			table, err := tables.GetTableVersion(ctx, txn, ps.PrepareInsertDirect.Dit.Tname, flags)
 			if table == nil || err != nil {
 				return err
@@ -458,20 +460,20 @@ func (ex *connExecutor) execPreparedirectBind(
 				Settings:         ex.server.GetCFG().Settings,
 			}
 			EvalContext.StartSinglenode = (ex.server.GetCFG().StartMode == StartSingleNode)
-			if err := GetColsInfo(ctx, &ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di, &ps.PrepareMetadata.Statement); err != nil {
+			if err := GetColsInfo(ctx, EvalContext, &ps.PrepareInsertDirect.Dit.ColsDesc, ins, &di, &ps.PrepareMetadata.Statement); err != nil {
 				return err
 			}
 			di.RowNum, di.ColNum = len(bindCmd.Args), len(di.IDMap)
 			di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
 			ptCtx := tree.NewParseTimeContext(ex.state.sqlTimestamp.In(ex.sessionData.DataConversion.Location))
 			// Calculate rowTimestamps and save the value of the timestamp column
-			inputValues, rowTimestamps, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, ps.PrepareInsertDirect.Dit.ColsDesc, di)
+			inputValues, rowTimestamps, err := TsprepareTypeCheck(ptCtx, bindCmd.Args, ps.InferredTypes, bindCmd.ArgFormatCodes, &ps.PrepareInsertDirect.Dit.ColsDesc, di)
 			if err != nil {
 				return err
 			}
 			if !EvalContext.StartSinglenode {
 				//start mode
-				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
+				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert, 1)
 				if err = BuildRowBytesForPrepareTsInsert(ptCtx, bindCmd.Args, ps.PrepareInsertDirect.Dit, &di, EvalContext, table, cfg.NodeInfo.NodeID.Get(), rowTimestamps); err != nil {
 					return err
 				}
@@ -479,7 +481,7 @@ func (ex *connExecutor) execPreparedirectBind(
 			} else {
 				// start-single-node mode
 				priTagValMap := BuildPreparepriTagValMap(bindCmd.Args, di)
-				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
+				di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert, 1)
 				for _, priTagRowIdx := range priTagValMap {
 					if err = BuildPreparePayload(&EvalContext, inputValues, priTagRowIdx,
 						&di, ps.PrepareInsertDirect.Dit, bindCmd.Args); err != nil {

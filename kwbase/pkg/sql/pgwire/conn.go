@@ -32,6 +32,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/security/audit/setting"
 	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/optbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
@@ -52,8 +54,10 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
+	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
 	"gitee.com/kwbasedb/kwbase/pkg/util/stop"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
@@ -846,17 +850,14 @@ func (c *conn) handleSimpleQuery(
 	c.parser.IsShortcircuit = unqis.GetTsinsertdirect()
 	var dit sql.DirectInsertTable
 	c.parser.Dudgetstable = func(dbName *string, tableName string) bool {
-		user := c.sessionArgs.User
 		if *dbName == "public" || *dbName == "" {
 			*dbName = unqis.GetTsSessionData().Database
 		}
+
+		var err error
 		var isTsTable bool
-		var insertErr error
-		isTsTable, dit, insertErr = server.GetCFG().InternalExecutor.IsTsTable(ctx, *dbName, tableName, user)
-		if insertErr != nil {
-			return false
-		}
-		return isTsTable
+		isTsTable, dit, err = server.GetCFG().InternalExecutor.IsTsTable(ctx, *dbName, tableName, c.sessionArgs.User)
+		return err == nil && isTsTable
 	}
 
 	startParse := timeutil.Now()
@@ -878,91 +879,135 @@ func (c *conn) handleSimpleQuery(
 
 	if c.parser.GetIsTsTable() {
 		if len(stmts) == 1 {
-			for {
-				ins, isInsert := stmts[0].AST.(*tree.Insert)
-				if !isInsert {
-					break
+			// Only a single INSERT statement is processed
+			ins, ok := stmts[0].AST.(*tree.Insert)
+			if !ok {
+				goto normalExec
+			}
+
+			var di sql.DirectInsert
+			// Check whether the inserted value and the number of columns match.
+			if matchCnt := sql.NumofInsertDirect(ins, &dit.ColsDesc, stmts, &di); matchCnt != di.RowNum*di.ColNum {
+				c.parser.IsShortcircuit = false
+				if stmts, err = c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv); err != nil {
+					return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 				}
-				var di sql.DirectInsert
-				// the number of inserted values cannot be evenly divided by the number of inserted columns
-				if sql.NumofInsertDirect(ins, dit.ColsDesc, stmts, &di) != di.RowNum*di.ColNum {
-					c.parser.IsShortcircuit = false
-					actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv)
-					if expectedErr != nil {
-						return c.stmtBuf.Push(ctx, sql.SendError{Err: expectedErr})
-					}
-					stmts = actualStmts
-					break
-				}
-				stmts[0].Insertdirectstmt.IgnoreBatcherror = unqis.GetTsSupportBatch() && (di.RowNum != 1)
-				cfg := server.GetCFG()
-				ie := cfg.InternalExecutor
-				err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-					tables := sql.GetTableCollection(cfg, ie)
-					defer tables.ReleaseTSTables(ctx)
-					var flags tree.ObjectLookupFlags
-					flags.Required = false
-					table, err := tables.GetTableVersion(ctx, txn, dit.Tname, flags)
-					if table == nil || err != nil {
+				goto normalExec
+			}
+
+			cfg := server.GetCFG()
+			// Set batch error flag
+			stmts[0].Insertdirectstmt.IgnoreBatcherror = unqis.GetTsSupportBatch() && di.RowNum > 1
+
+			// Execute in a transaction
+			if err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+				// Set execution context
+				evalCtx := getEvalContext(ctx, txn, server)
+				// Get table collection and version
+				tables := sql.GetTableCollection(cfg, cfg.InternalExecutor)
+
+				if ins.IsNoSchema {
+					ins.Columns = ins.NoSchemaColumns.GetNameList()
+					add, err := maybeAddNonExistsColumn(ctx, cfg.InternalExecutor, &dit, ins)
+					if err != nil {
 						return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 					}
-					EvalContext := getEvalContext(ctx, txn, server)
-					EvalContext.StartSinglenode = (server.GetCFG().StartMode == sql.StartSingleNode)
-					if err = sql.GetColsInfo(ctx, &dit.ColsDesc, ins, &di, &stmts[0]); err != nil {
-						return err
-					}
-					di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
-					var ptCtx tree.ParseTimeContext
-					if con, ok := unqis.(sql.ConnectionHandler); ok {
-						ptCtx = tree.NewParseTimeContext(con.GetTsZone())
-					}
-					r := c.allocCommandResult()
-					*r = commandResult{
-						conn: c,
-						typ:  commandComplete,
-					}
-					if !EvalContext.StartSinglenode {
-						// start mode
-						if err = sql.GetPayloadMapForMuiltNode(ctx, ptCtx, dit, &di, stmts, EvalContext, table, cfg.NodeInfo.NodeID.Get()); err != nil {
-							return err
-						}
-					} else {
-						// start-single-node mode
-						if di.InputValues, err = sql.GetInputValues(ctx, ptCtx, &dit.ColsDesc, &di, stmts); err != nil {
-							return err
-						}
-						priTagValMap := sql.BuildpriTagValMap(di)
-						di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
-						for _, priTagRowIdx := range priTagValMap {
-							if err = sql.BuildPayload(&EvalContext, priTagRowIdx, &di, dit); err != nil {
-								return err
+					if add {
+						for r := retry.Start(retryOpt); r.Next(); {
+							allGet := true
+							clock := hlc.NewClock(hlc.UnixNano, time.Nanosecond)
+							evalCtx.Txn.SetFixedTimestamp(ctx, clock.Now())
+							table, err := tables.GetTableVersion(ctx, txn, dit.Tname, tree.ObjectLookupFlags{})
+							for idx := range ins.NoSchemaColumns {
+								colDef := ins.NoSchemaColumns[idx]
+								_, err = sql.GetTSColumnByName(colDef.Name, table.TableDesc().Columns)
+								if err == nil {
+									continue
+								} else {
+									allGet = false
+									break
+								}
+							}
+							if allGet {
+								break
+							} else {
+								tables.ReleaseTSTables(ctx)
 							}
 						}
 					}
+				}
 
-					//for audit log
-					if err = handleInsertDirectAuditLog(ctx, server, startParse, stmts, unqis, dit.TabID, query); err != nil {
-						return err
-					}
-					if err = Send(ctx, unqis, EvalContext, r, stmts, di, c, timeReceived, startParse, endParse); err != nil {
-						return err
-					}
-					return nil
-				})
-				if err != nil {
+				defer tables.ReleaseTSTables(ctx)
+				table, err := tables.GetTableVersion(ctx, txn, dit.Tname, tree.ObjectLookupFlags{})
+				if err != nil || table == nil {
 					return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 				}
-				return nil
+
+				evalCtx.StartSinglenode = (server.GetCFG().StartMode == sql.StartSingleNode)
+				dit.DbID, dit.TabID = uint32(table.TableDescriptor.ParentID), uint32(table.TableDescriptor.ID)
+				dit.ColsDesc = table.TableDesc().Columns
+				// Get column information
+				if err = sql.GetColsInfo(ctx, evalCtx, &dit.ColsDesc, ins, &di, &stmts[0]); err != nil {
+					return err
+				}
+
+				di.PArgs.TSVersion = uint32(table.TsTable.TsVersion)
+
+				// Set time zone context
+				var ptCtx tree.ParseTimeContext
+				if con, ok := unqis.(sql.ConnectionHandler); ok {
+					ptCtx = tree.NewParseTimeContext(con.GetTsZone())
+				}
+
+				r := c.allocCommandResult()
+				*r = commandResult{conn: c, typ: commandComplete}
+
+				// According to the node mode processing
+				if !evalCtx.StartSinglenode {
+					// start
+					err = sql.GetPayloadMapForMuiltNode(ctx, ptCtx, dit, &di, stmts, evalCtx, table, cfg.NodeInfo.NodeID.Get())
+				} else {
+					// single node mode
+					if di.InputValues, err = sql.GetInputValues(ctx, ptCtx, &dit.ColsDesc, &di, stmts); err != nil {
+						return err
+					}
+
+					// Build payload by primary tag
+					priTagValMap := sql.BuildpriTagValMap(di)
+					di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert, 1)
+					for _, idx := range priTagValMap {
+						if err = sql.BuildPayload(&evalCtx, idx, &di, dit); err != nil {
+							return err
+						}
+					}
+				}
+
+				if err != nil {
+					return err
+				}
+
+				// Processing audit logs
+				if err = handleInsertDirectAuditLog(ctx, server, startParse, stmts, unqis, dit.TabID, query); err != nil {
+					return err
+				}
+
+				// Send insert_direct information
+				return Send(ctx, unqis, evalCtx, r, stmts, di, c, timeReceived, startParse, endParse)
+			}); err != nil {
+				return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
 			}
-		} else {
-			c.parser.IsShortcircuit = false
-			actualStmts, expectedErr := c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv)
-			if expectedErr != nil {
-				return c.stmtBuf.Push(ctx, sql.SendError{Err: expectedErr})
-			}
-			stmts = actualStmts
+
+			return nil
 		}
+		// Non-single INSERT statement, reparse
+		c.parser.IsShortcircuit = false
+		if stmts, err = c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv); err != nil {
+			return c.stmtBuf.Push(ctx, sql.SendError{Err: err})
+		}
+
 	}
+
+normalExec:
 
 	for i := range stmts {
 		// The CopyFrom statement is special. We need to detect it so we can hand
@@ -1002,6 +1047,110 @@ func (c *conn) handleSimpleQuery(
 		}
 	}
 	return nil
+}
+
+var retryOpt = retry.Options{
+	InitialBackoff: 20 * time.Millisecond,
+	MaxBackoff:     1 * time.Second,
+	Multiplier:     2,
+	MaxRetries:     60, // about 5 minutes
+}
+
+// maybeAddNonExistsColumn can automatically add columns that do not exist.
+func maybeAddNonExistsColumn(
+	ctx context.Context, ie *sql.InternalExecutor, dit *sql.DirectInsertTable, ins *tree.Insert,
+) (bool, error) {
+	addStmts, err := constructAutoAddStmts(dit.ColsDesc, ins, *dit.Tname, dit.TableType)
+	if err != nil {
+		return false, err
+	}
+
+	for i := range addStmts {
+		// Retry while execution returns error.
+		for r := retry.Start(retryOpt); r.Next(); {
+			_, err := ie.Query(ctx, "auto add column", nil, addStmts[i])
+			if err != nil {
+				if optbuilder.IsInsertNoSchemaRetryableError(err) {
+					log.Warningf(ctx, "auto alter add failed: %s, err: %s\n", addStmts[i], err.Error())
+				} else if strings.Contains(err.Error(), "schema version") {
+					return false, err
+				} else {
+					break
+				}
+			} else {
+				log.Infof(ctx, "auto alter add success: %s\n", addStmts[i])
+				break
+			}
+		}
+	}
+	return len(addStmts) != 0, nil
+}
+
+func createColumnMap(cols []sqlbase.ColumnDescriptor) map[string]*sqlbase.ColumnDescriptor {
+	columnMap := make(map[string]*sqlbase.ColumnDescriptor, len(cols))
+	for i := range cols {
+		columnMap[cols[i].Name] = &cols[i]
+	}
+	return columnMap
+}
+
+const alterStmt = `ALTER TABLE %s ADD %s %s %s`
+const alterColumnTypeStmt = `ALTER TABLE %s ALTER COLUMN %s TYPE %s`
+const alterTagTypeStmt = `ALTER TABLE %s ALTER TAG %s TYPE %s`
+
+// constructAutoAddStmts checks whether columns are exist and generate alter table stmt if necessary
+func constructAutoAddStmts(
+	cols []sqlbase.ColumnDescriptor,
+	ins *tree.Insert,
+	tbName tree.TableName,
+	tableType tree.TableType,
+) ([]string, error) {
+	var addStmts []string
+	columnMap := createColumnMap(cols)
+	inColName := make(map[tree.Name]bool, len(ins.NoSchemaColumns))
+
+	isInstanceOrTemplateTable := tableType == tree.InstanceTable || tableType == tree.TemplateTable
+	// constructs the map of the metadata column to the input value based on the user-specified column name
+	for idx := range ins.NoSchemaColumns {
+		colDef := &ins.NoSchemaColumns[idx]
+		typ := `COLUMN`
+		if colDef.IsTag {
+			typ = `TAG`
+		}
+		targetCol, exists := columnMap[string(colDef.Name)]
+		if !exists {
+			if _, ok := inColName[colDef.Name]; !ok {
+				inColName[colDef.Name] = true
+			} else {
+				return []string{}, pgerror.Newf(pgcode.DuplicateColumn, "multiple assignments to the same column \"%s\"", string(colDef.Name))
+			}
+			// If the column does not exist, generate a ALTER ... ADD ... statement.
+			addStmts = append(addStmts, fmt.Sprintf(alterStmt, tbName.String(), typ, colDef.Name, colDef.StrType))
+		} else {
+			if targetCol.IsTagCol() != colDef.IsTag {
+				return []string{}, pgerror.Newf(pgcode.DuplicateColumn, "duplicate %s name: %q", typ, colDef.Name)
+			}
+			if len(colDef.TypeLen) > 0 {
+				num, err := strconv.Atoi(colDef.TypeLen)
+				if err != nil {
+					return []string{}, err
+				}
+				if targetCol.Type.Width() < int32(num) {
+					if colDef.IsTag {
+						addStmts = append(addStmts, fmt.Sprintf(alterTagTypeStmt, tbName.String(), colDef.Name.String(), colDef.StrType+"("+colDef.TypeLen+")"))
+					} else {
+						addStmts = append(addStmts, fmt.Sprintf(alterColumnTypeStmt, tbName.String(), colDef.Name.String(), colDef.StrType+"("+colDef.TypeLen+")"))
+					}
+				}
+			}
+		}
+
+		// instance table does not support specifying tag column
+		if targetCol != nil && targetCol.IsTagCol() && isInstanceOrTemplateTable {
+			return []string{}, pgerror.Newf(pgcode.FeatureNotSupported, "cannot insert tag column: \"%s\" for INSTANCE table", targetCol.Name)
+		}
+	}
+	return addStmts, nil
 }
 
 func handleInsertDirectAuditLog(
@@ -1053,26 +1202,31 @@ func Send(
 	c *conn,
 	timeReceived, startParse, endParse time.Time,
 ) error {
-	if con, ok := unqis.(sql.ConnectionHandler); ok {
-		insertStmt := &stmts[0].Insertdirectstmt
-		insertStmt.InsertFast = true
-		insertStmt.RowsAffected = int64(di.RowNum - insertStmt.BatchFailed)
-		if di.RowNum == insertStmt.BatchFailed || di.RowNum == 0 {
-			return errors.Errorf("All BatchInsert Error.Check logs under the user data directory for more information.")
-		}
-		insertStmt.UseDeepRule, insertStmt.DedupRule, insertStmt.DedupRows = con.SendDTI(EvalContext.Context, &EvalContext, r, di, stmts)
-		if err := c.stmtBuf.Push(
-			ctx,
-			sql.ExecStmt{
-				Statement:    stmts[0],
-				TimeReceived: timeReceived,
-				ParseStart:   startParse,
-				ParseEnd:     endParse,
-			}); err != nil {
-			return err
-		}
+	con, ok := unqis.(sql.ConnectionHandler)
+	if !ok {
+		return nil
 	}
-	return nil
+
+	insertStmt := &stmts[0].Insertdirectstmt
+
+	failedRows := insertStmt.BatchFailed
+	rowNum := di.RowNum
+
+	if rowNum == failedRows || rowNum == 0 {
+		return errors.Errorf("All BatchInsert Error.Check logs under the user data directory for more information.")
+	}
+
+	insertStmt.InsertFast = true
+	insertStmt.RowsAffected = int64(rowNum - failedRows)
+
+	insertStmt.UseDeepRule, insertStmt.DedupRule, insertStmt.DedupRows = con.SendDTI(EvalContext.Context, &EvalContext, r, di, stmts)
+
+	return c.stmtBuf.Push(ctx, sql.ExecStmt{
+		Statement:    stmts[0],
+		TimeReceived: timeReceived,
+		ParseStart:   startParse,
+		ParseEnd:     endParse,
+	})
 }
 
 func shortInsertLogAudit(

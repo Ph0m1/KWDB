@@ -21,7 +21,6 @@ import (
 	"unicode/utf8"
 
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
@@ -42,6 +41,7 @@ type DirectInsertTable struct {
 	ColsDesc    []sqlbase.ColumnDescriptor
 	Tname       *tree.TableName
 	Desc        tree.NameList
+	TableType   tree.TableType
 }
 
 // DirectInsert is related struct in insert_direct
@@ -49,12 +49,21 @@ type DirectInsert struct {
 	RowNum, ColNum             int
 	IDMap, PosMap              []int
 	ColIndexs                  map[int]int
+	DefIndexs                  map[int]int
 	PArgs                      execbuilder.PayloadArgs
 	PrettyCols, PrimaryTagCols []*sqlbase.ColumnDescriptor
-	Dcs                        []sqlbase.ColumnDescriptor
+	Dcs                        []*sqlbase.ColumnDescriptor
 	PayloadNodeMap             map[int]*sqlbase.PayloadForDistTSInsert
 	InputValues                []tree.Datums
 }
+
+const (
+	errUnsupportedType = "unsupported input type relation \"%s\""
+	errOutOfRange      = "integer \"%s\" out of range for type %s"
+	errInvalidValue    = "value '%s' is invalid for type %s"
+	errValueOutofRange = "value '%s' out of range for type %s"
+	errTooLong         = "value '%s' too long for type %s"
+)
 
 // GetInputValues performs column type conversion and length checking
 func GetInputValues(
@@ -64,26 +73,32 @@ func GetInputValues(
 	di *DirectInsert,
 	stmts parser.Statements,
 ) ([]tree.Datums, error) {
-	inputValues := make([]tree.Datums, di.RowNum)
-	// Apply for continuous memory space at once and allocate it to 2D slices
-	preSlice := make([]tree.Datum, di.RowNum*di.ColNum)
-	for i := 0; i < di.RowNum; i++ {
-		inputValues[i], preSlice = preSlice[:di.ColNum:di.ColNum], preSlice[di.ColNum:]
+	rowNum := di.RowNum
+	colNum := di.ColNum
+	totalSize := rowNum * colNum
+	preSlice := make([]tree.Datum, totalSize)
+	inputValues := make([]tree.Datums, rowNum)
+	outputValues := make([]tree.Datums, 0, rowNum)
+
+	for i, j := 0, 0; i < rowNum; i++ {
+		end := j + colNum
+		inputValues[i] = preSlice[j:end:end]
+		j += colNum
 	}
-	var err error
-	outputValues := make([]tree.Datums, 0, di.RowNum)
-	for row := range inputValues {
-		err2 := getSingleRecord(ptCtx, cols, *di, stmts, row, inputValues, err)
-		if err2 != nil {
-			if !stmts[0].Insertdirectstmt.IgnoreBatcherror {
-				return nil, err2
+
+	ignoreError := stmts[0].Insertdirectstmt.IgnoreBatcherror
+	for row := 0; row < rowNum; row++ {
+		if err := getSingleRecord(ptCtx, cols, *di, stmts, row, inputValues); err != nil {
+			if !ignoreError {
+				return nil, err
 			}
 			stmts[0].Insertdirectstmt.BatchFailed++
-			log.Errorf(ctx, "BatchInsert Error: %s", err2)
+			log.Errorf(ctx, "BatchInsert Error: %s", err)
 			continue
 		}
 		outputValues = append(outputValues, inputValues[row])
 	}
+
 	return outputValues, nil
 }
 
@@ -94,20 +109,32 @@ func getSingleRecord(
 	stmts parser.Statements,
 	row int,
 	inputValues []tree.Datums,
-	err error,
 ) error {
-	for i := 0; i < len(di.IDMap); i++ {
+	rowOffset := row * di.ColNum
+	insertStmt := stmts[0].Insertdirectstmt
+	idMapLen := len(di.IDMap)
+
+	for i := 0; i < idMapLen; i++ {
 		// col position in raw cols slice
 		colPos := di.IDMap[i]
-		// col's metadata
-		column := (*cols)[colPos]
 		// col position in insert cols slice
 		col := di.PosMap[i]
-		rawValue := stmts[0].Insertdirectstmt.InsertValues[col+row*di.ColNum]
-		valueType := stmts[0].Insertdirectstmt.ValuesType[col+row*di.ColNum]
-		if valueType != parser.STRINGTYPE && rawValue == "" {
-			goto NullExec
+
+		valueIdx := col + rowOffset
+		rawValue := insertStmt.InsertValues[valueIdx]
+		valueType := insertStmt.ValuesType[valueIdx]
+		column := &(*cols)[colPos]
+
+		if rawValue == "" && valueType != parser.STRINGTYPE {
+			if !column.IsNullable() {
+				return sqlbase.NewNonNullViolationError(column.Name)
+			}
+			// attempting to insert a NULL value when no value is specified
+			inputValues[row][col] = tree.DNull
+			continue
 		}
+
+		var err error
 		switch column.Type.Oid() {
 		case oid.T_timestamptz:
 			var dVal *tree.DInt
@@ -138,7 +165,7 @@ func getSingleRecord(
 				// consistent with the timestamp range supported by savedata
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+						errOutOfRange, rawValue, column.Type.SQLString())
 				}
 			}
 			inputValues[row][col] = dVal
@@ -172,160 +199,79 @@ func getSingleRecord(
 				// consistent with the timestamp range supported by savedata
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+						errOutOfRange, rawValue, column.Type.SQLString())
 				}
 			}
 			inputValues[row][col] = dVal
-			continue
-		case oid.T_int8:
+
+		case oid.T_int8, oid.T_int4, oid.T_int2:
 			if valueType == parser.STRINGTYPE {
 				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 			}
-			in, err := strconv.Atoi(rawValue)
+
+			in, err := strconv.ParseInt(rawValue, 10, 64)
 			if err != nil {
-				dat, err := parserString2Int(rawValue, err, column)
-				if err != nil {
+				if dat, err := parserString2Int(rawValue, err, *column); err != nil {
 					if valueType == parser.NORMALTYPE {
-						return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+						return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 					}
 					return err
-				}
-				if dat != nil {
+				} else if dat != nil {
 					inputValues[row][col] = dat
 					continue
 				}
 			}
-			if in < math.MinInt64 || in > math.MaxInt64 {
-				err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-				return err
+
+			switch column.Type.Oid() {
+			case oid.T_int2:
+				if (in>>15) != 0 && (in>>15) != -1 {
+					goto rangeError
+				}
+			case oid.T_int4:
+				if (in>>31) != 0 && (in>>31) != -1 {
+					goto rangeError
+				}
 			}
-			d := tree.DInt(in)
-			inputValues[row][col] = &d
+
+			inputValues[row][col] = tree.NewDInt(tree.DInt(in))
 			continue
-		case oid.T_int4:
-			if valueType == parser.STRINGTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			in, err := strconv.Atoi(rawValue)
-			if err != nil {
-				dat, err := parserString2Int(rawValue, err, column)
-				if err != nil {
-					if valueType == parser.NORMALTYPE {
-						return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-					}
-					return err
-				}
-				if dat != nil {
-					inputValues[row][col] = dat
-					continue
-				}
-			}
-			if in < math.MinInt32 || in > math.MaxInt32 {
-				err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-				return err
-			}
-			d := tree.DInt(in)
-			inputValues[row][col] = &d
-			continue
-		case oid.T_int2:
-			if valueType == parser.STRINGTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			in, err := strconv.Atoi(rawValue)
-			if err != nil {
-				dat, err := parserString2Int(rawValue, err, column)
-				if err != nil {
-					if valueType == parser.NORMALTYPE {
-						return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-					}
-					return err
-				}
-				if dat != nil {
-					inputValues[row][col] = dat
-					continue
-				}
-			}
-			if in < math.MinInt16 || in > math.MaxInt16 {
-				err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-				return err
-			}
-			d := tree.DInt(in)
-			inputValues[row][col] = &d
-			continue
-		case oid.T_cstring, oid.T_char:
+
+		rangeError:
+			return pgerror.Newf(pgcode.NumericValueOutOfRange,
+				"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
+
+		case oid.T_cstring, oid.T_char, oid.T_text, oid.T_bpchar, oid.T_varchar, oid.Oid(91004), oid.Oid(91002):
 			if valueType == parser.NUMTYPE {
 				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 			}
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 			}
-			if valueType == parser.BYTETYPE {
-				switch column.Type.Family() {
-				case types.BytesFamily:
-					// Convert the value of the input bytes type into a string
-					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-				default:
-					// do nothing
+			if valueType == parser.BYTETYPE && column.Type.Family() == types.BytesFamily {
+				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			}
+
+			// Check string length
+			if column.Type.Width() > 0 {
+				var strLen int
+				if column.Type.Oid() == oid.Oid(91004) || column.Type.Oid() == oid.Oid(91002) {
+					strLen = utf8.RuneCountInString(rawValue)
+				} else {
+					strLen = len(rawValue)
+				}
+				if strLen > int(column.Type.Width()) {
+					return pgerror.Newf(pgcode.StringDataRightTruncation,
+						"value '%s' too long for type %s", rawValue, column.Type.SQLString())
 				}
 			}
 			inputValues[row][col] = tree.NewDString(rawValue)
-			continue
-		case oid.T_text, oid.T_bpchar, oid.T_varchar:
-			if valueType == parser.NUMTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-			}
-			if valueType == parser.BYTETYPE {
-				switch column.Type.Family() {
-				case types.BytesFamily:
-					// Convert the value of the input bytes type into a string
-					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-				default:
-					// do nothing
-				}
-			}
-			// string(n)/char(n)/varchar(n) calculate length by byte
-			if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
-				return pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-			}
-			inputValues[row][col] = tree.NewDString(rawValue)
-			continue
-		// NCHAR or NVARCHAR
-		case oid.Oid(91004), oid.Oid(91002):
-			if valueType == parser.NUMTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-			}
-			if valueType == parser.BYTETYPE {
-				switch column.Type.Family() {
-				case types.BytesFamily:
-					// Convert the value of the input bytes type into a string
-					rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-				default:
-					// do nothing
-				}
-			}
-			// nchar(n)/nvarchar(n) calculate length by character
-			if column.Type.Width() > 0 && utf8.RuneCountInString(rawValue) > int(column.Type.Width()) {
-				return pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-			}
-			inputValues[row][col] = tree.NewDString(rawValue)
-			continue
+
 		case oid.T_bytea, oid.T_varbytea:
 			if valueType == parser.NUMTYPE {
 				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 			}
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 			}
 			v, err := tree.ParseDByte(rawValue)
 			if err != nil {
@@ -337,34 +283,19 @@ func getSingleRecord(
 					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
 			}
 			inputValues[row][col] = v
-			continue
-		case oid.T_float4:
+
+		case oid.T_float4, oid.T_float8:
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 			}
 			if valueType == parser.STRINGTYPE {
 				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 			}
-			var in float64
-			in, err = strconv.ParseFloat(rawValue, 32)
-			if err != nil {
-				if strings.Contains(err.Error(), "out of range") {
-					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-				}
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			bitSize := 32
+			if column.Type.Oid() == oid.T_float8 {
+				bitSize = 64
 			}
-			inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
-			continue
-		case oid.T_float8:
-			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-			}
-			if valueType == parser.STRINGTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			var in float64
-			in, err = strconv.ParseFloat(rawValue, 64)
+			in, err := strconv.ParseFloat(rawValue, bitSize)
 			if err != nil {
 				if strings.Contains(err.Error(), "out of range") {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
@@ -375,7 +306,7 @@ func getSingleRecord(
 			inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
 		case oid.T_bool:
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 			}
 			inputValues[row][col], err = tree.ParseDBool(rawValue)
 			if err != nil {
@@ -383,33 +314,26 @@ func getSingleRecord(
 			}
 		case types.T_geometry:
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 			}
 			if valueType == parser.NUMTYPE {
 				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 			}
-			_, err := geos.FromWKT(rawValue)
-			if err != nil {
+			if _, err := geos.FromWKT(rawValue); err != nil {
 				if strings.Contains(err.Error(), "load error") {
 					return err
 				}
-				return pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", rawValue, column.Type.SQLString())
+				return pgerror.Newf(pgcode.DataException, errInvalidValue, rawValue, column.Type.SQLString())
 			}
 			inputValues[row][col] = tree.NewDString(rawValue)
 		default:
-			return pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
+			return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 
 		}
 		if err != nil {
 			return err
 		}
 		continue
-	NullExec:
-		if !column.IsNullable() {
-			return sqlbase.NewNonNullViolationError(column.Name)
-		}
-		// attempting to insert a NULL value when no value is specified
-		inputValues[row][col] = tree.DNull
 	}
 	return nil
 }
@@ -418,18 +342,17 @@ func parserString2Int(
 	rawValue string, err error, column sqlbase.ColumnDescriptor,
 ) (tree.Datum, error) {
 	if strings.Contains(err.Error(), "out of range") {
-		err = pgerror.New(pgcode.NumericValueOutOfRange, "numeric constant out of int64 range")
-		return nil, err
+		return nil, pgerror.New(pgcode.NumericValueOutOfRange, "numeric constant out of int64 range")
 	}
-	if rawValue == "true" {
-		dat := tree.NewDInt(tree.DInt(1))
-		return dat, nil
-	} else if rawValue == "false" {
-		dat := tree.NewDInt(tree.DInt(0))
-		return dat, nil
+
+	switch rawValue {
+	case "true":
+		return tree.NewDInt(1), nil
+	case "false":
+		return tree.NewDInt(0), nil
+	default:
+		return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 	}
-	err = tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-	return nil, err
 }
 
 // BuildPayload is used to BuildPayloadForTsInsert
@@ -495,49 +418,56 @@ func BuildPerNodePayloads(
 	priTagRowIdx []int,
 	primaryTagKey roachpb.Key,
 ) {
-	if val, ok := payloadNodeMap[int(nodeID[0])]; ok {
-		val.PerNodePayloads = append(val.PerNodePayloads, &sqlbase.SinglePayloadInfo{
-			Payload:       payload,
-			RowNum:        uint32(len(priTagRowIdx)),
-			PrimaryTagKey: primaryTagKey,
-		})
+	payloadInfo := &sqlbase.SinglePayloadInfo{
+		Payload:       payload,
+		RowNum:        uint32(len(priTagRowIdx)),
+		PrimaryTagKey: primaryTagKey,
+	}
+
+	nodeIDInt := int(nodeID[0])
+
+	if val, ok := payloadNodeMap[nodeIDInt]; ok {
+		val.PerNodePayloads = append(val.PerNodePayloads, payloadInfo)
 	} else {
-		rowVal := &sqlbase.PayloadForDistTSInsert{
-			NodeID: nodeID[0],
-			PerNodePayloads: []*sqlbase.SinglePayloadInfo{{
-				Payload:       payload,
-				RowNum:        uint32(len(priTagRowIdx)),
-				PrimaryTagKey: primaryTagKey,
-			}}}
-		payloadNodeMap[int(nodeID[0])] = rowVal
+		payloadNodeMap[nodeIDInt] = &sqlbase.PayloadForDistTSInsert{
+			NodeID:          nodeID[0],
+			PerNodePayloads: []*sqlbase.SinglePayloadInfo{payloadInfo},
+		}
 	}
 }
 
 // NumofInsertDirect id used to calculate colNum, insertLength, rowNum
 func NumofInsertDirect(
-	ins *tree.Insert, colsDesc []sqlbase.ColumnDescriptor, stmts parser.Statements, di *DirectInsert,
+	ins *tree.Insert, colsDesc *[]sqlbase.ColumnDescriptor, stmts parser.Statements, di *DirectInsert,
 ) int {
-	// insert number of columns
-	if ins.Columns != nil && len(ins.Columns) > 0 {
-		di.ColNum = len(ins.Columns)
-	} else {
-		di.ColNum = len(colsDesc)
+	stmt := &stmts[0].Insertdirectstmt
+
+	di.ColNum = len(ins.Columns)
+	if ins.IsNoSchema {
+		di.ColNum /= 3
 	}
-	insertLength := len(stmts[0].Insertdirectstmt.InsertValues)
-	//rowNum := insertLength / colNum
-	di.RowNum = int(stmts[0].Insertdirectstmt.RowsAffected)
-	return insertLength
+
+	if di.ColNum == 0 {
+		di.ColNum = len(*colsDesc)
+	}
+
+	di.RowNum = int(stmt.RowsAffected)
+	return len(stmt.InsertValues)
 }
 
 // BuildpriTagValMap groups input values by primary tag
 func BuildpriTagValMap(di DirectInsert) map[string][]int {
 	// group the input values by primary tag
 	priTagValMap := make(map[string][]int, len(di.InputValues))
+	var builder strings.Builder
+	builder.Grow(64)
 	for i := range di.InputValues {
+		builder.Reset()
 		var priVal string
 		for _, col := range di.PrimaryTagCols {
-			priVal += sqlbase.DatumToString(di.InputValues[i][di.ColIndexs[int(col.ID)]])
+			builder.WriteString(sqlbase.DatumToString(di.InputValues[i][di.ColIndexs[int(col.ID)]]))
 		}
+		priVal = builder.String()
 		priTagValMap[priVal] = append(priTagValMap[priVal], i)
 	}
 	return priTagValMap
@@ -547,26 +477,41 @@ func BuildpriTagValMap(di DirectInsert) map[string][]int {
 func BuildPreparepriTagValMap(qargs [][]byte, di DirectInsert) map[string][]int {
 	// group the input values by primary tag
 	rowNum := di.RowNum / di.ColNum
+	// Pre-allocate map with estimated size to avoid resizing
+	priTagValMap := make(map[string][]int, 10)
 
-	// Calculate column indexes in advance
-	var colIndexes []int
+	// Pre-calculate column indexes
+	colIndexes := make([]int, 0, len(di.PrimaryTagCols))
 	for _, col := range di.PrimaryTagCols {
 		colIndexes = append(colIndexes, di.ColIndexs[int(col.ID)])
 	}
 
-	priTagValMap := make(map[string][]int, 10)
+	// Reuse buffer for building keys to reduce allocations
+	var keyBuilder strings.Builder
+	keyBuilder.Grow(64) // Pre-allocate reasonable buffer size
+
 	for i := 0; i < rowNum; i++ {
-		var priVal []byte
+		keyBuilder.Reset()
+		baseOffset := i * di.ColNum
+
+		// Build composite key from primary tag columns
 		for _, idx := range colIndexes {
-			priVal = append(priVal, qargs[i*di.ColNum+idx]...)
+			keyBuilder.Write(qargs[baseOffset+idx])
 		}
-		priValStr := string(priVal)
-		priTagValMap[priValStr] = append(priTagValMap[priValStr], i)
+
+		key := keyBuilder.String()
+		if existing, exists := priTagValMap[key]; exists {
+			priTagValMap[key] = append(existing, i)
+		} else {
+			// Pre-allocate slice with reasonable capacity
+			priTagValMap[key] = make([]int, 1, 4)
+			priTagValMap[key][0] = i
+		}
 	}
 	return priTagValMap
 }
 
-// BuildRowBytesForPrepareTsInsert build rows for PrepareTsInsert
+// BuildRowBytesForPrepareTsInsert builds rows for PrepareTsInsert efficiently
 func BuildRowBytesForPrepareTsInsert(
 	ptCtx tree.ParseTimeContext,
 	Args [][]byte,
@@ -577,130 +522,113 @@ func BuildRowBytesForPrepareTsInsert(
 	nodeID roachpb.NodeID,
 	rowTimestamps []int64,
 ) error {
-
 	rowNum := di.RowNum / di.ColNum
+
+	// Pre-allocate all required buffers
 	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(rowNum, &di.Dcs)
 	if err != nil {
 		return err
 	}
-	// Define the required variables
-	var curColLength int
+
+	// Process rows sequentially with optimized memory usage
 	bitmapOffset := execbuilder.DataLenSize
 	for i := 0; i < rowNum; i++ {
 		Payload := rowBytes[i]
 		offset := dataOffset
 		varDataOffset := independentOffset
+
+		baseIdx := i * di.ColNum
 		for j, col := range di.PrettyCols {
 			colIdx := di.ColIndexs[int(col.ID)]
-			isLastDataCol := false
-			if colIdx < 0 || Args[i*di.ColNum+colIdx] == nil {
+
+			if col.IsTagCol() {
+				continue
+			}
+
+			argIdx := baseIdx + colIdx
+			arg := Args[argIdx]
+			argLen := len(arg)
+
+			dataColIdx := j - di.PArgs.PTagNum - di.PArgs.AllTagNum
+			isLastDataCol := dataColIdx == di.PArgs.DataColNum-1
+
+			curColLength := execbuilder.VarColumnSize
+			if int(col.TsCol.VariableLengthType) == sqlbase.StorageTuple {
+				curColLength = int(col.TsCol.StorageLen)
+			}
+			// deal with NULL value
+			if colIdx < 0 || arg == nil {
 				if !col.Nullable {
 					return sqlbase.NewNonNullViolationError(col.Name)
-				} else if col.IsTagCol() {
-					continue
 				}
-			}
-			// tag列不用拼到payload里
-			if !col.IsTagCol() {
-				// dataColIdx是第几个data
-				dataColIdx := j - di.PArgs.PTagNum - di.PArgs.AllTagNum
-				isLastDataCol = dataColIdx == di.PArgs.DataColNum-1
-
-				if int(col.TsCol.VariableLengthType) == sqlbase.StorageTuple {
-					curColLength = int(col.TsCol.StorageLen)
-				} else {
-					curColLength = execbuilder.VarColumnSize
-				}
-				// deal with NULL value
-				if colIdx < 0 || Args[i*di.ColNum+colIdx] == nil {
-					Payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
-					offset += curColLength
-					// Fill the length of rowByte
-					if isLastDataCol {
-						binary.LittleEndian.PutUint32(Payload[0:], uint32(varDataOffset-execbuilder.DataLenSize))
-						rowBytes[i] = Payload[:varDataOffset]
-					}
-					continue
-				}
-
-				switch col.Type.Oid() {
-				case oid.T_varchar, types.T_nvarchar:
-					vardataOffset := varDataOffset - bitmapOffset
-					binary.LittleEndian.PutUint32(Payload[offset:], uint32(vardataOffset))
-
-					addSize := len(Args[i*di.ColNum+colIdx]) + execbuilder.VarDataLenSize
-					if varDataOffset+addSize > len(Payload) {
-						// grow payload size
-						newPayload := make([]byte, len(Payload)+addSize)
-						copy(newPayload, Payload)
-						Payload = newPayload
-					}
-					binary.LittleEndian.PutUint16(Payload[varDataOffset:], uint16(len(Args[i*di.ColNum+colIdx])))
-					copy(Payload[varDataOffset+execbuilder.VarDataLenSize:], Args[i*di.ColNum+colIdx])
-					varDataOffset += addSize
-				case oid.T_bool:
-					dataLen := len(Args[i*di.ColNum+colIdx])
-					copy(Payload[offset:offset+dataLen], Args[i*di.ColNum+colIdx])
-
-				case oid.T_bytea:
-					// Special handling: When assembling the payload related to the bytes type,
-					// write the actual length of the bytes type data at the beginning of the byte array.
-					dataLen := len(Args[i*di.ColNum+colIdx])
-					copy(Payload[offset+2:offset+2+dataLen], Args[i*di.ColNum+colIdx])
-
-				case oid.T_varbytea:
-					vardataOffset := varDataOffset - bitmapOffset
-					binary.LittleEndian.PutUint32(Payload[offset:], uint32(vardataOffset))
-
-					addSize := len(Args[i*di.ColNum+colIdx]) + execbuilder.VarDataLenSize
-					if varDataOffset+addSize > len(Payload) {
-						// grow payload size
-						newPayload := make([]byte, len(Payload)+addSize)
-						copy(newPayload, Payload)
-						Payload = newPayload
-					}
-					binary.LittleEndian.PutUint16(Payload[varDataOffset:], uint16(len(Args[i*di.ColNum+colIdx])))
-					copy(Payload[varDataOffset+execbuilder.VarDataLenSize:], Args[i*di.ColNum+colIdx])
-					varDataOffset += addSize
-				default:
-					var dataLen int
-					if len(Args[i*di.ColNum+colIdx]) > curColLength {
-						dataLen = curColLength
-					} else {
-						dataLen = len(Args[i*di.ColNum+colIdx])
-					}
-					copy(Payload[offset:offset+dataLen], Args[i*di.ColNum+colIdx])
-
-				}
+				Payload[bitmapOffset+dataColIdx/8] |= 1 << (dataColIdx % 8)
 				offset += curColLength
+
+				if isLastDataCol {
+					binary.LittleEndian.PutUint32(Payload[0:], uint32(varDataOffset-execbuilder.DataLenSize))
+					rowBytes[i] = Payload[:varDataOffset]
+				}
+				continue
 			}
+
+			switch col.Type.Oid() {
+			case oid.T_varchar, types.T_nvarchar, oid.T_varbytea:
+				vardataOffset := varDataOffset - bitmapOffset
+				binary.LittleEndian.PutUint32(Payload[offset:], uint32(vardataOffset))
+
+				addSize := argLen + execbuilder.VarDataLenSize
+				if varDataOffset+addSize > len(Payload) {
+					newPayload := make([]byte, len(Payload)+addSize)
+					copy(newPayload, Payload)
+					Payload = newPayload
+				}
+				binary.LittleEndian.PutUint16(Payload[varDataOffset:], uint16(argLen))
+				copy(Payload[varDataOffset+execbuilder.VarDataLenSize:], arg)
+				varDataOffset += addSize
+
+			case oid.T_bool:
+				copy(Payload[offset:offset+argLen], arg)
+
+			case oid.T_bytea:
+				copy(Payload[offset+2:offset+2+argLen], arg)
+
+			default:
+				if argLen > curColLength {
+					argLen = curColLength
+				}
+				copy(Payload[offset:offset+argLen], arg)
+			}
+			offset += curColLength
 
 			if isLastDataCol {
-				Payload = Payload[:varDataOffset]
-				// The length of the data is placed in the first 4 bytes of the payload
 				binary.LittleEndian.PutUint32(Payload[0:], uint32(varDataOffset-execbuilder.DataLenSize))
 				rowBytes[i] = Payload[:varDataOffset]
 			}
 		}
 	}
-	//	The following code uniformly calculates priTagValMap
-	var colIndexes []int
+
+	// Build primary tag value map with pre-allocated capacity
+	priTagValMap := make(map[string][]int, 10)
+	var keyBuilder strings.Builder
+	keyBuilder.Grow(64)
+
+	colIndexes := make([]int, 0, len(di.PrimaryTagCols))
 	for _, col := range di.PrimaryTagCols {
 		colIndexes = append(colIndexes, di.ColIndexs[int(col.ID)])
 	}
 
-	priTagValMap := make(map[string][]int, 10)
 	for i := 0; i < rowNum; i++ {
-		var priVal []byte
+		keyBuilder.Reset()
 		for _, idx := range colIndexes {
-			priVal = append(priVal, Args[i*di.ColNum+idx]...)
+			keyBuilder.Write(Args[i*di.ColNum+idx])
 		}
-		priValStr := string(priVal)
-		priTagValMap[priValStr] = append(priTagValMap[priValStr], i)
+		key := keyBuilder.String()
+		priTagValMap[key] = append(priTagValMap[key], i)
 	}
-	di.PArgs.DataColNum, di.PArgs.DataColSize, di.PArgs.PreAllocColSize = 0, 0, 0
-	allPayloads := make([]*sqlbase.SinglePayloadInfo, len(priTagValMap))
-	count := 0
+
+	// Pre-allocate payloads slice
+	allPayloads := make([]*sqlbase.SinglePayloadInfo, 0, len(priTagValMap))
+
 	for _, priTagRowIdx := range priTagValMap {
 		payload, _, err := execbuilder.BuildPreparePayloadForTsInsert(
 			&EvalContext,
@@ -718,43 +646,48 @@ func BuildRowBytesForPrepareTsInsert(
 		if err != nil {
 			return err
 		}
-		// Make primaryTag key.
+
 		hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
 		primaryTagKey := sqlbase.MakeTsPrimaryTagKey(table.ID, hashPoints)
-		groupRowBytes := make([][]byte, len(priTagRowIdx))
-		groupRowTime := make([]int64, len(priTagRowIdx))
-		// TsRowPutRequest need min and max timestamp.
-		minTimestamp := int64(math.MaxInt64)
-		maxTimeStamp := int64(math.MinInt64)
+
+		groupLen := len(priTagRowIdx)
+		groupBytes := make([][]byte, groupLen)
+		groupTimes := make([]int64, groupLen)
 		valueSize := int32(0)
+		minTs := rowTimestamps[priTagRowIdx[0]]
+		maxTs := minTs
+
 		for i, idx := range priTagRowIdx {
-			groupRowBytes[i] = rowBytes[idx]
-			groupRowTime[i] = rowTimestamps[idx]
-			if rowTimestamps[idx] > maxTimeStamp {
-				maxTimeStamp = rowTimestamps[idx]
+			groupBytes[i] = rowBytes[idx]
+			ts := rowTimestamps[idx]
+			groupTimes[i] = ts
+			valueSize += int32(len(groupBytes[i]))
+
+			if ts < minTs {
+				minTs = ts
 			}
-			if rowTimestamps[idx] < minTimestamp {
-				minTimestamp = rowTimestamps[idx]
+			if ts > maxTs {
+				maxTs = ts
 			}
-			valueSize += int32(len(groupRowBytes[i]))
 		}
-		startKey := sqlbase.MakeTsRangeKey(table.ID, uint64(hashPoints[0]), minTimestamp)
-		endKey := sqlbase.MakeTsRangeKey(table.ID, uint64(hashPoints[0]), maxTimeStamp+1)
-		allPayloads[count] = &sqlbase.SinglePayloadInfo{
+
+		allPayloads = append(allPayloads, &sqlbase.SinglePayloadInfo{
 			Payload:       payload,
-			RowNum:        uint32(len(priTagRowIdx)),
+			RowNum:        uint32(groupLen),
 			PrimaryTagKey: primaryTagKey,
-			RowBytes:      groupRowBytes,
-			RowTimestamps: groupRowTime,
-			StartKey:      startKey,
-			EndKey:        endKey,
+			RowBytes:      groupBytes,
+			RowTimestamps: groupTimes,
+			StartKey:      sqlbase.MakeTsRangeKey(table.ID, uint64(hashPoints[0]), minTs),
+			EndKey:        sqlbase.MakeTsRangeKey(table.ID, uint64(hashPoints[0]), maxTs+1),
 			ValueSize:     valueSize,
-		}
-		count++
+		})
 	}
+
 	di.PayloadNodeMap[int(EvalContext.NodeID)] = &sqlbase.PayloadForDistTSInsert{
-		NodeID: nodeID, PerNodePayloads: allPayloads,
+		NodeID:          nodeID,
+		PerNodePayloads: allPayloads,
 	}
+
 	return nil
 }
 
@@ -764,7 +697,7 @@ func TsprepareTypeCheck(
 	Args [][]byte,
 	inferTypes []oid.Oid,
 	ArgFormatCodes []pgwirebase.FormatCode,
-	cols []sqlbase.ColumnDescriptor,
+	cols *[]sqlbase.ColumnDescriptor,
 	di DirectInsert,
 ) ([][][]byte, []int64, error) {
 	rowNum := di.RowNum / di.ColNum
@@ -779,8 +712,8 @@ func TsprepareTypeCheck(
 	for row := 0; row < rowNum; row++ {
 		for col := 0; col < di.ColNum; col++ {
 			colPos := di.IDMap[col]
-			column := cols[colPos]
-			// 通过列ID确定是第一列，也就是时间戳列
+			column := &(*cols)[colPos]
+			// Determine by column ID that it is the first column, which is the timestamp column.
 			if int(column.ID) == 1 {
 				isFirstCols = true
 			}
@@ -1107,7 +1040,7 @@ func TsprepareTypeCheck(
 							if strings.Contains(err.Error(), "load error") {
 								return nil, nil, err
 							}
-							return nil, nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", string(Args[idx]), column.Type.SQLString())
+							return nil, nil, pgerror.Newf(pgcode.DataException, errInvalidValue, string(Args[idx]), column.Type.SQLString())
 						}
 						if len(string(Args[idx])) > int(column.Type.Width()) {
 							return nil, nil, pgerror.Newf(pgcode.StringDataRightTruncation,
@@ -1138,99 +1071,93 @@ func TsprepareTypeCheck(
 func bigEndianToLittleEndian(bigEndian []byte) []byte {
 	// Reverse the byte slice of the large endings
 	// to obtain the byte slice of the small endings
-	littleEndian := make([]byte, len(bigEndian))
-	for i := 0; i < len(bigEndian); i++ {
-		littleEndian[i] = bigEndian[len(bigEndian)-1-i]
+	len := len(bigEndian)
+	for i := 0; i < len/2; i++ {
+		bigEndian[i], bigEndian[len-1-i] = bigEndian[len-1-i], bigEndian[i]
 	}
-	return littleEndian
+	return bigEndian
 }
 
 // GetColsInfo to obtain relevant column information
 func GetColsInfo(
 	ctx context.Context,
+	EvalContext tree.EvalContext,
 	tsColsDesc *[]sqlbase.ColumnDescriptor,
 	ins *tree.Insert,
 	di *DirectInsert,
 	stmt *parser.Statement,
-) (err error) {
-	var otherTagCols, dataCols []*sqlbase.ColumnDescriptor
-	var ptID, tID, dID []int
-	var ptPos, tPos, dPos []int
+) error {
 	colsDesc := *tsColsDesc
-	di.ColIndexs = make(map[int]int, len(colsDesc))
-	fixColsDesc := make([]sqlbase.ColumnDescriptor, 0, len(colsDesc))
-	di.Dcs = make([]sqlbase.ColumnDescriptor, 0, 11)
-	tagCols := make([]sqlbase.ColumnDescriptor, 0, 11)
-	samecol := make([]bool, len(ins.Columns))
-	for i := 0; i < len(colsDesc); i++ {
-		col := (colsDesc)[i]
-		if col.IsTagCol() {
-			tagCols = append(tagCols, col)
+	tableColLength := len(colsDesc)
+	insertColLength := len(ins.Columns)
+
+	var tagCount, dataCount int
+	for i := 0; i < tableColLength; i++ {
+		if colsDesc[i].IsDataCol() {
+			dataCount++
 		} else {
-			di.Dcs = append(di.Dcs, col)
+			tagCount++
 		}
 	}
-	fixColsDesc = append(fixColsDesc, di.Dcs...)
-	fixColsDesc = append(fixColsDesc, tagCols...)
-	colsDesc = fixColsDesc
-	*tsColsDesc = fixColsDesc
-	if ins.Columns != nil && len(ins.Columns) > 0 {
-		haveOtherTag, haveDataCol := false, false
-		isInsert := false
-		for i := 0; i < len(colsDesc); i++ {
-			isInsert = false
-			var insertPos int
-			for idx, name := range ins.Columns {
-				if !samecol[idx] && string(name) == colsDesc[i].Name {
-					isInsert = true
-					insertPos = idx
-					samecol[idx] = true
-					break
-				}
-			}
 
-			colID := opt.ColumnID(colsDesc[i].ID)
-			if colsDesc[i].IsPrimaryTagCol() {
-				di.PrimaryTagCols = append(di.PrimaryTagCols, &colsDesc[i])
-				if isInsert {
-					di.ColIndexs[int(colID)] = insertPos
-				}
+	tagCols := make([]*sqlbase.ColumnDescriptor, 0, tagCount)
+	dataCols := make([]*sqlbase.ColumnDescriptor, 0, dataCount)
+	tID, dID := make([]int, 0, tagCount), make([]int, 0, dataCount)
+	tPos, dPos := make([]int, 0, tagCount), make([]int, 0, dataCount)
+
+	di.ColIndexs, di.DefIndexs = make(map[int]int, tableColLength), make(map[int]int, tableColLength)
+
+	if insertColLength > 0 {
+		columnIndexMap := make(map[string]int, insertColLength)
+		for idx, colName := range ins.Columns {
+			colNameStr := string(colName)
+			if _, exists := columnIndexMap[colNameStr]; exists {
+				return pgerror.Newf(pgcode.DuplicateColumn, "multiple assignments to the same column \"%s\"", colNameStr)
 			}
-			if colsDesc[i].IsTagCol() {
-				otherTagCols = append(otherTagCols, &colsDesc[i])
-				if isInsert {
-					di.ColIndexs[int(colID)] = insertPos
-					haveOtherTag = true
-					tID = append(tID, i)
-					tPos = append(tPos, insertPos)
-				}
+			columnIndexMap[colNameStr] = idx
+		}
+
+		haveOtherTag, haveDataCol := false, false
+
+		for i := 0; i < tableColLength; i++ {
+			col := &colsDesc[i]
+			colID := int(col.ID)
+			insertPos, exists := columnIndexMap[col.Name]
+			columnIndexMap[col.Name] = -1
+
+			if exists {
+				di.ColIndexs[colID] = insertPos
 			} else {
-				dataCols = append(dataCols, &colsDesc[i])
-				if isInsert {
-					haveDataCol = true
-					di.ColIndexs[int(colID)] = insertPos
+				di.ColIndexs[colID] = -1
+				di.DefIndexs[colID] = i
+			}
+			if col.IsDataCol() {
+				dataCols = append(dataCols, col)
+				if exists {
 					dID = append(dID, i)
 					dPos = append(dPos, insertPos)
+					haveDataCol = true
 				}
-			}
-			if !isInsert {
-				di.ColIndexs[int(colsDesc[i].ID)] = -1
+			} else {
+				tagCols = append(tagCols, col)
+				if exists {
+					tID = append(tID, i)
+					tPos = append(tPos, insertPos)
+					haveOtherTag = true
+				}
+				if col.IsPrimaryTagCol() {
+					di.PrimaryTagCols = append(di.PrimaryTagCols, col)
+				}
 			}
 		}
+
+		valueLength := len(stmt.Insertdirectstmt.InsertValues)
 		for idx, name := range ins.Columns {
-			if !samecol[idx] {
-				for i := 0; i < len(colsDesc); i++ {
-					if colsDesc[i].Name == string(ins.Columns[idx]) {
-						err = pgerror.Newf(pgcode.DuplicateColumn, "multiple assignments to the same column \"%s\"", string(ins.Columns[idx]))
-						return
-					}
-				}
-				err = sqlbase.NewUndefinedColumnError(string(name))
+			if -1 != columnIndexMap[string(name)] {
 				if !stmt.Insertdirectstmt.IgnoreBatcherror {
-					return
+					return sqlbase.NewUndefinedColumnError(string(name))
 				}
-				valueLength := len(stmt.Insertdirectstmt.InsertValues)
-				insertColLength := len(ins.Columns)
+
 				cleanInsertValues := make([]string, 0, valueLength)
 				// Traverse the unknown columns in each inserted row
 				for i := 0; i < valueLength; i += insertColLength {
@@ -1238,7 +1165,7 @@ func GetColsInfo(
 						// BatchInsert: Unknown column has value, record log, delete this row
 						(*di).RowNum--
 						stmt.Insertdirectstmt.BatchFailedColumn++
-						log.Errorf(ctx, "BatchInsert Error: %s", err)
+						log.Errorf(ctx, "BatchInsert Error: %s", sqlbase.NewUndefinedColumnError(string(name)))
 						continue
 					}
 					// BatchInsert: Unknown column is null, ignore this column and continue inserting this row
@@ -1247,95 +1174,192 @@ func GetColsInfo(
 				(*stmt).Insertdirectstmt.InsertValues = cleanInsertValues
 			}
 		}
+
 		if !haveDataCol {
 			dataCols = dataCols[:0]
 		}
 		if !haveOtherTag && haveDataCol {
-			otherTagCols = otherTagCols[:0]
+			tagCols = tagCols[:0]
 		}
 	} else {
-		for i := 0; i < len(colsDesc); i++ {
-			if colsDesc[i].IsPrimaryTagCol() {
-				di.PrimaryTagCols = append(di.PrimaryTagCols, &colsDesc[i])
-			}
-			if colsDesc[i].IsTagCol() {
-				otherTagCols = append(otherTagCols, &colsDesc[i])
-				tID = append(tID, i)
-				tPos = append(tPos, i)
-			} else {
-				dataCols = append(dataCols, &colsDesc[i])
+		tagFirstIdx := -1
+		tagFirstFlag := false
+		colIdx := 0
+		for i := 0; i < tableColLength; i++ {
+			col := &colsDesc[i]
+			if col.IsDataCol() {
+				dataCols = append(dataCols, col)
 				dID = append(dID, i)
-				dPos = append(dPos, i)
+				dPos = append(dPos, colIdx)
+				di.ColIndexs[int(col.ID)] = colIdx
+				colIdx++
+			} else if !tagFirstFlag {
+				tagFirstIdx = i
+				tagFirstFlag = true
 			}
-			di.ColIndexs[int(colsDesc[i].ID)] = i
 		}
-	}
-	tsVersion := uint32(1)
-	di.PArgs, err = execbuilder.BuildPayloadArgs(tsVersion, di.PrimaryTagCols, otherTagCols, dataCols)
-	di.PrettyCols = di.PArgs.PrettyCols
-	di.IDMap = make([]int, 0, len(colsDesc))
-	di.IDMap = append(di.IDMap, ptID...)
-	di.IDMap = append(di.IDMap, tID...)
-	di.IDMap = append(di.IDMap, dID...)
-	di.PosMap = make([]int, 0, len(colsDesc))
-	di.PosMap = append(di.PosMap, ptPos...)
-	di.PosMap = append(di.PosMap, tPos...)
-	di.PosMap = append(di.PosMap, dPos...)
-	// check for not null columns
-	for i := 0; i < len(di.PrettyCols); i++ {
-		if di.ColIndexs[int(di.PrettyCols[i].ID)] < 0 {
-			if di.PrettyCols[i].IsPrimaryTagCol() {
-				var priTagNames []string
-				for _, ptCols := range di.PrimaryTagCols {
-					priTagNames = append(priTagNames, (*ptCols).Name)
+
+		// Process the tag column again.
+		for i := tagFirstIdx; i < tableColLength; i++ {
+			col := &colsDesc[i]
+			if col.IsTagCol() {
+				tagCols = append(tagCols, col)
+				tID = append(tID, i)
+				tPos = append(tPos, colIdx)
+				di.ColIndexs[int(col.ID)] = colIdx
+				colIdx++
+				if col.IsPrimaryTagCol() {
+					di.PrimaryTagCols = append(di.PrimaryTagCols, col)
 				}
-				err = pgerror.Newf(pgcode.Syntax, "need to specify all primary tag %v", priTagNames)
-				return
-			}
-			if di.PrettyCols[i].IsOrdinaryTagCol() && !di.PrettyCols[i].Nullable {
-				err = sqlbase.NewNonNullViolationError(di.PrettyCols[i].Name)
-				return
-			}
-			if !di.PrettyCols[i].Nullable && len(dataCols) != 0 {
-				err = sqlbase.NewNonNullViolationError(di.PrettyCols[i].Name)
-				return
 			}
 		}
 	}
-	return
+
+	tsVersion := uint32(1)
+	var err error
+	di.PArgs, err = execbuilder.BuildPayloadArgs(tsVersion, di.PrimaryTagCols, tagCols, dataCols)
+	if err != nil {
+		return err
+	}
+
+	di.PrettyCols = di.PArgs.PrettyCols
+	di.Dcs = dataCols
+
+	totalLen := len(tID) + len(dID)
+	di.IDMap = make([]int, totalLen)
+	di.PosMap = make([]int, totalLen)
+	copy(di.IDMap, tID)
+	copy(di.IDMap[len(tID):], dID)
+	copy(di.PosMap, tPos)
+	copy(di.PosMap[len(tPos):], dPos)
+
+	inputIdx := -1
+	// check for not null columns
+	colIndexMap := di.ColIndexs
+	for _, col := range di.PrettyCols {
+		if colIndexMap[int(col.ID)] < 0 {
+			if !col.HasDefault() {
+				switch {
+				case col.IsPrimaryTagCol():
+					priTagNames := make([]string, 0, len(di.PrimaryTagCols))
+					for _, ptCol := range di.PrimaryTagCols {
+						priTagNames = append(priTagNames, (*ptCol).Name)
+					}
+					return pgerror.Newf(pgcode.Syntax, "need to specify all primary tag %v", priTagNames)
+				case col.IsOrdinaryTagCol() && !col.Nullable:
+					return sqlbase.NewNonNullViolationError(col.Name)
+				case !col.Nullable && len(dataCols) != 0:
+					return sqlbase.NewNonNullViolationError(col.Name)
+				}
+			} else {
+				colsWithDefaultValMap, _ := execbuilder.CheckDefaultVals(&EvalContext, di.PArgs)
+				inputIdx = totalLen
+				totalLen++
+				colIndexMap[int(col.ID)] = inputIdx
+				if _, ok := colsWithDefaultValMap[col.ID]; ok {
+					if err = setDefaultValues(di, inputIdx, col, stmt); err != nil {
+						return err
+					}
+					di.ColNum++
+					di.IDMap, di.PosMap = append(di.IDMap, di.DefIndexs[int(col.ID)]), append(di.PosMap, inputIdx)
+				} else {
+					return pgerror.Newf(pgcode.CaseNotFound, "column '%s' should have default value '%s' "+
+						"but not found in internal struct", col.Name, col.DefaultExprStr())
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func setDefaultValues(
+	di *DirectInsert, inputIdx int, col *sqlbase.ColumnDescriptor, stmt *parser.Statement,
+) error {
+	var def string
+	var typ int
+	defaultValStr := col.DefaultExprStr()
+	for i := 0; i < di.RowNum; i++ {
+		idx := i + inputIdx*(i+1)
+		switch col.Type.InternalType.Family {
+		case types.BoolFamily:
+			def, typ = defaultValStr, 1
+		case types.IntFamily, types.FloatFamily:
+			def, typ = defaultValStr, 0
+		case types.StringFamily:
+			defaultExpr, err := parser.ParseExpr(col.DefaultExprStr())
+			if err != nil {
+				return err
+			}
+			if v, ok := defaultExpr.(*tree.StrVal); ok {
+				defaultValStr = v.RawString()
+			}
+			def, typ = strings.Replace(defaultValStr, "'", "", -1), 1
+		case types.TimestampFamily, types.TimestampTZFamily:
+			if strings.HasPrefix(col.DefaultExprStr(), "now()") {
+				def, typ = "now", 0
+			} else if strings.HasPrefix(defaultValStr, "'") {
+				def, typ = defaultValStr[1:len(col.DefaultExprStr())-1], 1
+			} else {
+				def, typ = defaultValStr, 0
+			}
+		case types.BytesFamily:
+			defaultExpr, err := parser.ParseExpr(col.DefaultExprStr())
+			if err != nil {
+				return err
+			}
+			if v, ok := defaultExpr.(*tree.StrVal); ok {
+				defaultValStr = v.RawString()
+			}
+			def, typ = defaultValStr, 3
+		}
+		stmt.Insertdirectstmt.ValuesType = append(stmt.Insertdirectstmt.ValuesType[:idx], append([]parser.TokenType{parser.TokenType(typ)}, stmt.Insertdirectstmt.ValuesType[idx:]...)...)
+		stmt.Insertdirectstmt.InsertValues = append(stmt.Insertdirectstmt.InsertValues[:idx], append([]string{def}, stmt.Insertdirectstmt.InsertValues[idx:]...)...)
+	}
+	return nil
 }
 
 // preAllocateDataRowBytes calculates the memory size required by rowBytes based on the data columns
 // and preAllocates the memory space.
 func preAllocateDataRowBytes(
-	rowNum int, dataCols *[]sqlbase.ColumnDescriptor,
+	rowNum int, dataCols *[]*sqlbase.ColumnDescriptor,
 ) (rowBytes [][]byte, dataOffset, varDataOffset int, err error) {
 	dataRowSize, preSize, err := computeColumnSize(dataCols)
 	if err != nil {
 		return
 	}
-	bitmapLen := (len(*dataCols) + 7) / 8
+
+	bitmapLen := (len(*dataCols) + 7) >> 3
+
 	singleRowSize := execbuilder.DataLenSize + bitmapLen + dataRowSize + preSize
-	rowBytesSize := singleRowSize * rowNum
+
+	buffer := make([]byte, rowNum*singleRowSize)
+
 	rowBytes = make([][]byte, rowNum)
-	// allocate memory for two nested slices, for better performance
-	preBytes := make([]byte, rowBytesSize)
-	for i := 0; i < rowNum; i++ {
-		rowBytes[i], preBytes = preBytes[:singleRowSize:singleRowSize], preBytes[singleRowSize:]
+
+	for i, j := 0, 0; i < rowNum; i++ {
+		end := j + singleRowSize
+		rowBytes[i] = buffer[j:end:end]
+		j += singleRowSize
 	}
-	bitmapOffset := execbuilder.DataLenSize
-	dataOffset = bitmapOffset + bitmapLen
+
+	dataOffset = execbuilder.DataLenSize + bitmapLen
 	varDataOffset = dataOffset + dataRowSize
 	return
 }
 
 // ComputeColumnSize computes colSize
-func computeColumnSize(cols *[]sqlbase.ColumnDescriptor) (int, int, error) {
+func computeColumnSize(cols *[]*sqlbase.ColumnDescriptor) (int, int, error) {
 	colSize := 0
 	preAllocSize := 0
-	for i := range *cols {
-		col := (*cols)[i]
-		switch col.Type.Oid() {
+
+	colsArr := *cols
+	colsLen := len(colsArr)
+
+	for i := 0; i < colsLen; i++ {
+		col := colsArr[i]
+		oidVal := col.Type.Oid()
+
+		switch oidVal {
 		case oid.T_int2:
 			colSize += 2
 		case oid.T_int4, oid.T_float4:
@@ -1352,29 +1376,29 @@ func computeColumnSize(cols *[]sqlbase.ColumnDescriptor) (int, int, error) {
 		case oid.T_char, types.T_nchar, oid.T_text, oid.T_bpchar, oid.T_bytea, types.T_geometry:
 			colSize += int(col.TsCol.StorageLen)
 		case oid.T_varchar, types.T_nvarchar, types.T_varbytea:
+			storageLen := int(col.TsCol.StorageLen)
 			if col.TsCol.VariableLengthType == sqlbase.StorageTuple || col.IsPrimaryTagCol() {
-				colSize += int(col.TsCol.StorageLen)
+				colSize += storageLen
 			} else {
 				// pre allocate paylaod space for var-length colums
 				// here we use some fixed-rule to preallocate more space to improve efficiency
 				// StorageLen = userWidth+1
 				// varDataLen = StorageLen+2
-				if col.TsCol.StorageLen < 68 {
-					// 100%
-					preAllocSize += int(col.TsCol.StorageLen)
-				} else if col.TsCol.StorageLen < 260 {
-					// 60%
-					preAllocSize += int(col.TsCol.StorageLen/5) * 3
-				} else {
-					// 30%
-					preAllocSize += int(col.TsCol.StorageLen/10) * 3
+				switch {
+				case storageLen < 68:
+					preAllocSize += storageLen // 100%
+				case storageLen < 260:
+					preAllocSize += (storageLen * 3) / 5 // 60%
+				default:
+					preAllocSize += (storageLen * 3) / 10 // 30%
 				}
 				colSize += execbuilder.VarColumnSize
 			}
 		default:
-			return 0, 0, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported input type oid %d", col.Type.Oid())
+			return 0, 0, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported input type oid %d", oidVal)
 		}
 	}
+
 	return colSize, preAllocSize, nil
 }
 
@@ -1386,14 +1410,22 @@ func GetRowBytesForTsInsert(
 	stmts parser.Statements,
 	rowTimestamps []int64,
 ) ([]tree.Datums, map[string][]int, [][]byte, error) {
-	inputValues := make([]tree.Datums, di.RowNum)
-	// Apply for continuous memory space at once and allocate it to 2D slices
-	preSlice := make([]tree.Datum, di.RowNum*di.ColNum)
-	for i := 0; i < di.RowNum; i++ {
-		inputValues[i], preSlice = preSlice[:di.ColNum:di.ColNum], preSlice[di.ColNum:]
+	// Pre-allocate all slices with exact sizes to avoid reallocations
+	rowNum := di.RowNum
+	colNum := di.ColNum
+	totalSize := rowNum * colNum
+	preSlice := make([]tree.Datum, totalSize)
+	inputValues := make([]tree.Datums, rowNum)
+	outputValues := make([]tree.Datums, 0, rowNum)
+
+	// Initialize input values slice efficiently
+	for i, j := 0, 0; i < rowNum; i++ {
+		end := j + colNum
+		inputValues[i] = preSlice[j:end:end]
+		j += colNum
 	}
 	tp := execbuilder.NewTsPayload()
-	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(di.RowNum, &di.Dcs)
+	rowBytes, dataOffset, independentOffset, err := preAllocateDataRowBytes(rowNum, &di.Dcs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1401,24 +1433,30 @@ func GetRowBytesForTsInsert(
 	priTagValMap := make(map[string][]int)
 	// Type check for input values.
 	var buf strings.Builder
-	outputValues := make([]tree.Datums, 0, di.RowNum)
-	outrowBytes := make([][]byte, 0, len(rowBytes))
+	outrowBytes := make([][]byte, 0, rowNum)
+
+	// Track batch errors
+	batchFailed := &stmts[0].Insertdirectstmt.BatchFailed
+	ignoreBatchErr := stmts[0].Insertdirectstmt.IgnoreBatcherror
+
 	for row := range inputValues {
 		tp.SetPayload(rowBytes[row])
-		offset := dataOffset
-		varDataOffset := independentOffset
-		err = getSingleRowBytes(ptCtx, di, tp, offset, varDataOffset, row, rowBytes, stmts, inputValues, &buf, rowTimestamps)
-		if err != nil {
-			if !stmts[0].Insertdirectstmt.IgnoreBatcherror {
+
+		if err := getSingleRowBytes(ptCtx, di, tp, dataOffset, independentOffset,
+			row, rowBytes, stmts, inputValues, &buf, rowTimestamps); err != nil {
+			if !ignoreBatchErr {
 				return nil, nil, nil, err
 			}
-			stmts[0].Insertdirectstmt.BatchFailed++
+			*batchFailed++
 			log.Errorf(ctx, "BatchInsert Error: %s", err)
 			continue
 		}
 
+		adjustedRow := row - *batchFailed
+		tagKey := buf.String()
+
 		outputValues = append(outputValues, inputValues[row])
-		priTagValMap[buf.String()] = append(priTagValMap[buf.String()], row-stmts[0].Insertdirectstmt.BatchFailed)
+		priTagValMap[tagKey] = append(priTagValMap[tagKey], adjustedRow)
 		outrowBytes = append(outrowBytes, rowBytes[row])
 
 		buf.Reset()
@@ -1438,67 +1476,78 @@ func getSingleRowBytes(
 	buf *strings.Builder,
 	rowTimestamps []int64,
 ) error {
-	var curColLength, dataColIdx int
-	var isDataCol, isLastDataCol bool
+	// Pre-calculate constants to avoid repeated calculations
 	bitmapOffset := execbuilder.DataLenSize
-	var err error
+	pTagNum := di.PArgs.PTagNum
+	allTagNum := di.PArgs.AllTagNum
+	dataColNum := di.PArgs.DataColNum
+	colNum := di.ColNum
+
+	// Pre-fetch frequently accessed values
+	insertValues := stmts[0].Insertdirectstmt.InsertValues
+	valuesType := stmts[0].Insertdirectstmt.ValuesType
+	rowOffset := row * colNum
+
+	// Process columns in a single pass
 	for i, column := range di.PrettyCols {
 		colIdx := di.ColIndexs[int(column.ID)]
-		isDataCol = !column.IsTagCol()
-		isLastDataCol = false
+		isDataCol := column.IsDataCol()
+
+		// Early exit for invalid column index
 		if colIdx < 0 {
 			if !column.IsNullable() {
 				return sqlbase.NewNonNullViolationError(column.Name)
-			} else if column.IsTagCol() {
-				continue
 			}
-			dataColIdx = i
-			if column.IsTagCol() {
+			if !isDataCol {
 				continue
 			}
 		}
-		if isDataCol {
-			dataColIdx = i - di.PArgs.PTagNum - di.PArgs.AllTagNum
-			isLastDataCol = dataColIdx == di.PArgs.DataColNum-1
 
+		// Handle data columns
+		if isDataCol {
+			dataColIdx := i - pTagNum - allTagNum
+			isLastDataCol := dataColIdx == dataColNum-1
+
+			// Calculate column length once
+			curColLength := execbuilder.VarColumnSize
 			if int(column.TsCol.VariableLengthType) == sqlbase.StorageTuple {
 				curColLength = int(column.TsCol.StorageLen)
-			} else {
-				curColLength = execbuilder.VarColumnSize
 			}
-			// deal with NULL value
+
+			// Handle NULL values efficiently
 			if colIdx < 0 {
 				execbuilder.SetBit(tp, bitmapOffset, dataColIdx)
 				offset += curColLength
-				// Fill the length of rowByte
+
 				if isLastDataCol {
 					execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
 					rowBytes[row] = tp.GetPayload(varDataOffset)
 				}
 				continue
 			}
-		}
-		col := colIdx
-		rawValue := stmts[0].Insertdirectstmt.InsertValues[col+row*di.ColNum]
-		valueType := stmts[0].Insertdirectstmt.ValuesType[col+row*di.ColNum]
-		if valueType != parser.STRINGTYPE && rawValue == "" {
-			if !column.IsNullable() {
-				return sqlbase.NewNonNullViolationError(column.Name)
-			}
-			// attempting to insert a NULL value when no value is specified
-			inputValues[row][col] = tree.DNull
-		} else {
-			inputValues[row][col], err = GetSingleDatum(ptCtx, *column, valueType, rawValue)
-		}
 
-		if err != nil {
-			return err
-		}
-		if i < di.PArgs.PTagNum {
-			buf.WriteString(sqlbase.DatumToString(inputValues[row][col]))
-		}
-		if isDataCol {
-			if inputValues[row][col] == tree.DNull {
+			// Process non-NULL data values
+			rawValue := insertValues[colIdx+rowOffset]
+			valueType := valuesType[colIdx+rowOffset]
+
+			var datum tree.Datum
+			var err error
+			if valueType != parser.STRINGTYPE && rawValue == "" {
+				if !column.IsNullable() {
+					return sqlbase.NewNonNullViolationError(column.Name)
+				}
+				// attempting to insert a NULL value when no value is specified
+				datum = tree.DNull
+			} else {
+				datum, err = GetSingleDatum(ptCtx, *column, valueType, rawValue)
+				if err != nil {
+					return err
+				}
+			}
+
+			inputValues[row][colIdx] = datum
+
+			if inputValues[row][colIdx] == tree.DNull {
 				execbuilder.SetBit(tp, bitmapOffset, dataColIdx)
 				offset += curColLength
 				// Fill the length of rowByte
@@ -1509,25 +1558,55 @@ func getSingleRowBytes(
 				continue
 			}
 
+			// Handle first timestamp column
 			if dataColIdx == 0 {
-				rowTimestamps[row] = int64(*inputValues[row][col].(*tree.DInt))
+				rowTimestamps[row] = int64(*datum.(*tree.DInt))
 			}
+
+			// Fill column data
 			if varDataOffset, err = tp.FillColData(
-				inputValues[row][col],
-				column, false, false,
+				datum, column, false, false,
 				offset, varDataOffset, bitmapOffset,
 			); err != nil {
 				return err
 			}
+
 			offset += curColLength
 			if isLastDataCol {
 				tp.SetPayload(tp.GetPayload(varDataOffset))
 				execbuilder.WriteUint32ToPayload(tp, uint32(varDataOffset-execbuilder.DataLenSize))
 				rowBytes[row] = tp.GetPayload(varDataOffset)
 			}
+			continue
 		}
-		continue
+
+		// Handle tag columns
+		rawValue := insertValues[colIdx+rowOffset]
+		valueType := valuesType[colIdx+rowOffset]
+
+		// Process NULL values
+		if valueType != parser.STRINGTYPE && rawValue == "" {
+			if !column.IsNullable() {
+				return sqlbase.NewNonNullViolationError(column.Name)
+			}
+			inputValues[row][colIdx] = tree.DNull
+			continue
+		}
+
+		// Get datum for non-NULL values
+		datum, err := GetSingleDatum(ptCtx, *column, valueType, rawValue)
+		if err != nil {
+			return err
+		}
+
+		inputValues[row][colIdx] = datum
+
+		// Build primary tag key
+		if i < pTagNum {
+			buf.WriteString(sqlbase.DatumToString(datum))
+		}
 	}
+
 	return nil
 }
 
@@ -1538,304 +1617,162 @@ func GetSingleDatum(
 	valueType parser.TokenType,
 	rawValue string,
 ) (tree.Datum, error) {
-	var err error
-	switch column.Type.Oid() {
-	case oid.T_timestamptz:
-		var dVal *tree.DInt
+	oidType := column.Type.Oid()
+
+	if valueType == parser.NORMALTYPE && oidType != oid.T_timestamptz && oidType != oid.T_timestamp {
+		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+	}
+
+	switch oidType {
+	case oid.T_timestamptz, oid.T_timestamp:
 		if valueType == parser.STRINGTYPE {
-			t, err := tree.ParseDTimestampTZ(ptCtx, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
-			if err != nil {
+			precision := tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision())
+			var datum tree.Datum
+			var err error
+
+			if oidType == oid.T_timestamptz {
+				if datum, err = tree.ParseDTimestampTZ(ptCtx, rawValue, precision); err != nil {
+					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				}
+				dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestampTZ).UnixMilli()))
+				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
+					return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString())
+				}
+				return dVal, nil
+			}
+
+			if datum, err = tree.ParseDTimestamp(nil, rawValue, precision); err != nil {
 				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 			}
-			dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
+			dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestamp).UnixMilli()))
 			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
+				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString())
 			}
-		} else {
-			if rawValue == "now" {
-				currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
-				return tree.NewDInt(tree.DInt(currentTime)), nil
-				//continue
-			}
-			in, err2 := strconv.ParseInt(rawValue, 10, 64)
-			if err2 != nil {
-				if strings.Contains(err2.Error(), "out of range") {
-					return nil, err2
-				}
-				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			dVal = (*tree.DInt)(&in)
-			// consistent with the timestamp range supported by savedata
-			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-			}
+			return dVal, nil
 		}
-		return dVal, nil
-		//continue
-	case oid.T_timestamp:
-		var dVal *tree.DInt
-		if valueType == parser.STRINGTYPE {
-			t, err := tree.ParseDTimestamp(nil, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
-			if err != nil {
-				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
-			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
-			}
-		} else {
-			if rawValue == "now" {
-				currentTime := timeutil.Now().UnixNano() / int64(time.Millisecond)
-				return tree.NewDInt(tree.DInt(currentTime)), nil
-				//continue
-			}
-			in, err2 := strconv.ParseInt(rawValue, 10, 64)
-			if err2 != nil {
-				if strings.Contains(err2.Error(), "out of range") {
-					return nil, err2
-				}
-				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-			}
-			dVal = (*tree.DInt)(&in)
-			// consistent with the timestamp range supported by savedata
-			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-			}
+
+		if rawValue == "now" {
+			return tree.NewDInt(tree.DInt(timeutil.Now().UnixNano() / int64(time.Millisecond))), nil
 		}
-		return dVal, nil
-		//continue
-	case oid.T_int8:
-		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		in, err := strconv.Atoi(rawValue)
-		if err != nil {
-			dat, err := parserString2Int(rawValue, err, column)
-			if err != nil {
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				return nil, err
-			}
-			if dat != nil {
-				return dat, nil
-				//continue
-			}
-		}
-		if in < math.MinInt64 || in > math.MaxInt64 {
-			err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-			return nil, err
-		}
-		d := tree.DInt(in)
-		return &d, nil
-		//continue
-	case oid.T_int4:
-		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		in, err := strconv.Atoi(rawValue)
-		if err != nil {
-			dat, err := parserString2Int(rawValue, err, column)
-			if err != nil {
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				return nil, err
-			}
-			if dat != nil {
-				return dat, nil
-				//continue
-			}
-		}
-		if in < math.MinInt32 || in > math.MaxInt32 {
-			err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-			return nil, err
-		}
-		d := tree.DInt(in)
-		return &d, nil
-		//continue
-	case oid.T_int2:
-		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		in, err := strconv.Atoi(rawValue)
-		if err != nil {
-			dat, err := parserString2Int(rawValue, err, column)
-			if err != nil {
-				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-				}
-				return nil, err
-			}
-			if dat != nil {
-				return dat, nil
-				//continue
-			}
-		}
-		if in < math.MinInt16 || in > math.MaxInt16 {
-			err = pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
-			return nil, err
-		}
-		d := tree.DInt(in)
-		return &d, nil
-		//continue
-	case oid.T_cstring, oid.T_char:
-		if valueType == parser.NUMTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
-		if valueType == parser.BYTETYPE {
-			switch column.Type.Family() {
-			case types.BytesFamily:
-				// Convert the value of the input bytes type into a string
-				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-			default:
-				// do nothing
-			}
-		}
-		return tree.NewDString(rawValue), nil
-		//continue
-	case oid.T_text, oid.T_bpchar, oid.T_varchar:
-		if valueType == parser.NUMTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
-		if valueType == parser.BYTETYPE {
-			switch column.Type.Family() {
-			case types.BytesFamily:
-				// Convert the value of the input bytes type into a string
-				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-			default:
-				// do nothing
-			}
-		}
-		// string(n)/char(n)/varchar(n) calculate length by byte
-		if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
-			return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-				"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-		}
-		return tree.NewDString(rawValue), nil
-		//continue
-	// NCHAR or NVARCHAR
-	case oid.Oid(91004), oid.Oid(91002):
-		if valueType == parser.NUMTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
-		if valueType == parser.BYTETYPE {
-			switch column.Type.Family() {
-			case types.BytesFamily:
-				// Convert the value of the input bytes type into a string
-				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
-			default:
-				// do nothing
-			}
-		}
-		// nchar(n)/nvarchar(n) calculate length by character
-		if column.Type.Width() > 0 && utf8.RuneCountInString(rawValue) > int(column.Type.Width()) {
-			return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-				"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-		}
-		return tree.NewDString(rawValue), nil
-		//continue
-	case oid.T_bytea, oid.T_varbytea:
-		if valueType == parser.NUMTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
-		v, err := tree.ParseDByte(rawValue)
-		if err != nil {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		// bytes(n)/varbytes(n) calculate length by byte
-		if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
-			return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-				"value '%s' too long for type %s", rawValue, column.Type.SQLString())
-		}
-		return v, nil
-		//continue
-	case oid.T_float4:
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
-		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		var in float64
-		in, err = strconv.ParseFloat(rawValue, 32)
+
+		in, err := strconv.ParseInt(rawValue, 10, 64)
 		if err != nil {
 			if strings.Contains(err.Error(), "out of range") {
-				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+				return nil, err
+			}
+			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+		}
+
+		dVal := tree.DInt(in)
+		if dVal < tree.TsMinTimestamp || dVal > tree.TsMaxTimestamp {
+			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errValueOutofRange, rawValue, column.Type.SQLString())
+		}
+		return &dVal, nil
+
+	case oid.T_int8, oid.T_int4, oid.T_int2:
+		if valueType == parser.STRINGTYPE {
+			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+		}
+
+		in, err := strconv.ParseInt(rawValue, 10, 64)
+		if err != nil {
+			if dat, err := parserString2Int(rawValue, err, column); err != nil {
+				if valueType == parser.NORMALTYPE {
+					return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+				}
+				return nil, err
+			} else if dat != nil {
+				return dat, nil
+			}
+		}
+
+		var minVal, maxVal int64
+		switch oidType {
+		case oid.T_int2:
+			minVal, maxVal = math.MinInt16, math.MaxInt16
+		case oid.T_int4:
+			minVal, maxVal = math.MinInt32, math.MaxInt32
+		case oid.T_int8:
+			minVal, maxVal = math.MinInt64, math.MaxInt64
+		}
+
+		if in < minVal || in > maxVal {
+			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errOutOfRange, rawValue, column.Type.SQLString())
+		}
+		d := tree.DInt(in)
+		return &d, nil
+
+	case oid.T_cstring, oid.T_char, oid.T_text, oid.T_bpchar, oid.T_varchar,
+		oid.T_bytea, oid.T_varbytea, oid.Oid(91004), oid.Oid(91002):
+		if valueType == parser.NUMTYPE {
+			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+		}
+
+		if width := column.Type.Width(); width > 0 {
+			var length int
+			if oidType == oid.Oid(91004) || oidType == oid.Oid(91002) {
+				length = utf8.RuneCountInString(rawValue)
+			} else {
+				length = len(rawValue)
+			}
+			if length > int(width) {
+				return nil, pgerror.Newf(pgcode.StringDataRightTruncation, errTooLong, rawValue, column.Type.SQLString())
+			}
+		}
+
+		if oidType == oid.T_bytea || oidType == oid.T_varbytea {
+			v, err := tree.ParseDByte(rawValue)
+			if err != nil {
+				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			}
+			return v, nil
+		}
+
+		return tree.NewDString(rawValue), nil
+
+	case oid.T_float4, oid.T_float8:
+		if valueType == parser.STRINGTYPE {
+			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+		}
+
+		bitSize := 32
+		if oidType == oid.T_float8 {
+			bitSize = 64
+		}
+
+		in, err := strconv.ParseFloat(rawValue, bitSize)
+		if err != nil {
+			if strings.Contains(err.Error(), "out of range") {
+				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
 			}
 			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 		}
 		return tree.NewDFloat(tree.DFloat(in)), nil
-		//continue
-	case oid.T_float8:
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
-		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		var in float64
-		in, err = strconv.ParseFloat(rawValue, 64)
-		if err != nil {
-			if strings.Contains(err.Error(), "out of range") {
-				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
-			}
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
-		}
-		return tree.NewDFloat(tree.DFloat(in)), nil
+
 	case oid.T_bool:
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
 		dBool, err := tree.ParseDBool(rawValue)
 		if err != nil {
 			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 		}
 		return dBool, nil
+
 	case types.T_geometry:
-		if valueType == parser.NORMALTYPE {
-			return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
-		}
 		if valueType == parser.NUMTYPE {
 			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
 		}
-		_, err := geos.FromWKT(rawValue)
-		if err != nil {
+
+		if _, err := geos.FromWKT(rawValue); err != nil {
 			if strings.Contains(err.Error(), "load error") {
 				return nil, err
 			}
-			return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", rawValue, column.Type.SQLString())
+			return nil, pgerror.Newf(pgcode.DataException, errInvalidValue, rawValue, column.Type.SQLString())
 		}
-		return tree.NewDString(rawValue), nil
-	default:
-		return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", rawValue)
 
+		return tree.NewDString(rawValue), nil
+
+	default:
+		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return nil, nil
 }
 
 // GetPayloadMapForMuiltNode builds payloads for distributed insertion
@@ -1850,13 +1787,18 @@ func GetPayloadMapForMuiltNode(
 	nodeid roachpb.NodeID,
 ) error {
 	rowTimestamps := make([]int64, di.RowNum)
+
 	inputValues, priTagValMap, rowBytes, err := GetRowBytesForTsInsert(ctx, ptCtx, di, stmts, rowTimestamps)
 	if err != nil {
 		return err
 	}
 	di.PArgs.DataColNum, di.PArgs.DataColSize, di.PArgs.PreAllocColSize = 0, 0, 0
-	allPayloads := make([]*sqlbase.SinglePayloadInfo, len(priTagValMap))
-	count := 0
+
+	allPayloads := make([]*sqlbase.SinglePayloadInfo, 0, len(priTagValMap))
+
+	cols := di.PArgs.PrettyCols[:di.PArgs.PTagNum+di.PArgs.AllTagNum]
+	tabID := sqlbase.ID(dit.TabID)
+
 	for _, priTagRowIdx := range priTagValMap {
 		// Payload is the encoding of a complete line, which is the first line in a line with the same ptag
 		payload, _, err := execbuilder.BuildPayloadForTsInsert(
@@ -1864,7 +1806,7 @@ func GetPayloadMapForMuiltNode(
 			EvalContext.Txn,
 			inputValues,
 			priTagRowIdx[:1],
-			di.PArgs.PrettyCols[:di.PArgs.PTagNum+di.PArgs.AllTagNum],
+			cols,
 			di.ColIndexs,
 			di.PArgs,
 			dit.DbID,
@@ -1877,47 +1819,68 @@ func GetPayloadMapForMuiltNode(
 		// Make primaryTag key.
 		hashPoints := sqlbase.DecodeHashPointFromPayload(payload)
 		primaryTagKey := sqlbase.MakeTsPrimaryTagKey(table.ID, hashPoints)
-		groupRowBytes := make([][]byte, len(priTagRowIdx))
-		groupRowTime := make([]int64, len(priTagRowIdx))
-		// TsRowPutRequest need min and max timestamp.
-		minTimestamp := int64(math.MaxInt64)
-		maxTimeStamp := int64(math.MinInt64)
-		valueSize := int32(0)
+
+		rowCount := len(priTagRowIdx)
+		groupRowBytes := make([][]byte, rowCount)
+		groupRowTime := make([]int64, rowCount)
+
+		minTs, maxTs := int64(math.MaxInt64), int64(math.MinInt64)
+		var valueSize int32
+
 		for i, idx := range priTagRowIdx {
 			groupRowBytes[i] = rowBytes[idx]
-			groupRowTime[i] = rowTimestamps[idx]
-			if rowTimestamps[idx] > maxTimeStamp {
-				maxTimeStamp = rowTimestamps[idx]
+			ts := rowTimestamps[idx]
+			groupRowTime[i] = ts
+
+			if ts > maxTs {
+				maxTs = ts
 			}
-			if rowTimestamps[idx] < minTimestamp {
-				minTimestamp = rowTimestamps[idx]
+			if ts < minTs {
+				minTs = ts
 			}
 			valueSize += int32(len(groupRowBytes[i]))
 		}
-		var startKey roachpb.Key
-		var endKey roachpb.Key
+
+		hashPoint := uint64(hashPoints[0])
+		var startKey, endKey roachpb.Key
 		if di.PArgs.RowType == execbuilder.OnlyTag {
-			startKey = sqlbase.MakeTsHashPointKey(sqlbase.ID(dit.TabID), uint64(hashPoints[0]))
-			endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(dit.TabID), uint64(hashPoints[0]), math.MaxInt64)
+			startKey = sqlbase.MakeTsHashPointKey(tabID, hashPoint)
+			endKey = sqlbase.MakeTsRangeKey(tabID, hashPoint, math.MaxInt64)
 		} else {
-			startKey = sqlbase.MakeTsRangeKey(sqlbase.ID(dit.TabID), uint64(hashPoints[0]), minTimestamp)
-			endKey = sqlbase.MakeTsRangeKey(sqlbase.ID(dit.TabID), uint64(hashPoints[0]), maxTimeStamp+1)
+			startKey = sqlbase.MakeTsRangeKey(tabID, hashPoint, minTs)
+			endKey = sqlbase.MakeTsRangeKey(tabID, hashPoint, maxTs+1)
 		}
-		allPayloads[count] = &sqlbase.SinglePayloadInfo{
+
+		allPayloads = append(allPayloads, &sqlbase.SinglePayloadInfo{
 			Payload:       payload,
-			RowNum:        uint32(len(priTagRowIdx)),
+			RowNum:        uint32(rowCount),
 			PrimaryTagKey: primaryTagKey,
 			RowBytes:      groupRowBytes,
 			RowTimestamps: groupRowTime,
 			StartKey:      startKey,
 			EndKey:        endKey,
 			ValueSize:     valueSize,
+		})
+	}
+
+	di.PayloadNodeMap = map[int]*sqlbase.PayloadForDistTSInsert{
+		int(EvalContext.NodeID): {
+			NodeID:          nodeid,
+			PerNodePayloads: allPayloads,
+		},
+	}
+
+	return nil
+}
+
+// GetTSColumnByName used for NoSchema
+func GetTSColumnByName(
+	inputName tree.Name, cols []sqlbase.ColumnDescriptor,
+) (*sqlbase.ColumnDescriptor, error) {
+	for i := range cols {
+		if string(inputName) == cols[i].Name {
+			return &cols[i], nil
 		}
-		count++
 	}
-	di.PayloadNodeMap = make(map[int]*sqlbase.PayloadForDistTSInsert)
-	di.PayloadNodeMap[int(EvalContext.NodeID)] = &sqlbase.PayloadForDistTSInsert{
-		NodeID: nodeid, PerNodePayloads: allPayloads,
-	}
-	return err
+	return nil, sqlbase.NewUndefinedColumnError(string(inputName))
 }

@@ -4120,6 +4120,11 @@ func (desc *ColumnDescriptor) IsNullable() bool {
 	return desc.Nullable
 }
 
+// IsDataCol is part of the cat.Column interface.
+func (desc *ColumnDescriptor) IsDataCol() bool {
+	return desc.TsCol.ColumnType == ColumnType_TYPE_DATA
+}
+
 // IsTagCol is part of the cat.Column interface.
 func (desc *ColumnDescriptor) IsTagCol() bool {
 	return desc.TsCol.ColumnType == ColumnType_TYPE_TAG || desc.TsCol.ColumnType == ColumnType_TYPE_PTAG

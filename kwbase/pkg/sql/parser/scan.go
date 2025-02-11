@@ -68,15 +68,18 @@ type Shortinsert struct {
 	isTsTable          bool
 	isInsert           bool
 	symbol             bool
-	bracket            int
+	bracket            struct{ elements []int }
 	InsertValues       []string
 	ValuesType         []TokenType
 	Columnsname        []tree.Name
+	ColumnsLengthMap   map[tree.Name]string
+	NoSchema           bool
 	db                 string
 	tb                 string
 	RowCount           int
 	Prepareplaceholder int
 	PrepareMode        bool
+	isValues           bool
 }
 
 var intervalUnit = map[string]struct{}{
@@ -106,14 +109,19 @@ func (s *Shortinsert) init() {
 	s.isTsTable = false
 	s.isInsert = false
 	s.symbol = false
-	s.bracket = 0
+	s.bracket = struct{ elements []int }{}
 	s.InsertValues = s.InsertValues[:0]
 	s.ValuesType = s.ValuesType[:0]
 	s.Columnsname = s.Columnsname[:0]
+	if s.ColumnsLengthMap != nil {
+		s.ColumnsLengthMap = nil
+	}
+	s.ColumnsLengthMap = make(map[tree.Name]string)
 	s.db = ""
 	s.tb = ""
 	s.RowCount = 0
 	s.Prepareplaceholder = 0
+	s.isValues = false
 }
 
 func makeScanner(str string) scanner {
@@ -127,12 +135,7 @@ func (s *scanner) init(str string) {
 	s.pos = 0
 	// Preallocate some buffer space for identifiers etc.
 	s.bytesPrealloc = make([]byte, len(str))
-	s.shortinsert.isTsTable = false
-	s.shortinsert.isInsert = false
-	s.shortinsert.symbol = false
-	s.shortinsert.bracket = 0
-	s.shortinsert.RowCount = 0
-	s.shortinsert.Prepareplaceholder = 0
+	s.shortinsert.init()
 }
 
 // cleanup is used to avoid holding on to memory unnecessarily (for the cases
@@ -235,7 +238,7 @@ func (s *scanner) scan(lval *sqlSymType) {
 			s.pos++
 			if s.scanString(lval, singleQuote, true /* allowEscapes */, false /* requireUTF8 */) {
 				lval.id = BCONST
-				if s.shortinsert.isTsTable {
+				if s.shortinsert.isValues && s.shortinsert.isTsTable {
 					s.shortinsert.ValuesType[len(s.shortinsert.ValuesType)-1] = BYTETYPE
 				}
 			}
@@ -437,7 +440,7 @@ func (s *scanner) scan(lval *sqlSymType) {
 		return
 
 	case '-':
-		if s.shortinsert.isTsTable {
+		if s.shortinsert.isValues && s.shortinsert.isTsTable {
 			s.shortinsert.symbol = true
 		}
 		switch s.peek() {
@@ -474,12 +477,12 @@ func (s *scanner) scan(lval *sqlSymType) {
 		return
 
 	case '(':
-		if s.shortinsert.isInsert && s.shortinsert.bracket == 0 {
-			s.shortinsert.bracket = 1
+		if s.shortinsert.isInsert && !s.shortinsert.isValues {
+			s.shortinsert.bracket.elements = append(s.shortinsert.bracket.elements, 1)
 		}
 	case ')':
-		if s.shortinsert.bracket > 0 {
-			s.shortinsert.bracket = -1
+		if len(s.shortinsert.bracket.elements) != 0 {
+			s.shortinsert.bracket.elements = s.shortinsert.bracket.elements[:len(s.shortinsert.bracket.elements)-1]
 		}
 		s.shortinsert.RowCount++
 	default:
@@ -655,7 +658,7 @@ func (s *scanner) scanIdent(lval *sqlSymType) {
 		// The string has unicode in it. No choice but to run Normalize.
 		lval.str = lex.NormalizeName(s.in[start:s.pos])
 	}
-	if s.shortinsert.isTsTable {
+	if s.shortinsert.isValues && s.shortinsert.isTsTable {
 		if lval.str == "null" {
 			s.shortinsert.InsertValues = append(s.shortinsert.InsertValues, "")
 			s.shortinsert.ValuesType = append(s.shortinsert.ValuesType, NORMALTYPE)
@@ -703,7 +706,7 @@ func (s *scanner) scanIdent(lval *sqlSymType) {
 		// experimental_/testing_ prefix.
 		lval.id = lex.GetKeywordID(lval.str)
 	}
-	if s.shortinsert.bracket == 1 {
+	if len(s.shortinsert.bracket.elements) != 0 {
 		s.shortinsert.Columnsname = append(s.shortinsert.Columnsname, tree.Name(strings.ToLower(s.in[start:s.pos])))
 	}
 }
@@ -768,7 +771,7 @@ func (s *scanner) scanNumber(lval *sqlSymType, ch int) {
 		break
 	}
 
-	if s.shortinsert.isTsTable {
+	if s.shortinsert.isValues && s.shortinsert.isTsTable {
 		if s.shortinsert.symbol {
 			start = start - 1
 			s.shortinsert.symbol = false
@@ -791,6 +794,12 @@ func (s *scanner) scanNumber(lval *sqlSymType, ch int) {
 	}
 
 	lval.str = s.in[start:s.pos]
+	if s.shortinsert.NoSchema && len(s.shortinsert.bracket.elements) > 1 {
+		if s.shortinsert.ColumnsLengthMap == nil {
+			s.shortinsert.ColumnsLengthMap = make(map[tree.Name]string)
+		}
+		s.shortinsert.ColumnsLengthMap[s.shortinsert.Columnsname[len(s.shortinsert.Columnsname)-2]] = lval.str
+	}
 	if hasDecimal || hasExponent {
 		lval.id = FCONST
 		floatConst := constant.MakeFromLiteral(lval.str, token.FLOAT, 0)
@@ -1038,13 +1047,13 @@ outer:
 		return false
 	}
 
-	if s.shortinsert.isTsTable {
+	if s.shortinsert.isValues && s.shortinsert.isTsTable {
 		s.shortinsert.InsertValues = append(s.shortinsert.InsertValues, s.finishString(buf))
 		s.shortinsert.ValuesType = append(s.shortinsert.ValuesType, STRINGTYPE)
 		return true
 	}
 	// tsinsert_direct handling of "column" situation
-	if s.shortinsert.bracket == 1 {
+	if len(s.shortinsert.bracket.elements) != 0 {
 		s.shortinsert.Columnsname = append(s.shortinsert.Columnsname, tree.Name(s.finishString(buf)))
 	}
 

@@ -1603,7 +1603,7 @@ func (b *Builder) maybeAddNonExistsColumn(
 		for r := retry.Start(retryOpt); r.Next(); {
 			_, err := b.evalCtx.InternalExecutor.Query(b.evalCtx.Context, "auto add column", nil, addStmts[i])
 			if err != nil {
-				if isInsertNoSchemaRetryableError(err) {
+				if IsInsertNoSchemaRetryableError(err) {
 					log.Warningf(b.ctx, "auto alter add failed: %s, err: %s\n", addStmts[i], err.Error())
 				} else if strings.Contains(err.Error(), "schema version") {
 					return false, err
@@ -1680,8 +1680,8 @@ func getColumnDescs(tab cat.Table) []*sqlbase.ColumnDescriptor {
 	return cols
 }
 
-// isInsertNoSchemaRetryableError returns true if error contains 'wait for success'.
-func isInsertNoSchemaRetryableError(err error) bool {
+// IsInsertNoSchemaRetryableError returns true if error contains 'wait for success'.
+func IsInsertNoSchemaRetryableError(err error) bool {
 	if strings.Contains(err.Error(), "Please wait for success") {
 		return true
 	}

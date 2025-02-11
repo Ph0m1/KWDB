@@ -124,9 +124,11 @@ type NameList []Name
 // NoSchemaName stores the name and type of a column/tag.
 // It is used to automatically add columns that do not exist when inserting data.
 type NoSchemaName struct {
-	Name  Name
-	Type  *types.T
-	IsTag bool
+	Name    Name
+	Type    *types.T
+	IsTag   bool
+	StrType string
+	TypeLen string
 }
 
 // NoSchemaNameList is a list of NoSchemaName.
@@ -134,9 +136,9 @@ type NoSchemaNameList []NoSchemaName
 
 // GetNameList returns column names.
 func (nsn *NoSchemaNameList) GetNameList() NameList {
-	var ret NameList
-	for _, noSchemaName := range *nsn {
-		ret = append(ret, noSchemaName.Name)
+	ret := make(NameList, 0, len(*nsn))
+	for i := range *nsn {
+		ret = append(ret, (*nsn)[i].Name)
 	}
 	return ret
 }

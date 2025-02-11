@@ -318,52 +318,54 @@ func (ie *InternalExecutor) IsTsTable(
 		cfg       = ie.s.cfg
 		isTsTable bool
 	)
-	isTsTable = false
+
 	err := cfg.DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-		var tables *TableCollection
-		tables = &TableCollection{
+		tables := &TableCollection{
 			leaseMgr:          cfg.LeaseManager,
 			settings:          cfg.Settings,
 			databaseCache:     ie.s.dbCache.getDatabaseCache(),
 			dbCacheSubscriber: ie.s.dbCache,
 		}
 		defer tables.releaseTables(ctx)
-		dit.Tname = tree.NewTableName(tree.Name(dbName), tree.Name(tbName))
-		var flags tree.ObjectLookupFlags
-		flags.Required = false
 
+		dit.Tname = tree.NewTableName(tree.Name(dbName), tree.Name(tbName))
+
+		flags := tree.ObjectLookupFlags{}
 		table, err := tables.getTableVersion(ctx, txn, dit.Tname, flags)
 		if table == nil || err != nil {
 			return errors.Errorf("can not find tables")
 		}
 
-		var pp planner
-		pp.txn = txn
-		pp.execCfg = cfg
-		pp.curPlan = planTop{}
-		var sd sessiondata.SessionData
-		sd.User = user
-		pp.avoidCachedDescriptors = true
-		pp.extendedEvalCtx = extendedEvalContext{
-			EvalContext: tree.EvalContext{
-				SessionData:      &sd,
-				InternalExecutor: cfg.InternalExecutor,
-				Settings:         cfg.Settings,
-			},
-			ExecCfg:         cfg,
-			schemaAccessors: newSchemaInterface(tables, cfg.VirtualSchemas),
-		}
-		err = pp.CheckPrivilege(ctx, table.TableDesc(), privilege.INSERT)
-		if err != nil {
-			return err
-		}
-
 		if table.TableType != tree.TimeseriesTable && table.TableType != tree.TemplateTable {
 			return errors.Errorf("%s is not a ts table", tbName)
 		}
-		dit.DbID = uint32(table.TableDescriptor.ParentID)
-		dit.TabID = uint32(table.TableDescriptor.ID)
-		dit.ColsDesc = table.TableDesc().Columns
+
+		sd := &sessiondata.SessionData{User: user}
+		pp := &planner{
+			txn:     txn,
+			execCfg: cfg,
+			curPlan: planTop{},
+			extendedEvalCtx: extendedEvalContext{
+				EvalContext: tree.EvalContext{
+					SessionData:      sd,
+					InternalExecutor: cfg.InternalExecutor,
+					Settings:         cfg.Settings,
+				},
+				ExecCfg:         cfg,
+				schemaAccessors: newSchemaInterface(tables, cfg.VirtualSchemas),
+			},
+			avoidCachedDescriptors: true,
+		}
+
+		if err := pp.CheckPrivilege(ctx, table.TableDesc(), privilege.INSERT); err != nil {
+			return err
+		}
+
+		tableDesc := table.TableDesc()
+		dit.DbID = uint32(tableDesc.ParentID)
+		dit.TabID = uint32(tableDesc.ID)
+		dit.ColsDesc = tableDesc.Columns
+		dit.TableType = table.GetTableType()
 		isTsTable = true
 		return nil
 	})
