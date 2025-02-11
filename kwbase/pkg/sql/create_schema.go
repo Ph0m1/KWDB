@@ -55,11 +55,11 @@ func (p *planner) createUserDefinedSchema(params runParams, n *tree.CreateSchema
 		return err
 	}
 	if db.EngineType == tree.EngineTypeTimeseries {
-		return pgerror.New(pgcode.WrongObjectType, "cannot create schema in timeseries database")
+		return pgerror.Newf(pgcode.WrongObjectType, "cannot create schema in timeseries database \"%s\"", db.Name)
 	}
 	// Users cannot create schemas within the system database.
 	if db.ID == keys.SystemDatabaseID {
-		return pgerror.New(pgcode.InvalidObjectDefinition, "cannot create schemas in the system database")
+		return pgerror.Newf(pgcode.InvalidObjectDefinition, "cannot create schema in the system database \"%s\"", db.Name)
 	}
 
 	if err := p.CheckPrivilege(params.ctx, db, privilege.CREATE); err != nil {

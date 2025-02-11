@@ -712,7 +712,7 @@ INSERT 1
 > ALTER TABLE test_alter.t13 ALTER COLUMN a SET DATA TYPE VARCHAR;
 ALTER TABLE
 > ALTER TABLE test_alter.t13 ALTER COLUMN a SET DATA TYPE NVARCHAR;
-ERROR: cannot convert VARCHAR(254) to NVARCHAR(63)
+ERROR: column: "a": cannot convert VARCHAR(254) to NVARCHAR(63)
 SQLSTATE: 42846
 > select * from test_alter.t13;
                ts               | a | attr

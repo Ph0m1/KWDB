@@ -10,7 +10,7 @@ INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:02', 9223372036854775807, 3);
 INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:03', 'test', 4);
-ERROR: could not resolve "test" as a INT8 type
+ERROR: could not resolve "test" as INT8 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:04', true, 5);
 INSERT 1
@@ -21,10 +21,10 @@ INSERT 1
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:07', -9223372036854775808, 8);
 INSERT 1
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:08', 123.679, 9);
-ERROR: could not resolve "123.679" as a INT8 type
+ERROR: could not resolve "123.679" as INT8 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:09', '中文', 10);
-ERROR: could not resolve "中文" as a INT8 type
+ERROR: could not resolve "中文" as INT8 type (column e1)
 SQLSTATE: 42804
 > select e1, t1_attribute from test_savedata1.d1 order by e1,t1_attribute;
            e1          | t1_attribute

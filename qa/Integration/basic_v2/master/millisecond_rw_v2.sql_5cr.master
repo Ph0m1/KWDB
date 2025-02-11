@@ -19,18 +19,18 @@ INSERT 1
 > INSERT INTO TS_DB.d1 values (1679882993000, 7, 1235405546970, 1);
 INSERT 1
 > INSERT INTO TS_DB.d1 values (1679882994000, 8, 31556995200002, 1);
-ERROR: integer "31556995200002" out of range for type TIMESTAMP
+ERROR: integer "31556995200002" out of range for type TIMESTAMP (column e2)
 SQLSTATE: 22003
 > INSERT INTO TS_DB.d1 values (1679882995000, 10, 12354055466259706, 1);
-ERROR: integer "12354055466259706" out of range for type TIMESTAMP
+ERROR: integer "12354055466259706" out of range for type TIMESTAMP (column e2)
 SQLSTATE: 22003
 > INSERT INTO TS_DB.d1 values (1679882996000, 11, 9223372036854775807, 1);
-ERROR: integer "9223372036854775807" out of range for type TIMESTAMP
+ERROR: integer "9223372036854775807" out of range for type TIMESTAMP (column e2)
 SQLSTATE: 22003
 > INSERT INTO TS_DB.d1 values (1679882997000, 12, 9223372036854, 1);
 INSERT 1
 > INSERT INTO TS_DB.d1 values (1679882998000, 13, 31556995200001, 1);
-ERROR: integer "31556995200001" out of range for type TIMESTAMP
+ERROR: integer "31556995200001" out of range for type TIMESTAMP (column e2)
 SQLSTATE: 22003
 > INSERT INTO TS_DB.d1 values (1679882999000, 14, '2020-12-30 18:52:14.111', 1);
 INSERT 1
@@ -41,16 +41,16 @@ INSERT 1
 > INSERT INTO TS_DB.d1 values (1679883002000, 17, '2020-12-30 18:52:14.26', 1);
 INSERT 1
 > INSERT INTO TS_DB.d1 values (1679883003000, 18, '2023-01-0118:52:14', 1);
-ERROR: could not resolve "2023-01-0118:52:14" as a TIMESTAMP type
+ERROR: could not resolve "2023-01-0118:52:14" as TIMESTAMP type (column e2)
 SQLSTATE: 42804
 > INSERT INTO TS_DB.d1 values (1679883004000, 19, '2023010118:52:14', 1);
-ERROR: could not resolve "2023010118:52:14" as a TIMESTAMP type
+ERROR: could not resolve "2023010118:52:14" as TIMESTAMP type (column e2)
 SQLSTATE: 42804
 > INSERT INTO TS_DB.d1 values (1679883005000, 20, '2970-01-01 00:00:01', 1);
-ERROR: value '2970-01-01 00:00:01' out of range for type TIMESTAMP
+ERROR: value '2970-01-01 00:00:01' out of range for type TIMESTAMP (column e2)
 SQLSTATE: 22026
 > INSERT INTO TS_DB.d1 values (1679883006000, 21, '2970-01-01 00:00:00.001', 1);
-ERROR: value '2970-01-01 00:00:00.001' out of range for type TIMESTAMP
+ERROR: value '2970-01-01 00:00:00.001' out of range for type TIMESTAMP (column e2)
 SQLSTATE: 22026
 > select * from TS_DB.d1 order by e1;
          k_timestamp        | e1 |              e2               | t1_attribute

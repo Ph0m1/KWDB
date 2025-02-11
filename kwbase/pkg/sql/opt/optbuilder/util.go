@@ -170,20 +170,6 @@ func (b *Builder) expandStar(
 	case *tree.AllColumnsSelector:
 		src, srcMeta, err := t.Resolve(b.ctx, inScope)
 		if err != nil {
-			//if strings.Contains(err.Error(), "no data source matches") && inScope.physType == tree.TS {
-			//	for i, col := range inScope.cols {
-			//		if _, ok := col.endpointMatch[t.TableName.Parts[0]]; ok && col.physType == tree.TS {
-			//			if !inScope.isIdenticalTbl(col.kobjectTableID) {
-			//				panic(pgerror.New(pgcode.Warning, "Cross group queries are not allowed temporarily"))
-			//			}
-			//			exprs = append(exprs, &inScope.cols[i])
-			//			aliases = append(aliases, string(col.name))
-			//		}
-			//	}
-			//	if exprs != nil {
-			//		break
-			//	}
-			//}
 			panic(err)
 		}
 		refScope := srcMeta.(*scope)
@@ -570,7 +556,7 @@ func resolveTemporaryStatus(name *tree.TableName, explicitTemp bool) bool {
 	// An explicit schema can only be provided in the CREATE TEMP TABLE statement
 	// iff it is pg_temp.
 	if explicitTemp && name.ExplicitSchema && name.SchemaName != sessiondata.PgTempSchemaName {
-		panic(pgerror.New(pgcode.InvalidTableDefinition, "cannot create temporary relation in non-temporary schema"))
+		panic(pgerror.Newf(pgcode.InvalidTableDefinition, "cannot create temporary relation in non-temporary schema, table name: %v", name))
 	}
 	return name.SchemaName == sessiondata.PgTempSchemaName || explicitTemp
 }
@@ -645,7 +631,7 @@ func (b *Builder) resolveTableForMutation(
 		// Lists of zero columns are not supported and will throw an error."
 		if t.Columns != nil && len(t.Columns) == 0 {
 			panic(pgerror.Newf(pgcode.Syntax,
-				"an explicit list of column IDs must include at least one column"))
+				"an explicit list of column IDs must include at least one column, table name: %v", tab.Name()))
 		}
 		columns = t.Columns
 
@@ -688,7 +674,7 @@ func (b *Builder) resolveTableForMutation(
 			// fill the field `TagName` if it is empty
 			if len(t.TableDef.Tags) > 0 && t.TableDef.Tags[0].TagName == "" {
 				if len(t.TableDef.Tags) != len(tags) {
-					panic(pgerror.New(pgcode.Syntax, "Tags number mismatch"))
+					panic(pgerror.Newf(pgcode.Syntax, "Tags number mismatch, number of table tags: %v, number of input tags:%v", len(t.TableDef.Tags), len(tags)))
 				}
 				for i := range t.TableDef.Tags {
 					t.TableDef.Tags[i].TagName = tree.Name(tags[i].TagName)
@@ -719,7 +705,7 @@ func (b *Builder) resolveTableForMutation(
 				}
 				datum, ok := typ.(tree.Datum)
 				if !ok {
-					panic(pgerror.New(pgcode.WrongObjectType, "wrong input attribute data type"))
+					panic(pgerror.Newf(pgcode.WrongObjectType, "wrong input value type for tag %s", tag.TagName))
 				}
 				if datum == tree.DNull {
 					continue

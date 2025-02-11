@@ -26,6 +26,7 @@ package sql
 
 import (
 	"context"
+	"fmt"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
@@ -45,7 +46,7 @@ var _ planNode = &sequenceSelectNode{}
 
 func (p *planner) SequenceSelectNode(desc *sqlbase.ImmutableTableDescriptor) (planNode, error) {
 	if desc.SequenceOpts == nil {
-		return nil, errors.New("descriptor is not a sequence")
+		return nil, errors.New(fmt.Sprintf("descriptor %s is not a sequence", desc.Name))
 	}
 	return &sequenceSelectNode{
 		desc: desc,

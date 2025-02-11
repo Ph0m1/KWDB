@@ -102,7 +102,7 @@ func FilterTableState(tableDesc *sqlbase.TableDescriptor) error {
 	case sqlbase.TableDescriptor_PUBLIC:
 		return nil
 	default:
-		return errors.Errorf("table in unknown state: %s", tableDesc.State.String())
+		return errors.Errorf("table %s in unknown state: %s", tableDesc.Name, tableDesc.State.String())
 	}
 }
 

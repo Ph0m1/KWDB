@@ -1429,9 +1429,10 @@ func getAggInfos(agg opt.ScalarExpr, i int, f funcGetOrdinalCol, aggInfos *[]exe
 	if aggFilter, ok := agg.(*memo.AggFilterExpr); ok {
 		filter, ok := aggFilter.Filter.(*memo.VariableExpr)
 		if !ok {
-			return errors.AssertionFailedf("only VariableOp args supported")
+			return errors.AssertionFailedf("only VariableOp args supported, illegal filter: %s \n", aggFilter.Filter)
 		}
 		filterOrd = f(filter.Col)
+		agg = aggFilter.Input
 		agg = aggFilter.Input
 	}
 
@@ -1451,12 +1452,12 @@ func getAggInfos(agg opt.ScalarExpr, i int, f funcGetOrdinalCol, aggInfos *[]exe
 		child := agg.Child(j)
 		if variable, ok := child.(*memo.VariableExpr); ok {
 			if len(constArgs) != 0 {
-				return errors.Errorf("constant args must come after variable args")
+				return errors.Errorf("constant args must come after variable args, illegal function: %s \n", agg)
 			}
 			argCols = append(argCols, f(variable.Col))
 		} else {
 			if len(argCols) == 0 {
-				return errors.Errorf("a constant arg requires at least one variable arg")
+				return errors.Errorf("a constant arg requires at least one variable arg, illegal function: %s \n", agg)
 			}
 			constArgs = append(constArgs, memo.ExtractConstDatum(child))
 		}
@@ -1648,7 +1649,7 @@ func (b *Builder) buildGroupByInput(groupBy memo.RelExpr) (execPlan, error) {
 	for colID, ok := neededCols.Next(0); ok; colID, ok = neededCols.Next(colID + 1) {
 		ordinal, ordOk := input.outputCols.Get(int(colID))
 		if !ordOk {
-			panic(errors.AssertionFailedf("needed column not produced by group-by input"))
+			panic(errors.AssertionFailedf("needed column %s not produced by group-by input", b.mem.Metadata().ColumnMeta(colID).Alias))
 		}
 		newOutputCols.Set(int(colID), len(cols))
 		cols = append(cols, exec.ColumnOrdinal(ordinal))
@@ -2407,7 +2408,7 @@ func (b *Builder) buildWindow(w *memo.WindowExpr) (execPlan, error) {
 		if ok {
 			f, ok := filter.(*memo.VariableExpr)
 			if !ok {
-				panic(errors.AssertionFailedf("expected FILTER expression to be a VariableExpr"))
+				panic(errors.AssertionFailedf("expected FILTER expression to be a VariableExpr in window"))
 			}
 			filterIdxs[i], _ = input.outputCols.Get(int(f.Col))
 

@@ -437,7 +437,7 @@ INSERT 1
 > Insert into t5 values ('2024-1-1 9:00:00',10,10,1.0,0.3,'c',false,10);
 INSERT 1
 > Insert into t5 values ('2024-1-1 10:00:00',null,null,null,'e','e',true,10);
-ERROR: could not resolve "e" as a FLOAT8 type
+ERROR: could not resolve "e" as FLOAT8 type (column c4)
 SQLSTATE: 42804
 > select * from t5 order by k_timestamp;
          k_timestamp        | c1 | c2  | c3  | c4  | c5 |  c6   | size

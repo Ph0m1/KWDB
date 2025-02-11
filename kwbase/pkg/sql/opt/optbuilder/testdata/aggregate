@@ -3659,7 +3659,7 @@ SELECT *
         SELECT b, sum(one) FROM abxy
        ) AS abxy ON kv.v = abxy.b
 ----
-error (42803): aggregate functions are not allowed in FROM clause of their own query level
+error (42803): aggregate functions are not allowed in FROM clause of their own query level, illegal function: sum
 
 # Regression test for #45838. The aggregate should be allowed in the WHERE
 # clause since it's scoped at the outer level.

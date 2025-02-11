@@ -190,30 +190,30 @@ func (n *createStatsNode) startJob(ctx context.Context, resultsCh chan<- tree.Da
 // checkStatsLegal is used to check whether it is legal to create statistics
 func (n *createStatsNode) checkTable(tableDesc *ImmutableTableDescriptor) error {
 	if tableDesc.IsVirtualTable() {
-		return pgerror.New(
-			pgcode.WrongObjectType, "cannot create statistics on virtual tables",
+		return pgerror.Newf(
+			pgcode.WrongObjectType, "cannot create statistics on virtual table \"%s\"", tableDesc.Name,
 		)
 	}
 
 	if tableDesc.IsView() {
-		return pgerror.New(
-			pgcode.WrongObjectType, "cannot create statistics on views",
+		return pgerror.Newf(
+			pgcode.WrongObjectType, "cannot create statistics on view \"%s\"", tableDesc.Name,
 		)
 	}
 
 	switch tableDesc.TableType {
 	case tree.TemplateTable:
-		return pgerror.New(
-			pgcode.WrongObjectType, "cannot create statistics on template tables",
+		return pgerror.Newf(
+			pgcode.WrongObjectType, "cannot create statistics on template table \"%s\"", tableDesc.Name,
 		)
 	case tree.InstanceTable:
-		return pgerror.New(
-			pgcode.WrongObjectType, "cannot create statistics on instance tables",
+		return pgerror.Newf(
+			pgcode.WrongObjectType, "cannot create statistics on instance table \"%s\"", tableDesc.Name,
 		)
 	case tree.TimeseriesTable:
 		if !createTsStats.Get(&n.p.execCfg.Settings.SV) {
-			return pgerror.New(
-				pgcode.WrongObjectType, "cannot create statistics on time series tables",
+			return pgerror.Newf(
+				pgcode.WrongObjectType, "cannot create statistics on time series table \"%s\"", tableDesc.Name,
 			)
 		}
 	default:
@@ -562,7 +562,10 @@ func createTsStatsByColumnIDs(
 			}
 
 		default:
-			return nil, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported column type: %s when creating statistic", columnsType.String())
+			return nil, pgerror.Newf(
+				pgcode.DatatypeMismatch,
+				"column %s: unsupported column type: %s when creating statistic",
+				columnDesc.Name, columnsType.String())
 		}
 	}
 

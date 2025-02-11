@@ -1337,17 +1337,17 @@ with &3 (cte)
 build
 SELECT * FROM (WITH foo AS (INSERT INTO y VALUES (1) RETURNING *) SELECT * FROM foo)
 ----
-error (0A000): WITH clause containing a data-modifying statement must be at the top level
+error (0A000): WITH clause containing a data-modifying statement must be at the top level, SQL: INSERT INTO y VALUES (1) RETURNING *
 
 build
 SELECT (WITH foo AS (INSERT INTO y VALUES (1) RETURNING *) SELECT * FROM foo)
 ----
-error (0A000): WITH clause containing a data-modifying statement must be at the top level
+error (0A000): WITH clause containing a data-modifying statement must be at the top level, SQL: INSERT INTO y VALUES (1) RETURNING *
 
 build
 SELECT (WITH foo AS (UPDATE y SET a = 4 RETURNING *) SELECT * FROM foo)
 ----
-error (0A000): WITH clause containing a data-modifying statement must be at the top level
+error (0A000): WITH clause containing a data-modifying statement must be at the top level, SQL: UPDATE y SET a = 4 RETURNING *
 
 # Certain contexts besides the literal root allow mutating CTEs, like
 # underneath an EXPLAIN.

@@ -285,7 +285,7 @@ func (a aggregateInfo) isCommutative() bool {
 
 // Eval is part of the tree.TypedExpr interface.
 func (a *aggregateInfo) Eval(_ *tree.EvalContext) (tree.Datum, error) {
-	panic(errors.AssertionFailedf("aggregateInfo must be replaced before evaluation"))
+	panic(errors.AssertionFailedf("aggregateInfo must be replaced before evaluation, illegal function: %v", a.def.Name))
 }
 
 var _ tree.Expr = &aggregateInfo{}
@@ -318,7 +318,7 @@ func (b *Builder) constructGroupBy(
 			if scalar == nil {
 				// A "pass through" column (i.e. a VariableOp) is not legal as an
 				// aggregation.
-				panic(errors.AssertionFailedf("variable as aggregation"))
+				panic(errors.AssertionFailedf("variable as aggregation, illegal col: %v", aggCols[i].name))
 			}
 			aggs = append(aggs, b.factory.ConstructAggregationsItem(scalar, id))
 			colSet.Add(id)
@@ -771,7 +771,7 @@ func (b *Builder) buildAggregateFunction(
 					}
 					if col.Func.FunctionName() == sqlbase.LastAgg && len(agg.FuncExpr.Exprs) == 3 {
 						if _, ok1 := agg.FuncExpr.Exprs[1].(*tree.CastExpr); !ok1 {
-							panic(pgerror.New(pgcode.FeatureNotSupported, "last in interpolate does not support multiple arguments"))
+							panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v in interpolate does not support multiple arguments", col.Func.FunctionName()))
 						}
 					}
 					column.typ = agg.col.typ
@@ -783,13 +783,13 @@ func (b *Builder) buildAggregateFunction(
 						info.aggOfInterpolate = strings.ToLower(agg.def.Name)
 						f.Exprs[0] = col.Exprs[0]
 					} else {
-						panic(pgerror.New(pgcode.Warning,
-							"the aggregate function, as a parameter of the interpolate function, only supports columns as its parameters"))
+						panic(pgerror.Newf(pgcode.Warning,
+							"%v as a parameter of the interpolate function, only supports columns as its parameters", agg.def.Name))
 					}
 				} else { // other is not only scopeColumn
 					// TODO Subsequent versions will lift restrictions
-					panic(pgerror.New(pgcode.Warning,
-						"the aggregate function, as a parameter of the interpolate function, only supports columns as its parameters"))
+					panic(pgerror.Newf(pgcode.Warning,
+						"%v as a parameter of the interpolate function, only supports columns as its parameters", agg.def.Name))
 				}
 			}
 		} else {
@@ -836,7 +836,7 @@ func (b *Builder) buildAggregateFunction(
 	// to the list of aggregates that need to be computed by the groupby
 	// expression and synthesize a column for the aggregation result.
 	if len(info.args) > 3 {
-		panic(pgerror.New(pgcode.Warning, "%s have %d param, agg function need have less than three param"))
+		panic(pgerror.Newf(pgcode.Warning, "%s have %d param, agg function need have less than three param", info.def.Name, len(info.args)))
 	}
 	key := getAggInfoKey(b.evalCtx, &info)
 	info.col = g.findAggregate(info, &key)

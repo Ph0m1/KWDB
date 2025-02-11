@@ -63,16 +63,16 @@ func (p *planner) CreateIndex(ctx context.Context, n *tree.CreateIndex) (planNod
 
 	if tableDesc.MaterializedView() {
 		if n.Interleave != nil {
-			return nil, pgerror.New(pgcode.InvalidObjectDefinition,
-				"cannot create interleaved index on materialized view")
+			return nil, pgerror.Newf(pgcode.InvalidObjectDefinition,
+				"cannot create interleaved index on materialized view %s", tableDesc.Name)
 		}
 		if n.Sharded != nil {
-			return nil, pgerror.New(pgcode.InvalidObjectDefinition,
-				"cannot create hash sharded index on materialized view")
+			return nil, pgerror.Newf(pgcode.InvalidObjectDefinition,
+				"cannot create hash sharded index on materialized view %s", tableDesc.Name)
 		}
 		if n.Unique {
-			return nil, pgerror.New(pgcode.InvalidObjectDefinition,
-				"cannot create unique index on materialized view")
+			return nil, pgerror.Newf(pgcode.InvalidObjectDefinition,
+				"cannot create unique index on materialized view %s", tableDesc.Name)
 		}
 	}
 

@@ -71,7 +71,7 @@ func (p *planner) RenameDatabase(ctx context.Context, n *tree.RenameDatabase) (p
 			return nil, sqlbase.NewTSNameInvalidError(n.NewName.String())
 		}
 		if len(n.NewName) > MaxTSDBNameLength {
-			return nil, sqlbase.NewTSNameOutOfLengthError("database", MaxTSDBNameLength)
+			return nil, sqlbase.NewTSNameOutOfLengthError("database", string(n.NewName), MaxTSDBNameLength)
 		}
 	}
 	if err := p.CheckPrivilege(ctx, dbDesc, privilege.DROP); err != nil {

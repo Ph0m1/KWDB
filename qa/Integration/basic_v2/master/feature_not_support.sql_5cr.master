@@ -129,15 +129,15 @@ CREATE TABLE
 > ALTER TABLE db1.t1 ADD column1 varchar NULL;
 ALTER TABLE
 > ALTER TABLE db1.t1 ALTER COLUMN column1 SET NOT NULL;
-ERROR: can not modify an existing column on ts table
+ERROR: can not modify an existing column on ts table "t1"
 SQLSTATE: 42809
 > ALTER TABLE db1.t1 ALTER COLUMN column1 DROP NOT NULL;
-ERROR: can not modify an existing column on ts table
+ERROR: can not modify an existing column on ts table "t1"
 SQLSTATE: 42809
 > ALTER TABLE db1.t1 ALTER COLUMN column1 SET DEFAULT 'a';
 ALTER TABLE
 > ALTER TABLE db1.t1 ALTER COLUMN column1 DROP STORED;
-ERROR: can not modify an existing column on ts table
+ERROR: can not modify an existing column on ts table "t1"
 SQLSTATE: 42809
 > select * from  t1;
   k_timestamp | value | column1 | id | location

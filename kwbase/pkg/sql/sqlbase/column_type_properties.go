@@ -92,12 +92,12 @@ func LimitValueWidth(typ *types.T, inVal tree.Datum, name *string) (outVal tree.
 				case oid.T_varbit:
 					if bitLen > uint(typ.Width()) {
 						return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-							"bit string length %d too large for type %s", bitLen, typ.SQLString())
+							"bit string length %d too large for type %s (column %q)", bitLen, typ.SQLString(), tree.ErrNameStringP(name))
 					}
 				default:
 					if bitLen != uint(typ.Width()) {
 						return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-							"bit string length %d does not match type %s", bitLen, typ.SQLString())
+							"bit string length %d does not match type %s (column %q)", bitLen, typ.SQLString(), tree.ErrNameStringP(name))
 					}
 				}
 			}

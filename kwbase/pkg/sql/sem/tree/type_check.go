@@ -1261,8 +1261,8 @@ func (expr *StrVal) TypeCheck(ctx *SemaContext, desired *types.T) (TypedExpr, er
 }
 
 // NewDatatypeMismatchError creates an error that represents a type check error.
-func NewDatatypeMismatchError(value string, typ string) error {
-	return pgerror.Newf(pgcode.DatatypeMismatch, "could not resolve \"%s\" as a %s type", value, typ)
+func NewDatatypeMismatchError(colName, value, typ string) error {
+	return pgerror.Newf(pgcode.DatatypeMismatch, "could not resolve \"%s\" as %s type (column %s)", value, typ, colName)
 }
 
 // TsMinTimestamp is the minimum value supported when ts column is of type timestamp.
@@ -1277,7 +1277,7 @@ const TsMaxTimestamp = 31556995200000
 const TsMaxTimestampString = "2970-01-01 00:00:00+00:00"
 
 // TSTypeCheck checks the value of the input numeric type against the expected type.
-func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
+func (expr *NumVal) TSTypeCheck(colName string, typ *types.T) (Datum, error) {
 
 	// If a numeric constant will be promoted to a DECIMAL because it was out
 	// of range of an INT, but an INT is desired, throw an error here so that
@@ -1288,7 +1288,7 @@ func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 			_, err := expr.AsInt64()
 			if err != nil {
 				if err == errConstNotInt {
-					return nil, NewDatatypeMismatchError(expr.FullOrigString(), typ.SQLString())
+					return nil, NewDatatypeMismatchError(colName, expr.FullOrigString(), typ.SQLString())
 				}
 				return nil, err
 			}
@@ -1300,7 +1300,7 @@ func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 		shifted := expr.resInt >> width
 		if (expr.resInt >= 0 && shifted > 0) || (expr.resInt < 0 && shifted < -1) {
 			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s", expr.resInt, typ.SQLString())
+				"integer \"%d\" out of range for type %s (column %s)", expr.resInt, typ.SQLString(), colName)
 		}
 		return &expr.resInt, nil
 
@@ -1308,14 +1308,14 @@ func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 		_, err := expr.AsInt64()
 		if err != nil {
 			if err == errConstNotInt {
-				return nil, NewDatatypeMismatchError(expr.FullOrigString(), typ.SQLString())
+				return nil, NewDatatypeMismatchError(colName, expr.FullOrigString(), typ.SQLString())
 			}
 			return nil, err
 		}
 		// Check the maximum and minimum value of the timestamp
 		if expr.resInt < TsMinTimestamp || expr.resInt > TsMaxTimestamp {
 			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s", expr.resInt, typ.SQLString())
+				"integer \"%d\" out of range for type %s (column %s)", expr.resInt, typ.SQLString(), colName)
 		}
 		return &expr.resInt, nil
 
@@ -1323,11 +1323,11 @@ func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 		f, _ := constant.Float64Val(expr.value)
 		if f != 0 && typ.Width() == 32 && (f < math.SmallestNonzeroFloat32 || f > math.MaxFloat32) {
 			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"float \"%s\" out of range for type %s", expr.FullOrigString(), typ.SQLString())
+				"float \"%s\" out of range for type %s (column %s)", expr.FullOrigString(), typ.SQLString(), colName)
 		}
 		if f != 0 && typ.Width() == 64 && (f < math.SmallestNonzeroFloat64 || f > math.MaxFloat64) {
 			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"float \"%s\" out of range for type %s", expr.FullOrigString(), typ.SQLString())
+				"float \"%s\" out of range for type %s (column %s)", expr.FullOrigString(), typ.SQLString(), colName)
 		}
 		if expr.negative {
 			f = -f
@@ -1338,7 +1338,7 @@ func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 		if expr.resInt == 0 {
 			_, err := expr.AsInt64()
 			if err != nil {
-				return nil, NewDatatypeMismatchError(expr.FullOrigString(), typ.SQLString())
+				return nil, NewDatatypeMismatchError(colName, expr.FullOrigString(), typ.SQLString())
 			}
 		}
 		if expr.resInt == 0 {
@@ -1346,17 +1346,17 @@ func (expr *NumVal) TSTypeCheck(typ *types.T) (Datum, error) {
 		} else if expr.resInt == 1 {
 			return DBoolTrue, nil
 		} else {
-			return nil, NewDatatypeMismatchError(expr.FullOrigString(), typ.SQLString())
+			return nil, NewDatatypeMismatchError(colName, expr.FullOrigString(), typ.SQLString())
 		}
 
 	default:
-		return nil, NewDatatypeMismatchError(expr.FullOrigString(), typ.SQLString())
+		return nil, NewDatatypeMismatchError(colName, expr.FullOrigString(), typ.SQLString())
 	}
 	return nil, nil
 }
 
 // TSTypeCheck checks the input string value against the expected type.
-func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, error) {
+func (expr *StrVal) TSTypeCheck(colName string, typ *types.T, ctx ParseTimeContext) (Datum, error) {
 	if expr.scannedAsBytes {
 		// We're looking at typing a byte literal constant into some value type.
 		switch typ.Family() {
@@ -1380,7 +1380,7 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 				if strings.Contains(err.Error(), "load error") {
 					return nil, err
 				}
-				return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", expr.s, typ.SQLString())
+				return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s (column %s)", expr.s, typ.SQLString(), colName)
 			}
 		case oid.T_bpchar, oid.T_text, oid.T_varchar:
 			width := int(typ.Width())
@@ -1395,7 +1395,7 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 			// string(n)/char(n)/varchar(n) Calculates the length in bytes
 			if len(expr.s) > width {
 				return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", expr.s, typ.SQLString())
+					"value '%s' too long for type %s (column %s)", expr.s, typ.SQLString(), colName)
 			}
 		case types.T_nchar, types.T_nvarchar:
 			width := int(typ.Width())
@@ -1410,10 +1410,10 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 			// nchar(n)/nvarchar(n) Calculates the length by character
 			if utf8.RuneCountInString(expr.s) > width {
 				return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", expr.s, typ.SQLString())
+					"value '%s' too long for type %s (column %s)", expr.s, typ.SQLString(), colName)
 			}
 		default:
-			return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
+			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 		}
 		expr.resString = DString(expr.s)
 		return &expr.resString, nil
@@ -1421,7 +1421,7 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 	case types.BytesFamily:
 		v, err := ParseDByte(expr.s)
 		if err != nil {
-			return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
+			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 		}
 		width := int(typ.Width())
 		if width == 0 {
@@ -1435,40 +1435,40 @@ func (expr *StrVal) TSTypeCheck(typ *types.T, ctx ParseTimeContext) (Datum, erro
 		// bytes(n)/varbytes(n) Calculates the length in bytes
 		if len(string(*v)) > width {
 			return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-				"value '%s' too long for type %s", expr.s, typ.SQLString())
+				"value '%s' too long for type %s (column %s)", expr.s, typ.SQLString(), colName)
 		}
 		return v, nil
 
 	case types.TimestampFamily:
 		dVal, err := ParseTimestampForTS(ctx, expr.s)
 		if err != nil {
-			return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
+			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 		}
 		// Check the maximum and minimum value of the timestamp
 		if *dVal < TsMinTimestamp || *dVal > TsMaxTimestamp {
 			return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-				"value '%s' out of range for type %s", expr.s, typ.SQLString())
+				"value '%s' out of range for type %s (column %s)", expr.s, typ.SQLString(), colName)
 		}
 		return dVal, nil
 	case types.TimestampTZFamily:
 		dVal, err := ParseTimestampTZForTS(ctx, expr.s)
 		if err != nil {
-			return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
+			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 		}
 		// Check the maximum and minimum value of the timestamp
 		if *dVal < TsMinTimestamp || *dVal > TsMaxTimestamp {
 			return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-				"value '%s' out of range for type %s", expr.s, typ.SQLString())
+				"value '%s' out of range for type %s (column %s)", expr.s, typ.SQLString(), colName)
 		}
 		return dVal, nil
 	case types.BoolFamily:
 		dVal, err := ParseDBool(expr.s)
 		if err != nil {
-			return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
+			return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 		}
 		return dVal, nil
 	default:
-		return nil, NewDatatypeMismatchError(expr.s, typ.SQLString())
+		return nil, NewDatatypeMismatchError(colName, expr.s, typ.SQLString())
 	}
 	return nil, nil
 }

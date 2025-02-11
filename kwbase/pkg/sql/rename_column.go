@@ -106,14 +106,15 @@ func (p *planner) renameColumn(
 ) (changed bool, err error) {
 
 	if tableDesc.TableType == tree.InstanceTable {
-		return false, pgerror.New(pgcode.WrongObjectType, "can not rename column/tag on instance table")
+		return false, pgerror.Newf(
+			pgcode.WrongObjectType, "can not rename column/tag on instance table \"%s\"", tableDesc.Name)
 	}
 	if tableDesc.IsTSTable() {
 		if len(string(*newName)) > MaxTagNameLength {
-			return false, sqlbase.NewTSNameOutOfLengthError("column/tag", MaxTagNameLength)
+			return false, sqlbase.NewTSNameOutOfLengthError("column/tag", string(*newName), MaxTagNameLength)
 		}
 		if sqlbase.ContainsNonAlphaNumSymbol(string(*newName)) {
-			return false, sqlbase.NewTSColInvalidError()
+			return false, sqlbase.NewTSColInvalidError(string(*newName))
 		}
 	}
 
@@ -157,7 +158,7 @@ func (p *planner) renameColumn(
 	}
 	isShardColumn := tableDesc.IsShardColumn(col)
 	if isShardColumn && !allowRenameOfShardColumn {
-		return false, pgerror.New(pgcode.ReservedName, "cannot rename shard column")
+		return false, pgerror.Newf(pgcode.ReservedName, "cannot rename shard column: %s", col)
 	}
 
 	if _, _, err := tableDesc.FindColumnByName(*newName); err == nil {

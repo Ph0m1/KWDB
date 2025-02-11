@@ -80,12 +80,12 @@ INSERT 1
 > create table tsdb.insertBool(ts timestamp not null, a bool) tags(ptag int not null) primary tags(ptag);
 CREATE TABLE
 > insert into tsdb.insertBool values('2023-10-27 12:13:14', 11111, 1);
-ERROR: could not resolve "11111" as a BOOL type
+ERROR: could not resolve "11111" as BOOL type (column a)
 SQLSTATE: 42804
 > prepare p8 as insert into tsdb.insertBool values($1,$2,1);
 PREPARE
 > execute p8('2023-10-27 12:13:14', 11111);
-ERROR: could not resolve "11111" as a BOOL type
+ERROR: could not resolve "11111" as BOOL type (column p8)
 SQLSTATE: 42809
 > use defaultdb;
 SET

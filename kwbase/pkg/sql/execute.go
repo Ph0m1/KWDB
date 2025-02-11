@@ -64,7 +64,7 @@ func fillInPlaceholders(
 		}
 		typedExpr, err := sqlbase.SanitizeVarFreeExpr(
 			e, typ, "EXECUTE parameter", /* context */
-			&semaCtx, true /* allowImpure */, ps.needTSTypeCheck)
+			&semaCtx, true /* allowImpure */, ps.needTSTypeCheck, name)
 		if err != nil {
 			return nil, pgerror.New(pgcode.WrongObjectType, err.Error())
 		}

@@ -152,7 +152,7 @@ func (b *Builder) buildDataSource(
 				// case time series table.
 				return b.buildTimeSeriesScan(tabMeta, indexFlags, &resName, inScope)
 			default:
-				panic(pgerror.New(pgcode.Warning, "unknown table type"))
+				panic(pgerror.Newf(pgcode.Warning, "unknown table type: %d", t.GetTableType()))
 			}
 
 		case cat.Sequence:
@@ -252,7 +252,7 @@ func (b *Builder) buildDataSource(
 		case cat.View:
 			if source.Columns != nil {
 				panic(pgerror.Newf(pgcode.FeatureNotSupported,
-					"cannot specify an explicit column list when accessing a view by reference"))
+					"cannot specify an explicit column list when accessing a view by reference, view name: %v", t.Name()))
 			}
 			tn := tree.MakeUnqualifiedTableName(t.Name())
 
@@ -262,7 +262,7 @@ func (b *Builder) buildDataSource(
 			// Any explicitly listed columns are ignored.
 			outScope = b.buildSequenceSelect(t, &tn, inScope)
 		default:
-			panic(errors.AssertionFailedf("unsupported catalog object"))
+			panic(errors.AssertionFailedf("unsupported catalog object: %v", t.Name()))
 		}
 		b.renameSource(source.As, outScope)
 		return outScope
@@ -293,7 +293,7 @@ func (b *Builder) buildView(
 
 		sel, ok = stmt.AST.(*tree.Select)
 		if !ok {
-			panic(errors.AssertionFailedf("expected SELECT statement"))
+			panic(errors.AssertionFailedf("expected SELECT statement: %v", stmt.SQL))
 		}
 
 		b.views[view] = sel
@@ -425,7 +425,7 @@ func (b *Builder) buildScanFromTableRef(
 		// Lists of zero columns are not supported and will throw an error."
 		if len(ref.Columns) == 0 {
 			panic(pgerror.Newf(pgcode.Syntax,
-				"an explicit list of column IDs must include at least one column"))
+				"an explicit list of column IDs must include at least one column, table name: %v", tab.Name()))
 		}
 		ordinals = cat.ConvertColumnIDsToOrdinals(tab, ref.Columns)
 	}
@@ -524,11 +524,11 @@ func (b *Builder) buildScan(
 	if tab.IsVirtualTable() {
 		if indexFlags != nil {
 			panic(pgerror.Newf(pgcode.Syntax,
-				"index flags not allowed with virtual tables"))
+				"index flags not allowed with virtual tables, table name: %v", tab.Name()))
 		}
 		if locking.isSet() {
 			panic(pgerror.Newf(pgcode.Syntax,
-				"%s not allowed with virtual tables", locking.get().Strength))
+				"%s not allowed with virtual tables, table name: %v", locking.get().Strength, tab.Name()))
 		}
 		private := memo.VirtualScanPrivate{Table: tabID, Cols: tabColIDs}
 		outScope.expr = b.factory.ConstructVirtualScan(&private)
@@ -557,10 +557,10 @@ func (b *Builder) buildScan(
 					if len(idx) == 0 {
 						if indexFlags.HintType == keys.UseIndexScan || indexFlags.HintType == keys.UseIndexOnly ||
 							indexFlags.HintType == keys.IgnoreIndexScan || indexFlags.HintType == keys.IgnoreIndexOnly {
-							panic(pgerror.Newf(pgcode.ExternalBindScanIndex, "stmt hint err: error index for hint: %v", indexFlags.HintType))
+							panic(pgerror.Newf(pgcode.ExternalBindScanIndex, "stmt hint err: error index for hint: %v, table name: %v", indexFlags.HintType, tab.Name()))
 						}
 						if indexFlags.HintType == keys.ForceIndexScan || indexFlags.HintType == keys.ForceIndexOnly {
-							panic(pgerror.Newf(pgcode.ExternalBindScanIndex, "stmt hint err: error index for hint: %v", indexFlags.HintType))
+							panic(pgerror.Newf(pgcode.ExternalBindScanIndex, "stmt hint err: error index for hint: %v, table name: %v", indexFlags.HintType, tab.Name()))
 						}
 					}
 					private.Flags.HintIndexes = idx
@@ -782,7 +782,7 @@ func (b *Builder) buildCTEs(with *tree.With, inScope *scope) (outScope *scope) {
 			panic(
 				pgerror.Newf(
 					pgcode.FeatureNotSupported,
-					"WITH clause containing a data-modifying statement must be at the top level",
+					"WITH clause containing a data-modifying statement must be at the top level, SQL: %v", with.CTEList[i].Stmt.String(),
 				),
 			)
 		}
@@ -1495,7 +1495,7 @@ func (b *Builder) validateAsOf(asOf tree.AsOfClause) {
 
 	if *b.semaCtx.AsOfTimestamp != ts {
 		panic(unimplementedWithIssueDetailf(35712, "",
-			"cannot specify AS OF SYSTEM TIME with different timestamps"))
+			"cannot specify AS OF SYSTEM TIME with different timestamps, first time: %v, second time:%v", *b.semaCtx.AsOfTimestamp, ts))
 	}
 }
 
@@ -1543,7 +1543,7 @@ func (b *Builder) validateLockingInFrom(
 			// created a lock. This behavior may improve as the transaction model gains
 			// more capabilities.
 		default:
-			panic(errors.AssertionFailedf("unknown locking strength: %s", li.Strength))
+			panic(errors.AssertionFailedf("unknown locking strength"))
 		}
 
 		// Validating locking wait policy.

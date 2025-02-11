@@ -3,18 +3,18 @@ CREATE TS DATABASE
 > use tsdb;
 SET
 > create table t(ts timestamptz not null, a geometry, b geometry) tags(ptag geometry not null) primary tags(ptag);
-ERROR: unsupported tag type geometry in timeseries table
+ERROR: tag ptag: unsupported tag type geometry in timeseries table
 SQLSTATE: 42809
 > create table t(ts timestamptz not null, a geometry, b geometry) tags(ptag int not null, gtag geometry) primary tags(ptag);
-ERROR: unsupported tag type geometry in timeseries table
+ERROR: tag gtag: unsupported tag type geometry in timeseries table
 SQLSTATE: 42809
 > create table t(ts timestamptz not null, a geometry, b geometry) tags(ptag int not null) primary tags(ptag);
 CREATE TABLE
 > insert into t values('2024-02-05 16:59:00.001 +0800', 'point(1.0, 1.0)', 'point(2.0, 2.0)', 1);
-ERROR: value 'point(1.0, 1.0)' is invalid for type GEOMETRY
+ERROR: value 'point(1.0, 1.0)' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.001 +0800', 'point(1.0 1.0)', 'polygon(2.0 2.0, 2.0 1.0, 3.0 0.0, 3.0 2.0, 2.0 2.0)', 1);
-ERROR: value 'polygon(2.0 2.0, 2.0 1.0, 3.0 0.0, 3.0 2.0, 2.0 2.0)' is invalid for type GEOMETRY
+ERROR: value 'polygon(2.0 2.0, 2.0 1.0, 3.0 0.0, 3.0 2.0, 2.0 2.0)' is invalid for type GEOMETRY (column b)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.001 +0800', 'point(1.0 1.0)', 'point(2.0 2.0)', 1);
 INSERT 1
@@ -25,34 +25,34 @@ INSERT 1
 > insert into t values('2024-02-05 16:59:00.004 +0800', 'point(1.1234567812345678 1.1234567812345678)', 'point(2.1234567812345678 2.1234567812345678)', 1);
 INSERT 1
 > insert into t values('2024-02-05 16:59:00.004 +0800', 'point(abc abc)', 'point(def def)', 1);
-ERROR: value 'point(abc abc)' is invalid for type GEOMETRY
+ERROR: value 'point(abc abc)' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.004 +0800', 'point(* +)', 'point(! $)', 1);
-ERROR: value 'point(* +)' is invalid for type GEOMETRY
+ERROR: value 'point(* +)' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.004 +0800', 'point(1)', 'point(2)', 1);
-ERROR: value 'point(1)' is invalid for type GEOMETRY
+ERROR: value 'point(1)' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.004 +0800', 'linestring(1,1)', 'linestring(2,2)', 1);
-ERROR: value 'linestring(1,1)' is invalid for type GEOMETRY
+ERROR: value 'linestring(1,1)' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.004 +0800', 'polygon((1,2,1))', 'polygon((2,3,2))', 1);
-ERROR: value 'polygon((1,2,1))' is invalid for type GEOMETRY
+ERROR: value 'polygon((1,2,1))' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.005 +0800', 'point(1.0 1.0 2.0)', 'point(1.0 1.0 2.0)', 1);
 INSERT 1
 > insert into t values('2024-02-05 16:59:00.006 +0800', 'linestring(1 1 1, 2 2 2)', 'linestring(1 1 1, 2 2 2)', 1);
 INSERT 1
 > insert into t values('2024-02-05 16:59:00.006 +0800', 'point(1.0 1.0 ,1.0)', 'point(2 2)', 1);
-ERROR: value 'point(1.0 1.0 ,1.0)' is invalid for type GEOMETRY
+ERROR: value 'point(1.0 1.0 ,1.0)' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.007 +0800', 'point(-1 -1)', 'point(-2 -2)', 1);
 INSERT 1
 > insert into t values('2024-02-05 16:59:00.007 +0800', 'point()', 'linestring()', 1);
-ERROR: value 'point()' is invalid for type GEOMETRY
+ERROR: value 'point()' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.007 +0800', 'polygon()', 'polygon(())', 1);
-ERROR: value 'polygon()' is invalid for type GEOMETRY
+ERROR: value 'polygon()' is invalid for type GEOMETRY (column a)
 SQLSTATE: 22000
 > insert into t values('2024-02-05 16:59:00.008 +0800', 'linestring(0 0, 1 1, 3 1)', 'linestring(0 0, 1 1, 3 1)', 1);
 INSERT 1

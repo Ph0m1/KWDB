@@ -890,4 +890,4 @@ inner-join-apply
 build
 SELECT * FROM information_schema.columns FOR UPDATE
 ----
-error (42601): FOR UPDATE not allowed with virtual tables
+error (42601): FOR UPDATE not allowed with virtual tables, table name: columns

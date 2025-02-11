@@ -188,11 +188,11 @@ func (n *alterTableNode) startExec(params runParams) error {
 					return pgerror.New(pgcode.FeatureNotSupported, "add column is not supported for instance table")
 				}
 				if d.Nullable.Nullability == tree.NotNull {
-					return pgerror.New(pgcode.FeatureNotSupported, "add NOT-NULL column is not supported")
+					return pgerror.Newf(pgcode.FeatureNotSupported, "add NOT-NULL column %s for timeseries table is not supported", d.Name)
 				}
 				if len(n.tableDesc.Columns)+1 > MaxTSDataColumns {
 					return pgerror.Newf(pgcode.TooManyColumns,
-						"the number of columns/tags exceeded the maximum value %d", MaxTSDataColumns)
+						"on table %s, the number of columns/tags exceeded the maximum value %d", n.tableDesc.Name, MaxTSDataColumns)
 				}
 				if err := checkTSColValidity(d); err != nil {
 					return err
@@ -528,7 +528,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				}
 				log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 				if colToDrop.ID == 1 {
-					return pgerror.New(pgcode.InvalidColumnDefinition, "cannot drop the first timestamp column")
+					return pgerror.Newf(pgcode.InvalidColumnDefinition, "cannot drop the first timestamp column %s", colToDrop.Name)
 				}
 				var columnCount int
 				found := false
@@ -541,7 +541,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 					}
 				}
 				if columnCount == 2 {
-					return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only data column besides the timestamp column")
+					return pgerror.Newf(
+						pgcode.InvalidTableDefinition,
+						"cannot drop the only data column besides the timestamp column on table %s", n.tableDesc.Name)
 				}
 				if !found {
 					return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
@@ -767,7 +769,8 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableDropConstraint:
 			if n.tableDesc.IsTSTable() {
-				return pgerror.New(pgcode.WrongObjectType, "can not drop constraint on timeseries table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not drop constraint on timeseries table \"%s\"", n.tableDesc.Name)
 			}
 			info, err := n.tableDesc.GetConstraintInfo(params.ctx, nil)
 			if err != nil {
@@ -780,7 +783,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 					continue
 				}
 				return pgerror.Newf(pgcode.UndefinedObject,
-					"constraint %q does not exist", t.Constraint)
+					"constraint %q does not exist on table %s", t.Constraint, n.tableDesc.Name)
 			}
 			if err := n.tableDesc.DropConstraint(
 				params.ctx,
@@ -797,7 +800,8 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableValidateConstraint:
 			if n.tableDesc.IsTSTable() {
-				return pgerror.New(pgcode.WrongObjectType, "can not validate constraint on timeseries table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not validate constraint on timeseries table \"%s\"", n.tableDesc.Name)
 			}
 			info, err := n.tableDesc.GetConstraintInfo(params.ctx, nil)
 			if err != nil {
@@ -807,7 +811,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			constraint, ok := info[name]
 			if !ok {
 				return pgerror.Newf(pgcode.UndefinedObject,
-					"constraint %q does not exist", t.Constraint)
+					"constraint %q does not exist on table %s", t.Constraint, n.tableDesc.Name)
 			}
 			if !constraint.Unvalidated {
 				continue
@@ -870,7 +874,8 @@ func (n *alterTableNode) startExec(params runParams) error {
 				isTSAlterColumnType = false
 			}
 			if n.tableDesc.IsTSTable() && !isTSAlterColumnType && !isTSAlterColumnDefault {
-				return pgerror.New(pgcode.WrongObjectType, "can not modify an existing column on ts table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not modify an existing column on ts table \"%s\"", n.tableDesc.Name)
 			}
 			// Column mutations
 			col, dropped, err := n.tableDesc.FindColumnByName(t.GetColumn())
@@ -893,10 +898,12 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableAlterTagType:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not alter tag type on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not alter tag type on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not alter tag type on instance table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not alter tag type on instance table \"%s\"", n.tableDesc.Name)
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 
@@ -924,7 +931,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			if tagColumn.Type.Identical(newType) {
 				return nil
 			}
-			isDoNothing, err := validateAlterTSType(&tagColumn.Type, newType, sqlbase.ColumnType_TYPE_TAG)
+			isDoNothing, err := validateAlterTSType(tagColumn.Name, &tagColumn.Type, newType, sqlbase.ColumnType_TYPE_TAG)
 			if err != nil {
 				return err
 			}
@@ -984,7 +991,8 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTablePartitionBy:
 			if n.tableDesc.IsTSTable() && t.HashPoint == nil {
-				return pgerror.New(pgcode.WrongObjectType, "can not partition ts table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not partition ts table \"%s\"", n.tableDesc.Name)
 			}
 			partitioning, err := CreatePartitioning(
 				params.ctx, params.p.ExecCfg().Settings,
@@ -1038,7 +1046,8 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableRenameConstraint:
 			if n.tableDesc.IsTSTable() {
-				return pgerror.New(pgcode.WrongObjectType, "can not rename constraint on timeseries table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not rename constraint on timeseries table \"%s\"", n.tableDesc.Name)
 			}
 			info, err := n.tableDesc.GetConstraintInfo(params.ctx, nil)
 			if err != nil {
@@ -1047,7 +1056,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 			details, ok := info[string(t.Constraint)]
 			if !ok {
 				return pgerror.Newf(pgcode.UndefinedObject,
-					"constraint %q does not exist", tree.ErrString(&t.Constraint))
+					"constraint %q does not exist on table %s", tree.ErrString(&t.Constraint), n.tableDesc.Name)
 			}
 			if t.Constraint == t.NewName {
 				// Nothing to do.
@@ -1078,14 +1087,16 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableAddTag:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not add tag on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not add tag on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not add tag on instance table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not add tag on instance table \"%s\"", n.tableDesc.Name)
 			}
 			if len(n.tableDesc.Columns)+1 > MaxTSDataColumns {
 				return pgerror.Newf(pgcode.TooManyColumns,
-					"the number of columns/tags exceeded the maximum value %d", MaxTSDataColumns)
+					"on table %s, the number of columns/tags exceeded the maximum value %d", n.tableDesc.Name, MaxTSDataColumns)
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			tagNum := 0
@@ -1099,20 +1110,21 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 
 			if len(string(t.Tag.TagName)) > MaxTagNameLength {
-				return sqlbase.NewTSNameOutOfLengthError("tag", MaxTagNameLength)
+				return sqlbase.NewTSNameOutOfLengthError("tag", string(t.Tag.TagName), MaxTagNameLength)
 			}
 			if !t.Tag.Nullable {
-				return pgerror.New(pgcode.FeatureNotSupported, "cannot add a NOT NULL tag")
+				return pgerror.Newf(pgcode.FeatureNotSupported, "cannot add a NOT NULL tag in timeseries table (tag %s)", string(t.Tag.TagName))
 			}
 			_, _, err := n.tableDesc.FindColumnByName(t.Tag.TagName)
 			if err == nil {
 				return pgerror.Newf(pgcode.DuplicateColumn, "duplicate tag name: %q", t.Tag.TagName)
 			}
 			if t.Tag.IsSerial {
-				return pgerror.New(pgcode.FeatureNotSupported, "serial tag is not supported in timeseries table")
+				return pgerror.Newf(
+					pgcode.FeatureNotSupported, "serial tag %s is not supported in timeseries table", t.Tag.TagName)
 			}
 			// Tag type check
-			tagType, err := checkTagType(t.Tag.TagType)
+			tagType, err := checkTagType(t.Tag.TagName, t.Tag.TagType)
 			if err != nil {
 				return err
 			}
@@ -1169,10 +1181,12 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableDropTag:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not drop tag on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not drop tag on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not drop tag on instance table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not drop tag on instance table \"%s\"", n.tableDesc.Name)
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			tagColumn, dropped, err := n.tableDesc.FindColumnByName(t.TagName)
@@ -1205,7 +1219,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				}
 			}
 			if tagCount == 1 && n.tableDesc.TableType == tree.TemplateTable {
-				return pgerror.New(pgcode.InvalidTableDefinition, "cannot drop the only tag")
+				return pgerror.Newf(pgcode.InvalidTableDefinition, "cannot drop the only tag on table %s", n.tableDesc.Name)
 			}
 			if !found {
 				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
@@ -1251,7 +1265,8 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableRenameTag:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not rename tag on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not rename tag on relational table \"%s\"", n.tableDesc.Name)
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 			const allowRenameOfShardColumn = false
@@ -1264,13 +1279,16 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableSetTag:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set tag on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set tag on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.TemplateTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set tag on template table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set tag on template table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.TimeseriesTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set tag on time series table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set tag on time series table \"%s\"", n.tableDesc.Name)
 			}
 
 			// get instance table id
@@ -1296,7 +1314,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 				if err != nil {
 					return err
 				}
-				datum, err := checkTagValue(params, t.Expr.Expr, col.Type, col.Nullable)
+				datum, err := checkTagValue(params, t.Expr.Expr, col.Type, col.Nullable, col.Name)
 				if err != nil {
 					return err
 				}
@@ -1335,10 +1353,12 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableSetRetentions:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set retentions on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set retentions on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set retentions on instance table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set retentions on instance table \"%s\"", n.tableDesc.Name)
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 
@@ -1355,10 +1375,12 @@ func (n *alterTableNode) startExec(params runParams) error {
 
 		case *tree.AlterTableSetActivetime:
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set retentions on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set retentions on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set retentions on instance table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set retentions on instance table \"%s\"", n.tableDesc.Name)
 			}
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 
@@ -1375,10 +1397,12 @@ func (n *alterTableNode) startExec(params runParams) error {
 			log.Infof(params.ctx, "alter ts table %s 1st txn start, id: %d, content: %s", n.n.Table.String(), n.tableDesc.ID, n.n.Cmds)
 
 			if n.tableDesc.TableType == tree.RelationalTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set partition interval on relational table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set partition interval on relational table \"%s\"", n.tableDesc.Name)
 			}
 			if n.tableDesc.TableType == tree.InstanceTable {
-				return pgerror.New(pgcode.WrongObjectType, "can not set partition interval on instance table")
+				return pgerror.Newf(
+					pgcode.WrongObjectType, "can not set partition interval on instance table \"%s\"", n.tableDesc.Name)
 			}
 			switch t.TimeInput.Unit {
 			case "s", "second", "m", "minute", "h", "hour":
@@ -1474,9 +1498,9 @@ func checkTSMutationColumnType(
 				if muCol.Type.Identical(&newCol.Type) {
 					continue
 				}
-				_, err := validateAlterTSType(&muCol.Type, &newCol.Type, tagOrColumn)
+				_, err := validateAlterTSType(muCol.Name, &muCol.Type, &newCol.Type, tagOrColumn)
 				if err != nil {
-					return errors.Wrapf(err, "blocked by existing ALTER TYPE on column \"%s\"", newCol.Name)
+					return errors.Wrap(err, "blocked by existing ALTER TYPE: ")
 				}
 			}
 		}
@@ -1563,13 +1587,14 @@ func applyColumnMutation(
 				return false, pgerror.New(pgcode.Syntax, "column and tag in timeseries table does not support USING or COLLATION")
 			}
 			if tableDesc.TableType == tree.InstanceTable {
-				return false, pgerror.New(pgcode.WrongObjectType, "can not alter tag type on instance table")
+				return false, pgerror.Newf(
+					pgcode.WrongObjectType, "can not alter tag type on instance table \"%s\"", tableDesc.Name)
 			}
 			if col.IsTagCol() {
 				return false, pgerror.Newf(pgcode.WrongObjectType, "%s is a tag", col.Name)
 			}
 			if col.ID == 1 {
-				return false, pgerror.New(pgcode.InvalidColumnDefinition, "cannot alter the first ts column")
+				return false, pgerror.Newf(pgcode.InvalidColumnDefinition, "cannot alter the first ts column %s", col.Name)
 			}
 
 			newType := prepareAlterType(t.ToType)
@@ -1578,7 +1603,7 @@ func applyColumnMutation(
 			}
 			// type cast validation
 			// if converting timestamp to timestamptz or reverse, we will not send this to AE.
-			isStorageDoNothing, err := validateAlterTSType(&col.Type, newType, sqlbase.ColumnType_TYPE_DATA)
+			isStorageDoNothing, err := validateAlterTSType(col.Name, &col.Type, newType, sqlbase.ColumnType_TYPE_DATA)
 			if err != nil {
 				return false, err
 			}
@@ -1712,14 +1737,14 @@ func applyColumnMutation(
 			isFuncDefault := false
 			colDatumType := &col.Type
 			expr, err := sqlbase.SanitizeVarFreeExpr(
-				t.Default, colDatumType, "DEFAULT", &params.p.semaCtx, true /* allowImpure */, isTSTable,
+				t.Default, colDatumType, "DEFAULT", &params.p.semaCtx, true /* allowImpure */, isTSTable, col.Name,
 			)
 			if err != nil {
 				return false, err
 			}
 			if expr == tree.DNull && !col.Nullable {
 				return false, pgerror.Newf(pgcode.InvalidColumnDefinition,
-					"default value NULL violates NOT NULL constraint")
+					"default value NULL violates NOT NULL constraint on column %s", col.Name)
 			}
 			if isTSTable {
 				if funcExpr, ok := expr.(*tree.FuncExpr); ok {
@@ -1727,7 +1752,7 @@ func applyColumnMutation(
 					case oid.T_timestamptz, oid.T_timestamp:
 						if strings.ToLower(funcExpr.Func.String()) != "now" {
 							return false, pgerror.Newf(pgcode.InvalidColumnDefinition,
-								"column with type %s can only be set now() as default function", col.Type.SQLString())
+								"column %s with type %s can only be set now() as default function", col.Name, col.Type.SQLString())
 						}
 					default:
 						return false, pgerror.Newf(pgcode.FeatureNotSupported,
@@ -2033,66 +2058,80 @@ func (p *planner) updateFKBackReferenceName(
 // Returns:
 // - doNothing bool: Return true if the storage structure does not need to be modified
 // - error: type cannot be converted error msg
-func validateAlterTSType(oldType, newType *types.T, colType sqlbase.ColumnType) (bool, error) {
+func validateAlterTSType(
+	colName string, oldType, newType *types.T, colType sqlbase.ColumnType,
+) (bool, error) {
 	switch oldType.Oid() {
 	// Numeric type
 	case oid.T_int2:
-		return false, validateNumType(oldType, newType, []oid.Oid{oid.T_int4, oid.T_int8, oid.T_varchar})
+		return false, validateNumType(colName, oldType, newType, []oid.Oid{oid.T_int4, oid.T_int8, oid.T_varchar})
 	case oid.T_int4:
-		return false, validateNumType(oldType, newType, []oid.Oid{oid.T_int8, oid.T_varchar})
+		return false, validateNumType(colName, oldType, newType, []oid.Oid{oid.T_int8, oid.T_varchar})
 	case oid.T_int8, oid.T_float8:
-		return false, validateNumType(oldType, newType, []oid.Oid{oid.T_varchar})
+		return false, validateNumType(colName, oldType, newType, []oid.Oid{oid.T_varchar})
 	case oid.T_float4:
-		return false, validateNumType(oldType, newType, []oid.Oid{oid.T_float8, oid.T_varchar})
+		return false, validateNumType(colName, oldType, newType, []oid.Oid{oid.T_float8, oid.T_varchar})
 		// Character type
 	case oid.T_bpchar, oid.T_varchar, types.T_nchar, types.T_nvarchar:
-		return false, validateTextType(oldType, newType, colType)
+		return false, validateTextType(colName, oldType, newType, colType)
 		// timestamp type
 	case oid.T_timestamp, oid.T_timestamptz:
 		if newType.Oid() == oid.T_timestamp || newType.Oid() == oid.T_timestamptz {
 			return true, nil
 		}
-		return false, newTypeConvertError(oldType, newType)
+		return false, newTypeConvertError(colName, oldType, newType)
 	default:
-		return false, newTypeConvertError(oldType, newType)
+		return false, newTypeConvertError(colName, oldType, newType)
 	}
 }
 
 // validateNumType validates ALTER COLUMN/TAG TYPE command for numeric types.
-func validateNumType(oldType, newType *types.T, validTypes []oid.Oid) error {
+func validateNumType(colName string, oldType, newType *types.T, validTypes []oid.Oid) error {
 	for _, validType := range validTypes {
 		if newType.Oid() == validType {
 			if newType.Oid() == oid.T_varchar {
 				if newType.Width() > MaxVariableLen {
-					return newTypeExceedError(newType, MaxVariableLen)
+					return newTypeExceedError(colName, newType, MaxVariableLen)
 				}
 				switch oldType.Oid() {
 				case oid.T_int2:
 					if newType.Width() < MaxInt16StrLen {
-						return pgerror.Newf(pgcode.InvalidColumnDefinition, "when %s is converted to VARCHAR, the minimum length is %d", oldType.SQLString(), MaxInt16StrLen)
+						return pgerror.Newf(
+							pgcode.InvalidColumnDefinition,
+							"column \"%s\": when %s is converted to VARCHAR, the minimum length is %d",
+							colName, oldType.SQLString(), MaxInt16StrLen)
 					}
 				case oid.T_int4:
 					if newType.Width() < MaxInt32StrLen {
-						return pgerror.Newf(pgcode.InvalidColumnDefinition, "when %s is converted to VARCHAR, the minimum length is %d", oldType.SQLString(), MaxInt32StrLen)
+						return pgerror.Newf(
+							pgcode.InvalidColumnDefinition,
+							"column \"%s\": when %s is converted to VARCHAR, the minimum length is %d",
+							colName, oldType.SQLString(), MaxInt32StrLen)
 					}
 				case oid.T_int8:
 					if newType.Width() < MaxInt64StrLen {
-						return pgerror.Newf(pgcode.InvalidColumnDefinition, "when %s is converted to VARCHAR, the minimum length is %d", oldType.SQLString(), MaxInt64StrLen)
+						return pgerror.Newf(
+							pgcode.InvalidColumnDefinition,
+							"column \"%s\": when %s is converted to VARCHAR, the minimum length is %d",
+							colName, oldType.SQLString(), MaxInt64StrLen)
 					}
 				case oid.T_float4, oid.T_float8:
 					if newType.Width() < MaxDoubleStrLen {
-						return pgerror.Newf(pgcode.InvalidColumnDefinition, "when %s is converted to VARCHAR, the minimum length is %d", oldType.SQLString(), MaxDoubleStrLen)
+						return pgerror.Newf(
+							pgcode.InvalidColumnDefinition,
+							"column \"%s\": when %s is converted to VARCHAR, the minimum length is %d",
+							colName, oldType.SQLString(), MaxDoubleStrLen)
 					}
 				}
 			}
 			return nil
 		}
 	}
-	return newTypeConvertError(oldType, newType)
+	return newTypeConvertError(colName, oldType, newType)
 }
 
 // validateTextType validates ALTER COLUMN/TAG TYPE command for text types.
-func validateTextType(oldType, newType *types.T, colType sqlbase.ColumnType) error {
+func validateTextType(colName string, oldType, newType *types.T, colType sqlbase.ColumnType) error {
 	if oldType.Oid() == oid.T_varchar {
 		switch newType.Oid() {
 		case oid.T_int2, oid.T_int4, oid.T_int8, oid.T_float4, oid.T_float8:
@@ -2102,75 +2141,75 @@ func validateTextType(oldType, newType *types.T, colType sqlbase.ColumnType) err
 	switch newType.Oid() {
 	case oid.T_bpchar:
 		if newType.Width() >= MaxFixedLen {
-			return newTypeExceedError(newType, MaxFixedLen)
+			return newTypeExceedError(colName, newType, MaxFixedLen)
 		}
 		if oldType.Oid() == oid.T_bpchar || oldType.Oid() == oid.T_varchar {
 			if newType.Width() < oldType.Width() {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		} else if oldType.Oid() == types.T_nchar || oldType.Oid() == types.T_nvarchar {
 			if newType.Width() < oldType.Width()*4 {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		}
 
 	case oid.T_varchar:
 		if newType.Width() > MaxVariableLen {
-			return newTypeExceedError(newType, MaxVariableLen)
+			return newTypeExceedError(colName, newType, MaxVariableLen)
 		}
 		if oldType.Oid() == oid.T_bpchar || oldType.Oid() == oid.T_varchar {
 			if newType.Width() < oldType.Width() {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		} else if oldType.Oid() == types.T_nchar || oldType.Oid() == types.T_nvarchar {
 			if newType.Width() < oldType.Width()*4 {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		}
 
 	case types.T_nchar:
 		if newType.Width() > MaxNCharLen {
-			return newTypeExceedError(newType, MaxNCharLen)
+			return newTypeExceedError(colName, newType, MaxNCharLen)
 		}
 		if oldType.Oid() == oid.T_bpchar || oldType.Oid() == oid.T_varchar {
 			if float64(newType.Width()) < float64(oldType.Width())/4 {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		} else if oldType.Oid() == types.T_nchar || oldType.Oid() == types.T_nvarchar {
 			if newType.Width() < oldType.Width() {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		}
 	case types.T_nvarchar:
 		if colType == sqlbase.ColumnType_TYPE_TAG {
-			return pgerror.Newf(pgcode.InvalidColumnDefinition, "tag does not support type %s", newType.SQLString())
+			return pgerror.Newf(pgcode.InvalidColumnDefinition, "tag %s does not support type %s", colName, newType.SQLString())
 		}
 		if newType.Width() > MaxVariableLen {
-			return newTypeExceedError(newType, MaxVariableLen)
+			return newTypeExceedError(colName, newType, MaxVariableLen)
 		}
 		if oldType.Oid() == oid.T_bpchar || oldType.Oid() == oid.T_varchar {
 			if float64(newType.Width()) < float64(oldType.Width())/4 {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		} else if oldType.Oid() == types.T_nchar || oldType.Oid() == types.T_nvarchar {
 			if newType.Width() < oldType.Width() {
-				return newTypeConvertError(oldType, newType)
+				return newTypeConvertError(colName, oldType, newType)
 			}
 		}
 	default:
-		return newTypeConvertError(oldType, newType)
+		return newTypeConvertError(colName, oldType, newType)
 	}
 	return nil
 }
 
 // newTypeConvertError returns an error when old type cannot convert to new type.
-func newTypeConvertError(oldType, newType *types.T) error {
-	return pgerror.Newf(pgcode.CannotCoerce, "cannot convert %s to %s", oldType.SQLString(), newType.SQLString())
+func newTypeConvertError(colName string, oldType, newType *types.T) error {
+	return pgerror.Newf(pgcode.CannotCoerce, "column: \"%s\": cannot convert %s to %s", colName, oldType.SQLString(), newType.SQLString())
 }
 
 // newTypeExceedError returns an error when new type exceeds the maximum width.
-func newTypeExceedError(newType *types.T, maxWidth int) error {
-	return pgerror.Newf(pgcode.CannotCoerce, "%s exceeds the maximum width: %d", newType.SQLString(), maxWidth)
+func newTypeExceedError(colName string, newType *types.T, maxWidth int) error {
+	return pgerror.Newf(pgcode.CannotCoerce, "column: \"%s\": %s exceeds the maximum width: %d", colName, newType.SQLString(), maxWidth)
 }
 
 // prepareAlterType assigns the correct width for varchar and nvarchar.

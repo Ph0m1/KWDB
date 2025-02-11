@@ -8,10 +8,10 @@ INSERT 1
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:01', 32768.123, 2);
 INSERT 1
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:02', 'test', 3);
-ERROR: could not resolve "test" as a FLOAT4 type
+ERROR: could not resolve "test" as FLOAT4 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:03', true, 4);
-ERROR: could not resolve "true" as a FLOAT4 type
+ERROR: could not resolve "true" as FLOAT4 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:04', 9223372036854775807.12345, 5);
 INSERT 1
@@ -22,10 +22,10 @@ INSERT 1
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:07', 99999999, 8);
 INSERT 1
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:08', '9223372036854775808.12345', 9);
-ERROR: could not resolve "9223372036854775808.12345" as a FLOAT4 type
+ERROR: could not resolve "9223372036854775808.12345" as FLOAT4 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1  VALUES ('2018-10-10 10:00:09', '中文', 10);
-ERROR: could not resolve "中文" as a FLOAT4 type
+ERROR: could not resolve "中文" as FLOAT4 type (column e1)
 SQLSTATE: 42804
 > select e1, t1_attribute from test_savedata1.d1 order by e1,t1_attribute;
             e1           | t1_attribute

@@ -48,7 +48,7 @@ INSERT 1
 > Insert into t1 values(10, 10, '👿', '👿', '👿', '👿', '👿', '👿', 1);
 INSERT 1
 > Insert into t1 values(11, 11, '\xe4\xb8\xad', '\xe4\xb8\xad\xe6\x96\x87', '\xe4\xb8\xad\xe6\x96\x87', '\xe4\xb8\xad\xe6\x96\x87', '\xe4\xb8\xad\xe6\x96\x87', '\xe4\xb8\xad\xe6\x96\x87', 1);
-ERROR: value '\xe4\xb8\xad' too long for type NCHAR
+ERROR: value '\xe4\xb8\xad' too long for type NCHAR (column b)
 SQLSTATE: 22001
 > Insert into t1 values(12, 12, b'a', b'abc', b'abc', b'abc', b'abc', b'abc', 1);
 INSERT 1

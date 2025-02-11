@@ -64,6 +64,7 @@ func SanitizeVarFreeExpr(
 	semaCtx *tree.SemaContext,
 	allowImpure bool,
 	tsTypeCheck bool,
+	colName string,
 ) (tree.TypedExpr, error) {
 	if tree.ContainsVars(expr) {
 		return nil, pgerror.Newf(pgcode.Syntax,
@@ -86,13 +87,13 @@ func SanitizeVarFreeExpr(
 	if tsTypeCheck {
 		switch v := expr.(type) {
 		case *tree.NumVal:
-			typedExpr, err = v.TSTypeCheck(expectedType)
+			typedExpr, err = v.TSTypeCheck(colName, expectedType)
 			if err != nil {
 				return nil, err
 			}
 			return typedExpr, nil
 		case *tree.StrVal:
-			typedExpr, err = (*v).TSTypeCheck(expectedType, semaCtx)
+			typedExpr, err = (*v).TSTypeCheck(colName, expectedType, semaCtx)
 			if err != nil {
 				return nil, err
 			}
@@ -212,7 +213,9 @@ func MakeColumnDefDescs(
 	}
 	// bytes(n)/varbytes(n) are not allowed in relational mode.
 	if d.Type.TypeEngine() == types.TIMESERIES.Mask() {
-		return nil, nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported column type %s with length in relational table", d.Type.Name())
+		return nil, nil, nil, pgerror.Newf(
+			pgcode.WrongObjectType, "column %s: unsupported column type %s with length in relational table",
+			d.Name, d.Type.Name())
 	}
 	col.Type = *d.Type
 
@@ -223,7 +226,7 @@ func MakeColumnDefDescs(
 		// and does not contain invalid functions.
 		var err error
 		if typedExpr, err = SanitizeVarFreeExpr(
-			d.DefaultExpr.Expr, d.Type, "DEFAULT", semaCtx, true /* allowImpure */, false,
+			d.DefaultExpr.Expr, d.Type, "DEFAULT", semaCtx, true /* allowImpure */, false, "",
 		); err != nil {
 			return nil, nil, nil, err
 		}
@@ -232,7 +235,7 @@ func MakeColumnDefDescs(
 			if strings.ToLower(funcExpr.Func.String()) == "unique_rowid" {
 				actualType := funcExpr.ResolvedType()
 				if !actualType.Equal(*d.Type) {
-					return nil, nil, nil, errors.New("The type of the default expression does not match the type of the column")
+					return nil, nil, nil, errors.Newf("The type of the default expression does not match the type of the column (column %s)", col.Name)
 				}
 			}
 		}
@@ -314,10 +317,10 @@ func MakeTSColumnDefDescs(
 ) (*ColumnDescriptor, tree.TypedExpr, error) {
 	// Parameter validation for ts column.
 	if len(name) > MaxTSColumnNameLength {
-		return nil, nil, NewTSNameOutOfLengthError("column", MaxTSColumnNameLength)
+		return nil, nil, NewTSNameOutOfLengthError("column", name, MaxTSColumnNameLength)
 	}
 	if ContainsNonAlphaNumSymbol(name) {
-		return nil, nil, NewTSColInvalidError()
+		return nil, nil, NewTSColInvalidError(name)
 	}
 	if (typ.Oid() == oid.T_timestamp || typ.Oid() == oid.T_timestamptz) && typ.InternalType.TimePrecisionIsSet {
 		return nil, nil, pgerror.Newf(pgcode.InvalidColumnDefinition, "timeseries table can not use %v type with precision", typ.Name())
@@ -353,14 +356,18 @@ func MakeTSColumnDefDescs(
 		// and does not contain invalid functions.
 		var err error
 		if typedExpr, err = SanitizeVarFreeExpr(
-			defaultExpr, typ, "DEFAULT", semaCtx, true /* allowImpure */, true,
+			defaultExpr, typ, "DEFAULT", semaCtx, true /* allowImpure */, true, col.Name,
 		); err != nil {
 			return nil, nil, err
 		}
 
 		if typedExpr == tree.DNull && !col.Nullable {
+			colTyp := "tag"
+			if columnType == ColumnType_TYPE_DATA {
+				colTyp = "column"
+			}
 			return nil, nil, pgerror.Newf(pgcode.InvalidColumnDefinition,
-				"default value NULL violates NOT NULL constraint")
+				"default value NULL violates NOT NULL constraint on %s %s", colTyp, col.Name)
 		}
 
 		if funcExpr, ok := typedExpr.(*tree.FuncExpr); ok {
@@ -369,11 +376,11 @@ func MakeTSColumnDefDescs(
 			case types.Timestamp, types.TimestampTZ:
 				if strings.ToLower(funcExpr.Func.String()) != "now" {
 					return nil, nil, pgerror.Newf(pgcode.InvalidColumnDefinition,
-						"column with type %s can only be set now() as default function", typ.SQLString())
+						"column %s with type %s can only be set now() as default function", col.Name, typ.SQLString())
 				}
 			default:
 				return nil, nil, pgerror.Newf(pgcode.FeatureNotSupported,
-					"column with type %s can only be set constant as default value", typ.SQLString())
+					"column %s with type %s can only be set constant as default value", col.Name, typ.SQLString())
 			}
 		}
 		if typedExpr != tree.DNull {
@@ -406,7 +413,8 @@ func MakeTSColumnDefDescs(
 		case oid.T_varchar:
 			errType = "char/character varying"
 		}
-		return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported %s type %s in timeseries table", errMsg, errType)
+		return nil, nil, pgerror.Newf(
+			pgcode.WrongObjectType, "column %s: unsupported %s type %s in timeseries table", col.Name, errMsg, errType)
 	}
 	col.TsCol.StorageType = storageType
 	stLen := GetStorageLenForFixedLenTypes(storageType)
@@ -440,28 +448,28 @@ func MakeTSColumnDefDescs(
 			if typeWidth < TSMaxFixedLen {
 				col.TsCol.StorageLen = uint64(typeWidth) + 1
 			} else if typ.Oid() == types.T_geometry {
-				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported width of %s", typ.Name())
+				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "column %s: unsupported width of %s", col.Name, typ.Name())
 			} else {
-				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported width of %s", storageType.String())
+				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "column %s: unsupported width of %s", col.Name, storageType.String())
 			}
 		case DataType_BYTES:
 			if typeWidth < TSMaxFixedLen {
 				col.TsCol.StorageLen = uint64(typeWidth) + 2
 			} else {
-				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported width of %s", storageType.String())
+				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "column %s: unsupported width of %s", col.Name, storageType.String())
 			}
 		// varchar, nvarchar, varbytes
 		case DataType_VARCHAR, DataType_NVARCHAR:
 			if typeWidth <= TSMaxVariableLen {
 				col.TsCol.StorageLen = uint64(typeWidth + 1)
 			} else {
-				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported width of %s", storageType.String())
+				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "column %s: unsupported width of %s", col.Name, storageType.String())
 			}
 		case DataType_VARBYTES:
 			if typeWidth <= TSMaxVariableLen {
 				col.TsCol.StorageLen = uint64(typeWidth)
 			} else {
-				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported width of %s", storageType.String())
+				return nil, nil, pgerror.Newf(pgcode.WrongObjectType, "column %s: unsupported width of %s", col.Name, storageType.String())
 			}
 		}
 	}
@@ -817,7 +825,7 @@ func GetTableDescriptorWithErr(
 		return nil, err
 	}
 	if !gr.Exists() {
-		return nil, errors.New("database missing")
+		return nil, errors.Newf("database %s missing", database)
 	}
 	dbDescID := ID(gr.ValueInt())
 	if dbDescID == InvalidID {
@@ -830,7 +838,7 @@ func GetTableDescriptorWithErr(
 		return nil, err
 	}
 	if !gr.Exists() {
-		return nil, errors.New("table missing")
+		return nil, errors.Newf("table %s missing", table)
 	}
 
 	descKey := MakeDescMetadataKey(ID(gr.ValueInt()))
@@ -841,7 +849,7 @@ func GetTableDescriptorWithErr(
 	}
 	tableDesc := desc.Table(ts)
 	if tableDesc == nil {
-		return nil, errors.New("table missing")
+		return nil, errors.Newf("table %s missing", table)
 	}
 	err = tableDesc.MaybeFillInDescriptor(ctx, kvDB)
 	if err != nil {
@@ -1011,7 +1019,7 @@ func GetTableDescriptorUseTxn(
 	}
 	tableDesc := desc.Table(ts)
 	if tableDesc == nil {
-		return nil, errors.New("table missing")
+		return nil, errors.Newf("table %s missing", table)
 	}
 	err = tableDesc.MaybeFillInDescriptor(ctx, txn)
 	if err != nil {

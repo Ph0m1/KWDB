@@ -343,25 +343,25 @@ INSERT 1
 ) tags (attr1 smallint not null, attr2 int, attr3 bigint, attr4 float4, attr5 double, attr6 bool, attr11 char, attr12 char(254), attr13 nchar, attr14 nchar(254), attr15 varchar, attr16 varchar(1023)) primary tags(attr1);
 CREATE TABLE
 > alter table test_alter.t2 add tag a1 timestamp;
-ERROR: unsupported tag type timestamp in timeseries table
+ERROR: tag a1: unsupported tag type timestamp in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a2 timestamptz;
-ERROR: unsupported tag type timestamptz in timeseries table
+ERROR: tag a2: unsupported tag type timestamptz in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a3 bytea;
-ERROR: unsupported tag type bytes in timeseries table
+ERROR: tag a3: unsupported tag type bytes in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a4 blob;
-ERROR: unsupported tag type bytes in timeseries table
+ERROR: tag a4: unsupported tag type bytes in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a5 string;
-ERROR: unsupported tag type string in timeseries table
+ERROR: tag a5: unsupported tag type string in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a6 decimal;
-ERROR: unsupported tag type decimal in timeseries table
+ERROR: tag a6: unsupported tag type decimal in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a7 time;
-ERROR: unsupported tag type time in timeseries table
+ERROR: tag a7: unsupported tag type time in timeseries table
 SQLSTATE: 42809
 > alter table test_alter.t2 add tag a8 data;
 ERROR: at or near "data": syntax error
@@ -371,7 +371,7 @@ alter table test_alter.t2 add tag a8 data
                                      ^
 HINT: try \h ALTER TABLE
 > alter table test_alter.t2 add tag a9 serial2;
-ERROR: serial tag is not supported in timeseries table
+ERROR: serial tag a9 is not supported in timeseries table
 SQLSTATE: 0A000
 > show tags from test_alter.t2;
    tag   |     type      | is_primary | nullable
@@ -581,7 +581,7 @@ INSERT 1
 ) tags (code1 int2 not null, code2 int, code3 int8, flag bool, val1 float, val2 float8, location varchar, color varchar(65536), age char, sex char(1023), year nchar, type nchar(254)) primary tags(code1);
 CREATE TABLE
 > alter table test_alter.t5 add column c1 decimal;
-ERROR: unsupported column type decimal in timeseries table
+ERROR: column c1: unsupported column type decimal in timeseries table
 SQLSTATE: 42809
 > create table test_alter.t6(
                             k_timestamp timestamp not null,

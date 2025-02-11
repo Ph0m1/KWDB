@@ -89,7 +89,7 @@ COMMENT ON COLUMN
   k_timestamp | 《!!database TEST中文英文COLUMN-k_timestamp!!》
 (40 rows)
 > SET sql_safe_updates = FALSE;ALTER TABLE test_comment.t1 DROP COLUMN k_timestamp;
-ERROR: cannot drop the first timestamp column
+ERROR: cannot drop the first timestamp column k_timestamp
 SQLSTATE: 42611
 > SELECT column_name,comment FROM [SHOW COLUMNS FROM test_comment.t1 WITH COMMENT] ORDER BY column_name;
   column_name |                     comment

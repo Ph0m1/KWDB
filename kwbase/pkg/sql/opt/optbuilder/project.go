@@ -244,7 +244,7 @@ func (b *Builder) analyzeSelectList(
 							case *tree.ColumnAccessExpr:
 								expansions = append(expansions, tree.SelectExpr{Expr: col})
 							default:
-								panic(errors.AssertionFailedf("unexpected column type in expansion"))
+								panic(errors.AssertionFailedf("unexpected column type in expansion, illegal expr: %s", expr))
 							}
 						}
 					}

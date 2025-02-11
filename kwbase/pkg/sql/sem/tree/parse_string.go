@@ -94,7 +94,9 @@ func ParseAndRequireString(t *types.T, s string, ctx ParseTimeContext) (Datum, e
 
 // TSParseAndRequireString parses s as ts type typ for simple types.
 // It's same like ParseAndRequireString, but only used by import.
-func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datum, error) {
+func TSParseAndRequireString(
+	colName string, typ *types.T, s string, ctx ParseTimeContext,
+) (Datum, error) {
 	// Typing a string literal constant into some value type.
 	switch typ.Family() {
 	case types.StringFamily:
@@ -103,28 +105,28 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 			// check length, string(n)/char(n)/varchar(n) is calculated length by byte
 			if len(s) > int(typ.Width()) {
 				return DNull, pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", s, typ.SQLString())
+					"value '%s' too long for type %s (column %s)", s, typ.SQLString(), colName)
 			}
 		case types.T_nchar, types.T_nvarchar:
 			// check length, nchar(n)/nvarchar(n) is calculated length by rune
 			if utf8.RuneCountInString(s) > int(typ.Width()) {
 				return DNull, pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", s, typ.SQLString())
+					"value '%s' too long for type %s (column %s)", s, typ.SQLString(), colName)
 			}
 		default:
-			return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+			return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 		}
 		return NewDString(s), nil
 
 	case types.BytesFamily:
 		v, err := ParseDByte(s)
 		if err != nil {
-			return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+			return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 		}
 		// check length, bytes(n)/varbytes(n) is calculated length by byte
 		if len(string(*v)) > int(typ.Width()) {
 			return DNull, pgerror.Newf(pgcode.StringDataRightTruncation,
-				"value '%s' too long for type %s", s, typ.SQLString())
+				"value '%s' too long for type %s (column %s)", s, typ.SQLString(), colName)
 		}
 		return v, nil
 
@@ -133,11 +135,11 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 		if err != nil {
 			i, err1 := strconv.ParseInt(s, 0, 64)
 			if err1 != nil {
-				return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+				return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 			}
 			if i < TsMinTimestamp || i > TsMaxTimestamp {
 				return DNull, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%d\" out of range for type %s", i, typ.SQLString())
+					"integer \"%d\" out of range for type %s (column %s)", i, typ.SQLString(), colName)
 			}
 			return NewDInt(DInt(i)), nil
 		}
@@ -146,11 +148,11 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 		if dVal < TsMinTimestamp || dVal > TsMaxTimestamp {
 			i, err1 := strconv.ParseInt(s, 0, 64)
 			if err1 != nil {
-				return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+				return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 			}
 			if i < TsMinTimestamp || i > TsMaxTimestamp {
 				return DNull, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%d\" out of range for type %s", i, typ.SQLString())
+					"integer \"%d\" out of range for type %s (column %s)", i, typ.SQLString(), colName)
 			}
 			return NewDInt(DInt(i)), nil
 		}
@@ -161,11 +163,11 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 			if err != nil {
 				i, err1 := strconv.ParseInt(s, 0, 64)
 				if err1 != nil {
-					return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+					return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 				}
 				if i < TsMinTimestamp || i > TsMaxTimestamp {
 					return DNull, pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"integer \"%d\" out of range for type %s", i, typ.SQLString())
+						"integer \"%d\" out of range for type %s (column %s)", i, typ.SQLString(), colName)
 				}
 				return NewDInt(DInt(i)), nil
 			}
@@ -175,11 +177,11 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 		if dVal < TsMinTimestamp || dVal > TsMaxTimestamp {
 			i, err1 := strconv.ParseInt(s, 0, 64)
 			if err1 != nil {
-				return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+				return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 			}
 			if i < TsMinTimestamp || i > TsMaxTimestamp {
 				return DNull, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"integer \"%d\" out of range for type %s", i, typ.SQLString())
+					"integer \"%d\" out of range for type %s (column %s)", i, typ.SQLString(), colName)
 			}
 			return NewDInt(DInt(i)), nil
 		}
@@ -196,7 +198,7 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 		shifted := i >> width
 		if (i >= 0 && shifted > 0) || (i < 0 && shifted < -1) {
 			return DNull, pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%s\" out of range for type %s", s, typ.SQLString())
+				"integer \"%s\" out of range for type %s (column %s)", s, typ.SQLString(), colName)
 		}
 		return NewDInt(DInt(i)), nil
 	case types.FloatFamily:
@@ -209,6 +211,6 @@ func TSParseAndRequireString(typ *types.T, s string, ctx ParseTimeContext) (Datu
 		return ParseDBool(s)
 
 	default:
-		return DNull, NewDatatypeMismatchError(s, typ.SQLString())
+		return DNull, NewDatatypeMismatchError(colName, s, typ.SQLString())
 	}
 }

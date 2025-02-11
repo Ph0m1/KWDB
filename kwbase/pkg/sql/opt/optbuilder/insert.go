@@ -201,7 +201,7 @@ func (b *Builder) buildInsert(ins *tree.Insert, inScope *scope) (outScope *scope
 	tblTyp := tab.GetTableType()
 	// insert into template table error
 	if tblTyp == tree.TemplateTable && !opt.CheckTsProperty(b.TSInfo.TSProp, TSPropInsertCreateTable) {
-		panic(pgerror.New(pgcode.FeatureNotSupported, "cannot insert into a TEMPLATE table"))
+		panic(pgerror.Newf(pgcode.FeatureNotSupported, "cannot insert into a TEMPLATE table, table name: %v", tab.Name()))
 	}
 
 	if ins.IsNoSchema {
@@ -437,30 +437,6 @@ func (b *Builder) buildInsert(ins *tree.Insert, inScope *scope) (outScope *scope
 	return mb.outScope
 }
 
-// convert datums to valuesClause
-func rowToValuesClause(b *Builder, selectSQL string) tree.ValuesClause {
-	rows, err := b.evalCtx.InternalExecutor.Query(b.ctx, "select ts table", b.evalCtx.Txn, selectSQL)
-	if err != nil {
-		panic(pgerror.Newf(pgcode.Warning, err.Error()))
-	}
-	if rows == nil {
-		return tree.ValuesClause{}
-	}
-	exprss := make([]tree.Exprs, len(rows))
-	for i, row := range rows {
-		var exprs tree.Exprs
-		for _, col := range row {
-			expr, err := col.DatumToExpr()
-			if err != nil {
-				panic(err)
-			}
-			exprs = append(exprs, expr)
-		}
-		exprss[i] = exprs
-	}
-	return tree.ValuesClause{Rows: exprss}
-}
-
 /* buildColsForTsInsert
  * @Description：build columns of insert by input columns or all columns of table;
  * @In ins: represents an INSERT statement;
@@ -547,7 +523,7 @@ func (mb *mutationBuilder) getChildIDAndName(
 		cTableID = mb.tabID
 		cName = tn.TableDef.Table.Table()
 	default:
-		panic(pgerror.New(pgcode.WrongObjectType, "wrong TableExpr type"))
+		panic(pgerror.Newf(pgcode.WrongObjectType, "unsupported TableExpr type, table name: %v", cName))
 	}
 	return
 }
@@ -1241,7 +1217,7 @@ func (b *Builder) buildTSInsert(
 		case *tree.InFlightCreateTableExpr:
 			childNamePriTag = tree.NewStrVal(tn.TableDef.Table.Table())
 		default:
-			panic(pgerror.New(pgcode.WrongObjectType, "wrong TableExpr type"))
+			panic(pgerror.Newf(pgcode.WrongObjectType, "unsupported TableExpr type, table name: %v", table.Name()))
 		}
 		childRowsValue := make([]tree.Exprs, len(rowsValue))
 		for i := range childRowsValue {
@@ -1516,7 +1492,7 @@ func checkInputForTSInsert(
 				case types.BoolFamily, types.IntFamily:
 					// do nothing
 				default:
-					return nil, tree.NewDatatypeMismatchError(v.String(), column.Type.SQLString())
+					return nil, tree.NewDatatypeMismatchError(column.Name, v.String(), column.Type.SQLString())
 				}
 			case *tree.FuncExpr:
 				// Currently only the now() function is supported for inserting ts table.
@@ -1552,7 +1528,7 @@ func analysisTmplTableTag(b *Builder, table cat.Table, ct *tree.CreateTable) {
 		// Only when no name is specified will there be a situation where TagName is empty
 		if ct.Tags[i].TagName == "" {
 			if len(ct.Tags) != len(tagMeta) {
-				panic(errors.AssertionFailedf("Tags number not matched"))
+				panic(errors.AssertionFailedf("Tags number not matched, number of tags: %v, number of tagMeta: %v", len(ct.Tags), len(tagMeta)))
 			}
 			ct.Tags[i].TagName = tree.Name(tagMeta[i].TagName)
 			tagType = tagMeta[i].TagType

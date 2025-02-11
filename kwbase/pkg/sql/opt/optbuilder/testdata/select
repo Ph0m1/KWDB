@@ -1043,7 +1043,7 @@ scan t
 build
 SELECT * FROM [53() AS t]
 ----
-error (42601): an explicit list of column IDs must include at least one column
+error (42601): an explicit list of column IDs must include at least one column, table name: tab53
 
 # Test that hidden columns are not presented
 build

@@ -58,11 +58,11 @@ type DirectInsert struct {
 }
 
 const (
-	errUnsupportedType = "unsupported input type relation \"%s\""
-	errOutOfRange      = "integer \"%s\" out of range for type %s"
-	errInvalidValue    = "value '%s' is invalid for type %s"
-	errValueOutofRange = "value '%s' out of range for type %s"
-	errTooLong         = "value '%s' too long for type %s"
+	errUnsupportedType = "unsupported input type relation \"%s\" (column %s)"
+	errOutOfRange      = "integer \"%s\" out of range for type %s (column %s)"
+	errInvalidValue    = "value '%s' is invalid for type %s (column %s)"
+	errValueOutofRange = "value '%s' out of range for type %s (column %s)"
+	errTooLong         = "value '%s' too long for type %s (column %s)"
 )
 
 // GetInputValues performs column type conversion and length checking
@@ -141,12 +141,12 @@ func getSingleRecord(
 			if valueType == parser.STRINGTYPE {
 				t, err := tree.ParseDTimestampTZ(ptCtx, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 				if err != nil {
-					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 					return pgerror.Newf(pgcode.StringDataLengthMismatch,
-						"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
+						"value '%s' out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
 				}
 			} else {
 				if rawValue == "now" {
@@ -159,13 +159,13 @@ func getSingleRecord(
 					if strings.Contains(err2.Error(), "out of range") {
 						return err2
 					}
-					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal = (*tree.DInt)(&in)
 				// consistent with the timestamp range supported by savedata
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						errOutOfRange, rawValue, column.Type.SQLString())
+						errOutOfRange, rawValue, column.Type.SQLString(), column.Name)
 				}
 			}
 			inputValues[row][col] = dVal
@@ -175,12 +175,12 @@ func getSingleRecord(
 			if valueType == parser.STRINGTYPE {
 				t, err := tree.ParseDTimestamp(nil, rawValue, tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 				if err != nil {
-					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal = tree.NewDInt(tree.DInt(t.UnixMilli()))
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 					return pgerror.Newf(pgcode.StringDataLengthMismatch,
-						"value '%s' out of range for type %s", rawValue, column.Type.SQLString())
+						"value '%s' out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
 				}
 			} else {
 				if rawValue == "now" {
@@ -193,27 +193,27 @@ func getSingleRecord(
 					if strings.Contains(err2.Error(), "out of range") {
 						return err2
 					}
-					return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal = (*tree.DInt)(&in)
 				// consistent with the timestamp range supported by savedata
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						errOutOfRange, rawValue, column.Type.SQLString())
+						errOutOfRange, rawValue, column.Type.SQLString(), column.Name)
 				}
 			}
 			inputValues[row][col] = dVal
 
 		case oid.T_int8, oid.T_int4, oid.T_int2:
 			if valueType == parser.STRINGTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 
 			in, err := strconv.ParseInt(rawValue, 10, 64)
 			if err != nil {
 				if dat, err := parserString2Int(rawValue, err, *column); err != nil {
 					if valueType == parser.NORMALTYPE {
-						return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+						return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 					}
 					return err
 				} else if dat != nil {
@@ -238,14 +238,14 @@ func getSingleRecord(
 
 		rangeError:
 			return pgerror.Newf(pgcode.NumericValueOutOfRange,
-				"integer \"%d\" out of range for type %s", in, column.Type.SQLString())
+				"integer \"%d\" out of range for type %s (column %s)", in, column.Type.SQLString(), column.Name)
 
 		case oid.T_cstring, oid.T_char, oid.T_text, oid.T_bpchar, oid.T_varchar, oid.Oid(91004), oid.Oid(91002):
 			if valueType == parser.NUMTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 			}
 			if valueType == parser.BYTETYPE && column.Type.Family() == types.BytesFamily {
 				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
@@ -261,35 +261,35 @@ func getSingleRecord(
 				}
 				if strLen > int(column.Type.Width()) {
 					return pgerror.Newf(pgcode.StringDataRightTruncation,
-						"value '%s' too long for type %s", rawValue, column.Type.SQLString())
+						"value '%s' too long for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
 				}
 			}
 			inputValues[row][col] = tree.NewDString(rawValue)
 
 		case oid.T_bytea, oid.T_varbytea:
 			if valueType == parser.NUMTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 			}
 			v, err := tree.ParseDByte(rawValue)
 			if err != nil {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			// bytes(n)/varbytes(n) calculate length by byte
 			if column.Type.Width() > 0 && len(rawValue) > int(column.Type.Width()) {
 				return pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", rawValue, column.Type.SQLString())
+					"value '%s' too long for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
 			}
 			inputValues[row][col] = v
 
 		case oid.T_float4, oid.T_float8:
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 			}
 			if valueType == parser.STRINGTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			bitSize := 32
 			if column.Type.Oid() == oid.T_float8 {
@@ -299,35 +299,35 @@ func getSingleRecord(
 			if err != nil {
 				if strings.Contains(err.Error(), "out of range") {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
-						"float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+						"float \"%s\" out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
 				}
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
 		case oid.T_bool:
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 			}
 			inputValues[row][col], err = tree.ParseDBool(rawValue)
 			if err != nil {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 		case types.T_geometry:
 			if valueType == parser.NORMALTYPE {
-				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 			}
 			if valueType == parser.NUMTYPE {
-				return tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			if _, err := geos.FromWKT(rawValue); err != nil {
 				if strings.Contains(err.Error(), "load error") {
 					return err
 				}
-				return pgerror.Newf(pgcode.DataException, errInvalidValue, rawValue, column.Type.SQLString())
+				return pgerror.Newf(pgcode.DataException, errInvalidValue, rawValue, column.Type.SQLString(), column.Name)
 			}
 			inputValues[row][col] = tree.NewDString(rawValue)
 		default:
-			return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+			return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 
 		}
 		if err != nil {
@@ -342,7 +342,7 @@ func parserString2Int(
 	rawValue string, err error, column sqlbase.ColumnDescriptor,
 ) (tree.Datum, error) {
 	if strings.Contains(err.Error(), "out of range") {
-		return nil, pgerror.New(pgcode.NumericValueOutOfRange, "numeric constant out of int64 range")
+		return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "numeric constant \"%s\" out of int64 range (column %s)", rawValue, column.Name)
 	}
 
 	switch rawValue {
@@ -351,7 +351,7 @@ func parserString2Int(
 	case "false":
 		return tree.NewDInt(0), nil
 	default:
-		return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+		return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString(), column.Name)
 	}
 }
 
@@ -731,12 +731,12 @@ func TsprepareTypeCheck(
 					// string type
 					t, err := tree.ParseDTimestampTZ(ptCtx, string(Args[idx]), tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 					if err != nil {
-						return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+						return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 					}
 					tum := t.UnixMilli()
 					if tum < tree.TsMinTimestamp || tum > tree.TsMaxTimestamp {
 						return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-							"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+							"value '%s' out of range for type %s (column %s)", t.String(), column.Type.SQLString(), column.Name)
 					}
 					Args[idx] = make([]byte, 8)
 					binary.LittleEndian.PutUint64(Args[idx][0:], uint64(tum))
@@ -758,12 +758,12 @@ func TsprepareTypeCheck(
 					// string type
 					t, err := tree.ParseDTimestamp(ptCtx, string(Args[idx]), tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 					if err != nil {
-						return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+						return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 					}
 					tum := t.UnixMilli()
 					if tum < tree.TsMinTimestamp || tum > tree.TsMaxTimestamp {
 						return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-							"value %s out of range for type %s", t.String(), column.Type.SQLString())
+							"value %s out of range for type %s (column %s)", t.String(), column.Type.SQLString(), column.Name)
 					}
 					Args[idx] = make([]byte, 8)
 					binary.LittleEndian.PutUint64(Args[idx][0:], uint64(tum))
@@ -831,7 +831,7 @@ func TsprepareTypeCheck(
 							Args[idx][0] = 0
 						}
 					default:
-						return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+						return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 					}
 				case types.StringFamily:
 					num := binary.BigEndian.Uint32(Args[idx])
@@ -840,7 +840,7 @@ func TsprepareTypeCheck(
 					copy(Args[idx][0:], str)
 					continue
 				default:
-					return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+					return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 				}
 			case oid.T_int4, oid.T_int2:
 				switch column.Type.Family() {
@@ -893,7 +893,7 @@ func TsprepareTypeCheck(
 							Args[idx][0] = 0
 						}
 					default:
-						return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+						return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 					}
 				case types.StringFamily:
 					num := binary.BigEndian.Uint32(Args[idx])
@@ -902,11 +902,11 @@ func TsprepareTypeCheck(
 					copy(Args[idx][0:], str)
 					continue
 				default:
-					return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+					return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 				}
 			case oid.T_float8:
 				if column.Type.Family() != types.FloatFamily {
-					return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+					return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 				}
 				switch column.Type.Oid() {
 				case oid.T_float4:
@@ -915,7 +915,7 @@ func TsprepareTypeCheck(
 					f32, err := strconv.ParseFloat(str, 32)
 					if err != nil {
 						return nil, nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"float \"%g\" out of range for type float4", f64)
+							"float \"%g\" out of range for type float4 (column %s)", f64, column.Name)
 					}
 					Args[idx] = make([]byte, 4)
 					binary.LittleEndian.PutUint32(Args[idx], uint32(int32(math.Float32bits(float32((f32))))))
@@ -924,14 +924,14 @@ func TsprepareTypeCheck(
 				}
 			case oid.T_float4:
 				if column.Type.Family() != types.FloatFamily {
-					return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+					return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 				}
 				switch column.Type.Oid() {
 				case oid.T_float4:
 					f := math.Float32frombits(binary.BigEndian.Uint32(Args[idx]))
 					if f < math.SmallestNonzeroFloat32 || f > math.MaxFloat32 {
 						return nil, nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"float \"%g\" out of range for type float4", f)
+							"float \"%g\" out of range for type float4 (column %s)", f, column.Name)
 					}
 					binary.LittleEndian.PutUint32(Args[idx], uint32(int32(math.Float32bits(float32((f))))))
 				case oid.T_float8:
@@ -940,7 +940,7 @@ func TsprepareTypeCheck(
 					f64, err := strconv.ParseFloat(str, 64)
 					if err != nil {
 						return nil, nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-							"float \"%g\" out of range for type float8", f32)
+							"float \"%g\" out of range for type float8 (column %s)", f32, column.Name)
 					}
 					Args[idx] = make([]byte, 8)
 					binary.LittleEndian.PutUint64(Args[idx], uint64(int64(math.Float64bits(float64(f64)))))
@@ -966,16 +966,16 @@ func TsprepareTypeCheck(
 							// string type
 							t, err := tree.ParseDTimestampTZ(ptCtx, string(Args[idx]), tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 							if err != nil {
-								return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+								return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 							}
 							tum := t.UnixMilli()
 							if tum < tree.TsMinTimestamp || tum > tree.TsMaxTimestamp {
 								if column.Type.Oid() == oid.T_timestamptz {
 									return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-										"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+										"value '%s' out of range for type %s (column %s)", t.String(), column.Type.SQLString(), column.Name)
 								}
 								return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-									"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+									"value '%s' out of range for type %s (column %s)", t.String(), column.Type.SQLString(), column.Name)
 							}
 							Args[idx] = make([]byte, 8)
 							binary.LittleEndian.PutUint64(Args[idx][0:], uint64(tum))
@@ -997,16 +997,16 @@ func TsprepareTypeCheck(
 							// string type
 							t, err := tree.ParseDTimestamp(ptCtx, string(Args[idx]), tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision()))
 							if err != nil {
-								return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+								return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 							}
 							tum := t.UnixMilli()
 							if tum < tree.TsMinTimestamp || tum > tree.TsMaxTimestamp {
 								if column.Type.Oid() == oid.T_timestamptz {
 									return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-										"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+										"value '%s' out of range for type %s (column %s)", t.String(), column.Type.SQLString(), column.Name)
 								}
 								return nil, nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-									"value '%s' out of range for type %s", t.String(), column.Type.SQLString())
+									"value '%s' out of range for type %s (column %s)", t.String(), column.Type.SQLString(), column.Name)
 							}
 							Args[idx] = make([]byte, 8)
 							binary.LittleEndian.PutUint64(Args[idx][0:], uint64(tum))
@@ -1026,7 +1026,7 @@ func TsprepareTypeCheck(
 					case oid.T_bool:
 						davl, err := tree.ParseDBool(string(Args[idx]))
 						if err != nil {
-							return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+							return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 						}
 						Args[idx] = make([]byte, 1)
 						if *davl {
@@ -1040,20 +1040,20 @@ func TsprepareTypeCheck(
 							if strings.Contains(err.Error(), "load error") {
 								return nil, nil, err
 							}
-							return nil, nil, pgerror.Newf(pgcode.DataException, errInvalidValue, string(Args[idx]), column.Type.SQLString())
+							return nil, nil, pgerror.Newf(pgcode.DataException, errInvalidValue, string(Args[idx]), column.Type.SQLString(), column.Name)
 						}
 						if len(string(Args[idx])) > int(column.Type.Width()) {
 							return nil, nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-								"value '%s' too long for type %s", string(Args[idx]), column.Type.SQLString())
+								"value '%s' too long for type %s (column %s)", string(Args[idx]), column.Type.SQLString(), column.Name)
 						}
 					}
 				default:
-					return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+					return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 				}
 			case oid.T_bool:
 				davl, err := tree.ParseDBool(string(Args[idx]))
 				if err != nil {
-					return nil, nil, tree.NewDatatypeMismatchError(string(Args[idx]), column.Type.SQLString())
+					return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 				}
 				Args[idx] = make([]byte, 1)
 				if *davl {
@@ -1395,7 +1395,7 @@ func computeColumnSize(cols *[]*sqlbase.ColumnDescriptor) (int, int, error) {
 				colSize += execbuilder.VarColumnSize
 			}
 		default:
-			return 0, 0, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported input type oid %d", oidVal)
+			return 0, 0, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported input type oid %d (column %s)", oidVal, col.Name)
 		}
 	}
 
@@ -1620,7 +1620,7 @@ func GetSingleDatum(
 	oidType := column.Type.Oid()
 
 	if valueType == parser.NORMALTYPE && oidType != oid.T_timestamptz && oidType != oid.T_timestamp {
-		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 	}
 
 	switch oidType {
@@ -1632,21 +1632,21 @@ func GetSingleDatum(
 
 			if oidType == oid.T_timestamptz {
 				if datum, err = tree.ParseDTimestampTZ(ptCtx, rawValue, precision); err != nil {
-					return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+					return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
 				dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestampTZ).UnixMilli()))
 				if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-					return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString())
+					return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString(), column.Name)
 				}
 				return dVal, nil
 			}
 
 			if datum, err = tree.ParseDTimestamp(nil, rawValue, precision); err != nil {
-				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestamp).UnixMilli()))
 			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
-				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString())
+				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch, errValueOutofRange, rawValue, column.Type.SQLString(), column.Name)
 			}
 			return dVal, nil
 		}
@@ -1660,25 +1660,25 @@ func GetSingleDatum(
 			if strings.Contains(err.Error(), "out of range") {
 				return nil, err
 			}
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 
 		dVal := tree.DInt(in)
 		if dVal < tree.TsMinTimestamp || dVal > tree.TsMaxTimestamp {
-			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errValueOutofRange, rawValue, column.Type.SQLString())
+			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errValueOutofRange, rawValue, column.Type.SQLString(), column.Name)
 		}
 		return &dVal, nil
 
 	case oid.T_int8, oid.T_int4, oid.T_int2:
 		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 
 		in, err := strconv.ParseInt(rawValue, 10, 64)
 		if err != nil {
 			if dat, err := parserString2Int(rawValue, err, column); err != nil {
 				if valueType == parser.NORMALTYPE {
-					return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+					return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 				}
 				return nil, err
 			} else if dat != nil {
@@ -1697,7 +1697,7 @@ func GetSingleDatum(
 		}
 
 		if in < minVal || in > maxVal {
-			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errOutOfRange, rawValue, column.Type.SQLString())
+			return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, errOutOfRange, rawValue, column.Type.SQLString(), column.Name)
 		}
 		d := tree.DInt(in)
 		return &d, nil
@@ -1705,7 +1705,7 @@ func GetSingleDatum(
 	case oid.T_cstring, oid.T_char, oid.T_text, oid.T_bpchar, oid.T_varchar,
 		oid.T_bytea, oid.T_varbytea, oid.Oid(91004), oid.Oid(91002):
 		if valueType == parser.NUMTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 
 		if width := column.Type.Width(); width > 0 {
@@ -1716,14 +1716,14 @@ func GetSingleDatum(
 				length = len(rawValue)
 			}
 			if length > int(width) {
-				return nil, pgerror.Newf(pgcode.StringDataRightTruncation, errTooLong, rawValue, column.Type.SQLString())
+				return nil, pgerror.Newf(pgcode.StringDataRightTruncation, errTooLong, rawValue, column.Type.SQLString(), column.Name)
 			}
 		}
 
 		if oidType == oid.T_bytea || oidType == oid.T_varbytea {
 			v, err := tree.ParseDByte(rawValue)
 			if err != nil {
-				return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+				return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
 			return v, nil
 		}
@@ -1732,7 +1732,7 @@ func GetSingleDatum(
 
 	case oid.T_float4, oid.T_float8:
 		if valueType == parser.STRINGTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 
 		bitSize := 32
@@ -1743,35 +1743,35 @@ func GetSingleDatum(
 		in, err := strconv.ParseFloat(rawValue, bitSize)
 		if err != nil {
 			if strings.Contains(err.Error(), "out of range") {
-				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "float \"%s\" out of range for type %s", rawValue, column.Type.SQLString())
+				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "float \"%s\" out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
 			}
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 		return tree.NewDFloat(tree.DFloat(in)), nil
 
 	case oid.T_bool:
 		dBool, err := tree.ParseDBool(rawValue)
 		if err != nil {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 		return dBool, nil
 
 	case types.T_geometry:
 		if valueType == parser.NUMTYPE {
-			return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
 
 		if _, err := geos.FromWKT(rawValue); err != nil {
 			if strings.Contains(err.Error(), "load error") {
 				return nil, err
 			}
-			return nil, pgerror.Newf(pgcode.DataException, errInvalidValue, rawValue, column.Type.SQLString())
+			return nil, pgerror.Newf(pgcode.DataException, errInvalidValue, rawValue, column.Type.SQLString(), column.Name)
 		}
 
 		return tree.NewDString(rawValue), nil
 
 	default:
-		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue)
+		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 	}
 }
 

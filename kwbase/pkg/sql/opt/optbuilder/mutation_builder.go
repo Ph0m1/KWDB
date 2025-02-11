@@ -939,17 +939,21 @@ func (mb *mutationBuilder) parseDefaultOrComputedExpr(colID opt.ColumnID) tree.E
 func (mb *mutationBuilder) CheckMixedTableRefWithTs() {
 	hasRelational := false
 	hasTS := false
+	rTableName := ""
+	tsTableName := ""
 	for _, tbl := range mb.b.factory.Metadata().AllTables() {
 		if tbl.Table.GetTableType() == tree.RelationalTable {
 			hasRelational = true
+			rTableName = string(tbl.Table.Name())
 		}
 		if tbl.Table.GetTableType() != tree.RelationalTable {
 			hasTS = true
+			tsTableName = string(tbl.Table.Name())
 		}
 	}
 	if hasRelational && hasTS {
 		panic(pgerror.Newf(pgcode.Warning,
-			"Mixed DML of time series and relational tables is NOT supported"))
+			"Mixed DML of time series and relational tables is NOT supported, relational table :%v, time series table: %v", rTableName, tsTableName))
 	}
 }
 

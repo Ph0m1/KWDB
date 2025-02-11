@@ -84,16 +84,15 @@ func (i KVInserter) InitPut(key, value interface{}, failOnTombstones bool) {
 // The result is a row tuple providing values for every column in insertCols.
 // This results contains:
 //
-// - the values provided by rowVals, the tuple of source values. The
-//   caller ensures this provides values 1-to-1 to the prefix of
-//   insertCols that was specified explicitly in the INSERT statement.
-// - the default values for any additional columns in insertCols that
-//   have default values in defaultExprs.
-// - the computed values for any additional columns in insertCols
-//   that are computed. The mapping in rowContainerForComputedCols
-//   maps the indexes of the comptuedCols/computeExpr slices
-//   back into indexes in the result row tuple.
-//
+//   - the values provided by rowVals, the tuple of source values. The
+//     caller ensures this provides values 1-to-1 to the prefix of
+//     insertCols that was specified explicitly in the INSERT statement.
+//   - the default values for any additional columns in insertCols that
+//     have default values in defaultExprs.
+//   - the computed values for any additional columns in insertCols
+//     that are computed. The mapping in rowContainerForComputedCols
+//     maps the indexes of the comptuedCols/computeExpr slices
+//     back into indexes in the result row tuple.
 func GenerateInsertRow(
 	defaultExprs []tree.TypedExpr,
 	computeExprs []tree.TypedExpr,
@@ -325,14 +324,14 @@ func NewDatumRowConverter(
 		col := &cols[i]
 		if col.Hidden {
 			if col.DefaultExpr == nil || *col.DefaultExpr != "unique_rowid()" || c.hidden != -1 {
-				return nil, errors.New("unexpected hidden column")
+				return nil, errors.Newf("unexpected hidden column %s", col.Name)
 			}
 			c.hidden = i
 			c.Datums = append(c.Datums, nil)
 		}
 	}
 	if len(c.Datums) != len(cols) {
-		return nil, errors.New("unexpected hidden column")
+		return nil, errors.New("columns does not match: unexpected hidden column")
 	}
 
 	padding := 2 * (len(immutDesc.Indexes) + len(immutDesc.Families))

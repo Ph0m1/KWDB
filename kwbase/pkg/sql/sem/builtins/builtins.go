@@ -3936,7 +3936,7 @@ may increase either contention or retry errors, or both.`,
 					var newDatum tree.Datum
 					if d.ResolvedType() == types.Unknown {
 						if !tableDesc.Columns[i].Nullable {
-							return nil, pgerror.Newf(pgcode.NotNullViolation, "NULL provided as a value for a non-nullable column")
+							return nil, pgerror.Newf(pgcode.NotNullViolation, "NULL provided as a value for a non-nullable column %s", tableDesc.Columns[i].Name)
 						}
 						newDatum = tree.DNull
 					} else {

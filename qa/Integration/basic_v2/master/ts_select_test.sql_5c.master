@@ -564,7 +564,7 @@ SQLSTATE: 22003
   2000000
 (2 rows)
 > select e3::timestamp from test_ts.ts_table;
-ERROR: int is out of range, should be between -9223372036854 and 9223372036854
+ERROR: int 100000000000000000 is out of range, should be between -9223372036854 and 9223372036854
 SQLSTATE: 01000
 > select e3::smallint from test_ts.ts_table;
 ERROR: value is out of range for type int2

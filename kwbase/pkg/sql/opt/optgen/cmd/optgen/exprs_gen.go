@@ -292,7 +292,7 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		}
 		fmt.Fprintf(g.w, "  }\n")
 	}
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range\"))\n")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	// Generate the Walk method.
@@ -317,7 +317,7 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 	fmt.Fprintf(g.w, "            }\n")
 	fmt.Fprintf(g.w, "        }\n")
 	fmt.Fprintf(g.w, "    } else {\n")
-	fmt.Fprintf(g.w, "        panic(errors.AssertionFailedf(\"param is nil\"))\n")
+	fmt.Fprintf(g.w, "        panic(errors.AssertionFailedf(\"param is nil, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "    }\n")
 	fmt.Fprintf(g.w, "    return ret\n")
 	fmt.Fprintf(g.w, "}\n\n")
@@ -367,7 +367,7 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		}
 		fmt.Fprintf(g.w, "  }\n")
 	}
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range\"))\n")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	if define.Tags.Contains("Scalar") {
@@ -469,7 +469,7 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		// Generate the setNext method.
 		fmt.Fprintf(g.w, "func (e *%s) setNext(member RelExpr) {\n", opTyp.name)
 		fmt.Fprintf(g.w, "  if e.next != nil {\n")
-		fmt.Fprintf(g.w, "    panic(errors.AssertionFailedf(\"expression already has its next defined: %%s\", e))\n")
+		fmt.Fprintf(g.w, "    panic(errors.AssertionFailedf(\"expression already has its next defined: %%s \\n \", e))\n")
 		fmt.Fprintf(g.w, "  }\n")
 		fmt.Fprintf(g.w, "  e.next = member\n")
 		fmt.Fprintf(g.w, "}\n\n")
@@ -477,7 +477,7 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		// Generate the setGroup method.
 		fmt.Fprintf(g.w, "func (e *%s) setGroup(member RelExpr) {\n", opTyp.name)
 		fmt.Fprintf(g.w, "  if e.grp != nil {\n")
-		fmt.Fprintf(g.w, "    panic(errors.AssertionFailedf(\"expression is already in a group: %%s\", e))\n")
+		fmt.Fprintf(g.w, "    panic(errors.AssertionFailedf(\"expression is already in a group: %%s \\n \", e))\n")
 		fmt.Fprintf(g.w, "  }\n")
 		fmt.Fprintf(g.w, "  e.grp = member.group()\n")
 		fmt.Fprintf(g.w, "  LastGroupMember(member).setNext(e)\n")
@@ -536,7 +536,7 @@ func (g *exprsGen) genEnforcerFuncs(define *lang.DefineExpr) {
 	fmt.Fprintf(g.w, "  if nth == 0 {\n")
 	fmt.Fprintf(g.w, "    return e.Input\n")
 	fmt.Fprintf(g.w, "  }\n")
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range\"))\n")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	// Generate the Walk method.
@@ -551,7 +551,7 @@ func (g *exprsGen) genEnforcerFuncs(define *lang.DefineExpr) {
 	fmt.Fprintf(g.w, "        ret = e.Input.Walk(param)\n")
 	fmt.Fprintf(g.w, "    }\n")
 	fmt.Fprintf(g.w, "  } else {\n")
-	fmt.Fprintf(g.w, "    panic(errors.AssertionFailedf(\"param is nil\"))\n")
+	fmt.Fprintf(g.w, "    panic(errors.AssertionFailedf(\"param is nil, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "  }\n")
 	fmt.Fprintf(g.w, "  return ret\n")
 	fmt.Fprintf(g.w, "}\n\n")
@@ -574,7 +574,7 @@ func (g *exprsGen) genEnforcerFuncs(define *lang.DefineExpr) {
 	fmt.Fprintf(g.w, "    e.Input = child.(RelExpr)\n")
 	fmt.Fprintf(g.w, "    return\n")
 	fmt.Fprintf(g.w, "  }\n")
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range\"))\n")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"child index out of range, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	// Generate the Memo method.
@@ -651,12 +651,12 @@ func (g *exprsGen) genEnforcerFuncs(define *lang.DefineExpr) {
 
 	// Generate the setNext method.
 	fmt.Fprintf(g.w, "func (e *%s) setNext(member RelExpr) {\n", opTyp.name)
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"setNext cannot be called on enforcers\"))\n")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"setNext cannot be called on enforcers, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	// Generate the setGroup method.
 	fmt.Fprintf(g.w, "func (e *%s) setGroup(member exprGroup) {\n", opTyp.name)
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"setGroup cannot be called on enforcers\"))\n")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"setGroup cannot be called on enforcers, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "}\n\n")
 }
 
@@ -672,7 +672,7 @@ func (g *exprsGen) genListExprFuncs(define *lang.DefineExpr) {
 
 	// Generate the ID method.
 	fmt.Fprintf(g.w, "func (e *%s) ID() opt.ScalarID {\n", opTyp.name)
-	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"lists have no id\"))")
+	fmt.Fprintf(g.w, "  panic(errors.AssertionFailedf(\"lists have no id, illegal expr: %%s \\n \", e))")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	// Generate the Op method.
@@ -714,7 +714,7 @@ func (g *exprsGen) genListExprFuncs(define *lang.DefineExpr) {
 	fmt.Fprintf(g.w, "            }\n")
 	fmt.Fprintf(g.w, "        }\n")
 	fmt.Fprintf(g.w, "    } else {\n")
-	fmt.Fprintf(g.w, "        panic(errors.AssertionFailedf(\"param is nil\"))\n")
+	fmt.Fprintf(g.w, "        panic(errors.AssertionFailedf(\"param is nil, illegal expr: %%s \\n \", e))\n")
 	fmt.Fprintf(g.w, "    }\n")
 	fmt.Fprintf(g.w, "    return ret\n")
 	fmt.Fprintf(g.w, "}\n\n")

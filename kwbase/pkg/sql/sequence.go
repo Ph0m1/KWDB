@@ -193,7 +193,7 @@ func (p *planner) GetSequenceValue(
 	ctx context.Context, desc *sqlbase.ImmutableTableDescriptor,
 ) (int64, error) {
 	if desc.SequenceOpts == nil {
-		return 0, errors.New("descriptor is not a sequence")
+		return 0, errors.Newf("descriptor %s is not a sequence", desc.Name)
 	}
 	keyValue, err := p.txn.Get(ctx, keys.MakeSequenceKey(uint32(desc.ID)))
 	if err != nil {

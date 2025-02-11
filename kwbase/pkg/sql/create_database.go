@@ -67,7 +67,7 @@ func (p *planner) CreateDatabase(ctx context.Context, n *tree.CreateDatabase) (p
 		}
 		// check if the name is too long
 		if len(n.Name) > MaxTSDBNameLength {
-			return nil, sqlbase.NewTSNameOutOfLengthError("database", MaxTSDBNameLength)
+			return nil, sqlbase.NewTSNameOutOfLengthError("database", string(n.Name), MaxTSDBNameLength)
 		}
 	}
 	if n.Name == "" {

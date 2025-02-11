@@ -669,7 +669,7 @@ func (mb *mutationBuilder) addTSUpdateCols(
 			return sqlbase.IntOutOfRangeError(col.DatumType(), string(col.ColName()))
 		}
 		if s, ok := expr.(*tree.StrVal); ok {
-			_, err := s.TSTypeCheck(&typ, mb.b.semaCtx)
+			_, err := s.TSTypeCheck(string(col.ColName()), &typ, mb.b.semaCtx)
 			if err != nil {
 				return err
 			}

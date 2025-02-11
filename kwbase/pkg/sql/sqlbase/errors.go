@@ -150,9 +150,9 @@ func IntOutOfRangeError(typ *types.T, name string) error {
 }
 
 // NewTSNameOutOfLengthError creates an error that name of timeseries object is out of length.
-func NewTSNameOutOfLengthError(name string, length int) error {
+func NewTSNameOutOfLengthError(typ, name string, length int) error {
 	return pgerror.Newf(
-		pgcode.InvalidName, "ts %s name exceeds max length (%d)", name, length)
+		pgcode.InvalidName, "ts %s name \"%s\" exceeds max length (%d)", typ, name, length)
 }
 
 // NewTSNameInvalidError creates an error indicates that name of ts object contains invalid character.
@@ -161,8 +161,11 @@ func NewTSNameInvalidError(name string) error {
 }
 
 // NewTSColInvalidError creates an error indicates that colName/tagName of ts table contains invalid character.
-func NewTSColInvalidError() error {
-	return pgerror.New(pgcode.InvalidName, "naming of column/tag in timeseries table only supports letters, numbers and symbols")
+func NewTSColInvalidError(name string) error {
+	return pgerror.Newf(
+		pgcode.InvalidName,
+		"invalid name: %s, naming of column/tag in timeseries table only supports letters, numbers and symbols",
+		name)
 }
 
 // UnsupportedTSExplicitTxnError returns error when there is an explicit transaction in TS mode.

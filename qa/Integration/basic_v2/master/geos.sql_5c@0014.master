@@ -25,7 +25,7 @@ e21 varbytes(4096),
 e22 varbytes(254),
 e23 timestamptz)
 TAGS (code1 bool not null, code2 smallint, code3 int, code4 bigint, code5 int2, code6 int4, code7 int8, code8 float, code9 real, code10 float4, code11 float8, code12 double, code13 char, code14 char(128), code15 nchar, code16 nchar(128), code17 varchar, code18 varchar(128), code19 varbytes, code20 varbytes(128), code21 varbytes, code22 varbytes(128), code23 timestamp, code24 timestamptz, code25 nvarchar, code26 nvarchar(128),code27 geometry) primary tags (code1);
-ERROR: unsupported tag type timestamp in timeseries table
+ERROR: tag code23: unsupported tag type timestamp in timeseries table
 SQLSTATE: 42809
 > SHOW CREATE TABLE test_geometry.tb1;
 ERROR: relation "test_geometry.tb1" does not exist

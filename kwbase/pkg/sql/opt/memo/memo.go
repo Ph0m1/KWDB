@@ -534,7 +534,7 @@ func (m *Memo) SetScalarRoot(scalar opt.ScalarExpr) {
 func (m *Memo) HasPlaceholders() bool {
 	rel, ok := m.rootExpr.(RelExpr)
 	if !ok {
-		panic(errors.AssertionFailedf("placeholders only supported when memo root is relational"))
+		panic(errors.AssertionFailedf("placeholders only supported when memo root is relational, illegal expr: %s \n", m.rootExpr))
 	}
 
 	return rel.Relational().HasPlaceholder
@@ -1561,10 +1561,12 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 	hasNotTag := false
 	ret.init()
 	ret.execInTSEngine = true
+	var notTagColName string
 	source.Cols.ForEach(func(colID opt.ColumnID) {
 		colMeta := m.metadata.ColumnMeta(colID)
 		if colMeta.IsNormalCol() {
 			hasNotTag = true
+			notTagColName = colMeta.Alias
 		}
 		m.AddColumn(colID, colMeta.Alias, ExprTypCol, ExprPosNone, 0, false)
 	})
@@ -1574,7 +1576,7 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 	ret.canDiffExecInAE = true
 	if onlyTag && hasNotTag {
 		ret.hasAddSynchronizer = onlyTag
-		ret.err = pgerror.New(pgcode.FeatureNotSupported, "TAG_ONLY can only query tag columns")
+		ret.err = pgerror.Newf(pgcode.FeatureNotSupported, "TAG_ONLY can only query tag columns, illegal column: %v", notTagColName)
 	} else {
 		// when the tagFilter has a subquery, it needs to Walk to check whether it can execute in ts engine.
 		param := GetSubQueryExpr{m: m}

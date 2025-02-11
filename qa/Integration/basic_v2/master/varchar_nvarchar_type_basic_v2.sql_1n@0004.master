@@ -18,11 +18,11 @@ INSERT 1
 INSERT 1
 > INSERT INTO test_varchar1.d11  VALUES ('2018-10-10 10:00:05', '中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingt11',
                                        '中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@', 6);
-ERROR: value '中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingt11' too long for type VARCHAR(254)
+ERROR: value '中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingt11' too long for type VARCHAR(254) (column e1)
 SQLSTATE: 22001
 > INSERT INTO test_varchar1.d11  VALUES ('2018-10-10 10:00:06', '中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingyu*1中文abcPOL!123！a()901-9@POP!《》？？。~~！！@yingt1',
                                        '中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@1', 7);
-ERROR: value '中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@1' too long for type NVARCHAR(63)
+ERROR: value '中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@1' too long for type NVARCHAR(63) (column e2)
 SQLSTATE: 22001
 > INSERT INTO test_varchar1.d11  VALUES ('2018-10-10 10:00:07', 'a'('a'),'中'('a'), 8);
 ERROR: at or near "(": syntax error
@@ -34,10 +34,10 @@ HINT: try \h VALUES
 > INSERT INTO test_varchar1.d11  VALUES ('2018-10-10 10:00:08', 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb','aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc', 9);
 INSERT 1
 > INSERT INTO test_varchar1.d11  VALUES ('2018-10-10 10:00:09', 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb1','aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc', 10);
-ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb1' too long for type VARCHAR(254)
+ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb1' too long for type VARCHAR(254) (column e1)
 SQLSTATE: 22001
 > INSERT INTO test_varchar1.d11  VALUES ('2018-10-10 10:00:10', 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb','aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc1', 11);
-ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc1' too long for type NVARCHAR(63)
+ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc1' too long for type NVARCHAR(63) (column e2)
 SQLSTATE: 22001
 > SELECT e1,e2 FROM test_varchar1.d11 ORDER BY k_timestamp;
                                                                                                                                 e1                                                                                                                               |                                         e2

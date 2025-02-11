@@ -84,7 +84,7 @@ func (p *planner) RenameTable(ctx context.Context, n *tree.RenameTable) (planNod
 			return nil, sqlbase.NewTSNameInvalidError(newTn.String())
 		}
 		if len(newTn.String()) > MaxTSTableNameLength {
-			return nil, sqlbase.NewTSNameOutOfLengthError("table", MaxTSTableNameLength)
+			return nil, sqlbase.NewTSNameOutOfLengthError("table", newTn.String(), MaxTSTableNameLength)
 		}
 	}
 	if tableDesc.State != sqlbase.TableDescriptor_PUBLIC {

@@ -299,7 +299,7 @@ CREATE TABLE y (
   a STRING AS (concat(now()::STRING, uuid_v4()::STRING)) STORED
 )
 
-statement error computed columns cannot reference other computed columns
+statement error pq: computed column b cannot reference other computed columns
 CREATE TABLE y (
   a INT8 AS (3) STORED,
   b INT8 AS (a) STORED
@@ -315,7 +315,7 @@ CREATE TABLE y (
   b INT8 AS (count(1)) STORED
 )
 
-statement error computed columns cannot have default values
+statement error pq: computed column a cannot have default values
 CREATE TABLE y (
   a INT8 AS (3) STORED DEFAULT 4
 )
@@ -359,7 +359,7 @@ CREATE TABLE tt (i INT8 AS (1) STORED)
 statement error variable sub-expressions are not allowed in computed column
 ALTER TABLE tt ADD COLUMN c STRING AS ((SELECT NULL)) STORED
 
-statement error computed columns cannot reference other computed columns
+statement error pq: computed column c cannot reference other computed columns
 ALTER TABLE tt ADD COLUMN c INT8 AS (i) STORED
 
 # Composite FK.

@@ -748,7 +748,7 @@ func (r *DistSQLReceiver) Push(
 			r.resultWriter.IncrementRowsAffected(int(meta.TsDelete.DeleteRow))
 			r.status = execinfra.ConsumerClosed
 			if !meta.TsDelete.DeleteSuccess {
-				err := errors.Newf("delete timeseries table failed, reason:%s", meta.TsDelete.DeleteErr)
+				err := errors.Newf("delete data from timeseries table failed, reason:%s", meta.TsDelete.DeleteErr)
 				r.resultWriter.SetError(err)
 			}
 		}

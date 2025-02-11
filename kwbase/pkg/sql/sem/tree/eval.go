@@ -4004,7 +4004,7 @@ func PerformCast(ctx *EvalContext, d Datum, t *types.T) (Datum, error) {
 			return MakeDTimestamp(t, roundTo), err
 		case *DInt:
 			if int64(*d) < -9223372036854 || int64(*d) > 9223372036854 {
-				return nil, pgerror.New(pgcode.Warning, "int is out of range, should be between -9223372036854 and 9223372036854")
+				return nil, pgerror.Newf(pgcode.Warning, "int %d is out of range, should be between -9223372036854 and 9223372036854", int64(*d))
 			}
 			return MakeDTimestamp(timeutil.Unix(0, int64(*d)*1e6), roundTo), nil
 		case *DTimestamp:

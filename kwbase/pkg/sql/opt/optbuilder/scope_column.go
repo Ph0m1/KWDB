@@ -150,7 +150,13 @@ func (s *scopeColumn) ResolvedType() *types.T {
 
 // Eval is part of the tree.TypedExpr interface.
 func (s *scopeColumn) Eval(_ *tree.EvalContext) (tree.Datum, error) {
-	panic(errors.AssertionFailedf("scopeColumn must be replaced before evaluation"))
+	colName := string(s.name)
+	if len(s.exprStr) > 0 {
+		colName = s.exprStr
+	} else if s.expr != nil {
+		colName = s.expr.String()
+	}
+	panic(errors.AssertionFailedf("scopeColumn %v must be replaced before evaluation ", colName))
 }
 
 // Variable is part of the tree.VariableExpr interface. This prevents the

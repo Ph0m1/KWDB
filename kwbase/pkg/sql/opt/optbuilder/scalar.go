@@ -594,11 +594,11 @@ func (b *Builder) buildFunction(
 	}
 
 	if isAggregate(def) {
-		panic(errors.AssertionFailedf("aggregate function should have been replaced"))
+		panic(errors.AssertionFailedf("aggregate function should have been replaced, illegal function: %v", def.Name))
 	}
 
 	if isWindow(def) {
-		panic(errors.AssertionFailedf("window function should have been replaced"))
+		panic(errors.AssertionFailedf("window function should have been replaced, illegal function: %v", def.Name))
 	}
 
 	args := make(memo.ScalarListExpr, len(f.Exprs))

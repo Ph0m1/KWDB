@@ -111,7 +111,7 @@ ALTER TABLE test.t DROP COLUMN xx;
 		{fmt.Sprintf("[%d(%d) as t]@bc", tID, cID), `(c)`, ``},
 		{fmt.Sprintf("[%d(%d, %d, %d) as t]", tID, cID, bID, aID), `(c, d, p)`, ``},
 		{fmt.Sprintf("[%d(%d, %d, %d) as t(c, b, a)]", tID, cID, bID, aID), `(c, b, a)`, ``},
-		{fmt.Sprintf("[%d() as t]", tID), ``, `pq: an explicit list of column IDs must include at least one column`},
+		{fmt.Sprintf("[%d() as t]", tID), ``, `pq: an explicit list of column IDs must include at least one column, table name: t`},
 		{`[666() as t]`, ``, `pq: [666() AS t]: relation "[666]" does not exist`},
 		{fmt.Sprintf("[%d(666) as t]", tID), ``, `pq: column [666] does not exist`},
 		{fmt.Sprintf("test.t@[%d]", pkID), `(p, d, c)`, ``},

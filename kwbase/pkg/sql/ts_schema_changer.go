@@ -877,7 +877,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		}
 		newPlanNode = &operateDataNode{d.Type, nodeList, desc}
 	default:
-		return pgerror.New(pgcode.FeatureNotSupported, "unsupported feature for now")
+		return pgerror.Newf(pgcode.FeatureNotSupported, "unsupported feature for now: %s", opType)
 	}
 	log.Infof(ctx, "%s AE execution start, jobID: %d", opType, sw.job.ID())
 	return sw.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
@@ -1004,11 +1004,11 @@ func (sw *TSSchemaChangeWorker) checkReplica(ctx context.Context, tableID sqlbas
 		for _, nodeID := range sw.healthyNodes {
 			if err := sw.distSQLPlanner.nodeHealth.check(ctx, nodeID); err != nil {
 				log.Errorf(ctx, "alter tag failed: %s", err.Error())
-				return pgerror.Newf(pgcode.ConnectionFailure, "failed to connect to n%s", nodeID.String())
+				return pgerror.Newf(pgcode.ConnectionFailure, "checkReplica() failed to connect to n%s", nodeID.String())
 			}
 		}
 	}
-	return pgerror.New(pgcode.Warning, "have tried 30 times, timed out of AdminReplicaVoterStatusConsistent")
+	return pgerror.New(pgcode.Warning, "checkReplica() have tried 30 times, timed out of AdminReplicaVoterStatusConsistent")
 }
 
 func getDDLOpType(op int32) string {

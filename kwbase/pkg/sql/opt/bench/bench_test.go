@@ -527,6 +527,7 @@ func (h *harness) prepareUsingAPI(tb testing.TB) {
 			&h.semaCtx,
 			true, /* allowImpure */
 			false,
+			"",
 		)
 		if err != nil {
 			tb.Fatalf("%v", err)
@@ -626,12 +627,11 @@ func makeChain(size int) benchQuery {
 //
 // For example, a 5-chain looks like:
 //
-//   SELECT * FROM a, b, c, d, e
-//   WHERE a.x = b.y
-//     AND b.x = c.y
-//     AND c.x = d.y
-//     AND d.x = e.y
-//
+//	SELECT * FROM a, b, c, d, e
+//	WHERE a.x = b.y
+//	  AND b.x = c.y
+//	  AND c.x = d.y
+//	  AND d.x = e.y
 func BenchmarkChain(b *testing.B) {
 	h := newHarness()
 	defer h.close()

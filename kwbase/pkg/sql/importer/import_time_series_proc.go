@@ -863,20 +863,20 @@ func (t *timeSeriesImportInfo) generateDatums(
 					case types.IntFamily:
 						t1, err1 := strconv.ParseInt(*field, 10, 64)
 						if err1 != nil {
-							inputDatums[valIdx], err = tree.TSParseAndRequireString(&col.Type, *field, evalCtx)
+							inputDatums[valIdx], err = tree.TSParseAndRequireString(col.Name, &col.Type, *field, evalCtx)
 							t.setType(valIdx, inputDatums[valIdx].ResolvedType().Oid())
 						} else {
 							inputDatums[valIdx] = (*tree.DInt)(&t1)
 						}
 					default:
-						inputDatums[valIdx], err = tree.TSParseAndRequireString(&col.Type, *field, evalCtx)
+						inputDatums[valIdx], err = tree.TSParseAndRequireString(col.Name, &col.Type, *field, evalCtx)
 					}
 				} else {
-					inputDatums[valIdx], err = tree.TSParseAndRequireString(&col.Type, *field, evalCtx)
+					inputDatums[valIdx], err = tree.TSParseAndRequireString(col.Name, &col.Type, *field, evalCtx)
 					t.setType(valIdx, inputDatums[valIdx].ResolvedType().Oid())
 				}
 			default:
-				inputDatums[valIdx], err = tree.TSParseAndRequireString(&col.Type, *field, evalCtx)
+				inputDatums[valIdx], err = tree.TSParseAndRequireString(col.Name, &col.Type, *field, evalCtx)
 			}
 		}
 		if err != nil {

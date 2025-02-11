@@ -692,7 +692,7 @@ func (s *scope) endAggFunc(aggInfo aggregateInfo) (g *groupby) {
 		var colSet opt.ColSet = curr.colSet()
 
 		if aggInfo.colRefs.Len() == 0 || aggInfo.colRefs.Intersects(colSet) || aggInfo.Func.FunctionName() == Interpolate {
-			curr.verifyAggregateContext()
+			curr.verifyAggregateContext(aggInfo.def.Name)
 			if curr.groupby == nil {
 				curr.initGrouping()
 			}
@@ -700,12 +700,12 @@ func (s *scope) endAggFunc(aggInfo aggregateInfo) (g *groupby) {
 		}
 	}
 
-	panic(errors.AssertionFailedf("aggregate function is not allowed in this context"))
+	panic(errors.AssertionFailedf("aggregate function is not allowed in this context, illegal function: %v", aggInfo.def.Name))
 }
 
 // verifyAggregateContext checks that the current scope is allowed to contain
 // aggregate functions.
-func (s *scope) verifyAggregateContext() {
+func (s *scope) verifyAggregateContext(aggName string) {
 	if s.inAgg {
 		panic(sqlbase.NewAggInAggError())
 	}
@@ -713,13 +713,11 @@ func (s *scope) verifyAggregateContext() {
 	switch s.context {
 	case exprTypeLateralJoin:
 		panic(pgerror.Newf(pgcode.Grouping,
-			"aggregate functions are not allowed in FROM clause of their own query level",
-		))
+			"aggregate functions are not allowed in FROM clause of their own query level, illegal function: %v", aggName))
 
 	case exprTypeOn:
 		panic(pgerror.Newf(pgcode.Grouping,
-			"aggregate functions are not allowed in JOIN conditions",
-		))
+			"aggregate functions are not allowed in JOIN conditions, illegal function: %v", aggName))
 
 	case exprTypeWhere:
 		panic(tree.NewInvalidFunctionUsageError(tree.AggregateClass, s.context.String()))
@@ -1398,7 +1396,7 @@ func analyzeWindowFrame(s *scope, windowDef *tree.WindowDef) error {
 			// At least one of the bounds is of type 'value' PRECEDING or 'value' FOLLOWING.
 			// We require ordering on a single column that supports addition/subtraction.
 			if len(windowDef.OrderBy) != 1 {
-				return pgerror.Newf(pgcode.Windowing, "RANGE with offset PRECEDING/FOLLOWING requires exactly one ORDER BY column")
+				return pgerror.Newf(pgcode.Windowing, "RANGE with offset PRECEDING/FOLLOWING requires exactly one ORDER BY column, illegal function: %v", windowDef.Name)
 			}
 			requiredType = windowDef.OrderBy[0].Expr.(tree.TypedExpr).ResolvedType()
 			if !types.IsAdditiveType(requiredType) {
@@ -1411,7 +1409,7 @@ func analyzeWindowFrame(s *scope, windowDef *tree.WindowDef) error {
 		}
 	case tree.GROUPS:
 		if len(windowDef.OrderBy) == 0 {
-			return pgerror.Newf(pgcode.Windowing, "GROUPS mode requires an ORDER BY clause")
+			return pgerror.Newf(pgcode.Windowing, "GROUPS mode requires an ORDER BY clause, illegal function: %v", windowDef.Name)
 		}
 		// In GROUPS mode, offsets must be non-null, non-negative integers.
 		// Non-nullity and non-negativity will be checked later.

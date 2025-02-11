@@ -335,21 +335,21 @@ func getTableCreateParams(
 func checkEngineType(n *createTableNode) error {
 	if n.dbDesc.EngineType == tree.EngineTypeRelational && n.n.TableType == tree.RelationalTable {
 		if n.n.DownSampling != nil || n.n.Sde {
-			return pgerror.New(pgcode.WrongObjectType, "downsampling feature is not supported on relational table.")
+			return pgerror.Newf(pgcode.WrongObjectType, "downsampling feature is not supported on relational table \"%s\"", n.n.Table.TableName)
 		}
 	}
 	if n.dbDesc.EngineType == tree.EngineTypeRelational && n.n.TableType != tree.RelationalTable {
-		return pgerror.New(pgcode.WrongObjectType, "can not create timeseries table in relational database.")
+		return pgerror.Newf(pgcode.WrongObjectType, "can not create timeseries table in relational database \"%s\"", n.dbDesc.Name)
 	}
 	if n.dbDesc.EngineType == tree.EngineTypeTimeseries && n.n.TableType == tree.RelationalTable {
-		return pgerror.New(pgcode.WrongObjectType, "can not create relational table in timeseries database.")
+		return pgerror.Newf(pgcode.WrongObjectType, "can not create relational table in timeseries database \"%s\"", n.dbDesc.Name)
 	}
 	if n.dbDesc.EngineType == tree.EngineTypeTimeseries {
 		if sqlbase.ContainsNonAlphaNumSymbol(n.n.Table.String()) {
 			return sqlbase.NewTSNameInvalidError(n.n.Table.String())
 		}
 		if len(n.n.Table.Table()) > MaxTSTableNameLength {
-			return sqlbase.NewTSNameOutOfLengthError("table", MaxTSTableNameLength)
+			return sqlbase.NewTSNameOutOfLengthError("table", n.n.Table.Table(), MaxTSTableNameLength)
 		}
 	}
 	return nil
@@ -1517,12 +1517,13 @@ func buildTSTableDesc(
 			}
 		}
 		if len(string(n.Tags[i].TagName)) > MaxTagNameLength {
-			return sqlbase.NewTSNameOutOfLengthError("tag", MaxTagNameLength)
+			return sqlbase.NewTSNameOutOfLengthError("tag", string(n.Tags[i].TagName), MaxTagNameLength)
 		}
 		if n.Tags[i].IsSerial {
-			return pgerror.New(pgcode.FeatureNotSupported, "serial tag is not supported in timeseries table")
+			return pgerror.Newf(
+				pgcode.FeatureNotSupported, "serial type for tag %s is not supported in timeseries table", n.Tags[i].TagName)
 		}
-		tagType, err := checkTagType(n.Tags[i].TagType)
+		tagType, err := checkTagType(n.Tags[i].TagName, n.Tags[i].TagType)
 		if err != nil {
 			return err
 		}
@@ -1655,9 +1656,10 @@ func checkAndMakeTSColDesc(
 	var expr tree.TypedExpr
 	if isFirstTSCol {
 		if d.Type != types.Timestamp && d.Type != types.TimestampTZ {
-			return nil, pgerror.New(pgcode.DatatypeMismatch, "the 1st column's type in timeseries table must be TimestampTZ")
+			return nil, pgerror.Newf(
+				pgcode.DatatypeMismatch, "column %s: the 1st column's type in timeseries table must be TimestampTZ", d.Name)
 		} else if d.Nullable.Nullability != tree.NotNull {
-			return nil, pgerror.New(pgcode.NotNullViolation, "the 1st TimestampTZ column must be not null")
+			return nil, pgerror.Newf(pgcode.NotNullViolation, "the 1st TimestampTZ column %s must be not null", string(d.Name))
 		}
 		d.Type = types.TimestampTZ
 	}
@@ -2572,9 +2574,9 @@ func validateComputedColumn(
 	desc *sqlbase.MutableTableDescriptor, d *tree.ColumnTableDef, semaCtx *tree.SemaContext,
 ) error {
 	if d.HasDefaultExpr() {
-		return pgerror.New(
+		return pgerror.Newf(
 			pgcode.InvalidTableDefinition,
-			"computed columns cannot have default values",
+			"computed column %s cannot have default values", d.Name,
 		)
 	}
 
@@ -2582,8 +2584,8 @@ func validateComputedColumn(
 	// First, check that no column in the expression is a computed column.
 	if err := iterColDescriptorsInExpr(desc, d.Computed.Expr, func(c *sqlbase.ColumnDescriptor) error {
 		if c.IsComputed() {
-			return pgerror.New(pgcode.InvalidTableDefinition,
-				"computed columns cannot reference other computed columns")
+			return pgerror.Newf(pgcode.InvalidTableDefinition,
+				"computed column %s cannot reference other computed columns", d.Name)
 		}
 		dependencies[c.ID] = struct{}{}
 
@@ -2624,7 +2626,7 @@ func validateComputedColumn(
 	}
 
 	if _, err := sqlbase.SanitizeVarFreeExpr(
-		replacedExpr, d.Type, "computed column", semaCtx, false /* allowImpure */, false,
+		replacedExpr, d.Type, "computed column", semaCtx, false /* allowImpure */, false, string(d.Name),
 	); err != nil {
 		return err
 	}
@@ -2694,7 +2696,7 @@ func MakeCheckConstraint(
 	}
 
 	if _, err := sqlbase.SanitizeVarFreeExpr(
-		expr, types.Bool, "CHECK", semaCtx, true /* allowImpure */, false,
+		expr, types.Bool, "CHECK", semaCtx, true /* allowImpure */, false, "",
 	); err != nil {
 		return nil, err
 	}
@@ -2766,7 +2768,7 @@ func checkTSColValidity(d *tree.ColumnTableDef) error {
 		return pgerror.Newf(pgcode.FeatureNotSupported, "%s is not supported in timeseries table", msg)
 	}
 	if d.Type.Family() == types.DecimalFamily || d.Type.Oid() == oid.T_bytea {
-		return pgerror.Newf(pgcode.WrongObjectType, "unsupported column type %s in timeseries table", d.Type.Name())
+		return pgerror.Newf(pgcode.WrongObjectType, "column %s: unsupported column type %s in timeseries table", d.Name, d.Type.Name())
 	}
 
 	if d.IsSerial {
@@ -2881,7 +2883,7 @@ func createInstanceTable(
 		// Only when no name is specified will there be a situation where TagName is empty
 		if n.Tags[i].TagName == "" {
 			if len(n.Tags) != len(tagMeta) {
-				return pgerror.New(pgcode.Syntax, "Tags number mismatch")
+				return pgerror.Newf(pgcode.Syntax, "Tags number mismatch: %d tags, %d values", len(tagMeta), len(n.Tags))
 			}
 			n.Tags[i].TagName = tagMeta[i].TagName
 			tagType = *tagMeta[i].TagType
@@ -2902,7 +2904,7 @@ func createInstanceTable(
 				}
 			}
 			if !find {
-				return pgerror.Newf(pgcode.UndefinedObject, "Tag %s does not exist", n.Tags[i].TagName)
+				return pgerror.Newf(pgcode.UndefinedObject, "Tag %s does not exist on table %s", n.Tags[i].TagName, tmplTbl.Name)
 			}
 		}
 		// if the tag no specified value, use NULL
@@ -2912,7 +2914,7 @@ func createInstanceTable(
 			}
 		}
 		// tag type check
-		datum, err := checkTagValue(params, n.Tags[i].TagVal, tagType, nullable)
+		datum, err := checkTagValue(params, n.Tags[i].TagVal, tagType, nullable, string(n.Tags[i].TagName))
 		if err != nil {
 			return err
 		}
@@ -3008,17 +3010,18 @@ func createInstanceTable(
 
 // checkTagValue checks if input of tag value accord with tag type
 func checkTagValue(
-	params runParams, tagVal tree.Expr, tagType types.T, nullable bool,
+	params runParams, tagVal tree.Expr, tagType types.T, nullable bool, tagName string,
 ) (tree.Datum, error) {
-	MatchErr := pgerror.New(pgcode.DatatypeMismatch,
-		"The data type of the input tag does not match the predefined type")
+	MatchErr := pgerror.Newf(pgcode.DatatypeMismatch,
+		"value %s doesn't match type %s of column %q",
+		tagVal.String(), tagType.String(), tree.ErrNameString(tagName))
 	var val tree.Datum
 	var err error
 	switch v := tagVal.(type) {
 	case *tree.NumVal:
-		val, err = v.TSTypeCheck(&tagType)
+		val, err = v.TSTypeCheck(tagName, &tagType)
 	case *tree.StrVal:
-		val, err = v.TSTypeCheck(&tagType, &params.p.semaCtx)
+		val, err = v.TSTypeCheck(tagName, &tagType, &params.p.semaCtx)
 	case *tree.DBool:
 		switch tagType.Family() {
 		case types.BoolFamily:
@@ -3035,7 +3038,7 @@ func checkTagValue(
 		}
 	case tree.DNullExtern:
 		if !nullable {
-			return nil, pgerror.New(pgcode.NotNullViolation, "can not use null tag value with not null constraint")
+			return nil, pgerror.Newf(pgcode.NotNullViolation, "can not use null tag value with not null constraint (tag %s)", tagName)
 		}
 		val = v
 
@@ -3048,13 +3051,13 @@ func checkTagValue(
 
 	datum, ok := val.(tree.Datum)
 	if !ok {
-		return nil, pgerror.New(pgcode.WrongObjectType, "wrong input attribute/tag data type")
+		return nil, pgerror.Newf(pgcode.WrongObjectType, "tag %s: wrong input attribute/tag data type", tagName)
 	}
 	return datum, nil
 }
 
 // checkTagType checks whether tag type is supported
-func checkTagType(tagType *types.T) (*types.T, error) {
+func checkTagType(tagName tree.Name, tagType *types.T) (*types.T, error) {
 	switch tagType.Oid() {
 	case oid.T_bool, oid.T_float4, oid.T_float8, oid.T_int2, oid.T_int4, oid.T_int8:
 
@@ -3063,7 +3066,10 @@ func checkTagType(tagType *types.T) (*types.T, error) {
 			tagType = types.MakeChar(DefaultFixedLen)
 		}
 		if tagType.Width() >= MaxFixedLen {
-			return nil, pgerror.Newf(pgcode.InvalidColumnDefinition, "%d exceeded the maximum width limit of the type: %s", tagType.Width(), tagType.String())
+			return nil, pgerror.Newf(
+				pgcode.InvalidColumnDefinition,
+				"tag %s: %d exceeded the maximum width limit of the type: %s",
+				tagName, tagType.Width(), tagType.String())
 		}
 	case oid.T_varchar, types.T_varbytea:
 		if tagType.Width() == DefaultTypeWithLength {
@@ -3074,17 +3080,26 @@ func checkTagType(tagType *types.T) (*types.T, error) {
 			}
 		}
 		if tagType.Width() > MaxVariableLen {
-			return nil, pgerror.Newf(pgcode.InvalidColumnDefinition, "%d exceeded the maximum width limit of the type: %s", tagType.Width(), tagType.String())
+			return nil, pgerror.Newf(
+				pgcode.InvalidColumnDefinition,
+				"tag %s: %d exceeded the maximum width limit of the type: %s",
+				tagName, tagType.Width(), tagType.String())
 		}
 	case types.T_nchar:
 		if tagType.Width() == DefaultTypeWithLength {
 			tagType = types.MakeNChar(DefaultFixedLen)
 		}
 		if tagType.Width() > MaxNCharLen {
-			return nil, pgerror.Newf(pgcode.InvalidColumnDefinition, "%d exceeded the maximum width limit of the type: %s", tagType.Width(), tagType.String())
+			return nil, pgerror.Newf(
+				pgcode.InvalidColumnDefinition,
+				"tag %s: %d exceeded the maximum width limit of the type: %s",
+				tagName, tagType.Width(), tagType.String())
 		}
 	default:
-		return nil, pgerror.Newf(pgcode.WrongObjectType, "unsupported tag type %s in timeseries table", tagType.String())
+		return nil, pgerror.Newf(
+			pgcode.WrongObjectType,
+			"tag %s: unsupported tag type %s in timeseries table",
+			tagName, tagType.String())
 	}
 	return tagType, nil
 }
@@ -3230,16 +3245,17 @@ func getTimeFromTimeInput(input tree.TimeInput) int64 {
 // checkPrimaryTag validates the definition of primary tag
 func checkPrimaryTag(tagColumn sqlbase.ColumnDescriptor) error {
 	if tagColumn.Nullable {
-		return pgerror.Newf(pgcode.NotNullViolation, "%s can not be a nullable tag as primary tag", tagColumn.Name)
+		return pgerror.Newf(pgcode.NotNullViolation, "tag %s can not be a nullable tag as primary tag", tagColumn.Name)
 	}
 	switch tagColumn.Type.Oid() {
 	case oid.T_float4, oid.T_float8, oid.T_varbytea:
 		return pgerror.Newf(pgcode.WrongObjectType,
-			"data type %s is not supported for primary tag", tagColumn.Type.String())
+			"data type %s is not supported for primary tag %s", tagColumn.Type.String(), tagColumn.Name)
 	case oid.T_varchar:
 		if tagColumn.Type.Width() > MaxPrimaryTagWidth {
 			return pgerror.Newf(pgcode.InvalidColumnDefinition,
-				"%d exceeded the maximum width limit of the type: %s as primary tag", tagColumn.Type.Width(), tagColumn.Type.String())
+				"tag %s: %d exceeded the maximum width limit of the type %s as primary tag",
+				tagColumn.Name, tagColumn.Type.Width(), tagColumn.Type.String())
 		}
 	}
 	return nil

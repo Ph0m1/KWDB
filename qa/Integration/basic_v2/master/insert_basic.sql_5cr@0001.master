@@ -8,15 +8,15 @@ INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:01', 0, 2);
 INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:02', 32768, 3);
-ERROR: integer "32768" out of range for type INT2
+ERROR: integer "32768" out of range for type INT2 (column e1)
 SQLSTATE: 22003
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:03', 'test', 4);
-ERROR: could not resolve "test" as a INT2 type
+ERROR: could not resolve "test" as INT2 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:04', true, 5);
 INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:05', 123.679, 6);
-ERROR: could not resolve "123.679" as a INT2 type
+ERROR: could not resolve "123.679" as INT2 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:06', -32768, 7);
 INSERT 1
@@ -25,13 +25,13 @@ INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:08', 32767, 9);
 INSERT 1
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:09', '中文', 10);
-ERROR: could not resolve "中文" as a INT2 type
+ERROR: could not resolve "中文" as INT2 type (column e1)
 SQLSTATE: 42804
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:10', 32768, 11);
-ERROR: integer "32768" out of range for type INT2
+ERROR: integer "32768" out of range for type INT2 (column e1)
 SQLSTATE: 22003
 > INSERT INTO test_savedata1.d1 VALUES ('2018-10-10 10:00:11', -32769, 12);
-ERROR: integer "-32769" out of range for type INT2
+ERROR: integer "-32769" out of range for type INT2 (column e1)
 SQLSTATE: 22003
 > select e1, t1_attribute from test_savedata1.d1 order by e1,t1_attribute;
     e1   | t1_attribute

@@ -29,13 +29,13 @@ INSERT 1
 > INSERT INTO ds_tb values('2023-12-12 12:00:11.000+00:00', null, 'seprator分隔符后,', null, 't', null, '中', null, 'seprator分隔符后,', null, 'seprator分隔符后,', null, b'\xaa', null, 'seprator分隔符后,', null, 1, 2, 3, false, 1.1, 1.2,'a', 'red', 'T','China', 'a', 'b', '1', '女', '1', 'pria');
 INSERT 1
 > INSERT INTO ds_tb values('2023-12-12 12:00:12.000+00:00', null, E'\\escape基础测试', null, 't', null, '中', null, E'\\escape基础测试', null, E'\\escape基础测试', null, b'\xaa', null, E'\\escape基础测试', null, 1, 2, 3, false, 1.1, 1.2,'a', 'red', 'T','China', 'a', 'b', '1', '女', '1', 'pria');
-ERROR: could not resolve "\escape基础测试" as a VARBYTES(200) type
+ERROR: could not resolve "\escape基础测试" as VARBYTES(200) type (column e21)
 SQLSTATE: 42804
 > INSERT INTO ds_tb values('2023-12-12 12:00:13.000+00:00', null, E'escape基础\\测试中', null, 't', null, '中', null, E'escape基础\\测试中', null, E'escape基础\\测试中', null, b'\xaa', null, E'escape基础\\测试中', null, 1, 2, 3, false, 1.1, 1.2,'a', 'red', 'T','China', 'a', 'b', '1', '女', '1', 'pria');
-ERROR: could not resolve "escape基础\测试中" as a VARBYTES(200) type
+ERROR: could not resolve "escape基础\测试中" as VARBYTES(200) type (column e21)
 SQLSTATE: 42804
 > INSERT INTO ds_tb values('2023-12-12 12:00:14.000+00:00', null, E'escape测试后\\', null, 't', null, '中', null, E'escape测试后\\', null, E'escape测试后\\', null, b'\xaa', null, E'escape测试后\\', null, 1, 2, 3, false, 1.1, 1.2,'a', 'red', 'T','China', 'a', 'b', '1', '女', '1', 'pria');
-ERROR: could not resolve "escape测试后\" as a VARBYTES(200) type
+ERROR: could not resolve "escape测试后\" as VARBYTES(200) type (column e21)
 SQLSTATE: 42804
 > select * from ds_tb;
          k_timestamp        |  e8  |            e9            | e10  | e11 | e12  | e13 | e14  |           e15            | e16  |           e17            | e18  | e19  | e20  |                             e21                              | e22  | code1 | code2 | code3 | flag  | val1 | val2 | location | color | name |    state     | tall | screen | age | sex | year | type

@@ -890,7 +890,7 @@ func (ts *TsPayload) FillColData(
 		}
 
 	default:
-		return independentOffset, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %T", datum)
+		return independentOffset, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %T while building payload", datum)
 	}
 	return independentOffset, nil
 }
@@ -1761,7 +1761,7 @@ func BuildPreparePayloadForTsInsert(
 					return payload, nil, errors.Errorf("unsupported int oid %v", column.Type.Oid())
 				}
 			default:
-				return payload, nil, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %T", inputValues)
+				return payload, nil, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %T while building payload(short circuit)", inputValues)
 			}
 
 			offset += curColLenth
@@ -1928,7 +1928,7 @@ func BuildInputForTSDelete(
 				isOutOfRange = true
 
 			default:
-				return nil, isOutOfRange, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %s", column.Type.String())
+				return nil, isOutOfRange, pgerror.Newf(pgcode.FeatureNotSupported, "unsupported input type %s while building ts delete", column.Type.String())
 			}
 		}
 		offset += curColLenth
@@ -2060,10 +2060,10 @@ func TSTypeCheckForInput(
 	}
 	switch v := actualExpr.(type) {
 	case *tree.NumVal:
-		return v.TSTypeCheck(colType)
+		return v.TSTypeCheck(column.Name, colType)
 
 	case *tree.StrVal:
-		return (*v).TSTypeCheck(colType, evalCtx)
+		return (*v).TSTypeCheck(column.Name, colType, evalCtx)
 
 	case *tree.DBool:
 		switch colType.Family() {
@@ -2076,7 +2076,7 @@ func TSTypeCheckForInput(
 			}
 			return tree.NewDInt(tree.DInt(0)), nil
 		default:
-			return nil, tree.NewDatatypeMismatchError(v.String(), colType.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, v.String(), colType.SQLString())
 		}
 
 	case *tree.FuncExpr:
@@ -2095,7 +2095,7 @@ func TSTypeCheckForInput(
 			dVal := tree.DInt(evalDatum.(*tree.DTimestampTZ).UnixMilli())
 			return &dVal, nil
 		default:
-			return nil, tree.NewDatatypeMismatchError(v.String(), colType.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, v.String(), colType.SQLString())
 		}
 	case tree.DNullExtern:
 		if !column.Nullable {
@@ -2118,7 +2118,7 @@ func TSTypeCheckForInput(
 		case oid.T_timestamp, oid.T_timestamptz:
 			if *v < tree.TsMinTimestamp || *v > tree.TsMaxTimestamp {
 				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", sqlbase.DatumToString(v), colType.SQLString())
+					"value '%s' out of range for type %s (column %s)", sqlbase.DatumToString(v), colType.SQLString(), column.Name)
 			}
 			// always send timestamp in DInt format to assemble payload
 			return v, nil
@@ -2150,7 +2150,7 @@ func TSTypeCheckForInput(
 			return tree.NewDBytes(tree.DBytes(v.String())), nil
 
 		default:
-			return nil, tree.NewDatatypeMismatchError(sqlbase.DatumToString(v), colType.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 		}
 	case *tree.DFloat:
 		switch colType.Oid() {
@@ -2158,17 +2158,17 @@ func TSTypeCheckForInput(
 			// when checking float value is overflow or not, use abs() value.
 			if *v != 0 && (math.Abs(float64(*v)) < math.SmallestNonzeroFloat32 || math.Abs(float64(*v)) > math.MaxFloat32) {
 				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"float \"%s\" out of range for type %s", v.String(), colType.Name())
+					"float \"%s\" out of range for type %s (column %s)", v.String(), colType.Name(), column.Name)
 			}
 			return v, nil
 		case oid.T_float8:
 			if *v != 0 && (math.Abs(float64(*v)) < math.SmallestNonzeroFloat64 || math.Abs(float64(*v)) > math.MaxFloat64) {
 				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-					"float \"%s\" out of range for type %s", v.String(), colType.Name())
+					"float \"%s\" out of range for type %s (column %s)", v.String(), colType.Name(), column.Name)
 			}
 			return v, nil
 		default:
-			return nil, tree.NewDatatypeMismatchError(sqlbase.DatumToString(v), colType.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 		}
 	case *tree.DString:
 		switch colType.Oid() {
@@ -2191,7 +2191,7 @@ func TSTypeCheckForInput(
 		case oid.T_bytea, oid.T_varbytea:
 			dVal, err := tree.ParseDByte(string(*v))
 			if err != nil {
-				return nil, tree.NewDatatypeMismatchError(string(*v), colType.SQLString())
+				return nil, tree.NewDatatypeMismatchError(column.Name, string(*v), colType.SQLString())
 			}
 			if colType.Width() > 0 && len(string(*dVal)) > int(colType.Width()) {
 				return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
@@ -2202,23 +2202,23 @@ func TSTypeCheckForInput(
 		case oid.T_timestamptz:
 			dVal, err := tree.ParseTimestampTZForTS(evalCtx, string(*v))
 			if err != nil {
-				return nil, tree.NewDatatypeMismatchError(string(*v), colType.SQLString())
+				return nil, tree.NewDatatypeMismatchError(column.Name, string(*v), colType.SQLString())
 			}
 			// Check the maximum and minimum value of the timestamp
 			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", string(*v), colType.SQLString())
+					"value '%s' out of range for type %s (column %s)", string(*v), colType.SQLString(), column.Name)
 			}
 			return dVal, nil
 		case oid.T_timestamp:
 			dVal, err := tree.ParseTimestampForTS(evalCtx, string(*v))
 			if err != nil {
-				return nil, tree.NewDatatypeMismatchError(string(*v), colType.SQLString())
+				return nil, tree.NewDatatypeMismatchError(column.Name, string(*v), colType.SQLString())
 			}
 			// Check the maximum and minimum value of the timestamp
 			if *dVal < tree.TsMinTimestamp || *dVal > tree.TsMaxTimestamp {
 				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", string(*v), colType.SQLString())
+					"value '%s' out of range for type %s (column %s)", string(*v), colType.SQLString(), column.Name)
 			}
 			return dVal, nil
 		case types.T_geometry:
@@ -2227,23 +2227,23 @@ func TSTypeCheckForInput(
 				if strings.Contains(err.Error(), "load error") {
 					return nil, err
 				}
-				return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s", string(*v), colType.SQLString())
+				return nil, pgerror.Newf(pgcode.DataException, "value '%s' is invalid for type %s (column %s)", string(*v), colType.SQLString(), column.Name)
 			}
 			// string(n)/char(n)/varchar(n) Calculates the length in bytes
 			if len(string(*v)) > int(colType.Width()) {
 				return nil, pgerror.Newf(pgcode.StringDataRightTruncation,
-					"value '%s' too long for type %s", string(*v), colType.SQLString())
+					"value '%s' too long for type %s (column %s)", string(*v), colType.SQLString(), column.Name)
 			}
 			return v, nil
 		case oid.T_bool:
 			dVal, err := tree.ParseDBool(string(*v))
 			if err != nil {
-				return nil, tree.NewDatatypeMismatchError(string(*v), colType.SQLString())
+				return nil, tree.NewDatatypeMismatchError(column.Name, string(*v), colType.SQLString())
 			}
 			return dVal, nil
 
 		default:
-			return nil, tree.NewDatatypeMismatchError(sqlbase.DatumToString(v), colType.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 		}
 
 	case *tree.DBytes:
@@ -2256,7 +2256,7 @@ func TSTypeCheckForInput(
 			}
 			return v, nil
 		default:
-			return nil, tree.NewDatatypeMismatchError(sqlbase.DatumToString(v), colType.SQLString())
+			return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 		}
 	case *tree.DTimestampTZ:
 		if colType.Oid() == oid.T_timestamptz {
@@ -2264,12 +2264,12 @@ func TSTypeCheckForInput(
 			// Check the maximum and minimum value of the timestamp
 			if dVal < tree.TsMinTimestamp || dVal > tree.TsMaxTimestamp {
 				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", sqlbase.DatumToString(v), colType.SQLString())
+					"value '%s' out of range for type %s (column %s)", sqlbase.DatumToString(v), colType.SQLString(), column.Name)
 			}
 			// always send timestamp in DInt format to assemble payload
 			return &dVal, nil
 		}
-		return nil, tree.NewDatatypeMismatchError(sqlbase.DatumToString(v), colType.SQLString())
+		return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 
 	case *tree.DTimestamp:
 		if colType.Oid() == oid.T_timestamp {
@@ -2277,12 +2277,12 @@ func TSTypeCheckForInput(
 			// Check the maximum and minimum value of the timestamp
 			if dVal < tree.TsMinTimestamp || dVal > tree.TsMaxTimestamp {
 				return nil, pgerror.Newf(pgcode.StringDataLengthMismatch,
-					"value '%s' out of range for type %s", sqlbase.DatumToString(v), colType.SQLString())
+					"value '%s' out of range for type %s (column %s)", sqlbase.DatumToString(v), colType.SQLString(), column.Name)
 			}
 			// always send timestamp in DInt format to assemble payload
 			return &dVal, nil
 		}
-		return nil, tree.NewDatatypeMismatchError(sqlbase.DatumToString(v), colType.SQLString())
+		return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 
 	case *tree.UnresolvedName:
 		return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", v.String())

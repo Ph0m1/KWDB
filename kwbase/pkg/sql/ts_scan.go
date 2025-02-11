@@ -113,7 +113,7 @@ func (n *tsScanNode) IndexedVarNodeFormatter(idx int) tree.NodeFormatter {
 }
 
 func (n *tsScanNode) startExec(params runParams) error {
-	return pgerror.New(pgcode.Warning, "time series query not support in subquery")
+	return pgerror.New(pgcode.Warning, "time series query is not supported in subquery")
 }
 
 func (n *tsScanNode) Close(context.Context) {
@@ -157,7 +157,7 @@ func (n *synchronizerNode) IndexedVarNodeFormatter(idx int) tree.NodeFormatter {
 }
 
 func (n *synchronizerNode) startExec(params runParams) error {
-	return pgerror.New(pgcode.Warning, "time series query not support in subquery")
+	return pgerror.New(pgcode.Warning, "time series query is not supported in subquery")
 }
 
 func (n *synchronizerNode) Close(ctx context.Context) {

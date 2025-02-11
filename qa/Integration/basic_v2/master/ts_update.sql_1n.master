@@ -1062,15 +1062,15 @@ SQLSTATE: 22003
 ERROR: numeric constant out of int64 range
 SQLSTATE: 42809
 > update update_tag.tb set t7 ='看看2112sdd'  where t1 = 1 and t4 = false and t8 = 'test测试！！！@TEST1' and t12 = 'vvvaa64_1';
-ERROR: value '看看2112sdd' too long for type CHAR
+ERROR: value '看看2112sdd' too long for type CHAR (column t7)
 SQLSTATE: 22001
 > update update_tag.tb set t9 ='x7839h7jj_1'  where t1 = 1 and t4 = false and t8 = 'test测试！！！@TEST1' and t12 = 'vvvaa64_1';
-ERROR: value 'x7839h7jj_1' too long for type NCHAR
+ERROR: value 'x7839h7jj_1' too long for type NCHAR (column t9)
 SQLSTATE: 22001
 > update update_tag.tb set t11 ='test测试！！！@TEST1'  where t1 = 1 and t4 = false and t8 = 'test测试！！！@TEST1' and t12 = 'vvvaa64_1';
 UPDATE 1
 > update update_tag.tb set t13 ='test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1'  where t1 = 1 and t4 = false and t8 = 'test测试！！！@TEST1' and t12 = 'vvvaa64_1';
-ERROR: value 'test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1' too long for type VARBYTES(254)
+ERROR: value 'test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1test测试！！！@TEST1' too long for type VARBYTES(254) (column t13)
 SQLSTATE: 22001
 > prepare p23 as update update_tag.tb set t7 =$1 where t1 = $2 and t4 = $3 and t8 = $4 and t12 = $5;
 PREPARE

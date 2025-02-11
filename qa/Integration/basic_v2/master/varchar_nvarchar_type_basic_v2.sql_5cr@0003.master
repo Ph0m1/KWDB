@@ -20,10 +20,10 @@ INSERT 1
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:06', 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中z!','中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@', 7);
 INSERT 1
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:07', 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中zA!1','中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@', 8);
-ERROR: value 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中zA!1' too long for type VARCHAR(254)
+ERROR: value 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中zA!1' too long for type VARCHAR(254) (column e1)
 SQLSTATE: 22001
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:08', 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中zA!','中文abPOL!123！a(01-OP!《》？？。~~！！@yingy*1中文ab!123！a()901-9!《》？。~！！@1', 9);
-ERROR: value 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中zA!' too long for type VARCHAR(254)
+ERROR: value 'test1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中文测试Englishtest！@#￥%&……%（*1928018hUIHStest1中zA!' too long for type VARCHAR(254) (column e1)
 SQLSTATE: 22001
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:09', 'a'('a'),'中'('a'), 10);
 ERROR: at or near "(": syntax error
@@ -35,10 +35,10 @@ HINT: try \h VALUES
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:10', 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb','aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc', 11);
 INSERT 1
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:11', 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbbq','aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc', 12);
-ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbbq' too long for type VARCHAR(254)
+ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbbq' too long for type VARCHAR(254) (column e1)
 SQLSTATE: 22001
 > INSERT INTO test_varchar1.d11 VALUES ('2018-10-10 10:00:12', 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbaaaaabbbbbaaaaabbbb','aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc1', 13);
-ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc1' too long for type NVARCHAR(63)
+ERROR: value 'aaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccaaaaabbbbbcccccabc1' too long for type NVARCHAR(63) (column e2)
 SQLSTATE: 22001
 > SELECT e1,e2 FROM test_varchar1.d11 ORDER BY k_timestamp;
                                                                                                                                 e1                                                                                                                               |                                         e2
