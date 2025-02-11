@@ -492,7 +492,7 @@ func (r *TsEngine) PutEntity(
 
 // PutData write in tag data and write in ts data
 func (r *TsEngine) PutData(
-	tableID uint64, payload [][]byte, tsTxnID uint64,
+	tableID uint64, payload [][]byte, tsTxnID uint64, writeWAL bool,
 ) (DedupResult, EntitiesAffect, error) {
 	if len(payload) == 0 {
 		return DedupResult{}, EntitiesAffect{}, errors.New("payload is nul")
@@ -522,7 +522,7 @@ func (r *TsEngine) PutData(
 	var entitiesAffected C.uint16_t
 	var unorderedAffected C.uint32_t
 	status := C.TSPutData(r.tdb, C.TSTableID(tableID), &cTsSlice[0], (C.size_t)(len(cTsSlice)), cRangeGroup, C.uint64_t(tsTxnID),
-		&entitiesAffected, &unorderedAffected, &dedupResult)
+		&entitiesAffected, &unorderedAffected, &dedupResult, C.bool(writeWAL))
 	if err := statusToError(status); err != nil {
 		return DedupResult{}, EntitiesAffect{}, errors.Wrap(err, "could not PutData")
 	}
@@ -540,7 +540,7 @@ func (r *TsEngine) PutData(
 
 // PutRowData 行存tags值和时序数据写入
 func (r *TsEngine) PutRowData(
-	tableID uint64, headerPrefix []byte, payload [][]byte, size int32, tsTxnID uint64,
+	tableID uint64, headerPrefix []byte, payload [][]byte, size int32, tsTxnID uint64, writeWAL bool,
 ) (DedupResult, EntitiesAffect, error) {
 	if len(payload) == 0 {
 		return DedupResult{}, EntitiesAffect{}, errors.New("payload is nul")
@@ -592,7 +592,7 @@ func (r *TsEngine) PutRowData(
 			var entitiesAffected C.uint16_t
 			var unorderedAffected C.uint32_t
 			status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID),
-				&entitiesAffected, &unorderedAffected, &dedupResult)
+				&entitiesAffected, &unorderedAffected, &dedupResult, C.bool(writeWAL))
 			if err := statusToError(status); err != nil {
 				return DedupResult{}, EntitiesAffect{}, errors.Wrap(err, "could not PutData")
 			}
@@ -618,7 +618,7 @@ func (r *TsEngine) PutRowData(
 	var entitiesAffected C.uint16_t
 	var unorderedAffected C.uint32_t
 	status := C.TSPutDataByRowType(r.tdb, C.TSTableID(tableID), &cTsSlice, (C.size_t)(1), cRangeGroup, C.uint64_t(tsTxnID),
-		&entitiesAffected, &unorderedAffected, &dedupResult)
+		&entitiesAffected, &unorderedAffected, &dedupResult, C.bool(writeWAL))
 	if err := statusToError(status); err != nil {
 		return DedupResult{}, EntitiesAffect{}, errors.Wrap(err, "could not PutData")
 	}

@@ -184,11 +184,11 @@ KStatus LoggedTsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint
 
 KStatus LoggedTsEntityGroup::PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id,
                                      uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
-                                     DedupResult* dedup_result, DedupRule dedup_rule) {
+                                     DedupResult* dedup_result, DedupRule dedup_rule, bool writeWAL) {
   // Iterate through the payloads array and invoke the PutData method to ensure that all payloads are successfully written.
   for (int i = 0; i < length; i++) {
     KStatus s = LoggedTsEntityGroup::PutData(ctx, payloads[i], mtr_id, inc_entity_cnt,
-                                             inc_unordered_cnt, dedup_result, dedup_rule);
+                                             inc_unordered_cnt, dedup_result, dedup_rule, writeWAL);
     if (s == FAIL) {
       return s;
     }

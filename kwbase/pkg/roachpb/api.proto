@@ -264,6 +264,7 @@ message TsRowPutRequest {
   repeated bytes values = 3;
   int32 valueSize = 4;
   repeated int64 timestamps = 5;
+  bool closeWAL = 6;
 }
 
 // A TsRowPutResponse is the return value for inserting row values to TS DB

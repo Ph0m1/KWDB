@@ -123,7 +123,7 @@ KStatus TsEntityGroup::PutEntity(kwdbContext_p ctx, TSSlice& payload, uint64_t m
 
 KStatus TsEntityGroup::PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id,
                                uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
-                               DedupResult* dedup_result, DedupRule dedup_rule) {
+                               DedupResult* dedup_result, DedupRule dedup_rule, bool writeWAL) {
   RW_LATCH_S_LOCK(drop_mutex_);
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   for (int i = 0; i < length; i++) {

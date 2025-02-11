@@ -120,6 +120,7 @@ message ReadImportDataSpec {
   // walltimeNanos is the MVCC time at which the created KVs will be written.
   optional int64 walltimeNanos = 6 [(gogoproto.nullable) = false];
   optional bool optimizedDispatch = 7 [(gogoproto.nullable) = false];
+  optional bool writeWAL = 8 [(gogoproto.nullable) = false];
 }
 
 // CSVWriterSpec is the specification for a processor that consumes rows and

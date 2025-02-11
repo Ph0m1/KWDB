@@ -359,7 +359,7 @@ KStatus TSEngineImpl::PutEntity(kwdbContext_p ctx, const KTableKey& table_id, ui
 
 KStatus TSEngineImpl::PutData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                               TSSlice* payload, int payload_num, uint64_t mtr_id, uint16_t* inc_entity_cnt,
-                              uint32_t* inc_unordered_cnt, DedupResult* dedup_result) {
+                              uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL) {
   std::shared_ptr<TsTable> table;
   KStatus s;
   s = GetTsTable(ctx, table_id, table);
@@ -391,7 +391,7 @@ KStatus TSEngineImpl::PutData(kwdbContext_p ctx, const KTableKey& table_id, uint
     dedup_result->payload_num = payload_num;
     dedup_result->dedup_rule = static_cast<int>(g_dedup_rule);
     s = table_range->PutData(ctx, &(payload[i]), 1, mtr_id, inc_entity_cnt,
-                             inc_unordered_cnt, dedup_result, g_dedup_rule);
+                             inc_unordered_cnt, dedup_result, g_dedup_rule, writeWAL);
     if (s == FAIL) {
       LOG_ERROR("PutData failed, table id: %lu, range group id: %lu", table->GetTableId(), range_group_id)
       return s;

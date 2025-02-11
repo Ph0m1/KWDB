@@ -76,7 +76,7 @@ class LoggedTsEntityGroup : public TsEntityGroup {
    */
   KStatus PutData(kwdbContext_p ctx, TSSlice* payloads, int length, uint64_t mtr_id,
                   uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt,
-                  DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE) override;
+                  DedupResult* dedup_result, DedupRule dedup_rule = DedupRule::OVERRIDE, bool writeWAL = true) override;
 
   /**
    * @brief Mark the deletion of time series data in a specified range.

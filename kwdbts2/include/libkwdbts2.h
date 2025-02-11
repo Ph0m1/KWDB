@@ -215,7 +215,8 @@ TSStatus TSPutEntity(TSEngine* engine, TSTableID tableId, TSSlice* payload, size
                      uint64_t mtr_id);
 
 TSStatus TSPutData(TSEngine* engine, TSTableID tableId, TSSlice* payload, size_t payload_num, RangeGroup range_group,
-                   uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt, DedupResult* dedup_result);
+                   uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt, DedupResult* dedup_result,
+                   bool writeWAL);
 
 TSStatus TSExecQuery(TSEngine* engine, QueryInfo* req, RespInfo* resp, TsFetcher* fetchers, void* fetcher);
 
@@ -293,7 +294,7 @@ TSStatus TSGetDataVolumeHalfTS(TSEngine* engine, TSTableID table_id, uint64_t be
  */
 TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* payload_row, size_t payload_num,
                             RangeGroup range_group, uint64_t mtr_id, uint16_t* inc_entity_cnt,
-                            uint32_t* inc_unordered_cnt, DedupResult* dedup_result);
+                            uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL);
 
 /**
  * @brief delete data in range, used after snapshot finished. 

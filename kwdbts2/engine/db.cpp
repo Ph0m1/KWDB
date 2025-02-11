@@ -381,7 +381,8 @@ TSStatus TSPutEntity(TSEngine* engine, TSTableID table_id, TSSlice* payload, siz
 }
 
 TSStatus TSPutData(TSEngine* engine, TSTableID table_id, TSSlice* payload, size_t payload_num, RangeGroup range_group,
-                   uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt, DedupResult* dedup_result) {
+                   uint64_t mtr_id, uint16_t* inc_entity_cnt, uint32_t* inc_unordered_cnt, DedupResult* dedup_result,
+                   bool writeWAL) {
   KWDB_DURATION(StStatistics::Get().ts_put);
   // The CGO calls the interface, and the GO layer code will call this interface to write data
   kwdbContext_t context;
@@ -399,7 +400,7 @@ TSStatus TSPutData(TSEngine* engine, TSTableID table_id, TSSlice* payload, size_
   // Parse range_group_id from payload
   uint64_t tmp_range_group_id = 1;
   s = engine->PutData(ctx_p, tmp_table_id, tmp_range_group_id, payload, payload_num, mtr_id,
-                      inc_entity_cnt, inc_unordered_cnt, dedup_result);
+                      inc_entity_cnt, inc_unordered_cnt, dedup_result, writeWAL);
   if (s != KStatus::SUCCESS) {
     std::ostringstream ss;
     ss << tmp_range_group_id;
@@ -887,7 +888,7 @@ TSStatus TSGetDataVolumeHalfTS(TSEngine* engine, TSTableID table_id, uint64_t be
 // Input data in Payload format based on line storage mode
 TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* payload_row, size_t payload_num,
                            RangeGroup range_group, uint64_t mtr_id, uint16_t* inc_entity_cnt,
-                            uint32_t* inc_unordered_cnt, DedupResult* dedup_result) {
+                            uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL) {
     kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
@@ -914,7 +915,7 @@ TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* paylo
     }
     // todo(liangbo01) current interface dedup result no support multi-payload insert.
     s = engine->PutData(ctx_p, tmp_table_id, tmp_range_group_id, &payload, payload_num, mtr_id,
-                        inc_entity_cnt, inc_unordered_cnt, dedup_result);
+                        inc_entity_cnt, inc_unordered_cnt, dedup_result, writeWAL);
     if (s != KStatus::SUCCESS) {
       free(payload.data);
       std::ostringstream ss;

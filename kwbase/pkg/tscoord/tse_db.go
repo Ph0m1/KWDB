@@ -137,7 +137,7 @@ func (s *TsSender) Send(
 			}
 		}
 		if putPayload != nil {
-			dedupRes, entitiesAffect, err := s.tsEngine.PutData(1, putPayload, 0)
+			dedupRes, entitiesAffect, err := s.tsEngine.PutData(1, putPayload, 0, true)
 			if err != nil {
 				// todo need to process dedupResult
 				return nil, &roachpb.Error{Message: err.Error()}

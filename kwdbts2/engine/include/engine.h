@@ -134,7 +134,7 @@ struct TSEngine {
    */
   virtual KStatus PutData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                           TSSlice* payload_data, int payload_num, uint64_t mtr_id, uint16_t* inc_entity_cnt,
-                          uint32_t* inc_unordered_cnt, DedupResult* dedup_result) = 0;
+                          uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL = true) = 0;
 
   /**
    * @brief Delete data of some specified entities within a specified time range by marking
@@ -524,7 +524,7 @@ class TSEngineImpl : public TSEngine {
 
   KStatus PutData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                   TSSlice* payload_data, int payload_num, uint64_t mtr_id, uint16_t* inc_entity_cnt,
-                  uint32_t* inc_unordered_cnt, DedupResult* dedup_result) override;
+                  uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL = true) override;
 
   KStatus DeleteRangeData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                           HashIdSpan& hash_span, const std::vector<KwTsSpan>& ts_spans, uint64_t* count,
