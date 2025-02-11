@@ -3546,6 +3546,11 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		}
 	}
 
+	var sort *execinfrapb.SorterSpec
+	if p.Processors[p.ResultRouters[0]].TSSpec.Core.Sorter != nil {
+		sort = p.Processors[p.ResultRouters[0]].TSSpec.Core.Sorter
+	}
+
 	var tsPost execinfrapb.TSPostProcessSpec
 	if addLocalAgg {
 		tsPost = createTSPostSpec(&intermediateTypes)
@@ -3565,7 +3570,20 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		// add parallel processor
 		if addSync {
 			addSynchronizerForAgg(planCtx, p, intermediateTypes, ordCols, &tsPost)
-
+			// sort agg case, need add sort after add syncchronizer.
+			if sort != nil {
+				p.AddTSNoGroupingStage(
+					execinfrapb.TSProcessorCoreUnion{
+						Sorter: &execinfrapb.SorterSpec{
+							OutputOrdering:   execinfrapb.Ordering{Columns: ordCols},
+							OrderingMatchLen: sort.OrderingMatchLen,
+						},
+					},
+					tsPost,
+					intermediateTypes,
+					execinfrapb.Ordering{Columns: ordCols},
+				)
+			}
 			// add ts final agg processor
 			if addTSTwiceAgg {
 				tsFinialAggsSpec := execinfrapb.AggregatorSpec{
