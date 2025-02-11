@@ -450,13 +450,23 @@ type Engine interface {
 	CreateCheckpoint(dir string) error
 }
 
+// BatchCommitType the commit of batch
+type BatchCommitType uint8
+
+const (
+	// NormalCommitType is the batch commit of normal batch
+	NormalCommitType BatchCommitType = iota
+	// TsCommitType is the batch commit of ts batch
+	TsCommitType
+)
+
 // Batch is the interface for batch specific operations.
 type Batch interface {
 	ReadWriter
 	// Commit atomically applies any batched updates to the underlying
 	// engine. This is a noop unless the batch was created via NewBatch(). If
 	// sync is true, the batch is synchronously committed to disk.
-	Commit(sync bool) error
+	Commit(sync bool, commitType BatchCommitType) error
 	// Distinct returns a view of the existing batch which only sees writes that
 	// were performed before the Distinct batch was created. That is, the
 	// returned batch will not read its own writes, but it will read writes to
@@ -648,7 +658,7 @@ func WriteSyncNoop(ctx context.Context, eng Engine) error {
 		return err
 	}
 
-	if err := batch.Commit(true /* sync */); err != nil {
+	if err := batch.Commit(true /* sync */, NormalCommitType); err != nil {
 		return err
 	}
 	return nil

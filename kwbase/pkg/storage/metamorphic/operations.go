@@ -452,7 +452,7 @@ func (b batchCommitOp) run(ctx context.Context) string {
 		return "noop"
 	}
 	batch := b.m.getReadWriter(b.id).(storage.Batch)
-	if err := batch.Commit(true); err != nil {
+	if err := batch.Commit(true, storage.NormalCommitType); err != nil {
 		return err.Error()
 	}
 	batch.Close()

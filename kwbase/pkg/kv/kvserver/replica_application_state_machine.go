@@ -1219,7 +1219,7 @@ func (b *replicaAppBatch) ApplyToStateMachine(ctx context.Context) error {
 	// before ensuring that the replica's data has been synchronously removed.
 	// See handleChangeReplicasResult().
 	sync := b.changeRemovesReplica
-	if err := b.batch.Commit(sync); err != nil {
+	if err := b.batch.Commit(sync, storage.NormalCommitType); err != nil {
 		return wrapWithNonDeterministicFailure(err, "unable to commit Raft entry batch")
 	}
 	desc := b.state.Desc

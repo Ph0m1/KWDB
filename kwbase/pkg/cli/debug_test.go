@@ -284,7 +284,7 @@ func TestRemoveDeadReplicas(t *testing.T) {
 						return err
 					}
 					if batch != nil {
-						if err := batch.Commit(true); err != nil {
+						if err := batch.Commit(true, storage.NormalCommitType); err != nil {
 							return err
 						}
 						batch.Close()

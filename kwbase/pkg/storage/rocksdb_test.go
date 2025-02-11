@@ -150,7 +150,7 @@ func TestBatchIterReadOwnWrite(t *testing.T) {
 		t.Fatal("uncommitted write seen by non-batch iter")
 	}
 
-	if err := b.Commit(false /* sync */); err != nil {
+	if err := b.Commit(false /* sync */, NormalCommitType); err != nil {
 		t.Fatal(err)
 	}
 
@@ -713,7 +713,7 @@ func TestConcurrentBatch(t *testing.T) {
 	// Concurrently write all the batches.
 	for _, batch := range batches {
 		go func(batch Batch) {
-			errChan <- batch.Commit(false /* sync */)
+			errChan <- batch.Commit(false /* sync */, NormalCommitType)
 		}(batch)
 	}
 
@@ -1279,7 +1279,7 @@ func TestRocksDBDeleteRangeCompaction(t *testing.T) {
 		MakeMVCCMetadataKey(makeKey("c", numEntries))); err != nil {
 		t.Fatal(err)
 	}
-	if err := batch.Commit(true); err != nil {
+	if err := batch.Commit(true, NormalCommitType); err != nil {
 		t.Fatal(err)
 	}
 	batch.Close()
@@ -1514,7 +1514,7 @@ func TestRocksDBWALFileEmptyBatch(t *testing.T) {
 	if err := b.Put(mvccKey("foo"), []byte{'b', 'a', 'r'}); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Commit(true /* sync */); err != nil {
+	if err := b.Commit(true /* sync */, NormalCommitType); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1533,7 +1533,7 @@ func TestRocksDBWALFileEmptyBatch(t *testing.T) {
 	// Commit an empty batch.
 	b = e.NewBatch()
 	defer b.Close()
-	if err := b.Commit(true /* sync */); err != nil {
+	if err := b.Commit(true /* sync */, NormalCommitType); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1575,7 +1575,7 @@ func TestRocksDBWALFileEmptyBatch(t *testing.T) {
 			t.Error("batch is not empty")
 		}
 
-		if err := batch.Commit(true /* sync */); err != nil {
+		if err := batch.Commit(true /* sync */, NormalCommitType); err != nil {
 			t.Fatal(err)
 		}
 

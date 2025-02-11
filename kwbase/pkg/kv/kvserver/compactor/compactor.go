@@ -353,7 +353,7 @@ func (c *Compactor) fetchSuggestions(
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := delBatch.Commit(true); err != nil {
+	if err := delBatch.Commit(true, storage.NormalCommitType); err != nil {
 		log.Warningf(ctx, "unable to delete suggested compaction records: %+v", err)
 	}
 	return suggestions, totalBytes, nil
@@ -421,7 +421,7 @@ func (c *Compactor) processCompaction(
 		}
 	}
 
-	if err := delBatch.Commit(true); err != nil {
+	if err := delBatch.Commit(true, storage.NormalCommitType); err != nil {
 		log.Warningf(ctx, "unable to delete suggested compaction records: %+v", err)
 	}
 	delBatch.Close()

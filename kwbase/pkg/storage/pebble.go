@@ -415,6 +415,7 @@ type Pebble struct {
 
 	closed       bool
 	path         string
+	tsPath       string
 	auxDir       string
 	maxSize      int64
 	attrs        roachpb.Attributes
@@ -531,6 +532,7 @@ func NewPebble(ctx context.Context, cfg PebbleConfig) (*Pebble, error) {
 	return &Pebble{
 		db:           db,
 		path:         cfg.Dir,
+		tsPath:       cfg.TsDir,
 		auxDir:       auxDir,
 		maxSize:      cfg.MaxSize,
 		attrs:        cfg.Attrs,
@@ -741,7 +743,7 @@ func (p *Pebble) ClearIterRange(iter Iterator, start, end roachpb.Key) error {
 	if err := batch.ClearIterRange(iter, start, end); err != nil {
 		return err
 	}
-	return batch.Commit(true)
+	return batch.Commit(true, NormalCommitType)
 }
 
 // Merge implements the Engine interface.
@@ -777,7 +779,7 @@ func (p *Pebble) Attrs() roachpb.Attributes {
 
 // Capacity implements the Engine interface.
 func (p *Pebble) Capacity() (roachpb.StoreCapacity, error) {
-	return computeCapacity(p.settings, p.path, p.maxSize)
+	return computeCapacity(p.settings, p.path, p.tsPath, p.maxSize)
 }
 
 // Flush implements the Engine interface.

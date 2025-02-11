@@ -344,7 +344,7 @@ func (p *pebbleBatch) LogLogicalOp(op MVCCLogicalOpType, details MVCCLogicalOpDe
 }
 
 // Commit implements the Batch interface.
-func (p *pebbleBatch) Commit(sync bool) error {
+func (p *pebbleBatch) Commit(sync bool, commitType BatchCommitType) error {
 	opts := pebble.NoSync
 	if sync {
 		opts = pebble.Sync

@@ -127,7 +127,7 @@ func TestEngineBatchCommit(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := batch.Commit(false /* sync */); err != nil {
+			if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 				t.Fatal(err)
 			}
 			close(writesDone)
@@ -348,7 +348,7 @@ func TestEngineBatch(t *testing.T) {
 				}
 				iter.Close()
 				// Commit the batch and try getting the value from the engine.
-				if err := b.Commit(false /* sync */); err != nil {
+				if err := b.Commit(false /* sync */, NormalCommitType); err != nil {
 					t.Errorf("%d: %+v", i, err)
 					continue
 				}
@@ -742,7 +742,7 @@ func TestFlushWithSSTables(t *testing.T) {
 				}
 			}
 
-			err := batch.Commit(true)
+			err := batch.Commit(true, NormalCommitType)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -933,7 +933,7 @@ func TestEngineDeleteRangeBatch(t *testing.T) {
 		if err := batch2.ApplyBatchRepr(batch.Repr(), false); err != nil {
 			return err
 		}
-		return batch2.Commit(false)
+		return batch2.Commit(false, NormalCommitType)
 	})
 }
 

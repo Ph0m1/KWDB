@@ -98,7 +98,7 @@ func (sc *AbortSpan) ClearData(e storage.Engine) error {
 	if err != nil {
 		return err
 	}
-	return b.Commit(false /* sync */)
+	return b.Commit(false /* sync */, storage.NormalCommitType)
 }
 
 // Get looks up an AbortSpan entry recorded for this transaction ID.

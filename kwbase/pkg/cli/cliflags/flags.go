@@ -776,6 +776,20 @@ Commas are forbidden in all values, since they are used to separate fields.
 Also, if you use equal signs in the file path to a store, you must use the
 "path" field label.`,
 	}
+	TsStore = FlagInfo{
+		Name: "ts-store",
+		Description: `
+The file path to a ts storage device. This flag must be specified separately for
+each storage device, for example:
+<PRE>
+
+  --ts-store=/mnt/ssd01 --ts-store=/mnt/ssd02 --ts-store=/mnt/hda1
+
+</PRE>
+Commas are forbidden in all values, since they are used to separate fields.
+Also, if you use equal signs in the file path to a store, you must use the
+"path" field label.`,
+	}
 
 	StorageEngine = FlagInfo{
 		Name: "storage-engine",

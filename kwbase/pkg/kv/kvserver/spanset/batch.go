@@ -529,8 +529,8 @@ type spanSetBatch struct {
 
 var _ storage.Batch = spanSetBatch{}
 
-func (s spanSetBatch) Commit(sync bool) error {
-	return s.b.Commit(sync)
+func (s spanSetBatch) Commit(sync bool, commitType storage.BatchCommitType) error {
+	return s.b.Commit(sync, storage.NormalCommitType)
 }
 
 func (s spanSetBatch) Distinct() storage.ReadWriter {

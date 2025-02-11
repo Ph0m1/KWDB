@@ -859,7 +859,7 @@ func (r *RocksDB) Put(key MVCCKey, value []byte) error {
 	if err := b.Put(key, value); err != nil {
 		return err
 	}
-	return b.Commit(true /* sync */)
+	return b.Commit(true /* sync */, NormalCommitType)
 }
 
 // Merge implements the RocksDB merge operator using the function goMergeInit
@@ -879,7 +879,7 @@ func (r *RocksDB) Merge(key MVCCKey, value []byte) error {
 	if err := b.Merge(key, value); err != nil {
 		return err
 	}
-	return b.Commit(true /* sync */)
+	return b.Commit(true /* sync */, NormalCommitType)
 }
 
 // LogData is part of the Writer interface.
@@ -906,7 +906,7 @@ func (r *RocksDB) ApplyBatchRepr(repr []byte, sync bool) error {
 	if err := b.ApplyBatchRepr(repr, sync); err != nil {
 		return err
 	}
-	return b.Commit(sync)
+	return b.Commit(sync, NormalCommitType)
 }
 
 // Get returns the value for the given key.
@@ -933,7 +933,7 @@ func (r *RocksDB) Clear(key MVCCKey) error {
 	if err := b.Clear(key); err != nil {
 		return err
 	}
-	return b.Commit(true /* sync */)
+	return b.Commit(true /* sync */, NormalCommitType)
 }
 
 // SingleClear removes the most recent item from the db with the given key.
@@ -948,7 +948,7 @@ func (r *RocksDB) SingleClear(key MVCCKey) error {
 	if err := b.SingleClear(key); err != nil {
 		return err
 	}
-	return b.Commit(true /* sync */)
+	return b.Commit(true /* sync */, NormalCommitType)
 }
 
 // ClearRange removes a set of entries, from start (inclusive) to end
@@ -961,7 +961,7 @@ func (r *RocksDB) ClearRange(start, end MVCCKey) error {
 	if err := b.ClearRange(start, end); err != nil {
 		return err
 	}
-	return b.Commit(true /* sync */)
+	return b.Commit(true /* sync */, NormalCommitType)
 }
 
 // ClearIterRange removes a set of entries, from start (inclusive) to end
@@ -978,7 +978,7 @@ func (r *RocksDB) ClearIterRange(iter Iterator, start, end roachpb.Key) error {
 	if err != nil {
 		return err
 	}
-	return b.Commit(true /* sync */)
+	return b.Commit(true /* sync */, NormalCommitType)
 }
 
 // Iterate iterates from start to end keys, invoking f on each
@@ -989,7 +989,7 @@ func (r *RocksDB) Iterate(start, end roachpb.Key, f func(MVCCKeyValue) (bool, er
 
 // Capacity queries the underlying file system for disk capacity information.
 func (r *RocksDB) Capacity() (roachpb.StoreCapacity, error) {
-	return computeCapacity(r.cfg.Settings, r.cfg.Dir, r.cfg.MaxSize)
+	return computeCapacity(r.cfg.Settings, r.cfg.Dir, r.cfg.TsDir, r.cfg.MaxSize)
 }
 
 // Compact forces compaction over the entire database.
@@ -1983,7 +1983,8 @@ func (r *rocksDBBatch) NewIterator(opts IterOptions) Iterator {
 	return iter
 }
 
-const maxBatchGroupSize = 1 << 20 // 1 MiB
+const maxBatchGroupSize = 1 << 20    // 1 MiB
+const tsMaxBatchGroupSize = 10 << 20 // 10 MiB
 
 // makeBatchGroup add the specified batch to the pending list of batches to
 // commit. Groups are delimited by a nil batch in the pending list. Group
@@ -2024,7 +2025,7 @@ func nextBatchGroup(pending []*rocksDBBatch) (prefix []*rocksDBBatch, suffix []*
 	return pending, pending[len(pending):]
 }
 
-func (r *rocksDBBatch) Commit(syncCommit bool) error {
+func (r *rocksDBBatch) Commit(syncCommit bool, commitType BatchCommitType) error {
 	if r.Closed() {
 		panic("this batch was already committed")
 	}
@@ -2052,8 +2053,11 @@ func (r *rocksDBBatch) Commit(syncCommit bool) error {
 	c.Lock()
 
 	var leader bool
-	c.pending, c.groupSize, leader = makeBatchGroup(c.pending, r, c.groupSize, maxBatchGroupSize)
-
+	if commitType == TsCommitType {
+		c.pending, c.groupSize, leader = makeBatchGroup(c.pending, r, c.groupSize, tsMaxBatchGroupSize)
+	} else if commitType == NormalCommitType {
+		c.pending, c.groupSize, leader = makeBatchGroup(c.pending, r, c.groupSize, maxBatchGroupSize)
+	}
 	if leader {
 		// We're the leader of our group. Wait for any running commit to finish and
 		// for our batch to make it to the head of the pending queue.

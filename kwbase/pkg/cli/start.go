@@ -431,9 +431,14 @@ func runStart(cmd *cobra.Command, args []string, disableReplication bool) error 
 	// Build a minimal StorageConfig out of the first store's spec, with enough
 	// attributes to be able to read encrypted-at-rest store directories.
 	firstSpec := serverCfg.Stores.Specs[0]
+	var firstTsSpec base.StoreSpec
+	if serverCfg.TsStores.Specs == nil {
+		firstTsSpec = serverCfg.Stores.Specs[0]
+	}
 	firstStoreConfig := base.StorageConfig{
 		Attrs:           firstSpec.Attributes,
 		Dir:             firstSpec.Path,
+		TsDir:           firstTsSpec.Path,
 		Settings:        serverCfg.Settings,
 		UseFileRegistry: firstSpec.UseFileRegistry,
 		ExtraOptions:    firstSpec.ExtraOptions,

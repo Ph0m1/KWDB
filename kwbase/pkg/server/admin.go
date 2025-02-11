@@ -752,7 +752,7 @@ func (s *adminServer) TableDetails(
 	// Get the size of TIME SERIES TABLE by system file
 	var tsTableSize int64
 	if tableType == "TIME SERIES TABLE" {
-		storePath := s.server.cfg.Stores.Specs[0].Path
+		storePath := s.server.cfg.TsStores.Specs[0].Path
 		var tablePath string = storePath + "/tsdb/" + strconv.Itoa(int(tableID))
 
 		rootDevNum, err := sysutil.GetDeviceNumber(tablePath)

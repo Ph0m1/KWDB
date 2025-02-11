@@ -125,7 +125,7 @@ func removePreemptiveSnapshot(
 	if err := writeTombstoneKey(ctx, batch, desc.RangeID, desc.NextReplicaID); err != nil {
 		return err
 	}
-	if err := batch.Commit(true); err != nil {
+	if err := batch.Commit(true, storage.NormalCommitType); err != nil {
 		return err
 	}
 	log.Infof(ctx, "removed preemptive snapshot for %v", desc)
@@ -221,7 +221,7 @@ func (r *Replica) destroyRaftMuLocked(ctx context.Context, nextReplicaID roachpb
 	// a synchronous batch first and then delete the data alternatively, but
 	// then need to handle the case in which there is both the tombstone and
 	// leftover replica data.
-	if err := batch.Commit(true); err != nil {
+	if err := batch.Commit(true, storage.NormalCommitType); err != nil {
 		return err
 	}
 

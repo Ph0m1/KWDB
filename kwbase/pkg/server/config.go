@@ -148,6 +148,9 @@ type Config struct {
 	// Stores is specified to enable durable key-value storage.
 	Stores base.StoreSpecList
 
+	// TsStores is specified to enable durable key-value storage.
+	TsStores base.StoreSpecList
+
 	// StorageEngine specifies the engine type (eg. rocksdb, pebble) to use to
 	// instantiate stores.
 	StorageEngine enginepb.EngineType
@@ -511,6 +514,9 @@ func (cfg *Config) CreateEngines(ctx context.Context) (Engines, error) {
 	if cfg.enginesCreated {
 		return Engines{}, errors.Errorf("engines already created")
 	}
+	if cfg.TsStores.Specs == nil {
+		cfg.TsStores = cfg.Stores
+	}
 	cfg.enginesCreated = true
 
 	var details []string
@@ -593,6 +599,7 @@ func (cfg *Config) CreateEngines(ctx context.Context) (Engines, error) {
 			storageConfig := base.StorageConfig{
 				Attrs:           spec.Attributes,
 				Dir:             spec.Path,
+				TsDir:           cfg.TsStores.Specs[i].Path,
 				MaxSize:         sizeInBytes,
 				Settings:        cfg.Settings,
 				UseFileRegistry: spec.UseFileRegistry,
@@ -685,7 +692,7 @@ func (cfg *Config) CreateTsEngine(
 
 	//TODO Use the rocksdb store directory +tsdb suffix
 	tsConfig := tse.TsEngineConfig{
-		Dir:            cfg.Stores.Specs[0].Path + "/tsdb",
+		Dir:            cfg.TsStores.Specs[0].Path + "/tsdb",
 		Settings:       cfg.Settings,
 		ThreadPoolSize: threadPoolSize,
 		TaskQueueSize:  taskQueueSize,

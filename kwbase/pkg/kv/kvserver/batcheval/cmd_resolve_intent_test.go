@@ -182,7 +182,7 @@ func TestResolveIntentAfterPartialRollback(t *testing.T) {
 		if err := storage.MVCCPut(ctx, batch, nil, k, ts, v, &txn); err != nil {
 			t.Fatal(err)
 		}
-		if err := batch.Commit(true); err != nil {
+		if err := batch.Commit(true, storage.NormalCommitType); err != nil {
 			t.Fatal(err)
 		}
 
@@ -245,7 +245,7 @@ func TestResolveIntentAfterPartialRollback(t *testing.T) {
 			}
 		}
 
-		if err := rbatch.Commit(true); err != nil {
+		if err := rbatch.Commit(true, storage.NormalCommitType); err != nil {
 			t.Fatal(err)
 		}
 

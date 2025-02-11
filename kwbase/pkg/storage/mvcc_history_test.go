@@ -892,7 +892,7 @@ func (e *evalCtx) withWriter(cmd string, fn func(_ ReadWriter) error) error {
 		return origErr
 	}
 	if batch != nil {
-		return batch.Commit(true)
+		return batch.Commit(true, NormalCommitType)
 	}
 	return nil
 }

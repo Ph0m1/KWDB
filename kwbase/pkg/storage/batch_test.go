@@ -156,7 +156,7 @@ func testBatchBasics(t *testing.T, writeOnly bool, commit func(e Engine, b Batch
 func TestBatchBasics(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 	testBatchBasics(t, false /* writeOnly */, func(e Engine, b Batch) error {
-		return b.Commit(false /* sync */)
+		return b.Commit(false /* sync */, NormalCommitType)
 	})
 }
 
@@ -344,7 +344,7 @@ func TestBatchRepr(t *testing.T) {
 func TestWriteBatchBasics(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 	testBatchBasics(t, true /* writeOnly */, func(e Engine, b Batch) error {
-		return b.Commit(false /* sync */)
+		return b.Commit(false /* sync */, NormalCommitType)
 	})
 }
 
@@ -401,7 +401,7 @@ func TestApplyBatchRepr(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Intentionally don't call Repr() because the expected user wouldn't.
-				if err := b4.Commit(false /* sync */); err != nil {
+				if err := b4.Commit(false /* sync */, NormalCommitType); err != nil {
 					t.Fatal(err)
 				}
 
@@ -584,7 +584,7 @@ func TestBatchProto(t *testing.T) {
 				t.Fatalf("expected GetProto to fail ok=%t: %+v", ok, err)
 			}
 			// Commit and verify the proto can be read directly from the engine.
-			if err := b.Commit(false /* sync */); err != nil {
+			if err := b.Commit(false /* sync */, NormalCommitType); err != nil {
 				t.Fatal(err)
 			}
 			if ok, _, _, err := e.GetProto(mvccKey("proto"), getVal); !ok || err != nil {
@@ -676,7 +676,7 @@ func TestBatchScan(t *testing.T) {
 			}
 
 			// Now, commit batch and re-scan using engine direct to compare results.
-			if err := b.Commit(false /* sync */); err != nil {
+			if err := b.Commit(false /* sync */, NormalCommitType); err != nil {
 				t.Fatal(err)
 			}
 			for i, scan := range scans {
@@ -1280,7 +1280,7 @@ func TestBatchCombine(t *testing.T) {
 							errs <- errors.Wrap(err, "put failed")
 							return
 						}
-						if err := b.Commit(false); err != nil {
+						if err := b.Commit(false, NormalCommitType); err != nil {
 							errs <- errors.Wrap(err, "commit failed")
 							return
 						}

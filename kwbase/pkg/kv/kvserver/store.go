@@ -2050,7 +2050,7 @@ func (s *Store) WriteHLCUpperBound(ctx context.Context, time int64) error {
 		return err
 	}
 
-	if err := batch.Commit(true /* sync */); err != nil {
+	if err := batch.Commit(true /* sync */, storage.NormalCommitType); err != nil {
 		return err
 	}
 	return nil

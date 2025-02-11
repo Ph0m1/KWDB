@@ -1021,9 +1021,9 @@ func (t *TeeEngineBatch) LogLogicalOp(op MVCCLogicalOpType, details MVCCLogicalO
 }
 
 // Commit implements the Batch interface.
-func (t *TeeEngineBatch) Commit(sync bool) error {
-	err := t.batch1.Commit(sync)
-	err2 := t.batch2.Commit(sync)
+func (t *TeeEngineBatch) Commit(sync bool, commitType BatchCommitType) error {
+	err := t.batch1.Commit(sync, NormalCommitType)
+	err2 := t.batch2.Commit(sync, NormalCommitType)
 	return fatalOnErrorMismatch(t.ctx, err, err2)
 }
 

@@ -150,7 +150,7 @@ func TestCmdClearRangeBytesThreshold(t *testing.T) {
 			}
 
 			// Now ensure that the data is gone, whether it was a ClearRange or individual calls to clear.
-			if err := batch.Commit(true /* commit */); err != nil {
+			if err := batch.Commit(true /* commit */, storage.NormalCommitType); err != nil {
 				t.Fatal(err)
 			}
 			if err := eng.Iterate(startKey, endKey,

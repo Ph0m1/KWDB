@@ -230,7 +230,7 @@ func TestSpanSetBatchBoundaries(t *testing.T) {
 	// Same test in reverse. We commit the batch and wrap an iterator on
 	// the raw engine because we don't support bidirectional iteration
 	// over a pending batch.
-	if err := batch.Commit(true); err != nil {
+	if err := batch.Commit(true, storage.NormalCommitType); err != nil {
 		t.Fatal(err)
 	}
 

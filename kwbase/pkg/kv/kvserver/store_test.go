@@ -3266,7 +3266,7 @@ func TestPreemptiveSnapshotsAreRemoved(t *testing.T) {
 			keys.RangeDescriptorKey(desc.StartKey), hlc.Timestamp{}, desc, nil))
 		_, err := stl.Save(ctx, b, state, stateloader.TruncatedStateUnreplicated)
 		require.NoError(t, err)
-		require.NoError(t, b.Commit(true /* sync */))
+		require.NoError(t, b.Commit(true /* sync */, storage.NormalCommitType))
 	}()
 
 	// Start the store.

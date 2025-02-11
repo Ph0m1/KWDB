@@ -3630,7 +3630,7 @@ func ComputeStatsGo(
 // computeCapacity returns capacity details for the engine's available storage,
 // by querying the underlying file system.
 func computeCapacity(
-	s *cluster.Settings, path string, maxSizeBytes int64,
+	s *cluster.Settings, path string, tsPath string, maxSizeBytes int64,
 ) (roachpb.StoreCapacity, error) {
 	fileSystemUsage := gosigar.FileSystemUsage{}
 	dir := path
@@ -3664,7 +3664,7 @@ func computeCapacity(
 	var totalUsedBytes int64
 	var tsdbUsedBytes int64
 	var relationalUsedBytes int64
-	var tsdbPath = path + "/tsdb/"
+	var tsdbPath = tsPath + "/tsdb/"
 
 	var period = defaultStatsCapacityPeriod // default value is 12
 	if s != nil {

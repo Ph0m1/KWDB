@@ -130,7 +130,7 @@ func loadTestData(dir string, numKeys, numBatches, batchTimeSpan, valueBytes int
 		if scaled := len(keys) / numBatches; (i % scaled) == 0 {
 			if i > 0 {
 				log.Infof(ctx, "committing (%d/~%d)", i/scaled, numBatches)
-				if err := batch.Commit(false /* sync */); err != nil {
+				if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 					return nil, err
 				}
 				batch.Close()
@@ -148,7 +148,7 @@ func loadTestData(dir string, numKeys, numBatches, batchTimeSpan, valueBytes int
 			return nil, err
 		}
 	}
-	if err := batch.Commit(false /* sync */); err != nil {
+	if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 		return nil, err
 	}
 	batch.Close()
@@ -264,7 +264,7 @@ func setupMVCCData(
 		// sstables.
 		if scaled := len(order) / 20; i > 0 && (i%scaled) == 0 {
 			log.Infof(ctx, "committing (%d/~%d)", i/scaled, 20)
-			if err := batch.Commit(false /* sync */); err != nil {
+			if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 				b.Fatal(err)
 			}
 			batch.Close()
@@ -292,7 +292,7 @@ func setupMVCCData(
 			resolveLastIntent(batch, idx)
 		}
 	}
-	if err := batch.Commit(false /* sync */); err != nil {
+	if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 		b.Fatal(err)
 	}
 	batch.Close()
@@ -575,7 +575,7 @@ func runMVCCBatchPut(ctx context.Context, b *testing.B, emk engineMaker, valueSi
 			}
 		}
 
-		if err := batch.Commit(false /* sync */); err != nil {
+		if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 			b.Fatal(err)
 		}
 
@@ -626,7 +626,7 @@ func runMVCCBatchTimeSeries(ctx context.Context, b *testing.B, emk engineMaker, 
 			}
 		}
 
-		if err := batch.Commit(false /* sync */); err != nil {
+		if err := batch.Commit(false /* sync */, NormalCommitType); err != nil {
 			b.Fatal(err)
 		}
 		batch.Close()
@@ -917,7 +917,7 @@ func runMVCCGarbageCollect(
 				}
 			}
 		}
-		if err := batch.Commit(false); err != nil {
+		if err := batch.Commit(false, NormalCommitType); err != nil {
 			b.Fatal(err)
 		}
 		batch.Close()

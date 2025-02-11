@@ -34,20 +34,23 @@ def get_nodes(node_str: str):
         if re.match('c\d+', node):
             ids.append(int(re.sub('c', '', node)))
     return ids
+
+
 def get_args(args_list: str):
     args = args_list.split(':')
     if len(args) < 2:
         return None
     args = args[1]
     args = args.split(' ')
-    args = [re.sub(' ','',arg) for arg in args]
-    args = [re.sub('\n','',arg) for arg in args]
+    args = [re.sub(' ', '', arg) for arg in args]
+    args = [re.sub('\n', '', arg) for arg in args]
     l = []
     for i in range(len(args)):
         arg = args[i]
         if arg != '':
             l.append(arg)
     return l
+
 
 def get_create_table_arg(node_str: str):
     strs = node_str.split(':')
@@ -268,6 +271,48 @@ if __name__ == "__main__":
             cmd = get_sleep_cmd(sql)
             cmds.append(cmd)
             pass
+        elif re.match('-- restart-with-ts-store', sql):
+            # print(sql)
+            node_ids = get_nodes(sql)
+            for node_id in node_ids:
+                if node_id > 5:
+                    url = get_url_for_join(node_id)
+                    store_id = int(url.split(':')[-1]) - 26256
+                    cmd = ' {} {}' \
+                          ' --insecure --listen-addr={}' \
+                          ' --http-addr={}' \
+                          ' --store={}/{}' \
+                          ' --ts-store={}/{}' \
+                          ' --locality=region=CN-100000-0{}' \
+                          ' --pid-file={}/kwbase.pid ' \
+                          ' --external-io-dir={}/extern' \
+                          ' --join={} --background'.format(
+                        kwbin_path, 'start', url, get_http_url_fot_join(node_id), store_dir, 'c' + str(store_id), store_dir,
+                                                                                             'c-ts' + str(store_id),
+                                                                                             "%02d" % node_id,
+                                                                                             store_dir + '/c' + str(
+                                                                                                 store_id), store_dir,
+                        get_url_from_node_id(1))
+                    cmds.append(cmd)
+                else:
+                    url = get_url_from_node_id(node_id)
+                    store_id = int(url.split(':')[-1]) - 26256
+                    cmd = ' {} {}' \
+                          ' --insecure --listen-addr={}' \
+                          ' --http-addr={}' \
+                          ' --store={}/{}' \
+                          ' --ts-store={}/{}' \
+                          ' --locality=region=CN-100000-0{}' \
+                          ' --pid-file={}/kwbase.pid ' \
+                          '--external-io-dir={}/extern' \
+                          ' --join={} --background'.format(
+                        kwbin_path, 'start', url, get_http_url_from_node_id(node_id), store_dir, 'c' + str(store_id),
+                        store_dir, 'c-ts' + str(store_id),
+                                                                                                 "%02d" % node_id,
+                                                                                                 store_dir + '/c' + str(
+                                                                                                     store_id),
+                        store_dir, get_url_from_node_id(1))
+                    cmds.append(cmd)
         elif re.match('-- restart', sql):
             # print(sql)
             node_ids = get_nodes(sql)
@@ -393,27 +438,27 @@ if __name__ == "__main__":
                       "fi".format(kwbin_path, url, node_id, kwbin_path, url, node_id)
                 cmds.append(cmd)
 
-        elif re.match('-- wait-all-replica-health',sql):
+        elif re.match('-- wait-all-replica-health', sql):
             strs = sql.split(':')
             if len(strs) < 2:
                 continue
             ts = strs[1]
-            ts = re.sub('s','',ts)
+            ts = re.sub('s', '', ts)
             # node_ids = get_nodes(sql)
             for node_id in last_exec_node:
                 url = get_url_from_node_id(1)
                 cmd = "count=0;" \
-                  "while [ $({} sql --insecure --host={} " \
-                  "-e \"WITH liveness_and_nodes AS (SELECT node_id AS id, CASE WHEN split_part(expiration, ',', 1)::decimal > now()::decimal AND NOT upgrading THEN true ELSE false END AS is_available, COALESCE(is_live, false) AS is_live, ranges AS gossiped_replicas, decommissioning AS is_decommissioning, draining AS is_draining FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id) ), kv_store_metrics AS (SELECT node_id AS id, sum((metrics->>'replicas.leaders')::DECIMAL)::INT AS replicas_leaders, sum((metrics->>'replicas.leaseholders')::DECIMAL)::INT AS replicas_leaseholders, sum((metrics->>'replicas')::DECIMAL)::INT AS ranges, sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable, sum((metrics->>'ranges.underreplicated')::DECIMAL)::INT AS ranges_underreplicated FROM kwdb_internal.kv_store_status GROUP BY node_id ) select sum(ranges_underreplicated) from kv_store_metrics ;\" --format=raw | grep -v '#' ) -ne 0 ] && [ $count -lt {} ]; do" \
-                  "    count=$((count+1));" \
-                  "    sleep 1;" \
-                  "done\n" \
-                  "if [ $count -ge {} ]; then" \
-                  "    {} sql --insecure --host={} " \
-                  "     -e \"WITH liveness_and_nodes AS (SELECT node_id AS id, CASE WHEN split_part(expiration, ',', 1)::decimal > now()::decimal AND NOT upgrading THEN true ELSE false END AS is_available, COALESCE(is_live, false) AS is_live, ranges AS gossiped_replicas, decommissioning AS is_decommissioning, draining AS is_draining FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id) ), kv_store_metrics AS (SELECT node_id AS id, sum((metrics->>'replicas.leaders')::DECIMAL)::INT AS replicas_leaders, sum((metrics->>'replicas.leaseholders')::DECIMAL)::INT AS replicas_leaseholders, sum((metrics->>'replicas')::DECIMAL)::INT AS ranges, sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable, sum((metrics->>'ranges.underreplicated')::DECIMAL)::INT AS ranges_underreplicated FROM kwdb_internal.kv_store_status GROUP BY node_id ) select sum(ranges_underreplicated) from kv_store_metrics ;;\";" \
-                  "    echo \"wait-all-replica-health timeout after {}s\";" \
-                  "fi;"\
-                    "echo cost $count s".format(kwbin_path, url, ts,ts,kwbin_path, url,ts)
+                      "while [ $({} sql --insecure --host={} " \
+                      "-e \"WITH liveness_and_nodes AS (SELECT node_id AS id, CASE WHEN split_part(expiration, ',', 1)::decimal > now()::decimal AND NOT upgrading THEN true ELSE false END AS is_available, COALESCE(is_live, false) AS is_live, ranges AS gossiped_replicas, decommissioning AS is_decommissioning, draining AS is_draining FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id) ), kv_store_metrics AS (SELECT node_id AS id, sum((metrics->>'replicas.leaders')::DECIMAL)::INT AS replicas_leaders, sum((metrics->>'replicas.leaseholders')::DECIMAL)::INT AS replicas_leaseholders, sum((metrics->>'replicas')::DECIMAL)::INT AS ranges, sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable, sum((metrics->>'ranges.underreplicated')::DECIMAL)::INT AS ranges_underreplicated FROM kwdb_internal.kv_store_status GROUP BY node_id ) select sum(ranges_underreplicated) from kv_store_metrics ;\" --format=raw | grep -v '#' ) -ne 0 ] && [ $count -lt {} ]; do" \
+                      "    count=$((count+1));" \
+                      "    sleep 1;" \
+                      "done\n" \
+                      "if [ $count -ge {} ]; then" \
+                      "    {} sql --insecure --host={} " \
+                      "     -e \"WITH liveness_and_nodes AS (SELECT node_id AS id, CASE WHEN split_part(expiration, ',', 1)::decimal > now()::decimal AND NOT upgrading THEN true ELSE false END AS is_available, COALESCE(is_live, false) AS is_live, ranges AS gossiped_replicas, decommissioning AS is_decommissioning, draining AS is_draining FROM kwdb_internal.gossip_liveness LEFT JOIN kwdb_internal.gossip_nodes USING (node_id) ), kv_store_metrics AS (SELECT node_id AS id, sum((metrics->>'replicas.leaders')::DECIMAL)::INT AS replicas_leaders, sum((metrics->>'replicas.leaseholders')::DECIMAL)::INT AS replicas_leaseholders, sum((metrics->>'replicas')::DECIMAL)::INT AS ranges, sum((metrics->>'ranges.unavailable')::DECIMAL)::INT AS ranges_unavailable, sum((metrics->>'ranges.underreplicated')::DECIMAL)::INT AS ranges_underreplicated FROM kwdb_internal.kv_store_status GROUP BY node_id ) select sum(ranges_underreplicated) from kv_store_metrics ;;\";" \
+                      "    echo \"wait-all-replica-health timeout after {}s\";" \
+                      "fi;" \
+                      "echo cost $count s".format(kwbin_path, url, ts, ts, kwbin_path, url, ts)
                 cmds.append(cmd)
 
         elif re.match('-- wait-clear', sql):

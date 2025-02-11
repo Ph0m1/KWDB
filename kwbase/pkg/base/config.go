@@ -695,6 +695,9 @@ type StorageConfig struct {
 	Attrs roachpb.Attributes
 	// Dir is the data directory for the Pebble instance.
 	Dir string
+
+	// TsDir is the ts data directory for the Pebble instance.
+	TsDir string
 	// If true, creating the instance fails if the target directory does not hold
 	// an initialized instance.
 	//
