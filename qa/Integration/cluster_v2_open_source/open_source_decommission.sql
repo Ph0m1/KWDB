@@ -6,4 +6,5 @@ ALTER RANGE default CONFIGURE ZONE USING ts_merge.days = 24h;
 ALTER RANGE default CONFIGURE ZONE USING constraints = '[]';
 ALTER RANGE default CONFIGURE ZONE USING lease_preferences = '[]';
 -- background-decommission: c4
+-- join: c6
 

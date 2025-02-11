@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"gitee.com/kwbasedb/kwbase/pkg/base"
 	"gitee.com/kwbasedb/kwbase/pkg/server"
 	"gitee.com/kwbasedb/kwbase/pkg/server/serverpb"
 	"gitee.com/kwbasedb/kwbase/pkg/util/contextutil"
@@ -59,6 +60,10 @@ single-node cluster, so the init command is not used in that case.
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	// Sleep for 3 seconds to ensure that the node is ready for initialization.
+	if base.OpenSource {
+		time.Sleep(3 * time.Second)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -324,6 +324,8 @@ if __name__ == "__main__":
                     "%02d" % node_id, store_dir,
                     get_url_from_node_id(1)
                 )
+                if open_source == 'true':
+                    cmd += ' 2>&1 | grep enterprise | tee -a {} > /dev/null'.format(output_file_path)
                 cmds.append(cmd)
         elif re.match('-- decommission', sql):
             node_ids = get_nodes(sql)
