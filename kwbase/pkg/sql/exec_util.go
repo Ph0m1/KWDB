@@ -181,6 +181,11 @@ var ReorderJoinsLimitClusterValue = settings.RegisterValidatedIntSetting(
 	},
 )
 
+// TSInsideOutRowRatio is used to set the number of output rows for the GroupByExpr after push down.
+var TSInsideOutRowRatio = settings.RegisterPublicFloatSetting(
+	"sql.opt.inside_out_row_ratio", "adjust output row of group by in inside-out case", 0.9,
+)
+
 var requireExplicitPrimaryKeysClusterMode = settings.RegisterBoolSetting(
 	"sql.defaults.require_explicit_primary_keys.enabled",
 	"default value for requiring explicit primary keys in CREATE TABLE statements",
@@ -2071,6 +2076,10 @@ func (m *sessionDataMutator) SetReorderJoinsLimit(val int) {
 	m.data.ReorderJoinsLimit = val
 }
 
+func (m *sessionDataMutator) SetInsideOutRowRatio(val float64) {
+	m.data.InsideOutRowRatio = val
+}
+
 func (m *sessionDataMutator) SetMultiModelReorderJoinsLimit(val int) {
 	m.data.MultiModelReorderJoinsLimit = val
 }
@@ -2243,4 +2252,9 @@ func (m *sessionDataMutator) SetMaxPushLimitNumber(val int64) {
 // CanPushSorter set CanPushSorter
 func (m *sessionDataMutator) SetCanPushSorter(val bool) {
 	m.data.CanPushSorter = val
+}
+
+// SetNeedControlIndideOut set NeedControlIndideOut of sessionData.
+func (m *sessionDataMutator) SetNeedControlIndideOut(val bool) {
+	m.data.NeedControlIndideOut = val
 }

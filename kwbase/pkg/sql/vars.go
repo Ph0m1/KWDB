@@ -553,6 +553,28 @@ var varGen = map[string]sessionVar{
 		},
 	},
 
+	`inside_out_row_ratio`: {
+		GetStringVal: makeFloatGetStringValFn(`inside_out_row_ratio`),
+		Set: func(_ context.Context, m *sessionDataMutator, s string) error {
+			b, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return err
+			}
+			if b > 1 {
+				return pgerror.Newf(pgcode.InvalidParameterValue,
+					"cannot set inside_out_row_ratio to a negative value: %f, should be less then 1.0", b)
+			}
+			m.SetInsideOutRowRatio(b)
+			return nil
+		},
+		Get: func(evalCtx *extendedEvalContext) string {
+			return strconv.FormatFloat(evalCtx.SessionData.InsideOutRowRatio, 'f', -1, 64)
+		},
+		GlobalDefault: func(sv *settings.Values) string {
+			return strconv.FormatFloat(TSInsideOutRowRatio.Get(sv), 'f', -1, 64)
+		},
+	},
+
 	// CockroachDB extension.
 	`enable_implicit_select_for_update`: {
 		GetStringVal: makePostgresBoolGetStringValFn(`enable_implicit_select_for_update`),
@@ -1070,6 +1092,23 @@ var varGen = map[string]sessionVar{
 			return "off"
 		},
 	},
+	`need_control_inside_out`: {
+		GetStringVal: makePostgresBoolGetStringValFn(`need_control_inside_out`),
+		Set: func(_ context.Context, m *sessionDataMutator, s string) error {
+			b, err := parsePostgresBool(s)
+			if err != nil {
+				return err
+			}
+			m.SetNeedControlIndideOut(b)
+			return nil
+		},
+		Get: func(evalCtx *extendedEvalContext) string {
+			return formatBoolAsPostgresSetting(evalCtx.SessionData.NeedControlIndideOut)
+		},
+		GlobalDefault: func(sv *settings.Values) string {
+			return "off"
+		},
+	},
 }
 
 const compatErrMsg = "this parameter is currently recognized only for compatibility and has no effect in CockroachDB."
@@ -1202,6 +1241,18 @@ func makeIntGetStringValFn(name string) getStringValFn {
 			return "", err
 		}
 		return strconv.FormatInt(s, 10), nil
+	}
+}
+
+// makeFloatGetStringValFn returns a getStringValFn which allows
+// the user to provide plain float values to a SET variable.
+func makeFloatGetStringValFn(name string) getStringValFn {
+	return func(ctx context.Context, evalCtx *extendedEvalContext, values []tree.TypedExpr) (string, error) {
+		s, err := getFloatVal(&evalCtx.EvalContext, name, values)
+		if err != nil {
+			return "", err
+		}
+		return strconv.FormatFloat(s, 'f', -1, 64), nil
 	}
 }
 

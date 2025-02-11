@@ -91,11 +91,7 @@ func (g *explorerGen) genDispatcher() {
 		if len(rules) > 0 {
 			opTyp := g.md.typeOf(define)
 			format := ""
-			if define.Name == "ScalarGroupBy" || define.Name == "GroupBy" {
-				format = "case *%s: \nif t.IsTSEngine() || walk(t) {\nreturn true}\n return _e.explore%s(state, t, ordinal)\n"
-			} else {
-				format = "case *%s: return _e.explore%s(state, t, ordinal)\n"
-			}
+			format = "case *%s: return _e.explore%s(state, t, ordinal)\n"
 
 			g.w.writeIndent(format, opTyp.name, define.Name)
 		}

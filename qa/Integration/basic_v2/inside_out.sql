@@ -72,6 +72,8 @@ insert into pipec_r.point_info values('a3','ee','a','aa','d','e');
 insert into pipec_r.point_info values('a4','ee','a','aa','d','e');
 insert into pipec_r.point_info values('a5','ee','a','aa','d','e');
 
+set inside_out_row_ratio = 0.9;
+
 -- ts node under Inner-Join is tsscan
 select max(measure_value) from db_pipec.t_point p,pipec_r.station_info s where p.station_sn=s.station_sn;
 explain select max(measure_value) from db_pipec.t_point p,pipec_r.station_info s where p.station_sn=s.station_sn;

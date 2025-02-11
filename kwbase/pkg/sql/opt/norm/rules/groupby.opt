@@ -290,21 +290,6 @@
     $aggregations
 )
 
-[PushAggIntoJoinTSEngineSide, Normalize]
-(GroupBy | ScalarGroupBy
-    $input:*
-    $aggregations:*
-    $groupingPrivate:* &
-        (IsAvailable $newExpr:(TryPushAgg
-              $input
-              $aggregations
-              $groupingPrivate
-            )
-        )
-)
-=>
-(ConstructNewGroupBy $newExpr)
-
 # OptimizeTSTableScanType change ts table scan type to only scan tag table
 # eg:
 # select distinct ptag from tstable;

@@ -44,7 +44,7 @@ func init() {
 // operator.
 func JoinTypeToUseCounter(op Operator) telemetry.Counter {
 	switch op {
-	case InnerJoinOp:
+	case InnerJoinOp, BatchLookUpJoinOp:
 		return sqltelemetry.JoinTypeInnerUseCounter
 	case LeftJoinOp, RightJoinOp:
 		return sqltelemetry.JoinTypeLeftUseCounter

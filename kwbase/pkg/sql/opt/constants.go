@@ -142,6 +142,9 @@ const (
 
 	// ReduceCrossJoinExplore use for avoid exploring invalid cross join.
 	ReduceCrossJoinExplore = 1 << 4
+
+	// OutsideInUseCBO is setted when need CBO opt in outside-in case.
+	OutsideInUseCBO = 1 << 5
 )
 
 // TSOrderedTable ts get ordered table data

@@ -234,20 +234,15 @@ func (o *Optimizer) Optimize() (_ opt.Expr, err error) {
 	// root points to the lowest cost tree by default (rather than the normalized
 	// tree by default.
 	root = o.setLowestCostTree(root, rootProps).(memo.RelExpr)
-	o.mem.SetRoot(root, rootProps)
 	if o.mem.TSSupportAllProcessor() {
 		err = o.mem.CheckWhiteListAndAddSynchronize(&root)
 		if err != nil {
 			return root, err
 		}
-
-		// only OrderGroupBy case should reset root.
-		if o.mem.CheckFlag(opt.OrderGroupBy) {
-			o.mem.SetRoot(root, root.RequiredPhysical())
-		}
 	} else {
 		o.mem.DealTSScan(root.(memo.RelExpr))
 	}
+	o.mem.SetRoot(root, rootProps)
 
 	// Validate there are no dangling references.
 	if !root.Relational().OuterCols.Empty() {

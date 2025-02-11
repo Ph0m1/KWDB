@@ -149,6 +149,13 @@ type SessionData struct {
 
 	// CanPushSorter if set true, can push sorter to ts engine
 	CanPushSorter bool
+
+	// InsideOutRowRatio use for control output rows of groupby in inside out case.
+	InsideOutRowRatio float64
+
+	// NeedControlIndideOut is set when statistical information is inaccurate and then
+	// need adjust output rows of groupby in inside out case.
+	NeedControlIndideOut bool
 }
 
 // DataConversionConfig contains the parameters that influence

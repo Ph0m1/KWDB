@@ -237,6 +237,28 @@ func getIntVal(evalCtx *tree.EvalContext, name string, values []tree.TypedExpr) 
 	return datumAsInt(evalCtx, name, values[0])
 }
 
+func datumAsFloat(evalCtx *tree.EvalContext, name string, value tree.TypedExpr) (float64, error) {
+	val, err := value.Eval(evalCtx)
+	if err != nil {
+		return 0, err
+	}
+	temp := tree.MustBeDDecimal(val)
+	iv, err := temp.Decimal.Float64()
+	if err != nil {
+		err = pgerror.Newf(pgcode.InvalidParameterValue,
+			"parameter %q requires an Float value, parse float failed", name)
+		return 0, err
+	}
+	return float64(iv), nil
+}
+
+func getFloatVal(evalCtx *tree.EvalContext, name string, values []tree.TypedExpr) (float64, error) {
+	if len(values) != 1 {
+		return 0, newSingleArgVarError(name)
+	}
+	return datumAsFloat(evalCtx, name, values[0])
+}
+
 func timeZoneVarGetStringVal(
 	_ context.Context, evalCtx *extendedEvalContext, values []tree.TypedExpr,
 ) (string, error) {

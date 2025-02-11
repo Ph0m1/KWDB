@@ -210,6 +210,9 @@ func (g *exprsGen) genExprStruct(define *lang.DefineExpr) {
 	if opTyp.name == "LimitExpr" {
 		fmt.Fprintf(g.w, "  LimitOptFlag opt.LimitOptType\n")
 	}
+	if opTyp.name == "ProjectExpr" {
+		fmt.Fprintf(g.w, "  IsInsideOut bool\n")
+	}
 
 	if define.Tags.Contains("Scalar") {
 		fmt.Fprintf(g.w, "\n")

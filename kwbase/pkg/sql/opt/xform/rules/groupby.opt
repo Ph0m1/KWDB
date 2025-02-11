@@ -115,3 +115,34 @@
 )
 =>
 (GenerateStreamingGroupBy (OpName) $input $aggs $private)
+
+[PushAggIntoJoinTSEngineSide, Explore]
+(GroupBy 
+    $input:*
+    $aggregations:*
+    $groupingPrivate:* &
+        (IsAvailable $newExpr:(TryPushAgg
+              $input
+              $aggregations
+              $groupingPrivate
+            )
+        )
+)
+=>
+(AddNewExprToGroup $newExpr)
+
+
+[PushScalarAggIntoJoinTSEngineSide, Explore]
+(ScalarGroupBy
+    $input:*
+    $aggregations:*
+    $groupingPrivate:* &
+        (IsAvailable $newExpr:(TryPushAgg
+              $input
+              $aggregations
+              $groupingPrivate
+            )
+        )
+)
+=>
+(AddNewExprToScalarGroup $newExpr)

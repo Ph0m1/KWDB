@@ -227,7 +227,7 @@ func checkTsCompressThreads(encodedValue string) error {
 // checkTsQueryOptMode checks whether the mode value set is valid
 func checkTsQueryOptMode(encodedValue string) error {
 	value, err := strconv.ParseInt(encodedValue, 2, 64)
-	if err != nil || value < 0 || value > 31 {
+	if err != nil || value < 0 || value > 63 {
 		return pgerror.Newf(pgcode.InvalidParameterValue, "invalid value for ts.sql.query_opt_mode")
 	}
 	return nil

@@ -184,6 +184,16 @@ define Project {
     internalFuncDeps FuncDepSet
 }
 
+# BatchLookUpJoin is a special join method used for cross modular computation, 
+# which records information equivalent to innerjoin
+[Relational, Join]
+define BatchLookUpJoin {
+    Left RelExpr
+    Right RelExpr
+    On FiltersExpr
+    _ JoinPrivate
+}
+
 # InnerJoin creates a result set that combines columns from its left and right
 # inputs, based upon its "on" join predicate. Rows which do not match the
 # predicate are filtered. While expressions in the predicate can refer to
@@ -522,6 +532,10 @@ define GroupingPrivate {
 
     # OptFlags flags of group by type, type is opt.GroupOptType
     OptFlags TSGroupOptType
+
+    # IsInsideOut is set when the GroupByExpr or ScalarGroupByExpr is 
+    # contruct in inside-out case, use for adjust output rows.
+    IsInsideOut bool
 }
 
 # ScalarGroupBy computes aggregate functions over the complete set of input

@@ -460,7 +460,8 @@ func (opc *optPlanningCtx) reuseMemo(cachedMemo *memo.Memo) (*memo.Memo, error) 
 
 	opc.optimizer.Memo().TSWhiteListMap = cachedMemo.TSWhiteListMap
 	opc.optimizer.Memo().SetTsDop(cachedMemo.GetTsDop())
-	if opc.optimizer.Memo().QueryType == memo.MultiModel {
+	if opc.optimizer.Memo().QueryType == memo.MultiModel &&
+		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&opc.p.ExecCfg().Settings.SV), opt.OutsideInUseCBO) {
 		opc.optimizer.SetTsRelGroup()
 		opc.optimizer.CheckMultiModel()
 	}
@@ -553,7 +554,8 @@ func (opc *optPlanningCtx) buildExecMemo(
 	}
 
 	// check if the query satisfies the requirements for multiple model processing.
-	if opc.optimizer.Memo().QueryType == memo.MultiModel {
+	if opc.optimizer.Memo().QueryType == memo.MultiModel &&
+		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&opc.p.ExecCfg().Settings.SV), opt.OutsideInUseCBO) {
 		opc.optimizer.SetTsRelGroup()
 		opc.optimizer.CheckMultiModel()
 	}

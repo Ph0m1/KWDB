@@ -433,6 +433,12 @@ func (b *logicalPropsBuilder) buildInnerJoinProps(join *InnerJoinExpr, rel *prop
 	b.buildJoinProps(join, rel)
 }
 
+func (b *logicalPropsBuilder) buildBatchLookUpJoinProps(
+	join *BatchLookUpJoinExpr, rel *props.Relational,
+) {
+	b.buildJoinProps(join, rel)
+}
+
 func (b *logicalPropsBuilder) buildLeftJoinProps(join *LeftJoinExpr, rel *props.Relational) {
 	b.buildJoinProps(join, rel)
 }

@@ -175,6 +175,7 @@ type Memo struct {
 	tsQueryOptMode             int64
 	maxPushLimitNumber         int64
 	tsCanPushSorterToTsEngine  bool
+	insideOutRowRatio          float64
 
 	// curID is the highest currently in-use scalar expression ID.
 	curID opt.ScalarID
@@ -405,6 +406,7 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 	m.insertFastPath = evalCtx.SessionData.InsertFastPath
 	m.maxPushLimitNumber = evalCtx.SessionData.MaxPushLimitNumber
 	m.tsCanPushSorterToTsEngine = evalCtx.SessionData.CanPushSorter
+	m.insideOutRowRatio = evalCtx.SessionData.InsideOutRowRatio
 
 	if evalCtx.Settings != nil {
 		m.tsOrderedScan = opt.TSOrderedTable.Get(&evalCtx.Settings.SV)
@@ -575,6 +577,7 @@ func (m *Memo) IsStale(
 		m.tsQueryOptMode != opt.TSQueryOptMode.Get(&evalCtx.Settings.SV) ||
 		m.tsForcePushGroupToTSEngine == stats.AutomaticTsStatisticsClusterMode.Get(&evalCtx.Settings.SV) ||
 		m.maxPushLimitNumber != evalCtx.SessionData.MaxPushLimitNumber ||
+		m.insideOutRowRatio != evalCtx.SessionData.InsideOutRowRatio ||
 		m.tsCanPushSorterToTsEngine != evalCtx.SessionData.CanPushSorter {
 		return true, nil
 	}
@@ -1994,6 +1997,8 @@ func (m *Memo) checkOtherJoin(source RelExpr) (ret CrossEngCheckResults) {
 	case *AntiJoinExpr:
 		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	case *AntiJoinApplyExpr:
+		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
+	case *BatchLookUpJoinExpr:
 		ret = m.checkOtherJoinChildExpr(s.Left, s.Right)
 	}
 	if ret.err != nil {

@@ -25,6 +25,7 @@
 package xform
 
 import (
+	"context"
 	"math"
 	"math/rand"
 
@@ -195,7 +196,8 @@ func (c *coster) ComputeCost(candidate memo.RelExpr, required *physical.Required
 		opt.SemiJoinApplyOp, opt.AntiJoinApplyOp:
 		// All join ops use hash join by default.
 		cost = c.computeHashJoinCost(candidate)
-
+	case opt.BatchLookUpJoinOp:
+		cost = c.computeBatchLoopUpJoinCost(candidate)
 	case opt.MergeJoinOp:
 		cost = c.computeMergeJoinCost(candidate.(*memo.MergeJoinExpr))
 
@@ -510,7 +512,17 @@ func (c *coster) computeProjectCost(prj *memo.ProjectExpr) memo.Cost {
 
 	// Add the CPU cost of emitting the rows.
 	cost += memo.Cost(rowCount) * cpuCostFactor
-	return cost
+	var insideoutCostFactor memo.Cost = 1.0
+	if prj.IsInsideOut {
+		// need to adjust cost of ProjectExpr in order to choose inside-out.
+		insideoutCostFactor = 0.01
+		if log.V(3) {
+			log.Infof(context.Background(),
+				"computeProjectCost during inside-out, input rows of group is %v, cost of group is %v",
+				rowCount, cost*insideoutCostFactor)
+		}
+	}
+	return cost * insideoutCostFactor
 }
 
 func (c *coster) computeValuesCost(values *memo.ValuesExpr) memo.Cost {
@@ -552,6 +564,58 @@ func (c *coster) computeHashJoinCost(join memo.RelExpr) memo.Cost {
 
 	// TODO(rytaft): Add a constant "setup" cost per extra ON condition similar
 	// to merge join and lookup join.
+	return cost
+}
+
+// computeBatchLoopUpJoinCost return the cost of BatchLoopUpJoin.
+// The cost for a regular HashJoin is cost=(lerf_row*1.24 + right_row*1.75)*0.01 + output_row*0.01,
+// and cost for BatchLoopUpJoin is cost=(output_row*1.24 + relationalRowCount*1.75)*0.01 + output_row*0.01
+// because the calculation process of BatchLoopUpJoin is
+// 1. pull the data of the relationship(small table, always right table)
+// 2. push relationship data down to AE for joining, and pull the joined data up
+// 3. and then output the joined data to other operators
+func (c *coster) computeBatchLoopUpJoinCost(join memo.RelExpr) memo.Cost {
+	if !join.Private().(*memo.JoinPrivate).Flags.Has(memo.AllowHashJoinStoreRight) {
+		return hugeCost
+	}
+	// DisallowHashJoin
+	if join.Private().(*memo.JoinPrivate).HintInfo.DisallowHashJoin {
+		return hugeCost
+	}
+
+	var relationalRowCount, tsRowCount float64
+	if walk(join.Child(0)) {
+		tsRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
+		relationalRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
+	} else {
+		relationalRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
+		tsRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
+	}
+	if tsRowCount/relationalRowCount < 100 {
+		return hugeCost
+	}
+
+	// A hash join must process every row from both tables once.
+	//
+	// We add some factors to account for the hashtable build and lookups. The
+	// right side is the one stored in the hashtable, so we use a larger factor
+	// for that side. This ensures that a join with the smaller right side is
+	// preferred to the symmetric join.
+	//
+	// TODO(rytaft): This is the cost of an in-memory hash join. When a certain
+	// amount of memory is used, distsql switches to a disk-based hash join with
+	// a temp RocksDB store.
+	cost := memo.Cost(1.25*0+1.75*relationalRowCount) * cpuCostFactor
+
+	// Add the CPU cost of emitting the rows.
+	rowsProcessed, ok := c.mem.RowsProcessed(join)
+	if !ok {
+		// This can happen as part of testing. In this case just return the number
+		// of rows.
+		rowsProcessed = join.Relational().Stats.RowCount
+	}
+	cost += memo.Cost(rowsProcessed)*cpuCostFactor + memo.Cost(1.25*rowsProcessed*cpuCostFactor)
+
 	return cost
 }
 
@@ -740,7 +804,19 @@ func (c *coster) computeGroupingCost(grouping memo.RelExpr, required *physical.R
 		cost += hashCost
 	}
 
-	return cost
+	var insideoutCostFactor memo.Cost = 1.0
+	if private.IsInsideOut {
+		// need to adjust cost of GroupBy or ScalarGroupBy in order to choose inside-out.
+		factor := grouping.Relational().Stats.RowCount / inputRowCount
+		insideoutCostFactor = memo.Cost(factor)
+		if log.V(3) {
+			log.Infof(context.Background(),
+				"computeGroupingCost during inside-out, output rows of group is %v, input rows of group is %v, cost of group is %v",
+				grouping.Relational().Stats.RowCount, inputRowCount, cost*insideoutCostFactor)
+		}
+	}
+
+	return cost * insideoutCostFactor
 }
 
 func (c *coster) computeLimitCost(limit *memo.LimitExpr) memo.Cost {

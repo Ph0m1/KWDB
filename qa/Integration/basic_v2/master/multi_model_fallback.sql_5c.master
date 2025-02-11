@@ -169,12 +169,12 @@ ORDER BY si.station_name;
    │                                              | avg                 | avg
    └── sort                                       |                     |
         │                                         | order               | +station_name
-        └── render                                |                     |
-             │                                    | avg                 | sum / sum_int
-             │                                    | station_name        | station_name
-             │                                    | count               | sum_int
-             └── filter                           |                     |
-                  │                               | filter              | sum_int > 0
+        └── filter                                |                     |
+             │                                    | filter              | count > 0
+             └── render                           |                     |
+                  │                               | avg                 | sum / sum_int
+                  │                               | station_name        | station_name
+                  │                               | count               | sum_int
                   └── group                       |                     |
                        │                          | aggregate 0         | station_name
                        │                          | aggregate 1         | sum_int(count)

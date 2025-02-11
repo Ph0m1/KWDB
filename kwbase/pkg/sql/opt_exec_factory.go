@@ -2711,11 +2711,41 @@ func (ef *execFactory) UpdateGroupInput(input *exec.Node) exec.Node {
 	return nil
 }
 
+// deleteSynchronizer delete the added synchronizer to avoid conflicts.
+func deleteSynchronizer(node *planNode) {
+	switch n := (*node).(type) {
+	case *synchronizerNode:
+		*node = n.plan
+	case *renderNode:
+		deleteSynchronizer(&n.source.plan)
+	case *sortNode:
+		deleteSynchronizer(&n.plan)
+	}
+}
+
+// parallelAgg parallel processing of agg executed in AE,
+// and delete the added synchronizer to avoid conflicts.
+func parallelAgg(agg *groupNode) {
+	isDistinct := false
+	for i := 0; i < len(agg.funcs); i++ {
+		f := agg.funcs[i]
+		if f.run.seen != nil {
+			isDistinct = true
+		}
+	}
+	if !isDistinct {
+		deleteSynchronizer(&agg.plan)
+		agg.addSynchronizer = true
+	}
+}
+
 // SetBljRightNode sets the right child of a batchLookUpJoinNode to a groupNode
 // for multiple model processing.
 func (ef *execFactory) SetBljRightNode(node1, node2 exec.Node) exec.Node {
 	if blj, ok := node1.(*batchLookUpJoinNode); ok {
 		if agg, ok := node2.(*groupNode); ok {
+			parallelAgg(agg)
+
 			agg.engine = tree.EngineTypeTimeseries
 			blj.right.plan = agg
 			blj.columns = agg.columns

@@ -159,51 +159,49 @@ FROM pipec_r.station_info si,
 GROUP BY si.station_name
 HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
-                       tree                       |         field         |                  description
---------------------------------------------------+-----------------------+-------------------------------------------------
-                                                  | distributed           | true
-                                                  | vectorized            | false
-  render                                          |                       |
-   │                                              | station_name          | station_name
-   │                                              | count                 | count
-   │                                              | avg                   | avg
-   └── sort                                       |                       |
-        │                                         | order                 | +station_name
-        └── render                                |                       |
-             │                                    | avg                   | sum / sum_int
-             │                                    | station_name          | station_name
-             │                                    | count                 | sum_int
-             └── filter                           |                       |
-                  │                               | filter                | sum_int > 0
-                  └── group                       |                       |
-                       │                          | aggregate 0           | station_name
-                       │                          | aggregate 1           | sum_int(count)
-                       │                          | aggregate 2           | sum(sum)
-                       │                          | aggregate 3           | sum_int(count)
-                       │                          | group by              | station_name
-                       └── cross-join             |                       |
-                            │                     | type                  | cross
-                            ├── scan              |                       |
-                            │                     | table                 | station_info@primary
-                            │                     | spans                 | FULL SCAN
-                            └── cross-join        |                       |
-                                 │                | type                  | cross
-                                 ├── scan         |                       |
-                                 │                | table                 | workarea_info@workarea_name_index
-                                 │                | spans                 | FULL SCAN
-                                 └── group        |                       |
-                                      │           | engine type           | time series
-                                      │           | aggregate 0           | count(measure_value)
-                                      │           | aggregate 1           | sum(measure_value)
-                                      │           | pushLocalAggToScan    | true
-                                      │           | addSynchronizer       | true
-                                      └── ts scan |                       |
-                                                  | ts-table              | t_point
-                                                  | access mode           | metaTable
-                                                  | use statistic         | true
-                                                  |                       |
-  warning messages                                | multi-model fall back | unsupported aggregation function or expression
-(42 rows)
+                       tree                       |        field        |            description
+--------------------------------------------------+---------------------+------------------------------------
+                                                  | distributed         | true
+                                                  | vectorized          | false
+  render                                          |                     |
+   │                                              | station_name        | station_name
+   │                                              | count               | count
+   │                                              | avg                 | avg
+   └── sort                                       |                     |
+        │                                         | order               | +station_name
+        └── filter                                |                     |
+             │                                    | filter              | count > 0
+             └── render                           |                     |
+                  │                               | avg                 | sum / sum_int
+                  │                               | station_name        | station_name
+                  │                               | count               | sum_int
+                  └── group                       |                     |
+                       │                          | aggregate 0         | station_name
+                       │                          | aggregate 1         | sum_int(count)
+                       │                          | aggregate 2         | sum(sum)
+                       │                          | aggregate 3         | sum_int(count)
+                       │                          | group by            | station_name
+                       └── cross-join             |                     |
+                            │                     | type                | cross
+                            ├── scan              |                     |
+                            │                     | table               | station_info@primary
+                            │                     | spans               | FULL SCAN
+                            └── cross-join        |                     |
+                                 │                | type                | cross
+                                 ├── scan         |                     |
+                                 │                | table               | workarea_info@workarea_name_index
+                                 │                | spans               | FULL SCAN
+                                 └── group        |                     |
+                                      │           | engine type         | time series
+                                      │           | aggregate 0         | count(measure_value)
+                                      │           | aggregate 1         | sum(measure_value)
+                                      │           | pushLocalAggToScan  | true
+                                      │           | addSynchronizer     | true
+                                      └── ts scan |                     |
+                                                  | ts-table            | t_point
+                                                  | access mode         | metaTable
+                                                  | use statistic       | true
+(40 rows)
 > explain SELECT si.station_name,
        STDDEV(t.measure_value)
 FROM pipec_r.station_info si,

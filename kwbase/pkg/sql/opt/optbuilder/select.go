@@ -1286,7 +1286,9 @@ func (b *Builder) buildFromTables(
 	// Only do the analysis when the switch is on and the server starts with single node mode
 	// Also only do for the following types of SQLs for multiple model processing.
 	// In future, the restriction may be removed.
-	if b.evalCtx.SessionData.MultiModelEnabled && !b.evalCtx.StartDistributeMode &&
+	if b.evalCtx.SessionData.MultiModelEnabled &&
+		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&b.evalCtx.Settings.SV), opt.OutsideInUseCBO) &&
+		!b.evalCtx.StartDistributeMode &&
 		(b.stmt.StatementTag() == "SELECT" || b.stmt.StatementTag() == "EXPLAIN" ||
 			b.stmt.StatementTag() == "EXPLAIN ANALYZE (DEBUG)" || b.stmt.StatementTag() == "UNION" ||
 			b.stmt.StatementTag() == "INSERT" || b.stmt.StatementTag() == "UPDATE" ||

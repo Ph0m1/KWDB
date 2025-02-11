@@ -25,6 +25,7 @@
 package memo
 
 import (
+	"context"
 	"math"
 	"reflect"
 
@@ -1789,6 +1790,52 @@ func (sb *statisticsBuilder) buildGroupBy(
 			// ones in colStatGroupBy.
 			colStat := sb.copyColStatFromChild(groupingColSet, groupNode, s)
 			s.RowCount = min(colStat.DistinctCount, inputStats.RowCount)
+
+			// Inside-out optimization generates a GroupBy for AE execution.
+			// If there is no statistical information or the statistical information is inaccurate, and
+			// the number of input and output rows of the GroupBy remains unchanged or changes very little,
+			// it is equivalent to the cost of adding an extra layer of GroupBy, and it is impossible to
+			// choose an inside-out plan.
+			// Therefore, it is necessary to adjust the number of output rowCount of the pushed GroupBy
+			// so that cost of Join > cost of Join + cost of GroupBy
+			// cost of join =(lerf_row*1.24 + right_row*1.75)*0.01 + output_row*0.01
+			// cost of GroupBy = output_row*0.01 + input_row*(aggsCount+groupingColCount)*0.01 + hashCost
+			// exp:
+			//		GroupBy				---->     GroupBy
+			//			|							|
+			//       InnerJoin					 InnerJoin
+			//		  /		\					  /		\
+			//		TSScan  Scan			  GroupBy  Scan
+			//									|
+			//								  TSScan
+			// rows of TSScan is 100000, Scan is 1000, if output rows of the GroupBy remains unchanged or changes very little.
+			// cost of GroupBy is 100000*0.01 + 100000*(aggsCount+groupingColCount)*0.01 + 100000*0.01 = ((aggsCount+groupingColCount)*0.01+0.02) * 100000
+			// cost of join is (100000*1.24 + 1000*1.75)*0.01 + output_row*0.01 = 0.0124+ * 100000 + 0.0175*1000 +  output_row*0.01
+			// compare the maximum coefficient ((aggsCount+groupingColCount)*0.01+0.02) always larger than 0.0124, so adjust the cost of GroupBy:
+			// cost = (output_row*0.01 + input_row*(aggsCount+groupingColCount)*0.01 + hashCost) * output_row/input_row,  output_row/input_row default is 0.1
+			// the maximum coefficient will be ((aggsCount+groupingColCount)*0.001+0.002), cost of GroupBy will less than Join in most cases，unless there are
+			// many aggs and grouping cols.
+			if colStat.DistinctCount > inputStats.RowCount*0.1 {
+				if gp, ok := groupNode.Private().(*GroupingPrivate); ok {
+					if gp.IsInsideOut {
+						rowRatio := sb.evalCtx.SessionData.InsideOutRowRatio
+						if relProps.Stats.Available {
+							if sb.evalCtx.SessionData.NeedControlIndideOut {
+								// has statistic case, and statistical information is inaccurate.
+								s.RowCount = inputStats.RowCount * (1 - rowRatio)
+							}
+						} else {
+							// default statistic case.
+							s.RowCount = inputStats.RowCount * (1 - rowRatio)
+						}
+						if log.V(3) {
+							log.Infof(context.Background(),
+								"construct statistics of group by during inside-out, available is %v, need_control_indide_out is %v, inside_out_row_ratio is %v",
+								relProps.Stats.Available, sb.evalCtx.SessionData.NeedControlIndideOut, rowRatio)
+						}
+					}
+				}
+			}
 		}
 	}
 

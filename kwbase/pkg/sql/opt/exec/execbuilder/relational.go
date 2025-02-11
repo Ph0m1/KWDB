@@ -370,6 +370,13 @@ func (b *Builder) buildRelational(e memo.RelExpr) (execPlan, error) {
 	case *memo.TSInsertSelectExpr:
 		ep, err = b.buildTsInsertSelect(t)
 
+	case *memo.BatchLookUpJoinExpr:
+		continueHashJoin := false
+		ep, continueHashJoin, err = b.buildBatchLookUpJoin(e)
+		if continueHashJoin {
+			ep, err = b.buildHashJoin(e)
+		}
+
 	default:
 		switch {
 		case opt.IsSetOp(e):
@@ -377,7 +384,9 @@ func (b *Builder) buildRelational(e memo.RelExpr) (execPlan, error) {
 
 		case opt.IsJoinNonApplyOp(e):
 			// check if we should build batchLookUpJoinNode for multiple model processing.
-			if b.mem.QueryType == memo.MultiModel && shouldBuildBatchLookUpJoin(e, b.mem) {
+			if b.mem.QueryType == memo.MultiModel &&
+				!opt.CheckOptMode(opt.TSQueryOptMode.Get(&b.evalCtx.Settings.SV), opt.OutsideInUseCBO) &&
+				shouldBuildBatchLookUpJoin(e, b.mem) {
 				var continueHashJoin bool
 				ep, continueHashJoin, err = b.buildBatchLookUpJoin(e)
 				if continueHashJoin {
@@ -1389,7 +1398,7 @@ func joinOutputMap(left, right opt.ColMap) opt.ColMap {
 
 func joinOpToJoinType(op opt.Operator) sqlbase.JoinType {
 	switch op {
-	case opt.InnerJoinOp, opt.InnerJoinApplyOp:
+	case opt.InnerJoinOp, opt.InnerJoinApplyOp, opt.BatchLookUpJoinOp:
 		return sqlbase.InnerJoin
 
 	case opt.LeftJoinOp, opt.LeftJoinApplyOp:

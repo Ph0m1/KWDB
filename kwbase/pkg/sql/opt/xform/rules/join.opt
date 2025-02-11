@@ -220,3 +220,23 @@
     (SortFilters (ExtractUnboundConditions $newOn $cols))
     (EmptyJoinPrivate)
 )
+
+[GenerateBatchLookUpJoin, Explore]
+(InnerJoin
+    $left:*
+    $right:*
+    $on:* & (CanApplyOutsideIn $left $right $on)
+    $private:* & (NoCommuteJoinHints $private)
+)
+=>
+(GenerateBatchLookUpJoin $left $right $on $private)
+
+[CommuteBatchLookUpJoin, Explore]
+(BatchLookUpJoin
+    $left:*
+    $right:*
+    $on:*
+    $private:* & (NoCommuteJoinHints $private)
+)
+=>
+(BatchLookUpJoin $right $left $on (CommuteJoinFlags $private))

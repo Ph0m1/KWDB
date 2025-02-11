@@ -49,6 +49,7 @@ extra_float_digits                        0
 force_savepoint_restart                   off
 idle_in_session_timeout                   0
 idle_in_transaction_session_timeout       0
+inside_out_row_ratio                      0.9
 integer_datetimes                         on
 intervalstyle                             postgres
 locality                                  region=test,dc=dc1
@@ -56,6 +57,7 @@ lock_timeout                              0
 max_identifier_length                     128
 max_index_keys                            32
 multi_model_reorder_joins_limit           8
+need_control_inside_out                   off
 node_id                                   1
 optimizer_foreign_keys                    on
 reorder_joins_limit                       4
