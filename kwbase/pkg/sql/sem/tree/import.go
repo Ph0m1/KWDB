@@ -36,6 +36,8 @@ type Import struct {
 	Files      Exprs
 	Options    KVOptions
 	OnlyMeta   bool
+	Settings   bool
+	Users      bool
 }
 
 var _ Statement = &Import{}

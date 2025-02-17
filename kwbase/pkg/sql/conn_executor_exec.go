@@ -992,6 +992,30 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 		if err != nil {
 			return nil
 		}
+		if exp.Settings {
+			if exp.FileFormat != "SQL" {
+				res.SetError(errors.Errorf("unsupported file format:%s while export cluster settings", exp.FileFormat))
+				return nil
+			}
+			// Read the system.settings and Write into clustersetting.sql
+			if err := getClusterSettingSQL(ctx, planner, exp.File.(*tree.StrVal).RawString(), res); err != nil {
+				res.SetError(err)
+				return nil
+			}
+			return nil
+		}
+		if exp.Users {
+			if exp.FileFormat != "SQL" {
+				res.SetError(errors.Errorf("unsupported file format:%s while export users", exp.FileFormat))
+				return nil
+			}
+			// Read the system.users and Write into users.sql
+			if err := getUserSQL(ctx, planner, exp.File.(*tree.StrVal).RawString(), res); err != nil {
+				res.SetError(err)
+				return nil
+			}
+			return nil
+		}
 		// export database
 		if exp.Database != "" && exp.Query == nil {
 			// database audit in exportRelationalAndTsDatabase function,so set auditFlag is false here
@@ -1016,7 +1040,7 @@ func (ex *connExecutor) dispatchToExecutionEngine(
 				// export more than one table can't export metadata
 				// export from select either.
 				if !expOpts.onlyData && exp.Database == "" && onlyOneTable && getTableSelect(stmt.AST) {
-					if err = writeTimeSeriesMeta(ctx, planner, exp.File.(*tree.StrVal).RawString(), tsTable.TableType, res, expOpts.withComment); err != nil {
+					if err = writeTimeSeriesMeta(ctx, planner, exp.File.(*tree.StrVal).RawString(), tsTable.TableType, res, expOpts.withComment, expOpts.withPrivileges); err != nil {
 						res.SetError(err)
 						return nil
 					}

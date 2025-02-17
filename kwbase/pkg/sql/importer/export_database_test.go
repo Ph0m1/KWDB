@@ -53,8 +53,9 @@ func checkDatabaseSqlWithComment(t *testing.T, extIoDir, dbName string) {
 	if !strings.Contains(string(content), str) {
 		t.Fatal(fmt.Errorf("no comment statement was found"))
 	}
-	dbSQL := "CREATE DATABASE " + dbName + ";\n" + "COMMENT ON DATABASE " + dbName + " IS 'DB for comment';\n"
-	if string(content) != dbSQL {
+	dbSQL := "CREATE DATABASE " + dbName + ";\n" + "COMMENT ON DATABASE " + dbName + " IS 'DB for comment';"
+	contentStr := string(content)
+	if contentStr != dbSQL {
 		t.Fatal(fmt.Errorf("invalid content of %s.sql", dbName))
 	}
 }
@@ -66,7 +67,9 @@ func checkSchemaSql(t *testing.T, dbDir, schemaName string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(content) != "CREATE SCHEMA "+schemaName {
+	stmt := "CREATE SCHEMA " + schemaName + ";\n"
+	contentStr := string(content)
+	if contentStr != stmt {
 		t.Fatal(fmt.Errorf("invalid content of schema %s", schemaName))
 	}
 }

@@ -514,7 +514,7 @@ func TestExportNewOptions(t *testing.T) {
 		if _, ok := err.(*os.PathError); !ok && err != nil {
 			t.Fatal(err)
 		}
-		if expected, got := "CREATE TABLE foo (\n\ti INT8 NOT NULL,\n\tx INT8 NULL,\n\ty INT8 NULL,\n\tz INT8 NULL,\n\tCONSTRAINT \"primary\" PRIMARY KEY (i ASC),\n\tINDEX foo_y_idx (y ASC),\n\tFAMILY \"primary\" (i, x, y, z)\n);", string(schema); expected != got {
+		if expected, got := "CREATE TABLE foo (\n\ti INT8 NOT NULL,\n\tx INT8 NULL,\n\ty INT8 NULL,\n\tz INT8 NULL,\n\tCONSTRAINT \"primary\" PRIMARY KEY (i ASC),\n\tINDEX foo_y_idx (y ASC),\n\tFAMILY \"primary\" (i, x, y, z)\n);\n", string(schema); expected != got {
 			t.Fatalf("expected %q, got %q", expected, got)
 		}
 	})

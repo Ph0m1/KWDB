@@ -2179,9 +2179,9 @@ import_stmt:
   {
     $$.val = &tree.Import{CreateFile: $5.expr(), FileFormat: $6, Files: $9.exprs(), Options: $11.kvOptions()}
   }
-| IMPORT TABLE CREATE USING string_or_placeholder
+| IMPORT TABLE CREATE USING string_or_placeholder opt_with_options
     {
-      $$.val = &tree.Import{CreateFile: $5.expr(),OnlyMeta:true}
+      $$.val = &tree.Import{CreateFile: $5.expr(), OnlyMeta:true, Options: $6.kvOptions()}
     }
 | IMPORT TABLE table_name '(' table_elem_list ')' import_format DATA '(' string_or_placeholder_list ')' opt_with_options
   {
@@ -2192,6 +2192,14 @@ import_stmt:
 	{
 		$$.val = &tree.Import{IsDatabase: true, FileFormat: $3, Files: $6.exprs(), Options: $8.kvOptions()}
 	}
+| IMPORT CLUSTER SETTING import_format DATA '(' string_or_placeholder_list ')'
+  {
+    $$.val = &tree.Import{Settings: true, FileFormat: $4, Files: $7.exprs()}
+  }
+| IMPORT USERS import_format DATA '(' string_or_placeholder_list ')'
+  {
+    $$.val = &tree.Import{Users: true, FileFormat: $3, Files: $6.exprs()}
+  }
 | IMPORT INTO table_name import_format DATA '(' string_or_placeholder_list ')' opt_with_options
   {
     name := $3.unresolvedObjectName().ToTableName()
@@ -2234,6 +2242,14 @@ export_stmt:
 	{
 		$$.val = &tree.Export{FileFormat: $3, File: $4.expr(), Database: tree.Name($7), Options: $8.kvOptions()}
 	}
+| EXPORT CLUSTER SETTING TO import_format string_or_placeholder
+  {
+    $$.val = &tree.Export{Settings: true, FileFormat: $5, File: $6.expr()}
+  }
+| EXPORT USERS TO import_format string_or_placeholder
+  {
+    $$.val = &tree.Export{Users: true, FileFormat: $4, File: $5.expr()}
+  }
 | EXPORT error // SHOW HELP: EXPORT
 
 string_or_placeholder:

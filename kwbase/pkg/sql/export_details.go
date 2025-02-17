@@ -35,12 +35,13 @@ import (
 )
 
 type exportOptions struct {
-	csvOpts     roachpb.CSVOptions
-	chunkSize   int
-	onlyMeta    bool
-	onlyData    bool
-	colName     bool
-	withComment bool
+	csvOpts        roachpb.CSVOptions
+	chunkSize      int
+	onlyMeta       bool
+	onlyData       bool
+	colName        bool
+	withComment    bool
+	withPrivileges bool
 }
 
 // checkBeforeExport is used to check some roles of export before running, such as privilege and options.
@@ -58,7 +59,7 @@ func checkBeforeExport(
 		return expOpts, err
 	}
 
-	if exp.FileFormat != "CSV" {
+	if exp.FileFormat != "CSV" && exp.FileFormat != "SQL" {
 		err := errors.Errorf("unsupported export format: %q", exp.FileFormat)
 		res.SetError(err)
 		return expOpts, err
@@ -77,7 +78,7 @@ func checkBeforeExport(
 		res.SetError(err)
 		return expOpts, err
 	}
-	expOpts, err = checkExportOptions(res, opts)
+	expOpts, err = checkExportOptions(exp, res, opts)
 	if err != nil {
 		res.SetError(err)
 		return expOpts, err
@@ -170,9 +171,23 @@ func (ex *connExecutor) dispatchExportDB(
 		}
 		if row[0] != tree.DNull {
 			comments := string(tree.MustBeDString(row[0]))
-			commentSQL := "COMMENT ON DATABASE " + string(exp.Database) + " IS '" + comments + "';" + "\n"
+			commentSQL := "COMMENT ON DATABASE " + string(exp.Database) + " IS '" + comments + "';"
 			sqlDB = sqlDB + "\n" + commentSQL
 			findComment = true
+		}
+	}
+
+	if expOpts.withPrivileges {
+		// get GRANT ON DATABASE
+		dbSQL, err := getDBPrivileges(ctx, planner, DatabaseName)
+		if err != nil {
+			res.SetError(err)
+			return nil
+		}
+		if dbSQL != nil {
+			for _, sql := range dbSQL {
+				sqlDB = sqlDB + "\n" + sql
+			}
 		}
 	}
 
@@ -241,16 +256,30 @@ func (ex *connExecutor) dispatchExportDB(
 				if ContainsUpperCase(schemaName) {
 					schemaName = "\"" + schemaName + "\""
 				}
-				if err = createStmtFunc(
+				sqlSC := "CREATE SCHEMA " + schemaName + ";" + "\n"
+				schemas[string(tbl.SchemaName)] = struct{}{}
+				if expOpts.withPrivileges {
+					// get GRANT ON SCHEMA
+					scSQL, err := getSCPrivileges(ctx, planner, string(tbl.SchemaName), tbl.Catalog())
+					if err != nil {
+						res.SetError(err)
+						return nil
+					}
+					if scSQL != nil {
+						for _, sql := range scSQL {
+							sqlSC = sqlSC + sql + "\n"
+						}
+					}
+				}
+				if err := createStmtFunc(
 					planner.EvalContext().Ctx(),
 					uri.String(),
 					strings.Replace(exportFilePatternSQL, exportFilePatternPart, "meta", -1),
-					"CREATE SCHEMA "+schemaName,
+					sqlSC,
 				); err != nil {
 					res.SetError(err)
 					return nil
 				}
-				schemas[string(tbl.SchemaName)] = struct{}{}
 			}
 		}
 		uri.Path = path.Join(relPath, string(tbl.SchemaName), string(tbl.TableName))
@@ -360,7 +389,7 @@ func getTablesNameByDBWithFindComment(
 
 // checkExportOptions is used to check whether the export options is legal.
 func checkExportOptions(
-	res RestrictedCommandResult, opts map[string]string,
+	exp *tree.Export, res RestrictedCommandResult, opts map[string]string,
 ) (exportOptions, error) {
 	delimiter := ','
 	var expOpts exportOptions
@@ -452,6 +481,18 @@ func checkExportOptions(
 	if hasWithComment {
 		comment = true
 	}
+
+	_, privileges := opts[exportOptionPrivileges]
+
+	if privileges && exp.Database == "" {
+		selectClause, ok := exp.Query.Select.(*tree.SelectClause)
+		if ok {
+			if !selectClause.TableSelect {
+				res.SetError(errors.Errorf("Export permission information does not support select queries"))
+				return expOpts, err
+			}
+		}
+	}
 	optInfo := roachpb.CSVOptions{Comma: delimiter, NullEncoding: &NullEncoding, Enclosed: Enclosed, Escaped: Escaped, Charset: Charset}
 	if err := CheckImpExpInfoConflict(optInfo); err != nil {
 		return expOpts, err
@@ -463,6 +504,7 @@ func checkExportOptions(
 		onlyData,
 		colName,
 		comment,
+		privileges,
 	}
 	return expOpts, nil
 }
@@ -559,6 +601,40 @@ func (ex *connExecutor) dispatchExportTSDB(
 			res.SetError(errors.Errorf("DATABASE or TABLE or COLUMN without COMMENTS cannot be used 'WITH COMMENT'"))
 			return nil
 		}
+
+		if expOpts.withPrivileges {
+			// get GRANT ON DATABASE
+			dbSQL, err := getDBPrivileges(ctx, planner, DatabaseName)
+			if err != nil {
+				res.SetError(err)
+				return nil
+			}
+			if dbSQL != nil {
+				for _, sql := range dbSQL {
+					if _, err = writer.GetBufio().WriteString(sql + "\n"); err != nil {
+						res.SetError(err)
+						return nil
+					}
+				}
+			}
+			for _, tbName := range disTableNames {
+				// get GRANT ON TABLE
+				tbSQL, err := getTBPrivileges(ctx, planner, tbName.TableName.String(), tbName.SchemaName.String(), tbName.CatalogName.String())
+				if err != nil {
+					res.SetError(err)
+					return nil
+				}
+				if tbSQL != nil {
+					for _, sql := range tbSQL {
+						if _, err = writer.GetBufio().WriteString(sql + "\n"); err != nil {
+							res.SetError(err)
+							return nil
+						}
+					}
+				}
+			}
+		}
+
 		writer.Flush()
 		if err = es.WriteFile(ctx, fileName, bytes.NewReader(buf.Bytes())); err != nil {
 			res.SetError(err)

@@ -14,6 +14,7 @@ package importer
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 	"sort"
@@ -54,6 +55,7 @@ import (
 const (
 	csvOptionDelimiter = "delimiter"
 	optionComment      = "comment"
+	optionPrivileges   = "privileges"
 	csvOptionNullIf    = "nullif"
 	csvOptionSkip      = "skip"
 	csvOptionEscaped   = "escaped"
@@ -70,6 +72,7 @@ const (
 var importOptionExpectValues = map[string]sql.KVStringOptValidate{
 	csvOptionDelimiter: sql.KVStringOptRequireValue,
 	optionComment:      sql.KVStringOptRequireNoValue,
+	optionPrivileges:   sql.KVStringOptRequireNoValue,
 	csvOptionNullIf:    sql.KVStringOptRequireValue,
 	csvOptionSkip:      sql.KVStringOptRequireValue,
 	csvOptionEscaped:   sql.KVStringOptRequireValue,
@@ -92,6 +95,18 @@ var importHeader = sqlbase.ResultColumns{
 	{Name: "abandon_rows", Typ: types.String},
 	{Name: "reject_rows", Typ: types.String},
 	{Name: "note", Typ: types.String},
+}
+
+// clusterHeader is the header for IMPORT CLUSTER SETTING stmt results.
+var clusterHeader = sqlbase.ResultColumns{
+	{Name: "prompt_information", Typ: types.String},
+}
+
+// userHeader is the header for IMPORT USER stmt results.
+var userHeader = sqlbase.ResultColumns{
+	{Name: "job_id", Typ: types.String},
+	{Name: "status", Typ: types.String},
+	{Name: "rows", Typ: types.Int},
 }
 
 var escapedMap = map[rune]bool{'"': true, '\\': true}
@@ -137,6 +152,7 @@ func importPlanHook(
 		}
 	}
 	_, hasComment := opts[optionComment]
+	_, withPrivileges := opts[optionPrivileges]
 	_, writeWAL := opts[optionWriteWAL]
 
 	fn := func(ctx context.Context, _ []sql.PlanNode, resultsCh chan<- tree.Datums) error {
@@ -167,14 +183,47 @@ func importPlanHook(
 		var tableDetails []sqlbase.ImportTable
 		var files []string
 		var databaseComment string
+		var privileges []string
 		files, err = filesFn()
 		if err != nil {
 			return err
 		}
+		if importStmt.Settings {
+			if fileFormat.Format != roachpb.IOFileFormat_SQL {
+				return errors.Errorf("unsupported file format:%s while import cluster settings", fileFormat.Format)
+			}
+			// Read the SQL file of cluster parameter settings and execute it
+			if err := execClusterSettingSQL(ctx, p, files[0]); err != nil {
+				return err
+			}
+			resultsCh <- tree.Datums{
+				tree.NewDString("The cluster settings have been set"),
+			}
+			return nil
+		}
+		if importStmt.Users {
+			if len(opts) != 0 {
+				return errors.Errorf("cannot use options while import users or roles")
+			}
+			if fileFormat.Format != roachpb.IOFileFormat_SQL {
+				return errors.Errorf("unsupported file format:%s while import users or roles", fileFormat.Format)
+			}
+			// Read the SQL file of cluster parameter settings and execute it
+			rows, err := execUserSQL(ctx, p, files[0])
+			if err != nil {
+				return err
+			}
+			resultsCh <- tree.Datums{
+				tree.NewDString("-"),
+				tree.NewDString(string(jobs.StatusSucceeded)),
+				tree.NewDInt(tree.DInt(rows)),
+			}
+			return nil
+		}
 		var timeSeriesImport bool
 		// 3.do some check and get tableDetails in different IMPORT
 		if importStmt.IsDatabase {
-			timeSeriesImport, dbName, scNames, tableDetails, databaseComment, err = checkAndGetDetailsInDatabase(ctx, p, files, hasComment)
+			timeSeriesImport, dbName, scNames, tableDetails, databaseComment, privileges, err = checkAndGetDetailsInDatabase(ctx, p, files, hasComment, withPrivileges)
 			if err != nil {
 				return err
 			}
@@ -184,6 +233,9 @@ func importPlanHook(
 			if importStmt.Into {
 				if hasComment {
 					return errors.New("'WITH COMMENT' can only be used for the 'IMPORT CREATE USING' and 'IMPORT DATABASE', the current syntax is 'IMPORT INTO'")
+				}
+				if withPrivileges {
+					return errors.New("'WITH PRIVILEGES' can only be used for the 'IMPORT CREATE USING' and 'IMPORT DATABASE', the current syntax is 'IMPORT INTO'")
 				}
 				var tableDesc *sql.MutableTableDescriptor
 				intoCols := make([]string, 0, len(importStmt.IntoCols))
@@ -236,20 +288,25 @@ func importPlanHook(
 						return err
 					}
 					var hasTableComment bool
+					var hasPrivileges bool
 					if tbCreate.IsTS() {
 						timeSeriesImport = true
-						if dbName, tableDetails, hasTableComment, err = checkAndGetDetailsInTable(ctx, p, stmts, hasComment); err != nil {
+						if dbName, tableDetails, hasTableComment, privileges, hasPrivileges, err = checkAndGetDetailsInTable(ctx, p, stmts, hasComment, withPrivileges); err != nil {
 							return err
 						}
 						// Check if there are comments in SQL
 						if hasComment && !hasTableComment {
 							return errors.New("NO COMMENT statement in the SQL file")
 						}
+						// Check if there are privileges in SQL
+						if withPrivileges && !hasPrivileges {
+							return errors.New("NO GRANT statement in the SQL file")
+						}
 					}
 				}
 				if !timeSeriesImport {
 					// Relation table import table create using / import table tableName(table elements)
-					if dbName, tableDetails, err = checkAndGetDetailsInTableNew(ctx, p, importStmt, createFileFn, hasComment); err != nil {
+					if dbName, tableDetails, privileges, err = checkAndGetDetailsInTableNew(ctx, p, importStmt, createFileFn, hasComment, withPrivileges); err != nil {
 						return err
 					}
 					for _, t := range tableDetails {
@@ -285,6 +342,7 @@ func importPlanHook(
 			OnlyMeta:         importStmt.OnlyMeta,
 			WithComment:      hasComment,
 			DatabaseComment:  databaseComment,
+			Privileges:       privileges,
 			WriteWAL:         writeWAL,
 		}
 		walltime := p.ExecCfg().Clock.Now().WallTime
@@ -333,6 +391,12 @@ func importPlanHook(
 		}
 		err = sj.Run(ctx)
 		return err
+	}
+	if importStmt.Settings {
+		return fn, clusterHeader, nil, false, nil
+	}
+	if importStmt.Users {
+		return fn, userHeader, nil, false, nil
 	}
 	return fn, importHeader, nil, false, nil
 }
@@ -394,11 +458,15 @@ func getImportOpts(p sql.PlanHookState, importStmt *tree.Import) (map[string]str
 
 func getOptsParas(fileFormat string, opts map[string]string) (roachpb.IOFileFormat, error) {
 	ioFileFormat := roachpb.IOFileFormat{}
-	if fileFormat != "CSV" {
+	if fileFormat != "CSV" && fileFormat != "SQL" {
 		return ioFileFormat, unimplemented.Newf("import.format", "unsupported import format: %q", fileFormat)
 	}
 
-	ioFileFormat.Format = roachpb.IOFileFormat_CSV
+	if fileFormat == "CSV" {
+		ioFileFormat.Format = roachpb.IOFileFormat_CSV
+	} else {
+		ioFileFormat.Format = roachpb.IOFileFormat_SQL
+	}
 	// Set the default CSV separator for the cases when it is not overwritten.
 	ioFileFormat.Csv.Comma = ','
 	ioFileFormat.Csv.Enclosed = '"'
@@ -674,6 +742,37 @@ func (r *importResumer) relationalResume(
 		if err := r.publishTables(ctx, cfg); err != nil {
 			return err
 		}
+		// Add COMMENT to the database
+		if details.DatabaseComment != "" {
+			if err := execCommentOnMeta(ctx, p, details.DatabaseComment, details.DatabaseName); err != nil {
+				return err
+			}
+		}
+		// Add COMMENT to the table
+		for _, table := range details.Tables {
+			if table.IsNew {
+				if table.TableComment != "" {
+					if err := execCommentOnMeta(ctx, p, table.TableComment, details.DatabaseName); err != nil {
+						return err
+					}
+				}
+				// Add COMMENT to the column
+				if table.ColumnComment != nil {
+					for _, colComment := range table.ColumnComment {
+						if err := execCommentOnMeta(ctx, p, colComment, details.DatabaseName); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+
+		// Exec Privileges statement
+		if details.Privileges != nil {
+			if err := execPrivilegesSQL(ctx, p, details.Privileges, strings.Trim(details.DatabaseName, "\"")); err != nil {
+				return err
+			}
+		}
 		showResult(resultsCh, *r.job.ID(), r.res.Rows, 0, 0, false)
 		return nil
 	}
@@ -790,6 +889,13 @@ func (r *importResumer) relationalResume(
 					}
 				}
 			}
+		}
+	}
+
+	// Exec Privileges statement
+	if details.Privileges != nil {
+		if err := execPrivilegesSQL(ctx, p, details.Privileges, strings.Trim(details.DatabaseName, "\"")); err != nil {
+			return err
 		}
 	}
 
@@ -988,6 +1094,13 @@ func (r *importResumer) prepareTSTableDescsForIngestion(
 			}
 		}
 	}
+	// Exec Privileges statement
+	if details.Privileges != nil {
+		if err = execPrivilegesSQL(ctx, p, details.Privileges, strings.Trim(details.DatabaseName, "\"")); err != nil {
+			return err
+		}
+	}
+
 	return p.ExecCfg().DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
 		defer p.ExecCfg().InternalExecutor.SetSessionData(new(sessiondata.SessionData))
 		importDetails := details
@@ -1240,8 +1353,10 @@ func (r *importResumer) dropTables(
 			}
 		}
 		// Set all table states to public before dropping
-		if err := setTableStatePublic(ctx, txn, b, *tbl.Desc); err != nil {
-			return err
+		if !details.TablesPublished {
+			if err := setTableStatePublic(ctx, txn, b, *tbl.Desc); err != nil {
+				return err
+			}
 		}
 	}
 	if err := txn.Run(ctx, b); err != nil {
@@ -1299,4 +1414,114 @@ func init() {
 			}
 		},
 	)
+}
+
+// Read clustersetting.sql files, check file contents, execute SQL statements
+func execClusterSettingSQL(ctx context.Context, p sql.PlanHookState, s string) error {
+	es, err := p.ExecCfg().DistSQLSrv.ExternalStorageFromURI(ctx, s)
+	if err != nil {
+		return err
+	}
+	defer es.Close()
+	f, err := es.ReadFile(ctx, "")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	settingStr, err := ioutil.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	stmts, err := parser.Parse(string(settingStr))
+	if err != nil {
+		return err
+	}
+	// Check the syntax in the SQL file
+	for i := range stmts {
+		// SET CLUSTER SETTING
+		if _, ok := stmts[i].AST.(*tree.SetClusterSetting); ok {
+			_, err = p.ExecCfg().InternalExecutor.Exec(
+				ctx, "import_settings", nil,
+				stmts[i].SQL,
+			)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		return errors.Errorf("The cluster setting file does not exist in the path :%s", s)
+	}
+	return nil
+}
+
+// Read user.sql files, check file contents, execute SQL statements
+func execUserSQL(ctx context.Context, p sql.PlanHookState, s string) (int, error) {
+	es, err := p.ExecCfg().DistSQLSrv.ExternalStorageFromURI(ctx, s)
+	var row int
+	if err != nil {
+		return row, err
+	}
+	defer es.Close()
+	f, err := es.ReadFile(ctx, "")
+	if err != nil {
+		return row, errors.Errorf("The sql file does not exist in the path: %s", s)
+	}
+	defer f.Close()
+	userStr, err := ioutil.ReadAll(f)
+	if err != nil {
+		return row, err
+	}
+	stmts, err := parser.Parse(string(userStr))
+	if err != nil {
+		return row, err
+	}
+	if err := p.ExecCfg().DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+		// Check the syntax in the SQL file
+		for i := range stmts {
+			// CREATE USER / CREATE ROLE
+			if _, ok := stmts[i].AST.(*tree.CreateRole); ok {
+				_, err = p.ExecCfg().InternalExecutor.Exec(
+					ctx, "import_users", txn,
+					stmts[i].SQL,
+				)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			// GRANT TO
+			if _, ok := stmts[i].AST.(*tree.GrantRole); ok {
+				_, err = p.ExecCfg().InternalExecutor.Exec(
+					ctx, "import_grant", txn,
+					stmts[i].SQL,
+				)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			return errors.Errorf("The SQL statement in file :%s must be CREATE USER or CREATE ROLE or GRANT TO", s)
+		}
+		return nil
+	}); err != nil {
+		return row, err
+	}
+	return len(stmts), nil
+}
+
+// execCreateTableMeta exec grant to sql use InternalExecutor.
+func execPrivilegesSQL(
+	ctx context.Context, p sql.PlanHookState, privileges []string, dbName string,
+) error {
+	return p.ExecCfg().DB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+		p.ExecCfg().InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: dbName})
+		defer p.ExecCfg().InternalExecutor.SetSessionData(new(sessiondata.SessionData))
+		for _, privilege := range privileges {
+			_, err := p.ExecCfg().InternalExecutor.Exec(ctx, "create privileges", txn, privilege)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

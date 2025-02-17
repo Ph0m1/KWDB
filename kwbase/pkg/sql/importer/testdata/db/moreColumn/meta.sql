@@ -3,4 +3,4 @@ CREATE TABLE t2 (
 	name STRING NULL,
 	score INT4 NULL,
 	FAMILY "primary" (id, name, score, rowid)
-)
+);

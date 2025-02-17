@@ -61,7 +61,8 @@ func checkAndGetDetailsInTableNew(
 	importStmt *tree.Import,
 	createFileFn func() (string, error),
 	OptComment bool,
-) (string, []sqlbase.ImportTable, error) {
+	withPrivileges bool,
+) (string, []sqlbase.ImportTable, []string, error) {
 	var create *tree.CreateTable
 	var table *tree.TableName
 	var tableDetails []sqlbase.ImportTable
@@ -69,6 +70,8 @@ func checkAndGetDetailsInTableNew(
 	var dbName string
 	var createFile bool
 	var hasTableComment bool
+	var hasPrivileges bool
+	var privileges []string
 	// 1.IMPORT gets create stmt from createDefs or create file.
 	if importStmt.CreateDefs != nil { /* Specify the table structure when importing */
 		create = &tree.CreateTable{
@@ -80,40 +83,44 @@ func checkAndGetDetailsInTableNew(
 		createFile = true
 		sqlFile, err := createFileFn()
 		if err != nil {
-			return "", tableDetails, err
+			return "", tableDetails, nil, err
 		}
 		stmts, err = readCreateTableFromStore(ctx, sqlFile, p.ExecCfg().DistSQLSrv.ExternalStorageFromURI)
 		if err != nil {
-			return "", tableDetails, err
+			return "", tableDetails, nil, err
 		}
 		create, _ = stmts[0].AST.(*tree.CreateTable)
 		table = &create.Table
 	}
 	if err := checkCreateTableLegal(ctx, create); err != nil {
-		return "", tableDetails, err
+		return "", tableDetails, nil, err
 	}
 	// 2.We have a target table, so it might specify a DB in its name.
 	descI, err := checkDatabaseExist(ctx, p, table)
 	if err != nil {
-		return "", tableDetails, err
+		return "", tableDetails, nil, err
 	}
 	// 3.If this is a non-INTO import that will thus be making a new table, we
 	// need the CREATE priv in the target DB.
 	dbDesc := descI.(*sqlbase.ResolvedObjectPrefix).Database
 	if err := p.CheckPrivilege(ctx, &dbDesc, privilege.CREATE); err != nil {
-		return "", tableDetails, err
+		return "", tableDetails, nil, err
 	}
 	if !createFile {
 		tableDetails = []sqlbase.ImportTable{{Create: create.String(), IsNew: true, SchemaName: table.Schema(), TableName: table.Table()}}
-		return dbDesc.Name, tableDetails, nil
+		return dbDesc.Name, tableDetails, nil, nil
 	}
-	if dbName, tableDetails, hasTableComment, err = checkAndGetDetailsInTable(ctx, p, stmts, OptComment); err != nil {
-		return "", tableDetails, err
+	if dbName, tableDetails, hasTableComment, privileges, hasPrivileges, err = checkAndGetDetailsInTable(ctx, p, stmts, OptComment, withPrivileges); err != nil {
+		return "", tableDetails, nil, err
 	}
 	if OptComment && !hasTableComment {
-		return "", tableDetails, errors.New("NO COMMENT statement in the TABLE SQL file")
+		return "", tableDetails, nil, errors.New("NO COMMENT statement in the TABLE SQL file")
 	}
-	return dbName, tableDetails, err
+	// Check if there are privileges in SQL
+	if withPrivileges && !hasPrivileges {
+		return "", tableDetails, nil, errors.New("NO GRANT statement in the SQL file")
+	}
+	return dbName, tableDetails, privileges, err
 }
 
 // readCreateTableFromStore read meta.sql at target path and parse it to stmts.
@@ -238,17 +245,23 @@ func checkTableMetaFile(
 
 // checkAndGetDetailsInTable generate ts tables' tableDetails and return.
 func checkAndGetDetailsInTable(
-	ctx context.Context, p sql.PlanHookState, stmts parser.Statements, OptComment bool,
-) (string, []sqlbase.ImportTable, bool, error) {
+	ctx context.Context,
+	p sql.PlanHookState,
+	stmts parser.Statements,
+	OptComment bool,
+	withPrivileges bool,
+) (string, []sqlbase.ImportTable, bool, []string, bool, error) {
 	tbCreate, _ := stmts[0].AST.(*tree.CreateTable)
 	prefix, err := sql.ResolveTargetObject(ctx, p, &tbCreate.Table)
 	if err != nil {
-		return "", nil, false, err
+		return "", nil, false, nil, false, err
 	}
 	dbName := prefix.Database.Name
 	var tableDetails []sqlbase.ImportTable
 	// Gets information about all instance tables in the template table's meta.sql.
 	var hasComment bool
+	var hasPrivileges bool
+	var privileges []string
 	for i, stmt := range stmts {
 		if tb, ok := stmt.AST.(*tree.CreateTable); ok {
 			var columnName []string
@@ -273,7 +286,7 @@ func checkAndGetDetailsInTable(
 			if comment {
 				n, hasTable := isTableCreated(tableComment.Table.ToTableName().TableName, tableDetails)
 				if !hasTable {
-					return "", nil, false, errors.New("The table for COMMENT ON was not created")
+					return "", nil, false, nil, false, errors.New("The table for COMMENT ON was not created")
 				}
 				tableDetails[n].TableComment = stmts[i].SQL
 				hasComment = true
@@ -285,19 +298,28 @@ func checkAndGetDetailsInTable(
 			if comment {
 				n, hasTable := isTableCreated(columnComment.TableName.ToTableName().TableName, tableDetails)
 				if !hasTable {
-					return "", nil, false, errors.New("The table containing this column for COMMENT has not been created")
+					return "", nil, false, nil, false, errors.New("The table containing this column for COMMENT has not been created")
 				}
 				hasColumn := isColumnCreated(columnComment.ColumnName, tableDetails[n])
 				if !hasColumn {
-					return "", nil, false, errors.New("The column for COMMENT ON was not created")
+					return "", nil, false, nil, false, errors.New("The column for COMMENT ON was not created")
 				}
 				tableDetails[n].ColumnComment = append(tableDetails[n].ColumnComment, stmts[i].SQL)
 				hasComment = true
 				continue
 			}
 		}
+		// Check and obtain comments in the SQL file if WITH Privileges
+		if withPrivileges {
+			// Check if there is a GRANT statement
+			_, ok := stmts[i].AST.(*tree.Grant)
+			if ok {
+				privileges = append(privileges, stmts[i].SQL)
+			}
+			hasPrivileges = true
+		}
 	}
-	return dbName, tableDetails, hasComment, nil
+	return dbName, tableDetails, hasComment, privileges, hasPrivileges, nil
 }
 
 // execCreateTableMeta exec create table sql use InternalExecutor.

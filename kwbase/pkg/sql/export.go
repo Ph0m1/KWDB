@@ -39,6 +39,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/rowcontainer"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/cloud"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
@@ -86,6 +87,7 @@ const (
 	exportOptionColumnsName = "column_name"
 	exportOptionCharset     = "charset"
 	exportOptionComment     = "comment"
+	exportOptionPrivileges  = "privileges"
 )
 
 var exportOptionExpectValues = map[string]KVStringOptValidate{
@@ -100,6 +102,7 @@ var exportOptionExpectValues = map[string]KVStringOptValidate{
 	exportOptionColumnsName: KVStringOptRequireNoValue,
 	exportOptionCharset:     KVStringOptRequireValue,
 	exportOptionComment:     KVStringOptRequireNoValue,
+	exportOptionPrivileges:  KVStringOptRequireNoValue,
 }
 
 // ExportChunkSizeDefault The default limit for the number of rows in an exported file
@@ -107,6 +110,9 @@ const ExportChunkSizeDefault = 100000
 const exportFilePatternPart = "%part%"
 const exportFilePatternDefault = exportFilePatternPart + ".csv"
 const exportFilePatternSQL = exportFilePatternPart + ".sql"
+
+const createUser = "CREATE USER "
+const createRole = "CREATE ROLE "
 
 // ConstructExport is part of the exec.Factory interface.
 func (ef *execFactory) ConstructExport(
@@ -158,8 +164,9 @@ func (ef *execFactory) ConstructExport(
 		IgnoreCheckComment = exp.IgnoreCheckComment
 	}
 	_, withComment := optVals[exportOptionComment]
+	_, withPrivileges := optVals[exportOptionPrivileges]
 	if !onlyData {
-		if err := ef.writeCreateFile(input, string(*fileNameStr), fk, withComment, IgnoreCheckComment); err != nil {
+		if err := ef.writeCreateFile(input, string(*fileNameStr), fk, withComment, withPrivileges, IgnoreCheckComment); err != nil {
 			return nil, err
 		}
 	}
@@ -252,13 +259,18 @@ func (ef *execFactory) ConstructExport(
 
 // writeCreateFile is used to check time series table and call the func writeRelationalMeta to write relational meta.
 func (ef *execFactory) writeCreateFile(
-	input exec.Node, file string, foreignKey bool, withComment bool, IgnoreCheckComment bool,
+	input exec.Node,
+	file string,
+	foreignKey bool,
+	withComment bool,
+	withPrivileges bool,
+	IgnoreCheckComment bool,
 ) error {
 	// Get params from ef and input node.
 	p := ef.planner
 	ctx := p.EvalContext().Ctx()
 	if _, ok := input.(*scanNode); ok {
-		return writeRelationalMeta(ctx, p, input, file, foreignKey, withComment, IgnoreCheckComment)
+		return writeRelationalMeta(ctx, p, input, file, foreignKey, withComment, withPrivileges, IgnoreCheckComment)
 	}
 	// judge ts
 	if mergeNode, ok := input.(*synchronizerNode); ok {
@@ -284,6 +296,7 @@ func writeRelationalMeta(
 	file string,
 	foreignKey bool,
 	withComment bool,
+	withPrivileges bool,
 	IgnoreCheckComment bool,
 ) error {
 	desc := input.(*scanNode).desc.TableDesc()
@@ -328,14 +341,379 @@ func writeRelationalMeta(
 			return errors.Errorf("TABLE or COLUMN without COMMENTS cannot be used 'WITH COMMENT'")
 		}
 	}
-	if _, err := writer.GetBufio().WriteString(create + ";"); err != nil {
+	if _, err := writer.GetBufio().WriteString(create + ";" + "\n"); err != nil {
 		return err
+	}
+	if withPrivileges {
+		// get GRANT ON TABLE
+		tbSQL, err := getTBPrivileges(ctx, p, p.tableName.TableName.String(), p.tableName.SchemaName.String(), p.tableName.CatalogName.String())
+		if err != nil {
+			return err
+		}
+		if tbSQL != nil {
+			for _, sql := range tbSQL {
+				if _, err := writer.GetBufio().WriteString(sql + "\n"); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	writer.Flush()
 	bufBytes := buf.Bytes()
 	part := "meta"
 	filename := strings.Replace(exportFilePatternSQL, exportFilePatternPart, part, -1)
 	return es.WriteFile(ctx, filename, bytes.NewReader(bufBytes))
+}
+
+func getDBPrivileges(ctx context.Context, p *planner, database string) ([]string, error) {
+	// set sessionData
+	p.ExtendedEvalContext().ExecCfg.InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: strings.Trim(database, "\"")})
+	defer p.ExtendedEvalContext().ExecCfg.InternalExecutor.SetSessionData(new(sessiondata.SessionData))
+	dbPrivQuery := `
+SELECT table_catalog AS database_name,
+       table_schema AS schema_name,
+       grantee,
+       privilege_type
+FROM ` + database + `.` + `information_schema.schema_privileges 
+WHERE table_schema = 'information_schema' and grantee != 'admin' and grantee != 'root'`
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "select database grants", nil, dbPrivQuery)
+	if err != nil {
+		return nil, err
+	}
+	var dbSQL []string
+	for _, grantRow := range row {
+		/*
+			  database_name |    schema_name     | grantee | privilege_type
+			----------------+--------------------+---------+-----------------
+			  ys            | information_schema | u1      | SELECT
+		*/
+		dbName := strings.Trim(grantRow[0].String(), "'")
+		userName := strings.Trim(grantRow[2].String(), "'")
+		privilegeType := strings.Trim(grantRow[3].String(), "'")
+		if ContainsUpperCase(dbName) {
+			dbName = "\"" + dbName + "\""
+		}
+		if ContainsUpperCase(userName) {
+			userName = "\"" + userName + "\""
+		}
+		create := fmt.Sprintf(`GRANT %s ON DATABASE %s TO %s;`, privilegeType, dbName, userName)
+		dbSQL = append(dbSQL, create)
+	}
+	return dbSQL, nil
+}
+
+func getSCPrivileges(
+	ctx context.Context, p *planner, schema string, database string,
+) ([]string, error) {
+	p.ExtendedEvalContext().ExecCfg.InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: strings.Trim(database, "\"")})
+	defer p.ExtendedEvalContext().ExecCfg.InternalExecutor.SetSessionData(new(sessiondata.SessionData))
+	scPrivQuery := `
+SELECT table_catalog AS database_name,
+       table_schema AS schema_name,
+       grantee,
+       privilege_type
+FROM "` + database + `".` + `information_schema.schema_privileges 
+WHERE table_schema = '` + schema + `' and grantee != 'admin' and grantee != 'root'`
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "select schema grants", nil, scPrivQuery)
+	if err != nil {
+		return nil, err
+	}
+	var scSQL []string
+	for _, grantRow := range row {
+		/*
+			  database_name | schema_name | grantee | privilege_type
+			----------------+-------------+---------+-----------------
+			  YS            | SC          | r1      | DELETE
+		*/
+		scName := strings.Trim(grantRow[1].String(), "'")
+		userName := strings.Trim(grantRow[2].String(), "'")
+		privilegeType := strings.Trim(grantRow[3].String(), "'")
+		if ContainsUpperCase(scName) {
+			scName = "\"" + scName + "\""
+		}
+		if ContainsUpperCase(userName) {
+			userName = "\"" + userName + "\""
+		}
+		create := fmt.Sprintf(`GRANT %s ON SCHEMA %s TO %s;`, privilegeType, scName, userName)
+		scSQL = append(scSQL, create)
+	}
+	return scSQL, nil
+}
+
+func getTBPrivileges(
+	ctx context.Context, p *planner, table string, schema string, database string,
+) ([]string, error) {
+	searchPath := sessiondata.SetSearchPath(p.CurrentSearchPath(), []string{strings.Trim(schema, "\"")})
+	p.ExtendedEvalContext().ExecCfg.InternalExecutor.SetSessionData(&sessiondata.SessionData{Database: strings.Trim(database, "\""), SearchPath: searchPath})
+	defer p.ExtendedEvalContext().ExecCfg.InternalExecutor.SetSessionData(new(sessiondata.SessionData))
+	tablePrivQuery := `
+SELECT table_catalog AS database_name,
+       table_schema AS schema_name,
+       table_name,
+       grantee,
+       privilege_type 
+FROM "` + database + `".information_schema.table_privileges 
+WHERE table_schema = '` + schema + `' and table_name = '` + table + `' and grantee != 'admin' and grantee != 'root'; `
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "select table grants", nil, tablePrivQuery)
+	if err != nil {
+		return nil, err
+	}
+	var tbSQL []string
+	for _, grantRow := range row {
+		/*
+			  database_name | schema_name | table_name | grantee | privilege_type
+			----------------+-------------+------------+---------+-----------------
+			  YS            | SC          | T          | r1      | INSERT
+			  YS            | SC          | T          | u1      | SELECT
+		*/
+		dbName := strings.Trim(grantRow[0].String(), "'")
+		scName := strings.Trim(grantRow[1].String(), "'")
+		tbName := strings.Trim(grantRow[2].String(), "'")
+		userName := strings.Trim(grantRow[3].String(), "'")
+		privilegeType := strings.Trim(grantRow[4].String(), "'")
+		if ContainsUpperCase(dbName) {
+			dbName = "\"" + dbName + "\""
+		}
+		if ContainsUpperCase(scName) {
+			scName = "\"" + scName + "\""
+		}
+		if ContainsUpperCase(tbName) {
+			tbName = "\"" + tbName + "\""
+		}
+		if ContainsUpperCase(userName) {
+			userName = "\"" + userName + "\""
+		}
+		create := fmt.Sprintf(`GRANT %s ON TABLE %s.%s.%s TO %s;`, privilegeType, dbName, scName, tbName, userName)
+		tbSQL = append(tbSQL, create)
+	}
+	return tbSQL, nil
+}
+
+// Get cluster_setting from system.settings. Write them into clustersetting.sql
+func getClusterSettingSQL(
+	ctx context.Context, p *planner, file string, res RestrictedCommandResult,
+) error {
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+	conf, err := cloud.ExternalStorageConfFromURI(file)
+	if err != nil {
+		return err
+	}
+	es, err := p.execCfg.DistSQLSrv.ExternalStorage(ctx, conf)
+	if err != nil {
+		return err
+	}
+	defer es.Close()
+	selectStmt := fmt.Sprintf("SELECT * FROM system.settings")
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "select cluster setting statement", nil, selectStmt)
+	if err != nil {
+		return err
+	}
+	var rows int
+	for _, clusterRow := range row {
+		if clusterRow[0].String() == "'cluster.secret'" || clusterRow[0].String() == "'diagnostics.reporting.enabled'" || clusterRow[0].String() == "'version'" {
+			continue
+		}
+		clusterName := strings.Trim(clusterRow[0].String(), "'")
+		value := strings.Trim(clusterRow[1].String(), "'")
+		cluster := fmt.Sprintf(`SET CLUSTER SETTING %s = '%s'`, clusterName, value)
+		if _, err := writer.GetBufio().WriteString(cluster + ";" + "\n"); err != nil {
+			return err
+		}
+		rows++
+	}
+
+	// Write cluster_setting to a file.
+	writer.Flush()
+	part := "clustersetting"
+	filename := strings.Replace(exportFilePatternSQL, exportFilePatternPart, part, -1)
+	if err := es.WriteFile(ctx, filename, bytes.NewReader(buf.Bytes())); err != nil {
+		return err
+	}
+	var result tree.Datums
+	result = tree.Datums{
+		tree.NewDString("CLUSTER SETTING"),
+		tree.NewDInt(tree.DInt(rows)),
+		tree.NewDInt(tree.DInt(p.ExtendedEvalContext().NodeID)),
+		tree.NewDInt(tree.DInt(1)),
+	}
+	res.SetColumns(ctx, sqlbase.ExportColumns)
+	if err := res.AddRow(ctx, result); err != nil {
+		res.AppendNotice(err)
+	}
+	return nil
+}
+
+// Get user/role from system.users. Write them into users.sql
+func getUserSQL(ctx context.Context, p *planner, file string, res RestrictedCommandResult) error {
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+	conf, err := cloud.ExternalStorageConfFromURI(file)
+	if err != nil {
+		return err
+	}
+	es, err := p.execCfg.DistSQLSrv.ExternalStorage(ctx, conf)
+	if err != nil {
+		return err
+	}
+	defer es.Close()
+	// get username and rolename
+	sysUserName, sysRoleName, err := getUserAndRoleFromSysUsers(ctx, p)
+	if err != nil {
+		return err
+	}
+	// get username, options, member_of
+	userOptionMap, err := getUserAndMemberFromSysMembers(ctx, p)
+	if err != nil {
+		return err
+	}
+	var createStmt string
+	// Splicing the SQL statements of CREATE USER and writing them to a file
+	for _, username := range sysUserName {
+		option := userOptionMap[username]
+		/*
+			  username |                    options                     | member_of
+			-----------+------------------------------------------------+------------
+			  u2       | NOLOGIN, VALID UNTIL=2025-01-16 00:00:00+00:00 | {}
+
+			CREATE USER u2 ---> WITH ---> NOLOGIN ---> VALID UNTIL---> '2025-01-16 00:00:00+00:00'
+		*/
+		if option == "" {
+			createStmt = fmt.Sprintf(createUser + username)
+		} else {
+			parts := strings.Split(option, ",")
+			withOption := " WITH "
+			for _, options := range parts {
+				index := strings.Index(options, "=")
+				if index == -1 {
+					withOption = fmt.Sprintf(withOption + options)
+				} else {
+					withOption = fmt.Sprintf(withOption + options[:index] + " '" + options[index+1:] + "'")
+				}
+			}
+			createStmt = fmt.Sprintf(createUser + username + withOption)
+		}
+		if _, err := writer.GetBufio().WriteString(createStmt + ";" + "\n"); err != nil {
+			return err
+		}
+	}
+	// Splicing the SQL statements of CREATE ROLE and writing them to a file
+	for _, rolename := range sysRoleName {
+		option := userOptionMap[rolename]
+		if option == "" {
+			createStmt = fmt.Sprintf(createRole + rolename + " " + "WITH LOGIN")
+		} else {
+			parts := strings.Split(option, ",")
+			withOption := " WITH "
+			for _, options := range parts {
+				index := strings.Index(options, "=")
+				if index == -1 {
+					withOption = fmt.Sprintf(withOption + options + " ")
+				} else {
+					withOption = fmt.Sprintf(withOption + options[:index] + " '" + options[index+1:] + "' ")
+				}
+			}
+			if !strings.Contains(option, "NOLOGIN") {
+				withOption = fmt.Sprintf(withOption + " LOGIN")
+			}
+			createStmt = fmt.Sprintf(createRole + rolename + withOption)
+		}
+		if _, err := writer.GetBufio().WriteString(createStmt + ";" + "\n"); err != nil {
+			return err
+		}
+	}
+
+	// Splicing the SQL statements of GRANT TO and writing them to a file
+	/*
+		  role  | member | isAdmin
+		--------+--------+----------
+		  admin | root   |  true
+		  r1    | u1     |  false
+	*/
+	selectStmt := fmt.Sprintf("SELECT * FROM system.role_members;")
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "select user members", nil, selectStmt)
+	if err != nil {
+		return err
+	}
+	for _, memberRow := range row {
+		if memberRow[0].String() == "'admin'" && memberRow[1].String() == "'root'" && memberRow[2].String() == "true" {
+			continue
+		}
+		roleName := strings.Trim(memberRow[0].String(), "'")
+		memberName := strings.Trim(memberRow[1].String(), "'")
+		isAdmin := strings.Trim(memberRow[2].String(), "'")
+		var create string
+		if isAdmin != "true" {
+			create = fmt.Sprintf(`GRANT %s TO %s `, roleName, memberName)
+		} else {
+			create = fmt.Sprintf(`GRANT %s TO %s WITH ADMIN OPTION`, roleName, memberName)
+		}
+		if _, err := writer.GetBufio().WriteString(create + ";" + "\n"); err != nil {
+			return err
+		}
+	}
+
+	// Write users to a file.
+	writer.Flush()
+	part := "users"
+	filename := strings.Replace(exportFilePatternSQL, exportFilePatternPart, part, -1)
+	if err := es.WriteFile(ctx, filename, bytes.NewReader(buf.Bytes())); err != nil {
+		return err
+	}
+	var result tree.Datums
+	result = tree.Datums{
+		tree.NewDString("USERS"),
+		tree.NewDInt(tree.DInt(len(sysUserName))),
+		tree.NewDInt(tree.DInt(p.ExtendedEvalContext().NodeID)),
+		tree.NewDInt(tree.DInt(1)),
+	}
+	res.SetColumns(ctx, sqlbase.ExportColumns)
+	if err := res.AddRow(ctx, result); err != nil {
+		res.AppendNotice(err)
+	}
+	return nil
+}
+
+// Read system.users, return USERNAMES and ROLENAMES
+func getUserAndRoleFromSysUsers(ctx context.Context, p *planner) ([]string, []string, error) {
+	selectStmt := fmt.Sprintf("SELECT * FROM system.users")
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "select users statement", nil, selectStmt)
+	if err != nil {
+		return nil, nil, err
+	}
+	var userNames []string
+	var roleNames []string
+	for _, userRow := range row {
+		if userRow[0].String() == "'admin'" || userRow[0].String() == "'root'" {
+			continue
+		}
+		userName := strings.Trim(userRow[0].String(), "'")
+		if userRow[2].String() == "true" {
+			roleNames = append(roleNames, userName)
+		} else {
+			userNames = append(userNames, userName)
+		}
+	}
+	return userNames, roleNames, nil
+}
+
+// Read show users, return userOptionMap
+func getUserAndMemberFromSysMembers(ctx context.Context, p *planner) (map[string]string, error) {
+	selectStmt := fmt.Sprintf("SHOW USERS")
+	row, err := p.ExecCfg().InternalExecutor.Query(ctx, "show users", nil, selectStmt)
+	if err != nil {
+		return nil, err
+	}
+	userOptionMap := make(map[string]string)
+	for _, userRow := range row {
+		if userRow[0].String() == "'admin'" || userRow[0].String() == "'root'" {
+			continue
+		}
+		userName := strings.Trim(userRow[0].String(), "'")
+		options := strings.Trim(userRow[1].String(), "'")
+		userOptionMap[userName] = options
+	}
+	return userOptionMap, nil
 }
 
 // writeTimeSeriesMeta is same as writeRelationalMeta, but for time series table.
@@ -349,6 +727,7 @@ func writeTimeSeriesMeta(
 	tableType tree.TableType,
 	res RestrictedCommandResult,
 	withComment bool,
+	withPrivileges bool,
 ) error {
 	tableName := p.tableName.TableName.String()
 	catalog := p.tableName.Catalog()
@@ -395,6 +774,22 @@ func writeTimeSeriesMeta(
 			// only sql of creating table is exported.
 			if _, err := writer.GetBufio().WriteString(tableCreate[0] + ";" + "\n"); err != nil {
 				return err
+			}
+		}
+		if withPrivileges {
+			// get GRANT ON TABLE
+			tbSQL, err := getTBPrivileges(ctx, p, tableName, p.tableName.SchemaName.String(), p.tableName.CatalogName.String())
+			if err != nil {
+				res.SetError(err)
+				return nil
+			}
+			if tbSQL != nil {
+				for _, sql := range tbSQL {
+					if _, err = writer.GetBufio().WriteString(sql + "\n"); err != nil {
+						res.SetError(err)
+						return nil
+					}
+				}
 			}
 		}
 	// write itself and it's all child

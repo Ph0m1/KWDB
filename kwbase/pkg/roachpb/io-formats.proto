@@ -33,6 +33,7 @@ message IOFileFormat {
   enum FileFormat {
     Unknown = 0;
     CSV = 1;
+    SQL = 2;
   }
 
   optional FileFormat format = 1 [(gogoproto.nullable) = false];

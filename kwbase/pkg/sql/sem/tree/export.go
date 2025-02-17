@@ -33,6 +33,8 @@ type Export struct {
 	Database           Name
 	IsTS               bool
 	IgnoreCheckComment bool
+	Settings           bool
+	Users              bool
 }
 
 var _ Statement = &Export{}

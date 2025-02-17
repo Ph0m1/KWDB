@@ -115,8 +115,8 @@ func runTimeSeriesImport(
 	close(tsInfo.rejectedHandler)
 	err = gr.Wait()
 	if tsInfo.hasSwap {
-		return nil, errors.Errorf("The CSV file: %s, contains line breaks, so the IMPORT failed this time. "+
-			"The imported database/table needs to be deleted and REIMPORT with thread_concurrency='1'", tsInfo.filename)
+		return nil, errors.Errorf("Import failed due to incorrect delimiter used, or the CSV file: %s, contains line breaks. "+
+			"The imported database/table needs to be deleted and REIMPORT with thread_concurrency='1' or correct delimiter.", tsInfo.filename)
 	}
 	return &roachpb.BulkOpSummary{TimeSeriesCounts: tsInfo.result.seq, RejectedCounts: tsInfo.RejectedCount, AbandonCounts: tsInfo.AbandonCount}, err
 }
