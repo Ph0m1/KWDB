@@ -45,10 +45,12 @@ func init() {
 
 func checkVarName(name string) {
 	// Env vars must:
-	//  - start with KWBASE_
+	//  - start with KWBASE_ or KWDB_ or KW_
 	//  - be uppercase
 	//  - only contain letters, digits, and _
-	valid := strings.HasPrefix(name, "KWBASE_") || strings.HasPrefix(name, "KWDB_")
+	valid := strings.HasPrefix(name, "KWBASE_") ||
+		strings.HasPrefix(name, "KWDB_") ||
+		strings.HasPrefix(name, "KW_")
 	for i := 0; valid && i < len(name); i++ {
 		c := name[i]
 		valid = ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')

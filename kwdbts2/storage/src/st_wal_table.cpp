@@ -413,6 +413,8 @@ KStatus LoggedTsEntityGroup::CreateCheckpointInternal(kwdbContext_p ctx) {
     LOG_ERROR("Failed to flush the Metrics table.")
     Return(FAIL)
   }
+  // force sync metric data into files.
+  ebt_manager_->sync(0);
 
   // update wal metadata lsn
   wal_manager_->CreateCheckpoint(ctx);

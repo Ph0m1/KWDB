@@ -511,6 +511,18 @@ void TagTable::sync_with_lsn(kwdbts::TS_LSN lsn) {
   m_index_->setLSN(lsn);
   return ;
 }
+// snapshot using this sync
+void TagTable::sync(int flag) {
+  std::vector<TagPartitionTable*> all_parttables;
+  TableVersion cur_tbl_version = this->GetTagTableVersionManager()->GetCurrentTableVersion();
+  m_partition_mgr_->GetAllPartitionTablesLessVersion(all_parttables, cur_tbl_version);
+  for (const auto& part_table : all_parttables) {
+    (void)part_table->startRead();
+    part_table->sync(flag);
+    (void)part_table->stopRead();
+  }
+  return ;
+}
 
 TagTuplePack* TagTable::GenTagPack(const char* primarytag, int len) {
   // 1. search primary tag

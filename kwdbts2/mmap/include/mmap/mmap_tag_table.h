@@ -103,6 +103,8 @@ class TagTable {
   // wal
   void sync_with_lsn(kwdbts::TS_LSN lsn);
 
+  void sync(int flag);
+
   TagTuplePack* GenTagPack(const char* primarytag, int len);
 
   int undoAlterTagTable(uint32_t cur_version, uint32_t new_version, ErrorInfo& err_info);

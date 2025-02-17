@@ -32,6 +32,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
@@ -324,6 +325,11 @@ func (s *Store) addReplicaToRangeMapLocked(repl *Replica) error {
 	if existing, loaded := s.mu.replicas.LoadOrStore(
 		int64(repl.RangeID), unsafe.Pointer(repl)); loaded && (*Replica)(existing) != repl {
 		return errors.Errorf("%s: replica already exists", repl)
+	}
+	// if node is starting, the cluster setting may not be refreshed, so the
+	// TsRaftLogCombineWAL is not always trustable, need also check repl.mu.tsFlushedIndex.
+	if repl.isTsLocked() && (tse.TsRaftLogCombineWAL.Get(&s.ClusterSettings().SV) || repl.mu.tsFlushedIndex > 0) {
+		AddReplicaOnNode(repl)
 	}
 	// Check whether the replica is unquiesced but not in the map. This
 	// can happen during splits and merges, where the uninitialized (but

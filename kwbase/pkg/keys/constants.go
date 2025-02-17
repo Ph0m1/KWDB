@@ -138,6 +138,8 @@ var (
 	// localRangeLastVerificationTimestampSuffix is DEPRECATED and remains to
 	// prevent reuse.
 	localRangeLastVerificationTimestampSuffix = []byte("rlvt")
+	// LocalTsFlushedIndexSuffix is the suffix for the ts flushed index.
+	LocalTsFlushedIndexSuffix = []byte("tsf")
 
 	// 3. Range local keys
 	//

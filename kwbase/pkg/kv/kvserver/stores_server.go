@@ -152,6 +152,7 @@ func (is Server) WaitForApplication(
 			}
 			repl.mu.RLock()
 			leaseAppliedIndex := repl.mu.state.LeaseAppliedIndex
+			isTs := repl.isTsLocked()
 			repl.mu.RUnlock()
 			if leaseAppliedIndex >= req.LeaseIndex {
 				// For performance reasons, we don't sync to disk when
@@ -165,6 +166,11 @@ func (is Server) WaitForApplication(
 				// everything up to this point to disk.
 				//
 				// https://gitee.com/kwbasedb/kwbase/issues/33120
+				if isTs {
+					if err = s.TsEngine.CheckpointForTable(repl.Desc().TableId); err != nil {
+						log.Warningf(ctx, "checkpoint for table %d failed for %+v", repl.Desc().TableId, err)
+					}
+				}
 				return storage.WriteSyncNoop(ctx, s.engine)
 			}
 		}

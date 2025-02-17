@@ -46,6 +46,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqltelemetry"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/humanizeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
@@ -338,6 +339,27 @@ func (n *setClusterSettingNode) startExec(params runParams) error {
 			if function, ok := CheckClusterSetting[n.name]; ok {
 				if err = function(encoded); err != nil {
 					return err
+				}
+			}
+			if n.name == "ts.raftlog_combine_wal.enabled" {
+				if encoded == "true" {
+					if tse.TsRaftLogCombineWAL.Get(&n.st.SV) {
+						return nil
+					}
+					if params.ExecCfg().StartMode != StartMultiReplica {
+						return errors.New("set ts.raftlog_combine_wal.enabled to true is not supported in MPP mode")
+					}
+					if sqlbase.CheckWhetherHasTsTable(params.ctx, txn) {
+						return errors.New("cluster has time-series table, cannot set ts.raftlog_combine_wal.enabled to true")
+					}
+					deRule := tse.DeDuplicateRule.Get(&n.st.SV)
+					if deRule != "merge" && deRule != "override" {
+						return errors.New("should set ts.dedup.rule to merge or override before set ts.raftlog_combine_wal.enabled to true")
+					}
+				} else {
+					if !tse.TsRaftLogCombineWAL.Get(&n.st.SV) {
+						return nil
+					}
 				}
 			}
 			if _, err = execCfg.InternalExecutor.ExecEx(

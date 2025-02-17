@@ -127,6 +127,7 @@ var kwdbInternal = virtualSchema{
 		sqlbase.CrdbInternalKWDBSchedulesTableID:        kwdbInternalKWDBSchedulesTable,
 		sqlbase.CrdbInternalKWDBObjectCreateStatementID: kwdbInternalKWDBObjectCreateStatement,
 		sqlbase.CrdbInternalKWDBObjectRetentionID:       kwdbInternalKWDBObjectRetention,
+		sqlbase.CrdbInternalTSEInfoID:                   kwdbInternalTSEngineInfo,
 	},
 	validWithNoDatabaseContext: true,
 }
@@ -3878,6 +3879,29 @@ CREATE TABLE kwdb_internal.kwdb_retention (
 					return err
 				}
 			}
+		}
+
+		return nil
+	},
+}
+
+var kwdbInternalTSEngineInfo = virtualSchemaTable{
+	comment: "kwdb show info of ts engine",
+	schema: `
+CREATE TABLE kwdb_internal.kwdb_tse_info (
+    wal_level INT
+)
+`,
+	populate: func(ctx context.Context, p *planner, dbContext *DatabaseDescriptor, addRow func(...tree.Datum) error) error {
+
+		walLevel, err := p.ExecCfg().TsEngine.GetWalLevel()
+		if err != nil {
+			return err
+		}
+		if err := addRow(
+			tree.NewDInt(tree.DInt(walLevel)), // table_id
+		); err != nil {
+			return err
 		}
 
 		return nil

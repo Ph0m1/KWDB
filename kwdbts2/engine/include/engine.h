@@ -349,6 +349,14 @@ struct TSEngine {
   virtual KStatus CreateCheckpoint(kwdbContext_p ctx) = 0;
 
   /**
+    * @brief create check point for target table
+    * @param[in] table_id   ID of the table
+    * 
+    * @return KStatus
+    */
+  virtual KStatus CreateCheckpointForTable(kwdbContext_p ctx, TSTableID table_id) = 0;
+
+  /**
     * @brief recover transactions, while restart
     *
     * @return KStatus
@@ -486,6 +494,14 @@ struct TSEngine {
   */
   virtual KStatus GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) = 0;
 
+  /**
+  * @brief Get current wal level of the engine
+  *
+  * @param[out] wal_level   wal level
+  *
+  * @return KStatus
+  */
+  virtual KStatus GetWalLevel(kwdbContext_p ctx, uint8_t* wal_level) = 0;
 
   /**
    * @brief Alter table cache capacity.
@@ -576,6 +592,8 @@ class TSEngineImpl : public TSEngine {
 
   KStatus CreateCheckpoint(kwdbContext_p ctx) override;
 
+  KStatus CreateCheckpointForTable(kwdbContext_p ctx, TSTableID table_id) override;
+
   KStatus Recover(kwdbContext_p ctx) override;
 
   KStatus TSMtrBegin(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
@@ -622,6 +640,8 @@ class TSEngineImpl : public TSEngine {
   KStatus GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) override;
 
   KStatus GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uint32_t* version) override;
+
+  KStatus GetWalLevel(kwdbContext_p ctx, uint8_t* wal_level) override;
 
   virtual KStatus Init(kwdbContext_p ctx);
 
@@ -719,6 +739,8 @@ class TSEngineImpl : public TSEngine {
       return "WAL without sync";
     case WALMode::SYNC:
       return " WAL with sync";
+    case WALMode::BYRL:
+      return "WAL in raft log";
     default:
       return "not found";
     }

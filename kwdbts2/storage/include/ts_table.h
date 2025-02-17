@@ -880,6 +880,8 @@ class TsEntityGroup {
     RW_LATCH_UNLOCK(drop_mutex_);
   }
 
+  KStatus SyncMetricDataVersion();
+
   int SyncTagVersion(uint32_t cur_version, uint32_t new_version) {
     RW_LATCH_S_LOCK(drop_mutex_);
     Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
@@ -893,7 +895,6 @@ class TsEntityGroup {
     if (new_tag_bt_->AddNewPartitionVersion(schema, new_version, err_info) < 0) {
       return -1;
     }
-    new_tag_bt_->GetTagTableVersionManager()->SyncCurrentTableVersion();
     return 0;
   }
 

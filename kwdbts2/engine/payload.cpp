@@ -18,6 +18,9 @@ Payload::Payload(MMapRootTableManager* root_bt_manager, TSSlice data) : slice_(d
   if (flag_ != Payload::TAG_ONLY) {
     data_len_ = KInt32(slice_.data + tag_offset_ + tag_len_);
     data_offset_ = tag_offset_ + tag_len_ + 4;
+  } else {
+    data_len_ = 0;
+    data_offset_ = 0;
   }
   bitmap_len_ = (count_ + 7) / 8;
 
@@ -42,6 +45,9 @@ Payload::Payload(const std::vector<AttributeInfo>& schema, const std::vector<uin
   if (flag_ != Payload::TAG_ONLY) {
     data_len_ = KInt32(slice_.data + tag_offset_ + tag_len_);
     data_offset_ = tag_offset_ + tag_len_ + 4;
+  } else {
+    data_len_ = 0;
+    data_offset_ = 0;
   }
   bitmap_len_ = (count_ + 7) / 8;
 

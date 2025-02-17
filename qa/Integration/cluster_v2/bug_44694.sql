@@ -1,5 +1,4 @@
 create ts database test_gc;
-select * from kwdb_internal.node_metrics where name='capacity.tsdb_used';
 ALTER DATABASE test_gc CONFIGURE ZONE USING gc.ttlseconds=10;
 create table test_gc.t1(k_timestamp timestamptz not null,e1 int2) tags (ptag smallint not null, attr1 varchar(32),attr2 varchar(32), attr3 varchar(32), attr4 varchar(32), attr5 varchar(32))primary tags(ptag);
 

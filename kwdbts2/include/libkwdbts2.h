@@ -233,6 +233,8 @@ TSStatus TSFlushBuffer(TSEngine* engine);
 
 TSStatus TSCreateCheckpoint(TSEngine* engine);
 
+TSStatus TSCreateCheckpointForTable(TSEngine* engine, TSTableID table_id);
+
 TSStatus TSMtrBegin(TSEngine* engine, TSTableID table_id, uint64_t range_group_id,
                     uint64_t range_id, uint64_t index, uint64_t* mtr_id);
 
@@ -425,7 +427,17 @@ TSStatus TSGetWaitThreadNum(TSEngine* engine, void* resp);
  */
 TSStatus TsGetTableVersion(TSEngine* engine, TSTableID table_id, uint32_t* version);
 
+/**
+ * @brief Get current wal level of ts engine
+ * @param[out] wal_level current wal level
+ * @return
+ */
+TSStatus TsGetWalLevel(TSEngine* engine, uint8_t *wal_level);
+
 bool __attribute__((weak)) isCanceledCtx(uint64_t goCtxPtr);
+
+int __attribute__((weak)) goPrepareFlush();
+int __attribute__((weak)) goFlushed();
 
 #ifdef __cplusplus
 }  // extern "C"

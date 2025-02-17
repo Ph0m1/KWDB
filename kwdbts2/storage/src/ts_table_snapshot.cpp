@@ -15,6 +15,7 @@
 #include "ts_table_snapshot.h"
 #include "sys_utils.h"
 #include "st_logged_entity_group.h"
+#include "st_byrl_table.h"
 
 namespace kwdbts {
 
@@ -444,8 +445,8 @@ KStatus TsSnapshotConsumer::setMtrOver(kwdbContext_p ctx, bool commit) {
   // not open wal, if rollback we need delete data by delete function.
   if (entity_grp_mtr_id_.size() == 0) {
     if (commit) {
-      // not open wal, data has inserted into storage.
-      return KStatus::SUCCESS;
+      LOG_INFO("flush data for table %lu", snapshot_info_.table->GetTableId());
+      return snapshot_info_.table->CreateCheckpoint(ctx);
     }
     HashIdSpan hash_span{snapshot_info_.begin_hash, snapshot_info_.end_hash};
     std::vector<KwTsSpan> ts_spans;

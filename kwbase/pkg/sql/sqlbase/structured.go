@@ -447,6 +447,27 @@ func CheckMaxTableIDIsTimeSeries(ctx context.Context, txn *kv.Txn) uint32 {
 	return 0
 }
 
+// CheckWhetherHasTsTable check whether the cluster has time-series table.
+func CheckWhetherHasTsTable(ctx context.Context, txn *kv.Txn) bool {
+	NameKey, _ := MakeKWDBMetadataKeyInt(NamespaceTable, nil)
+	rows, err := GetKWDBMetadataRows(ctx, txn, NameKey, NamespaceTable)
+	if err != nil {
+		return false
+	}
+	for i := range rows {
+		parentID := uint32(tree.MustBeDInt(rows[i][0]))
+		id := uint32(tree.MustBeDInt(rows[i][3]))
+		// parentID > 1 means rows[i] is a user table
+		if parentID > 1 {
+			desc, _ := GetTableDescFromID(ctx, txn, ID(id))
+			if desc != nil && desc.IsTSTable() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // GetTableDescFromIDWithFKsChanged retrieves the table descriptor for the table
 // ID passed in using an existing proto getter. It returns the same things as
 // GetTableDescFromID but additionally returns whether or not the table descriptor

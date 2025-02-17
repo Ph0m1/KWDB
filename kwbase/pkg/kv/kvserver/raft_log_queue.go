@@ -187,10 +187,8 @@ func newTruncateDecision(ctx context.Context, r *Replica) (truncateDecision, err
 	if targetSize > *r.mu.zone.RangeMaxBytes {
 		targetSize = *r.mu.zone.RangeMaxBytes
 	}
-	if Desc, err := r.getReplicaDescriptorRLocked(); err == nil {
-		if Desc.GetTag() == roachpb.TS_REPLICA {
-			targetSize = 1 << 30 // 1024 MiB
-		}
+	if r.isTsLocked() {
+		targetSize = 1 << 30 // 1024 MB
 	}
 	raftStatus := r.raftStatusRLocked()
 
@@ -198,6 +196,10 @@ func newTruncateDecision(ctx context.Context, r *Replica) (truncateDecision, err
 	const anyRecipientStore roachpb.StoreID = 0
 	pendingSnapshotIndex := r.getAndGCSnapshotLogTruncationConstraintsLocked(now, anyRecipientStore)
 	lastIndex := r.mu.lastIndex
+	if r.mu.tsFlushedIndex > 0 {
+		lastIndex = r.mu.tsFlushedIndex
+	}
+
 	logSizeTrusted := r.mu.raftLogSizeTrusted
 	r.mu.Unlock()
 

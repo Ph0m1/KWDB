@@ -1040,11 +1040,15 @@ func (b *replicaAppBatch) runPreApplyTriggersAfterStagingWriteBatch(
 	}
 
 	if res.State != nil && res.State.TruncatedState != nil {
-		if apply, err := handleTruncatedStateBelowRaft(
+		if err := b.r.adaptNewTruncateState(ctx, res.State.TruncatedState); err != nil {
+			return wrapWithNonDeterministicFailure(err, "unable to adapt truncated state")
+		}
+		log.VEventf(ctx, 3, "try to apply truncate state %d, %d", res.State.TruncatedState.Index, res.State.TruncatedState.Term)
+		if applied, err := handleTruncatedStateBelowRaft(
 			ctx, b.state.TruncatedState, res.State.TruncatedState, b.r.raftMu.stateLoader, b.batch,
 		); err != nil {
 			return wrapWithNonDeterministicFailure(err, "unable to handle truncated state")
-		} else if !apply {
+		} else if !applied {
 			// The truncated state was discarded, so make sure we don't apply
 			// it to our in-memory state.
 			res.State.TruncatedState = nil

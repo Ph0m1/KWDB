@@ -50,12 +50,16 @@ func TestTSOpen(t *testing.T) {
 		BufferPoolSize: 4096,
 	}
 	stopper := stop.NewStopper()
-	tsDB, err := NewTsEngine(context.Background(), cfg, stopper, nil)
+	tsDB, err := NewTsEngine(context.Background(), cfg, stopper)
 	if err != nil {
 		panic(err)
 	}
+	if err = tsDB.Open(nil); err != nil {
+		panic(err)
+	}
+	stopper.AddCloser(tsDB)
 	fmt.Println("TsEngine open success")
-	tsDB.Close()
+	stopper.Stop(context.Background())
 	_ = os.RemoveAll("./tsdb1")
 }
 
@@ -118,10 +122,14 @@ func TestTSPut(t *testing.T) {
 		BufferPoolSize: 4096,
 	}
 	stopper := stop.NewStopper()
-	tsDB, err := NewTsEngine(context.Background(), cfg, stopper, nil)
+	tsDB, err := NewTsEngine(context.Background(), cfg, stopper)
 	if err != nil {
 		panic(err)
 	}
+	if err = tsDB.Open(nil); err != nil {
+		panic(err)
+	}
+	stopper.AddCloser(tsDB)
 	fmt.Println("TsEngine open success")
 
 	// create table
@@ -142,6 +150,6 @@ func TestTSPut(t *testing.T) {
 		panic(err)
 	}
 	// close ts engine
-	tsDB.Close()
+	stopper.Stop(context.Background())
 	_ = os.RemoveAll("./tsdb2")
 }

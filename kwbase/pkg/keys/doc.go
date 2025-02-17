@@ -198,6 +198,7 @@ var _ = [...]interface{}{
 	RaftLogKey,                     // "rftl"
 	RaftTruncatedStateKey,          // "rftt"
 	RangeLastReplicaGCTimestampKey, // "rlrt"
+	TsFlushedIndexKey,              // "tsf"
 
 	//   3. Range local keys: These also store metadata that pertains to a range
 	//   as a whole. They are replicated and addressable. Typical examples are

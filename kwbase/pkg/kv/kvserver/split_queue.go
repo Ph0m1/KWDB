@@ -333,9 +333,9 @@ func (sq *splitQueue) processAttempt(
 				//fmt.Println(" ======== ",r.startKey(),endKey,r.GetMVCCStats().LiveBytes,"GetDataVolume:",rangeSize,err)
 				var halfTimestamp int64
 				halfTimestamp, err = r.store.TsEngine.GetDataVolumeHalfTS(
-					uint64(startTableID),
+					startTableID,
 					startHashPoint,
-					startHashPoint,
+					endHashPoint,
 					startTimestamp,
 					endTimestamp,
 				)
@@ -346,9 +346,13 @@ func (sq *splitQueue) processAttempt(
 					//fmt.Println("GetDataVolumeHalfTS Failed ! Err: ",err ,
 					//	fmt.Sprintf("===TableID :%d  StartHashPoint : %d, EndHashPoint: %d StartTimeStamp: %d EndTimeStamp: %d",
 					//		startTableID,startHashPoint,startHashPoint,startTimestamp,endTimestamp))
-					log.Errorf(ctx, fmt.Sprintf("GetDataVolumeHalfTS Failed. Err: %v. TableID: %d, StartKey: %s, EndKey:%s,  halfTimestamp:%v, startTimeStamp: %d, endTimeStamp: %d", err, startTableID, startKey, endKey, halfTimestamp, startTimestamp, endTimestamp))
-					// GetDataVolumeHalfTS failed, set splitTimeStamp = startTimestamp + 1day
-					halfTimestamp = startTimestamp + 86400000
+					err = errors.Wrapf(err, "GetDataVolumeHalfTS Failed. TableID: %d, StartKey: %s, "+
+						"EndKey:%s,  halfTimestamp:%v, startTimeStamp: %d, endTimeStamp: %d",
+						startTableID, startKey, endKey, halfTimestamp, startTimestamp, endTimestamp)
+					log.Errorf(ctx, err.Error())
+					return err
+					//// GetDataVolumeHalfTS failed, set splitTimeStamp = startTimestamp + 1day
+					//halfTimestamp = startTimestamp + 86400000
 				}
 				splitHashPoint := startHashPoint
 				splitTimeStamp := halfTimestamp

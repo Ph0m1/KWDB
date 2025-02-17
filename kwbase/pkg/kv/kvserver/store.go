@@ -2692,7 +2692,113 @@ func ReadClusterVersion(
 	return cv, err
 }
 
+// NodeReplicas stores all replicas of the node.
+type NodeReplicas struct {
+	mu struct {
+		syncutil.RWMutex
+		replicas map[roachpb.RangeID]*Replica
+	}
+}
+
+var nodeReplicas NodeReplicas
+
+// AddReplicaOnNode adds a replica to nodeReplicas.
+func AddReplicaOnNode(repl *Replica) {
+	nodeReplicas.mu.Lock()
+	defer nodeReplicas.mu.Unlock()
+	log.Infof(context.Background(), "add r%d of table%d", repl.RangeID, repl.Desc().TableId)
+	if nodeReplicas.mu.replicas == nil {
+		log.Warningf(context.Background(), "nodeReplicas is nil, maybe it has been cleared")
+		return
+	}
+	nodeReplicas.mu.replicas[repl.RangeID] = repl
+}
+
+// RemoveReplicaOnNode removes replica from nodeReplicas by the RangeID.
+func RemoveReplicaOnNode(rangeID roachpb.RangeID) {
+	nodeReplicas.mu.Lock()
+	defer nodeReplicas.mu.Unlock()
+	delete(nodeReplicas.mu.replicas, rangeID)
+}
+
+// SetTsPrepareFlushedIndexForAllReplicas sets the tsPrepareFlushedIndex
+// of all replicas in current node.
+func SetTsPrepareFlushedIndexForAllReplicas(ctx context.Context) error {
+	nodeReplicas.mu.Lock()
+	defer nodeReplicas.mu.Unlock()
+	if nodeReplicas.mu.replicas == nil {
+		log.Warningf(context.Background(), "nodeReplicas is nil, maybe it has been cleared")
+		return nil
+	}
+	for _, repl := range nodeReplicas.mu.replicas {
+		repl.mu.Lock()
+		if !repl.isInitializedRLocked() {
+			repl.mu.Unlock()
+			log.Warningf(ctx, "r%d is uninitialized", repl.RangeID)
+			continue
+		}
+		repl.mu.tsPrepareFlushedIndex = repl.mu.state.RaftAppliedIndex
+		log.VEventf(ctx, 3, "prepare flushed index of r%d to %d", repl.RangeID, repl.mu.tsPrepareFlushedIndex)
+		repl.mu.Unlock()
+	}
+	return nil
+}
+
+// SetTsFlushedIndexForAllReplicas sets the tsFlushedIndex of all replicas
+// in current node.
+func SetTsFlushedIndexForAllReplicas(ctx context.Context) error {
+	nodeReplicas.mu.Lock()
+	defer nodeReplicas.mu.Unlock()
+	if nodeReplicas.mu.replicas == nil {
+		log.Warningf(context.Background(), "nodeReplicas is nil, maybe it has been cleared")
+		return nil
+	}
+	for _, repl := range nodeReplicas.mu.replicas {
+		repl.mu.Lock()
+		if !repl.isInitializedRLocked() {
+			repl.mu.Unlock()
+			log.Warningf(ctx, "r%d is uninitialized", repl.RangeID)
+			continue
+		}
+		repl.mu.tsFlushedIndex = repl.mu.tsPrepareFlushedIndex
+		log.VEventf(ctx, 3, "set flushed index of r%d to %d", repl.RangeID, repl.mu.tsFlushedIndex)
+		if err := repl.mu.stateLoader.SetTsFlushedIndex(ctx, repl.Engine(), repl.mu.tsFlushedIndex); err != nil {
+			repl.mu.Unlock()
+			return err
+		}
+		repl.mu.Unlock()
+	}
+	return nil
+}
+
+// ClearReplicasAndResetFlushedIndex reset the tsPrepareFlushedIndex and tsFlushedIndex
+// and clear the map, it happens when disable TsRaftLogCombineWAL and restart node.
+func ClearReplicasAndResetFlushedIndex(ctx context.Context) error {
+	var replicas map[roachpb.RangeID]*Replica
+	nodeReplicas.mu.Lock()
+	replicas, nodeReplicas.mu.replicas = nodeReplicas.mu.replicas, nil
+	nodeReplicas.mu.Unlock()
+	for _, repl := range replicas {
+		repl.mu.Lock()
+		if !repl.isInitializedRLocked() {
+			repl.mu.Unlock()
+			log.Warningf(ctx, "r%d is uninitialized", repl.RangeID)
+			continue
+		}
+		repl.mu.tsPrepareFlushedIndex = 0
+		repl.mu.tsFlushedIndex = 0
+		log.VEventf(ctx, 3, "clear tsPrepareFlushedIndex and tsFlushedIndex")
+		if err := repl.mu.stateLoader.SetTsFlushedIndex(ctx, repl.Engine(), repl.mu.tsFlushedIndex); err != nil {
+			repl.mu.Unlock()
+			return err
+		}
+		repl.mu.Unlock()
+	}
+	return nil
+}
+
 func init() {
+	nodeReplicas.mu.replicas = make(map[roachpb.RangeID]*Replica, 1)
 	tracing.RegisterTagRemapping("s", "store")
 }
 

@@ -274,6 +274,11 @@ type Replica struct {
 		// from the Raft log entry. Use the invalidLastTerm constant for this
 		// case.
 		lastIndex, lastTerm uint64
+		// the index of the raft log which data has been flushed to disk.
+		// for ts replicas only, the value will always be 0 in kv replicas.
+		tsFlushedIndex uint64
+		// prepare for tsFlushedIndex.
+		tsPrepareFlushedIndex uint64
 		// A map of raft log index of pending snapshots to deadlines.
 		// Used to prohibit raft log truncations that would leave a gap between
 		// the snapshot and the new first index. The map entry has a zero

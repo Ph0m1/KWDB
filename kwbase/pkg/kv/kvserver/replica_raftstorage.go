@@ -41,6 +41,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/protoutil"
@@ -1205,6 +1206,9 @@ func (r *Replica) applySnapshot(
 	r.mu.lastIndex = s.RaftAppliedIndex
 	r.mu.lastTerm = lastTerm
 	r.mu.raftLogSize = raftLogSize
+	if inSnap.IsTSSnapshot && tse.TsRaftLogCombineWAL.Get(&r.store.ClusterSettings().SV) {
+		r.mu.tsFlushedIndex = s.TruncatedState.Index
+	}
 	// Update the store stats for the data in the snapshot.
 	r.store.metrics.subtractMVCCStats(*r.mu.state.Stats)
 	r.store.metrics.addMVCCStats(*s.Stats)

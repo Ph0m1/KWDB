@@ -35,6 +35,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 	"unsafe"
@@ -45,6 +46,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
+	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/stop"
 	"gitee.com/kwbasedb/kwbase/pkg/util/syncutil"
@@ -162,12 +164,28 @@ type TsEngine struct {
 	stopper *stop.Stopper
 	cfg     TsEngineConfig
 	tdb     *C.TSEngine
+	opened  bool
+	openCh  chan struct{}
 }
 
 // IsSingleNode Returns whether TsEngine is started in singleNode mode
 func (r *TsEngine) IsSingleNode() bool {
 	return r.cfg.IsSingleNode
 }
+
+// DeDuplicateRule indicates the deduplicate rule of the ts engine
+var DeDuplicateRule = settings.RegisterPublicStringSetting(
+	"ts.dedup.rule",
+	"remove time series data duplicate rule",
+	"override",
+)
+
+// TsRaftLogCombineWAL indicates whether combine raft log and wal
+var TsRaftLogCombineWAL = settings.RegisterPublicBoolSetting(
+	"ts.raftlog_combine_wal.enabled",
+	"combine raft log and wal to reduce write amplification, but still ensure data consistency",
+	false,
+)
 
 // TsWALFlushInterval indicates the WAL flush interval of TsEngine
 var TsWALFlushInterval = settings.RegisterPublicDurationSetting(
@@ -255,7 +273,7 @@ func isCanceledCtx(goCtxPtr C.uint64_t) C.bool {
 
 // NewTsEngine new ts engine
 func NewTsEngine(
-	ctx context.Context, cfg TsEngineConfig, stopper *stop.Stopper, rangeIndex []roachpb.RangeIndex,
+	ctx context.Context, cfg TsEngineConfig, stopper *stop.Stopper,
 ) (*TsEngine, error) {
 	if cfg.Dir == "" {
 		return nil, errors.New("dir must be non-empty")
@@ -264,23 +282,50 @@ func NewTsEngine(
 	r := &TsEngine{
 		stopper: stopper,
 		cfg:     cfg,
+		openCh:  make(chan struct{}),
 	}
 
-	if err := r.open(rangeIndex); err != nil {
-		return nil, err
-	}
 	return r, nil
 }
 
-func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
-	interval := TsWALFlushInterval.Get(&r.cfg.Settings.SV)
+// IsOpen returns when the ts engine has been open.
+func (r *TsEngine) IsOpen() bool {
+	return r.opened
+}
+
+// CheckOrWaitForOpen check whether the ts engine has been open and
+// waits for open if it is not.
+func (r *TsEngine) checkOrWaitForOpen() {
+	if r.opened {
+		return
+	}
+	_ = <-r.openCh
+}
+
+// Open opens the ts engine.
+func (r *TsEngine) Open(rangeIndex []roachpb.RangeIndex) error {
 	var walLevel uint8
-	if interval < 0 {
-		walLevel = 0
-	} else if interval >= 0 && interval <= 200*time.Millisecond {
-		walLevel = 2
+	if TsRaftLogCombineWAL.Get(&r.cfg.Settings.SV) {
+		walLevel = 3
+		if v, ok := envutil.EnvString("KW_WAL_LEVEL", 0); ok && v != "3" {
+			if err := os.Setenv("KW_WAL_LEVEL", "3"); err != nil {
+				return errors.Wrap(err, "failed adjust env KW_WAL_LEVEL to 3")
+			}
+		}
 	} else {
-		walLevel = 1
+		interval := TsWALFlushInterval.Get(&r.cfg.Settings.SV)
+		if interval < 0 {
+			walLevel = 0
+		} else if interval >= 0 && interval <= 200*time.Millisecond {
+			walLevel = 2
+		} else {
+			walLevel = 1
+		}
+		if v, ok := envutil.EnvString("KW_WAL_LEVEL", 0); ok && v == "3" {
+			if err := os.Setenv("KW_WAL_LEVEL", fmt.Sprintf("%d", walLevel)); err != nil {
+				return errors.Wrapf(err, "failed adjust env KW_WAL_LEVEL to %d", walLevel)
+			}
+		}
 	}
 
 	walBufferSize := TsWALBufferSize.Get(&r.cfg.Settings.SV) >> 20
@@ -345,11 +390,14 @@ func (r *TsEngine) open(rangeIndex []roachpb.RangeIndex) error {
 	}
 
 	r.manageWAL()
+	r.opened = true
+	close(r.openCh)
 	return nil
 }
 
 // CreateTsTable create ts table
 func (r *TsEngine) CreateTsTable(tableID uint64, meta []byte, rangeGroups []api.RangeGroup) error {
+	r.checkOrWaitForOpen()
 	nRange := len(rangeGroups)
 	cRanges := make([]C.RangeGroup, nRange)
 	for i := 0; i < nRange; i++ {
@@ -369,6 +417,7 @@ func (r *TsEngine) CreateTsTable(tableID uint64, meta []byte, rangeGroups []api.
 
 // GetMetaData get meta from source of the snapshot
 func (r *TsEngine) GetMetaData(tableID uint64, rangeGroup api.RangeGroup) ([]byte, error) {
+	r.checkOrWaitForOpen()
 	cRangeGroup := C.RangeGroup{
 		range_group_id: C.uint64_t(rangeGroup.RangeGroupID),
 	}
@@ -384,6 +433,7 @@ func (r *TsEngine) GetMetaData(tableID uint64, rangeGroup api.RangeGroup) ([]byt
 
 // TSIsTsTableExist checks if ts table exists.
 func (r *TsEngine) TSIsTsTableExist(tableID uint64) (bool, error) {
+	r.checkOrWaitForOpen()
 	var isExist C.bool
 	status := C.TSIsTsTableExist(r.tdb, C.TSTableID(tableID), &isExist)
 	if err := statusToError(status); err != nil {
@@ -394,6 +444,7 @@ func (r *TsEngine) TSIsTsTableExist(tableID uint64) (bool, error) {
 
 // DropTsTable drop ts table.
 func (r *TsEngine) DropTsTable(tableID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSDropTsTable(r.tdb, C.TSTableID(tableID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "could not DropTsTable")
@@ -405,6 +456,7 @@ func (r *TsEngine) DropTsTable(tableID uint64) error {
 func (r *TsEngine) AddTSColumn(
 	tableID uint64, currentTSVersion, newTSVersion uint32, transactionID []byte, colMeta []byte,
 ) error {
+	r.checkOrWaitForOpen()
 	status := C.TSAddColumn(
 		r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta), C.uint32_t(currentTSVersion), C.uint32_t(newTSVersion))
 	if err := statusToError(status); err != nil {
@@ -417,6 +469,7 @@ func (r *TsEngine) AddTSColumn(
 func (r *TsEngine) DropTSColumn(
 	tableID uint64, currentTSVersion, newTSVersion uint32, transactionID []byte, colMeta []byte,
 ) error {
+	r.checkOrWaitForOpen()
 	status := C.TSDropColumn(
 		r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])), goToTSSlice(colMeta), C.uint32_t(currentTSVersion), C.uint32_t(newTSVersion))
 	if err := statusToError(status); err != nil {
@@ -427,6 +480,7 @@ func (r *TsEngine) DropTSColumn(
 
 // AlterPartitionInterval alter partition interval for ts table.
 func (r *TsEngine) AlterPartitionInterval(tableID uint64, partitionInterval uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSAlterPartitionInterval(r.tdb, C.TSTableID(tableID), C.uint64_t(partitionInterval))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "could not AlterPartitionInterval")
@@ -442,6 +496,7 @@ func (r *TsEngine) AlterTSColumnType(
 	colMeta []byte,
 	originColMeta []byte,
 ) error {
+	r.checkOrWaitForOpen()
 	status := C.TSAlterColumnType(
 		r.tdb,
 		C.TSTableID(tableID),
@@ -465,6 +520,7 @@ func (r *TsEngine) PutEntity(
 		return errors.New("payload is nul")
 	}
 
+	r.checkOrWaitForOpen()
 	cTsSlice := make([]C.TSSlice, len(payload))
 	for i, p := range payload {
 		if len(p) == 0 {
@@ -498,6 +554,7 @@ func (r *TsEngine) PutData(
 		return DedupResult{}, EntitiesAffect{}, errors.New("payload is nul")
 	}
 
+	r.checkOrWaitForOpen()
 	cTsSlice := make([]C.TSSlice, len(payload))
 	for i, p := range payload {
 		if len(p) == 0 {
@@ -546,6 +603,7 @@ func (r *TsEngine) PutRowData(
 		return DedupResult{}, EntitiesAffect{}, errors.New("payload is nul")
 	}
 
+	r.checkOrWaitForOpen()
 	sizeLimit := int32(TsPayloadSizeLimit.Get(&r.cfg.Settings.SV))
 	var cTsSlice C.TSSlice
 	// The structure of HeaderPrefix: | Header | primary_tag_len | primary_tag | tag_ten | tags | data_len |
@@ -639,6 +697,7 @@ func (r *TsEngine) PutRowData(
 func (r *TsEngine) GetDataVolume(
 	tableID uint64, startHashPoint, endHashPoint uint64, startTimestamp, endTimestamp int64,
 ) (uint64, error) {
+	r.checkOrWaitForOpen()
 	var volume C.uint64_t
 	status := C.TSGetDataVolume(
 		r.tdb,
@@ -663,6 +722,7 @@ func (r *TsEngine) GetDataVolume(
 func (r *TsEngine) GetDataVolumeHalfTS(
 	tableID uint64, startHashPoint, endHashPoint uint64, startTimestamp, endTimestamp int64,
 ) (int64, error) {
+	r.checkOrWaitForOpen()
 	var halfTimestamp C.int64_t
 	status := C.TSGetDataVolumeHalfTS(
 		r.tdb,
@@ -684,6 +744,7 @@ func (r *TsEngine) GetDataVolumeHalfTS(
 
 // GetAvgTableRowSize gets AvgTableRowSize
 func (r *TsEngine) GetAvgTableRowSize(tableID uint64) (uint64, error) {
+	r.checkOrWaitForOpen()
 	var avgRowSize C.uint64_t
 	status := C.TSGetAvgTableRowSize(
 		r.tdb,
@@ -811,6 +872,7 @@ func (r *TsEngine) DeleteEntities(
 		return 0, errors.New("primaryTags is null")
 	}
 
+	r.checkOrWaitForOpen()
 	cTsSlice := make([]C.TSSlice, len(primaryTags))
 	defer freeTSSlice(cTsSlice)
 	for i, p := range primaryTags {
@@ -845,6 +907,7 @@ func (r *TsEngine) DeleteRangeData(
 	tsSpans []*roachpb.TsSpan,
 	tsTxnID uint64,
 ) (uint64, error) {
+	r.checkOrWaitForOpen()
 	cKwHashIDSpans := C.HashIdSpan{
 		begin: C.uint64_t(beginHash),
 		end:   C.uint64_t(endHash),
@@ -872,6 +935,7 @@ func (r *TsEngine) DeleteRangeData(
 func (r *TsEngine) DeleteTsRangeData(
 	tableID, beginHash, endHash uint64, startTs, endTs int64, tsTxnID uint64,
 ) error {
+	r.checkOrWaitForOpen()
 	tsSpan := C.KwTsSpan{
 		begin: C.int64_t(startTs),
 		end:   C.int64_t(endTs),
@@ -892,6 +956,7 @@ func (r *TsEngine) DeleteData(
 		return 0, errors.New("primaryTag is null")
 	}
 
+	r.checkOrWaitForOpen()
 	cTsSlice := C.TSSlice{
 		data: (*C.char)(C.CBytes(primaryTag)),
 		len:  C.size_t(len(primaryTag)),
@@ -918,6 +983,7 @@ func (r *TsEngine) DeleteData(
 
 // CompressTsTable compress partitions with maximum time<=ts
 func (r *TsEngine) CompressTsTable(tableID uint64, ts int64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSCompressTsTable(r.tdb, C.TSTableID(tableID), C.int64_t(ts))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to compress ts table")
@@ -927,6 +993,7 @@ func (r *TsEngine) CompressTsTable(tableID uint64, ts int64) error {
 
 // CompressImmediately compress partitions immediately
 func (r *TsEngine) CompressImmediately(ctx context.Context, tableID uint64) error {
+	r.checkOrWaitForOpen()
 	goCtxPtr := C.uint64_t(uintptr(unsafe.Pointer(&ctx)))
 	status := C.TSCompressImmediately(r.tdb, goCtxPtr, C.TSTableID(tableID))
 	if err := statusToError(status); err != nil {
@@ -937,6 +1004,7 @@ func (r *TsEngine) CompressImmediately(ctx context.Context, tableID uint64) erro
 
 // VacuumTsTable vacuum partitions after compress
 func (r *TsEngine) VacuumTsTable(tableID uint64, tsVersion uint32) error {
+	r.checkOrWaitForOpen()
 	status := C.TSVacuumTsTable(r.tdb, C.TSTableID(tableID), C.uint32_t(tsVersion))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to vacuum ts table")
@@ -946,6 +1014,7 @@ func (r *TsEngine) VacuumTsTable(tableID uint64, tsVersion uint32) error {
 
 // DeleteExpiredData delete expired data from time partitions that fall completely within the [min_int64, end) interval
 func (r *TsEngine) DeleteExpiredData(tableID uint64, _ int64, end int64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSDeleteExpiredData(r.tdb, C.TSTableID(tableID), C.int64_t(end))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to delete expired data")
@@ -955,6 +1024,7 @@ func (r *TsEngine) DeleteExpiredData(tableID uint64, _ int64, end int64) error {
 
 // TsTableAutonomy Autonomous Evaluation
 func (r *TsEngine) TsTableAutonomy(tableID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSTableAutonomy(r.tdb, C.TSTableID(tableID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to ts table's autonomy")
@@ -966,6 +1036,7 @@ func (r *TsEngine) TsTableAutonomy(tableID uint64) error {
 func (r *TsEngine) SetupTsFlow(
 	ctx *context.Context, tsQueryInfo TsQueryInfo,
 ) (tsRespInfo TsQueryInfo, err error) {
+	r.checkOrWaitForOpen()
 	return r.tsExecute(ctx, C.MQ_TYPE_DML_SETUP, tsQueryInfo)
 }
 
@@ -973,6 +1044,7 @@ func (r *TsEngine) SetupTsFlow(
 func (r *TsEngine) NextTsFlow(
 	ctx *context.Context, tsQueryInfo TsQueryInfo,
 ) (tsRespInfo TsQueryInfo, err error) {
+	r.checkOrWaitForOpen()
 	return r.tsExecute(ctx, C.MQ_TYPE_DML_NEXT, tsQueryInfo)
 }
 
@@ -980,6 +1052,7 @@ func (r *TsEngine) NextTsFlow(
 func (r *TsEngine) NextTsFlowPgWire(
 	ctx *context.Context, tsQueryInfo TsQueryInfo,
 ) (tsRespInfo TsQueryInfo, err error) {
+	r.checkOrWaitForOpen()
 	return r.tsExecute(ctx, C.MQ_TYPE_DML_PG_RESULT, tsQueryInfo)
 }
 
@@ -987,18 +1060,21 @@ func (r *TsEngine) NextTsFlowPgWire(
 // only push PUSH type req and pass data chunk pointer to tse for multiple model processing
 // when the switch is on and the server starts with single node mode.
 func (r *TsEngine) PushTsFlow(ctx *context.Context, tsQueryInfo TsQueryInfo) (err error) {
+	r.checkOrWaitForOpen()
 	_, err = r.tsExecute(ctx, C.MQ_TYPE_DML_PUSH, tsQueryInfo)
 	return err
 }
 
 // CloseTsFlow close the TS actuator corresponding to the current flow
 func (r *TsEngine) CloseTsFlow(ctx *context.Context, tsQueryInfo TsQueryInfo) (err error) {
+	r.checkOrWaitForOpen()
 	_, err = r.tsExecute(ctx, C.MQ_TYPE_DML_CLOSE, tsQueryInfo)
 	return err
 }
 
 // FlushBuffer flush WALs of all ts tables to files in the node
 func (r *TsEngine) FlushBuffer() error {
+	r.checkOrWaitForOpen()
 	status := C.TSFlushBuffer(r.tdb)
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to flush WAL buffer")
@@ -1009,6 +1085,7 @@ func (r *TsEngine) FlushBuffer() error {
 
 // Checkpoint create checkpoint
 func (r *TsEngine) Checkpoint() error {
+	r.checkOrWaitForOpen()
 	status := C.TSCreateCheckpoint(r.tdb)
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to create WAL checkpoint")
@@ -1017,8 +1094,19 @@ func (r *TsEngine) Checkpoint() error {
 	return nil
 }
 
+// CheckpointForTable create checkpoint for a table
+func (r *TsEngine) CheckpointForTable(tableID uint32) error {
+	r.checkOrWaitForOpen()
+	status := C.TSCreateCheckpointForTable(r.tdb, C.uint64_t(tableID))
+	if err := statusToError(status); err != nil {
+		return err
+	}
+	return nil
+}
+
 // DeleteRangeGroup Delete RangeGroup
 func (r *TsEngine) DeleteRangeGroup(tableID uint64, rangeGroup api.RangeGroup) error {
+	r.checkOrWaitForOpen()
 	cRangeGroup := C.RangeGroup{
 		range_group_id: C.uint64_t(rangeGroup.RangeGroupID),
 	}
@@ -1033,6 +1121,7 @@ func (r *TsEngine) DeleteRangeGroup(tableID uint64, rangeGroup api.RangeGroup) e
 func (r *TsEngine) CreateSnapshotForRead(
 	tableID uint64, beginHash uint64, endHash uint64, beginTs int64, endTs int64,
 ) (uint64, error) {
+	r.checkOrWaitForOpen()
 	var snapshotID C.uint64_t
 	tsSpan := C.KwTsSpan{
 		begin: C.int64_t(beginTs),
@@ -1050,6 +1139,7 @@ func (r *TsEngine) CreateSnapshotForRead(
 func (r *TsEngine) CreateSnapshotForWrite(
 	tableID uint64, beginHash uint64, endHash uint64, beginTs int64, endTs int64,
 ) (uint64, error) {
+	r.checkOrWaitForOpen()
 	var snapshotID C.uint64_t
 	tsSpan := C.KwTsSpan{
 		begin: C.int64_t(beginTs),
@@ -1065,6 +1155,7 @@ func (r *TsEngine) CreateSnapshotForWrite(
 
 // GetSnapshotNextBatchData get data of the snapshot
 func (r *TsEngine) GetSnapshotNextBatchData(tableID uint64, snapshotID uint64) ([]byte, error) {
+	r.checkOrWaitForOpen()
 	var data C.TSSlice
 	status := C.TSGetSnapshotNextBatchData(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID), &data)
 	if err := statusToError(status); err != nil {
@@ -1080,6 +1171,7 @@ func (r *TsEngine) WriteSnapshotBatchData(tableID uint64, snapshotID uint64, dat
 		return errors.New("snapshot data is null")
 	}
 
+	r.checkOrWaitForOpen()
 	cTsSlice := C.TSSlice{
 		data: (*C.char)(C.CBytes(data)),
 		len:  C.size_t(len(data)),
@@ -1095,6 +1187,7 @@ func (r *TsEngine) WriteSnapshotBatchData(tableID uint64, snapshotID uint64, dat
 
 // WriteSnapshotSuccess apply snapshot
 func (r *TsEngine) WriteSnapshotSuccess(tableID uint64, snapshotID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSWriteSnapshotSuccess(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to apply snapshot")
@@ -1104,6 +1197,7 @@ func (r *TsEngine) WriteSnapshotSuccess(tableID uint64, snapshotID uint64) error
 
 // WriteSnapshotRollback rollback snapshot
 func (r *TsEngine) WriteSnapshotRollback(tableID uint64, snapshotID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSWriteSnapshotRollback(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to rollback snapshot")
@@ -1113,6 +1207,7 @@ func (r *TsEngine) WriteSnapshotRollback(tableID uint64, snapshotID uint64) erro
 
 // DeleteSnapshot drops Snapshot.
 func (r *TsEngine) DeleteSnapshot(tableID uint64, snapshotID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSDeleteSnapshot(r.tdb, C.TSTableID(tableID), C.uint64_t(snapshotID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to drop snapshot")
@@ -1124,6 +1219,7 @@ func (r *TsEngine) DeleteSnapshot(tableID uint64, snapshotID uint64) error {
 func (r *TsEngine) MtrBegin(
 	tableID uint64, rangeGroupID uint64, rangeID uint64, index uint64,
 ) (uint64, error) {
+	r.checkOrWaitForOpen()
 	var miniTransID C.uint64_t
 	status := C.TSMtrBegin(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(rangeID),
 		C.uint64_t(index), &miniTransID)
@@ -1135,6 +1231,7 @@ func (r *TsEngine) MtrBegin(
 
 // MtrCommit COMMIT a TS mini-transaction
 func (r *TsEngine) MtrCommit(tableID uint64, rangeGroupID uint64, miniTransID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSMtrCommit(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(miniTransID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to COMMIT a TS mini-transaction")
@@ -1144,6 +1241,7 @@ func (r *TsEngine) MtrCommit(tableID uint64, rangeGroupID uint64, miniTransID ui
 
 // MtrRollback ROLLBACK a TS mini-transaction
 func (r *TsEngine) MtrRollback(tableID uint64, rangeGroupID uint64, miniTransID uint64) error {
+	r.checkOrWaitForOpen()
 	status := C.TSMtrRollback(r.tdb, C.TSTableID(tableID), C.uint64_t(rangeGroupID), C.uint64_t(miniTransID))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to ROLLBACK a TS mini-transaction")
@@ -1153,6 +1251,7 @@ func (r *TsEngine) MtrRollback(tableID uint64, rangeGroupID uint64, miniTransID 
 
 // TransBegin BEGIN a TS transaction
 func (r *TsEngine) TransBegin(tableID uint64, transactionID []byte) error {
+	r.checkOrWaitForOpen()
 	status := C.TSxBegin(r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to BEGIN a TS mini-transaction")
@@ -1162,6 +1261,7 @@ func (r *TsEngine) TransBegin(tableID uint64, transactionID []byte) error {
 
 // TransCommit COMMIT a TS transaction
 func (r *TsEngine) TransCommit(tableID uint64, transactionID []byte) error {
+	r.checkOrWaitForOpen()
 	status := C.TSxCommit(r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to COMMIT a TS mini-transaction")
@@ -1171,6 +1271,7 @@ func (r *TsEngine) TransCommit(tableID uint64, transactionID []byte) error {
 
 // TransRollback ROLLBACK a TS transaction
 func (r *TsEngine) TransRollback(tableID uint64, transactionID []byte) error {
+	r.checkOrWaitForOpen()
 	status := C.TSxRollback(r.tdb, C.TSTableID(tableID), (*C.char)(unsafe.Pointer(&transactionID[0])))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to ROLLBACK a TS mini-transaction")
@@ -1180,6 +1281,7 @@ func (r *TsEngine) TransRollback(tableID uint64, transactionID []byte) error {
 
 // TSGetWaitThreadNum is used to get wait thread num from time series engine
 func (r *TsEngine) TSGetWaitThreadNum() (uint32, error) {
+	r.checkOrWaitForOpen()
 	var info C.ThreadInfo
 	status := C.TSGetWaitThreadNum(r.tdb, unsafe.Pointer(&info))
 	if err := statusToError(status); err != nil {
@@ -1253,6 +1355,7 @@ func (r *TsEngine) manageWAL() {
 func (r *TsEngine) DeleteReplicaTSData(
 	tableID uint64, beginHash uint64, endHash uint64, startTs int64, endTs int64,
 ) error {
+	r.checkOrWaitForOpen()
 	tsSpan := C.KwTsSpan{
 		begin: C.int64_t(startTs),
 		end:   C.int64_t(endTs),
@@ -1380,10 +1483,22 @@ func goUnLock(goMutux C.uint64_t) {
 
 // GetTsVersion get current version of ts table
 func (r *TsEngine) GetTsVersion(tableID uint64) (uint32, error) {
+	r.checkOrWaitForOpen()
 	var tsVersion C.uint32_t
 	status := C.TsGetTableVersion(r.tdb, C.TSTableID(tableID), &tsVersion)
 	if err := statusToError(status); err != nil {
 		return uint32(tsVersion), errors.Wrap(err, "failed to get ts version")
 	}
 	return uint32(tsVersion), nil
+}
+
+// GetWalLevel get current wal level of ts engine
+func (r *TsEngine) GetWalLevel() (int, error) {
+	r.checkOrWaitForOpen()
+	var walLevel C.uint8_t
+	status := C.TsGetWalLevel(r.tdb, &walLevel)
+	if err := statusToError(status); err != nil {
+		return int(walLevel), errors.Wrap(err, "failed to get ts version")
+	}
+	return int(walLevel), nil
 }

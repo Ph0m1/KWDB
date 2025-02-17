@@ -970,6 +970,9 @@ void MMapSegmentTable::push_back_null_bitmap(kwdbts::Payload* payload, MetricRow
 }
 
 void MMapSegmentTable::sync(int flags) {
+  if (is_compressed_ || meta_data_ == nullptr) {
+    return;
+  }
   meta_data_->num_node = actual_writed_count_.load();
   bt_file_.sync(flags);
   for (size_t i = 0 ; i < col_files_.size() ; ++i) {

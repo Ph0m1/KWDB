@@ -19,6 +19,7 @@
 #include "ee_dml_exec.h"
 #include "ee_executor.h"
 #include "st_wal_table.h"
+#include "st_byrl_table.h"
 #include "sys_utils.h"
 #include "ts_table.h"
 #include "th_kwdb_dynamic_thread_pool.h"
@@ -106,14 +107,33 @@ KStatus TSEngineImpl::CreateTsTable(kwdbContext_p ctx, const KTableKey& table_id
 
   std::shared_ptr<TsTable> table = nullptr;
   UpdateSetting(ctx);
-  if (options_.wal_level > 0) {
+  switch (options_.wal_level) {
+  case WALMode::OFF:
+    table = std::make_shared<TsTable>(ctx, options_.db_path, table_id);
+    break;
+  case WALMode::ON:
+  case WALMode::SYNC:
+  {
     s = wal_sys_->WriteDDLCreateWAL(ctx, 0, table_id, meta, &ranges);
     if (s == FAIL) {
       return s;
     }
     table = std::make_shared<LoggedTsTable>(ctx, options_.db_path, table_id, &options_);
-  } else {
-    table = std::make_shared<TsTable>(ctx, options_.db_path, table_id);
+  }
+    break;
+  case WALMode::BYRL:
+  {
+    s = wal_sys_->WriteDDLCreateWAL(ctx, 0, table_id, meta, &ranges);
+    if (s == FAIL) {
+      return s;
+    }
+    LOG_INFO("create RaftLoggedTsTable %lu", table_id);
+    table = std::make_shared<RaftLoggedTsTable>(ctx, options_.db_path, table_id);
+  }
+    break;
+  default:
+    LOG_WARN("invalid wal level %d", options_.wal_level);
+    break;
   }
 
   std::vector<TagInfo> tag_schema;
@@ -244,10 +264,20 @@ KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, s
   }
 
   UpdateSetting(ctx);
-  if (options_.wal_level > 0) {
-    table = std::make_shared<LoggedTsTable>(ctx, options_.db_path, table_id, &options_);
-  } else {
+  switch (options_.wal_level) {
+  case WALMode::OFF:
     table = std::make_shared<TsTable>(ctx, options_.db_path, table_id);
+    break;
+  case WALMode::ON:
+  case WALMode::SYNC:
+    table = std::make_shared<LoggedTsTable>(ctx, options_.db_path, table_id, &options_);
+    break;
+  case WALMode::BYRL:
+    table = std::make_shared<RaftLoggedTsTable>(ctx, options_.db_path, table_id);
+    break;
+  default:
+    LOG_WARN("invalid wal level %d", options_.wal_level);
+    break;
   }
 
   std::unordered_map<k_uint64, int8_t> range_groups;
@@ -571,6 +601,9 @@ KStatus TSEngineImpl::CreateCheckpoint(kwdbts::kwdbContext_p ctx) {
   }
   LOG_DEBUG("creating checkpoint ...");
 
+  if (options_.wal_level == 3) {
+    goPrepareFlush();
+  }
   // Traverse all EntityGroups in each timeline of the current node
   // For each EntityGroup, call the interface of WALMgr to start the timing library checkpoint operation
   std::list<std::pair<KTableKey, std::shared_ptr<TsTable>>> tables = tables_cache_->GetAllValues();
@@ -585,8 +618,25 @@ KStatus TSEngineImpl::CreateCheckpoint(kwdbts::kwdbContext_p ctx) {
     iter->second->CreateCheckpoint(ctx);
     iter++;
   }
+  if (options_.wal_level == 3) {
+    goFlushed();
+  }
 
   return KStatus::SUCCESS;
+}
+
+KStatus TSEngineImpl::CreateCheckpointForTable(kwdbts::kwdbContext_p ctx, TSTableID table_id) {
+  if (options_.wal_level == 0) {
+    return KStatus::SUCCESS;
+  }
+  LOG_DEBUG("creating checkpoint for table %d...", table_id);
+
+  std::shared_ptr<TsTable> table = tables_cache_->Get(table_id);
+  if (!table || table->IsDropped()) {
+    LOG_WARN("table %d doesn't exist, %p", table_id, table.get());
+    return KStatus::FAIL;
+  }
+  return table->CreateCheckpoint(ctx);
 }
 
 KStatus TSEngineImpl::recover(kwdbts::kwdbContext_p ctx) {
@@ -696,7 +746,7 @@ KStatus TSEngineImpl::Recover(kwdbts::kwdbContext_p ctx) {
 #endif
   }
 
-  if (options_.wal_level == 0) {
+  if (options_.wal_level == 0 || options_.wal_level == 3) {
     return KStatus::SUCCESS;
   }
 
@@ -750,12 +800,16 @@ KStatus TSEngineImpl::FlushBuffer(kwdbContext_p ctx) {
   if (options_.wal_level == 0) {
     return KStatus::SUCCESS;
   }
-  LOG_DEBUG("Start flush WAL buffer");
+  LOG_DEBUG("Start flush WAL buffer, wal_sys_ %p", wal_sys_);
 
   KStatus s = wal_sys_->Flush(ctx);
   if (s == KStatus::FAIL) {
     LOG_ERROR("Flush Buffer failed.")
     return s;
+  }
+
+  if (options_.wal_level == 3) {
+    return KStatus::SUCCESS;
   }
 
   std::list<std::pair<KTableKey, std::shared_ptr<TsTable>>> tables = tables_cache_->GetAllValues();
@@ -775,7 +829,7 @@ KStatus TSEngineImpl::FlushBuffer(kwdbContext_p ctx) {
 
 KStatus TSEngineImpl::TSMtrBegin(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                                  uint64_t range_id, uint64_t index, uint64_t& mtr_id) {
-  if (options_.wal_level == 0) {
+  if (options_.wal_level == 0 || options_.wal_level == 3) {
     mtr_id = 0;
     return KStatus::SUCCESS;
   }
@@ -822,7 +876,7 @@ KStatus TSEngineImpl::TSMtrBegin(kwdbContext_p ctx, const KTableKey& table_id, u
 
 KStatus TSEngineImpl::TSMtrCommit(kwdbContext_p ctx, const KTableKey& table_id,
                                   uint64_t range_group_id, uint64_t mtr_id) {
-  if (options_.wal_level == 0) {
+  if (options_.wal_level == 0 || options_.wal_level == 3) {
     return KStatus::SUCCESS;
   }
 
@@ -867,7 +921,7 @@ KStatus TSEngineImpl::TSMtrCommit(kwdbContext_p ctx, const KTableKey& table_id,
 
 KStatus TSEngineImpl::TSMtrRollback(kwdbContext_p ctx, const KTableKey& table_id,
                                     uint64_t range_group_id, uint64_t mtr_id) {
-  if (options_.wal_level == 0 || mtr_id == 0) {
+  if (options_.wal_level == 0 || options_.wal_level == 3 || mtr_id == 0) {
     return KStatus::SUCCESS;
   }
 
@@ -1263,6 +1317,15 @@ KStatus TSEngineImpl::GetTableVersion(kwdbContext_p ctx, TSTableID table_id, uin
     return s;
   }
   *version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
+  return KStatus::SUCCESS;
+}
+
+KStatus TSEngineImpl::GetWalLevel(kwdbContext_p ctx, uint8_t* wal_level) {
+  if (wal_level == nullptr) {
+    LOG_ERROR("wal_level is nullptr");
+    return KStatus::FAIL;
+  }
+  *wal_level = options_.wal_level;
   return KStatus::SUCCESS;
 }
 

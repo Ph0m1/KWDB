@@ -147,6 +147,7 @@ const (
 	CrdbInternalKWDBAttributeValueTableID
 	CrdbInternalKWDBObjectCreateStatementID
 	CrdbInternalKWDBObjectRetentionID
+	CrdbInternalTSEInfoID
 	InformationSchemaID
 	InformationSchemaAdministrableRoleAuthorizationsID
 	InformationSchemaApplicableRolesID

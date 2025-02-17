@@ -651,3 +651,44 @@ func (rsl StateLoader) SynthesizeHardState(
 	err := rsl.SetHardState(ctx, readWriter, newHS)
 	return errors.Wrapf(err, "writing HardState %+v", &newHS)
 }
+
+// SetTsFlushedIndex overwrites the ts flushed index.
+func (rsl StateLoader) SetTsFlushedIndex(
+	ctx context.Context, writer storage.Writer, flushedIndex uint64,
+) error {
+	var value roachpb.Value
+	value.SetInt(int64(flushedIndex))
+	// "Blind" because ms == nil and timestamp == hlc.Timestamp{}.
+	return storage.MVCCBlindPut(
+		ctx,
+		writer,
+		nil, /* ms */
+		rsl.TsFlushedIndexKey(),
+		hlc.Timestamp{}, /* timestamp */
+		value,
+		nil, /* txn */
+	)
+}
+
+// LoadTsFlushedIndex overwrites the HardState.
+func (rsl StateLoader) LoadTsFlushedIndex(
+	ctx context.Context, reader storage.Reader,
+) (uint64, error) {
+	// If the range applied state is not found, check the legacy Raft applied
+	// index and the lease applied index keys. This is where these indices were
+	// stored before the range applied state was introduced.
+	v, _, err := storage.MVCCGet(ctx, reader, rsl.TsFlushedIndexKey(),
+		hlc.Timestamp{}, storage.MVCCGetOptions{})
+	if err != nil {
+		return 0, err
+	}
+	var tsFlushedIndex uint64
+	if v != nil {
+		int64TsFlushedIndex, err := v.GetInt()
+		if err != nil {
+			return 0, err
+		}
+		tsFlushedIndex = uint64(int64TsFlushedIndex)
+	}
+	return tsFlushedIndex, nil
+}

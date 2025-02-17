@@ -164,11 +164,6 @@ var (
 		"time series data partition interval",
 		864000)
 
-	deDuplicateRule = settings.RegisterPublicStringSetting(
-		"ts.dedup.rule",
-		"remove time series data duplicate rule",
-		"override")
-
 	mountMaxLimit = settings.RegisterPublicIntSetting(
 		"ts.mount.max_limit",
 		"the limit on the number of mount files compressed by the database process",
@@ -1879,7 +1874,14 @@ func (s *Server) Start(ctx context.Context) error {
 
 	setTse := func() (*tse.TsEngine, *tscoord.DB, error) {
 		if s.cfg.Stores.Specs != nil && s.cfg.Stores.Specs[0].Path != "" && !s.cfg.ForbidCatchCoreDump {
-			s.tsEngine, err = s.cfg.CreateTsEngine(ctx, s.stopper, s.node.Descriptor.RangeIndex)
+			tse.TsRaftLogCombineWAL.SetOnChange(&s.st.SV, func() {
+				if !tse.TsRaftLogCombineWAL.Get(&s.st.SV) {
+					if err := kvserver.ClearReplicasAndResetFlushedIndex(ctx); err != nil {
+						log.Warningf(ctx, "failed clear flushed index for replicas, err: %+v", err)
+					}
+				}
+			})
+			s.tsEngine, err = s.cfg.CreateTsEngine(ctx, s.stopper)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "failed to create ts engine")
 			}
@@ -3070,4 +3072,26 @@ func (s *Server) RestfulLogout(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+//export goPrepareFlush
+func goPrepareFlush() C.int {
+	ctx := context.Background()
+	log.VEventf(ctx, 3, "prepare flush")
+	if err := kvserver.SetTsPrepareFlushedIndexForAllReplicas(ctx); err != nil {
+		log.Warningf(ctx, "failed prepare flush for replicas, err: %+v", err)
+		return -1
+	}
+	return 0
+}
+
+//export goFlushed
+func goFlushed() C.int {
+	ctx := context.Background()
+	log.VEventf(ctx, 3, "set flushed")
+	if err := kvserver.SetTsFlushedIndexForAllReplicas(ctx); err != nil {
+		log.Warningf(ctx, "failed set flushed for replicas, err: %+v", err)
+		return -1
+	}
+	return 0
 }

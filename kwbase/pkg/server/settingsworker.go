@@ -138,6 +138,18 @@ func (s *Server) refreshSettings() {
 				if ok {
 					u.ResetRemaining()
 				}
+				// TODO(whz): we open tsengine async to wait for updated cluster settings.
+				// This affects all start modes, and some immediate ops may block to wait
+				// for opening of tsengine. It depends on the speed of refreshing cluster
+				// setting, usually quick enough. We will optimize it later if necessary.
+				if s.tsEngine == nil {
+					log.Warningf(ctx, "ts engine is not creted")
+				} else if !s.tsEngine.IsOpen() {
+					log.Infof(ctx, "try open ts engine")
+					if err := s.tsEngine.Open(s.node.Descriptor.RangeIndex); err != nil {
+						panic(errors.Errorf("failed create tsEngine, err: %+v", err))
+					}
+				}
 			case <-s.stopper.ShouldStop():
 				return
 			}

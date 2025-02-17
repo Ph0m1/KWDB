@@ -276,10 +276,32 @@ func (r *Replica) handleLeaseResult(ctx context.Context, lease *roachpb.Lease) {
 	r.leasePostApply(ctx, *lease, false /* permitJump */)
 }
 
+// adaptNewTruncateState adapts the truncate index according to the tsFlushedIndex
+func (r *Replica) adaptNewTruncateState(ctx context.Context, t *roachpb.RaftTruncatedState) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// tsFlushedIndex > 0 means that use raft log for wal, and r is ts replica
+	if r.mu.tsFlushedIndex > 0 {
+		if t.Index > r.mu.tsFlushedIndex {
+			log.VEventf(ctx, 3, "change RaftTruncatedState index from %d to %d", t.Index, r.mu.tsFlushedIndex)
+			t.Index = r.mu.tsFlushedIndex
+			var err error
+			t.Term, err = r.raftTermRLocked(t.Index)
+			if err != nil {
+				log.Errorf(ctx, "failed get term for index %d, truncate index: %d, err: %+v", t.Index, r.mu.state.TruncatedState.Index, err)
+				return err
+			}
+		}
+		log.VEventf(ctx, 3, "truncate to index %d, term %d", t.Index, t.Term)
+	}
+	return nil
+}
+
 func (r *Replica) handleTruncatedStateResult(
 	ctx context.Context, t *roachpb.RaftTruncatedState,
 ) (raftLogDelta int64) {
 	r.mu.Lock()
+	log.VEventf(ctx, 3, "set truncate index to %d, term to %d", t.Index, t.Term)
 	r.mu.state.TruncatedState = t
 	r.mu.Unlock()
 
@@ -390,6 +412,9 @@ func (r *Replica) handleNoRaftLogDeltaResult(ctx context.Context) {
 	// log.
 	r.mu.Lock()
 	checkRaftLog := r.mu.raftLogSize-r.mu.raftLogLastCheckSize >= RaftLogQueueStaleSize
+	if r.mu.tsFlushedIndex > 0 {
+		checkRaftLog = checkRaftLog && (r.mu.tsFlushedIndex > r.mu.state.TruncatedState.Index)
+	}
 	if checkRaftLog {
 		r.mu.raftLogLastCheckSize = r.mu.raftLogSize
 	}

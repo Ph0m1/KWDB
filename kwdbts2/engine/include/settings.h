@@ -26,7 +26,8 @@ namespace kwdbts {
 enum WALMode : uint8_t {
   OFF = 0,
   ON = 1,
-  SYNC = 2
+  SYNC = 2,
+  BYRL = 3    // by raft log
 };
 
 inline const string& s_defaultDateFormat()

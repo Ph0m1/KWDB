@@ -672,7 +672,7 @@ func (cfg *Config) CreateEngines(ctx context.Context) (Engines, error) {
 
 // CreateTsEngine create ts engine
 func (cfg *Config) CreateTsEngine(
-	ctx context.Context, stopper *stop.Stopper, rangeIndex []roachpb.RangeIndex,
+	ctx context.Context, stopper *stop.Stopper,
 ) (*tse.TsEngine, error) {
 
 	threadPoolSize, err := strconv.Atoi(cfg.ThreadPoolSize)
@@ -700,7 +700,7 @@ func (cfg *Config) CreateTsEngine(
 		LogCfg:         cfg.LogConfig,
 		IsSingleNode:   GetSingleNodeModeFlag(cfg.ModeFlag),
 	}
-	tsDB, err := tse.NewTsEngine(ctx, tsConfig, stopper, rangeIndex)
+	tsDB, err := tse.NewTsEngine(ctx, tsConfig, stopper)
 	if err != nil {
 		return nil, err
 	}

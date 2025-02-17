@@ -212,6 +212,21 @@ KStatus TsEntityGroup::putTagData(kwdbContext_p ctx, int32_t groupid, int32_t en
   return KStatus::SUCCESS;
 }
 
+KStatus TsEntityGroup::SyncMetricDataVersion() {
+  RW_LATCH_S_LOCK(drop_mutex_);
+  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
+  ErrorInfo err_info;
+  // sync metric schema versions.
+  root_bt_manager_->Sync(0, err_info);
+  if (err_info.errcode < 0) {
+    LOG_ERROR("root_bt_manager sync failed. %s", err_info.errmsg.c_str());
+    return KStatus::FAIL;
+  }
+  // sync metric data.
+  ebt_manager_->sync(0);
+  return KStatus::SUCCESS;
+}
+
 KStatus TsEntityGroup::GetAllPartitions(kwdbContext_p ctx, std::unordered_map<SubGroupID,
                                         std::vector<timestamp64>>* subgrp_partitions) {
   std::vector<void*> primary_tags;

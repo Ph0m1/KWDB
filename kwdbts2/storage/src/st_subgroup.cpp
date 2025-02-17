@@ -772,9 +772,13 @@ void TsSubEntityGroup::sync(int flags) {
   for (auto it = partitions.begin() ; it != partitions.end() ; it++) {
     TsTimePartition* p_table = GetPartitionTable(it->first, err_info, false);
     if (p_table != nullptr) {
-      p_table->sync(flags);
+      if (p_table->isValid()) {
+        p_table->rdLock();
+        p_table->sync(flags);
+        p_table->unLock();
+      }
+      ReleaseTable(p_table);
     }
-    ReleaseTable(p_table);
   }
 }
 

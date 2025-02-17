@@ -253,6 +253,11 @@ func LeaseAppliedIndexLegacyKey(rangeID roachpb.RangeID) roachpb.Key {
 	return MakeRangeIDPrefixBuf(rangeID).LeaseAppliedIndexLegacyKey()
 }
 
+// TsFlushedIndexKey returns a system-local key for a ts flushed index.
+func TsFlushedIndexKey(rangeID roachpb.RangeID) roachpb.Key {
+	return MakeRangeIDPrefixBuf(rangeID).TsFlushedIndexKey()
+}
+
 // RaftTruncatedStateLegacyKey returns a system-local key for a RaftTruncatedState.
 // See VersionUnreplicatedRaftTruncatedState.
 func RaftTruncatedStateLegacyKey(rangeID roachpb.RangeID) roachpb.Key {
@@ -941,6 +946,11 @@ func (b RangeIDPrefixBuf) RaftLogKey(logIndex uint64) roachpb.Key {
 // the range's last replica GC timestamp.
 func (b RangeIDPrefixBuf) RangeLastReplicaGCTimestampKey() roachpb.Key {
 	return append(b.unreplicatedPrefix(), LocalRangeLastReplicaGCTimestampSuffix...)
+}
+
+// TsFlushedIndexKey returns a system-local key for a ts flushed index.
+func (b RangeIDPrefixBuf) TsFlushedIndexKey() roachpb.Key {
+	return append(b.unreplicatedPrefix(), LocalTsFlushedIndexSuffix...)
 }
 
 // ZoneKeyPrefix returns the key prefix for id's row in the system.zones table.

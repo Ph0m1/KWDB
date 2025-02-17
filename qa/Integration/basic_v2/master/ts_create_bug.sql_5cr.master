@@ -364,7 +364,7 @@ SET
 > select count(*) from pg_catalog.pg_class;
   count
 ---------
-    114
+    115
 (1 row)
 > use defaultdb;
 SET
@@ -375,7 +375,7 @@ SET
 > select count(*) from pg_catalog.pg_class;
   count
 ---------
-    114
+    115
 (1 row)
 > use defaultdb;
 SET

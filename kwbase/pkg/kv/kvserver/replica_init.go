@@ -38,6 +38,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/rpc"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
@@ -165,6 +166,42 @@ func (r *Replica) loadRaftMuLockedReplicaMuLocked(
 	var err error
 	if r.mu.state, err = r.mu.stateLoader.Load(ctx, r.Engine(), desc); err != nil {
 		return err
+	}
+	if r.isTsLocked() {
+		// if we use the mode that raft log combines with WAL to guarantee the data integrity,
+		// we need to adjust applied index with ts flushed index.
+		needAdjustAppliedIndex := false
+		if isInit {
+			// start node, TsRaftLogCombineWAL is unavailable yet, check r.mu.tsFlushedIndex
+			r.mu.tsFlushedIndex, err = r.mu.stateLoader.LoadTsFlushedIndex(ctx, r.Engine())
+			if err != nil {
+				return err
+			}
+			needAdjustAppliedIndex = r.mu.tsFlushedIndex > 0
+		} else {
+			// create replica, r.mu.tsFlushedIndex is not set and TsRaftLogCombineWAL
+			// is available, directly check TsRaftLogCombineWAL
+			needAdjustAppliedIndex = tse.TsRaftLogCombineWAL.Get(&r.store.ClusterSettings().SV)
+		}
+		if needAdjustAppliedIndex {
+			log.Infof(ctx, "init %v, truncate index is %d, tsFlushedIndex is %d, RaftAppliedIndex is %d",
+				isInit, r.mu.state.TruncatedState.Index, r.mu.tsFlushedIndex, r.mu.state.RaftAppliedIndex)
+			// just created, set r.mu.state.TruncatedState.Index to r.mu.tsFlushedIndex
+			if r.mu.tsFlushedIndex == 0 {
+				r.mu.tsFlushedIndex = r.mu.state.TruncatedState.Index
+				if err := r.mu.stateLoader.SetTsFlushedIndex(ctx, r.Engine(), r.mu.tsFlushedIndex); err != nil {
+					log.Warningf(ctx, "failed SetTsFlushedIndex, err: %v", err)
+				}
+			}
+			if r.mu.state.RaftAppliedIndex != r.mu.tsFlushedIndex {
+				// only set RaftAppliedIndex to tsFlushedIndex when node starts.
+				log.Infof(ctx, "set RaftAppliedIndex to %d", r.mu.tsFlushedIndex)
+				r.mu.state.RaftAppliedIndex = r.mu.tsFlushedIndex
+				if _, err := r.mu.stateLoader.Save(ctx, r.Engine(), r.mu.state, stateloader.TruncatedStateUnreplicated); err != nil {
+					log.Warningf(ctx, "failed Save ReplicaState, err: %v", err)
+				}
+			}
+		}
 	}
 	if isInit {
 		r.store.nodeDesc.RangeIndex = append(r.store.nodeDesc.RangeIndex, roachpb.RangeIndex{

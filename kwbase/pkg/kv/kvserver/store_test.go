@@ -57,6 +57,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
 	"gitee.com/kwbasedb/kwbase/pkg/util/hlc"
 	"gitee.com/kwbasedb/kwbase/pkg/util/leaktest"
@@ -3294,6 +3295,164 @@ func TestPreemptiveSnapshotsAreRemoved(t *testing.T) {
 		}
 	}
 	require.True(t, foundTombstoneKey)
+}
+
+func TestUpdateNodeReplicas(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	ctx := context.Background()
+	stopper := stop.NewStopper()
+	defer stopper.Stop(ctx)
+	storeConfig := TestStoreConfig(hlc.NewClock(hlc.UnixNano, base.DefaultMaxClockOffset))
+	s := createTestStoreWithoutStart(t, stopper, testStoreOpts{}, &storeConfig)
+
+	testCases := []struct {
+		add               bool
+		rangeID           roachpb.RangeID
+		isTs              bool
+		combineEnabled    bool
+		hasTsFlushedIndex bool
+		replicaChange     int
+	}{
+		{add: true, rangeID: 1, isTs: false, combineEnabled: true, hasTsFlushedIndex: false, replicaChange: 0},
+		{add: true, rangeID: 2, isTs: true, combineEnabled: false, hasTsFlushedIndex: false, replicaChange: 0},
+		{add: true, rangeID: 3, isTs: true, combineEnabled: true, hasTsFlushedIndex: false, replicaChange: 1},
+		{add: true, rangeID: 4, isTs: true, combineEnabled: false, hasTsFlushedIndex: true, replicaChange: 1},
+		{add: false, rangeID: 5, isTs: true, combineEnabled: true, hasTsFlushedIndex: true, replicaChange: 0},
+		{add: false, rangeID: 4, isTs: false, combineEnabled: false, hasTsFlushedIndex: false, replicaChange: -1},
+		{add: false, rangeID: 3, isTs: true, combineEnabled: true, hasTsFlushedIndex: true, replicaChange: -1},
+	}
+
+	tsTag := roachpb.TS_REPLICA
+	s.Ident = &roachpb.StoreIdent{StoreID: 1}
+	for i, c := range testCases {
+		var r Replica
+		r.RangeID = c.rangeID
+		r.store = s
+		r.mu.state.Desc = &roachpb.RangeDescriptor{
+			RangeID:          c.rangeID,
+			InternalReplicas: []roachpb.ReplicaDescriptor{{StoreID: s.StoreID()}},
+		}
+		if c.isTs {
+			r.mu.state.Desc.InternalReplicas[0].Tag = &tsTag
+		}
+		if c.combineEnabled {
+			tse.TsRaftLogCombineWAL.Override(&s.ClusterSettings().SV, true)
+		} else {
+			tse.TsRaftLogCombineWAL.Override(&s.ClusterSettings().SV, false)
+		}
+		if c.hasTsFlushedIndex {
+			r.mu.tsFlushedIndex = 15
+		}
+		expected := len(nodeReplicas.mu.replicas) + c.replicaChange
+		if c.add {
+			if err := s.addReplicaToRangeMapLocked(&r); err != nil {
+				t.Fatalf("add replica failed, err: %s", err)
+			}
+		} else {
+			s.unlinkReplicaByRangeIDLocked(c.rangeID)
+		}
+		n := len(nodeReplicas.mu.replicas)
+		if n != expected {
+			t.Errorf("%d, expected %d, but fount %d", i, expected, n)
+		}
+	}
+}
+
+func TestUpdateTsFlushedIndex(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	ctx := context.Background()
+	stopper := stop.NewStopper()
+	defer stopper.Stop(ctx)
+	storeConfig := TestStoreConfig(hlc.NewClock(hlc.UnixNano, base.DefaultMaxClockOffset))
+	s := createTestStoreWithoutStart(t, stopper, testStoreOpts{}, &storeConfig)
+
+	testReplicas := []struct {
+		repl           *Replica
+		initialized    bool
+		tsFlushedIndex uint64
+		appliedIndex   uint64
+	}{
+		{repl: &Replica{store: s, RangeID: 1}, initialized: true, appliedIndex: 18},
+		{repl: &Replica{store: s, RangeID: 2}, initialized: false, appliedIndex: 13},
+		{repl: &Replica{store: s, RangeID: 3}, initialized: true, appliedIndex: 17},
+	}
+	for _, testRepl := range testReplicas {
+		r := testRepl.repl
+		r.mu.state.Desc = &roachpb.RangeDescriptor{
+			RangeID:  r.RangeID,
+			StartKey: roachpb.RKey("a"),
+		}
+		if testRepl.initialized {
+			r.mu.state.Desc.EndKey = roachpb.RKey("b")
+		}
+		r.mu.state.RaftAppliedIndex = testRepl.appliedIndex
+		r.mu.stateLoader = stateloader.Make(r.RangeID)
+		nodeReplicas.mu.replicas[r.RangeID] = r
+	}
+	if err := SetTsPrepareFlushedIndexForAllReplicas(ctx); err != nil {
+		t.Fatalf("prepare flushed index failed: %s", err)
+	}
+	for _, testRepl := range testReplicas {
+		if testRepl.initialized {
+			if testRepl.repl.mu.tsPrepareFlushedIndex != testRepl.appliedIndex {
+				t.Errorf("expected %d, but found %d", testRepl.appliedIndex, testRepl.repl.mu.tsPrepareFlushedIndex)
+			}
+			tsFlushedIndex, err := testRepl.repl.mu.stateLoader.LoadTsFlushedIndex(ctx, testRepl.repl.Engine())
+			if err != nil {
+				t.Fatalf("load ts flushed index failed: %s", err)
+			}
+			if tsFlushedIndex == testRepl.appliedIndex {
+				t.Errorf("unexpected %d", tsFlushedIndex)
+			}
+		} else {
+			if testRepl.repl.mu.tsPrepareFlushedIndex != 0 {
+				t.Errorf("expected 0, but found %d", testRepl.repl.mu.tsPrepareFlushedIndex)
+			}
+		}
+	}
+
+	if err := SetTsFlushedIndexForAllReplicas(ctx); err != nil {
+		t.Fatalf("set ts flushed index failed: %s", err)
+	}
+	for _, testRepl := range testReplicas {
+		if testRepl.initialized {
+			if testRepl.repl.mu.tsFlushedIndex != testRepl.repl.mu.tsPrepareFlushedIndex {
+				t.Errorf("expected %d, but found %d", testRepl.repl.mu.tsPrepareFlushedIndex, testRepl.repl.mu.tsFlushedIndex)
+			}
+			tsFlushedIndex, err := testRepl.repl.mu.stateLoader.LoadTsFlushedIndex(ctx, testRepl.repl.Engine())
+			if err != nil {
+				t.Fatalf("load ts flushed index failed: %s", err)
+			}
+			if tsFlushedIndex != testRepl.repl.mu.tsPrepareFlushedIndex {
+				t.Errorf("expected %d, but found %d", testRepl.repl.mu.tsPrepareFlushedIndex, tsFlushedIndex)
+			}
+		} else {
+			if testRepl.repl.mu.tsFlushedIndex != 0 {
+				t.Errorf("expected 0, but found %d", testRepl.repl.mu.tsFlushedIndex)
+			}
+		}
+	}
+
+	if err := ClearReplicasAndResetFlushedIndex(ctx); err != nil {
+		t.Fatalf("set ts flushed index failed: %s", err)
+	}
+	for _, testRepl := range testReplicas {
+		if testRepl.repl.mu.tsFlushedIndex != 0 {
+			t.Errorf("expected 0, but found %d", testRepl.repl.mu.tsFlushedIndex)
+		}
+		if testRepl.repl.mu.tsPrepareFlushedIndex != 0 {
+			t.Errorf("expected 0, but found %d", testRepl.repl.mu.tsPrepareFlushedIndex)
+		}
+		tsFlushedIndex, err := testRepl.repl.mu.stateLoader.LoadTsFlushedIndex(ctx, testRepl.repl.Engine())
+		if err != nil {
+			t.Fatalf("load ts flushed index failed: %s", err)
+		}
+		if tsFlushedIndex != 0 {
+			t.Errorf("expected 0, but found %d", tsFlushedIndex)
+		}
+	}
 }
 
 func BenchmarkStoreGetReplica(b *testing.B) {

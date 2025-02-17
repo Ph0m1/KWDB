@@ -522,6 +522,20 @@ TSStatus TSCreateCheckpoint(TSEngine* engine) {
   return kTsSuccess;
 }
 
+TSStatus TSCreateCheckpointForTable(TSEngine* engine, TSTableID table_id) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  s = engine->CreateCheckpointForTable(ctx_p, table_id);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("Checkpoint Error!");
+  }
+  return kTsSuccess;
+}
+
 TSStatus TSMtrBegin(TSEngine* engine, TSTableID table_id, uint64_t range_group_id,
                     uint64_t range_id, uint64_t index, uint64_t* mtr_id) {
   kwdbContext_t context;
@@ -1189,6 +1203,20 @@ TSStatus TsGetTableVersion(TSEngine* engine, TSTableID table_id, uint32_t* versi
   s = engine->GetTableVersion(ctx_p, table_id, version);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("GetTableVersion Error!");
+  }
+  return kTsSuccess;
+}
+
+TSStatus TsGetWalLevel(TSEngine* engine, uint8_t *wal_level) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+      return ToTsStatus("InitServerKWDBContext Error!");
+  }
+  s = engine->GetWalLevel(ctx_p, wal_level);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetWalLevel Error!");
   }
   return kTsSuccess;
 }

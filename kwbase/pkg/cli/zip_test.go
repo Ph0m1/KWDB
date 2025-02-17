@@ -90,7 +90,8 @@ SELECT concat('kwdb_internal.', table_name) as name FROM [ SHOW TABLES FROM kwdb
 'session_trace',
 'session_variables',
 'tables',
-'kwdb_user_pre_computing'
+'kwdb_user_pre_computing',
+'kwdb_tse_info'
 )
 ORDER BY name ASC`)
 	assert.NoError(t, err)
