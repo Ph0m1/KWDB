@@ -80,7 +80,7 @@ New expression 1 of 1:
         └── b:2 = y:6 [outer=(2,6), constraints=(/2: (/NULL - ]; /6: (/NULL - ]), fd=(2)==(6), (6)==(2)]
 
 ================================================================================
-CommuteJoin
+ReorderJoins
 ================================================================================
 Source expression:
   inner-join (hash)
@@ -158,23 +158,6 @@ New expression 1 of 1:
    ├── scan abc
    │    └── columns: a:1 b:2 c:3
    └── filters (true)
-
-================================================================================
-CommuteJoin
-================================================================================
-Source expression:
-  inner-join (hash)
-   ├── columns: a:1!null b:2!null c:3 x:5!null y:6!null z:7
-   ├── fd: (1)==(5), (5)==(1), (2)==(6), (6)==(2)
-   ├── scan xyz
-   │    └── columns: x:5 y:6 z:7
-   ├── scan abc
-   │    └── columns: a:1 b:2 c:3
-   └── filters
-        ├── a:1 = x:5 [outer=(1,5), constraints=(/1: (/NULL - ]; /5: (/NULL - ]), fd=(1)==(5), (5)==(1)]
-        └── b:2 = y:6 [outer=(2,6), constraints=(/2: (/NULL - ]; /6: (/NULL - ]), fd=(2)==(6), (6)==(2)]
-
-No new expressions.
 
 ================================================================================
 GenerateMergeJoins

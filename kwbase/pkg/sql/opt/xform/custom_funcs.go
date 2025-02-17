@@ -2246,7 +2246,42 @@ func (c *CustomFuncs) ShouldReorderJoins(left, right memo.RelExpr) bool {
 			right.Memo().QueryType == memo.MultiModel) {
 		return size <= c.e.evalCtx.SessionData.MultiModelReorderJoinsLimit
 	}
+
 	return size <= c.e.evalCtx.SessionData.ReorderJoinsLimit
+}
+
+// NewShouldReorderJoins returns whether the optimizer should attempt to find
+// a better ordering for a join tree. This is the case if the given expression
+// is the first expression of its group, and the join tree rooted at the
+// expression has not previously been reordered. This is to avoid duplicate
+// work. In addition, a join cannot be reordered if it has join hints.
+func (c *CustomFuncs) NewShouldReorderJoins(root memo.RelExpr) bool {
+	if root != root.FirstExpr() {
+		// Only match the first expression of a group to avoid duplicate work.
+		return false
+	}
+	if c.e.evalCtx.SessionData.ReorderJoinsLimit == 0 {
+		// Join reordering has been disabled.
+		return false
+	}
+
+	private, ok := root.Private().(*memo.JoinPrivate)
+	if !ok {
+		panic(errors.AssertionFailedf("operator does not have a join private: %v", root.Op()))
+	}
+
+	// Ensure that this join expression was not added to the memo by a previous
+	// reordering, as well as that the join does not have hints.
+	return !private.SkipReorderJoins && c.NoJoinHints(private)
+}
+
+// ReorderJoins adds alternate orderings of the given join tree to the memo. The
+// first expression of the memo group is used for construction of the join
+// graph. For more information, see the comment in join_order_builder.go.
+func (c *CustomFuncs) ReorderJoins(grp memo.RelExpr) memo.RelExpr {
+	c.e.o.JoinOrderBuilder().Init(c.e.f, c.e.evalCtx)
+	c.e.o.JoinOrderBuilder().Reorder(grp.FirstExpr())
+	return grp
 }
 
 // NoJoinManipulation returns whether the join has alternatives.

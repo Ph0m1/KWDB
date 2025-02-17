@@ -448,19 +448,19 @@ ORDER BY
              │                          | pipeline_name | pipeline_name
              │                          | measure_value | measure_value
              │                          | measure_type  | measure_type
-             └── hash-join              |               |
-                  │                     | type          | inner
-                  │                     | equality      | (c7) = (measure_value)
-                  ├── scan              |               |
-                  │                     | table         | rel_t1@primary
-                  │                     | spans         | FULL SCAN
-                  └── cross-join        |               |
-                       │                | type          | cross
-                       ├── synchronizer |               |
-                       │    └── ts scan |               |
-                       │                | ts-table      | t_point
-                       │                | access mode   | tableTableMeta
-                       └── scan         |               |
+             └── cross-join             |               |
+                  │                     | type          | cross
+                  ├── hash-join         |               |
+                  │    │                | type          | inner
+                  │    │                | equality      | (c7) = (measure_value)
+                  │    ├── scan         |               |
+                  │    │                | table         | rel_t1@primary
+                  │    │                | spans         | FULL SCAN
+                  │    └── synchronizer |               |
+                  │         └── ts scan |               |
+                  │                     | ts-table      | t_point
+                  │                     | access mode   | tableTableMeta
+                  └── scan              |               |
                                         | table         | pipeline_info@pipeline_name_index
                                         | spans         | FULL SCAN
 (33 rows)
@@ -668,16 +668,18 @@ GROUP BY
         │                               | measure_value                                              | measure_value
         └── hash-join                   |                                                            |
              │                          | type                                                       | inner
-             │                          | equality                                                   | (station_sn, work_area_sn) = (station_sn, work_area_sn)
+             │                          | equality                                                   | (work_area_sn) = (work_area_sn)
              │                          | left cols are key                                          |
              ├── scan                   |                                                            |
-             │                          | table                                                      | station_info@primary
-             │                          | spans                                                      | FULL SCAN
-             └── cross-join             |                                                            |
-                  │                     | type                                                       | cross
+             │                          | table                                                      | workarea_info@workarea_name_index
+             │                          | spans                                                      | /"work_area_1"-/"work_area_1"/PrefixEnd /"work_area_2"-/"work_area_2"/PrefixEnd /"work_area_3"-/"work_area_3"/PrefixEnd
+             └── hash-join              |                                                            |
+                  │                     | type                                                       | inner
+                  │                     | equality                                                   | (station_sn) = (station_sn)
+                  │                     | left cols are key                                          |
                   ├── scan              |                                                            |
-                  │                     | table                                                      | workarea_info@workarea_name_index
-                  │                     | spans                                                      | /"work_area_1"-/"work_area_1"/PrefixEnd /"work_area_2"-/"work_area_2"/PrefixEnd /"work_area_3"-/"work_area_3"/PrefixEnd
+                  │                     | table                                                      | station_info@primary
+                  │                     | spans                                                      | FULL SCAN
                   └── hash-join         |                                                            |
                        │                | type                                                       | inner
                        │                | equality                                                   | (point_sn) = (point_sn)
@@ -698,7 +700,7 @@ GROUP BY
                             └── scan    |                                                            |
                                         | table                                                      | pipeline_info@pipeline_name_index
                                         | spans                                                      | /"pipeline_1"-/"pipeline_1"/PrefixEnd
-(54 rows)
+(56 rows)
 > set enable_multimodel=true;
 SET
 > SELECT si.station_name,

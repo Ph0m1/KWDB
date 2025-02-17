@@ -539,7 +539,7 @@ JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
 JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
 JOIN pg_catalog.pg_collation k ON a.attcollation = k.oid
 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
-WHERE n.nspname = 'public'
+WHERE n.nspname = 'public' order by c.relname
 ----
 relname  attname  typname  attcollation  collname
 t1       d        varchar  3903121477    en-US

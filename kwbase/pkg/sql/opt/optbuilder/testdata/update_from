@@ -214,18 +214,18 @@ update abc
       ├── grouping columns: abc.a:4!null
       ├── inner-join (hash)
       │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ab.a:7!null ab.b:8 ab.rowid:9!null ac.a:10!null ac.c:11 ac.rowid:12!null
-      │    ├── scan ab
-      │    │    └── columns: ab.a:7 ab.b:8 ab.rowid:9!null
+      │    ├── scan ac
+      │    │    └── columns: ac.a:10 ac.c:11 ac.rowid:12!null
       │    ├── inner-join (hash)
-      │    │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ac.a:10!null ac.c:11 ac.rowid:12!null
-      │    │    ├── scan ac
-      │    │    │    └── columns: ac.a:10 ac.c:11 ac.rowid:12!null
+      │    │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ab.a:7!null ab.b:8 ab.rowid:9!null
       │    │    ├── scan abc
       │    │    │    └── columns: abc.a:4!null abc.b:5 abc.c:6
+      │    │    ├── scan ab
+      │    │    │    └── columns: ab.a:7 ab.b:8 ab.rowid:9!null
       │    │    └── filters
-      │    │         └── abc.a:4 = ac.a:10
+      │    │         └── abc.a:4 = ab.a:7
       │    └── filters
-      │         └── ab.a:7 = abc.a:4
+      │         └── ab.a:7 = ac.a:10
       └── aggregations
            ├── first-agg [as=abc.b:5]
            │    └── abc.b:5
@@ -268,18 +268,18 @@ update abc
       ├── grouping columns: abc.a:4!null
       ├── inner-join (hash)
       │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ab.a:7!null ab.b:8 ac.a:10!null ac.c:11
-      │    ├── scan ab
-      │    │    └── columns: ab.a:7 ab.b:8
+      │    ├── scan ac
+      │    │    └── columns: ac.a:10 ac.c:11
       │    ├── inner-join (hash)
-      │    │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ac.a:10!null ac.c:11
-      │    │    ├── scan ac
-      │    │    │    └── columns: ac.a:10 ac.c:11
+      │    │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ab.a:7!null ab.b:8
       │    │    ├── scan abc
       │    │    │    └── columns: abc.a:4!null abc.b:5 abc.c:6
+      │    │    ├── scan ab
+      │    │    │    └── columns: ab.a:7 ab.b:8
       │    │    └── filters
-      │    │         └── abc.a:4 = ac.a:10
+      │    │         └── abc.a:4 = ab.a:7
       │    └── filters
-      │         └── ab.a:7 = abc.a:4
+      │         └── ab.a:7 = ac.a:10
       └── aggregations
            ├── first-agg [as=abc.b:5]
            │    └── abc.b:5
@@ -317,18 +317,18 @@ update abc
       ├── grouping columns: abc.a:4!null
       ├── inner-join (hash)
       │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ab.a:7!null ab.b:8 ab.rowid:9!null ac.a:10!null ac.c:11 ac.rowid:12!null
-      │    ├── scan ab
-      │    │    └── columns: ab.a:7 ab.b:8 ab.rowid:9!null
+      │    ├── scan ac
+      │    │    └── columns: ac.a:10 ac.c:11 ac.rowid:12!null
       │    ├── inner-join (hash)
-      │    │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ac.a:10!null ac.c:11 ac.rowid:12!null
-      │    │    ├── scan ac
-      │    │    │    └── columns: ac.a:10 ac.c:11 ac.rowid:12!null
+      │    │    ├── columns: abc.a:4!null abc.b:5 abc.c:6 ab.a:7!null ab.b:8 ab.rowid:9!null
       │    │    ├── scan abc
       │    │    │    └── columns: abc.a:4!null abc.b:5 abc.c:6
+      │    │    ├── scan ab
+      │    │    │    └── columns: ab.a:7 ab.b:8 ab.rowid:9!null
       │    │    └── filters
-      │    │         └── abc.a:4 = ac.a:10
+      │    │         └── abc.a:4 = ab.a:7
       │    └── filters
-      │         └── ab.a:7 = abc.a:4
+      │         └── ab.a:7 = ac.a:10
       └── aggregations
            ├── first-agg [as=abc.b:5]
            │    └── abc.b:5

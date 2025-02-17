@@ -159,48 +159,48 @@ FROM pipec_r.station_info si,
 GROUP BY si.station_name
 HAVING COUNT(t.measure_value) > 0
 ORDER BY si.station_name;
-                       tree                       |        field        |            description
---------------------------------------------------+---------------------+------------------------------------
-                                                  | distributed         | true
-                                                  | vectorized          | false
-  render                                          |                     |
-   │                                              | station_name        | station_name
-   │                                              | count               | count
-   │                                              | avg                 | avg
-   └── sort                                       |                     |
-        │                                         | order               | +station_name
-        └── filter                                |                     |
-             │                                    | filter              | count > 0
-             └── render                           |                     |
-                  │                               | avg                 | sum / sum_int
-                  │                               | station_name        | station_name
-                  │                               | count               | sum_int
-                  └── group                       |                     |
-                       │                          | aggregate 0         | station_name
-                       │                          | aggregate 1         | sum_int(count)
-                       │                          | aggregate 2         | sum(sum)
-                       │                          | aggregate 3         | sum_int(count)
-                       │                          | group by            | station_name
-                       └── cross-join             |                     |
-                            │                     | type                | cross
-                            ├── scan              |                     |
-                            │                     | table               | station_info@primary
-                            │                     | spans               | FULL SCAN
-                            └── cross-join        |                     |
-                                 │                | type                | cross
-                                 ├── scan         |                     |
-                                 │                | table               | workarea_info@workarea_name_index
-                                 │                | spans               | FULL SCAN
-                                 └── group        |                     |
-                                      │           | engine type         | time series
-                                      │           | aggregate 0         | count(measure_value)
-                                      │           | aggregate 1         | sum(measure_value)
-                                      │           | pushLocalAggToScan  | true
-                                      │           | addSynchronizer     | true
-                                      └── ts scan |                     |
-                                                  | ts-table            | t_point
-                                                  | access mode         | metaTable
-                                                  | use statistic       | true
+                     tree                    |        field        |            description
+---------------------------------------------+---------------------+------------------------------------
+                                             | distributed         | true
+                                             | vectorized          | false
+  render                                     |                     |
+   │                                         | station_name        | station_name
+   │                                         | count               | count
+   │                                         | avg                 | avg
+   └── sort                                  |                     |
+        │                                    | order               | +station_name
+        └── filter                           |                     |
+             │                               | filter              | count > 0
+             └── render                      |                     |
+                  │                          | avg                 | sum / sum_int
+                  │                          | station_name        | station_name
+                  │                          | count               | sum_int
+                  └── group                  |                     |
+                       │                     | aggregate 0         | station_name
+                       │                     | aggregate 1         | sum_int(count)
+                       │                     | aggregate 2         | sum(sum)
+                       │                     | aggregate 3         | sum_int(count)
+                       │                     | group by            | station_name
+                       └── cross-join        |                     |
+                            │                | type                | cross
+                            ├── cross-join   |                     |
+                            │    │           | type                | cross
+                            │    ├── scan    |                     |
+                            │    │           | table               | station_info@primary
+                            │    │           | spans               | FULL SCAN
+                            │    └── scan    |                     |
+                            │                | table               | workarea_info@workarea_name_index
+                            │                | spans               | FULL SCAN
+                            └── group        |                     |
+                                 │           | engine type         | time series
+                                 │           | aggregate 0         | count(measure_value)
+                                 │           | aggregate 1         | sum(measure_value)
+                                 │           | pushLocalAggToScan  | true
+                                 │           | addSynchronizer     | true
+                                 └── ts scan |                     |
+                                             | ts-table            | t_point
+                                             | access mode         | metaTable
+                                             | use statistic       | true
 (40 rows)
 > explain SELECT si.station_name,
        STDDEV(t.measure_value)
@@ -231,22 +231,22 @@ ORDER BY si.station_name;
              └── hash-join              |                       |
                   │                     | type                  | inner
                   │                     | equality              | (work_area_sn) = (work_area_sn)
-                  │                     | left cols are key     |
-                  ├── scan              |                       |
-                  │                     | table                 | workarea_info@workarea_name_index
-                  │                     | spans                 | /"work_area_1"-/"work_area_1"/PrefixEnd
-                  └── lookup-join       |                       |
-                       │                | table                 | station_info@primary
-                       │                | type                  | inner
-                       │                | equality              | (station_sn) = (station_sn)
-                       │                | equality cols are key |
-                       │                | parallel              |
-                       └── synchronizer |                       |
-                            └── ts scan |                       |
-                                        | ts-table              | t_point
-                                        | access mode           | tableTableMeta
-                                        | filter                | measure_value > 80.0
-                                        | tag filter[0]         | measure_type = 5
+                  │                     | right cols are key    |
+                  ├── lookup-join       |                       |
+                  │    │                | table                 | station_info@primary
+                  │    │                | type                  | inner
+                  │    │                | equality              | (station_sn) = (station_sn)
+                  │    │                | equality cols are key |
+                  │    │                | parallel              |
+                  │    └── synchronizer |                       |
+                  │         └── ts scan |                       |
+                  │                     | ts-table              | t_point
+                  │                     | access mode           | tableTableMeta
+                  │                     | filter                | measure_value > 80.0
+                  │                     | tag filter[0]         | measure_type = 5
+                  └── scan              |                       |
+                                        | table                 | workarea_info@workarea_name_index
+                                        | spans                 | /"work_area_1"-/"work_area_1"/PrefixEnd
                                         |                       |
   warning messages                      | multi-model fall back | unsupported aggregation function or expression
 (33 rows)
@@ -280,22 +280,22 @@ ORDER BY si.station_name;
              └── hash-join              |                       |
                   │                     | type                  | inner
                   │                     | equality              | (work_area_sn) = (work_area_sn)
-                  │                     | left cols are key     |
-                  ├── scan              |                       |
-                  │                     | table                 | workarea_info@workarea_name_index
-                  │                     | spans                 | /"work_area_1"-/"work_area_1"/PrefixEnd
-                  └── lookup-join       |                       |
-                       │                | table                 | station_info@primary
-                       │                | type                  | inner
-                       │                | equality              | (station_sn) = (station_sn)
-                       │                | equality cols are key |
-                       │                | parallel              |
-                       └── synchronizer |                       |
-                            └── ts scan |                       |
-                                        | ts-table              | t_point
-                                        | access mode           | tableTableMeta
-                                        | filter                | measure_value > 80.0
-                                        | tag filter[0]         | measure_type = 5
+                  │                     | right cols are key    |
+                  ├── lookup-join       |                       |
+                  │    │                | table                 | station_info@primary
+                  │    │                | type                  | inner
+                  │    │                | equality              | (station_sn) = (station_sn)
+                  │    │                | equality cols are key |
+                  │    │                | parallel              |
+                  │    └── synchronizer |                       |
+                  │         └── ts scan |                       |
+                  │                     | ts-table              | t_point
+                  │                     | access mode           | tableTableMeta
+                  │                     | filter                | measure_value > 80.0
+                  │                     | tag filter[0]         | measure_type = 5
+                  └── scan              |                       |
+                                        | table                 | workarea_info@workarea_name_index
+                                        | spans                 | /"work_area_1"-/"work_area_1"/PrefixEnd
                                         |                       |
   warning messages                      | multi-model fall back | unsupported aggregation function or expression
 (34 rows)
@@ -328,22 +328,22 @@ ORDER BY si.station_name;
              └── hash-join              |                       |
                   │                     | type                  | inner
                   │                     | equality              | (work_area_sn) = (work_area_sn)
-                  │                     | left cols are key     |
-                  ├── scan              |                       |
-                  │                     | table                 | workarea_info@workarea_name_index
-                  │                     | spans                 | /"work_area_1"-/"work_area_1"/PrefixEnd
-                  └── lookup-join       |                       |
-                       │                | table                 | station_info@primary
-                       │                | type                  | inner
-                       │                | equality              | (station_sn) = (station_sn)
-                       │                | equality cols are key |
-                       │                | parallel              |
-                       └── synchronizer |                       |
-                            └── ts scan |                       |
-                                        | ts-table              | t_point
-                                        | access mode           | tableTableMeta
-                                        | filter                | measure_value > 80.0
-                                        | tag filter[0]         | measure_type = 5
+                  │                     | right cols are key    |
+                  ├── lookup-join       |                       |
+                  │    │                | table                 | station_info@primary
+                  │    │                | type                  | inner
+                  │    │                | equality              | (station_sn) = (station_sn)
+                  │    │                | equality cols are key |
+                  │    │                | parallel              |
+                  │    └── synchronizer |                       |
+                  │         └── ts scan |                       |
+                  │                     | ts-table              | t_point
+                  │                     | access mode           | tableTableMeta
+                  │                     | filter                | measure_value > 80.0
+                  │                     | tag filter[0]         | measure_type = 5
+                  └── scan              |                       |
+                                        | table                 | workarea_info@workarea_name_index
+                                        | spans                 | /"work_area_1"-/"work_area_1"/PrefixEnd
                                         |                       |
   warning messages                      | multi-model fall back | unsupported aggregation function or expression
 (34 rows)
@@ -456,19 +456,19 @@ ORDER BY
                   │                          | measure_value         | measure_value
                   │                          | measure_type          | measure_type
                   │                          | pipeline_name         | pipeline_name
-                  └── hash-join              |                       |
-                       │                     | type                  | inner
-                       │                     | equality              | (c7) = (measure_value)
-                       ├── scan              |                       |
-                       │                     | table                 | rel_t1@primary
-                       │                     | spans                 | FULL SCAN
-                       └── cross-join        |                       |
-                            │                | type                  | cross
-                            ├── synchronizer |                       |
-                            │    └── ts scan |                       |
-                            │                | ts-table              | t_point
-                            │                | access mode           | tableTableMeta
-                            └── scan         |                       |
+                  └── cross-join             |                       |
+                       │                     | type                  | cross
+                       ├── hash-join         |                       |
+                       │    │                | type                  | inner
+                       │    │                | equality              | (c7) = (measure_value)
+                       │    ├── scan         |                       |
+                       │    │                | table                 | rel_t1@primary
+                       │    │                | spans                 | FULL SCAN
+                       │    └── synchronizer |                       |
+                       │         └── ts scan |                       |
+                       │                     | ts-table              | t_point
+                       │                     | access mode           | tableTableMeta
+                       └── scan              |                       |
                                              | table                 | pipeline_info@pipeline_name_index
                                              | spans                 | FULL SCAN
                                              |                       |
@@ -494,60 +494,61 @@ GROUP BY
     si.station_name
 ORDER BY
     abnormal_point_count DESC;
-                       tree                       |         field         |                                          description
---------------------------------------------------+-----------------------+------------------------------------------------------------------------------------------------
-                                                  | distributed           | true
-                                                  | vectorized            | false
-  sort                                            |                       |
-   │                                              | order                 | -abnormal_point_count
-   └── group                                      |                       |
-        │                                         | aggregate 0           | any_not_null
-        │                                         | aggregate 1           | count(DISTINCT point_sn)
-        │                                         | group by              | any_not_null
-        └── render                                |                       |
-             │                                    | point_sn              | point_sn
-             │                                    | any_not_null          | any_not_null
-             └── hash-join                        |                       |
-                  │                               | type                  | inner
-                  │                               | equality              | (pipeline_sn, station_sn) = (pipeline_sn, station_sn)
-                  │                               | left cols are key     |
-                  │                               | pred                  | measure_value < (avg * 0.5)
-                  ├── group                       |                       |
-                  │    │                          | aggregate 0           | pipeline_sn
-                  │    │                          | aggregate 1           | station_sn
-                  │    │                          | aggregate 2           | avg(measure_value)
-                  │    │                          | aggregate 3           | any_not_null(station_name)
-                  │    │                          | group by              | pipeline_sn, station_sn
-                  │    └── render                 |                       |
-                  │         │                     | pipeline_sn           | pipeline_sn
-                  │         │                     | station_sn            | station_sn
-                  │         │                     | station_name          | station_name
-                  │         │                     | measure_value         | measure_value
-                  │         └── hash-join         |                       |
-                  │              │                | type                  | left outer
-                  │              │                | equality              | (pipeline_sn) = (pipeline_sn)
-                  │              ├── cross-join   |                       |
-                  │              │    │           | type                  | cross
-                  │              │    ├── scan    |                       |
-                  │              │    │           | table                 | station_info@primary
-                  │              │    │           | spans                 | FULL SCAN
-                  │              │    └── scan    |                       |
-                  │              │                | table                 | pipeline_info@pipeline_name_index
-                  │              │                | spans                 | /"pipeline_1"-/"pipeline_1"/PrefixEnd
-                  │              └── synchronizer |                       |
-                  │                   └── ts scan |                       |
-                  │                               | ts-table              | t_point
-                  │                               | access mode           | tableTableMeta
-                  │                               | tag filter[0]         | measure_type = 4
-                  └── synchronizer                |                       |
-                       └── ts scan                |                       |
-                                                  | ts-table              | t_point
-                                                  | access mode           | tableTableMeta
-                                                  | filter                | (k_timestamp <= '2024-08-01 01:00:00+00:00') AND (k_timestamp >= '2023-08-01 00:00:00+00:00')
-                                                  | tag filter[0]         | measure_type = 4
-                                                  |                       |
-  warning messages                                | multi-model fall back | join between time-series tables
-(51 rows)
+                          tree                         |         field         |                                          description
+-------------------------------------------------------+-----------------------+------------------------------------------------------------------------------------------------
+                                                       | distributed           | true
+                                                       | vectorized            | false
+  sort                                                 |                       |
+   │                                                   | order                 | -abnormal_point_count
+   └── group                                           |                       |
+        │                                              | aggregate 0           | any_not_null
+        │                                              | aggregate 1           | count(DISTINCT point_sn)
+        │                                              | group by              | any_not_null
+        └── render                                     |                       |
+             │                                         | point_sn              | point_sn
+             │                                         | any_not_null          | any_not_null
+             └── hash-join                             |                       |
+                  │                                    | type                  | inner
+                  │                                    | equality              | (pipeline_sn, station_sn) = (pipeline_sn, station_sn)
+                  │                                    | left cols are key     |
+                  │                                    | pred                  | measure_value < (avg * 0.5)
+                  ├── group                            |                       |
+                  │    │                               | aggregate 0           | pipeline_sn
+                  │    │                               | aggregate 1           | station_sn
+                  │    │                               | aggregate 2           | avg(measure_value)
+                  │    │                               | aggregate 3           | any_not_null(station_name)
+                  │    │                               | group by              | pipeline_sn, station_sn
+                  │    └── render                      |                       |
+                  │         │                          | pipeline_sn           | pipeline_sn
+                  │         │                          | station_sn            | station_sn
+                  │         │                          | station_name          | station_name
+                  │         │                          | measure_value         | measure_value
+                  │         └── cross-join             |                       |
+                  │              │                     | type                  | cross
+                  │              ├── scan              |                       |
+                  │              │                     | table                 | station_info@primary
+                  │              │                     | spans                 | FULL SCAN
+                  │              └── hash-join         |                       |
+                  │                   │                | type                  | right outer
+                  │                   │                | equality              | (pipeline_sn) = (pipeline_sn)
+                  │                   │                | right cols are key    |
+                  │                   ├── synchronizer |                       |
+                  │                   │    └── ts scan |                       |
+                  │                   │                | ts-table              | t_point
+                  │                   │                | access mode           | tableTableMeta
+                  │                   │                | tag filter[0]         | measure_type = 4
+                  │                   └── scan         |                       |
+                  │                                    | table                 | pipeline_info@pipeline_name_index
+                  │                                    | spans                 | /"pipeline_1"-/"pipeline_1"/PrefixEnd
+                  └── synchronizer                     |                       |
+                       └── ts scan                     |                       |
+                                                       | ts-table              | t_point
+                                                       | access mode           | tableTableMeta
+                                                       | filter                | (k_timestamp <= '2024-08-01 01:00:00+00:00') AND (k_timestamp >= '2023-08-01 00:00:00+00:00')
+                                                       | tag filter[0]         | measure_type = 4
+                                                       |                       |
+  warning messages                                     | multi-model fall back | join between time-series tables
+(52 rows)
 > explain SELECT si.station_name
 FROM pipec_r.station_info si,              
      pipec_r.workarea_info wi,             

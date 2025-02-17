@@ -111,6 +111,9 @@ type Optimizer struct {
 	// disabledRules is a set of rules that are not allowed to run, used for
 	// testing.
 	disabledRules RuleSet
+
+	// JoinOrderBuilder adds new join orderings to the memo.
+	jb *JoinOrderBuilder
 }
 
 // Init initializes the Optimizer with a new, blank memo structure inside. This
@@ -126,6 +129,7 @@ func (o *Optimizer) Init(evalCtx *tree.EvalContext, catalog cat.Catalog) {
 	o.stateMap = make(map[groupStateKey]*groupState)
 	o.matchedRule = nil
 	o.appliedRule = nil
+	o.jb = &JoinOrderBuilder{}
 	if evalCtx.TestingKnobs.DisableOptimizerRuleProbability > 0 {
 		o.disableRules(evalCtx.TestingKnobs.DisableOptimizerRuleProbability)
 	}
@@ -1495,4 +1499,10 @@ func (o *Optimizer) SetTsRelGroup() {
 	}
 	groups = append(groups, [][]opt.TableID{relTable, tsTable})
 	mem.MultimodelHelper.TableGroup = groups
+}
+
+// JoinOrderBuilder returns the JoinOrderBuilder instance that the optimizer is
+// currently using to reorder join trees.
+func (o *Optimizer) JoinOrderBuilder() *JoinOrderBuilder {
+	return o.jb
 }

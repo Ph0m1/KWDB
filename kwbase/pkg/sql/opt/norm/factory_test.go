@@ -101,6 +101,7 @@ func TestCopyAndReplace(t *testing.T) {
 	}
 
 	evalCtx := tree.MakeTestingEvalContext(cluster.MakeTestingClusterSettings())
+	evalCtx.SessionData.ReorderJoinsLimit = 4
 
 	var o xform.Optimizer
 	testutils.BuildQuery(t, &o, cat, &evalCtx, "SELECT * FROM ab INNER JOIN cde ON a=c AND d=$1")

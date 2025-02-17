@@ -127,6 +127,9 @@ func CheckOptMode(csValue int64, mode int) bool {
 	return int(v)&mode > 0
 }
 
+// MaxReorderJoinsLimit is the maximum number of joins which can be reordered.
+const MaxReorderJoinsLimit = 63
+
 const (
 	// JoinPushTimeBucket indicates join push down time_bucket
 	JoinPushTimeBucket = 1 << 0

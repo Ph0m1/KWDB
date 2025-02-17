@@ -1081,6 +1081,13 @@ func (f *FuncDepSet) AddEquivFrom(fdset *FuncDepSet) {
 	}
 }
 
+// ResetDeps reset the FuncDepSet.
+func (f *FuncDepSet) ResetDeps() {
+	f.deps = nil
+	f.hasKey = 0
+	f.key = opt.ColSet{}
+}
+
 // MakeProduct modifies the FD set to reflect the impact of a cartesian product
 // operation between this set and the given set. The result is a union of the
 // FDs from each set, as well as a union of their keys. The two FD sets are
@@ -1819,4 +1826,22 @@ func (f *funcDep) String() string {
 	var b strings.Builder
 	f.format(&b)
 	return b.String()
+}
+
+// AreColsEquiv returns true if the two given columns are equivalent.
+func (f *FuncDepSet) AreColsEquiv(col1, col2 opt.ColumnID) bool {
+	if col1 == col2 {
+		return true
+	}
+	for i := range f.deps {
+		fd := &f.deps[i]
+
+		if fd.equiv && fd.strict {
+			if (fd.from.Contains(col1) && fd.to.Contains(col2)) ||
+				(fd.from.Contains(col2) && fd.to.Contains(col1)) {
+				return true
+			}
+		}
+	}
+	return false
 }

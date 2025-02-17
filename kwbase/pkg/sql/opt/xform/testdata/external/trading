@@ -842,9 +842,9 @@ sort
       │    │    │    └── fd: ()-->(22)
       │    │    ├── inner-join (hash)
       │    │    │    ├── columns: transactiondetails.dealerid:1!null transactiondetails.isbuy:2!null transactiondate:3!null transactiondetails.cardid:4!null quantity:5!null transactiondetails.sellprice:6!null transactiondetails.buyprice:7!null transactions.dealerid:9!null transactions.isbuy:10!null date:11!null accountname:12!null customername:13!null id:16!null
-      │    │    │    ├── stats: [rows=12345.679, distinct(1)=1, null(1)=0, distinct(2)=1, null(2)=0, distinct(3)=7803.99736, null(3)=0, distinct(4)=11100.2211, null(4)=0, distinct(5)=7783.34916, null(5)=0, distinct(6)=7783.34916, null(6)=0, distinct(7)=7783.34916, null(7)=0, distinct(9)=1, null(9)=0, distinct(10)=1, null(10)=0, distinct(11)=7803.99736, null(11)=0, distinct(12)=6199.73419, null(12)=0, distinct(13)=6199.73419, null(13)=0, distinct(16)=11100.2211, null(16)=0]
+      │    │    │    ├── stats: [rows=19530.4769, distinct(1)=1, null(1)=0, distinct(2)=1, null(2)=0, distinct(3)=12345.679, null(3)=0, distinct(4)=16536.0663, null(4)=0, distinct(5)=19228.7336, null(5)=0, distinct(6)=19228.7336, null(6)=0, distinct(7)=19228.7336, null(7)=0, distinct(9)=1, null(9)=0, distinct(10)=1, null(10)=0, distinct(11)=12345.679, null(11)=0, distinct(12)=9807.78085, null(12)=0, distinct(13)=9807.78085, null(13)=0, distinct(16)=16536.0663, null(16)=0]
       │    │    │    ├── key: (5,11,16)
-      │    │    │    ├── fd: ()-->(1,2,9,10), (3-5)-->(6,7), (11)-->(12,13), (3)==(11), (11)==(3), (4)==(16), (16)==(4)
+      │    │    │    ├── fd: ()-->(1,2,9,10), (11)-->(12,13), (3-5)-->(6,7), (4)==(16), (16)==(4), (3)==(11), (11)==(3)
       │    │    │    ├── scan cards@cardsnamesetnumber
       │    │    │    │    ├── columns: id:16!null
       │    │    │    │    ├── stats: [rows=57000, distinct(16)=57000, null(16)=0]

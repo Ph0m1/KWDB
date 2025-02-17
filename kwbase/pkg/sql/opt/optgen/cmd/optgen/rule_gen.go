@@ -98,7 +98,6 @@ type contextDecl struct {
 // If the inner join expression has already been explored (i.e. if
 // _partlyExplored is true), then this logic only explores newly added Left
 // children.
-//
 type newRuleGen struct {
 	compiled   *lang.CompiledExpr
 	md         *metadata
@@ -961,6 +960,13 @@ func (g *newRuleGen) genCustomFunc(customFunc *lang.CustomFuncExpr) {
 		// looking up op name at runtime.
 		ref := customFunc.Args[0].(*lang.RefExpr)
 		g.w.write("%s.Op()", ref.Label)
+	} else if customFunc.Name == "Root" {
+		// Handle Root function.
+		if g.normalize {
+			// The root expression can only be accessed during exploration.
+			panic("the root expression can only be accessed during exploration")
+		}
+		g.w.write("_root")
 	} else {
 		funcName := string(customFunc.Name)
 		g.w.write("%s.funcs.%s(", g.thisVar, funcName)
