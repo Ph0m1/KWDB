@@ -953,3 +953,8 @@ func (q *Queue) TrackedTxns() map[uuid.UUID]struct{} {
 	q.mu.Unlock()
 	return m
 }
+
+// ClearRHS implements the queue interface.
+func (q *Queue) ClearRHS(endKey roachpb.Key) []roachpb.LockUpdate {
+	return nil
+}

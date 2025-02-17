@@ -365,14 +365,14 @@ func (m *managerImpl) OnRangeLeaseUpdated(seq roachpb.LeaseSequence, isLeasehold
 	}
 }
 
-// OnRangeSplit implements the RangeStateListener interface.
-func (m *managerImpl) OnRangeSplit() {
-	// TODO(nvanbenschoten): it only essential that we clear the half of the
-	// lockTable which contains locks in the key range that is being split off
-	// from the current range. For now though, we clear it all.
+// OnRangeSplit implements the RangeStateListener interface. It is
+// called on the LHS replica of a split and should be passed the new
+// EndKey of that replica.
+func (m *managerImpl) OnRangeSplit(endKey roachpb.Key) []roachpb.LockUpdate {
+	lockToMove := m.lt.ClearRHS(endKey)
 	const disable = false
-	m.lt.Clear(disable)
 	m.twq.Clear(disable)
+	return lockToMove
 }
 
 // OnRangeMerge implements the RangeStateListener interface.

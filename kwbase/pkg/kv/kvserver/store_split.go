@@ -320,7 +320,7 @@ func (s *Store) SplitRange(
 	// appropriate. We do this after setDescWithoutProcessUpdate to ensure
 	// that no pre-split commands are inserted into the wait-queues after we
 	// clear them.
-	leftRepl.concMgr.OnRangeSplit()
+	locksToAcquireOnRHS := leftRepl.concMgr.OnRangeSplit(roachpb.Key(newLeftDesc.EndKey))
 
 	// The rangefeed processor will no longer be provided logical ops for
 	// its entire range, so it needs to be shut down and all registrations
@@ -341,6 +341,11 @@ func (s *Store) SplitRange(
 		leftRepl.writeStats.splitRequestCounts(throwawayRightWriteStats)
 	} else {
 		rightRepl := rightReplOrNil
+		// Add the unreplicated locks associated with rightRepl to rightRepl after splitting the replica
+		log.Infof(ctx, "acquiring %d locks on the RHS", len(locksToAcquireOnRHS))
+		for _, l := range locksToAcquireOnRHS {
+			rightRepl.concMgr.OnLockAcquired(ctx, &l)
+		}
 		leftRepl.writeStats.splitRequestCounts(rightRepl.writeStats)
 		if err := s.addReplicaInternalLocked(rightRepl); err != nil {
 			return errors.Errorf("unable to add replica %v: %s", rightRepl, err)

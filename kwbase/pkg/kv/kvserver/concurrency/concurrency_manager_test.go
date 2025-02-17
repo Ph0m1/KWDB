@@ -67,7 +67,9 @@ import (
 //
 // new-txn      name=<txn-name> ts=<int>[,<int>] epoch=<int> [maxts=<int>[,<int>]]
 // new-request  name=<req-name> txn=<txn-name>|none ts=<int>[,<int>] [priority] [consistency]
-//   <proto-name> [<field-name>=<field-value>...] (hint: see scanSingleRequest)
+//
+//	<proto-name> [<field-name>=<field-value>...] (hint: see scanSingleRequest)
+//
 // sequence     req=<req-name>
 // finish       req=<req-name>
 //
@@ -87,7 +89,6 @@ import (
 // debug-lock-table
 // debug-disable-txn-pushes
 // reset
-//
 func TestConcurrencyManagerBasic(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
@@ -433,7 +434,7 @@ func TestConcurrencyManagerBasic(t *testing.T) {
 			case "on-split":
 				mon.runSync("split range", func(ctx context.Context) {
 					log.Event(ctx, "complete")
-					m.OnRangeSplit()
+					m.OnRangeSplit(roachpb.Key(roachpb.RKeyMin))
 				})
 				return c.waitAndCollect(t, mon)
 

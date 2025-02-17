@@ -107,9 +107,10 @@ type treeMu struct {
 // thread.
 //
 // Mutex ordering:   lockTableImpl.enabledMu
-//                 > treeMu.mu
-//                 > lockState.mu
-//                 > lockTableGuardImpl.mu
+//
+//	> treeMu.mu
+//	> lockState.mu
+//	> lockTableGuardImpl.mu
 type lockTableImpl struct {
 	// Is the lockTable enabled? When enabled, the lockTable tracks locks and
 	// allows requests to queue in wait-queues on these locks. When disabled,
@@ -204,41 +205,41 @@ var _ lockTable = &lockTableImpl{}
 // transitions where the transitions are notified via newState() and the current
 // state can be read using CurState().
 //
-// - The waitFor* states provide information on who the request is waiting for.
-//   The waitForDistinguished state is a sub-case -- a distinguished waiter is
-//   responsible for taking extra actions e.g. immediately pushing the transaction
-//   it is waiting for. The implementation ensures that if there are multiple
-//   requests in waitFor state waiting on the same transaction at least one will
-//   be a distinguished waiter.
+//   - The waitFor* states provide information on who the request is waiting for.
+//     The waitForDistinguished state is a sub-case -- a distinguished waiter is
+//     responsible for taking extra actions e.g. immediately pushing the transaction
+//     it is waiting for. The implementation ensures that if there are multiple
+//     requests in waitFor state waiting on the same transaction at least one will
+//     be a distinguished waiter.
 //
-//   TODO(sbhola): investigate removing the waitForDistinguished state which
-//   will simplify the code here. All waitFor requests would wait (currently
-//   50ms) before pushing the transaction (for deadlock detection) they are
-//   waiting on, say T. Typically T will be done before 50ms which is considered
-//   ok: the one exception we will need to make is if T has the min priority or
-//   the waiting transaction has max priority -- in both cases it will push
-//   immediately. The bad case is if T is ABORTED: the push will succeed after,
-//   and if T left N intents, each push would wait for 50ms, incurring a latency
-//   of 50*N ms. A cache of recently encountered ABORTED transactions on each
-//   Store should mitigate this latency increase. Whenever a transaction sees a
-//   waitFor state, it will consult this cache and if T is found, push
-//   immediately (if there isn't already a push in-flight) -- even if T is not
-//   initially in the cache, the first push will place it in the cache, so the
-//   maximum latency increase is 50ms.
+//     TODO(sbhola): investigate removing the waitForDistinguished state which
+//     will simplify the code here. All waitFor requests would wait (currently
+//     50ms) before pushing the transaction (for deadlock detection) they are
+//     waiting on, say T. Typically T will be done before 50ms which is considered
+//     ok: the one exception we will need to make is if T has the min priority or
+//     the waiting transaction has max priority -- in both cases it will push
+//     immediately. The bad case is if T is ABORTED: the push will succeed after,
+//     and if T left N intents, each push would wait for 50ms, incurring a latency
+//     of 50*N ms. A cache of recently encountered ABORTED transactions on each
+//     Store should mitigate this latency increase. Whenever a transaction sees a
+//     waitFor state, it will consult this cache and if T is found, push
+//     immediately (if there isn't already a push in-flight) -- even if T is not
+//     initially in the cache, the first push will place it in the cache, so the
+//     maximum latency increase is 50ms.
 //
-// - The waitElsewhere state is a rare state that is used when the lockTable is
-//   under memory pressure and is clearing its internal queue state. Like the
-//   waitFor* states, it informs the request who it is waiting for so that
-//   deadlock detection works. However, sequencing information inside the
-//   lockTable is mostly discarded.
+//   - The waitElsewhere state is a rare state that is used when the lockTable is
+//     under memory pressure and is clearing its internal queue state. Like the
+//     waitFor* states, it informs the request who it is waiting for so that
+//     deadlock detection works. However, sequencing information inside the
+//     lockTable is mostly discarded.
 //
-// - The waitSelf state is a rare state when a different request from the same
-//   transaction has a reservation. See the comment about "Reservations" in
-//   lockState.
+//   - The waitSelf state is a rare state when a different request from the same
+//     transaction has a reservation. See the comment about "Reservations" in
+//     lockState.
 //
-// - The doneWaiting state is used to indicate that the request should make
-//   another call to ScanAndEnqueue() (that next call is more likely to return a
-//   lockTableGuard that returns false from StartWaiting()).
+//   - The doneWaiting state is used to indicate that the request should make
+//     another call to ScanAndEnqueue() (that next call is more likely to return a
+//     lockTableGuard that returns false from StartWaiting()).
 type lockTableGuardImpl struct {
 	seqNum uint64
 
@@ -1994,6 +1995,11 @@ func (t *lockTableImpl) tryClearLocks(force bool) {
 	}
 }
 
+// ClearRHS implements the lockTable interface.
+func (t *lockTableImpl) ClearRHS(key roachpb.Key) []roachpb.LockUpdate {
+	return t.tryClearLocksRHS(key)
+}
+
 // Given the key must be in spans, returns the strongest access
 // specified in the spans, along with the scope of the key.
 func findAccessInSpans(
@@ -2152,4 +2158,53 @@ func (t *lockTableImpl) String() string {
 		tree.mu.RUnlock()
 	}
 	return buf.String()
+}
+
+// tryClearLocksRHS attempts to clear and return all unreplicated locks greater or equal to endKey.
+func (t *lockTableImpl) tryClearLocksRHS(endKey roachpb.Key) []roachpb.LockUpdate {
+
+	var lockUpdateToReturn []roachpb.LockUpdate
+
+	for i := 0; i < int(spanset.NumSpanScope); i++ {
+		tree := &t.locks[i]
+		tree.mu.Lock()
+		var locksToClear []*lockState
+		iter := tree.MakeIter()
+		for iter.First(); iter.Valid(); iter.Next() {
+			l := iter.Cur()
+			if l.key.Compare(endKey) < 0 {
+				continue
+			}
+
+			// Add any held locks to the slice of returned LockUpdate that the RHS
+			// should attempt.
+			for j := range l.holder.holder {
+				if l.holder.holder[j].txn != nil {
+					lockUpdateToReturn = append(lockUpdateToReturn, roachpb.LockUpdate{
+						Span: roachpb.Span{
+							Key: l.key,
+						},
+						Txn:        *l.holder.holder[j].txn,
+						Durability: lock.Durability(j),
+					})
+				}
+			}
+
+			if l.tryClearLock(true) {
+				locksToClear = append(locksToClear, l)
+			}
+		}
+		atomic.AddInt64(&tree.numLocks, int64(-len(locksToClear)))
+		if tree.Len() == len(locksToClear) {
+			// Fast-path full clear.
+			tree.Reset()
+		} else {
+			for _, l := range locksToClear {
+				tree.Delete(l)
+			}
+		}
+		tree.mu.Unlock()
+	}
+
+	return lockUpdateToReturn
 }
