@@ -24,6 +24,7 @@
 #include "ts_table.h"
 #include "th_kwdb_dynamic_thread_pool.h"
 #include "ee_exec_pool.h"
+#include "st_tier.h"
 
 #ifndef KWBASE_OSS
 #include "ts_config_autonomy.h"
@@ -56,6 +57,7 @@ bool EngineOptions::is_single_node_ = false;
 int EngineOptions::table_cache_capacity_ = 1000;
 std::atomic<int64_t> kw_used_anon_memory_size;
 
+
 void EngineOptions::init() {
   char * env_var = getenv(ENV_KW_HOME);
   if (env_var) {
@@ -70,8 +72,8 @@ void EngineOptions::init() {
   }
 }
 
-TSEngineImpl::TSEngineImpl(kwdbContext_p ctx, std::string dir_path,
-                           const EngineOptions& engine_options) : options_(engine_options) {
+TSEngineImpl::TSEngineImpl(kwdbContext_p ctx, const std::string& ts_store_path, const EngineOptions& engine_options) :
+                           ts_store_path_(ts_store_path), options_(engine_options) {
   LogInit();
   tables_lock_ = new KLatch(LATCH_ID_TSTABLE_CACHE_LOCK);
   tables_cache_ = new SharedLruUnorderedMap<KTableKey, TsTable>(EngineOptions::table_cache_capacity_, true);
@@ -534,6 +536,13 @@ KStatus TSEngineImpl::Init(kwdbContext_p ctx) {
   }
   tables_cache_->Init();
 
+  EngineOptions::init();
+  s = TsTier::GetInstance().Init(ts_store_path_);
+  if (s == KStatus::FAIL) {
+    LOG_ERROR("Storage tier init failed")
+    return s;
+  }
+
   // loop and recover all the TS tables, and then close them.
   // all incoming request should be blocked before the recover jobs are done.
   s = Recover(ctx);
@@ -546,26 +555,24 @@ KStatus TSEngineImpl::Init(kwdbContext_p ctx) {
     LOG_ERROR("wal_sys_::Recovery fail.")
     return s;
   }
-
-  EngineOptions::init();
   return KStatus::SUCCESS;
 }
 
-KStatus TSEngineImpl::OpenTSEngine(kwdbContext_p ctx, const std::string& dir_path, const EngineOptions& engine_config,
+KStatus TSEngineImpl::OpenTSEngine(kwdbContext_p ctx, const std::string& primary_ts_path, const EngineOptions& engine_config,
                                    TSEngine** engine) {
-  return OpenTSEngine(ctx, dir_path, engine_config, engine, nullptr, 0);
+  return OpenTSEngine(ctx, primary_ts_path, engine_config, engine, nullptr, 0);
 }
 
-KStatus TSEngineImpl::OpenTSEngine(kwdbContext_p ctx, const std::string& dir_path, const EngineOptions& engine_config,
+KStatus TSEngineImpl::OpenTSEngine(kwdbContext_p ctx, const std::string& ts_store_path, const EngineOptions& engine_config,
                                    TSEngine** engine, AppliedRangeIndex* applied_indexes, size_t range_num) {
   char* env_home = getenv("KW_HOME");
   if (env_home == nullptr) {
-    setenv("KW_HOME", dir_path.c_str(), 1);
+    setenv("KW_HOME", engine_config.db_path.c_str(), 1);
   }
   ErrorInfo err_info;
   // initBigObjectApplication(err_info);
 
-  auto* t_engine = new TSEngineImpl(ctx, dir_path, engine_config);
+  auto* t_engine = new TSEngineImpl(ctx, ts_store_path, engine_config);
 
   // Initialize the map for Applied Range Indexes.
   t_engine->initRangeIndexMap(applied_indexes, range_num);

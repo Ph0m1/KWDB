@@ -168,7 +168,7 @@ KStatus TsEntityGroup::PutDataWithoutWAL(kwdbContext_p ctx, TSSlice payload, TS_
     releaseTagTable();
   }};
   // check if lsn is set, in wal-off mode, lsn will not set, we should set lsn to 1 for marking lsn exist.
-  TS_LSN pl_lsn;
+  TS_LSN pl_lsn = 0;
   if (pd.GetLsn(pl_lsn)) {
     if (pl_lsn == 0) {
       pd.SetLsn(1);
@@ -720,6 +720,13 @@ KStatus TsEntityGroup::Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo 
     LOG_ERROR("TsEntityGroup::Vacuum error : %s", err_info.errmsg.c_str());
     return FAIL;
   }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsEntityGroup::TierMigrate() {
+  RW_LATCH_S_LOCK(drop_mutex_);
+  Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
+  ebt_manager_->TierMigrate();
   return KStatus::SUCCESS;
 }
 
@@ -1786,6 +1793,36 @@ KStatus TsTable::Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_i
     }
   }
   return s;
+}
+
+KStatus TsTable::TierMigrate() {
+  if (entity_bt_manager_ == nullptr) {
+    LOG_ERROR("TsTable not created : %s", tbl_sub_path_.c_str());
+    return KStatus::FAIL;
+  }
+
+  if (!entity_bt_manager_->TrySetMigrateStatus()) {  // avoid migrate repeatedly in a short time
+    LOG_INFO("table[%lu] is migrating, skip this schedule", table_id_);
+    return KStatus::SUCCESS;
+  }
+
+  std::vector<std::shared_ptr<TsEntityGroup>> entity_groups;
+  {
+    RW_LATCH_S_LOCK(entity_groups_mtx_);
+    Defer defer([&]() { RW_LATCH_UNLOCK(entity_groups_mtx_); });
+    // get all entity groups
+    for (auto& entity_group : entity_groups_) {
+      entity_groups.push_back(entity_group.second);
+    }
+  }
+  for (auto& entity_group : entity_groups) {
+    if (!entity_group) {
+      continue;
+    }
+    entity_group->TierMigrate();
+  }
+  entity_bt_manager_->ResetMigrateStatus();
+  return KStatus::SUCCESS;
 }
 
 KStatus TsTable::GetEntityIndex(kwdbContext_p ctx, uint64_t begin_hash, uint64_t end_hash,

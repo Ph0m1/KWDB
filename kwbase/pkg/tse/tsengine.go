@@ -35,6 +35,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -1015,6 +1016,9 @@ func (r *TsEngine) VacuumTsTable(tableID uint64, tsVersion uint32) error {
 // DeleteExpiredData delete expired data from time partitions that fall completely within the [min_int64, end) interval
 func (r *TsEngine) DeleteExpiredData(tableID uint64, _ int64, end int64) error {
 	r.checkOrWaitForOpen()
+	if end == math.MinInt64 {
+		return nil
+	}
 	status := C.TSDeleteExpiredData(r.tdb, C.TSTableID(tableID), C.int64_t(end))
 	if err := statusToError(status); err != nil {
 		return errors.Wrap(err, "failed to delete expired data")

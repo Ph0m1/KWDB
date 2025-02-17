@@ -518,7 +518,7 @@ namespace kwdbts {
  */
 class TSEngineImpl : public TSEngine {
  public:
-  TSEngineImpl(kwdbContext_p ctx, std::string dir_path, const EngineOptions& engine_options);
+  TSEngineImpl(kwdbContext_p ctx, const std::string& ts_store_path, const EngineOptions& engine_options);
 
   ~TSEngineImpl() override;
 
@@ -651,10 +651,10 @@ class TSEngineImpl : public TSEngine {
    *
    * @return KStatus
    */
-  static KStatus OpenTSEngine(kwdbContext_p ctx, const std::string& dir_path, const EngineOptions& engine_config,
+  static KStatus OpenTSEngine(kwdbContext_p ctx, const std::string& primary_ts_path, const EngineOptions& engine_config,
                               TSEngine** engine);
 
-  static KStatus OpenTSEngine(kwdbContext_p ctx, const std::string& dir_path, const EngineOptions& engine_config,
+  static KStatus OpenTSEngine(kwdbContext_p ctx, const std::string& ts_store_path, const EngineOptions& engine_config,
                               TSEngine** engine, AppliedRangeIndex* applied_indexes, size_t range_num);
 
   /**
@@ -683,6 +683,7 @@ class TSEngineImpl : public TSEngine {
   int IsSingleNode();
 
  private:
+  string ts_store_path_;
   EngineOptions options_;
   SharedLruUnorderedMap<KTableKey, TsTable>* tables_cache_{};
   KLatch* tables_lock_;

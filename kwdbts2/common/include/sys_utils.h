@@ -13,53 +13,78 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "lg_api.h"
 #include "ts_object_error.h"
 
 extern int64_t g_free_space_alert_threshold;
 
-/*
- * @Description: Check whether the file or directory exists
- * @IN: path: the path of file or directory
- * @Return: false/true
+/**
+ * @brief Check whether the file or directory exists
+ * @param path The path of file or directory
+ * @return false/true
  */
 bool IsExists(const string& path);
 
-/*
- * @Description: remove file or directory
- * @IN: path: the path of file or directory
- * @Return: false/true
+/**
+ * @brief Remove file or directory
+ * @param path The path of file or directory
+ * @return false/true
  */
 bool Remove(const string& path, ErrorInfo& error_info = getDummyErrorInfo());
 
 /**
- * @Description: remove directory contents
- * @param dir_path the path of directory
+ * @brief Remove directory contents
+ * @param dir_path The path of directory
  * @param error_info
  * @return
  */
 bool RemoveDirContents(const string& dir_path, ErrorInfo& error_info = getDummyErrorInfo());
 
-/*
- * @Description: recursively create a directory (mkdir -p xxx)
- * @IN: path: the path of directory
- * @Return: true/false
+/**
+ * @brief Recursively create a directory (mkdir -p xxx)
+ * @param dir_path The path of directory
+ * @return true/false
  */
 bool MakeDirectory(const string& dir_path, ErrorInfo& error_info = getDummyErrorInfo());
 
-/*
- * @Description: get the modify time of file
- * @IN: filePath: the path of file
- * @Return: modify time
+/**
+ * @brief Get the modify time of file
+ * @param filePath The path of file
+ * @return modify time
  */
 std::time_t ModifyTime(const std::string& filePath);
 
-/*
- * @Description: call system()
- * @IN: cmd: shell command
- * @Return: true/false
+/**
+ * @brief call system()
+ * @param cmd shell command
+ * @return true/false
  */
 bool System(const string& cmd, ErrorInfo& error_info = getDummyErrorInfo());
+
+/**
+ * @brief Move the files in one directory to another directory
+ * @param src_path Source directory path
+ * @param dst_path Target directory path
+ * @return true/false
+ */
+bool CopyDirectory(std::vector<string>& src_path, const string& dst_path, ErrorInfo& error_info);
+
+/**
+ * Change link directory for link_path
+ * @param link_path source directory path
+ * @param new_path dest directory path
+ * @return true/false
+ */
+bool ChangeDirLink(string link_path, string new_path, ErrorInfo& error_info);
+
+/**
+ * Resolve a symbolic link to its real (or absolute) path
+ * @param link_path
+ * @param error_info
+ * @return
+ */
+std::string ParseLinkDirToReal(string link_path, ErrorInfo& error_info);
 
 bool DirExists(const std::string& path);
 

@@ -205,6 +205,14 @@ TSStatus TSCompressImmediately(TSEngine* engine, uint64_t goCtxPtr, TSTableID ta
 
 TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_version);
 
+/**
+ * @brief Migrate table partition to another tiering level if hot and cold data tiering is configured
+ * @param engine
+ * @param table_id Id of the time series table
+ * @return
+ */
+TSStatus TSMigrateTsTable(TSEngine* engine, TSTableID table_id);
+
 TSStatus TSTableAutonomy(TSEngine* engine, TSTableID table_id);
 
 TSStatus TSIsTsTableExist(TSEngine* engine, TSTableID tableId, bool* find);

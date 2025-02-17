@@ -84,6 +84,10 @@ class EntityBlockMetaManager {
     return idx;
   }
 
+  inline uint32_t GetMetaFileNum() {
+   return meta_num_;
+  }
+
   /**
  * @brief	 mark blockspan rows deleted.
  *

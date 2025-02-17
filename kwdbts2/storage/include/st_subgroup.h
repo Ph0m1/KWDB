@@ -226,6 +226,12 @@ class TsSubEntityGroup : public TSObject {
   int ClearPartitionCache();
   int ErasePartitionCache(timestamp64 pt_ts);
 
+  /**
+   * @brief Hot and cold data tiering migration, loop all partitions
+   * @return void
+   */
+  void PartitionsTierMigrate();
+
  private:
   std::string db_path_;
   std::string tbl_sub_path_;
@@ -287,6 +293,8 @@ class TsSubEntityGroup : public TSObject {
   * @return error code
   */
   int removePartitionDir(const std::string& db_path, const std::string& pt_tbl_sub_path);
+
+  void calcPartitionTierLevel(KTimestamp partition_max_ts, int* to_level);
 
   inline string partitionTblSubPath(timestamp64 p_time) {
     if (p_time >= 0) {

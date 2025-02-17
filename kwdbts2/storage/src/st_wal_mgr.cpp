@@ -336,6 +336,19 @@ KStatus WALMgr::WriteSnapshotWAL(kwdbContext_p ctx, uint64_t x_id, TSTableID tbl
   return status;
 }
 
+KStatus WALMgr::WritePartitionTierWAL(kwdbContext_p ctx, uint64_t x_id, std::string link_path, std::string tier_path) {
+  auto* wal_log = PartitionTierChangeEntry::construct(WALLogType::PARTITION_TIER_CHANGE, x_id, link_path, tier_path);
+  if (wal_log == nullptr) {
+    LOG_ERROR("Failed to construct WAL, insufficient memory")
+    return KStatus::FAIL;
+  }
+  size_t log_len = PartitionTierChangeEntry::fixed_length + link_path.length() + tier_path.length() + 2;
+  KStatus status = WriteWAL(ctx, wal_log, log_len);
+
+  delete[] wal_log;
+  return status;
+}
+
 KStatus WALMgr::WriteTempDirectoryWAL(kwdbContext_p ctx, uint64_t x_id, std::string path) {
   auto* wal_log = TempDirectoryEntry::construct(WALLogType::SNAPSHOT_TMP_DIRCTORY, x_id, path);
   if (wal_log == nullptr) {
@@ -510,7 +523,7 @@ void WALMgr::CleanUp(kwdbContext_p ctx) {
 }
 
 KStatus WALMgr::ResetWAL(kwdbContext_p ctx) {
-  LOG_INFO("Cleaning wal meta file tableid: %d.", table_id_)
+  LOG_INFO("Cleaning wal meta file tableid: lu.", table_id_)
   if (!IsExists(wal_path_)) {
     if (!MakeDirectory(wal_path_)) {
       LOG_ERROR("Failed to create the WAL log directory '%s'", wal_path_.c_str())

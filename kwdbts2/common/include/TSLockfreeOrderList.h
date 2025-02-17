@@ -95,7 +95,7 @@ class TSLockfreeOrderList {
       if (prev == nullptr) {
         return true;
       }
-      V v = prev->value;
+      V& v = prev->value;
       if (v != V{} && !func(prev->key, v)) {
         return false;
       }

@@ -1010,7 +1010,6 @@ TEST_F(TestWalManagerWriter, TestWALCheckpoint) {
 }
 
 TEST_F(TestWalManagerWriter, TestWALSnapshot) {
-  TS_LSN lsn;
   uint64_t x_id = 1;
   TSTableID table_id = 9;
   uint64_t b_hash = 3, e_hash = 5;
@@ -1045,7 +1044,6 @@ TEST_F(TestWalManagerWriter, TestWALSnapshot) {
 }
 
 TEST_F(TestWalManagerWriter, TestWALTempDirectory) {
-  TS_LSN lsn;
   uint64_t x_id = 1;
   string file_path = "./test111/222/333/";
   int log_num = 5;
@@ -1065,6 +1063,34 @@ TEST_F(TestWalManagerWriter, TestWALTempDirectory) {
     EXPECT_EQ(redo->getXID(), x_id);
     EXPECT_EQ(redo->GetPath(), file_path + intToString(i));
   }
+  for (auto& l : redo_logs) {
+    delete l;
+  }
+}
+TEST_F(TestWalManagerWriter, TestPartitionTierChange) {
+  uint64_t x_id = 1;
+  char path[4096];
+  getcwd(path, 4096);
+  std::string abs_path(path);
+  string link_path = abs_path + "/link_path";
+  string tier_path = abs_path + "/tier_path";
+  ASSERT_TRUE(MakeDirectory(tier_path));
+  std::string link_cmd = "ln -s " + tier_path + " " + link_path;
+  ASSERT_TRUE(System(link_cmd));
+  KStatus s = wal_->WritePartitionTierWAL(ctx_, x_id, link_path, tier_path);
+  EXPECT_EQ(s, KStatus::SUCCESS);
+
+  vector<LogEntry*> redo_logs;
+  wal_->ReadWALLog(redo_logs, wal_->FetchCheckpointLSN(), wal_->FetchCurrentLSN());
+  EXPECT_EQ(redo_logs.size(), 1);
+
+  auto* redo = reinterpret_cast<PartitionTierChangeEntry*>(redo_logs[0]);
+  redo->prettyPrint();
+  EXPECT_EQ(redo->getType(), WALLogType::PARTITION_TIER_CHANGE);
+  EXPECT_EQ(redo->getXID(), x_id);
+  EXPECT_EQ(redo->GetLinkPath(), link_path);
+  EXPECT_EQ(redo->GetTierPath(), tier_path);
+
   for (auto& l : redo_logs) {
     delete l;
   }

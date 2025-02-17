@@ -136,12 +136,17 @@ class LoggedTsEntityGroup : public TsEntityGroup {
   KStatus BeginSnapshotMtr(kwdbContext_p ctx, uint64_t range_id, uint64_t index,
                            const SnapshotRange& range, uint64_t &mtr_id);
 
+  KStatus BeginSnapshotMtr(kwdbContext_p ctx, uint64_t range_id,
+                          std::string link_path, std::string tier_path, uint64_t &mtr_id);
   /**
     * @brief write temp directory info to WAL log.
     *
     * @return KStatus
     */
   KStatus WriteTempDirectoryLog(kwdbContext_p ctx, uint64_t mtr_id, std::string path);
+
+  KStatus BeginPartitionTierChangeMtr(kwdbContext_p ctx, uint64_t range_id,
+                                      std::string link_path, std::string tier_path, uint64_t &mtr_id);
 
   /**
     * @brief Start the log recovery operation of the current EntityGroup.

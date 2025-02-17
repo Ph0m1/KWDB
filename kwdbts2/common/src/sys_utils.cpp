@@ -139,6 +139,70 @@ bool System(const string& cmd, ErrorInfo& error_info) {
   return false;
 }
 
+bool CopyDirectory(std::vector<string>& src_path, const string& dst_path, ErrorInfo& error_info) {
+  for (size_t i = 0; i < src_path.size(); i++) {
+    std::string mv_cmd = "cp ";
+    if (src_path[i].back() == '/') {
+      src_path[i].pop_back();
+      mv_cmd += " -r ";
+    }
+    mv_cmd = mv_cmd + src_path[i] + " " + dst_path;
+    if (!System(mv_cmd, error_info)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ChangeDirLink(string link_path, string new_path, ErrorInfo& error_info) {
+  if (link_path.back() == '/') {
+    link_path = link_path.substr(0, link_path.length() - 1);
+  }
+  if (new_path.back() == '/') {
+    new_path = new_path.substr(0, new_path.length() - 1);
+  }
+  std::string link_rm_cmd = "mv " + link_path + " " + link_path + "_tmp";
+  if (System(link_rm_cmd, error_info)) {
+    std::string link_cmd = "ln -s " + new_path + " " + link_path;
+    if (System(link_cmd, error_info)) {
+      std::string link_rm_cmd = "rm " + link_path + "_tmp";
+      System(link_rm_cmd, error_info);
+      return true;
+    } else {
+      System("mv " + link_path + "_tmp " + link_path);
+    }
+  }
+  return false;
+}
+
+std::string ParseLinkDirToReal(string link_path, ErrorInfo& error_info) {
+  if (link_path.back() == '/') {
+    link_path = link_path.substr(0, link_path.length() - 1);
+  }
+  struct stat st;
+  std::string real_path = "";
+  if (lstat(link_path.c_str(), &st) != 0) {
+    error_info.errcode = KWENOOBJ;
+    error_info.errmsg = std::string(link_path) + " cannot stat.";
+    LOG_ERROR("cannot stat directory path [%s].", link_path.c_str());
+    return real_path;
+  }
+  if (!S_ISLNK(st.st_mode)) {
+    return link_path;
+  }
+  const int PATH_MAX_LENGTH = 4096;
+  char rpath[PATH_MAX_LENGTH];
+  memset(rpath, 0, PATH_MAX_LENGTH);
+  int rslt = readlink(link_path.c_str(), rpath, PATH_MAX_LENGTH);
+  if (rslt < 0 || rslt >= PATH_MAX_LENGTH) {
+    LOG_ERROR("read link failed.[%s] errno[%d]", link_path.c_str(), errno);
+    error_info.errcode = KWEINVALPATH;
+    error_info.errmsg = std::string(link_path) + " read link failed.";
+    return real_path;
+  }
+  return std::string(rpath);
+}
+
 bool DirExists(const std::string& path) {
   return fs::exists(path) && fs::is_directory(path);
 }

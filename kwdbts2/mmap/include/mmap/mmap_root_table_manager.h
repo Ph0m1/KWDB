@@ -52,7 +52,7 @@ protected:
   uint64_t partition_interval_;
   // Compression status.
   std::atomic<bool> is_compressing_{false};
-  std::atomic<bool> is_vacuuming_{false};
+  std::atomic<bool> is_migrating_{false};  // avoid scheduler call tier migrate repeatedly
   // Control delete data concurrency.
   TsHashLatch delete_data_latch_;
   // Stores mappings of all versions of the root table.
@@ -275,6 +275,10 @@ public:
    * @return
    */
   void SetCompressStatus(bool status);
+
+  bool TrySetMigrateStatus();
+
+  void ResetMigrateStatus();
 
   /**
    * @brief Clear all data in the table.

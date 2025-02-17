@@ -240,6 +240,12 @@ class TsTable {
 
   virtual KStatus Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info);
 
+  /**
+   * @brief Hot and cold data tiering migration
+   * @return success or fail
+   */
+  virtual KStatus TierMigrate();
+
   std::string GetStoreDirectory() {
     return db_path_ + tbl_sub_path_;
   }
@@ -578,6 +584,12 @@ class TsEntityGroup {
   virtual KStatus Compress(kwdbContext_p ctx, const KTimestamp& ts, uint32_t& compressed_num, ErrorInfo& err_info);
 
   virtual KStatus Vacuum(kwdbContext_p ctx, uint32_t ts_version, ErrorInfo& err_info);
+
+  /**
+   * @brief Hot and cold data tiering migration
+   * @return success or fail
+   */
+  virtual KStatus TierMigrate();
 
   /**
    * @brief Write entity tags values and support tag value modification.

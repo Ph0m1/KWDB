@@ -22,6 +22,7 @@
 #include "lru_cache_manager.h"
 #include "st_config.h"
 #include "sys_utils.h"
+#include "st_tier.h"
 
 #ifndef KWBASE_OSS
 #include "ts_config_autonomy.h"
@@ -32,8 +33,11 @@ DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
 std::shared_mutex g_settings_mutex;
 bool g_engine_initialized = false;
 TSEngine* g_engine_ = nullptr;
-extern int64_t g_vacuum_interval;
+
 std::atomic<bool> g_is_vacuuming{false};
+std::atomic<bool> g_is_migrating{false};
+uint64_t g_duration_level0{30 * 24 * 60 * 60};
+uint64_t g_duration_level1{90 * 24 * 60 * 60};
 
 TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
                 AppliedRangeIndex* applied_indexes, size_t range_num) {
@@ -44,8 +48,8 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
     return ToTsStatus("InitServerKWDBContext Error!");
   }
   EngineOptions opts;
-  std::string db_path(dir.data, dir.len);
-  opts.db_path = db_path;
+  std::string ts_store_path(dir.data, dir.len);
+  opts.db_path = ts_store_path + "/tsdb";
   // TODO(rongtianyang): set wal level by cluster setting rather than env val.
   // If cluster setting support Dynamic-Update, cancel this env val.
   char* wal_env = getenv("KW_WAL_LEVEL");
@@ -60,12 +64,12 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
   opts.wal_file_in_group = options.wal_file_in_group;
 
   // TODO(LSY): log settings from kwbase start params
-  string lg_path = db_path;
+  string lg_path = ts_store_path;
   try {
     opts.lg_opts.path = string(options.lg_opts.Dir.data, options.lg_opts.Dir.len);
   } catch (...) {
     cerr << "InitTsServerLog Error! log path is nullptr. using current dir to log\n";
-    opts.lg_opts.path = db_path;
+    opts.lg_opts.path = ts_store_path;
   }
   opts.lg_opts.file_max_size = options.lg_opts.LogFileMaxSize;
   opts.lg_opts.level = kLgSeverityMap.find(options.lg_opts.LogFileVerbosityThreshold)->second;
@@ -80,7 +84,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
   opts.task_queue_size = options.task_queue_size;
   opts.buffer_pool_size = options.buffer_pool_size;
 
-  setenv("KW_HOME", db_path.c_str(), 1);
+  setenv("KW_HOME", ts_store_path.c_str(), 1);
 
 #ifndef K_DO_NOT_SHIP
   char* port_str;
@@ -118,7 +122,7 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
   InitCompressInfo(opts.db_path);
 
   TSEngine* ts_engine;
-  s = TSEngineImpl::OpenTSEngine(ctx, opts.db_path, opts, &ts_engine, applied_indexes, range_num);
+  s = TSEngineImpl::OpenTSEngine(ctx, ts_store_path, opts, &ts_engine, applied_indexes, range_num);
   if (s == KStatus::FAIL) {
     return ToTsStatus("OpenTSEngine Internal Error!");
   }
@@ -353,6 +357,35 @@ TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_versi
   s = table->Vacuum(ctx_p, ts_version, err_info);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("VacuumTsTable Error");
+  }
+  return kTsSuccess;
+}
+
+TSStatus TSMigrateTsTable(TSEngine* engine, TSTableID table_id) {
+  if (TsTier::GetInstance().TierEnabled()) {
+    bool expected = false;
+    if (!g_is_migrating.compare_exchange_strong(expected, true)) {
+      LOG_INFO("The engine is migrating tiered storage data, ignore migrate request");
+      return kTsSuccess;
+    }
+    Defer defer([&](){ g_is_migrating.store(false); });
+    kwdbContext_t context;
+    kwdbContext_p ctx_p = &context;
+    KStatus s = InitServerKWDBContext(ctx_p);
+    if (s != KStatus::SUCCESS) {
+      return ToTsStatus("InitServerKWDBContext Error!");
+    }
+    std::shared_ptr<TsTable> table;
+    s = engine->GetTsTable(ctx_p, table_id, table);
+    if (s != KStatus::SUCCESS) {
+      LOG_INFO("The current node does not have the table[%lu], skip migrate", table_id);
+      return kTsSuccess;
+    }
+    s = table->TierMigrate();
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("migrate table[%lu] failed", table_id);
+      return ToTsStatus("MigrateTsTable Error!");
+    }
   }
   return kTsSuccess;
 }
@@ -621,6 +654,39 @@ TSStatus TSxRollback(TSEngine* engine, TSTableID table_id, char* transaction_id)
   return kTsSuccess;
 }
 
+// Parse configuration parameter for hot and cold data tiering duration, such as '1d'.
+int parseDuration(const std::string& duration_str) {
+  char unit = duration_str.back();
+  int value = std::stoi(duration_str.substr(0, duration_str.size() - 1));
+
+  switch (unit) {
+    case 'm':
+    case 'M':
+      return value * 60;
+    case 'h':
+    case 'H':
+      return value * 3600;
+    case 'd':
+    case 'D':
+      return value * 86400;
+    default:
+      throw std::invalid_argument("Invalid tier duration unit: " + std::string(1, unit));
+  }
+}
+
+// Parse configuration parameter for hot and cold data tiering duration, such as '30d,90d'.
+void parseDurations(const std::string& input) {
+  std::vector<std::string> durations;
+  std::istringstream ss(input);
+  std::string token;
+
+  while (std::getline(ss, token, ',')) {
+    durations.push_back(token);
+  }
+  g_duration_level0 = parseDuration(durations[0]);
+  g_duration_level1 = parseDuration(durations[1]);
+}
+
 void TriggerSettingCallback(const std::string& key, const std::string& value) {
   if (TRACE_CONFIG_NAME == key) {
     TRACER.SetTraceConfigStr(value);
@@ -708,6 +774,8 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     if (g_engine_) {
       g_engine_->AlterTableCacheCapacity(EngineOptions::table_cache_capacity_);
     }
+  } else if ("ts.tier.duration" == key) {
+    parseDurations(value);
   }
 #ifndef KWBASE_OSS
   else if ("ts.storage.autonomy.mode" == key) {  // NOLINT

@@ -174,6 +174,9 @@ class WALBufferMgr {
   KStatus readDDLAlterLog(vector<LogEntry*>& log_entries, TS_LSN current_lsn, TS_LSN txn_id, TS_LSN& current_offset,
                           queue<EntryBlock*>& read_queue);
 
+  KStatus readPartitionTierChangeLog(std::vector<LogEntry*>& log_entries, TS_LSN current_lsn,
+                              TS_LSN txn_id, TS_LSN& current_offset, std::queue<EntryBlock*>& read_queue);
+
   void Lock() {
     MUTEX_LOCK(buf_mutex_);
   }

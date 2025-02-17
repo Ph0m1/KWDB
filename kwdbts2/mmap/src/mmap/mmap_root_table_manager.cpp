@@ -438,6 +438,17 @@ void MMapRootTableManager::SetCompressStatus(bool status) {
   is_compressing_.store(status);
 }
 
+bool MMapRootTableManager::TrySetMigrateStatus() {
+  bool expected = false;
+  if (is_migrating_.compare_exchange_strong(expected, true)) {
+    return true;
+  }
+  return false;
+}
+
+void MMapRootTableManager::ResetMigrateStatus() {
+  is_migrating_.store(false);
+}
 
 KStatus MMapRootTableManager::RemoveAll() {
   wrLock();

@@ -24,6 +24,7 @@
 #include "sys_utils.h"
 #include "mmap/mmap_metrics_table.h"
 #include "lt_rw_latch.h"
+#include "st_tier_manager.h"
 
 namespace kwdbts {
 
@@ -507,7 +508,11 @@ TsTimePartition* TsSubEntityGroup::CreatePartitionTable(timestamp64 ts, ErrorInf
 TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
                                                         ErrorInfo& err_info) {
   // Create partition directory
-  if (!MakeDirectory(db_path_ + pt_tbl_sub_path, err_info)) {
+  int p_level = 0;
+  calcPartitionTierLevel(max_ts, &p_level);
+  auto status = TsTierPartitionManager::GetInstance().MakePartitionDir(db_path_ + pt_tbl_sub_path, p_level, err_info);
+  if (status != KStatus::SUCCESS) {
+    LOG_ERROR("create partition [%s] failed.", pt_tbl_sub_path.c_str());
     return nullptr;
   }
   vector<string> key{};
@@ -621,7 +626,7 @@ int TsSubEntityGroup::removePartitionTable(TsTimePartition* mt_table, bool is_fo
   err_info.errcode = mt_table->remove();
   if (err_info.errcode >= 0) {
     // remove partition directory
-    Remove(pt_path, err_info);
+    TsTierPartitionManager::GetInstance().RMPartitionDir(pt_path, err_info);
   }
   delete mt_table;
   mt_table = nullptr;
@@ -657,7 +662,8 @@ int TsSubEntityGroup::removePartitionDir(const std::string& db_path, const std::
     }
     closedir(dir_ptr);
   }
-  Remove(real_partition_path);
+  ErrorInfo err_info;
+  TsTierPartitionManager::GetInstance().RMPartitionDir(real_partition_path, err_info);
   return 0;
 }
 
@@ -804,6 +810,13 @@ inline void TsSubEntityGroup::partitionTime(timestamp64 target_ts, timestamp64 b
       max_ts = begin_ts + interval - offset - 1;
     }
   }
+}
+
+void TsSubEntityGroup::calcPartitionTierLevel(KTimestamp partition_max_ts, int* to_level) {
+  *to_level = TsTierPartitionManager::CalculateTierLevelByTimestamp(partition_max_ts);
+}
+
+void TsSubEntityGroup::PartitionsTierMigrate() {
 }
 
 }  // namespace kwdbts

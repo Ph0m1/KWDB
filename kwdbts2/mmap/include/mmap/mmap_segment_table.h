@@ -567,6 +567,13 @@ class MMapSegmentTable : public TSObject, public TsTableObject {
     return true;
   }
 
+  bool TryUnmountSqfs(ErrorInfo& err_info) const {
+    if(!is_compressed_) {
+      return true;
+    }
+    return umount(db_path_, tbl_sub_path_, err_info);
+  }
+
   // check if column has valid value in front rows of block.
   inline bool hasValue(MetricRowID start_row, size_t count, size_t c) const {
     if (!isColExist(c)) {

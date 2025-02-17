@@ -38,10 +38,11 @@
 
 extern int64_t g_vacuum_interval;
 
-enum class CompVacuumStatus{
+enum class ExclusiveStatus{
   NONE = 0,
   COMPRESSING,
-  VACUUMING
+  VACUUMING,
+  MIGRATING
 };
 
 bool ReachMetaMaxBlock(BLOCK_ID cur_block_id);
@@ -72,9 +73,9 @@ class TsTimePartition : public TSObject {
 
   void ScheduledCompress(timestamp64 ts, uint32_t& compressed_num, ErrorInfo& err_info);
 
-  bool TrySetCompVacuumStatus(CompVacuumStatus desired);
+  bool TrySetExclusiveStatus(ExclusiveStatus desired);
 
-  void ResetCompVacuumStatus();
+  void ResetExclusiveStatus();
 
 
  protected:
@@ -84,7 +85,7 @@ class TsTimePartition : public TSObject {
   string file_path_;
   bool cancel_vacuum_ = false;
   std::atomic<int> writing_count_{0};
-  std::atomic<CompVacuumStatus> comp_vacuum_status_{CompVacuumStatus::NONE};
+  std::atomic<ExclusiveStatus> comp_vacuum_status_{ExclusiveStatus::NONE};
 
   // root table with schema info in table root directory
   MMapRootTableManager*& root_table_manager_;
@@ -94,6 +95,8 @@ class TsTimePartition : public TSObject {
   TSLockfreeOrderList<BLOCK_ID, std::shared_ptr<MMapSegmentTable>> data_segments_;
   // current allocating space segment object.
   std::shared_ptr<MMapSegmentTable> active_segment_{nullptr};
+
+  std::atomic<int>* update_time_count_{nullptr};
 
   // segment sub path
   inline std::string segment_tbl_sub_path(BLOCK_ID segment) {
@@ -107,9 +110,6 @@ class TsTimePartition : public TSObject {
 
   // initialize column with schema
   int init(const vector<AttributeInfo>& schema, int encoding, bool init_data, ErrorInfo& err_info);
-
-  // load all segments
-  int loadSegments(ErrorInfo& err_info);
 
   int loadSegment(BLOCK_ID segment_id, ErrorInfo& err_info);
 
@@ -157,13 +157,25 @@ class TsTimePartition : public TSObject {
     return MUTEX_UNLOCK(m_ref_cnt_mtx_);
   }
 
-  void vacuumLock() {
+  inline void updateLock() {
+    rdLock();
+    MUTEX_LOCK(vacuum_insert_lock_);
+    MUTEX_LOCK(vacuum_delete_lock_);
+  }
+
+  inline void updateUnlock() {
+    unLock();
+    MUTEX_UNLOCK(vacuum_insert_lock_);
+    MUTEX_UNLOCK(vacuum_delete_lock_);
+  }
+
+  inline void vacuumLock() {
     wrLock();
     MUTEX_LOCK(vacuum_insert_lock_);
     MUTEX_LOCK(vacuum_delete_lock_);
   }
 
-  void vacuumUnlock() {
+  inline void vacuumUnlock() {
     unLock();
     MUTEX_UNLOCK(vacuum_insert_lock_);
     MUTEX_UNLOCK(vacuum_delete_lock_);
@@ -712,6 +724,37 @@ class TsTimePartition : public TSObject {
   KStatus Vacuum(uint32_t ts_version, VacuumStatus &vacuum_result);
 
   /**
+   * move partition data from high level disk to lower level disk.
+   * @param from_level current disk level
+   * @param to_level move to disk level.
+   * @param vacuum_result failed/canceled/finished
+   * @return KStatus
+   */
+  KStatus Migrate(int from_level, int to_level);
+
+  /**
+   * get files and directory that store data.
+   * @param from_level current disk level
+   * @param to_level move to disk level.
+   * @param vacuum_result failed/canceled/finished
+   * @return KStatus
+   */
+  KStatus GetMigrateFileList(std::vector<std::string>* files);
+
+  /**
+   * is all segments  compressed.
+   * @return true/false
+   */
+  bool IsAllSegCompressed();
+
+  /**
+   * get current partition data in disk level.
+   * @param level disk level.
+   * @return KStatus
+   */
+  KStatus CurrentLevel(int* level);
+
+  /**
    * Read partial data from the block item of the specified segment and convert it into ResultSet.
    * @param origin_segment_tbl Get data from this segment tabl
    * @param cur_block_item Get data from this block item
@@ -736,6 +779,30 @@ class TsTimePartition : public TSObject {
 
   // Modify segment status
   void ChangeSegmentStatus();
+
+  void CountUpdateTime() {
+    if (update_time_count_ == nullptr) {
+      return;
+    }
+    update_time_count_->fetch_add(1);
+  }
+
+  bool OpenUpateTimesCount(std::atomic<int>* update_time_count) {
+    if (update_time_count_ == nullptr) {
+      update_time_count_ = update_time_count;
+      return true;
+    }
+    return false;
+  }
+
+  void CloseUpateTimesCount() {
+    update_time_count_ = nullptr;
+  }
+
+  bool Unmount();
+
+  // load all segments
+  int loadSegments(ErrorInfo& err_info);
 
   int DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids);
 

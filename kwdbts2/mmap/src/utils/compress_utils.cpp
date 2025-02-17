@@ -148,8 +148,8 @@ bool compressToPath(const string& db_path, const string& tbl_sub_path, const str
       return true;
     }
     // The generated sqfs file will not take effect for now, by adding the suffix _tmp
-    string file_path_tmp = desc_path + "/" + dir_name + ".sqfs_tmp";
-    string file_path_desc = desc_path + "/" + dir_name + ".sqfs";
+    string file_path_tmp = desc_path + dir_name + ".sqfs_tmp";
+    string file_path_desc = desc_path + dir_name + ".sqfs";
     // Delete previously failed sqfs files
     if (IsExists(file_path_tmp)) {
       Remove(file_path_tmp);

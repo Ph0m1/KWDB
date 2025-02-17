@@ -31,6 +31,7 @@
 #include "utils/compress_utils.h"
 #include "lg_api.h"
 #include "perf_stat.h"
+#include "st_tier_manager.h"
 
 int64_t g_vacuum_interval = 3600;
 
@@ -469,6 +470,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
   int deleted_rows = 0;
   {
     MUTEX_LOCK(vacuum_insert_lock_);
+    CountUpdateTime();
     // 2.Allocate data space for writing to the corresponding entity and save the allocation result to the passed in spans array.
     // If an error occurs during the allocation process, revert the space allocated before and return an error code.
     // If the current segment is full, switch to a new segment.
@@ -519,6 +521,7 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
     }
     std::vector<size_t> full_block_idx;
     MUTEX_LOCK(vacuum_insert_lock_);
+    CountUpdateTime();
     TsHashLatch* entity_item_latch = GetEntityItemLatch();
     entity_item_latch->Lock(entity_id);
     EntityItem* entity_item = getEntityItem(entity_id);
@@ -587,6 +590,12 @@ int64_t TsTimePartition::push_back_payload(kwdbts::kwdbContext_p ctx, uint32_t e
 
   err_info.errcode = err_code;
   return err_code;
+}
+
+
+KStatus TsTimePartition::CurrentLevel(int* level) {
+  ErrorInfo err_info;
+  return TsTierPartitionManager::GetInstance().GetPartitionCurrentLevel(db_path_ + tbl_sub_path_, level, err_info);
 }
 
 bool TsTimePartition::ShouldVacuum(uint32_t ts_version) {
@@ -910,11 +919,11 @@ KStatus TsTimePartition::Vacuum(uint32_t ts_version, VacuumStatus &vacuum_result
       return SUCCESS;
     }
 
-    if (!TrySetCompVacuumStatus(CompVacuumStatus::VACUUMING)) {
+    if (!TrySetExclusiveStatus(ExclusiveStatus::VACUUMING)) {
       LOG_WARN("partition[%s] is being compressed, cannot vacuum now", GetPath().c_str());
       return SUCCESS;
     }
-    Defer defer2{[&]() { ResetCompVacuumStatus(); }};
+    Defer defer2{[&]() { ResetExclusiveStatus(); }};
     LOG_INFO("Start vacuum in partition [%s]", GetPath().c_str());
     entities = GetEntities();
     // set cancel_vacuum_ flag false, if the data written after unlocking is disordered or deleted, indicates that need to
@@ -1281,20 +1290,20 @@ void TsTimePartition::ScheduledCompress(timestamp64 compress_ts_p, uint32_t& com
   }
 }
 
-bool TsTimePartition::TrySetCompVacuumStatus(CompVacuumStatus desired) {
-  CompVacuumStatus expected = CompVacuumStatus::NONE;
+bool TsTimePartition::TrySetExclusiveStatus(ExclusiveStatus desired) {
+  ExclusiveStatus expected = ExclusiveStatus::NONE;
   if (comp_vacuum_status_.compare_exchange_strong(expected, desired)) {
     return true;
   }
   return false;
 }
 
-void TsTimePartition::ResetCompVacuumStatus() {
-  comp_vacuum_status_.store(CompVacuumStatus::NONE);
+void TsTimePartition::ResetExclusiveStatus() {
+  comp_vacuum_status_.store(ExclusiveStatus::NONE);
 }
 
-void TsTimePartition::Compress(const timestamp64& compress_ts, uint32_t& compressed_num, ErrorInfo& err_info){
-  if (!TrySetCompVacuumStatus(CompVacuumStatus::COMPRESSING)) {
+void TsTimePartition::Compress(const timestamp64& compress_ts, uint32_t& compressed_num, ErrorInfo& err_info) {
+  if (!TrySetExclusiveStatus(ExclusiveStatus::COMPRESSING)) {
     return;
   }
   if (compress_ts == INT64_MAX){
@@ -1302,7 +1311,7 @@ void TsTimePartition::Compress(const timestamp64& compress_ts, uint32_t& compres
   } else {
     ScheduledCompress(compress_ts, compressed_num, err_info);
   }
-  ResetCompVacuumStatus();
+  ResetExclusiveStatus();
 }
 
 int TsTimePartition::Sync(kwdbts::TS_LSN check_lsn, ErrorInfo& err_info) {
@@ -1327,6 +1336,7 @@ int TsTimePartition::DeleteEntity(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64
   MUTEX_LOCK(vacuum_delete_lock_);
   Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   *count = 0;
+  CountUpdateTime();
   EntityItem* entity_item = getEntityItem(entity_id);
   if (entity_item->cur_block_id == 0) {
     deleteEntityItem(entity_id);
@@ -1368,6 +1378,7 @@ int TsTimePartition::DeleteData(uint32_t entity_id, kwdbts::TS_LSN lsn, const st
   Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   // 1. using primary_tag\start\end, get all satisfied rows
   // 2.mark rows delete flag
+  CountUpdateTime();
   EntityItem* entity_item = getEntityItem(entity_id);
   BLOCK_ID block_item_id = entity_item->cur_block_id;
 
@@ -1432,6 +1443,7 @@ int TsTimePartition::UndoPut(uint32_t entity_id, kwdbts::TS_LSN lsn, uint64_t st
                              kwdbts::Payload* payload, ErrorInfo& err_info) {
   MUTEX_LOCK(vacuum_delete_lock_);
   Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
+  CountUpdateTime();
   size_t p_count = num;
   if (p_count == 0) {
     return 0;
@@ -1525,6 +1537,7 @@ int TsTimePartition::UndoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
   MUTEX_LOCK(vacuum_delete_lock_);
   Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   uint32_t undo_num = 0;
+  CountUpdateTime();
   /*
      1. struct BlockItem.rows_delete_flags records the delete flags for 1000 rows in the data block.
         A bit of 1 indicates that the row has been deleted
@@ -1591,6 +1604,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
   int deleted_rows = 0;
   {
     MUTEX_LOCK(vacuum_insert_lock_);
+    CountUpdateTime();
     // 2.GetAndAllocateAllDataSpace finds the block corresponding to the data that has been written,
     // rolls it back, writes it to alloc_spans,
     // and then requests the block needed for the data that has not been written, and writes it to alloc_spans.
@@ -1636,6 +1650,7 @@ int TsTimePartition::RedoPut(kwdbts::kwdbContext_p ctx, uint32_t entity_id, kwdb
     delete dedup_result;
     std::vector<size_t> full_block_idx;
     MUTEX_LOCK(vacuum_insert_lock_);
+    CountUpdateTime();
     TsHashLatch* entity_item_latch = GetEntityItemLatch();
     entity_item_latch->Lock(entity_id);
     EntityItem* entity_item = getEntityItem(entity_id);
@@ -1941,6 +1956,7 @@ void TsTimePartition::publish_payload_space(const std::vector<BlockSpan>& alloc_
   MUTEX_LOCK(vacuum_delete_lock_);
   Defer defer{[&]() { MUTEX_UNLOCK(vacuum_delete_lock_); }};
   // All requested space is marked as deleted space.
+  CountUpdateTime();
   if (!success) {
     TsHashLatch* entity_item_latch = GetEntityItemLatch();
     entity_item_latch->Lock(entity_id);
@@ -2226,7 +2242,7 @@ int TsTimePartition::GetDedupRows(uint entity_id, const BlockSpan& first_span, k
   for (size_t i = 0; i < block_items.size(); i++) {
     BlockItem* block_item = block_items[i];
     if (block_item->block_id > first_span.block_item->block_id) {
-      continue;;
+      continue;
     }
     int read_count = block_item->publish_row_count;
     // If the current block item matches the specified first span, update the number of records read.
@@ -2745,6 +2761,59 @@ int TsTimePartition::DropSegmentDir(const std::vector<BLOCK_ID>& segment_ids) {
     }
   }
   return 0;
+}
+
+KStatus TsTimePartition::GetMigrateFileList(std::vector<std::string>* files) {
+  ErrorInfo err_info;
+  data_segments_.Traversal([&](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+    if (tbl->sqfsIsExists()) {
+      files->push_back(tbl->getCompressedFilePath());
+    } else {
+      files->push_back(tbl->GetPath());
+    }
+    return true;
+  });
+  auto metas = meta_manager_.GetMetaFileNum();
+  for (size_t i = 0; i < metas; i++) {
+    files->push_back(GetPath() + name_ + ".meta." + intToString(i));
+  }
+  return KStatus::SUCCESS;
+}
+
+bool TsTimePartition::IsAllSegCompressed() {
+  ErrorInfo err_info;
+  bool exist_no_compressed = false;
+  data_segments_.Traversal([&](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+    if (!tbl->sqfsIsExists()) {
+      exist_no_compressed = true;
+      return false;
+    }
+    return true;
+  });
+  return !exist_no_compressed;
+}
+
+
+KStatus TsTimePartition::Migrate(int from_level, int to_level) {
+  return KStatus::SUCCESS;
+}
+
+bool TsTimePartition::Unmount() {
+  // umount all segment.
+  ErrorInfo err_info;
+  bool failed = false;
+  data_segments_.Traversal([&](BLOCK_ID segment_id, std::shared_ptr<MMapSegmentTable> tbl) -> bool {
+    if (tbl->close(err_info) < 0) {
+      failed = true;
+      return false;
+    }
+    if (!tbl->TryUnmountSqfs(err_info)) {
+      failed = true;
+      return false;
+    }
+    return true;
+  });
+  return !failed;
 }
 
 bool TsTimePartition::IsSegmentsBusy(const std::vector<BLOCK_ID>& segment_ids) {

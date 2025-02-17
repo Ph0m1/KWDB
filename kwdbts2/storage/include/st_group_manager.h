@@ -168,6 +168,12 @@ class SubEntityGroupManager : public TSObject {
 
   void sync(int flags) override;
 
+  /**
+   * @brief Hot and cold data tiering migration
+   * @return void
+   */
+  void TierMigrate();
+
  private:
   std::string db_path_;
   std::string tbl_sub_path_;

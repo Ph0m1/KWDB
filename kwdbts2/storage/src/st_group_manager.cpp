@@ -428,4 +428,12 @@ void SubEntityGroupManager::sync(int flags) {
     it->second->sync(flags);
   }
 }
+
+void SubEntityGroupManager::TierMigrate() {
+  rdLock();
+  Defer defer{[&]() { unLock(); }};
+  for (auto& subgroup : subgroups_) {
+    subgroup.second->PartitionsTierMigrate();
+  }
+}
 }  // namespace kwdbts

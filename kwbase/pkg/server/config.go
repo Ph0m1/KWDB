@@ -692,7 +692,7 @@ func (cfg *Config) CreateTsEngine(
 
 	//TODO Use the rocksdb store directory +tsdb suffix
 	tsConfig := tse.TsEngineConfig{
-		Dir:            cfg.TsStores.Specs[0].Path + "/tsdb",
+		Dir:            cfg.TsStores.Specs[0].Path,
 		Settings:       cfg.Settings,
 		ThreadPoolSize: threadPoolSize,
 		TaskQueueSize:  taskQueueSize,
