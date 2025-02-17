@@ -1693,10 +1693,20 @@ func (c *conn) bufferRow(
 ) {
 	c.msgBuilder.initMsg(pgwirebase.ServerMsgDataRow)
 	c.msgBuilder.putInt16(int16(len(row)))
+	count := len(formatCodes)
 	for i, col := range row {
 		fmtCode := pgwirebase.FormatText
 		if formatCodes != nil {
-			fmtCode = formatCodes[i]
+			if i < count {
+				fmtCode = formatCodes[i]
+			} else {
+				// default format code
+				if count == 1 {
+					fmtCode = formatCodes[0]
+				} else {
+					c.msgBuilder.setError(errors.Errorf("format code count %d less than result count %d", count, len(row)))
+				}
+			}
 		}
 		switch fmtCode {
 		case pgwirebase.FormatText:
