@@ -654,6 +654,8 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
     return KStatus::SUCCESS;
   }
   partition_table_iter_->Reset();
+  block_item_queue_.clear();
+  cur_block_item_ = nullptr;
   while (true) {
     TsTimePartition* cur_pt = nullptr;
     partition_table_iter_->Next(&cur_pt);
@@ -705,6 +707,7 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
       bool has_found = false;
       // save bitmap for all blocks, the first map key is col index
       if (getBlockBitmap(segment_tbl, block_item, 1) != KStatus::SUCCESS) {
+        LOG_ERROR("getBlockBitmap failed.");
         return KStatus::FAIL;
       }
       // If there is no first_row type query, it can be skipped directly when all data in the current block is null.
@@ -774,6 +777,8 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
     return KStatus::SUCCESS;
   }
   partition_table_iter_->Reset(true);
+  block_item_queue_.clear();
+  cur_block_item_ = nullptr;
   while (true) {
     TsTimePartition* cur_pt = nullptr;
     partition_table_iter_->Next(&cur_pt);
@@ -827,6 +832,7 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
       // save bitmap for all blocks, the first map key is col index
       // last row no need check bitmap
       if (getBlockBitmap(segment_tbl, block_item, 2) != KStatus::SUCCESS) {
+        LOG_ERROR("getBlockBitmap failed.");
         return KStatus::FAIL;
       }
       // If there is no last row type query, it can be skipped directly when the data in the current block is all null.
@@ -946,6 +952,8 @@ KStatus TsAggIterator::findFirstLastData(ResultSet* res, k_uint32* count, timest
 KStatus TsAggIterator::countDataUseStatistics(ResultSet* res, k_uint32* count, timestamp64 ts) {
   *count = 0;
   partition_table_iter_->Reset();
+  block_item_queue_.clear();
+  cur_block_item_ = nullptr;
   std::vector<timestamp64> partition_need_traverse;
   while (partition_table_iter_->Valid()) {
     KStatus s = partition_table_iter_->Next(&cur_partition_table_);
@@ -990,6 +998,8 @@ KStatus TsAggIterator::countDataAllBlocks(ResultSet* res, k_uint32* count, times
   *count = 0;
   k_uint64 total_count = 0;
   partition_table_iter_->Reset();
+  block_item_queue_.clear();
+  cur_block_item_ = nullptr;
   while (true) {
     TsTimePartition* cur_pt = nullptr;
     partition_table_iter_->Next(&cur_pt);
@@ -1146,15 +1156,6 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     uint32_t first_row = 1;
     bool has_data = getCurBlockSpan(cur_block, segment_tbl, &first_row, count);
     MetricRowID first_real_row = cur_block->getRowID(first_row);
-    if (first_last_row_.NeedFirstLastAgg()) {
-      for (uint32_t i = 0; i < *count; i++) {
-        MetricRowID real_row = cur_block->getRowID(first_row + i);
-        timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(real_row , 0));
-        // Continuously updating member variables that record first/last/first_row/last_row results during data traversal.
-        first_last_row_.UpdateFirstRow(cur_ts, real_row, cur_partition_table_, segment_tbl, col_blk_bitmaps_);
-        first_last_row_.UpdateLastRow(cur_ts, real_row, cur_partition_table_, segment_tbl, col_blk_bitmaps_);
-      }
-    }
     // If qualified data is obtained, further obtain the aggregation result of this continuous data
     // and package Batch to be added to res to return.
     // 1. If the data obtained is for the entire BlockItem and the aggregation results stored in the BlockItem are
@@ -1460,6 +1461,24 @@ KStatus TsAggIterator::Next(ResultSet* res, k_uint32* count, bool* is_finished, 
     return KStatus::SUCCESS;
   }
 
+  if (!hasFoundFirstAggData()) {
+    s = findFirstDataByIter(ts);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("findFirstDataByIter failed.");
+      return s;
+    }
+  }
+  if (!hasFoundLastAggData()) {
+    s = findLastDataByIter(ts);
+    if (s != KStatus::SUCCESS) {
+      LOG_ERROR("findLastDataByIter failed.");
+      return s;
+    }
+  }
+
+  partition_table_iter_->Reset();
+  block_item_queue_.clear();
+  cur_block_item_ = nullptr;
   ResultSet result{(k_uint32) kw_scan_cols_.size()};
   // Continuously calling the traceAllBlocks function to obtain
   // the intermediate aggregation result of all data for the current query entity.
