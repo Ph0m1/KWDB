@@ -616,6 +616,9 @@ func addPrimaryTagExpr(left, right tree.Expr, exprs map[int]tree.Datum, meta *op
 
 // checkUpdateTagIsComplete check if primary tags in filter is completed
 func checkUpdateTagIsComplete(exprs map[int]tree.Datum, primaryTagIDs map[int]struct{}) bool {
+	if len(exprs) != len(primaryTagIDs) {
+		return false
+	}
 	for key := range primaryTagIDs {
 		if _, ok := exprs[key]; !ok {
 			return false

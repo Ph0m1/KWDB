@@ -462,4 +462,15 @@ update update_tag.t11 set c = 2 where b = 1;
 alter table update_tag.t11 drop column a;
 update update_tag.t11 set c = 3 where b = 1;
 
+---fix bug 45329
+create table update_tag.t12(k_timestamp timestamptz not null,e1 int2) tags (t1 int2 not null,t2 int not null, t3 int) primary tags(t1,t2);
+insert into update_tag.t12 values('2020-11-06 17:10:23', 1, 1, 1, 1);
+insert into update_tag.t12 values('2020-11-06 17:10:24', 2, 2, 1, 1);
+insert into update_tag.t12 values('2020-11-06 17:10:25', 2, 2, 1, 1);
+update update_tag.t12 set t3 = 3 where e1 = 1;
+update update_tag.t12 set t3 = 3 where t1 = 1 and e1 = 1;
+update update_tag.t12 set t3 = 3 where t2 = 1 and e1 = 1;
+update update_tag.t12 set t3 = 3 where t1 = 1 and t2 = 1 and e1 = 1;
+update update_tag.t12 set t3 = 3 where t1 = 1 and t2 = 1 and k_timestamp = '2020-11-06 17:10:23';
+
 drop database update_tag cascade;

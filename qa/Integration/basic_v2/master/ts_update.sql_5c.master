@@ -1224,5 +1224,28 @@ UPDATE 1
 ALTER TABLE
 > update update_tag.t11 set c = 3 where b = 1;
 UPDATE 1
+> create table update_tag.t12(k_timestamp timestamptz not null,e1 int2) tags (t1 int2 not null,t2 int not null, t3 int) primary tags(t1,t2);
+CREATE TABLE
+> insert into update_tag.t12 values('2020-11-06 17:10:23', 1, 1, 1, 1);
+INSERT 1
+> insert into update_tag.t12 values('2020-11-06 17:10:24', 2, 2, 1, 1);
+INSERT 1
+> insert into update_tag.t12 values('2020-11-06 17:10:25', 2, 2, 1, 1);
+INSERT 1
+> update update_tag.t12 set t3 = 3 where e1 = 1;
+ERROR: unsupported conditions in update: unsupported binary operator or mismatching tag filter
+SQLSTATE: 0A000
+> update update_tag.t12 set t3 = 3 where t1 = 1 and e1 = 1;
+ERROR: unsupported conditions in update: unsupported binary operator or mismatching tag filter
+SQLSTATE: 0A000
+> update update_tag.t12 set t3 = 3 where t2 = 1 and e1 = 1;
+ERROR: unsupported conditions in update: unsupported binary operator or mismatching tag filter
+SQLSTATE: 0A000
+> update update_tag.t12 set t3 = 3 where t1 = 1 and t2 = 1 and e1 = 1;
+ERROR: unsupported conditions in update: unsupported binary operator or mismatching tag filter
+SQLSTATE: 0A000
+> update update_tag.t12 set t3 = 3 where t1 = 1 and t2 = 1 and k_timestamp = '2020-11-06 17:10:23';
+ERROR: unsupported conditions in update: unsupported binary operator or mismatching tag filter
+SQLSTATE: 0A000
 > drop database update_tag cascade;
 DROP DATABASE
