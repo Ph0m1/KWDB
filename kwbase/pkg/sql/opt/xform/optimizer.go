@@ -807,6 +807,20 @@ func (o *Optimizer) ensureOptState(grp memo.RelExpr, required *physical.Required
 	return state
 }
 
+// if expr contains tsInsertSelectExpr, deal with expr.input
+func dealWithTsInsertSelect(expr memo.RelExpr) (memo.RelExpr, bool) {
+	if e, ok := expr.(*memo.TSInsertSelectExpr); ok {
+		return e.Input, true
+	}
+	// with ... as ...
+	if e1, ok1 := expr.(*memo.WithExpr); ok1 {
+		if e2, ok2 := e1.Main.(*memo.TSInsertSelectExpr); ok2 {
+			return e2.Input, true
+		}
+	}
+	return expr, false
+}
+
 // optimizeRootWithProps tries to simplify the root operator based on the
 // properties required of it. This may trigger the creation of a new root and
 // new properties.
@@ -815,21 +829,22 @@ func (o *Optimizer) optimizeRootWithProps() {
 	if !ok {
 		panic(errors.AssertionFailedf("Optimize can only be called on relational root expressions"))
 	}
+
 	// rootProps is bestExpr of subexpression in time series insert select,
 	// handle TSInsertSelectExpr. execute some sql maybe stack error
 	// so need to simplify subexpression
 	// eg: insert into test_ts.ts_table2
 	// select * from test_sts.stable as t1 where
 	//	e1 in (select e1 from test_ts.ts_table where e1>1000 and t1.e2 < 2000 limit 1 offset 1);
-	if expr, ok1 := root.(*memo.TSInsertSelectExpr); ok1 {
-		root = expr.Input
-	}
+	var isTsInsSel bool
+	root, isTsInsSel = dealWithTsInsertSelect(root)
 	rootProps := o.mem.RootProps()
 
 	// [SimplifyRootOrdering]
 	// SimplifyRootOrdering removes redundant columns from the root properties,
 	// based on the operator's functional dependencies.
-	if rootProps.Ordering.CanSimplify(&root.Relational().FuncDeps) {
+	// ps: simplifyRootOrdering is forbiddened if it is tsInsertSelect
+	if rootProps.Ordering.CanSimplify(&root.Relational().FuncDeps) && !isTsInsSel {
 		if o.matchedRule == nil || o.matchedRule(opt.SimplifyRootOrdering) {
 			simplified := *rootProps
 			simplified.Ordering = rootProps.Ordering.Copy()

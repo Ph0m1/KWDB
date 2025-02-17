@@ -552,8 +552,6 @@ func (mb *mutationBuilder) buildTSInsertSelect(rNum, tNum int, ins *tree.Insert,
 		// select relational data or cross-module data insert into ts table
 		if !TSInsertSelectLimitEnable.Get(&b.evalCtx.Settings.SV) && rNum > 0 && tNum == 0 {
 			panic(pgerror.New(pgcode.Warning, "insert relational data into time series table is not supported"))
-		} else if rNum > 0 && tNum > 0 {
-			panic(pgerror.New(pgcode.Warning, "insert cross-module datas into time series table is not supported"))
 		}
 	}
 
@@ -839,8 +837,13 @@ func (mb *mutationBuilder) buildInputForInsert(inScope *scope, inputRows *tree.S
 		inCol := &mb.outScope.cols[i]
 		ord := mb.tabID.ColumnOrdinal(mb.targetColList[i])
 
+		tableType := tree.RelationalTable
+		if ord == 0 && i == 0 {
+			// we need to handle column of ts specially if table is TimeseriesTable
+			tableType = mb.tab.GetTableType()
+		}
 		// Type check the input column against the corresponding table column.
-		checkDatumTypeFitsColumnType(mb.tab.Column(ord), inCol.typ)
+		checkDatumTypeFitsColumnType(mb.tab.Column(ord), inCol.typ, tableType)
 
 		// Assign name of input column.
 		inCol.name = tree.Name(mb.md.ColumnMeta(mb.targetColList[i]).Alias)

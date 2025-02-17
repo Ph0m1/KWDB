@@ -460,6 +460,13 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 			fmt.Fprintf(g.w, "func (e *%s) bestProps() *bestProps {\n", opTyp.name)
 			fmt.Fprintf(g.w, "  return e.Input.bestProps()\n")
 			fmt.Fprintf(g.w, "}\n\n")
+		} else if opTyp.name == "WithExpr" {
+			fmt.Fprintf(g.w, "func (e *%s) bestProps() *bestProps {\n", opTyp.name)
+			fmt.Fprintf(g.w, "  if is, ok := e.Main.(*TSInsertSelectExpr);ok {\n")
+			fmt.Fprintf(g.w, "    return is.Input.bestProps()\n")
+			fmt.Fprintf(g.w, "  }\n")
+			fmt.Fprintf(g.w, "  return e.grp.bestProps()\n")
+			fmt.Fprintf(g.w, "}\n\n")
 		} else {
 			fmt.Fprintf(g.w, "func (e *%s) bestProps() *bestProps {\n", opTyp.name)
 			fmt.Fprintf(g.w, "  return e.grp.bestProps()\n")

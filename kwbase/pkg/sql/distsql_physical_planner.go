@@ -2335,7 +2335,9 @@ func (dsp *DistSQLPlanner) createTSInsertSelect(
 ) error {
 	thisNodeID := dsp.nodeDesc.NodeID
 	// add noop to subNode of tsInsertSelectNode
-	plan.AddNoopToTsProcessors(thisNodeID, true, true)
+	if plan.ResultRouters != nil && (len(plan.ResultRouters) > 1 || plan.ChildIsExecInTSEngine()) {
+		plan.AddNoopToTsProcessors(thisNodeID, true, true)
+	}
 
 	stageID := plan.NewStageID()
 	var tsInsertSel = &execinfrapb.TsInsertSelSpec{TargetTableId: n.TableID, DbId: n.DBID, Cols: n.Cols, ColIdxs: n.ColIdxs, ChildName: n.TableName, TableType: n.TableType, NotSetInputsToDrain: plan.InlcudeApplyJoin}

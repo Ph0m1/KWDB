@@ -514,7 +514,14 @@ func (tis *tsInsertSelecter) Start(ctx context.Context) context.Context {
 	rowCount := 0
 	for {
 		// get data
-		rows, _ = tis.input.Next()
+		var meta *execinfrapb.ProducerMetadata
+		rows, meta = tis.input.Next()
+		if meta != nil {
+			switch tis.Out.Output().Push(rows, meta) {
+			case execinfra.NeedMoreRows:
+				continue
+			}
+		}
 		if rows == nil {
 			insertRows = insertRows[0:rowCount]
 			if len(insertRows) > 0 {

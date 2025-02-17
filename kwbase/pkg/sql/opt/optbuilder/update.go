@@ -225,7 +225,7 @@ func (mb *mutationBuilder) addUpdateCols(exprs tree.UpdateExprs) {
 	checkCol := func(sourceCol *scopeColumn, scopeOrd scopeOrdinal, targetColID opt.ColumnID) {
 		// Type check the input expression against the corresponding table column.
 		ord := mb.tabID.ColumnOrdinal(targetColID)
-		checkDatumTypeFitsColumnType(mb.tab.Column(ord), sourceCol.typ)
+		checkDatumTypeFitsColumnType(mb.tab.Column(ord), sourceCol.typ, tree.RelationalTable)
 
 		// Add ordinal of new scope column to the list of columns to update.
 		mb.updateOrds[ord] = scopeOrd
@@ -660,7 +660,7 @@ func (mb *mutationBuilder) addTSUpdateCols(
 		// Type check the input expression against the corresponding table column.
 		ord := mb.tabID.ColumnOrdinal(targetColID)
 		col := mb.tab.Column(ord)
-		checkDatumTypeFitsColumnType(col, sourceCol.typ)
+		checkDatumTypeFitsColumnType(col, sourceCol.typ, tree.RelationalTable)
 		if !col.IsNullable() && d == tree.DNull {
 			return sqlbase.UnsupportedUpdateConditionError(fmt.Sprintf("tag %s is not null", mb.tab.Column(ord).ColName()))
 		}

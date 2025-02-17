@@ -585,6 +585,8 @@ func (mb *mutationBuilder) addSynthesizedCols(
 		if mb.tab.GetTableType() != tree.RelationalTable {
 			if projectionsScope == nil {
 				projectionsScope = mb.outScope.replace()
+				projectionsScope.ordering = mb.outScope.ordering
+				projectionsScope.extraCols = mb.outScope.extraCols
 				projectionsScope.appendColumnsFromScope(mb.outScope)
 				mb.b.constructProjectForScope(mb.outScope, projectionsScope)
 				mb.outScope = projectionsScope
@@ -1006,12 +1008,16 @@ func isTsInsertTimestamp(col cat.Column, typ *types.T) bool {
 // be different (eg. TEXT and VARCHAR will fit the same scalar type String).
 //
 // This is used by the UPDATE, INSERT and UPSERT code.
-func checkDatumTypeFitsColumnType(col cat.Column, typ *types.T) {
+func checkDatumTypeFitsColumnType(col cat.Column, typ *types.T, tableType tree.TableType) {
 	if typ.Equivalent(col.DatumType()) || isTsInsertTimestamp(col, typ) {
 		return
 	}
 
 	colName := string(col.ColName())
+	if tableType != tree.RelationalTable {
+		panic(pgerror.New(pgcode.DatatypeMismatch,
+			"first column must be timestamp when the target table is table of time series"))
+	}
 	panic(pgerror.Newf(pgcode.DatatypeMismatch,
 		"value type %s doesn't match type %s of column %q",
 		typ, col.DatumType(), tree.ErrNameString(colName)))

@@ -251,6 +251,11 @@ func init() {
 		buildChildReqOrdering: exportBuildChildReqOrdering,
 		buildProvidedOrdering: noProvidedOrdering,
 	}
+	funcMap[opt.TSInsertSelectOp] = funcs{
+		canProvideOrdering:    tsInsertSelectCanProvideOrdering,
+		buildChildReqOrdering: tsInsertSelectBuildChildReqOrdering,
+		buildProvidedOrdering: tsInsertSelectBuildProvided,
+	}
 }
 
 func canNeverProvideOrdering(expr memo.RelExpr, required *physical.OrderingChoice) bool {
