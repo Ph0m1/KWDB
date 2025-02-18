@@ -412,3 +412,38 @@ INSERT 1
 (7 rows)
 > use defaultdb;drop database test_select_timebucket_ms cascade;
 DROP DATABASE
+> create ts database tsdb;
+CREATE TS DATABASE
+> use tsdb;
+SET
+> create table t2 (ts timestamp not null, status int) tags(a int not null) primary tags(a);
+CREATE TABLE
+> insert into t2 values('2025-01-10 00:00:00+00:00', 1, 1);
+INSERT 1
+> insert into t2 values('2025-01-11 00:00:00+00:00', 1, 1);
+INSERT 1
+> insert into t2 values('2025-01-12 00:00:00+00:00', 1, 1);
+INSERT 1
+> insert into t2 values('2025-01-14 00:00:00+00:00', 1, 1);
+INSERT 1
+> insert into t2 values('2025-01-16 00:00:00+00:00', 1, 1);
+INSERT 1
+> insert into t2 values('2025-01-20 00:00:00+00:00', 1, 1);
+INSERT 1
+> select time_bucket_gapfill(ts, '1day') as tb,COALESCE(interpolate(sum(status),null),25) from t2 group by tb;
+             tb             | coalesce
+----------------------------+-----------
+  2025-01-10 00:00:00+08:00 |        1
+  2025-01-11 00:00:00+08:00 |        1
+  2025-01-12 00:00:00+08:00 |        1
+  2025-01-13 00:00:00+08:00 |       25
+  2025-01-14 00:00:00+08:00 |        1
+  2025-01-15 00:00:00+08:00 |       25
+  2025-01-16 00:00:00+08:00 |        1
+  2025-01-17 00:00:00+08:00 |       25
+  2025-01-18 00:00:00+08:00 |       25
+  2025-01-19 00:00:00+08:00 |       25
+  2025-01-20 00:00:00+08:00 |        1
+(11 rows)
+> use defaultdb;drop database tsdb cascade;
+DROP DATABASE

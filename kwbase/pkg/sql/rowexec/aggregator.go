@@ -918,6 +918,8 @@ func (ag *aggregatorBase) aggGapFillStart() (
 				curRowData = tree.NewDInt(tree.DInt(t.IntConstant))
 			case builtins.ConstantFloatMethod:
 				curRowData = tree.NewDFloat(tree.DFloat(t.FloatConstant))
+			case builtins.ConstantDecimalMethod:
+				curRowData = t.DecimalConstant
 			case builtins.PrevMethod:
 				curRowData = ag.imputation[i].prevValue
 			case builtins.NextMethod:
@@ -938,6 +940,9 @@ func (ag *aggregatorBase) aggGapFillStart() (
 						curRowData = tree.NewDInt(tree.DInt(math.Round(val)))
 					default:
 						errorOut = true
+					}
+					if !errorOut && ag.outputTypes[i].InternalType.Family == types.DecimalFamily {
+						curRowData, _ = tree.ParseDDecimal(curRowData.String())
 					}
 					// ag.gapfill.linearPos = ag.gapfill.linearPos + 1
 					haveGapFilled = true

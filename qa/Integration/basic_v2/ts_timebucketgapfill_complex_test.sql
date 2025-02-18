@@ -143,3 +143,15 @@ insert into test_select_timebucket_ms.tb3 values('0002-06-06 11:15:15.783','2024
 select time_bucket_gapfill(k_timestamp,'1800000MILLiseconds') as a,interpolate(avg(e4),'next'),interpolate(count(distinct e22),'next') from test_select_timebucket_ms.tb3 group by a order by a;
 
 use defaultdb;drop database test_select_timebucket_ms cascade;
+
+create ts database tsdb;
+use tsdb;
+create table t2 (ts timestamp not null, status int) tags(a int not null) primary tags(a);
+insert into t2 values('2025-01-10 00:00:00+00:00', 1, 1);
+insert into t2 values('2025-01-11 00:00:00+00:00', 1, 1);
+insert into t2 values('2025-01-12 00:00:00+00:00', 1, 1);
+insert into t2 values('2025-01-14 00:00:00+00:00', 1, 1);
+insert into t2 values('2025-01-16 00:00:00+00:00', 1, 1);
+insert into t2 values('2025-01-20 00:00:00+00:00', 1, 1);
+select time_bucket_gapfill(ts, '1day') as tb,COALESCE(interpolate(sum(status),null),25) from t2 group by tb;
+use defaultdb;drop database tsdb cascade;

@@ -3157,9 +3157,10 @@ type ImputationAggregate struct {
 	Timebucket int64
 	Exp        ImputationMethod
 
-	OriginalType  *types.T
-	IntConstant   int64
-	FloatConstant float64
+	OriginalType    *types.T
+	IntConstant     int64
+	FloatConstant   float64
+	DecimalConstant *tree.DDecimal
 }
 
 // ImputationMethod is for interpolate method
@@ -3172,6 +3173,8 @@ const (
 	ConstantIntMethod
 	//ConstantFloatMethod is for interpolate method
 	ConstantFloatMethod
+	//ConstantDecimalMethod is for interpolate method
+	ConstantDecimalMethod
 	//PrevMethod is for interpolate method
 	PrevMethod
 	//NextMethod is for interpolate method
@@ -3190,6 +3193,9 @@ func (a *ImputationAggregate) Add(
 ) error {
 	if datum1 != tree.DNull {
 		a.OriginalType = datum1.ResolvedType()
+		if a.OriginalType == types.Decimal {
+			return errors.Newf("interpolate not support originalColType is decimal.")
+		}
 	}
 	//fmt.Printf("arg1 %T, arg2 %T\n", datum1.ResolvedType(), datum2[0].ResolvedType())
 	switch v := datum2[0].(type) {
@@ -3213,8 +3219,8 @@ func (a *ImputationAggregate) Add(
 			return errors.New("Interpolate/imputation method not supported, please check spelling")
 		}
 	case *tree.DDecimal:
-		a.FloatConstant, _ = v.Float64()
-		a.Exp = ConstantFloatMethod
+		a.DecimalConstant = v
+		a.Exp = ConstantDecimalMethod
 	default:
 		return errors.New("Second argument type must be int, float or string")
 	}
