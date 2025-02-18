@@ -25,6 +25,7 @@
 package optbuilder
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,6 +40,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/util/duration"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 	"github.com/lib/pq/oid"
@@ -965,6 +967,11 @@ func checkLastAgg(name string) bool {
 	return name == sqlbase.LastAgg || name == sqlbase.LastRowAgg || name == sqlbase.LastTSAgg || name == sqlbase.LastRowTSAgg
 }
 
+// checkTwaOrElapsedAgg is used to check twa or elapsed aggregation
+func checkTwaOrElapsedAgg(name string) bool {
+	return name == "twa" || name == "elapsed"
+}
+
 // handleLastAgg limit last agg can only use in pure time-series scenarios,and
 // add a timestamp column as the second parameter to the last function
 // Parameters:
@@ -1069,5 +1076,87 @@ func checkBoundary(s *scope, f tree.FuncExpr, funcName string, t *types.T) {
 		} else {
 			panic(pgerror.Newf(pgcode.DatatypeMismatch, "the second parameter of last must be of timestamptz type"))
 		}
+	}
+}
+
+// handleTwaOrElapsedAgg processes TWA and Elapsed aggregation functions.
+func (b *Builder) handleTwaOrElapsedAgg(e tree.Expr, funcName string) {
+	// Check if the expression is a function expression
+	if f, isFuncExpr := e.(*tree.FuncExpr); isFuncExpr {
+		// Handle each aggregation function based on the name
+		switch funcName {
+		case "twa":
+			b.handleTwaAgg(f)
+		case "elapsed":
+			b.handleElapsedAgg(f)
+		default:
+			// If it's not a TWA or Elapsed function, return without modification
+			return
+		}
+	}
+}
+
+// handleTwaAgg processes the twa function's arguments, ensuring that the first argument
+// is a primary timestamp and applies to time series tables.
+func (b *Builder) handleTwaAgg(f *tree.FuncExpr) {
+	if len(f.Exprs) == 2 {
+		// Extract the timestamp argument
+		if tsArg, ok := f.Exprs[0].(*scopeColumn); ok {
+			tableID := b.factory.Metadata().ColumnMeta(tsArg.id).Table
+			// If table ID is 0, the timestamp argument is not a table column
+			if tableID == 0 {
+				panic(pgerror.New(pgcode.DatatypeMismatch, fmt.Sprintf("first parameter should be primary timestamp in %s function", "twa")))
+			}
+
+			tsTable := b.factory.Metadata().TableMeta(tableID).Table
+			// Check if the table is a time series table.
+			if tsTable.GetTableType() != tree.TimeseriesTable {
+				panic(pgerror.New(pgcode.FeatureNotSupported, fmt.Sprintf("%s function can only be used in time series table", "twa")))
+			}
+			// Ensure the timestamp column is the primary timestamp column (index 0)
+			if tableID.ColumnOrdinal(tsArg.id) != 0 {
+				panic(pgerror.New(pgcode.DatatypeMismatch, fmt.Sprintf("first parameter should be primary timestamp in %s function", "twa")))
+			}
+		} else {
+			panic(pgerror.New(pgcode.DatatypeMismatch, fmt.Sprintf("first parameter should be primary timestamp in %s function", "twa")))
+		}
+	} else {
+		panic(pgerror.New(pgcode.UndefinedFunction, fmt.Sprintf("invalid parameter number in %s function", "twa")))
+	}
+}
+
+// handleElapsedAgg processes the elapsed function, ensuring that the first argument
+// is a primary timestamp and applies to time series tables.
+func (b *Builder) handleElapsedAgg(f *tree.FuncExpr) {
+	if len(f.Exprs) == 1 || len(f.Exprs) == 2 {
+		// Extract the timestamp argument.
+		if tsArg, ok := f.Exprs[0].(*scopeColumn); ok {
+			tableID := b.factory.Metadata().ColumnMeta(tsArg.id).Table
+			// If table ID is 0, the timestamp argument is not a table column.
+			if tableID == 0 {
+				panic(pgerror.New(pgcode.DatatypeMismatch, fmt.Sprintf("first parameter should be primary timestamp in %s function", "elapsed")))
+			}
+
+			tsTable := b.factory.Metadata().TableMeta(tableID).Table
+			// Check if the table is a time series table.
+			if tsTable.GetTableType() != tree.TimeseriesTable {
+				panic(pgerror.New(pgcode.FeatureNotSupported, fmt.Sprintf("%s function can only be used in time series table", "elapsed")))
+			}
+			// Ensure the timestamp column is the primary timestamp column (index 0).
+			if tableID.ColumnOrdinal(tsArg.id) != 0 {
+				panic(pgerror.New(pgcode.DatatypeMismatch, fmt.Sprintf("first parameter should be primary timestamp in %s function", "elapsed")))
+			}
+
+			// If there's only one argument, add a constant time unit argument.
+			if len(f.Exprs) == 1 {
+				// Time unit of 1 millisecond as a constant value.
+				tsTimeUnit := tree.DInterval{Duration: duration.MakeDuration(1000000, 0, 0)}
+				f.Exprs = append(f.Exprs, &tsTimeUnit)
+			}
+		} else {
+			panic(pgerror.New(pgcode.DatatypeMismatch, fmt.Sprintf("first parameter should be primary timestamp in %s function", "elapsed")))
+		}
+	} else {
+		panic(pgerror.New(pgcode.UndefinedFunction, fmt.Sprintf("invalid parameter number in %s function", "elapsed")))
 	}
 }

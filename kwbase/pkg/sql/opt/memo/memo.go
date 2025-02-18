@@ -1040,6 +1040,11 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 		}
 	}
 
+	// if twa can exec in ae, then set ts scan use ordered scan table
+	if m.CheckFlag(opt.TwaUseOrderScan) {
+		walkDealTSScan(src, setOrderedForce)
+	}
+
 	if ret.isParallel && !ret.commonRet.hasAddSynchronizer && !gp.OptFlags.PruneFinalAggOpt() {
 		if m.CheckHelper.GroupHint != keys.ForceNoSynchronizerGroup {
 			src.SetAddSynchronizer()
@@ -1398,6 +1403,11 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 			}
 		}
 
+		// add sortExpr to input if sql has twa function.
+		if !retAgg.commonRet.execInTSEngine {
+			addSortExprForTwaFunc(source, sortExpr, ok)
+		}
+
 		if source.OptFlags.PruneFinalAggOpt() {
 			m.addOrderedColumn(source.bestProps())
 		}
@@ -1408,6 +1418,11 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 			&source.GroupingPrivate)
 		if retAgg.commonRet.err != nil {
 			return retAgg.commonRet.disableExecInTSEngine()
+		}
+		sortExpr, hasSortExpr := (*src).Child(0).(*SortExpr)
+		// add sortExpr to input if sql has twa function.
+		if !retAgg.commonRet.execInTSEngine {
+			addSortExprForTwaFunc(source, sortExpr, hasSortExpr)
 		}
 		m.dealWithGroupBy(source, source.Input, &retAgg)
 		return retAgg.commonRet
@@ -1883,6 +1898,11 @@ func (m *Memo) checkGroupBy(
 				srcExpr := (*aggs)[i].Agg
 				hashCode := GetExprHash(srcExpr)
 
+				// In distributed mode, pushing down twa and elapsed is not supported.
+				if m.checkTwaAndElapsedOps(gp.GroupingCols, srcExpr, &ret) {
+					return ret
+				}
+
 				// first: check if child of agg can execute in ts engine.
 				// second: check if agg itself can execute in ts engine.
 				if !m.CheckChildExecInTS(srcExpr, hashCode) ||
@@ -2233,4 +2253,122 @@ type InsideOutOptHelper struct {
 type AggArgHelper struct {
 	AggOp    opt.Operator
 	ArgColID opt.ColumnID
+}
+
+// checkTwaAndElapsedOps check twa/elapsed function can push down or can use timeBucket optimize.
+func (m *Memo) checkTwaAndElapsedOps(
+	groupingCols opt.ColSet, srcExpr opt.ScalarExpr, ret *aggCrossEngCheckResults,
+) bool {
+	if (srcExpr.Op() == opt.TwaOp || srcExpr.Op() == opt.ElapsedOp) && !m.CheckFlag(opt.SingleMode) {
+		ret.commonRet = ret.commonRet.disableExecInTSEngine()
+		return true
+	}
+
+	if srcExpr.Op() == opt.TwaOp || srcExpr.Op() == opt.ElapsedOp {
+		ret.commonRet.canTimeBucketOptimize = false
+	}
+
+	if twaExpr, ok := srcExpr.(*TwaExpr); ok {
+		if tsArg, isTsArg := twaExpr.TsInput.(*VariableExpr); isTsArg {
+			tableID := m.Metadata().ColumnMeta(tsArg.Col).Table
+			tsTable := m.Metadata().TableMeta(tableID).Table
+
+			var primaryTagColSet opt.ColSet
+			for i := 0; i < tsTable.ColumnCount(); i++ {
+				if tsTable.Column(i).IsPrimaryTagCol() {
+					primaryTagColSet.Add(tableID.ColumnID(int(tsTable.Column(i).ColID() - 1)))
+				}
+			}
+
+			if primaryTagColSet.SubsetOf(groupingCols) {
+				m.SetFlag(opt.TwaUseOrderScan)
+			} else {
+				ret.commonRet = ret.commonRet.disableExecInTSEngine()
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// addSortExprForTwaFunc handles the logic for both GroupByExpr and ScalarGroupByExpr.
+// It checks if any TWA function is used in the aggregations and modifies the SortExpr accordingly
+// by adding the corresponding columns to the ordering.
+// Arguments:
+// - source: the current expression (either GroupByExpr or ScalarGroupByExpr) containing the aggregations to check for Twa functions.
+// - sortExpr: the SortExpr that may need to be modified based on the presence of Twa functions.
+// - hasSortExpr: whether the SortExpr is already part of the plan or needs adjustment.
+func addSortExprForTwaFunc(source RelExpr, sortExpr *SortExpr, hasSortExpr bool) {
+	var tsColSet opt.ColSet
+	var hasTwaFunc bool
+
+	// Check for TWA functions in the aggregations.
+	// We use a type assertion to check whether it's GroupByExpr or ScalarGroupByExpr.
+	switch src := source.(type) {
+	case *GroupByExpr:
+		// Check the aggregations in GroupByExpr
+		for _, agg := range src.Aggregations {
+			if agg.Agg.Op() == opt.TwaOp {
+				hasTwaFunc = true
+				twaAgg, _ := agg.Agg.(*TwaExpr)
+				tsInput, _ := twaAgg.TsInput.(*VariableExpr)
+				tsColSet.Add(tsInput.Col)
+			}
+		}
+	case *ScalarGroupByExpr:
+		// Check the aggregations in ScalarGroupByExpr
+		for _, agg := range src.Aggregations {
+			if agg.Agg.Op() == opt.TwaOp {
+				hasTwaFunc = true
+				twaAgg, _ := agg.Agg.(*TwaExpr)
+				tsInput, _ := twaAgg.TsInput.(*VariableExpr)
+				tsColSet.Add(tsInput.Col)
+			}
+		}
+	default:
+		return
+	}
+
+	// If TWA function exists, adjust the SortExpr.
+	if hasTwaFunc {
+		var provided *physical.Provided
+		newSortExpr := &SortExpr{}
+
+		// If hasSortExpr is true, use the provided physical properties from sortExpr.
+		if hasSortExpr {
+			provided = sortExpr.ProvidedPhysical()
+		} else {
+			// Otherwise, create a new SortExpr.
+			if src, ok := source.(*GroupByExpr); ok {
+				newSortExpr.Input = src.Input
+			} else if src, ok := source.(*ScalarGroupByExpr); ok {
+				newSortExpr.Input = src.Input
+			}
+			provided = newSortExpr.ProvidedPhysical()
+		}
+
+		// Add the columns associated with TWA functions to the ordering.
+		tsColSet.ForEach(func(i opt.ColumnID) {
+			alreadyExists := false
+			for _, orderingCol := range provided.Ordering {
+				if opt.ColumnID(orderingCol) == i {
+					alreadyExists = true
+					break
+				}
+			}
+			if !alreadyExists {
+				provided.Ordering = append(provided.Ordering, opt.MakeOrderingColumn(i, false))
+			}
+		})
+
+		// If hasSortExpr is false, update the source input with the new sort expression.
+		if !hasSortExpr {
+			if src, ok := source.(*GroupByExpr); ok {
+				src.Input = newSortExpr
+			} else if src, ok := source.(*ScalarGroupByExpr); ok {
+				src.Input = newSortExpr
+			}
+		}
+	}
 }

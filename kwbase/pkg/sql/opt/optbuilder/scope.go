@@ -1194,6 +1194,11 @@ func (s *scope) replaceAggregate(f *tree.FuncExpr, def *tree.FunctionDefinition)
 		}
 		handleLastAgg(s, expr, f.Func.FunctionName())
 	}
+
+	// Processes TWA and Elapsed aggregation functions.
+	if checkTwaOrElapsedAgg(f.Func.FunctionName()) {
+		s.builder.handleTwaOrElapsedAgg(expr, f.Func.FunctionName())
+	}
 	s.DelScopeProperty(def.Name)
 
 	// Update this scope to indicate that we are now inside an aggregate function

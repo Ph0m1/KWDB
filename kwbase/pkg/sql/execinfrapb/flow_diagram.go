@@ -188,6 +188,10 @@ func (a *AggregatorSpec) summary() (string, []string) {
 			buf.WriteString("DISTINCT ")
 		}
 		buf.WriteString(colListStr(agg.ColIdx))
+		for _, c := range agg.Arguments {
+			buf.WriteByte(',')
+			fmt.Fprintf(&buf, "%s", c)
+		}
 		buf.WriteByte(')')
 		if agg.FilterColIdx != nil {
 			fmt.Fprintf(&buf, " FILTER @%d", *agg.FilterColIdx+1)

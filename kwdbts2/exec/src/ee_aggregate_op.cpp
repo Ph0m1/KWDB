@@ -279,35 +279,27 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
       case Sumfunctype::LAST: {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(1);
-        k_int32 pointIdx = -1;
-        if (agg.col_idx_size() > 2) {
-          pointIdx = agg.col_idx(2);
-        }
+        k_int64 time = agg.timestampconstant(0);
         k_uint32 len = fixLength(input_fields_[argIdx]->get_storage_length());
-
         if (IsStringType(param_.aggs_[i]->get_storage_type())) {
-          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, pointIdx, len + STRING_WIDE);
+          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, time, len + STRING_WIDE);
         } else if (param_.aggs_[i]->get_storage_type() == roachpb::DataType::DECIMAL) {
-          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx,  pointIdx, len + BOOL_WIDE);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx,  time, len + BOOL_WIDE);
         } else {
-          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx,  pointIdx, len);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx,  time, len);
         }
         break;
       }
       case Sumfunctype::LASTTS: {
         k_uint32 argIdx = agg.col_idx(0);
         k_uint32 tsIdx = agg.col_idx(0);
-        k_int32 pointIdx = -1;
         if (agg.col_idx_size() > 1) {
           tsIdx = agg.col_idx(1);
         }
-        if (agg.col_idx_size() > 2) {
-          pointIdx = agg.col_idx(2);
-        }
         LOG_DEBUG("LASTTS aggregations argument column : %u\n", argIdx);
-
+        k_int64 time = agg.timestampconstant(0);
         k_uint32 len = fixLength(input_fields_[tsIdx]->get_storage_length());
-        agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, pointIdx, len);
+        agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, time, len);
         break;
       }
       case Sumfunctype::LAST_ROW: {
@@ -424,6 +416,58 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
         }
         break;
       }
+      case Sumfunctype::TWA: {
+        k_int32 argIdx = INT32_MAX;
+        double const_val = 0.0f;
+        k_uint32 tsIdx = agg.col_idx(0);
+        k_uint32 len = param_.aggs_[i]->get_storage_length();
+        roachpb::DataType storage_type = roachpb::DataType::BIGINT;
+        if (agg.col_idx_size() > 1) {
+          argIdx = agg.col_idx(1);
+          storage_type = input_fields_[argIdx]->get_storage_type();
+        } else if (agg.col_idx_size() > 0) {
+          TSAggregatorSpec_Expression a = agg.arguments(0);
+          string s = *a.mutable_expr();
+          const_val = atof(s.substr(0, s.find_first_of(":::")).c_str());
+          storage_type = roachpb::DataType::DOUBLE;
+        }
+
+        switch (storage_type) {
+          case roachpb::DataType::SMALLINT:
+            agg_func = make_unique<TwaAggregate<k_int16>>(i, argIdx, tsIdx, const_val, len);
+            break;
+          case roachpb::DataType::INT:
+            agg_func = make_unique<TwaAggregate<k_int32>>(i, argIdx, tsIdx, const_val, len);
+            break;
+          case roachpb::DataType::BIGINT:
+            agg_func = make_unique<TwaAggregate<k_int64>>(i, argIdx, tsIdx, const_val, len);
+            break;
+          case roachpb::DataType::FLOAT:
+            agg_func = make_unique<TwaAggregate<k_float32>>(i, argIdx, tsIdx, const_val, len);
+            break;
+          case roachpb::DataType::DOUBLE:
+            agg_func = make_unique<TwaAggregate<k_double64>>(i, argIdx, tsIdx, const_val, len);
+            break;
+          default:
+            LOG_ERROR("unsupported data type for twa aggregation\n");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "unsupported data type for twa aggregation");
+            status = KStatus::FAIL;
+            break;
+        }
+
+        break;
+      }
+      case Sumfunctype::ELAPSED: {
+        k_uint32 argIdx = agg.col_idx(0);
+        k_uint32 len = param_.aggs_[i]->get_storage_length();
+        string time = "'00:00:00.001':::INTERVAL";
+        if (agg.arguments_size() > 0) {
+          TSAggregatorSpec_Expression a = agg.arguments(0);
+          time = *a.mutable_expr();
+        }
+        agg_func = make_unique<ElapsedAggregate>(i, argIdx, time, input_fields_[argIdx]->get_storage_type(), len);
+        break;
+      }
       default:
         LOG_ERROR("unknown aggregation function type %d\n", func_type);
         EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_FUNCTION_DEFINITION, "unknown aggregation function type");
@@ -500,6 +544,10 @@ EEIteratorErrCode BaseAggregator::Init(kwdbContext_p ctx) {
         agg_row_size_ += BOOL_WIDE;
       } else if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
         agg_row_size_ += sizeof(k_int64);
+      } else if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_ELAPSED) {
+        agg_row_size_ += sizeof(ElapsedInfo);
+      } else if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_TWA) {
+        agg_row_size_ += sizeof(TwaInfo);
       }
 
       if (IsFirstLastAggFunc(aggregations_[i].func())) {
@@ -553,6 +601,10 @@ void BaseAggregator::CalculateAggOffsets() {
       offset += BOOL_WIDE;
     } else if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
       offset += sizeof(k_int64);
+    } else if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_ELAPSED) {
+      offset += sizeof(ElapsedInfo);
+    } else if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_TWA) {
+      offset += sizeof(TwaInfo);
     }
 
     if (IsFirstLastAggFunc(aggregations_[i].func())) {

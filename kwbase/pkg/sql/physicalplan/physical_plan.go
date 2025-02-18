@@ -2377,14 +2377,21 @@ func getTableOutPutInfoFromPost(
 }
 
 func checkRepeat(
-	mapAgg *map[execinfrapb.AggregatorSpec_Func][]uint32,
+	mapAgg *map[execinfrapb.AggregatorSpec_Func]AggKey,
 	params []uint32,
+	constArguments []int64,
 	typ execinfrapb.AggregatorSpec_Func,
 ) bool {
-	if v, ok := (*mapAgg)[typ]; ok && len(v) == len(params) {
+	if v, ok := (*mapAgg)[typ]; ok && len(v.Columns) == len(params) && len(v.Constants) == len(constArguments) {
 		allSame := true
 		for i, idx := range params {
-			if idx != v[i] {
+			if idx != v.Columns[i] {
+				allSame = false
+				break
+			}
+		}
+		for i, constArg := range constArguments {
+			if constArg != v.Constants[i] {
 				allSame = false
 				break
 			}
@@ -2393,8 +2400,14 @@ func checkRepeat(
 			return true
 		}
 	}
-	(*mapAgg)[typ] = params
+	(*mapAgg)[typ] = AggKey{Columns: params, Constants: constArguments}
 	return false
+}
+
+// AggKey is used to represent column and constant parameters for each aggregate function
+type AggKey struct {
+	Columns   []uint32
+	Constants []int64
 }
 
 // PushAggToStatisticReader push Agg to statistic reader
@@ -2426,21 +2439,28 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 				destMap[key] = value
 			}
 		}
-		aggMap := make(map[execinfrapb.AggregatorSpec_Func][]uint32)
+		aggMap := make(map[execinfrapb.AggregatorSpec_Func]AggKey)
 		addStatScan := func(
-			params []uint32, typ execinfrapb.AggregatorSpec_Func, colType *types.T,
+			params []uint32, constArguments []int64, typ execinfrapb.AggregatorSpec_Func, colType *types.T,
 		) error {
 			// prune repeat agg
-			if checkRepeat(&aggMap, params, typ) {
+			if checkRepeat(&aggMap, params, constArguments, typ) {
 				return nil
 			}
 
-			infos := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(params))
+			infos := make([]execinfrapb.TSStatisticReaderSpec_ParamInfo, len(params)+len(constArguments))
 			for j, v := range params {
 				if v >= uint32(len(scanOutPut)) {
 					return pgerror.Newf(pgcode.Internal, "statistic table could not find col")
 				}
 				infos[j] = scanOutPut[v]
+			}
+
+			for j, v := range constArguments {
+				infos[len(params)+j] = execinfrapb.TSStatisticReaderSpec_ParamInfo{
+					Typ:   execinfrapb.TSStatisticReaderSpec_ParamInfo_const,
+					Value: v,
+				}
 			}
 
 			// count_rows or count(1), convert to count(ts)
@@ -2480,15 +2500,15 @@ func (p *PhysicalPlan) PushAggToStatisticReader(
 
 		for i, agg := range aggSpecs.Aggregations {
 			if agg.Func == execinfrapb.AggregatorSpec_AVG {
-				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_SUM, nil); err != nil {
+				if err := addStatScan(agg.ColIdx, agg.TimestampConstant, execinfrapb.AggregatorSpec_SUM, nil); err != nil {
 					return err
 				}
 
-				if err := addStatScan(agg.ColIdx, execinfrapb.AggregatorSpec_COUNT, nil); err != nil {
+				if err := addStatScan(agg.ColIdx, agg.TimestampConstant, execinfrapb.AggregatorSpec_COUNT, nil); err != nil {
 					return err
 				}
 			} else {
-				if err := addStatScan(agg.ColIdx, agg.Func, &aggResTypes[i]); err != nil {
+				if err := addStatScan(agg.ColIdx, agg.TimestampConstant, agg.Func, &aggResTypes[i]); err != nil {
 					return err
 				}
 			}

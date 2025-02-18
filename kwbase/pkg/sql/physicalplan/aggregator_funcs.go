@@ -406,26 +406,21 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 		LocalStage: []execinfrapb.AggregatorSpec_Func{
 			execinfrapb.AggregatorSpec_LAST,
 			execinfrapb.AggregatorSpec_LASTTS,
-			execinfrapb.AggregatorSpec_ANY_NOT_NULL,
 		},
 		MiddleStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_LAST,
-				LocalIdxs: []uint32{0, 1, 2},
+				LocalIdxs: []uint32{0, 1},
 			},
 			{
 				Fn:        execinfrapb.AggregatorSpec_LASTTS,
-				LocalIdxs: []uint32{0, 1, 2},
-			},
-			{
-				Fn:        execinfrapb.AggregatorSpec_ANY_NOT_NULL,
-				LocalIdxs: []uint32{2},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 		FinalStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_LAST,
-				LocalIdxs: []uint32{0, 1, 2},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 	},
@@ -434,26 +429,21 @@ var DistAggregationTable = map[execinfrapb.AggregatorSpec_Func]DistAggregationIn
 		LocalStage: []execinfrapb.AggregatorSpec_Func{
 			execinfrapb.AggregatorSpec_LAST,
 			execinfrapb.AggregatorSpec_LASTTS,
-			execinfrapb.AggregatorSpec_ANY_NOT_NULL,
 		},
 		MiddleStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_LAST,
-				LocalIdxs: []uint32{0, 1, 2},
+				LocalIdxs: []uint32{0, 1},
 			},
 			{
 				Fn:        execinfrapb.AggregatorSpec_LASTTS,
-				LocalIdxs: []uint32{0, 1, 2},
-			},
-			{
-				Fn:        execinfrapb.AggregatorSpec_ANY_NOT_NULL,
-				LocalIdxs: []uint32{2},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 		FinalStage: []FinalStageInfo{
 			{
 				Fn:        execinfrapb.AggregatorSpec_LASTTS,
-				LocalIdxs: []uint32{0, 1, 2},
+				LocalIdxs: []uint32{0, 1},
 			},
 		},
 	},

@@ -187,6 +187,9 @@ const (
 
 	// ScalarSubQueryPush is set when the switch of push-scalar-subQuery is turned on
 	ScalarSubQueryPush = 1 << 9
+
+	// TwaUseOrderScan is set when twa Function exec in AE.
+	TwaUseOrderScan = 1 << 10
 )
 
 // OrderedTableType TSScanOrderedType

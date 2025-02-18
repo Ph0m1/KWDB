@@ -1523,6 +1523,18 @@ func (ag *aggregatorBase) createAggregateFuncs() (aggregateFuncs, error) {
 			}
 			ag.interpolated = true
 		}
+		if twaBucket, ok := bucket[i].(*builtins.TwaAggregate); ok {
+			colIdx := ag.aggregations[i].ColIdx
+			if len(colIdx) > 0 {
+				twaBucket.Precision = int64(ag.inputTypes[colIdx[0]].Precision())
+			}
+		}
+		if elapsedBucket, ok := bucket[i].(*builtins.ElapsedAggregate); ok {
+			colIdx := ag.aggregations[i].ColIdx
+			if len(colIdx) > 0 {
+				elapsedBucket.Precision = int64(ag.inputTypes[colIdx[0]].Precision())
+			}
+		}
 	}
 	return bucket, nil
 }

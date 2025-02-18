@@ -410,6 +410,20 @@ EEIteratorErrCode AggregatorSpecParam<T>::ResolveAggCol(kwdbContext_p ctx,
         IsAggColNull(func_field);
         break;
       }
+      case Sumfunctype::TWA: {
+        k_uint32 col = agg.col_idx(0);
+        func_field = new FieldAggDouble(i, roachpb::DataType::DOUBLE,
+                                        sizeof(k_double64), agg_op_);
+        IsAggColNull(func_field);
+        break;
+      }
+      case Sumfunctype::ELAPSED: {
+        k_uint32 col = agg.col_idx(0);
+        func_field = new FieldAggDouble(i, roachpb::DataType::DOUBLE,
+                                        sizeof(k_double64), agg_op_);
+        IsAggColNull(func_field);
+        break;
+      }
       default:
         EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INDETERMINATE_DATATYPE, "Undecided datatype");
         LOG_ERROR("unknow agg function num : %d\n", i);

@@ -880,6 +880,18 @@ define Imputation {
 }
 
 [Scalar, Aggregate]
+define Elapsed {
+    Input ScalarExpr
+    TimeUnit  ScalarExpr
+}
+
+[Scalar, Aggregate]
+define Twa {
+    TsInput ScalarExpr
+    DataInput ScalarExpr
+}
+
+[Scalar, Aggregate]
 define XorAgg {
     Input ScalarExpr
 }

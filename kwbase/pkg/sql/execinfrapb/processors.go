@@ -124,6 +124,14 @@ func (a AggregatorSpec_Aggregation) Equals(b AggregatorSpec_Aggregation) bool {
 			return false
 		}
 	}
+	if len(a.Arguments) != len(b.Arguments) {
+		return false
+	}
+	for i, c := range a.Arguments {
+		if c.Expr != b.Arguments[i].Expr {
+			return false
+		}
+	}
 	return true
 }
 

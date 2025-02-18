@@ -319,6 +319,8 @@ message TSAggregatorSpec {
     FIRSTTS = 33;
     FIRST_ROW = 34;
     FIRSTROWTS = 35;
+    ELAPSED = 36;
+    TWA = 37;
   }
 
   enum Type {
@@ -367,6 +369,9 @@ message TSAggregatorSpec {
 
     // Arguments are const expressions passed to aggregation functions.
     repeated Expression arguments = 6;
+
+    // The timestamp constant represents the last argument of the last/lastts function, push to ae.
+    repeated int64 timestampConstant = 7;
 
     reserved 3;
   }

@@ -2594,6 +2594,18 @@ func (d *DTimestamp) UnixMilli() int64 {
 	return d.Unix()*1e3 + int64(math.Round(float64(d.Nanosecond())/1e6))
 }
 
+// UnixMicro returns t as a Unix time, the number of microseconds elapsed since
+// January 1, 1970 UTC.
+func (d *DTimestamp) UnixMicro() int64 {
+	return d.Unix()*1e6 + int64(math.Round(float64(d.Nanosecond())/1e3))
+}
+
+// UnixMicro returns t as a Unix time, the number of microseconds elapsed since
+// January 1, 1970 UTC.
+func (d *DTimestampTZ) UnixMicro() int64 {
+	return d.Unix()*1e6 + int64(math.Round(float64(d.Nanosecond())/1e3))
+}
+
 var dMinTimestampTZ = &DTimestampTZ{}
 
 // AsDTimestampTZ attempts to retrieve a DTimestampTZ from an Expr, returning a

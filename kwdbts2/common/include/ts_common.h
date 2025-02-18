@@ -623,7 +623,9 @@ enum Sumfunctype {
   LASTROWTS = 32,
   FIRSTTS = 33,
   FIRST_ROW = 34,
-  FIRSTROWTS = 35
+  FIRSTROWTS = 35,
+  ELAPSED = 36,
+  TWA = 37
 };
 
 enum WindowFunc {

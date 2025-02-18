@@ -493,21 +493,21 @@ KStatus PostAggScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
         output_fields_[i]->set_storage_type(output_fields_[argIdx]->get_storage_type());
         output_fields_[i]->set_storage_length(output_fields_[argIdx]->get_storage_length());
         len = output_fields_[i]->get_storage_length() + sizeof(KTimestamp);
-
+        k_int64 time = agg.timestampconstant(0);
         if (IsStringType(output_fields_[i]->get_storage_type())) {
-          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, -1, len + STRING_WIDE);
+          agg_func = make_unique<LastAggregate<true>>(i, argIdx, tsIdx, time, len + STRING_WIDE);
         } else {
-          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, -1, len);
+          agg_func = make_unique<LastAggregate<>>(i, argIdx, tsIdx, time, len);
         }
         break;
       }
       case Sumfunctype::LASTTS: {
         k_uint32 tsIdx = argIdx;
-
+        k_int64 time = agg.timestampconstant(0);
         len = sizeof(KTimestamp) * 2;
         output_fields_[i]->set_storage_type(roachpb::DataType::TIMESTAMP);
         output_fields_[i]->set_storage_length(sizeof(KTimestamp));
-        agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, -1, len);
+        agg_func = make_unique<LastTSAggregate>(i, argIdx, tsIdx, time, len);
         break;
       }
       case Sumfunctype::LAST_ROW: {

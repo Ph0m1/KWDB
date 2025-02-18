@@ -332,6 +332,10 @@ func (b *Builder) constructGroupBy(
 	// ARRAY_AGG). So we add the grouping columns as optional columns.
 	private.Ordering.FromOrderingWithOptCols(ordering, groupingColSet)
 
+	// Check Twa and elapsed aggregations to ensure they conform
+	// to the requirements of being applied on time series tables.
+	b.checkTwaAndElapsedAggregations(aggCols, &private, groupingColSet)
+
 	if groupingColSet.Empty() {
 		return b.factory.ConstructScalarGroupBy(input, aggs, &private)
 	}
@@ -409,9 +413,14 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 		// except in the case of string_agg, where the second argument must be
 		// a constant expression.
 		args := make([]opt.ScalarExpr, 0, 2)
-		for range agg.args {
-			colID := argCols[0].id
-			args = append(args, b.factory.ConstructVariable(colID))
+		for j := range agg.args {
+			// Check the aggregation function can be optimized using constants.
+			if canUseConstOptimize(j, argCols[0].scalar, agg.Func.FunctionName()) {
+				args = append(args, argCols[0].scalar)
+			} else {
+				colID := argCols[0].id
+				args = append(args, b.factory.ConstructVariable(colID))
+			}
 
 			// Skip past argCols that have been handled. There may be variable
 			// number of them, so need to set up for next aggregate function.
@@ -964,6 +973,10 @@ func (b *Builder) constructAggregate(name string, args []opt.ScalarExpr) opt.Sca
 		return b.factory.ConstructLastRow(args[0], args[1])
 	case "lastts":
 		return b.factory.ConstructLastTimeStamp(args[0], args[2], args[1])
+	case "elapsed":
+		return b.factory.ConstructElapsed(args[0], args[1])
+	case "twa":
+		return b.factory.ConstructTwa(args[0], args[1])
 	}
 	panic(errors.AssertionFailedf("unhandled aggregate: %s", name))
 }
@@ -1027,4 +1040,60 @@ func (b *Builder) allowImplicitGroupingColumn(colID opt.ColumnID, g *groupby) bo
 		pkCols.Remove(groupingCols[i].id)
 	}
 	return pkCols.Empty()
+}
+
+// checkTwaAndElapsedAggregations checks Twa and elapsed aggregations to ensure
+// they conform to the requirements of being applied on time series tables.
+func (b *Builder) checkTwaAndElapsedAggregations(
+	aggCols []scopeColumn, private *memo.GroupingPrivate, groupingColSet opt.ColSet,
+) {
+	for _, aggCol := range aggCols {
+		switch expr := aggCol.scalar.(type) {
+		case *memo.TwaExpr:
+			if _, isTsArg := expr.TsInput.(*memo.VariableExpr); isTsArg {
+				b.checkTimeSeriesConstraints(nil, "twa")
+			}
+		case *memo.ElapsedExpr:
+			if _, isTsArg := expr.Input.(*memo.VariableExpr); isTsArg {
+				b.checkTimeSeriesConstraints(expr.TimeUnit, "elapsed")
+			}
+		}
+	}
+}
+
+// checkTimeSeriesConstraints is used to check the time series usage limit.
+func (b *Builder) checkTimeSeriesConstraints(dataArg opt.ScalarExpr, funcName string) {
+	if funcName == "elapsed" && dataArg != nil {
+		if timeUnit, isConstArg := dataArg.(*memo.ConstExpr); isConstArg {
+			timeUnitStr := timeUnit.Value.String()
+
+			validTimeUnits := map[string]bool{
+				"'00:00:00.000000001'": true,
+				"'00:00:00.000001'":    true,
+				"'00:00:00.001'":       true,
+				"'00:00:01'":           true,
+				"'00:01:00'":           true,
+				"'01:00:00'":           true,
+				"'1 day'":              true,
+				"'7 days'":             true,
+			}
+
+			if _, isValid := validTimeUnits[timeUnitStr]; !isValid {
+				panic(pgerror.New(pgcode.InvalidParameterValue, "invalid time unit in elapsed function"))
+			}
+		} else {
+			panic(pgerror.New(pgcode.InvalidParameterValue, "invalid time unit in elapsed function"))
+		}
+	}
+}
+
+// canUseConstOptimize checks the aggregation function can be optimized using constants.
+func canUseConstOptimize(j int, scalar opt.ScalarExpr, funcName string) bool {
+	if j > 0 && scalar != nil && scalar.Op() == opt.ConstOp {
+		switch funcName {
+		case "twa", "elapsed", "last", "lastts":
+			return true
+		}
+	}
+	return false
 }

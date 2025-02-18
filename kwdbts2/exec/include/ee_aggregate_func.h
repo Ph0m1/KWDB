@@ -34,6 +34,51 @@ struct DistinctOpt {
   std::vector<k_uint32>& group_cols;
 };
 
+struct ElapsedInfo {
+  k_double64 result;
+  k_int64 min;
+  k_int64 max;
+  k_int64 timeUnit;
+  ElapsedInfo() { timeUnit = 1; }
+};
+
+struct Point1 {
+  k_int64 tKey;
+  k_double64 val;
+};
+
+struct TwaInfo {
+  k_double64 dOutput;
+  k_int64 nums;
+  Point1 lastV;
+  k_int64 start;
+  k_int64 end;
+};
+
+#define INIT_POINT(_p, _k, _v) \
+  do {                              \
+    (_p).tKey = (_k);                \
+    (_p).val = (_v);                \
+  } while (0)
+
+static k_int64 resolveTimeUnit(string& str) {
+  k_int64 time_unit = 1;
+  if (str == "'00:00:00.001':::INTERVAL") {
+    time_unit = 1;
+  } else if (str == "'00:00:01':::INTERVAL") {
+    time_unit = 1000;
+  } else if (str == "'00:01:00':::INTERVAL") {
+    time_unit = 60 * 1000;
+  } else if (str == "'01:00:00':::INTERVAL") {
+    time_unit = 60 * 60 * 1000;
+  } else if (str == "'1 day':::INTERVAL") {
+    time_unit = 24 * 60 * 60 * 1000;
+  } else if (str == "'7 days':::INTERVAL") {
+    time_unit = 7 * 24 * 60 * 60 * 1000;
+  }
+  return time_unit;
+}
+
 class AggregateFunc {
  public:
   AggregateFunc(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 len) : col_idx_(col_idx), len_(len) {
@@ -108,6 +153,8 @@ class AggregateFunc {
     }
     return 0;
   }
+
+  virtual char* Result(DatumRowPtr dest) { return dest + offset_; }
 
   void SetOffset(k_uint32 offset) {
     offset_ = offset;
@@ -2621,10 +2668,10 @@ template<bool IS_STRING_FAMILY = false>
 class LastAggregate : public AggregateFunc {
  public:
   LastAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx,
-                k_int32 point_idx, k_uint32 len)
+                k_int64 point_time, k_uint32 len)
       : AggregateFunc(col_idx, arg_idx, len),
         ts_idx_(ts_idx),
-        point_idx_(point_idx) {}
+        point_time_(point_time) {}
 
   ~LastAggregate() override = default;
 
@@ -2639,14 +2686,10 @@ class LastAggregate : public AggregateFunc {
     k_bool is_ts_null = chunk->IsNull(line, ts_idx_);
     auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
     DatumPtr dest_ptr = dest + offset_;
-    k_int64 point_ts = INT64_MAX;
-    if (point_idx_ != -1) {  // for last point
-      DatumPtr point_ptr = chunk->GetData(line, point_idx_);
-      point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-    }
+    k_int64 point_ts = point_time_;
 
     if (is_dest_null) {
-      if ((ts > point_ts || is_ts_null) && point_ts != INT64_MAX) {
+      if (ts > point_ts || is_ts_null) {
         return;
       }
       // first assign
@@ -2657,8 +2700,7 @@ class LastAggregate : public AggregateFunc {
     }
 
     auto last_ts = *reinterpret_cast<KTimestamp*>(dest_ptr + len_ - sizeof(KTimestamp));
-    if (ts > last_ts &&
-        (point_ts == INT64_MAX || (ts <= point_ts && point_ts != INT64_MAX))) {
+    if (ts > last_ts && (ts <= point_ts)) {
       std::memcpy(dest_ptr, src, len_ - sizeof(KTimestamp));
       std::memcpy(dest_ptr + len_ - sizeof(KTimestamp), ts_ptr,
                   sizeof(KTimestamp));
@@ -2688,12 +2730,8 @@ class LastAggregate : public AggregateFunc {
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          k_int64 point_ts = INT64_MAX;
-          if (point_idx_ != -1) {  // for last point
-            DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
-            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-          }
-          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+          k_int64 point_ts = point_time_;
+          if (!(last_ts_ > point_ts)) {
             current_data_chunk_->SetNotNull(target_row, col_idx_);
             std::memcpy(dest_ptr, last_line_ptr, len_);
           }
@@ -2715,19 +2753,13 @@ class LastAggregate : public AggregateFunc {
       if (!input_chunk->IsNull(row, arg_idx)) {
         char* ts_src_ptr = input_chunk->GetData(row, ts_idx_);
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        k_int64 point_ts = INT64_MAX;
-        if (point_idx_ != -1) {  // for last point
-          DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
-          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-        }
+        k_int64 point_ts = point_time_;
         if (last_line_ptr == nullptr) {
-          if ((point_ts != INT64_MAX) &&
-              (ts > point_ts || input_chunk->IsNull(row, ts_idx_))) {
+          if (ts > point_ts || input_chunk->IsNull(row, ts_idx_)) {
             continue;
           }
         }
-        if (ts > last_ts_ && (point_ts == INT64_MAX ||
-                              (ts <= point_ts && point_ts != INT64_MAX))) {
+        if (ts > last_ts_ && (ts <= point_ts)) {
           last_ts_ = ts;
           last_line_ptr = input_chunk->GetData(row, arg_idx);
         }
@@ -2755,29 +2787,19 @@ class LastAggregate : public AggregateFunc {
     char* last_line_ptr = nullptr;
 
     k_uint16 str_length = 0;
-
+    k_int64 point_ts = point_time_;
     if (target_row >= 0) {
       dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
     }
 
     auto* arg_field = renders[arg_idx];
     auto* ts_field = renders[ts_idx_];
-    Field* point_field = nullptr;
-    if (point_idx_ != -1) {
-      point_field = renders[point_idx_];
-    }
     auto storage_type = arg_field->get_storage_type();
-
     for (k_uint32 row = 0; row < data_container_count; ++row) {
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          k_int64 point_ts = INT64_MAX;
-          if (point_idx_ != -1) {  // for last point
-            DatumPtr point_ptr = point_field->get_ptr(row_batch);
-            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-          }
-          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+          if (!(last_ts_ > point_ts)) {
             current_data_chunk_->SetNotNull(target_row, col_idx_);
             if (IS_STRING_FAMILY) {
               std::memcpy(dest_ptr, &str_length, STRING_WIDE);
@@ -2805,20 +2827,14 @@ class LastAggregate : public AggregateFunc {
         char* ts_src_ptr = ts_field->get_ptr(row_batch);
 
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        k_int64 point_ts = INT64_MAX;
-        if (point_idx_ != -1) {  // for last point
-          DatumPtr point_ptr = point_field->get_ptr(row_batch);
-          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-        }
+        k_int64 point_ts = point_time_;
         if (last_line_ptr == nullptr) {
-          if ((point_ts != INT64_MAX) &&
-              (ts > point_ts ||
-               (ts_field->isNullable() && ts_field->is_nullable()))) {
+          if (ts > point_ts ||
+              (ts_field->isNullable() && ts_field->is_nullable())) {
             continue;
           }
         }
-        if (ts > last_ts_ && (point_ts == INT64_MAX ||
-                              (ts <= point_ts && point_ts != INT64_MAX))) {
+        if (ts > last_ts_ && (ts <= point_ts)) {
           last_ts_ = ts;
           last_line_ptr = arg_field->get_ptr(row_batch);
 
@@ -2851,7 +2867,7 @@ class LastAggregate : public AggregateFunc {
  private:
   k_uint32 ts_idx_;
   KTimestamp last_ts_ = INT64_MIN;
-  k_int32 point_idx_ = -1;
+  k_int64 point_time_ = -1;
 };
 
 ////////////////////////// LastRowAggregate //////////////////////////
@@ -3068,10 +3084,10 @@ class LastRowAggregate : public AggregateFunc {
 class LastTSAggregate : public AggregateFunc {
  public:
   LastTSAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx,
-                  k_int32 point_Idx, k_uint32 len)
+                  k_int64 point_time, k_uint32 len)
       : AggregateFunc(col_idx, arg_idx, len),
         ts_idx_(ts_idx),
-        point_idx_(point_Idx) {}
+        point_time_(point_time) {}
 
   ~LastTSAggregate() override = default;
 
@@ -3084,13 +3100,9 @@ class LastTSAggregate : public AggregateFunc {
     DatumPtr ts_ptr = chunk->GetData(line, ts_idx_);
     DatumPtr dest_ptr = dest + offset_;
     auto ts = *reinterpret_cast<KTimestamp*>(ts_ptr);
-    k_int64 point_ts = INT64_MAX;
-    if (point_idx_ != -1) {  // for last point
-      DatumPtr point_ptr = chunk->GetData(line, point_idx_);
-      point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-    }
+    k_int64 point_ts = point_time_;  // for last point
     if (is_dest_null) {
-      if (ts > point_ts && point_ts != INT64_MAX) {
+      if (ts > point_ts) {
         return;
       }
       std::memcpy(dest_ptr, ts_ptr, sizeof(KTimestamp));
@@ -3101,8 +3113,7 @@ class LastTSAggregate : public AggregateFunc {
 
     auto last_ts =
         *reinterpret_cast<KTimestamp*>(dest_ptr + sizeof(KTimestamp));
-    if (ts > last_ts &&
-        (point_ts == INT64_MAX || (ts <= point_ts && point_ts != INT64_MAX))) {
+    if (ts > last_ts && (ts <= point_ts)) {
       std::memcpy(dest_ptr, ts_ptr, sizeof(KTimestamp));
       std::memcpy(dest_ptr + sizeof(KTimestamp), ts_ptr, sizeof(KTimestamp));
     }
@@ -3127,18 +3138,12 @@ class LastTSAggregate : public AggregateFunc {
         last_line_ptr = dest_ptr;
       }
     }
-
+    k_int64 point_ts = point_time_;  // for last point
     for (k_uint32 row = 0; row < data_container_count; ++row) {
-      k_int64 point_ts = INT64_MAX;
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          if (point_idx_ != -1) {  // for last point
-            DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
-            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-          }
-
-          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+          if (!(last_ts_ > point_ts)) {
             current_data_chunk_->SetNotNull(target_row, col_idx_);
             std::memcpy(dest_ptr, last_line_ptr, len_);
           }
@@ -3159,13 +3164,7 @@ class LastTSAggregate : public AggregateFunc {
       if (!input_chunk->IsNull(row, arg_idx)) {
         char* ts_src_ptr = input_chunk->GetData(row, ts_idx_);
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        if (point_idx_ != -1) {  // for last point
-          DatumPtr point_ptr = input_chunk->GetData(row, point_idx_);
-          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-        }
-        if ((last_line_ptr == nullptr || ts > last_ts_) &&
-            (point_ts == INT64_MAX ||
-             (ts <= point_ts && point_ts != INT64_MAX))) {
+        if ((last_line_ptr == nullptr || ts > last_ts_) && (ts <= point_ts)) {
           last_ts_ = ts;
           last_line_ptr = ts_src_ptr;
         }
@@ -3201,20 +3200,12 @@ class LastTSAggregate : public AggregateFunc {
 
     auto* arg_field = renders[arg_idx];
     auto* ts_field = renders[ts_idx_];
-    Field* point_field = nullptr;
-    if (point_idx_ != -1) {
-      point_field = renders[point_idx_];
-    }
+    k_int64 point_ts = point_time_;  // for last point
     for (k_uint32 row = 0; row < data_container_count; ++row) {
-      k_int64 point_ts = INT64_MAX;
       if (group_by_metadata.isNewGroup(row)) {
         // save the agg result of last bucket
         if (last_line_ptr != nullptr) {
-          if (point_idx_ != -1) {  // for last point
-            DatumPtr point_ptr = point_field->get_ptr(row_batch);
-            point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-          }
-          if (!(last_ts_ > point_ts && point_ts != INT64_MAX)) {
+          if (!(last_ts_ > point_ts)) {
             current_data_chunk_->SetNotNull(target_row, col_idx_);
             std::memcpy(dest_ptr, last_line_ptr, len_);
           }
@@ -3234,15 +3225,8 @@ class LastTSAggregate : public AggregateFunc {
 
       if (!(arg_field->isNullable() && arg_field->is_nullable())) {
         char* ts_src_ptr = ts_field->get_ptr(row_batch);
-
-        if (point_idx_ != -1) {  // for last point
-          DatumPtr point_ptr = point_field->get_ptr(row_batch);
-          point_ts = *reinterpret_cast<KTimestamp*>(point_ptr);
-        }
         KTimestamp ts = *reinterpret_cast<KTimestamp*>(ts_src_ptr);
-        if ((last_line_ptr == nullptr || ts > last_ts_) &&
-            (point_ts == INT64_MAX ||
-             (ts <= point_ts && point_ts != INT64_MAX))) {
+        if ((last_line_ptr == nullptr || ts > last_ts_) && (ts <= point_ts)) {
           last_ts_ = ts;
           last_line_ptr = ts_src_ptr;
         }
@@ -3260,7 +3244,7 @@ class LastTSAggregate : public AggregateFunc {
  private:
   k_uint32 ts_idx_;
   KTimestamp last_ts_ = INT64_MIN;
-  k_int32 point_idx_ = -1;
+  k_int64 point_time_ = -1;
 };
 
 ////////////////////////// LastRowTSAggregate //////////////////////////
@@ -4106,6 +4090,546 @@ class FirstRowTSAggregate : public AggregateFunc {
  private:
   k_uint32 ts_idx_;
   KTimestamp first_ts_ = INT64_MAX;
+};
+
+////////////////////////// TwaAggregate //////////////////////////
+
+template<typename T>
+class TwaAggregate : public AggregateFunc {
+ public:
+  TwaAggregate(k_uint32 col_idx, k_uint32 arg_idx, k_uint32 ts_idx,
+               k_double64 const_val, k_uint32 len)
+      : AggregateFunc(col_idx, arg_idx, len), ts_idx_(ts_idx) {
+    if (arg_idx == INT32_MAX) {
+      use_const_ = true;
+      const_value_ = const_val;
+    }
+  }
+
+  ~TwaAggregate() override = default;
+
+  void addOrUpdate(DatumRowPtr dest, char* bitmap, IChunk* chunk, k_uint32 line) override {
+    if (!use_const_ && chunk->IsNull(line, arg_idx_[0])) {
+      return;
+    }
+
+    k_bool is_dest_null = AggregateFunc::IsNull(bitmap, col_idx_);
+    DatumPtr src = nullptr;
+    if (!use_const_) {
+      src = chunk->GetData(line, arg_idx_[0]);
+    }
+
+    DatumPtr ts_ptr = chunk->GetData(line, ts_idx_);
+
+    if (is_dest_null) {
+      // first assign
+      T src_val = const_value_;
+      if (!use_const_) {
+        src_val = *reinterpret_cast<T*>(src);
+      }
+
+      k_double64 twa = (k_double64)src_val;
+      std::memcpy(dest + offset_, &twa, sizeof(k_double64));
+      TwaInfo twaInfo;
+      init_twa_info(twaInfo, ts_ptr, src_val);
+      std::memcpy(dest + offset_ + sizeof(k_double64), &twaInfo, sizeof(TwaInfo));
+      AggregateFunc::SetNotNull(bitmap, col_idx_);
+      return;
+    }
+
+    Point1 st = {0};
+    T src_val = const_value_;
+    if (!use_const_) {
+      src_val = *reinterpret_cast<T*>(src);
+    }
+    INIT_POINT(st, *reinterpret_cast<KTimestamp*>(ts_ptr), src_val);
+    TwaInfo twa =
+        *reinterpret_cast<TwaInfo*>(dest + offset_ + sizeof(k_double64));
+    if (twa.lastV.tKey == st.tKey) {
+      EEPgErrorInfo::SetPgErrorInfo(
+          ERRCODE_INDETERMINATE_DATATYPE,
+          "duplicate timestamps not allowed in twa function");
+      return;
+    }
+    twa.dOutput += get_twa_area(twa.lastV, st);
+    twa.end = *reinterpret_cast<KTimestamp*>(ts_ptr);
+    twa.lastV = st;
+    std::memcpy(dest + offset_, &twa.dOutput, sizeof(k_double64));
+    std::memcpy(dest + offset_ + sizeof(k_double64), &twa, sizeof(TwaInfo));
+  }
+
+  int addOrUpdate(std::vector<DataChunk*>& chunks, k_int32 start_line_in_begin_chunk, IChunk* data_container,
+                  GroupByMetadata& group_by_metadata, DistinctOpt& distinctOpt) override {
+    k_uint32 arg_idx = arg_idx_[0];
+
+    auto data_container_count = data_container->Count();
+    k_uint32 chunk_idx = 0;
+    k_int32 target_row = start_line_in_begin_chunk;
+    auto current_data_chunk_ = chunks[chunk_idx];
+    auto chunk_capacity = current_data_chunk_->Capacity();
+
+    char* dest_ptr;
+    k_bool first_init = true;
+    k_double64 output = 0.0f;
+    k_int64 count = 0;
+    bool is_dest_null = true;
+    TwaInfo twa;
+    if (target_row >= 0) {
+      dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
+      if (!is_dest_null) {
+        output = *reinterpret_cast<k_double64*>(dest_ptr);
+        twa = *reinterpret_cast<TwaInfo*>(dest_ptr + sizeof(k_double64));
+        first_init = false;
+      }
+    }
+
+    for (k_uint32 row = 0; row < data_container_count; ++row) {
+      if (group_by_metadata.isNewGroup(row)) {
+        // save the agg result of last bucket
+        if (!is_dest_null) {
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+          double output = compute_twa(twa);
+          std::memcpy(dest_ptr, &output, sizeof(k_double64));
+          std::memcpy(dest_ptr + sizeof(k_double64), &twa, sizeof(TwaInfo));
+        } else if (target_row >= 0) {
+          current_data_chunk_->SetNull(target_row, col_idx_);
+        }
+
+        // if the current chunk is full.
+        if (target_row == chunk_capacity - 1) {
+          current_data_chunk_ = chunks[++chunk_idx];
+          target_row = 0;
+        } else {
+          ++target_row;
+        }
+        dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+        first_init = true;
+        is_dest_null = true;
+      }
+
+      if (use_const_ || !data_container->IsNull(row, arg_idx)) {
+        is_dest_null = false;
+        T src_val;
+        if (use_const_) {
+          src_val = const_value_;
+        } else {
+          char* src_ptr = nullptr;
+          src_ptr = data_container->GetData(row, arg_idx);
+          src_val = *reinterpret_cast<T*>(src_ptr);
+        }
+        char* ts_ptr = data_container->GetData(row, ts_idx_);
+        if (first_init) {
+          init_twa_info(twa, ts_ptr, src_val);
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+          first_init = false;
+        } else {
+          Point1 st = {0};
+          INIT_POINT(st, *reinterpret_cast<KTimestamp*>(ts_ptr), src_val);
+          if (twa.lastV.tKey == st.tKey) {
+            EEPgErrorInfo::SetPgErrorInfo(
+                ERRCODE_INDETERMINATE_DATATYPE,
+                "duplicate timestamps not allowed in twa function");
+            return -1;
+          }
+          twa.dOutput += get_twa_area(twa.lastV, st);
+          twa.end = *reinterpret_cast<KTimestamp*>(ts_ptr);
+          twa.lastV = st;
+        }
+      }
+
+      data_container->NextLine();
+    }
+
+    if (!is_dest_null) {
+      current_data_chunk_->SetNotNull(target_row, col_idx_);
+      double out = compute_twa(twa);
+      std::memcpy(dest_ptr, &out, sizeof(k_double64));
+      std::memcpy(dest_ptr + sizeof(k_double64), &twa, sizeof(TwaInfo));
+    }
+    return 0;
+  }
+
+  void addOrUpdate(std::vector<DataChunk*>& chunks, k_int32 start_line_in_begin_chunk, RowBatch* row_batch,
+                                              GroupByMetadata& group_by_metadata, Field** renders) override {
+    auto data_container_count = row_batch->Count();
+    k_uint32 chunk_idx = 0;
+    k_int32 target_row = start_line_in_begin_chunk;
+    auto current_data_chunk_ = chunks[chunk_idx];
+    auto chunk_capacity = current_data_chunk_->Capacity();
+
+    char* dest_ptr;
+    k_bool first_init = true;
+    k_double64 output = 0.0f;
+    bool is_dest_null = true;
+    TwaInfo twa;
+    if (target_row >= 0) {
+      dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
+      if (!is_dest_null) {
+        output = *reinterpret_cast<k_double64*>(dest_ptr);
+        twa = *reinterpret_cast<TwaInfo*>(dest_ptr + sizeof(k_double64));
+        first_init = false;
+      }
+    }
+
+    Field* arg_field = nullptr;
+    if (!use_const_) {
+      k_uint32 arg_idx = arg_idx_[0];
+      arg_field = renders[arg_idx];
+    }
+
+    auto* ts_field = renders[ts_idx_];
+
+    for (k_uint32 row = 0; row < data_container_count; ++row) {
+      if (group_by_metadata.isNewGroup(row)) {
+        // save the agg result of last bucket
+        if (!is_dest_null) {
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+          double out = compute_twa(twa);
+          std::memcpy(dest_ptr, &out, sizeof(k_double64));
+          std::memcpy(dest_ptr + sizeof(k_double64), &twa, sizeof(TwaInfo));
+          first_init = false;
+        } else if (target_row >= 0) {
+          current_data_chunk_->SetNull(target_row, col_idx_);
+        }
+
+        // if the current chunk is full.
+        if (target_row == chunk_capacity - 1) {
+          current_data_chunk_ = chunks[++chunk_idx];
+          target_row = 0;
+        } else {
+          ++target_row;
+        }
+        dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+        first_init = true;
+        is_dest_null = true;
+      }
+
+    if (use_const_ ||
+        (!(arg_field->isNullable() && arg_field->is_nullable()))) {
+      is_dest_null = false;
+      T src_val;
+      if (use_const_) {
+        src_val = const_value_;
+      } else {
+        char* src_ptr = nullptr;
+        src_ptr = arg_field->get_ptr(row_batch);
+        src_val = *reinterpret_cast<T*>(src_ptr);
+      }
+      char* ts_ptr = ts_field->get_ptr(row_batch);
+      if (first_init) {
+        init_twa_info(twa, ts_ptr, src_val);
+        current_data_chunk_->SetNotNull(target_row, col_idx_);
+        first_init = false;
+      } else {
+        Point1 st = {0};
+        INIT_POINT(st, *reinterpret_cast<KTimestamp*>(ts_ptr), src_val);
+        twa.dOutput += get_twa_area(twa.lastV, st);
+        twa.end = *reinterpret_cast<KTimestamp*>(ts_ptr);
+        twa.lastV = st;
+      }
+    }
+
+      row_batch->NextLine();
+    }
+
+    if (!is_dest_null) {
+      current_data_chunk_->SetNotNull(target_row, col_idx_);
+      double out = compute_twa(twa);
+      std::memcpy(dest_ptr, &out, sizeof(k_double64));
+      std::memcpy(dest_ptr + sizeof(k_double64), &twa, sizeof(TwaInfo));
+    }
+  }
+
+  char* Result(DatumRowPtr dest) {
+    TwaInfo twa = *reinterpret_cast<TwaInfo*>(dest + offset_ + sizeof(k_double64));
+    k_double64 output = compute_twa(twa);
+    std::memcpy(dest + offset_, &output, sizeof(k_double64));
+    return dest + offset_;
+  }
+
+  void init_twa_info(TwaInfo& twa, char* ts, T& src_val) {
+    twa.dOutput = 0.0f;
+    twa.start = *reinterpret_cast<KTimestamp*>(ts);
+    twa.end = *reinterpret_cast<KTimestamp*>(ts);
+    twa.lastV.tKey = *reinterpret_cast<KTimestamp*>(ts);
+    twa.lastV.val = src_val;
+  }
+
+  k_double64 get_twa_area(Point1& s, Point1& e) {
+    if (e.tKey == INT64_MAX || s.tKey == INT64_MIN) {
+      return 0;
+    }
+
+    if ((s.val >= 0 && e.val >= 0) || (s.val <= 0 && e.val <= 0)) {
+      return (s.val + e.val) * (e.tKey - s.tKey) / 2;
+    }
+
+    double x = (s.tKey * e.val - e.tKey * s.val) / (e.val - s.val);
+    double val = (s.val * (x - s.tKey) + e.val * (e.tKey - x)) / 2;
+    return val;
+  }
+
+  k_double64 compute_twa(TwaInfo& twa) {
+    if (twa.end == twa.start) {
+      twa.dOutput = twa.lastV.val;
+    } else if (twa.end == INT64_MAX || twa.start == INT64_MIN) {
+      twa.dOutput = 0;
+    } else {
+      twa.dOutput = twa.dOutput / (twa.end - twa.start);
+    }
+    return twa.dOutput;
+  }
+
+ private:
+  k_uint32 ts_idx_;
+  k_double64 const_value_;
+  k_bool use_const_{false};
+};
+
+////////////////////////// ElapsedAggregate //////////////////////////
+
+class ElapsedAggregate : public AggregateFunc {
+ public:
+  ElapsedAggregate(k_uint32 col_idx, k_uint32 arg_idx, string& time_unit, roachpb::DataType dataType,
+                   k_uint32 len)
+      : AggregateFunc(col_idx, arg_idx, len) {
+    if (dataType == roachpb::DataType::TIMESTAMPTZ_MICRO) {
+      if (time_unit == "'00:00:00.000001':::INTERVAL") {
+        timeUnit_ = 1;
+      } else if (time_unit == "'00:00:00.000000001':::INTERVAL") {
+        timeUnit_ = resolveTimeUnit(time_unit);
+        time_unit_extra_ *= 1000;
+      } else {
+        timeUnit_ = resolveTimeUnit(time_unit) * 1000;
+      }
+    } else if (dataType == roachpb::DataType::TIMESTAMPTZ_NANO) {
+      if (time_unit == "'00:00:00.000000001':::INTERVAL") {
+        timeUnit_ = 1;
+      } else if (time_unit == "'00:00:00.000001':::INTERVAL") {
+        timeUnit_ = resolveTimeUnit(time_unit) * 1000;
+      } else {
+        timeUnit_ = resolveTimeUnit(time_unit) * 1000 * 1000;
+      }
+    } else if (dataType == roachpb::DataType::TIMESTAMPTZ) {
+      if (time_unit == "'00:00:00.000001':::INTERVAL") {
+        timeUnit_ = resolveTimeUnit(time_unit);
+        time_unit_extra_ *= 1000;
+      } else if (time_unit == "'00:00:00.000000001':::INTERVAL") {
+        timeUnit_ = resolveTimeUnit(time_unit);
+        time_unit_extra_ = 1000 * 1000;
+      } else {
+        timeUnit_ = resolveTimeUnit(time_unit);
+      }
+    }
+  }
+
+  ~ElapsedAggregate() override = default;
+
+  void addOrUpdate(DatumRowPtr dest, char* bitmap, IChunk* chunk, k_uint32 line) override {
+    if (chunk->IsNull(line, arg_idx_[0])) {
+      return;
+    }
+
+    k_bool is_dest_null = AggregateFunc::IsNull(bitmap, col_idx_);
+    DatumPtr src = chunk->GetData(line, arg_idx_[0]);
+    if (is_dest_null) {
+      // first assign
+      KTimestamp ts = *reinterpret_cast<KTimestamp*>(src);
+      ElapsedInfo info;
+      info.max = ts;
+      info.min = ts;
+      info.result = 0.0f;
+      info.timeUnit = timeUnit_;
+      std::memcpy(dest + offset_, &info.result, sizeof(k_double64));
+      std::memcpy(dest + offset_ + sizeof(k_double64), &info, sizeof(ElapsedInfo));
+      AggregateFunc::SetNotNull(bitmap, col_idx_);
+      return;
+    }
+
+    KTimestamp src_val = *reinterpret_cast<KTimestamp*>(src);
+    ElapsedInfo info = *reinterpret_cast<ElapsedInfo*>(dest + offset_ + sizeof(k_double64));
+    if (src_val < info.min) {
+      info.min = src_val;
+    } else if (info.max < src_val) {
+      info.max = src_val;
+    }
+
+    std::memcpy(dest + offset_ + sizeof(k_double64), &info, sizeof(ElapsedInfo));
+  }
+
+  int addOrUpdate(std::vector<DataChunk*>& chunks, k_int32 start_line_in_begin_chunk, IChunk* data_container,
+                  GroupByMetadata& group_by_metadata, DistinctOpt& distinctOpt) override {
+    k_uint32 arg_idx = arg_idx_[0];
+
+    auto data_container_count = data_container->Count();
+    k_uint32 chunk_idx = 0;
+    k_int32 target_row = start_line_in_begin_chunk;
+    auto current_data_chunk_ = chunks[chunk_idx];
+    auto chunk_capacity = current_data_chunk_->Capacity();
+
+    char* dest_ptr;
+    ElapsedInfo info;
+    info.timeUnit = timeUnit_;
+    bool is_dest_null = true;
+    k_bool first_init = true;
+    if (target_row >= 0) {
+      dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
+      if (!is_dest_null) {
+        info = *reinterpret_cast<ElapsedInfo*>(dest_ptr + sizeof(k_double64));
+        first_init = false;
+      }
+    }
+
+    for (k_uint32 row = 0; row < data_container_count; ++row) {
+      if (group_by_metadata.isNewGroup(row)) {
+        // save the agg result of last bucket
+        if (!is_dest_null) {
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+          k_double64 result = (k_double64)(info.max - info.min);
+          result = (result >= 0) ? result : -result;
+          info.result = result / info.timeUnit * time_unit_extra_;
+          std::memcpy(dest_ptr, &info.result, sizeof(k_double64));
+          std::memcpy(dest_ptr + sizeof(k_double64), &info, sizeof(ElapsedInfo));
+        }
+
+        // if the current chunk is full.
+        if (target_row == chunk_capacity - 1) {
+          current_data_chunk_ = chunks[++chunk_idx];
+          target_row = 0;
+        } else {
+          ++target_row;
+        }
+        dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+        is_dest_null = true;
+        first_init = true;
+      }
+
+      if (!data_container->IsNull(row, arg_idx)) {
+        is_dest_null = false;
+        char* src_ptr = data_container->GetData(row, arg_idx);
+        KTimestamp ts = *reinterpret_cast<KTimestamp*>(src_ptr);
+        if (first_init) {
+          first_init = false;
+          info.max = ts;
+          info.min = ts;
+          info.result = 0.0f;
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+        } else {
+          if (ts < info.min) {
+            info.min = ts;
+          } else if (info.max < ts) {
+            info.max = ts;
+          }
+        }
+      }
+
+      data_container->NextLine();
+    }
+
+    if (!is_dest_null) {
+      current_data_chunk_->SetNotNull(target_row, col_idx_);
+      k_double64 result = (k_double64)(info.max - info.min);
+      result = (result >= 0) ? result : -result;
+      info.result = result / info.timeUnit * time_unit_extra_;
+      std::memcpy(dest_ptr, &info.result, sizeof(k_double64));
+      std::memcpy(dest_ptr + sizeof(k_double64), &info, sizeof(ElapsedInfo));
+    }
+    return 0;
+  }
+
+  void addOrUpdate(std::vector<DataChunk*>& chunks, k_int32 start_line_in_begin_chunk, RowBatch* row_batch,
+                                              GroupByMetadata& group_by_metadata, Field** renders) override {
+    k_uint32 arg_idx = arg_idx_[0];
+    auto data_container_count = row_batch->Count();
+    k_uint32 chunk_idx = 0;
+    k_int32 target_row = start_line_in_begin_chunk;
+    auto current_data_chunk_ = chunks[chunk_idx];
+    auto chunk_capacity = current_data_chunk_->Capacity();
+
+    char* dest_ptr;
+    ElapsedInfo info;
+    bool is_dest_null = true;
+    k_bool first_init = true;
+    if (target_row >= 0) {
+      dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+      is_dest_null = current_data_chunk_->IsNull(target_row, col_idx_);
+      if (!is_dest_null) {
+        info = *reinterpret_cast<ElapsedInfo*>(dest_ptr + sizeof(k_double64));
+        first_init = false;
+      }
+    }
+
+    auto* arg_field = renders[arg_idx];
+    info.timeUnit = timeUnit_;
+    for (k_uint32 row = 0; row < data_container_count; ++row) {
+      if (group_by_metadata.isNewGroup(row)) {
+        // save the agg result of last bucket
+        if (!is_dest_null) {
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+          k_double64 result = (k_double64)(info.max - info.min);
+          result = (result >= 0) ? result : -result;
+          info.result = result / info.timeUnit * time_unit_extra_;
+          std::memcpy(dest_ptr, &info.result, sizeof(k_double64));
+          std::memcpy(dest_ptr + sizeof(k_double64), &info, sizeof(ElapsedInfo));
+        }
+
+        // if the current chunk is full.
+        if (target_row == chunk_capacity - 1) {
+          current_data_chunk_ = chunks[++chunk_idx];
+          target_row = 0;
+        } else {
+          ++target_row;
+        }
+        dest_ptr = current_data_chunk_->GetData(target_row, col_idx_);
+        is_dest_null = true;
+        first_init = true;
+      }
+
+      if (!(arg_field->isNullable() && arg_field->is_nullable())) {
+        is_dest_null = false;
+        char* src_ptr = arg_field->get_ptr(row_batch);
+        KTimestamp ts = *reinterpret_cast<KTimestamp*>(src_ptr);
+        if (first_init) {
+          first_init = false;
+          info.max = ts;
+          info.min = ts;
+          info.result = 0.0f;
+          current_data_chunk_->SetNotNull(target_row, col_idx_);
+        } else {
+          if (ts < info.min) {
+            info.min = ts;
+          } else if (info.max < ts) {
+            info.max = ts;
+          }
+        }
+
+        row_batch->NextLine();
+      }
+    }
+    if (!is_dest_null) {
+      current_data_chunk_->SetNotNull(target_row, col_idx_);
+      k_double64 result = (k_double64)(info.max - info.min);
+      result = (result >= 0) ? result : -result;
+      info.result = result / info.timeUnit * time_unit_extra_;
+      std::memcpy(dest_ptr, &info.result, sizeof(k_double64));
+      std::memcpy(dest_ptr + sizeof(k_double64), &info, sizeof(ElapsedInfo));
+    }
+  }
+  char* Result(DatumRowPtr dest) {
+    ElapsedInfo info = *reinterpret_cast<ElapsedInfo*>(dest + offset_ + sizeof(k_double64));
+    k_double64 result = (k_double64)(info.max - info.min);
+    result = (result >= 0) ? result : -result;
+    info.result = result / info.timeUnit * time_unit_extra_;
+    std::memcpy(dest + offset_, &info.result, sizeof(k_double64));
+    return dest + offset_;
+  }
+
+ private:
+  k_int64 timeUnit_{1};
+  k_int32 time_unit_extra_{1};
 };
 
 }  // namespace kwdbts

@@ -49,7 +49,8 @@ char *FieldAggNum::get_ptr() {
     DatumRowPtr data = *(hash_agg_op->iter_);
     if (!data) return nullptr;
 
-    return data + hash_agg_op->funcs_[num_]->GetOffset();
+    return hash_agg_op->funcs_[num_]->Result(data);
+    // return data + hash_agg_op->funcs_[num_]->GetOffset();
   }
 
   OrderedAggregateOperator *ordered_agg_op =

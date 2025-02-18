@@ -393,6 +393,28 @@ var aggregates = map[string]builtinDefinition{
 			"TimeBucketGapfill"),
 	),
 
+	"elapsed": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Timestamp, types.Interval}, types.Float, newElapsedAggregate,
+			"Calculates the continuous duration of the statistical period."),
+		makeAggOverload([]*types.T{types.TimestampTZ, types.Interval}, types.Float, newElapsedAggregate,
+			"Calculates the continuous duration of the statistical period."),
+		makeAggOverload([]*types.T{types.Timestamp}, types.Float, newElapsedAggregate,
+			"Calculates the continuous duration of the statistical period."),
+		makeAggOverload([]*types.T{types.TimestampTZ}, types.Float, newElapsedAggregate,
+			"Calculates the continuous duration of the statistical period."),
+	),
+
+	"twa": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Timestamp, types.Int}, types.Float, newTwaAggregate,
+			"Calculates the time-weighted average of the statistical period."),
+		makeAggOverload([]*types.T{types.Timestamp, types.Float}, types.Float, newTwaAggregate,
+			"Calculates the time-weighted average of the statistical period."),
+		makeAggOverload([]*types.T{types.TimestampTZ, types.Int}, types.Float, newTwaAggregate,
+			"Calculates the time-weighted average of the statistical period."),
+		makeAggOverload([]*types.T{types.TimestampTZ, types.Float}, types.Float, newTwaAggregate,
+			"Calculates the time-weighted average of the statistical period."),
+	),
+
 	"interpolate": makeBuiltin(aggProps(),
 		makeAggOverload([]*types.T{types.Int, types.Int}, types.Int, newImputationAggregate,
 			"Interpolate"),
@@ -717,6 +739,8 @@ const sizeOfBitOrAggregate = int64(unsafe.Sizeof(bitOrAggregate{}))
 const sizeOfTimeBucketAggregate = int64(unsafe.Sizeof(TimeBucketAggregate{}))
 const sizeOfImputationAggregate = int64(unsafe.Sizeof(ImputationAggregate{}))
 const sizeOfTimestamptzBucketAggregate = int64(unsafe.Sizeof(TimestamptzBucketAggregate{}))
+const sizeOfElapsedAggregate = int64(unsafe.Sizeof(ElapsedAggregate{}))
+const sizeOfTwaAggregate = int64(unsafe.Sizeof(TwaAggregate{}))
 
 // singleDatumAggregateBase is a utility struct that helps aggregate builtins
 // that store a single datum internally track their memory usage related to
@@ -1717,7 +1741,7 @@ func (a *minAggregate) AggHandling() {
 func lastAndFirstAdd(
 	evalCtx *tree.EvalContext,
 	variableDatumSize, isCheckNull, isLast bool,
-	inDatum, inTSDatum, datum tree.Datum,
+	inDatum, inTSDatum, datum, DeadlineTs tree.Datum,
 	otherDatum ...tree.Datum,
 ) (tree.Datum, tree.Datum, bool) {
 	if len(otherDatum) == 0 {
@@ -1733,8 +1757,8 @@ func lastAndFirstAdd(
 		return datum, inTSDatum, false
 	}
 	tsDatum := otherDatum[0]
-	if isLast && len(otherDatum) >= 2 && otherDatum[1] != tree.DNull {
-		c1 := otherDatum[0].Compare(evalCtx, otherDatum[1])
+	if isLast && len(otherDatum) == 1 && DeadlineTs != nil {
+		c1 := tsDatum.Compare(evalCtx, DeadlineTs)
 		if c1 > 0 {
 			return inDatum, inTSDatum, false
 		}
@@ -1788,7 +1812,7 @@ func (a *FirstAggregate) Add(
 	ctx context.Context, datum tree.Datum, otherDatums ...tree.Datum,
 ) error {
 	var isUpdateMem bool
-	a.first, a.firstts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, false, a.first, a.firstts, datum, otherDatums...)
+	a.first, a.firstts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, false, a.first, a.firstts, datum, nil, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -1859,7 +1883,7 @@ func (a *FirsttsAggregate) Add(
 ) error {
 	// for functions like timebucket gapfill interpolate, no ts is added for unordered timestamps
 	var isUpdateMem bool
-	a.first, a.firstts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, false, a.first, a.firstts, datum, otherDatums...)
+	a.first, a.firstts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, false, a.first, a.firstts, datum, nil, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -1933,7 +1957,7 @@ func (a *FirstrowAggregate) Add(
 	ctx context.Context, datum tree.Datum, otherDatums ...tree.Datum,
 ) error {
 	var isUpdateMem bool
-	a.firstrow, a.firstrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, false, a.firstrow, a.firstrowts, datum, otherDatums...)
+	a.firstrow, a.firstrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, false, a.firstrow, a.firstrowts, datum, nil, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -2009,7 +2033,7 @@ func (a *FirstrowtsAggregate) Add(
 ) error {
 	// for functions like timebucket gapfill interpolate, no ts is added for unordered timestamps
 	var isUpdateMem bool
-	a.firstrow, a.firstrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, false, a.firstrow, a.firstrowts, datum, otherDatums...)
+	a.firstrow, a.firstrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, false, a.firstrow, a.firstrowts, datum, nil, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -2058,26 +2082,35 @@ type LastAggregate struct {
 
 	last              tree.Datum
 	lastts            tree.Datum
+	DeadlineTs        tree.Datum
 	evalCtx           *tree.EvalContext
 	tsEvalCtx         *tree.EvalContext
 	variableDatumSize bool
 }
 
 func newLastAggregate(
-	params []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
+	params []*types.T, evalCtx *tree.EvalContext, deadlineTs tree.Datums,
 ) tree.AggregateFunc {
 	_, variable := tree.DatumTypeSize(params[0])
 	// If the datum type has a variable size, the memory account will be
 	// updated accordingly on every change to the current "min" value, but if
 	// it has a fixed size, the memory account will be updated only on the
 	// first non-null datum.
-	return &LastAggregate{
+	lastAgg := &LastAggregate{
 		singleDatumAggregateBase: makeSingleDatumAggregateBase(evalCtx),
 		evalCtx:                  evalCtx,
 		variableDatumSize:        variable,
 		last:                     nil,
 		lastts:                   nil,
 	}
+
+	if len(deadlineTs) == 1 && deadlineTs[0] != tree.DNull {
+		lastAgg.DeadlineTs = deadlineTs[0]
+	} else if len(deadlineTs) > 1 {
+		panic(fmt.Sprintf("too many arguments passed in, expected < 2, got %d", len(deadlineTs)))
+	}
+
+	return lastAgg
 }
 
 // Add sets the min to the smaller of the current min or the passed datum.
@@ -2086,7 +2119,7 @@ func (a *LastAggregate) Add(
 ) error {
 	// for functions like timebucket gapfill interpolate, no ts is added for unordered timestamps
 	var isUpdateMem bool
-	a.last, a.lastts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, true, a.last, a.lastts, datum, otherDatums...)
+	a.last, a.lastts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, true, a.last, a.lastts, datum, a.DeadlineTs, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -2135,25 +2168,34 @@ type LasttsAggregate struct {
 
 	lastts            tree.Datum
 	last              tree.Datum
+	DeadlineTs        tree.Datum
 	evalCtx           *tree.EvalContext
 	variableDatumSize bool
 }
 
 func newLasttsAggregate(
-	params []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
+	params []*types.T, evalCtx *tree.EvalContext, deadlineTs tree.Datums,
 ) tree.AggregateFunc {
 	_, variable := tree.DatumTypeSize(params[0])
 	// If the datum type has a variable size, the memory account will be
 	// updated accordingly on every change to the current "min" value, but if
 	// it has a fixed size, the memory account will be updated only on the
 	// first non-null datum.
-	return &LasttsAggregate{
+	lasttsAgg := &LasttsAggregate{
 		singleDatumAggregateBase: makeSingleDatumAggregateBase(evalCtx),
 		evalCtx:                  evalCtx,
 		variableDatumSize:        variable,
 		lastts:                   nil,
 		last:                     nil,
 	}
+
+	if len(deadlineTs) == 1 && deadlineTs[0] != tree.DNull {
+		lasttsAgg.DeadlineTs = deadlineTs[0]
+	} else if len(deadlineTs) > 1 {
+		panic(fmt.Sprintf("too many arguments passed in, expected < 2, got %d", len(deadlineTs)))
+	}
+
+	return lasttsAgg
 }
 
 // Add sets the min to the smaller of the current min or the passed datum.
@@ -2162,7 +2204,7 @@ func (a *LasttsAggregate) Add(
 ) error {
 	// for functions like timebucket gapfill interpolate, no ts is added for unordered timestamps
 	var isUpdateMem bool
-	a.last, a.lastts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, true, a.last, a.lastts, datum, otherDatums...)
+	a.last, a.lastts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, true, true, a.last, a.lastts, datum, a.DeadlineTs, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -2236,7 +2278,7 @@ func (a *LastrowAggregate) Add(
 	ctx context.Context, datum tree.Datum, otherDatums ...tree.Datum,
 ) error {
 	var isUpdateMem bool
-	a.lastrow, a.lastrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, true, a.lastrow, a.lastrowts, datum, otherDatums...)
+	a.lastrow, a.lastrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, true, a.lastrow, a.lastrowts, datum, nil, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -2312,7 +2354,7 @@ func (a *LastrowtsAggregate) Add(
 ) error {
 	// for functions like timebucket gapfill interpolate, no ts is added for unordered timestamps
 	var isUpdateMem bool
-	a.lastrow, a.lastrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, true, a.lastrow, a.lastrowts, datum, otherDatums...)
+	a.lastrow, a.lastrowts, isUpdateMem = lastAndFirstAdd(a.evalCtx, a.variableDatumSize, false, true, a.lastrow, a.lastrowts, datum, nil, otherDatums...)
 	if isUpdateMem {
 		if err := a.updateMemoryUsage(ctx, int64(datum.Size())); err != nil {
 			return err
@@ -4031,4 +4073,306 @@ func (a *jsonAggregate) Size() int64 {
 // AggHandling is part of the tree.AggregateFunc interface.
 func (a *jsonAggregate) AggHandling() {
 	// do nothing
+}
+
+// ElapsedAggregate stores the state of the aggregate calculation
+// for the continuous time length.
+type ElapsedAggregate struct {
+	StartTime int64
+	EndTime   int64
+
+	TimeUnit        tree.Datum
+	HasReceivedData bool
+	Precision       int64
+}
+
+// newElapsedAggregate is used to create and initialize a TwaAggregate object.
+func newElapsedAggregate(
+	_ []*types.T, _ *tree.EvalContext, otherDatums tree.Datums,
+) tree.AggregateFunc {
+	elapsedAgg := &ElapsedAggregate{}
+	if len(otherDatums) == 1 && otherDatums[0] != tree.DNull {
+		elapsedAgg.TimeUnit = otherDatums[0]
+	} else if len(otherDatums) > 1 {
+		panic(fmt.Sprintf("too many arguments passed in, expected < 2, got %d", len(otherDatums)))
+	}
+
+	return elapsedAgg
+}
+
+// Add is for elapsed agg
+func (a *ElapsedAggregate) Add(_ context.Context, datum tree.Datum, _ ...tree.Datum) error {
+	if datum == tree.DNull {
+		return nil
+	}
+
+	var tsKey int64
+	switch t := datum.(type) {
+	case *tree.DTimestamp:
+		if a.Precision == 3 {
+			tsKey = t.UnixMilli()
+		} else if a.Precision == 6 {
+			tsKey = t.UnixMicro()
+		} else {
+			tsKey = t.UnixNano()
+		}
+	case *tree.DTimestampTZ:
+		if a.Precision == 3 {
+			tsKey = t.UnixMilli()
+		} else if a.Precision == 6 {
+			tsKey = t.UnixMicro()
+		} else {
+			tsKey = t.UnixNano()
+		}
+	default:
+		return pgerror.New(pgcode.DatatypeMismatch, "invalid first parameter type in elapsed function")
+	}
+
+	if !a.HasReceivedData {
+		// Set the UpperInterval/DownInterval if it's not yet set
+		a.StartTime = tsKey
+		a.EndTime = tsKey
+		a.HasReceivedData = true
+	} else {
+		// Set the UpperInterval/DownInterval to the latest datum
+		if a.StartTime > tsKey {
+			a.StartTime = tsKey
+		}
+
+		if a.EndTime < tsKey {
+			a.EndTime = tsKey
+		}
+	}
+
+	return nil
+}
+
+// Result is for elapsed agg
+func (a *ElapsedAggregate) Result() (tree.Datum, error) {
+	var result float64
+	timeUnit, _ := a.TimeUnit.(*tree.DInterval)
+
+	elapsedTime := a.EndTime - a.StartTime
+	switch timeUnit.String() {
+	case "'00:00:00.000000001'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) * float64(time.Millisecond)
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) * float64(time.Microsecond)
+		} else {
+			result = float64(elapsedTime)
+		}
+	case "'00:00:00.000001'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) * float64(time.Microsecond)
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime)
+		} else {
+			result = float64(elapsedTime) / float64(time.Microsecond)
+		}
+	case "'00:00:00.001'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime)
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) / float64(time.Microsecond)
+		} else {
+			result = float64(elapsedTime) / float64(time.Millisecond)
+		}
+	case "'00:00:01'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) / float64(time.Microsecond)
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) / float64(time.Millisecond)
+		} else {
+			result = float64(elapsedTime) / float64(time.Second)
+		}
+	case "'00:01:00'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) / (60 * float64(time.Microsecond))
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) / (60 * float64(time.Millisecond))
+		} else {
+			result = float64(elapsedTime) / (60 * float64(time.Second))
+		}
+	case "'01:00:00'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) / (60 * 60 * float64(time.Microsecond))
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) / (60 * 60 * float64(time.Millisecond))
+		} else {
+			result = float64(elapsedTime) / (60 * 60 * float64(time.Second))
+		}
+	case "'1 day'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) / (24 * 60 * 60 * float64(time.Microsecond))
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) / (24 * 60 * 60 * float64(time.Millisecond))
+		} else {
+			result = float64(elapsedTime) / (24 * 60 * 60 * float64(time.Second))
+		}
+	case "'7 days'":
+		if a.Precision == 3 {
+			result = float64(elapsedTime) / (7 * 24 * 60 * 60 * float64(time.Microsecond))
+		} else if a.Precision == 6 {
+			result = float64(elapsedTime) / (7 * 24 * 60 * 60 * float64(time.Millisecond))
+		} else {
+			result = float64(elapsedTime) / (7 * 24 * 60 * 60 * float64(time.Second))
+		}
+	default:
+		return nil, pgerror.New(pgcode.InvalidParameterValue, "invalid time unit in elapsed function")
+	}
+
+	return tree.NewDFloat(tree.DFloat(result)), nil
+}
+
+// Reset implements tree.AggregateFunc interface.
+func (a *ElapsedAggregate) Reset(ctx context.Context) {}
+
+// Close is part of the tree.AggregateFunc interface.
+func (a *ElapsedAggregate) Close(ctx context.Context) {}
+
+// Size is part of the tree.AggregateFunc interface.
+func (a *ElapsedAggregate) Size() int64 {
+	return sizeOfElapsedAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *ElapsedAggregate) AggHandling() {
+	// do nothing
+}
+
+// TwaAggregate is used to store the state of a time-weighted average (TWA) aggregate calculation.
+type TwaAggregate struct {
+	TotalArea       float64
+	StartTime       int64
+	EndTime         int64
+	LastVal         float64
+	HasReceivedData bool
+	ConstVal        tree.Datum
+	Precision       int64
+}
+
+// newTwaAggregate is used to create and initialize a TwaAggregate object.
+func newTwaAggregate(_ []*types.T, _ *tree.EvalContext, arguments tree.Datums) tree.AggregateFunc {
+	twaAgg := &TwaAggregate{}
+	if len(arguments) == 1 && arguments[0] != tree.DNull {
+		twaAgg.ConstVal = arguments[0]
+	} else if len(arguments) > 1 {
+		panic(fmt.Sprintf("too many arguments passed in, expected < 2, got %d", len(arguments)))
+	}
+
+	return twaAgg
+}
+
+// Add calculates the weighted value and calculates the start/end timestamp
+func (a *TwaAggregate) Add(_ context.Context, datum tree.Datum, otherDatum ...tree.Datum) error {
+	if (len(otherDatum) > 0 && otherDatum[0] == tree.DNull) || a.ConstVal != nil {
+		return nil
+	}
+
+	var tsKey int64
+	switch t := datum.(type) {
+	case *tree.DTimestamp:
+		if a.Precision == 3 {
+			tsKey = t.UnixMilli()
+		} else if a.Precision == 6 {
+			tsKey = t.UnixMicro()
+		} else {
+			tsKey = t.UnixNano()
+		}
+	case *tree.DTimestampTZ:
+		if a.Precision == 3 {
+			tsKey = t.UnixMilli()
+		} else if a.Precision == 6 {
+			tsKey = t.UnixMicro()
+		} else {
+			tsKey = t.UnixNano()
+		}
+	default:
+		return pgerror.New(pgcode.DatatypeMismatch, "invalid first parameter type in twa function")
+	}
+
+	var tsVal float64
+	switch otherDatum[0].(type) {
+	case *tree.DInt:
+		tsVal = float64(tree.MustBeDInt(otherDatum[0]))
+	case *tree.DFloat:
+		tsVal = float64(tree.MustBeDFloat(otherDatum[0]))
+	default:
+		return pgerror.New(pgcode.DatatypeMismatch, "invalid second parameter type in twa function")
+	}
+
+	// Calculate area if not the first data point
+	if !a.HasReceivedData {
+		a.StartTime = tsKey
+		a.HasReceivedData = true
+	} else {
+		a.TotalArea += twaGetArea(a.EndTime, tsKey, a.LastVal, tsVal)
+	}
+
+	if a.EndTime == tsKey {
+		return pgerror.New(pgcode.InvalidParameterValue, "duplicate timestamps not allowed in twa function")
+	}
+
+	// Update last timestamp and value
+	a.EndTime = tsKey
+	a.LastVal = tsVal
+
+	return nil
+}
+
+// Result calculates and returns the result of a time-weighted average
+func (a *TwaAggregate) Result() (tree.Datum, error) {
+	if a.ConstVal != nil {
+		switch a.ConstVal.(type) {
+		case *tree.DInt:
+			return tree.NewDFloat(tree.DFloat(tree.MustBeDInt(a.ConstVal))), nil
+		case *tree.DFloat:
+			return tree.NewDFloat(tree.MustBeDFloat(a.ConstVal)), nil
+		default:
+			return nil, pgerror.New(pgcode.DatatypeMismatch, "invalid second parameter type in twa function")
+		}
+	}
+
+	if !a.HasReceivedData {
+		return tree.DNull, nil
+	}
+
+	var twaRes float64
+	if a.StartTime == a.EndTime {
+		twaRes = a.LastVal
+	} else {
+		twaRes = a.TotalArea / (2 * float64(a.EndTime-a.StartTime))
+	}
+
+	return tree.NewDFloat(tree.DFloat(twaRes)), nil
+}
+
+// Reset implements tree.AggregateFunc interface.
+func (a *TwaAggregate) Reset(ctx context.Context) {}
+
+// Close is part of the tree.AggregateFunc interface.
+func (a *TwaAggregate) Close(ctx context.Context) {}
+
+// Size is part of the tree.AggregateFunc interface.
+func (a *TwaAggregate) Size() int64 {
+	return sizeOfTwaAggregate
+}
+
+// AggHandling is part of the tree.AggregateFunc interface.
+func (a *TwaAggregate) AggHandling() {
+	// do nothing
+}
+
+// twaGetArea calculates the time-weighted value area based on the start and end timestamps
+// and corresponding values
+func twaGetArea(sKey, eKey int64, sVal, eVal float64) float64 {
+	if (sVal >= 0 && eVal >= 0) || (sVal <= 0 && eVal <= 0) {
+		deltaT := eKey - sKey
+		return (sVal + eVal) * float64(deltaT)
+	}
+
+	x := (float64(sKey)*eVal - float64(eKey)*sVal) / (eVal - sVal)
+
+	return sVal*(x-float64(sKey)) + eVal*(float64(eKey)-x)
 }

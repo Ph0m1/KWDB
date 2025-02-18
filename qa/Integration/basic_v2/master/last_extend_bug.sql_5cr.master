@@ -23,43 +23,42 @@ INSERT 1
 > INSERT INTO test_select_last_add.testlastnew VALUES(2,2,null,null,'2','2',2,null,null,'2');
 INSERT 1
 > explain SELECT last(*,'1970-01-01 00:00:00.000') FROM test_select_last_add.testlastnew ;
-        tree        |            field            |                         description
---------------------+-----------------------------+--------------------------------------------------------------
-                    | distributed                 | true
-                    | vectorized                  | false
-  group             |                             |
-   │                | engine type                 | time series
-   │                | aggregate 0                 | last(k_timestamp, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 1                 | last(id, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 2                 | last(e1, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 3                 | last(e2, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 4                 | last(e3, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 5                 | last(e4, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 6                 | last(idp, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 7                 | last(code1, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 8                 | last(code3, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | aggregate 9                 | last(code4, k_timestamp, '1970-01-01 00:00:00+00:00')
-   │                | scalar                      |
-   │                | pushLocalAggToScan          | true
-   │                | addSynchronizer             | true
-   └── render       |                             |
-        │           | engine type                 | time series
-        │           | '1970-01-01 00:00:00+00:00' | '1970-01-01 00:00:00+00:00'
-        │           | k_timestamp                 | k_timestamp
-        │           | id                          | id
-        │           | e1                          | e1
-        │           | e2                          | e2
-        │           | e3                          | e3
-        │           | e4                          | e4
-        │           | idp                         | idp
-        │           | code1                       | code1
-        │           | code3                       | code3
-        │           | code4                       | code4
-        └── ts scan |                             |
-                    | ts-table                    | testlastnew
-                    | access mode                 | tableTableMeta
-                    | use statistic               | true
-(34 rows)
+        tree        |        field        |          description
+--------------------+---------------------+---------------------------------
+                    | distributed         | true
+                    | vectorized          | false
+  group             |                     |
+   │                | engine type         | time series
+   │                | aggregate 0         | last(k_timestamp, k_timestamp)
+   │                | aggregate 1         | last(id, k_timestamp)
+   │                | aggregate 2         | last(e1, k_timestamp)
+   │                | aggregate 3         | last(e2, k_timestamp)
+   │                | aggregate 4         | last(e3, k_timestamp)
+   │                | aggregate 5         | last(e4, k_timestamp)
+   │                | aggregate 6         | last(idp, k_timestamp)
+   │                | aggregate 7         | last(code1, k_timestamp)
+   │                | aggregate 8         | last(code3, k_timestamp)
+   │                | aggregate 9         | last(code4, k_timestamp)
+   │                | scalar              |
+   │                | pushLocalAggToScan  | true
+   │                | addSynchronizer     | true
+   └── render       |                     |
+        │           | engine type         | time series
+        │           | k_timestamp         | k_timestamp
+        │           | id                  | id
+        │           | e1                  | e1
+        │           | e2                  | e2
+        │           | e3                  | e3
+        │           | e4                  | e4
+        │           | idp                 | idp
+        │           | code1               | code1
+        │           | code3               | code3
+        │           | code4               | code4
+        └── ts scan |                     |
+                    | ts-table            | testlastnew
+                    | access mode         | tableTableMeta
+                    | use statistic       | true
+(33 rows)
 > SELECT last(*,'1970-01-01 00:00:00.000') FROM test_select_last_add.testlastnew ;
   last(k_timestamp) | last(id) | last(e1) | last(e2) | last(e3) | last(e4) | last(idp) | last(code1) | last(code3) | last(code4)
 --------------------+----------+----------+----------+----------+----------+-----------+-------------+-------------+--------------
