@@ -613,27 +613,27 @@ FieldTypeCastTimestampTz::FieldTypeCastTimestampTz(Field *field,
   return_type_ = KWDBTypeFamily::TimestampFamily;
   switch (type_num) {
     case 3:
-      sql_type_ = roachpb::DataType::TIMESTAMP;
-      storage_type_ = roachpb::DataType::TIMESTAMP;
+      sql_type_ = roachpb::DataType::TIMESTAMPTZ;
+      storage_type_ = roachpb::DataType::TIMESTAMPTZ;
       type_scale_ = 1;
       timezone_diff_ = timezone * 3600 * 1000;
       break;
     case 6:
-      sql_type_ = roachpb::DataType::TIMESTAMP_MICRO;
-      storage_type_ = roachpb::DataType::TIMESTAMP_MICRO;
+      sql_type_ = roachpb::DataType::TIMESTAMPTZ_MICRO;
+      storage_type_ = roachpb::DataType::TIMESTAMPTZ_MICRO;
       type_scale_ = 1000;
       timezone_diff_ = timezone * 3600 * 1000000;
       break;
     case 9:
-      sql_type_ = roachpb::DataType::TIMESTAMP_NANO;
-      storage_type_ = roachpb::DataType::TIMESTAMP_NANO;
+      sql_type_ = roachpb::DataType::TIMESTAMPTZ_NANO;
+      storage_type_ = roachpb::DataType::TIMESTAMPTZ_NANO;
       type_scale_ = 1000000;
       timezone_diff_ = timezone * 3600 * 1000000000;
 
       break;
     default:
-      sql_type_ = roachpb::DataType::TIMESTAMP;
-      storage_type_ = roachpb::DataType::TIMESTAMP;
+      sql_type_ = roachpb::DataType::TIMESTAMPTZ;
+      storage_type_ = roachpb::DataType::TIMESTAMPTZ;
       type_scale_ = 1;
       timezone_diff_ = timezone * 3600 * 1000;
       break;
