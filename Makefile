@@ -9,12 +9,15 @@ CXX ?= $(shell which g++)
 
 KWBASE_OSS ?= ON
 
+PROTOBUF_DIR ?=
+
 # cmake configuration options
 BUILD_TYPE ?= Debug
 WITH_TESTS ?= OFF
 INSTALL_PATH ?= $(BASEDIR)/install
 CMAKE_CONFIG_OPTIONS ?= -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
-	-DCMAKE_INSTALL_PREFIX=$(INSTALL_PATH) -DKWBASE_OSS=$(KWBASE_OSS)
+	-DCMAKE_INSTALL_PREFIX=$(INSTALL_PATH) -DKWBASE_OSS=$(KWBASE_OSS) \
+	-DPROTOBUF_DIR=$(PROTOBUF_DIR)
 
 ALL_TESTS := cpplint kwdbts2-test kwbase-test
 
@@ -129,7 +132,7 @@ install: .ALWAYS_REBUILD | build
 bin/.submodules-initialized:
 	gitdir=$$(git rev-parse --git-dir 2>/dev/null || true); \
 	if test -n "$$gitdir"; then \
-	   git submodule update --init --recursive --remote; \
+	   git submodule update --init --recursive; \
 	fi
 
 clean:

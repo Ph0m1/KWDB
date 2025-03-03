@@ -112,7 +112,11 @@ void ExceptionHandler(const int sig, siginfo_t* const info, void*) {
   const char* sigstr = strsignal(sig);
   // https://man7.org/linux/man-pages/man2/sigaction.2.html
   snprintf(kEmergencyBuf, sizeof(kEmergencyBuf),
+#if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
+    "Exception time(UTC):%s\nsignal:%s(%d)\npid=%d tid=%ld si_code=%d si_addr=%p\n",
+#else
     "Exception time(UTC):%s\nsignal:%s(%d)\npid=%d tid=%d si_code=%d si_addr=%p\n",
+#endif
     time_buffer, sigstr, sig, getpid(), gettid(), info->si_code, info->si_addr);
   Out2Console(kEmergencyBuf);
 

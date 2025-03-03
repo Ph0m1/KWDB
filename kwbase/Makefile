@@ -487,7 +487,18 @@ LIBROCKSDB  := $(ROCKSDB_DIR)/librocksdb.a
 LIBSNAPPY   := $(SNAPPY_DIR)/libsnappy.a
 LIBEDIT     := $(LIBEDIT_DIR)/src/.libs/libedit.a
 LIBROACH    := $(LIBROACH_DIR)/libroach.a
-PROTOC 		 := protoc
+PROTOC      := protoc
+
+PROTOBUF_DIR ?=
+ifneq (,$(PROTOBUF_DIR))
+CGO_LDFLAGS += -L$(PROTOBUF_DIR)/lib
+LDFLAGS += -L$(PROTOBUF_DIR)/lib
+LD_LIBRARY_PATH += :$(PROTOBUF_DIR)/lib
+PROTOC = $(PROTOBUF_DIR)/bin/protoc
+xcmake-flags += -DPROTOBUF_DIR=$(PROTOBUF_DIR)
+
+export LD_LIBRARY_PATH
+endif
 
 C_LIBS_COMMON = \
 	$(if $(use-stdmalloc),,$(LIBJEMALLOC)) \

@@ -177,7 +177,34 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 # compile with external protobuf
-option(PROTOBUF_DIR "Compile with external protobuf." OFF)
+# option(PROTOBUF_DIR "Compile with external protobuf." OFF)
+
+if ("${PROTOBUF_DIR}" STREQUAL "")
+  # Find the protobuf library installed on your system
+  find_package(Protobuf REQUIRED)
+  if (PROTOBUF_FOUND)
+    message(STATUS "protobuf found")
+    set(PROTOBUF_LIB protobuf)
+    set(PROTOBUF_C protoc)
+  else ()
+    message(FATAL_ERROR "Cannot find Protobuf")
+  endif ()
+else()
+  if (NOT EXISTS ${PROTOBUF_DIR}/include)
+    message(FATAL_ERROR "Protobuf include directory not found : ${PROTOBUF_DIR}/include")
+  endif()
+  include_directories(${PROTOBUF_DIR}/include)
+  if (NOT EXISTS ${PROTOBUF_DIR}/lib)
+    message(FATAL_ERROR "Protobuf library directory not found : ${PROTOBUF_DIR}/lib")
+  endif()
+  link_directories(${PROTOBUF_DIR}/lib)
+  if (NOT EXISTS ${PROTOBUF_DIR}/bin/protoc)
+    message(FATAL_ERROR "Protobuf compiler not found : ${PROTOBUF_DIR}/bin/protoc")
+  endif()
+  set(PROTOBUF_C ${PROTOBUF_DIR}/bin/protoc)
+
+endif()
+
 # compile unit test
 option(WITH_TESTS "build with tests" OFF)
 message(STATUS "Build with tests:${WITH_TESTS}")
@@ -197,15 +224,16 @@ if (BUILD_KWBASE)
     endif()
 
     add_custom_target(
-            kwbase ALL
-            COMMAND make build -f ${KWBASE_MAKEFILE}
-                OUTPUT_PATH=${CMAKE_BINARY_DIR}/bin
-                KWDB_LIB_DIR=${CMAKE_BINARY_DIR}/lib WITH_ASAN=${WITH_ASAN}
-                GOPATH=$ENV{GOPATH} KWBASE_MAKEFILE=${KWBASE_MAKEFILE}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/kwbase
-            COMMENT "compile kwbase"
-            DEPENDS kwdbts2 common
-    )
+        kwbase ALL
+        COMMAND make build -f ${KWBASE_MAKEFILE}
+        PROTOBUF_DIR=${PROTOBUF_DIR}
+        OUTPUT_PATH=${CMAKE_BINARY_DIR}/bin
+        KWDB_LIB_DIR=${CMAKE_BINARY_DIR}/lib WITH_ASAN=${WITH_ASAN}
+        GOPATH=$ENV{GOPATH} KWBASE_MAKEFILE=${KWBASE_MAKEFILE}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/kwbase
+        COMMENT "====== compile kwbase ======"
+        DEPENDS kwdbts2 common
+        )
 endif()
 
 if (WITH_TESTS)
