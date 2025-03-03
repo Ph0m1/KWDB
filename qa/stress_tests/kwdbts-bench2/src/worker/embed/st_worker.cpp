@@ -185,6 +185,7 @@ KBStatus StScanWorker::do_work(KTimestamp  new_ts) {
   if (s.isNotOK()) {
     return s;
   }
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
   std::shared_ptr<TsEntityGroup> tbl_range;
   stat = ts_table->GetEntityGroup(ctx, st_inst_->rangeGroup(), &tbl_range);
   uint32_t entity_index = 1;
@@ -199,11 +200,11 @@ KBStatus StScanWorker::do_work(KTimestamp  new_ts) {
   }
 
   std::vector<Sumfunctype> scan_agg_types;
-  TsIterator* iter;
+  TsStorageIterator* iter;
   SubGroupID group_id = 1;
 
   vector<uint32_t> entity_ids = {entity_index};
-  stat = tbl_range->GetIterator(ctx, group_id, entity_ids, ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range,
+  stat = tbl_range->GetIterator(ctx, group_id, entity_ids, ts_spans, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range,
                       {}, false, false);
   s = dump_zstatus("GetIterator", ctx, stat);
   if (s.isNotOK()) {

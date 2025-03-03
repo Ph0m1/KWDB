@@ -67,9 +67,10 @@ class SortScanOperator : public TableScanOperator {
   BaseOperator* Clone() override;
 
  private:
-  EEIteratorErrCode initContainer(kwdbContext_p ctx);
-  EEIteratorErrCode ResolveFilter(kwdbContext_p ctx,
-                                  ScanRowBatch* row_batch);
+  EEIteratorErrCode mallocTempField(kwdbContext_p ctx);
+  EEIteratorErrCode initContainer(kwdbContext_p ctx, DataChunkPtr&chunk,
+                                              const std::vector<Field*> &cols, k_uint32 line);
+  EEIteratorErrCode ResolveFilter(kwdbContext_p ctx, ScanRowBatch* row_batch);
   EEIteratorErrCode PrioritySort(kwdbContext_p ctx, ScanRowBatch* row_batch, k_uint32 limit);
 
  protected:
@@ -79,6 +80,10 @@ class SortScanOperator : public TableScanOperator {
   std::priority_queue<Data*, std::vector<Data*>, Greater> data_desc_;
   std::priority_queue<Data*, std::vector<Data*>, Less> data_asc_;
   DataChunkPtr data_chunk_;
+  Field **tmp_renders_{nullptr};
+  std::vector<Field*> tmp_output_fields_;
+  Field *new_field_{nullptr};
+  bool is_offset_opt_{false};
 };
 
 }  // namespace kwdbts

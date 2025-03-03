@@ -32,34 +32,55 @@ SortScanOperator::SortScanOperator(const SortScanOperator& other,
                                    BaseOperator* input, int32_t processor_id)
     : TableScanOperator(other, input, processor_id), spec_{other.spec_} {}
 
-SortScanOperator::~SortScanOperator() {}
+SortScanOperator::~SortScanOperator() {
+  if (is_offset_opt_) {
+    SafeDeletePointer(tmp_renders_);
+    SafeDeletePointer(new_field_);
+  }
+}
 
 EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
   do {
+    k_int32 idx = 0;
     code = TableScanOperator::Init(ctx);
     if (code != EEIteratorErrCode::EE_OK) {
       LOG_ERROR("TableScanOperator::PreInit() failed\n");
       break;
     }
-    const TSOrdering& order = spec_->sorter();
-    k_uint32 order_size_ = order.columns_size();
-    if (order_size_ != 1) {
-      LOG_ERROR("SortScanOperator must have one order column");
-      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "must have one order column");
-      break;
+    is_offset_opt_ = spec_->offsetopt();
+    if (!is_offset_opt_) {
+      const TSOrdering& order = spec_->sorter();
+      k_uint32 order_size_ = order.columns_size();
+      if (order_size_ != 1) {
+        LOG_ERROR("SortScanOperator must have one order column");
+        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE, "must have one order column");
+        break;
+      }
+
+      idx = order.columns(0).col_idx();
+      TSOrdering_Column_Direction direction = order.columns(0).direction();
+      if (TSOrdering_Column_Direction::TSOrdering_Column_Direction_DESC == direction) {
+        table_->is_reverse_ = 1;
+      }
+    } else {
+      idx = 0;
+      table_->is_reverse_ = spec_->reverse();
     }
 
-    k_int32 idx = order.columns(0).col_idx();
-    TSOrdering_Column_Direction direction = order.columns(0).direction();
-    if (TSOrdering_Column_Direction::TSOrdering_Column_Direction_DESC ==
-        direction) {
-      table_->is_reverse_ = 1;
-    }
+    table_->optimize_offset_ = is_offset_opt_;
+    table_->offset_ = offset_;
+    table_->limit_ = limit_;
 
     order_field_ = param_.GetOutputField(ctx, idx);
+    if (is_offset_opt_) {
+      code = mallocTempField(ctx);
+    } else {
+      tmp_renders_ = renders_;
+      tmp_output_fields_ = output_fields_;
+    }
   } while (0);
 
   Return(code);
@@ -74,21 +95,13 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
   }
 
   auto start = std::chrono::high_resolution_clock::now();
-  // set current offset
-  cur_offset_ = offset_;
-
   KWThdContext* thd = current_thd;
   StorageHandler* handler = handler_;
 
   if (CheckCancel(ctx) != SUCCESS) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
-  code = initContainer(ctx);
-  if (code != EEIteratorErrCode::EE_OK) {
-    return code;
-  }
 
-  k_uint32 limit = limit_ + offset_;
   // read data
   while (true) {
     code = InitScanRowBatch(ctx, &row_batch_);
@@ -96,7 +109,12 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
       break;
     }
     row_batch_->ts_ = ts_;
-    code = handler->TsNext(ctx);
+    if (!is_offset_opt_) {
+      code = handler_->TsNext(ctx);
+    } else {
+      code = handler_->TsOffsetNext(ctx);
+    }
+
     if (EEIteratorErrCode::EE_OK != code) {
       if (EEIteratorErrCode::EE_END_OF_RECORD == code ||
           EEIteratorErrCode::EE_TIMESLICE_OUT == code) {
@@ -105,16 +123,36 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
       break;
     }
 
+    k_uint32 storage_offset = handler->GetStorageOffset();
+    cur_offset_ = offset_ - storage_offset;
+
+    if (nullptr == data_chunk_) {
+      code = initContainer(ctx, data_chunk_, tmp_output_fields_, limit_ + cur_offset_);
+      if (code != EEIteratorErrCode::EE_OK) {
+        return code;
+      }
+    }
+
     // resolve filter
     ResolveFilter(ctx, row_batch_);
     if (0 == row_batch_->Count()) {
       continue;
     }
     // sort
-    PrioritySort(ctx, row_batch_, limit_ + offset_);
+    PrioritySort(ctx, row_batch_, limit_ + cur_offset_);
   }
+  if (nullptr == data_chunk_) {
+    code = initContainer(ctx, data_chunk_, tmp_output_fields_, limit_);
+    if (code != EEIteratorErrCode::EE_OK) {
+      return code;
+    }
+  }
+
   auto end = std::chrono::high_resolution_clock::now();
-  fetcher_.Update(data_chunk_->Count(), (end - start).count(), data_chunk_->Count() * data_chunk_->RowSize(), 0, 0, 0);
+  if (data_chunk_) {
+    fetcher_.Update(data_chunk_->Count(), (end - start).count(),
+                                    data_chunk_->Count() * data_chunk_->RowSize(), 0, 0, 0);
+  }
 
   Return(code);
 }
@@ -128,7 +166,18 @@ EEIteratorErrCode SortScanOperator::Next(kwdbContext_p ctx,
     Return(EEIteratorErrCode::EE_END_OF_RECORD);
   }
 
-  chunk = std::move(data_chunk_);
+  if (!is_offset_opt_) {
+    chunk = std::move(data_chunk_);
+  } else {
+    code = initContainer(ctx, chunk, output_fields_, limit_);
+    if (code != EEIteratorErrCode::EE_OK) {
+      return code;
+    }
+    if (data_chunk_->Count() > 0) {
+      chunk->CopyFrom(data_chunk_, cur_offset_, data_chunk_->Count() - 1, table_->is_reverse_);
+    }
+  }
+
   OPERATOR_DIRECT_ENCODING(ctx, output_encoding_, thd, chunk);
   is_done_ = true;
 
@@ -174,22 +223,45 @@ BaseOperator* SortScanOperator::Clone() {
   return iter;
 }
 
-EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx) {
+EEIteratorErrCode SortScanOperator::mallocTempField(kwdbContext_p ctx) {
+  EnterFunc();
+  tmp_renders_ = static_cast<Field **>(malloc((num_ + 1) * sizeof(Field *)));
+  if (nullptr == tmp_renders_) {
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  for (k_uint32 i = 0; i < num_; ++i) {
+    tmp_renders_[i] = renders_[i];
+  }
+  tmp_renders_[num_] = table_->GetFieldWithColNum(0);
+
+  new_field_ = table_->GetFieldWithColNum(0)->field_to_copy();
+  if (nullptr == new_field_) {
+    SafeDeletePointer(tmp_renders_);
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+  new_field_->set_num(output_fields_.size());
+  new_field_->is_chunk_ = true;
+  tmp_output_fields_.insert(tmp_output_fields_.end(), output_fields_.begin(), output_fields_.end());
+  tmp_output_fields_.push_back(new_field_);
+
+  Return(EEIteratorErrCode::EE_OK);
+}
+
+EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx, DataChunkPtr&chunk,
+                                                        const std::vector<Field*> &cols, k_uint32 line) {
   // init col
   std::vector<ColumnInfo> col_info;
-  col_info.reserve(output_fields_.size());
+  col_info.reserve(cols.size());
   k_int32 row_size = 0;
-  for (auto field : output_fields_) {
+  for (auto field : cols) {
     col_info.emplace_back(field->get_storage_length(),
                           field->get_storage_type(), field->get_return_type());
     row_size += field->get_storage_length();
   }
-  k_uint64 lines = limit_ + offset_;
-  if (lines * row_size < BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE) {
-    data_chunk_ = std::make_unique<DataChunk>(col_info, lines);
-  }
-  if (!data_chunk_ || data_chunk_->Initialize() != true) {
-    data_chunk_ = nullptr;
+  chunk = std::make_unique<DataChunk>(col_info, line);
+  if (!chunk || chunk->Initialize() != true) {
+    chunk = nullptr;
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     return EEIteratorErrCode::EE_ERROR;
   }
@@ -220,6 +292,7 @@ EEIteratorErrCode SortScanOperator::ResolveFilter(kwdbContext_p ctx,
 EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
                                                  ScanRowBatch *row_batch,
                                                  k_uint32 limit) {
+  k_uint32 renders_num = is_offset_opt_ ? num_ + 1 : num_;
   k_uint32 count = row_batch->Count();
   k_uint32 free = limit - data_chunk_->Count();
   k_uint32 num = free > count ? count : free;
@@ -229,7 +302,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
       data->ts_ = order_field_->ValInt();
       data->rowno_ = data_chunk_->Count();
       data_asc_.push(data);
-      FieldsToChunk(renders_, num_, data->rowno_, data_chunk_);
+      FieldsToChunk(tmp_renders_, renders_num, data->rowno_, data_chunk_);
       data_chunk_->AddCount();
       row_batch->NextLine();
     }
@@ -242,7 +315,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
         Data* data = new Data;
         data->ts_ = ts;
         data->rowno_ = top->rowno_;
-        FieldsToChunk(renders_, num_, top->rowno_, data_chunk_);
+        FieldsToChunk(tmp_renders_, renders_num, top->rowno_, data_chunk_);
         data_asc_.push(data);
         SafeDeletePointer(top);
       }
@@ -257,7 +330,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
       data->ts_ = order_field_->ValInt();
       data->rowno_ = data_chunk_->Count();
       data_desc_.push(data);
-      FieldsToChunk(renders_, num_, data->rowno_, data_chunk_);
+      FieldsToChunk(tmp_renders_, renders_num, data->rowno_, data_chunk_);
       data_chunk_->AddCount();
       row_batch->NextLine();
     }
@@ -270,7 +343,7 @@ EEIteratorErrCode SortScanOperator::PrioritySort(kwdbContext_p ctx,
         Data* data = new Data;
         data->ts_ = ts;
         data->rowno_ = top->rowno_;
-        FieldsToChunk(renders_, num_, top->rowno_, data_chunk_);
+        FieldsToChunk(tmp_renders_, renders_num, top->rowno_, data_chunk_);
         data_desc_.push(data);
         SafeDeletePointer(top);
       }

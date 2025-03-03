@@ -37,6 +37,10 @@ class TagScanBaseOperator : public BaseOperator {
   virtual KStatus GetEntities(kwdbContext_p ctx,
                       std::vector<EntityResultIndex>* entities,
                       TagRowBatchPtr* row_batch_ptr) = 0;
+  bool IsHasTagFilter() { return filter_ != nullptr; }
+
+ protected:
+  Field* filter_{nullptr};
 };
 
 
@@ -86,7 +90,6 @@ class TagScanOperator : public TagScanBaseOperator {
   char* data_{nullptr};
   k_uint32 count_{0};
   ReaderPostResolve param_;
-  Field* filter_{nullptr};
   TagRowBatchPtr tag_rowbatch_{nullptr};
   StorageHandler* handler_{nullptr};
 

@@ -210,7 +210,8 @@ class DataChunk : public IChunk {
   KStatus InsertDecimal(k_uint32 row, k_uint32 col, DatumPtr value,
                         k_bool is_double);
 
-  /**
+
+ /**
    * @brief Copy data from another data chunk
    * @param[in] other
    * @param[in] begin
@@ -223,6 +224,36 @@ class DataChunk : public IChunk {
     size_t offset = begin * RowSize();
     memcpy(data_ + offset, other->GetData(), batch_buf_length);
   }
+
+  /**
+   * @brief Copy data from another data chunk
+   * @param[in] other
+   * @param[in] begin
+   * @param[in] end
+   */
+  void CopyFrom(std::unique_ptr<DataChunk>& other, k_uint32 begin, k_uint32 end, bool is_reverse) {
+    count_ = end - begin + 1;
+    if (count_ <= 0) {
+      return;
+    }
+    std::vector<k_uint32> selection;
+    other->OffsetSort(selection, is_reverse);
+
+    for (k_uint32 col_idx = 0; col_idx < col_num_; ++col_idx) {
+      for (k_uint32 row = 0, src_row = begin; row < count_; ++row, ++src_row) {
+        if (other->IsNull(selection[src_row], col_idx)) {
+          SetNull(row, col_idx);
+        } else {
+          char *src_ptr = other->GetData(selection[src_row], col_idx);
+          k_uint32 col_offset = row * col_info_[col_idx].fixed_storage_len + col_offset_[col_idx];
+          std::memcpy(data_ + col_offset, src_ptr, col_info_[col_idx].fixed_storage_len);
+          SetNotNull(row, col_idx);
+        }
+      }
+    }
+  }
+
+  KStatus OffsetSort(std::vector<k_uint32> &selection, bool is_reverse);
 
   /**
    * @brief Copy current line using row mode

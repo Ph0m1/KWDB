@@ -35,7 +35,7 @@ void CreateReaderSpec(TSReaderSpec **spec, k_uint64 objid) {
   TsSpan *span = (*spec)->add_ts_spans();
   span->set_fromtimestamp(0);
   span->set_totimestamp(100000);
-  (*spec)->set_usestatistic(false);
+  // (*spec)->set_usestatistic(false);
   (*spec)->set_tableid(objid);
   (*spec)->set_tableversion(1);
 }

@@ -1737,6 +1737,10 @@ int TsTimePartition::RedoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn,
   return 0;
 }
 
+int TsTimePartition::GetAllBlockItems(vector<uint32_t>& entity_ids, std::deque<BlockItem*>& block_items) {
+  return meta_manager_.GetAllBlockItems(entity_ids, block_items);
+}
+
 int TsTimePartition::GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse) {
   return meta_manager_.GetAllBlockItems(entity_id, block_items, reverse);
 }

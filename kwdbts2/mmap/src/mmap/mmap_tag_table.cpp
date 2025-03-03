@@ -34,10 +34,12 @@ TagTable::~TagTable() {
   delete m_version_mgr_;
   delete m_partition_mgr_;
   delete m_index_;
+  delete m_entity_row_index_;
   delete m_mutex_;
   m_version_mgr_ = nullptr;
   m_partition_mgr_ = nullptr;
   m_index_ = nullptr;
+  m_entity_row_index_ = nullptr;
   m_mutex_ = nullptr;
 }
 
@@ -68,6 +70,12 @@ int TagTable::create(const vector<TagInfo> &schema, uint32_t table_version, Erro
     LOG_ERROR("create HashIndex failed, %s", err_info.errmsg.c_str());
     return -1;
   }
+  // 4. create entity row hash index
+  if (initEntityRowHashIndex(MMAP_CREAT_EXCL, err_info) < 0) {
+    LOG_ERROR("create EntityRow HashIndex failed, %s", err_info.errmsg.c_str());
+    return -1;
+  }
+
   tag_ver_obj->setStatus(TAG_STATUS_READY);
   m_version_mgr_->UpdateNewestTableVersion(table_version);
   m_version_mgr_->SyncCurrentTableVersion();
@@ -115,6 +123,11 @@ int TagTable::open(ErrorInfo &err_info) {
     LOG_ERROR("open HashIndex failed. error: %s ", err_info.errmsg.c_str());
     return -1;
   }
+  // 4. open entity row hash index
+  if (initEntityRowHashIndex(MMAP_OPEN_NORECURSIVE, err_info) < 0) {
+    LOG_ERROR("open Entity Row HashIndex failed. error: %s ", err_info.errmsg.c_str());
+    return -1;
+  }
   m_version_mgr_->SyncCurrentTableVersion();
   return 0;
 }
@@ -139,6 +152,13 @@ int TagTable::remove(ErrorInfo &err_info) {
   }
   delete m_index_;
   m_index_ = nullptr;
+
+  if (m_entity_row_index_ && (m_entity_row_index_->remove() < 0)) {
+    LOG_ERROR("m_entity_row_index_ remove failed.");
+    return -1;
+  }
+  delete m_entity_row_index_;
+  m_entity_row_index_ = nullptr;
   LOG_DEBUG("Tag table remove successed.");
   fs::remove_all((m_db_path_ + m_tbl_sub_path_).c_str());
   return 0;
@@ -198,6 +218,12 @@ int TagTable::InsertTagRecord(kwdbts::Payload &payload, int32_t sub_group_id, in
     return -1;
   }
 
+  uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id) << 32) | sub_group_id;
+  if (m_entity_row_index_->put(reinterpret_cast<const char *>(&joint_entity_id), sizeof(uint64_t), tag_partition_version, row_no) < 0) {
+    LOG_ERROR("insert entity row hash index data failed. table_version: %u row_no: %lu ", tag_partition_version, row_no);
+    return -1;
+  }
+
   // 4. set undelete mark
   tag_partition_table->startRead();
   tag_partition_table->unsetDeleteMark(row_no);
@@ -241,12 +267,19 @@ int TagTable::DeleteTagRecord(const char *primary_tags, int len, ErrorInfo& err_
     return -1;
   }
   // 2. delete mark
+  uint32_t entity_id{0}, sub_group_id{0};
   tag_part_table->startRead();
   tag_part_table->setDeleteMark(ret.second);
+  tag_part_table->getEntityIdGroupId(ret.second, entity_id, sub_group_id);
   tag_part_table->stopRead();
 
   // 3. delete index record
   auto ret_del = m_index_->delete_data(primary_tags, len);
+
+  // 4. delete entity row index record
+  uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id) << 32) | sub_group_id;
+  ret_del = m_entity_row_index_->delete_data(reinterpret_cast<const char *>(&joint_entity_id));
+
   return 0;
 }
 
@@ -320,6 +353,69 @@ int TagTable::GetEntityIdList(const std::vector<void*>& primary_tags, const std:
   }  // end for primary_tags
   *count = fetch_count;
   return 0;                              
+}
+int TagTable::GetTagList(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_id_list,
+               const std::vector<uint32_t>& scan_tags, ResultSet* res, uint32_t* count, uint32_t table_version) {
+  TagPartitionTableRowID row;
+  uint32_t fetch_count = 0;
+  TagVersionObject*   result_tag_version_obj = nullptr;
+  TagPartitionTable*  src_tag_partition_tbl = nullptr;
+  TableVersionID last_tbl_version = 0;
+  // 1. get result table version scan tags
+  result_tag_version_obj = m_version_mgr_->GetVersionObject(table_version);
+  if (nullptr == result_tag_version_obj) {
+    LOG_ERROR("GetVersionObject not found. table_version: %u ", table_version);
+    return -1;
+  }
+  std::vector<uint32_t> result_scan_tags;
+  for(const auto& tag_idx : scan_tags) {
+    result_scan_tags.emplace_back(result_tag_version_obj->getValidSchemaIdxs()[tag_idx]);
+  }
+  std::vector<uint32_t> src_scan_tags;
+  for (int idx = 0; idx < entity_id_list.size(); idx++) {
+    //2. get entity row index data
+    uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id_list[idx].entityId) << 32) | entity_id_list[idx].subGroupId;
+    auto ret = m_entity_row_index_->get(reinterpret_cast<const char *>(&joint_entity_id), m_entity_row_index_->keySize());
+    if (ret.second == 0) {
+      // not found
+      LOG_DEBUG("entity row hash index not found.");
+      continue;
+    }
+    TableVersionID tbl_version = ret.first;
+    TagPartitionTableRowID row = ret.second;
+    if (src_tag_partition_tbl == nullptr || tbl_version != last_tbl_version) {
+      src_tag_partition_tbl = m_partition_mgr_->GetPartitionTable(tbl_version);
+      if (nullptr == src_tag_partition_tbl) {
+        LOG_ERROR("GetPartitionTable not found. table_version: %u ", tbl_version);
+        return -1;
+      }
+      last_tbl_version = tbl_version;
+      // get actual schemas
+      src_scan_tags.clear();
+      for(int i = 0; i < scan_tags.size(); ++i) {
+        if (result_scan_tags[i] >= src_tag_partition_tbl->getIncludeDroppedSchemaInfos().size()) {
+          src_scan_tags.push_back(INVALID_COL_IDX);
+        } else {
+          src_scan_tags.push_back(result_scan_tags[i]);
+        }
+      }
+    }
+    //3. read data
+    src_tag_partition_tbl->startRead();
+    // tag column
+    int err_code = 0;
+    if ((err_code = src_tag_partition_tbl->getColumnsByRownum(
+            row, src_scan_tags,
+            result_tag_version_obj->getIncludeDroppedSchemaInfos(),
+            res)) < 0) {
+      src_tag_partition_tbl->stopRead();
+      return err_code;
+    }
+    src_tag_partition_tbl->stopRead();
+    fetch_count++;
+  }  // end for primary_tags
+  *count = fetch_count;
+  return 0;
 }
 
 // query tag by rownum
@@ -459,6 +555,63 @@ int TagTable::initHashIndex(int flags, ErrorInfo& err_info) {
   return err_info.errcode;
 }
 
+int TagTable::initPrevEntityRowData(ErrorInfo& err_info) {
+  // 1. load all versions id
+  std::vector<std::pair<uint32_t, TagPartitionTable*>> all_partition_tbls;
+  m_partition_mgr_->GetAllPartitionTables(all_partition_tbls);
+  // 2. init data into entity index file
+  for (const auto it : all_partition_tbls) {
+    auto src_tag_partition_tbl = it.second;
+    src_tag_partition_tbl->startRead();
+    for (int row = 1; row <= src_tag_partition_tbl->size(); row++) {
+      if (src_tag_partition_tbl->isValidRow(row)){
+        std::vector<kwdbts::EntityResultIndex> entity_id_list;
+        if (!EngineOptions::isSingleNode()) {
+          uint32_t hps;
+          src_tag_partition_tbl->getHashpointByRowNum(row, &hps);
+          src_tag_partition_tbl->getHashedEntityIdByRownum(row, hps, &entity_id_list);
+        } else {
+          src_tag_partition_tbl->getEntityIdByRownum(row, &entity_id_list);
+        }
+        for (int idx = 0; idx < entity_id_list.size(); idx++) {
+          uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id_list[idx].entityId) << 32) | entity_id_list[idx].subGroupId;
+          if (m_entity_row_index_->put(reinterpret_cast<const char *>(&joint_entity_id), sizeof(uint64_t), it.first, row) < 0) {
+            LOG_ERROR("insert entity row hash index data failed. table_version: %u row_no: %lu ", it.first, row);
+            src_tag_partition_tbl->stopRead();
+            return -1;
+          }
+        }
+      }
+    }
+    src_tag_partition_tbl->stopRead();
+  }
+  return 0;
+}
+
+int TagTable::initEntityRowHashIndex(int flags, ErrorInfo& err_info) {
+  string index_name = std::to_string(m_table_id) + ".tag"+ ".et";
+  m_entity_row_index_ = new MMapEntityRowHashIndex();
+  if (flags & MMAP_OPEN_NORECURSIVE) {
+    if (!IsExists(m_db_path_ + m_tbl_sub_path_ + index_name)) {
+      flags = MMAP_CREAT_EXCL;
+    }
+  }
+  err_info.errcode = m_entity_row_index_->open(index_name, m_db_path_, m_tbl_sub_path_,
+                                    flags, err_info);
+  if (err_info.errcode < 0) {
+    delete m_entity_row_index_;
+    m_entity_row_index_ = nullptr;
+    err_info.errmsg = "create EntityRow Hash Index failed.";
+    LOG_ERROR("failed to open the tag hash index file %s%s, error: %s",
+              m_tbl_sub_path_.c_str(), index_name.c_str(), err_info.errmsg.c_str())
+    return err_info.errcode;
+  }
+  if (flags & MMAP_CREAT_EXCL) {
+    err_info.errcode = initPrevEntityRowData(err_info);
+  }
+  return err_info.errcode;
+}
+
 int TagTable::loadAllVersions(std::vector<TableVersion>& all_versions, ErrorInfo& err_info) {
   string real_path = m_db_path_ + m_tbl_sub_path_;
   // Load all versions of root table
@@ -509,6 +662,7 @@ void TagTable::sync_with_lsn(kwdbts::TS_LSN lsn) {
     (void)part_table->stopRead();
   }
   m_index_->setLSN(lsn);
+  m_entity_row_index_->setLSN(lsn);
   return ;
 }
 // snapshot using this sync
@@ -655,8 +809,13 @@ int TagTable::DeleteForUndo(uint32_t group_id, uint32_t entity_id,
     LOG_ERROR("insert hash index data failed. table_version: %u row_no: %lu ", tbl_version, row_no);
     return -1;
   }
-
-  // 5. set undelete mark
+  // 5. insert entity row index data
+  uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id) << 32) | group_id;
+  if (m_entity_row_index_->put(reinterpret_cast<const char *>(&joint_entity_id), sizeof(uint64_t), tbl_version, row_no) < 0) {
+    LOG_ERROR("insert entity row hash index data failed. table_version: %u row_no: %lu ", tbl_version, row_no);
+    return -1;
+  }
+  // 6. set undelete mark
   tag_partition_table->startRead();
   tag_partition_table->unsetDeleteMark(row_no);
   tag_partition_table->stopRead();
@@ -681,7 +840,11 @@ int TagTable::DeleteForRedo(uint32_t group_id, uint32_t entity_id,
   tag_partition_table->startRead();
   tag_partition_table->setDeleteMark(ret.second);
   tag_partition_table->stopRead();
+  // 3. delete index record
   auto ret_del = m_index_->delete_data(primary_tag.data, primary_tag.len);
+  // 4. delete entity row index record
+  uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id) << 32) | group_id;
+  ret_del = m_entity_row_index_->delete_data(reinterpret_cast<const char *>(&joint_entity_id));
 
   return 0;
 }
@@ -706,6 +869,9 @@ int TagTable::UpdateForRedo(uint32_t group_id, uint32_t entity_id,
     tag_partition_table->stopRead();
     // delete index data
     auto ret_del = m_index_->delete_data(primary_tag.data, primary_tag.len);
+    // delete entity row index data
+    uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id) << 32) | group_id;
+    ret_del = m_entity_row_index_->delete_data(reinterpret_cast<const char *>(&joint_entity_id));
   }
   return InsertTagRecord(payload, group_id, entity_id);
 }
@@ -748,6 +914,13 @@ int TagTable::UpdateForUndo(uint32_t group_id, uint32_t entity_id, const TSSlice
     LOG_ERROR("UpdateForUndo insert hash index failed");
     return -1;
   }
+  // 2. put entity row index record
+  uint64_t joint_entity_id = (static_cast<uint64_t>(entity_id) << 32) | group_id;
+  if (m_entity_row_index_->put(reinterpret_cast<const char *>(&joint_entity_id), sizeof(uint64_t), tag_partition_version, row_no) < 0) {
+    LOG_ERROR("insert entity row hash index data failed. table_version: %u row_no: %lu ", tag_partition_version, row_no);
+    return -1;
+  }
+
   tag_partition_table->startRead();
   tag_partition_table->unsetDeleteMark(row_no);
   tag_partition_table->stopRead();
@@ -937,6 +1110,17 @@ void TagPartitionTableManager::GetAllPartitionTablesLessVersion(std::vector<TagP
   for (const auto& it : m_partition_tables_) {
     if (it.first <= max_table_version) {
       tag_part_tables.push_back(it.second);
+    }
+  }
+  unLock();
+  return ;
+}
+
+void TagPartitionTableManager::GetAllPartitionTables(std::vector<std::pair<uint32_t, TagPartitionTable*>>& tag_part_tables) {
+  rdLock();
+  for (const auto& it : m_partition_tables_) {
+    if (it.second != nullptr) {
+      tag_part_tables.push_back(it);
     }
   }
   unLock();

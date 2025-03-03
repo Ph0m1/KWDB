@@ -202,8 +202,8 @@ message TSReaderSpec {
   repeated TsSpan ts_spans = 1;
   // table id
   required uint64 tableID = 2;
-  // use statistic flag
-  required bool useStatistic = 3;
+  // use offsetOpt flag
+  required bool offsetOpt = 3;
 
   //all cols meta，have not col id
   repeated TSCol colMetas = 4;

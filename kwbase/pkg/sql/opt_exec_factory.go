@@ -1030,14 +1030,77 @@ func (ef *execFactory) ConstructLimit(
 		engine = tree.EngineTypeTimeseries
 	}
 
-	return &limitNode{
+	node := &limitNode{
 		plan:               plan,
 		countExpr:          limit,
 		offsetExpr:         offset,
 		engine:             engine,
-		canOpt:             tryOptLimitOrder(meta, limitExpr, limit, ef.planner.SessionData().MaxPushLimitNumber),
 		pushLimitToAggScan: getLimitOpt(limitExpr),
-	}, nil
+	}
+	if limit != nil {
+		node.canOpt = tryOptLimitOrder(meta, limitExpr, limit, ef.planner.SessionData().MaxPushLimitNumber)
+	} else {
+		canOpt := (ef.planner.execCfg.StartMode == StartSingleNode) && tryOffsetOpt(meta, limitExpr, offset) &&
+			checkFilterForOffsetOpt(input)
+		if canOpt {
+			// offset optimize must have limitNode and limit count less than MaxPushLimitNumber
+			if v, ok := input.(*limitNode); ok {
+				count, ok1 := v.countExpr.(*tree.DInt)
+				offset, ok2 := offset.(*tree.DInt)
+				if ok1 && ok2 && (int64(*count)-int64(*offset) < ef.planner.SessionData().MaxPushLimitNumber) {
+					node.countExpr = v.countExpr
+					node.plan = applyOffsetOptimize(v.plan, false).(planNode)
+					node.canOpt = true
+				}
+			}
+		}
+	}
+	return node, nil
+}
+
+// checkFilterForOffsetOpt  we can not use offset optimize that have normal col filter,
+// normal col filter can exists tsScanNode filter or filterNode
+func checkFilterForOffsetOpt(input exec.Node) bool {
+	switch t := input.(type) {
+	case *tsScanNode:
+		return t.filter == nil
+	case *synchronizerNode:
+		return checkFilterForOffsetOpt(t.plan)
+	case *sortNode:
+		return checkFilterForOffsetOpt(t.plan)
+	case *limitNode:
+		return checkFilterForOffsetOpt(t.plan)
+	case *renderNode:
+		return checkFilterForOffsetOpt(t.source.plan)
+	}
+
+	return false
+}
+
+// applyOffsetOptimize apply offset optimize need deal
+// 1 delete synchronizeNode, offset optimize can not support parrelle
+// 2 delete limitNode, push limit count to tsscan node
+// 2 add ordered type for tsScanNode according order by ts direction,
+// reverse set OrderedScan, otherwise set ForceOrderedScan
+func applyOffsetOptimize(src exec.Node, reverse bool) exec.Node {
+	switch t := src.(type) {
+	case *tsScanNode:
+		if reverse {
+			t.orderedType = opt.OrderedScan
+		} else {
+			t.orderedType = opt.ForceOrderedScan
+		}
+		return t
+	case *sortNode:
+		return applyOffsetOptimize(t.plan, t.ordering[0].Direction == encoding.Descending)
+	case *synchronizerNode:
+		return applyOffsetOptimize(t.plan, reverse).(planNode)
+	case *renderNode:
+		t.source.plan = applyOffsetOptimize(t.source.plan, reverse).(planNode)
+		return t
+	}
+
+	return src
 }
 
 // ConstructMax1Row is part of the exec.Factory interface.
@@ -2617,6 +2680,29 @@ func tryOptLimitOrder(
 	return false
 }
 
+// tryOffsetOpt check if limit offset and sort can optimize.
+// meta is metadata.
+// e is memo.LimitExpr
+// offset is offset value
+func tryOffsetOpt(meta *opt.Metadata, e memo.RelExpr, offset tree.TypedExpr) bool {
+	if _, ok := offset.(*tree.DInt); !ok {
+		return false
+	}
+	if e.IsTSEngine() {
+		if l, ok := e.(*memo.OffsetExpr); ok {
+			// need order by ts col
+			if limit, ok := l.Input.(*memo.LimitExpr); ok {
+				if sort, ok := limit.Input.(*memo.SortExpr); ok {
+					return walkSort(meta, sort)
+				}
+			}
+
+			return false
+		}
+	}
+	return false
+}
+
 // walkSort check if sort only order by timestamp column,
 // and child are only ProjectExpr, SelectExpr, TSScanExpr.
 // meta is metadata.
@@ -2632,6 +2718,7 @@ func walkSort(meta *opt.Metadata, expr memo.RelExpr) bool {
 			col := meta.ColumnMeta(opt.ColumnID(v))
 			if col.Table.ColumnID(0) != col.MetaID {
 				orderTimestampCol = false
+				break
 			}
 		}
 		if orderTimestampCol {

@@ -5142,10 +5142,27 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 		if err := n.evalLimit(planCtx.EvalContext()); err != nil {
 			return PhysicalPlan{}, err
 		}
-		if err := plan.AddLimit(n.count, n.offset, planCtx, dsp.nodeDesc.NodeID, n.engine == tree.EngineTypeTimeseries); err != nil {
-			return PhysicalPlan{}, err
+
+		if n.offsetExpr != nil {
+			if !n.canOpt {
+				if err := plan.AddLimit(n.count, n.offset, planCtx, dsp.nodeDesc.NodeID,
+					n.engine == tree.EngineTypeTimeseries); err != nil {
+					return PhysicalPlan{}, err
+				}
+			} else {
+				if n.count == math.MaxInt64 {
+					n.count = 0
+				}
+				tsOffsetOptimize(&plan, uint32(n.count), uint32(n.offset))
+			}
+		} else {
+			if err := plan.AddLimit(n.count, n.offset, planCtx, dsp.nodeDesc.NodeID,
+				n.engine == tree.EngineTypeTimeseries); err != nil {
+				return PhysicalPlan{}, err
+			}
+
+			handleTSReaderPost(&plan, n.canOpt, n.pushLimitToAggScan)
 		}
-		handleTSReaderPost(&plan, n.canOpt, n.pushLimitToAggScan)
 
 	case *lookupJoinNode:
 		plan, err = dsp.createPlanForLookupJoin(planCtx, n)
@@ -6669,6 +6686,20 @@ func (p *PhysicalPlan) getLimitOffset() (
 		offset = uint32(p.Processors[p.ResultRouters[0]].Spec.Post.Offset)
 	}
 	return order, limit, offset
+}
+
+// tsOffsetOptimize pushs offset and limit to ts table reader spec
+func tsOffsetOptimize(p *PhysicalPlan, limit, offset uint32) {
+	for k, v := range p.Processors {
+		if v.TSSpec.Core.TableReader != nil {
+			if limit > 0 {
+				p.Processors[k].TSSpec.Post.Limit = limit - offset
+			}
+
+			p.Processors[k].TSSpec.Post.Offset = offset
+			p.Processors[k].TSSpec.Core.TableReader.OffsetOpt = true
+		}
+	}
 }
 
 // getSpans obtain the corresponding SpanPartition through the PartitionTSSpansByPrimaryTagValue() or

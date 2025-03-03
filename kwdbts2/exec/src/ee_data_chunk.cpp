@@ -16,6 +16,29 @@
 #include "ee_timestamp_utils.h"
 namespace kwdbts {
 
+class MemCompare {
+ public:
+  explicit MemCompare(DataChunk *chunk, bool is_reverse): chunk_(chunk), is_reverse_(is_reverse) {}
+
+  inline bool operator()(k_uint32 l1, k_uint32 r1) {
+    void *lptr = chunk_->GetData(l1, chunk_->ColumnNum() - 1);
+    void *rptr = chunk_->GetData(r1, chunk_->ColumnNum() - 1);
+    k_int64 l_ts = *(static_cast<k_int64*>(lptr));
+    k_int64 r_ts = *(static_cast<k_int64*>(rptr));
+    if (is_reverse_) {
+      return l_ts > r_ts;
+    } else {
+      return l_ts < r_ts;
+    }
+  }
+
+  DataChunk *chunk_{nullptr};
+  bool is_reverse_{false};
+};
+
+
+
+
 DataChunk::DataChunk(vector<ColumnInfo>& col_info, k_uint32 capacity) :
     col_info_(col_info), capacity_(capacity) {}
 
@@ -1390,5 +1413,18 @@ KStatus DataChunk::ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 co
   Return(KStatus::SUCCESS);
 }
 
+
+KStatus DataChunk::OffsetSort(std::vector<k_uint32> &selection, bool is_reverse) {
+  for (k_uint32 i = 0; i < count_; ++i) {
+    selection.push_back(i);
+  }
+  const auto it_begin = selection.begin();
+  auto it_end = selection.end();
+
+  MemCompare cmp(this, is_reverse);
+  std::sort(it_begin, it_end, cmp);
+
+  return KStatus::SUCCESS;
+}
 
 }   // namespace kwdbts

@@ -128,6 +128,9 @@ class TABLE {
   bool only_tag_{false};
   k_int32 ptag_size_{0};
   bool ordered_scan_{false};
+  bool optimize_offset_{false};
+  k_uint32 offset_{0};
+  k_uint32 limit_{0};
 
  protected:
   // relational fields for multiple model processing

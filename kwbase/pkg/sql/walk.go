@@ -483,7 +483,11 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 			v.expr(name, "count", -1, n.countExpr)
 			v.expr(name, "offset", -1, n.offsetExpr)
 			if n.canOpt {
-				v.observer.attr(name, "useSorterScan", "true")
+				if n.offsetExpr != nil {
+					v.observer.attr(name, "useOffsetOptimize", "true")
+				} else {
+					v.observer.attr(name, "useSorterScan", "true")
+				}
 			}
 		}
 		n.plan = v.visit(n.plan)

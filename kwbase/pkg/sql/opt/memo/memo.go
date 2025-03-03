@@ -1495,7 +1495,13 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 		return ret
 	case *OffsetExpr:
 		ret = m.CheckWhiteListAndAddSynchronizeImp(&source.Input)
-		ret.execInTSEngine = false
+		if ret.err != nil {
+			return ret.disableExecInTSEngine()
+		}
+		if ret.execInTSEngine {
+			addSynchronize(&ret.hasAddSynchronizer, source)
+			source.SetEngineTS()
+		}
 		return ret
 	case *ValuesExpr:
 		return ret

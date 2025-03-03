@@ -494,6 +494,8 @@ class TsTimePartition : public TSObject {
    */
   int RedoDelete(uint32_t entity_id, kwdbts::TS_LSN lsn, const vector<kwdbts::DelRowSpan>* rows, ErrorInfo& err_info);
 
+  int GetAllBlockItems(vector<uint32_t>& entity_ids, std::deque<BlockItem*>& block_items);
+
   int GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse = false);
 
   int GetAllBlockSpans(uint32_t entity_id, std::vector<KwTsSpan>& ts_spans, std::deque<BlockSpan>& block_spans,

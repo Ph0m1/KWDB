@@ -292,6 +292,9 @@ struct BlockSpan {
   BlockItem* block_item = nullptr;
   uint32_t start_row;             // first row is 0
   uint32_t row_num = 0;               // continuous num
+  uint32_t subgroup_id = 0;
+  timestamp64 min_ts = INT64_MAX;
+  timestamp64 max_ts = INT64_MIN;
 };
 
 /**
@@ -403,6 +406,14 @@ class MMapEntityBlockMeta : public MMapFile {
     assert(item_id > 0);
     return reinterpret_cast<BlockItem*>((intptr_t) getBlockItemOffset() +
                                         (item_id - block_item_offset_num_ - 1) * sizeof(BlockItem));
+  }
+
+  inline uint32_t GetMinBlockId() {
+    return block_item_offset_num_ + 1;
+  }
+
+  inline uint32_t GetMaxBlockId() {
+    return entity_header_->cur_block_id;
   }
 
   void to_string();

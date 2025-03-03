@@ -267,11 +267,13 @@ MMapTagColumnTable::~MMapTagColumnTable() {
 
   delete  m_bitmap_file_;
   delete  m_index_;
+  delete  m_entity_row_index_;
   delete  m_meta_file_;
   delete m_hps_file_;
 
   m_bitmap_file_ = nullptr;
   m_index_ = nullptr;
+  m_entity_row_index_ = nullptr;
   m_meta_file_ = nullptr;
   m_hps_file_ = nullptr;
 

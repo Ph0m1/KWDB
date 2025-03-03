@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <unordered_map>
 #include <memory>
 #include "lru_cache.h"
 #include "mmap/mmap_root_table_manager.h"
@@ -372,12 +373,36 @@ class TsSubGroupPTIterator {
     return true;
   }
 
+  inline const std::vector<timestamp64> GetPartitions() {
+    return partitions_;
+  }
+
  private:
   TsSubEntityGroup* sub_eg_{nullptr};
   std::vector<timestamp64> partitions_;
   bool reverse_traverse_{false};
   int cur_partition_idx_{0};
   TsTimePartition* cur_p_table_{nullptr};
+};
+
+class TsEntityGroupPTIterator {
+ public:
+  TsEntityGroupPTIterator() {}
+
+  ~TsEntityGroupPTIterator() {
+    cur_p_table_.clear();
+    partition_table_iter_.clear();
+  }
+
+  void push_back(uint32_t subgroup_id, std::shared_ptr<TsSubGroupPTIterator>& p_iter) {
+    partition_table_iter_[subgroup_id] = p_iter;
+  }
+
+  KStatus Next(uint32_t subgroup_id, TsTimePartition** p_table);
+
+ private:
+  unordered_map<uint32_t, std::shared_ptr<TsSubGroupPTIterator>> partition_table_iter_;
+  unordered_map<uint32_t, TsTimePartition*> cur_p_table_;
 };
 
 }  // namespace kwdbts

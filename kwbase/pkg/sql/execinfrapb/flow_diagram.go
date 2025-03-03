@@ -264,8 +264,8 @@ func (tr *TSReaderSpec) summary() (string, []string) {
 		fmt.Sprintf("TableID: %v", tr.TableID),
 	}
 
-	if tr.UseStatistic {
-		details = append(details, fmt.Sprintf("Use statistic: %v", tr.UseStatistic))
+	if tr.OffsetOpt {
+		details = append(details, "Offset optimize")
 	}
 
 	if tr.OrderedScan {
@@ -310,13 +310,6 @@ func (tr *TSTagReaderSpec) summary() (string, []string) {
 	}
 	for _, val := range tr.PrimaryTags {
 		res = append(res, fmt.Sprintf("ptag [%v]: %v", val.Colid, val.TagValues))
-	}
-	res = append(res, "RangeSpans: ")
-	for _, val := range tr.RangeSpans {
-		res = append(res, fmt.Sprintf("Hashpoint: %v", val.Hashpoint))
-		for _, v := range val.Tspans {
-			res = append(res, fmt.Sprintf("[%v - %v]", v.FromTimeStamp, v.ToTimeStamp))
-		}
 	}
 
 	return "TagReader", res

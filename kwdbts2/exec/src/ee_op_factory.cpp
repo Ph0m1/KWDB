@@ -90,7 +90,7 @@ KStatus OpFactory::NewTableScan(kwdbContext_p ctx, TsFetcherCollection* collecti
         const_cast<TSReaderSpec*>(&readerSpec),
         const_cast<TSPostProcessSpec*>(&post), *table, childIterator,
         processor_id);
-  } else if (readerSpec.has_sorter()) {
+  } else if (readerSpec.has_sorter() || readerSpec.offsetopt()) {
     *iterator = NewIterator<SortScanOperator>(collection,
         const_cast<TSReaderSpec*>(&readerSpec),
         const_cast<TSPostProcessSpec*>(&post), *table, childIterator, processor_id);

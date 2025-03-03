@@ -143,7 +143,7 @@ class TestTsBLockItemMaxNoCore : public TestBigTableInstance {
     delete table_;
   }
 
-  int GetIterRows(TsIterator* iter1, k_uint32 scan_cols_size) {
+  int GetIterRows(TsStorageIterator* iter1, k_uint32 scan_cols_size) {
     ResultSet res{scan_cols_size};
     k_uint32 ret_cnt;
     int total_rows = 0;
@@ -239,8 +239,9 @@ TEST_F(TestTsBLockItemMaxNoCore, mulitiInsert) {
   ts_spans.push_back(ts_span);
   std::vector<k_uint32> scan_cols = {0};
   std::vector<Sumfunctype> scan_agg_types;
-  TsIterator* iter1;
-  ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId}, ts_spans,
+  TsStorageIterator* iter1;
+  auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
+  ASSERT_EQ(entity_group_leader_->GetIterator(ctx_, entity_id_list[0].subGroupId, {entity_id_list[0].entityId}, ts_spans, ts_type,
     scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_leader_, {}, false, false), KStatus::SUCCESS);
   int iter_count = GetIterRows(iter1, scan_cols.size());
   EXPECT_TRUE(iter_count % batch_count == 0);

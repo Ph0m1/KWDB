@@ -16,6 +16,7 @@
 #include "big_table.h"
 #include "mmap_object.h"
 #include "mmap_hash_index.h"
+#include "mmap_entity_row_hash_index.h"
 #include "ts_common.h"
 #include "lg_api.h"
 #include "payload.h"
@@ -266,6 +267,7 @@ class MMapTagColumnTable: public TSObject {
   TagColumn*               m_meta_file_{nullptr};
   TagColumn*               m_hps_file_{nullptr};
   MMapHashIndex*           m_index_{nullptr};
+  MMapEntityRowHashIndex*  m_entity_row_index_{nullptr};
   TagTableMutex*  m_tag_table_mutex_;
   TagTableRWLatch*  m_tag_table_rw_lock_;
   std::vector<TagInfo>     m_tag_info_include_dropped_;

@@ -149,8 +149,8 @@ message TSReaderSpec {
   repeated TsSpan ts_spans = 1 [(gogoproto.nullable) = false];
   // table id
   required uint64 tableID = 2 [(gogoproto.nullable) = false];
-  // use statistic flag
-  required bool useStatistic = 3 [(gogoproto.nullable) = false];
+  // use offsetOpt flag
+  required bool offsetOpt = 3 [(gogoproto.nullable) = false];
 
   // Metadata for all columns, excluding column ids
   repeated sqlbase.TSCol colMetas = 4;

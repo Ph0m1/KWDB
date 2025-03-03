@@ -57,6 +57,8 @@ class EntityBlockMetaManager {
   std::vector<uint32_t> getEntities() { return entity_block_metas_[0]->getEntities(); }
   MMapEntityBlockMeta* GetFirstMeta() { return entity_block_metas_[0]; }
 
+  int GetAllBlockItems(vector<uint32_t>& entity_ids, std::deque<BlockItem*>& block_items);
+
   /**
    * @brief	get all blockitem objects of entity.
    * @return	0 succeed, otherwise -1.

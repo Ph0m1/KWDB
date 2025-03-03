@@ -239,14 +239,14 @@ class TsFirstLastRow {
  * @brief This is the iterator base class implemented internally in the storage layer, and its two derived classes are:
  *        (1) TsRawDataIterator, used for raw data queries (2) TsAggIterator, used for aggregate queries
  */
-class TsIterator {
+class TsStorageIterator {
  public:
-  TsIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
-             vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
+  TsStorageIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
+             vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans, DATATYPE ts_col_type,
              std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
              uint32_t table_version);
 
-  virtual ~TsIterator();
+  virtual ~TsStorageIterator();
 
   virtual KStatus Init(bool is_reversed);
 
@@ -326,6 +326,7 @@ class TsIterator {
   std::vector<k_uint32> ts_scan_cols_;
   // column attributes
   vector<AttributeInfo> attrs_;
+  DATATYPE ts_col_type_;
     // table version
   uint32_t table_version_;
   TsTimePartition* cur_partition_table_ = nullptr;
@@ -345,12 +346,12 @@ class TsIterator {
 };
 
 // used for raw data queries
-class TsRawDataIterator : public TsIterator {
+class TsRawDataIterator : public TsStorageIterator {
  public:
   TsRawDataIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
-                    vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
+                    vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans, DATATYPE ts_col_type,
                     std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols, uint32_t table_version) :
-                    TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
+                    TsStorageIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, ts_col_type,
                                kw_scan_cols, ts_scan_cols, table_version) {}
 
   /**
@@ -366,13 +367,13 @@ class TsRawDataIterator : public TsIterator {
   KStatus Next(ResultSet* res, k_uint32* count, bool* is_finished, timestamp64 ts = INVALID_TS) override;
 };
 
-class TsSortedRowDataIterator : public TsIterator {
+class TsSortedRowDataIterator : public TsStorageIterator {
  public:
   TsSortedRowDataIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
-                          vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
+                          vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans, DATATYPE ts_col_type,
                           std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
                           uint32_t table_version, SortOrder order_type = ASC) :
-      TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans,
+      TsStorageIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, ts_col_type,
                  kw_scan_cols, ts_scan_cols, table_version), order_type_(order_type) {}
 
   KStatus Init(bool is_reversed) override;
@@ -399,14 +400,14 @@ class TsSortedRowDataIterator : public TsIterator {
 };
 
 // used for aggregate queries
-class TsAggIterator : public TsIterator {
+class TsAggIterator : public TsStorageIterator {
  public:
   TsAggIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
-                vector<uint32_t>& entity_ids, vector<KwTsSpan>& ts_spans,
+                vector<uint32_t>& entity_ids, vector<KwTsSpan>& ts_spans, DATATYPE ts_col_type,
                 std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
                 std::vector<Sumfunctype>& scan_agg_types, std::vector<timestamp64>& ts_points, uint32_t table_version) :
-                TsIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, kw_scan_cols,
-                           ts_scan_cols, table_version), scan_agg_types_(scan_agg_types) {
+                TsStorageIterator(entity_group, entity_group_id, subgroup_id, entity_ids, ts_spans, ts_col_type,
+                                  kw_scan_cols, ts_scan_cols, table_version), scan_agg_types_(scan_agg_types) {
     // When creating an aggregate query iterator, the elements of the ts_scan_cols_ and scan_agg_types_ arrays
     // correspond one-to-one, and their lengths must be consistent.
     assert(scan_agg_types_.empty() || ts_scan_cols_.size() == scan_agg_types_.size());
@@ -615,19 +616,27 @@ class TsAggIterator : public TsIterator {
   bool only_count_ts_ = false;
 };
 
+class TsIterator {
+ public:
+  virtual ~TsIterator() {}
+  virtual bool IsDisordered() = 0;
+  virtual uint32_t GetFilterCount() = 0;
+  virtual KStatus Next(ResultSet* res, k_uint32* count, timestamp64 ts = INVALID_TS) = 0;
+};
+
 /**
  * @brief The iterator class provided to the execution layer.
  */
-class TsTableIterator {
+class TsTableIterator : public TsIterator {
  public:
   TsTableIterator() : latch_(LATCH_ID_TSTABLE_ITERATOR_MUTEX) {}
-  ~TsTableIterator() {
+  ~TsTableIterator() override {
     for (auto iter : iterators_) {
       delete iter;
     }
   }
 
-  void AddEntityIterator(TsIterator* iter) {
+  void AddEntityIterator(TsStorageIterator* iter) {
     iterators_.push_back(iter);
   }
 
@@ -638,8 +647,12 @@ class TsTableIterator {
   /**
    * @brief Check whether the partition table of entity being queried is disordered.
    */
-  bool IsDisordered() {
+  bool IsDisordered() override {
     return iterators_[current_iter_]->IsDisordered();
+  }
+
+  uint32_t GetFilterCount() override {
+    return 0;
   }
 
   /**
@@ -648,13 +661,102 @@ class TsTableIterator {
    * @param res     the set of returned query results
    * @param count   number of rows of data
    */
-  KStatus Next(ResultSet* res, k_uint32* count, timestamp64 ts = INVALID_TS);
+  KStatus Next(ResultSet* res, k_uint32* count, timestamp64 ts = INVALID_TS) override;
 
  private:
   KLatch latch_;
   size_t current_iter_ = 0;
-  // an array of TsIterator objects, where one TsIterator corresponds to the data of a subgroup
-  std::vector<TsIterator*> iterators_;
+  // an array of TsStorageIterator objects, where one TsStorageIterator corresponds to the data of a subgroup
+  std::vector<TsStorageIterator*> iterators_;
+};
+
+class TsOffsetIterator : public TsIterator {
+ public:
+  TsOffsetIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id,
+                   std::map<SubGroupID, std::vector<EntityID>>& entity_ids, std::vector<KwTsSpan>& ts_spans,
+                   DATATYPE ts_col_type, std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
+                   uint32_t table_version, uint32_t offset, uint32_t limit);
+
+  ~TsOffsetIterator() override;
+
+  KStatus Init(bool is_reversed);
+
+  // not available!!!
+  bool IsDisordered() override {
+    return false;
+  }
+
+  uint32_t GetFilterCount() override {
+    return filter_cnt_;
+  }
+
+  KStatus Next(ResultSet* res, k_uint32* count, timestamp64 ts = INVALID_TS) override;
+
+ private:
+  KStatus divideBlockSpans(timestamp64 begin_ts, timestamp64 end_ts,
+                           uint32_t* lower_cnt, deque<BlockSpan>& lower_block_span_);
+  KStatus filterLower(uint32_t* cnt);
+  KStatus filterUpper(uint32_t filter_num, uint32_t* cnt);
+
+  int nextBlockSpan();
+  KStatus fetchBlockItems(uint32_t subgroup_id, uint32_t* cnt);
+
+  inline void GetTerminationTime() {
+    switch (ts_col_type_) {
+      case TIMESTAMP64_LSN:
+      case TIMESTAMP64:
+        t_time_ = 10;
+        break;
+      case TIMESTAMP64_LSN_MICRO:
+      case TIMESTAMP64_MICRO:
+        t_time_ = 10000;
+        break;
+      case TIMESTAMP64_LSN_NANO:
+      case TIMESTAMP64_NANO:
+        t_time_ = 10000000;
+        break;
+      default:
+        assert(false);
+        break;
+    }
+  }
+
+ private:
+  KLatch latch_;
+  uint64_t entity_group_id_{0};
+  std::map<SubGroupID, std::vector<EntityID>> entity_ids_;
+  // map<timestamp, {subgroup_id}>
+  map<timestamp64, vector<uint32_t>> p_times_;
+  map<timestamp64, vector<uint32_t>>::iterator p_time_it_;
+  // unordered_map<subgroup_id, TsSubGroupPTIterator>
+  unordered_map<uint32_t, std::shared_ptr<TsSubGroupPTIterator>> partition_table_iter_;
+  unordered_map<uint32_t, TsTimePartition*> cur_partition_table_;
+  // the data time range queried by the iterator
+  std::vector<KwTsSpan> ts_spans_;
+
+  // column attributes
+  vector<AttributeInfo> attrs_;
+  DATATYPE ts_col_type_;
+  // column index
+  std::vector<k_uint32> kw_scan_cols_;
+  std::vector<k_uint32> ts_scan_cols_;
+  std::shared_ptr<TsEntityGroup> entity_group_;
+  std::pair<uint32_t, MMapSegmentTableIterator*> segment_iter_ = {0, nullptr};
+
+  uint32_t table_version_;
+  bool is_reversed_ = false;
+  BlockSpan cur_block_span_;
+  std::deque<BlockSpan> filter_block_spans_;
+  std::deque<BlockSpan> block_spans_;
+
+  int32_t offset_;
+  int32_t limit_;
+  int32_t filter_cnt_ = 0;
+  bool filter_end_ = false;
+  int32_t deviation_ = 1000;
+
+  int32_t queried_cnt = 0;
+  timestamp t_time_ = 0;
 };
 
 }  //  namespace kwdbts

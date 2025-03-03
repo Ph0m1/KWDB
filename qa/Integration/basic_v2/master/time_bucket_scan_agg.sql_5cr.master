@@ -2097,6 +2097,7 @@ OFFSET 2;
                                    | distributed         | true
                                    | vectorized          | false
   render                           |                     |
+   │                               | engine type         | time series
    │                               | k_timestamp_b       | k_timestamp_b
    │                               | hostname            | any_not_null
    │                               | sum                 | sum
@@ -2106,6 +2107,7 @@ OFFSET 2;
    │                               | last_row            | last_row
    │                               | last_ts             | lastts
    └── limit                       |                     |
+        │                          | engine type         | time series
         │                          | offset              | 2
         └── sort                   |                     |
              │                     | order               | +k_timestamp_b,+lastts
@@ -2143,7 +2145,7 @@ OFFSET 2;
                                    | spans:toTime        | 2023-12-31 23:59:59.999 +0000 UTC
                                    | tag filter[0]       | hostname = 'host_1'
                                    | tag filter[1]       | region = 'aaa'
-(49 rows)
+(51 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        min(usage_iowait),
@@ -2442,6 +2444,7 @@ OFFSET 1;
                                         | distributed         | true
                                         | vectorized          | false
   render                                |                     |
+   │                                    | engine type         | time series
    │                                    | k_timestamp_b       | k_timestamp_b
    │                                    | hostname            | hostname
    │                                    | count               | count
@@ -2450,6 +2453,7 @@ OFFSET 1;
    │                                    | first_row           | first_row
    │                                    | last_ts             | lastts
    └── limit                            |                     |
+        │                               | engine type         | time series
         │                               | offset              | 1
         └── limit                       |                     |
              │                          | engine type         | time series
@@ -2491,7 +2495,7 @@ OFFSET 1;
                                         | access mode         | tableTableMeta
                                         | spans:fromTime      | 2023-01-01 00:00:00 +0000 UTC
                                         | spans:toTime        | 2023-12-31 23:59:59.999 +0000 UTC
-(52 rows)
+(54 rows)
 > explain SELECT time_bucket(k_timestamp, '2s') as k_timestamp_b,
        hostname,
        firstts(usage_iowait), last (usage_user), min (usage_steal),

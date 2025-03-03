@@ -37,7 +37,7 @@
 namespace kwdbts {
 
 class TsEntityGroup;
-class TsIterator;
+class TsStorageIterator;
 class TagIterator;
 class MetaIterator;
 class EntityGroupTagIterator;
@@ -356,33 +356,43 @@ class TsTable {
   virtual KStatus DeleteExpiredData(kwdbContext_p ctx, int64_t end_ts);
 
   /**
-    * @brief Create the iterator TsIterator for the timeline and query the data of all entities within the Leader EntityGroup
+    * @brief Create the iterator TsStorageIterator for the timeline and query the data of all entities within the Leader EntityGroup
     * @param[in] ts_span
     * @param[in] scan_cols  column to read
     * @param[in] scan_agg_types Read column agg type array for filtering block statistics information
     * @param[in] table_version The maximum table version that needs to be queried
-    * @param[out] TsIterator*
+    * @param[out] TsStorageIterator*
     */
+  virtual KStatus GetNormalIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
+                                    std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
+                                    std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
+                                    TsIterator** iter, std::vector<timestamp64> ts_points,
+                                    bool reverse, bool sorted);
+
+  virtual KStatus GetOffsetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
+                                    vector<KwTsSpan>& ts_spans, std::vector<k_uint32> scan_cols, k_uint32 table_version,
+                                    TsIterator** iter, k_uint32 offset, k_uint32 limit, bool reverse);
+
   virtual KStatus GetIterator(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                               std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
-                              TsTableIterator** iter, std::vector<timestamp64> ts_points,
-                              bool reverse, bool sorted);
+                              TsIterator** iter, std::vector<timestamp64> ts_points,
+                              bool reverse, bool sorted, k_uint32 offset = 0, k_uint32 limit = 0);
 
   virtual KStatus GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats);
 
   /**
-    * @brief Create the iterator TsIterator in the order of entity_ids for the timeline and query the data of all entities within the Leader EntityGroup for multiple model processing
+    * @brief Create the iterator TsStorageIterator in the order of entity_ids for the timeline and query the data of all entities within the Leader EntityGroup for multiple model processing
     * @param[in] ts_span
     * @param[in] scan_cols  column to read
     * @param[in] scan_agg_types Read column agg type array for filtering block statistics information
     * @param[in] table_version The maximum table version that needs to be queried
-    * @param[out] TsIterator*
+    * @param[out] TsStorageIterator*
     */
   virtual KStatus GetIteratorInOrder(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_ids,
                               std::vector<KwTsSpan> ts_spans, std::vector<k_uint32> scan_cols,
                               std::vector<Sumfunctype> scan_agg_types, k_uint32 table_version,
-                              TsTableIterator** iter, std::vector<timestamp64> ts_points,
+                              TsIterator** iter, std::vector<timestamp64> ts_points,
                               bool reverse, bool sorted);
 
   /**
@@ -400,9 +410,22 @@ class TsTable {
                   std::vector<EntityResultIndex>* entity_id_list, ResultSet* res,
                   uint32_t* count, uint32_t table_version = 1);
 
+  /**
+ * @brief get entity row
+ * @param[in] scan_tags    scan tag
+ * @param[in] entityId List
+ * @param[out] res
+ * @param[out] count
+ *
+ * @return KStatus
+ */
+  virtual KStatus
+  GetTagList(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_id_list,
+             const std::vector<uint32_t>& scan_tags, ResultSet* res, uint32_t* count,
+             uint32_t table_version);
 
   /**
-   * @brief Create an iterator TsIterator for Tag tables
+   * @brief Create an iterator TsStorageIterator for Tag tables
    * @param[in] scan_tags tag index
    * @param[out] TagIterator**
    */
@@ -737,29 +760,54 @@ class TsEntityGroup {
                   ResultSet* res, uint32_t* count, uint32_t table_version = 1);
 
   /**
+ * @brief Obtain entityId List based on conditions
+ * @param[in] scan_tags    scan tag
+ * @param[in] entityId List
+ * @param[out] res
+ * @param[out] count
+ *
+ * @return KStatus
+ */
+  virtual KStatus
+  GetTagList(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_id_list,
+             const std::vector<uint32_t>& scan_tags, ResultSet* res, uint32_t* count, uint32_t table_version);
+
+  /**
    * @brief Creating an Iterator for Timetable
    * @param[in] entity_id entity id
    * @param[in] ts_span
    * @param[in] scan_cols column index
    * @param[in] scan_agg_types Read column agg type array for filtering block statistics information
    * @param[in] table_version The maximum table version that needs to be queried
-   * @param[out] TsIterator*
+   * @param[out] TsStorageIterator*
    */
   virtual KStatus GetIterator(kwdbContext_p ctx, SubGroupID sub_group_id,
                               vector<uint32_t> entity_ids,
                               std::vector<KwTsSpan> ts_spans,
+                              DATATYPE ts_col_type,
                               std::vector<k_uint32> scan_cols,
                               std::vector<k_uint32> ts_scan_cols,
                               std::vector<Sumfunctype> scan_agg_types,
-                              uint32_t table_version, TsIterator** iter,
+                              uint32_t table_version, TsStorageIterator** iter,
                               std::shared_ptr<TsEntityGroup> entity_group,
                               std::vector<timestamp64> ts_points,
                               bool reverse, bool sorted);
 
+  virtual KStatus GetOffsetIterator(kwdbContext_p ctx, std::map<SubGroupID, std::vector<EntityID>> entity_ids,
+                                    std::vector<KwTsSpan> ts_spans, DATATYPE ts_col_type,
+                                    std::vector<k_uint32> scan_cols, std::vector<k_uint32> ts_scan_cols,
+                                    uint32_t table_version, TsIterator** iter,
+                                    std::shared_ptr<TsEntityGroup> entity_group,
+                                    k_uint32 offset, k_uint32 limit, bool reverse);
+
+  inline k_uint32 GetSubGroupNum() {
+    return ebt_manager_->GetMaxSubGroupId();
+  }
+
   virtual KStatus GetUnorderedDataInfo(kwdbContext_p ctx, const KwTsSpan ts_span, UnorderedDataStats* stats);
 
   /**
-   * @brief Create an iterator TsIterator for Tag tables
+   * @brief Create an iterator TsStorageIterator for Tag tables
    * @param[in] scan_tags tag index
    * @param[out] TagIterator**
    */

@@ -65,8 +65,8 @@ class TestEngineWAL : public TestBigTableInstance {
       k_uint32 entity_id = 1;
       SubGroupID group_id = 1;
       while (entity_id <= entity_num) {
-        TsIterator* iter1;
-        entity_group->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types,
+        TsStorageIterator* iter1;
+        entity_group->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scan_cols, scan_cols, scan_agg_types,
                                   table_version, &iter1, entity_group, {}, false, false);
         total_rows += GetIterRows(iter1, scan_cols.size());
         entity_id++;
@@ -77,7 +77,7 @@ class TestEngineWAL : public TestBigTableInstance {
     return total_rows;
   }
 
-  k_uint32 GetIterRows(TsIterator* iter1, k_uint32 scancol_num) {
+  k_uint32 GetIterRows(TsStorageIterator* iter1, k_uint32 scancol_num) {
     ResultSet res{scancol_num};
     k_uint32 ret_cnt;
     k_uint32 total_rows = 0;

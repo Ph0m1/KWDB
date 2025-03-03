@@ -38,7 +38,7 @@
 namespace kwdbts {
 
 class TsTable;
-class TsTableIterator;
+class TsIterator;
 class TagIterator;
 class BaseEntityIterator;
 class TABLE;
@@ -69,6 +69,8 @@ class StorageHandler {
 
   void SetReadMode(TSTableReadMode read_mode) { read_mode_ = read_mode; }
 
+  k_uint32 GetStorageOffset();
+
   /**
    * @brief             init
    *
@@ -96,6 +98,8 @@ class StorageHandler {
    * @return EEIteratorErrCode
    */
   virtual EEIteratorErrCode TsNext(kwdbContext_p ctx);
+
+  virtual EEIteratorErrCode TsOffsetNext(kwdbContext_p ctx);
 
   /**
    * @brief           read data
@@ -157,13 +161,14 @@ class StorageHandler {
                     const vector<k_uint32> tag_other_join_cols);
   void SetTagScan(TagScanBaseOperator* tag_scan) { tag_scan_ = tag_scan; }
 
+  bool IsHasTagFilter() { return tag_scan_->IsHasTagFilter(); }
   bool isDisorderedMetrics();
 
  private:
   TABLE *table_{nullptr};
   std::shared_ptr<TsTable> ts_table_{nullptr};
   std::vector<KwTsSpan> *ts_spans_{nullptr};
-  TsTableIterator *ts_iterator{nullptr};
+  TsIterator *ts_iterator{nullptr};
   //  TagIterator *tag_iterator{nullptr};
   BaseEntityIterator *tag_iterator{nullptr};
   TagRowBatchPtr tag_rowbatch_;

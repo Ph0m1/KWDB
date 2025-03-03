@@ -147,6 +147,22 @@ int EntityBlockMetaManager::sync(int flags) {
   return 0;
 }
 
+int EntityBlockMetaManager::GetAllBlockItems(vector<uint32_t>& entity_ids, std::deque<BlockItem*>& block_items) {
+  if (entity_ids.empty()) {
+    for (int i = 0; i < meta_num_; ++i) {
+      uint32_t min_block = entity_block_metas_[i]->GetMinBlockId(), max_block = entity_block_metas_[i]->GetMaxBlockId();
+      for (uint32_t id = min_block; id <= max_block; ++id) {
+        block_items.emplace_back(GetBlockItem(id));
+      }
+    }
+  } else {
+    for (auto entity_id : entity_ids) {
+      GetAllBlockItems(entity_id, block_items, false);
+    }
+  }
+  return 0;
+}
+
 int EntityBlockMetaManager::GetAllBlockItems(uint32_t entity_id, std::deque<BlockItem*>& block_items, bool reverse) {
   EntityItem* entity_item = getEntityItem(entity_id);
   if (entity_item->is_deleted) {

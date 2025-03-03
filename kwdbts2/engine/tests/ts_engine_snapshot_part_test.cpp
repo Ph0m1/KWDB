@@ -92,11 +92,10 @@ TEST_F(TestEngineSnapshotTable, CreateSnapshot) {
   KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + 5 * 10, ts_type)};
   std::vector<k_uint32> scancols = {0, 1, 2};
   std::vector<Sumfunctype> scanaggtypes;
-  TsIterator* iter1;
+  TsStorageIterator* iter1;
   SubGroupID group_id = 1;
-  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scancols, scancols, scanaggtypes, 1, &iter1,
-            tbl_range, {}, false, false),
-            KStatus::SUCCESS);
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scancols, scancols,
+                                   scanaggtypes, 1, &iter1, tbl_range, {}, false, false),KStatus::SUCCESS);
   ResultSet res(scancols.size());
   k_uint32 count;
   bool is_finished = false;

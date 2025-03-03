@@ -423,6 +423,16 @@ KStatus TsSubGroupPTIterator::Next(TsTimePartition** p_table) {
   return KStatus::SUCCESS;
 }
 
+KStatus TsEntityGroupPTIterator::Next(uint32_t subgroup_id, TsTimePartition** p_table) {
+  KStatus s = partition_table_iter_[subgroup_id]->Next(p_table);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("failed get next partition");
+    return KStatus::FAIL;
+  }
+  cur_p_table_[subgroup_id] = *p_table;
+  return KStatus::SUCCESS;
+}
+
 TsTimePartition* TsSubEntityGroup::CreateTmpPartitionTable(string p_name, size_t version, bool& created) {
   string pt_tbl_sub_path = tbl_sub_path_ + p_name;
   ErrorInfo err_info;

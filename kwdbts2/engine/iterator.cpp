@@ -68,14 +68,16 @@ bool ChangeSumType(DATATYPE type, void* base, void** new_base) {
   return true;
 }
 
-TsIterator::TsIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id, uint32_t subgroup_id,
-                       vector<uint32_t>& entity_ids, std::vector<KwTsSpan>& ts_spans,
-                       std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
-                       uint32_t table_version)
+TsStorageIterator::TsStorageIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id,
+                                     uint32_t subgroup_id, vector<uint32_t>& entity_ids,
+                                     std::vector<KwTsSpan>& ts_spans, DATATYPE ts_col_type,
+                                     std::vector<uint32_t>& kw_scan_cols, std::vector<uint32_t>& ts_scan_cols,
+                                     uint32_t table_version)
                        : entity_group_id_(entity_group_id),
                          subgroup_id_(subgroup_id),
                          entity_ids_(entity_ids),
                          ts_spans_(ts_spans),
+                         ts_col_type_(ts_col_type),
                          kw_scan_cols_(kw_scan_cols),
                          ts_scan_cols_(ts_scan_cols),
                          table_version_(table_version),
@@ -83,7 +85,7 @@ TsIterator::TsIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t en
   entity_group_->RdDropLock();
 }
 
-TsIterator::~TsIterator() {
+TsStorageIterator::~TsStorageIterator() {
   if (segment_iter_ != nullptr) {
     delete segment_iter_;
     segment_iter_ = nullptr;
@@ -91,11 +93,11 @@ TsIterator::~TsIterator() {
   entity_group_->DropUnlock();
 }
 
-void TsIterator::fetchBlockItems(k_uint32 entity_id) {
+void TsStorageIterator::fetchBlockItems(k_uint32 entity_id) {
   cur_partition_table_->GetAllBlockItems(entity_id, block_item_queue_, is_reversed_);
 }
 
-KStatus TsIterator::Init(bool is_reversed) {
+KStatus TsStorageIterator::Init(bool is_reversed) {
   is_reversed_ = is_reversed;
   auto sub_grp_mgr = entity_group_->GetSubEntityGroupManager();
   if (sub_grp_mgr == nullptr) {
@@ -115,7 +117,7 @@ KStatus TsIterator::Init(bool is_reversed) {
 }
 
 // return -1 means all partition tables scan over.
-int TsIterator::nextBlockItem(k_uint32 entity_id, timestamp64 ts) {
+int TsStorageIterator::nextBlockItem(k_uint32 entity_id, timestamp64 ts) {
   cur_block_item_ = nullptr;
   // block_item_queue_ saves the BlockItem object pointer of the partition table for the current query
   // Calling the Next function once can retrieve data within a maximum of one BlockItem.
@@ -172,8 +174,8 @@ int TsIterator::nextBlockItem(k_uint32 entity_id, timestamp64 ts) {
   }
 }
 
-bool TsIterator::getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable>& segment_tbl, uint32_t* first_row,
-                                 uint32_t* count) {
+bool TsStorageIterator::getCurBlockSpan(BlockItem* cur_block, std::shared_ptr<MMapSegmentTable>& segment_tbl,
+                                        uint32_t* first_row, uint32_t* count) {
   bool has_data = false;
   *count = 0;
   // Sequential read optimization, if the maximum and minimum timestamps of a BlockItem are within the ts_span range,
@@ -238,7 +240,7 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
           *is_finished = true;
           return KStatus::SUCCESS;
         }
-         // current entity scan over, we need scan next entity in same subgroup, and scan same partiton tables.
+         // current entity scan over, we need scan next entity in same subgroup, and scan same partition tables.
         partition_table_iter_->Reset(is_reversed_);
       } else if (ret == NextBlkStatus::error) {
         LOG_ERROR("can not get next block item.");
@@ -248,11 +250,11 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
     }
     TsTimePartition* cur_pt = cur_partition_table_;
     if (ts != INVALID_TS) {
-      if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
+      if (!is_reversed_ && convertSecondToPrecisionTS(cur_pt->minTimestamp(), ts_col_type_) > ts) {
         // At this time, if no data smaller than ts exists, -1 is returned directly, and the query is ended
         nextEntity();
         return SUCCESS;
-      } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
+      } else if (is_reversed_ && convertSecondToPrecisionTS(cur_pt->maxTimestamp(), ts_col_type_) < ts) {
         // In this case, if no data larger than ts exists, -1 is returned and the query is completed
         nextEntity();
         return SUCCESS;
@@ -325,10 +327,10 @@ void TsFirstLastRow::Reset() {
     } else if (scan_agg_types_[i] == Sumfunctype::LAST_ROW || scan_agg_types_[i] == Sumfunctype::LASTROWTS) {
       no_first_last_type_ = false;
     }
-    if (!TsIterator::IsFirstAggType(scan_agg_types_[i])) {
+    if (!TsStorageIterator::IsFirstAggType(scan_agg_types_[i])) {
       first_agg_valid_ += 1;
     }
-    if (!TsIterator::IsLastTsAggType(scan_agg_types_[i])) {
+    if (!TsStorageIterator::IsLastTsAggType(scan_agg_types_[i])) {
       last_agg_valid_ += 1;
     }
     first_pairs_[i].first = i;
@@ -358,7 +360,7 @@ KStatus TsFirstLastRow::UpdateFirstRow(timestamp64 ts, MetricRowID row_id, TsTim
     return KStatus::SUCCESS;
   }
   for (int i = 0; i < first_pairs_.size(); ++i) {
-    if (!TsIterator::IsFirstAggType(scan_agg_types_[i])) {
+    if (!TsStorageIterator::IsFirstAggType(scan_agg_types_[i])) {
       continue;
     }
     timestamp64 first_ts = first_pairs_[i].second.row_ts;
@@ -411,7 +413,7 @@ KStatus TsFirstLastRow::UpdateLastRow(timestamp64 ts, MetricRowID row_id,
     return KStatus::SUCCESS;
   }
   for (int i = 0; i < last_pairs_.size(); ++i) {
-    if (!TsIterator::IsLastTsAggType(scan_agg_types_[i])) {
+    if (!TsStorageIterator::IsLastTsAggType(scan_agg_types_[i])) {
       continue;
     }
     timestamp64 last_ts = last_pairs_[i].second.row_ts;
@@ -665,9 +667,9 @@ KStatus TsAggIterator::findFirstDataByIter(timestamp64 ts) {
       break;
     }
     if (ts != INVALID_TS) {
-      if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
+      if (!is_reversed_ && convertSecondToPrecisionTS(cur_pt->minTimestamp(), ts_col_type_) > ts) {
         break;
-      } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
+      } else if (is_reversed_ && convertSecondToPrecisionTS(cur_pt->maxTimestamp(), ts_col_type_) < ts) {
         break;
       }
     }
@@ -788,9 +790,9 @@ KStatus TsAggIterator::findLastDataByIter(timestamp64 ts) {
       break;
     }
     if (ts != INVALID_TS) {
-      if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
+      if (!is_reversed_ && convertSecondToPrecisionTS(cur_pt->minTimestamp(), ts_col_type_) > ts) {
         break;
-      } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
+      } else if (is_reversed_ && convertSecondToPrecisionTS(cur_pt->maxTimestamp(), ts_col_type_) < ts) {
         break;
       }
     }
@@ -966,8 +968,8 @@ KStatus TsAggIterator::countDataUseStatistics(ResultSet* res, k_uint32* count, t
       break;
     }
     if (!isTimestampWithinSpans(ts_spans_,
-                                cur_partition_table_->minTimestamp() * 1000,
-                                cur_partition_table_->maxTimestamp() * 1000)) {
+                                convertSecondToPrecisionTS(cur_partition_table_->minTimestamp(), ts_col_type_),
+                                convertSecondToPrecisionTS(cur_partition_table_->maxTimestamp(), ts_col_type_))) {
       partition_need_traverse.push_back(cur_partition_table_->minTimestamp());
     } else {
       auto entity_item = cur_partition_table_->getEntityItem(entity_ids_[cur_entity_idx_]);
@@ -1009,9 +1011,9 @@ KStatus TsAggIterator::countDataAllBlocks(ResultSet* res, k_uint32* count, times
       break;
     }
     if (ts != INVALID_TS) {
-      if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
+      if (!is_reversed_ && convertSecondToPrecisionTS(cur_pt->minTimestamp(), ts_col_type_) > ts) {
         break;
-      } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
+      } else if (is_reversed_ && convertSecondToPrecisionTS(cur_pt->maxTimestamp(), ts_col_type_) < ts) {
         break;
       }
     }
@@ -1132,9 +1134,9 @@ KStatus TsAggIterator::traverseAllBlocks(ResultSet* res, k_uint32* count, timest
     BlockItem* cur_block = cur_block_item_;
     TsTimePartition* cur_pt = cur_partition_table_;
     if (ts != INVALID_TS) {
-      if (!is_reversed_ && cur_pt->minTimestamp() * 1000 > ts) {
+      if (!is_reversed_ && convertSecondToPrecisionTS(cur_pt->minTimestamp(), ts_col_type_) > ts) {
         return SUCCESS;
-      } else if (is_reversed_ && cur_pt->maxTimestamp() * 1000 < ts) {
+      } else if (is_reversed_ && convertSecondToPrecisionTS(cur_pt->maxTimestamp(), ts_col_type_) < ts) {
         return SUCCESS;
       }
     }
@@ -1396,7 +1398,7 @@ TsAggIterator::getActualColMemAndBitmap(std::shared_ptr<MMapSegmentTable>& segme
 }
 
 KStatus TsAggIterator::Init(bool is_reversed) {
-  KStatus s = TsIterator::Init(is_reversed);
+  KStatus s = TsStorageIterator::Init(is_reversed);
   if (s != KStatus::SUCCESS) {
     return s;
   }
@@ -1625,7 +1627,8 @@ KStatus TsTableIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
     if (s == FAIL) {
       return s;
     }
-    // When is_finished is true, it indicates that a TsIterator iterator query has ended and continues to read the next one.
+    // when is_finished is true,
+    // it indicates that a TsStorageIterator iterator query has ended and continues to read the next one.
     if (is_finished) current_iter_++;
   } while (is_finished);
 
@@ -1823,6 +1826,394 @@ KStatus TsSortedRowDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_
     GetBatch(segment_tbl, cur_block_item, first_row, res, *count);
     res->entity_index = {entity_group_id_, entity_ids_[cur_entity_idx_], subgroup_id_};
     KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
+    return SUCCESS;
+  }
+  KWDB_STAT_ADD(StStatistics::Get().it_num, *count);
+  return SUCCESS;
+}
+
+KStatus TsOffsetIterator::divideBlockSpans(timestamp64 begin_ts, timestamp64 end_ts,
+                                       uint32_t* lower_cnt, deque<BlockSpan>& lower_block_span_) {
+  int size = filter_block_spans_.size();
+  timestamp64 mid_ts = begin_ts + (end_ts - begin_ts) / 2;
+  for (int i = 0; i < size; ++i) {
+    BlockSpan block_span = filter_block_spans_.front();
+    filter_block_spans_.pop_front();
+
+    uint32_t subgroup_id = block_span.subgroup_id;
+    timestamp64 min_ts = block_span.min_ts, max_ts = block_span.max_ts;
+    if ((is_reversed_ && min_ts > mid_ts) || (!is_reversed_ && max_ts <= mid_ts)) {
+      *lower_cnt += block_span.row_num;
+      lower_block_span_.push_back(block_span);
+    } else if ((is_reversed_ && max_ts <= min_ts) || (!is_reversed_ && min_ts > mid_ts)) {
+      filter_block_spans_.push_back(block_span);
+    } else {
+      std::shared_ptr<MMapSegmentTable> segment_tbl =
+          cur_partition_table_[subgroup_id]->getSegmentTable(block_span.block_item->block_id);
+      if (segment_tbl == nullptr) {
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]",
+                  block_span.block_item->block_id, cur_partition_table_[subgroup_id]->GetPath().c_str());
+        return KStatus::FAIL;
+      }
+
+      bool is_lower_part;
+      uint32_t first_row = block_span.start_row;
+      for (int j = block_span.start_row; j < block_span.start_row + block_span.row_num; ++j) {
+        MetricRowID row_id = block_span.block_item->getRowID(j + 1);
+        timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
+        if (j == block_span.start_row) {
+          is_lower_part = is_reversed_ ? (cur_ts > mid_ts) : (cur_ts <= mid_ts);
+          min_ts = max_ts = cur_ts;
+        } else if (is_lower_part && ((is_reversed_ && cur_ts <= mid_ts) || (!is_reversed_ && cur_ts > mid_ts))) {
+          *lower_cnt += (j - first_row);
+          lower_block_span_.push_back({block_span.block_item, first_row, j - first_row, subgroup_id, min_ts, max_ts});
+          first_row = j;
+          is_lower_part = false;
+          min_ts = max_ts = cur_ts;
+        } else if (!is_lower_part && ((is_reversed_ && cur_ts > mid_ts) || (!is_reversed_ && cur_ts <= mid_ts))) {
+          filter_block_spans_.push_back({block_span.block_item, first_row, j - first_row, subgroup_id, min_ts, max_ts});
+          first_row = j;
+          is_lower_part = true;
+          min_ts = max_ts = cur_ts;
+        } else {
+          min_ts = min(min_ts, cur_ts);
+          max_ts = max(max_ts, cur_ts);
+        }
+      }
+      if (first_row < block_span.row_num + block_span.start_row) {
+        if (is_lower_part) {
+          *lower_cnt += (block_span.start_row + block_span.row_num - first_row);
+          lower_block_span_.push_back({block_span.block_item, first_row,
+                                       block_span.start_row + block_span.row_num - first_row,
+                                       subgroup_id, min_ts, max_ts});
+        } else {
+          filter_block_spans_.push_back({block_span.block_item, first_row,
+                                         block_span.start_row + block_span.row_num - first_row,
+                                         subgroup_id, min_ts, max_ts});
+        }
+      }
+    }
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsOffsetIterator::filterLower(uint32_t* cnt) {
+  *cnt = 0;
+  timestamp64 begin_ts = convertSecondToPrecisionTS(cur_partition_table_.begin()->second->minTimestamp(), ts_col_type_);
+  timestamp64 end_ts = convertSecondToPrecisionTS(cur_partition_table_.begin()->second->maxTimestamp(), ts_col_type_);
+  // 精度 10 常量
+  while (!filter_end_) {
+    uint32_t lower_cnt = 0;
+    deque<BlockSpan> lower_block_span_;
+    if (divideBlockSpans(begin_ts, end_ts, &lower_cnt, lower_block_span_) != KStatus::SUCCESS) {
+      return KStatus::FAIL;
+    }
+    timestamp64 mid_ts = begin_ts + (end_ts - begin_ts) / 2;
+
+    if (filter_cnt_ + lower_cnt < offset_) {
+      is_reversed_ ? end_ts = mid_ts : begin_ts = mid_ts;
+      filter_cnt_ += lower_cnt;
+    } else {
+      is_reversed_ ? begin_ts = mid_ts : end_ts = mid_ts;
+      while (!filter_block_spans_.empty()) {
+        block_spans_.push_back(filter_block_spans_.front());
+        *cnt += filter_block_spans_.front().row_num;
+        filter_block_spans_.pop_front();
+      }
+      while (!lower_block_span_.empty()) {
+        filter_block_spans_.push_back(lower_block_span_.front());
+        lower_block_span_.pop_front();
+      }
+    }
+    filter_end_ = (filter_cnt_ > (offset_ - deviation_)) || (end_ts - begin_ts < t_time_);
+  }
+  while (!filter_block_spans_.empty()) {
+    block_spans_.push_back(filter_block_spans_.front());
+    *cnt += filter_block_spans_.front().row_num;
+    filter_block_spans_.pop_front();
+  }
+  return KStatus::SUCCESS;
+}
+
+KStatus TsOffsetIterator::filterUpper(uint32_t filter_num, uint32_t* cnt) {
+  *cnt = 0;
+  timestamp64 begin_ts = convertSecondToPrecisionTS(cur_partition_table_.begin()->second->minTimestamp(), ts_col_type_);
+  timestamp64 end_ts = convertSecondToPrecisionTS(cur_partition_table_.begin()->second->maxTimestamp(), ts_col_type_);
+  bool filter_end = false;
+  while (!filter_end) {
+    uint32_t lower_cnt = 0;
+    deque<BlockSpan> lower_block_span_;
+    timestamp64 mid_ts = begin_ts + (end_ts - begin_ts) / 2;
+    if (divideBlockSpans(begin_ts, end_ts, &lower_cnt, lower_block_span_) != KStatus::SUCCESS) {
+      return KStatus::FAIL;
+    }
+    if (lower_cnt >= filter_num) {
+      is_reversed_ ? begin_ts = mid_ts : end_ts = mid_ts;
+      std::deque<BlockSpan>().swap(filter_block_spans_);
+      while (!lower_block_span_.empty()) {
+        filter_block_spans_.push_back(lower_block_span_.front());
+        lower_block_span_.pop_front();
+      }
+    } else {
+      is_reversed_ ? end_ts = mid_ts : begin_ts = mid_ts;
+      while (!lower_block_span_.empty()) {
+        block_spans_.push_back(lower_block_span_.front());
+        lower_block_span_.pop_front();
+      }
+      *cnt += lower_cnt;
+      filter_num -= lower_cnt;
+    }
+    // TODO(liumengzhen): optimize end condition
+    filter_end = (filter_num <= 0) || (end_ts - begin_ts < t_time_);
+  }
+  while (!filter_block_spans_.empty()) {
+    *cnt += filter_block_spans_.front().row_num;
+    block_spans_.push_back(filter_block_spans_.front());
+    filter_block_spans_.pop_front();
+  }
+  return KStatus::SUCCESS;
+}
+
+int TsOffsetIterator::nextBlockSpan() {
+  while (true) {
+    if (block_spans_.empty()) {
+      if (segment_iter_.second != nullptr) {
+        delete segment_iter_.second;
+        segment_iter_ = {0, nullptr};
+      }
+      if (p_time_it_ == p_times_.end()) {
+        // all partition scan over.
+        return NextBlkStatus::scan_over;
+      }
+      if (queried_cnt >= offset_ + limit_ - filter_cnt_) {
+        return NextBlkStatus::scan_over;
+      }
+      uint32_t row_cnt = 0;
+      cur_partition_table_.clear();
+      for (auto subgroup_id : p_time_it_->second) {
+        std::shared_ptr<TsSubGroupPTIterator> cur_iter = partition_table_iter_[subgroup_id];
+        TsTimePartition* p_table = nullptr;
+        KStatus s = cur_iter->Next(&p_table);
+        if (s != KStatus::SUCCESS) {
+          LOG_ERROR("failed get next partition");
+          return NextBlkStatus::error;
+        }
+        cur_partition_table_[subgroup_id] = p_table;
+        uint32_t cnt = 0;
+        if (fetchBlockItems(subgroup_id, &cnt) != KStatus::SUCCESS) {
+          LOG_ERROR("failed fetchBlockItems");
+          return NextBlkStatus::error;
+        }
+        row_cnt += cnt;
+      }
+      ++p_time_it_;
+      filter_end_ = (filter_cnt_ > (offset_ - deviation_));
+      if (!filter_end_) {
+        if (filter_cnt_ + row_cnt <= offset_) {
+          filter_cnt_ += row_cnt;
+          row_cnt = 0;
+          std::deque<BlockSpan>().swap(filter_block_spans_);
+          filter_end_ = (filter_cnt_ > (offset_ - deviation_));
+          continue;
+        } else {
+          if (filterLower(&row_cnt) != KStatus::SUCCESS) {
+            return NextBlkStatus::error;
+          }
+        }
+      } else {
+        while (!filter_block_spans_.empty()) {
+          block_spans_.push_back(filter_block_spans_.front());
+          filter_block_spans_.pop_front();
+        }
+      }
+
+      uint32_t need_to_be_returned = offset_ + limit_ - filter_cnt_ - queried_cnt;
+      if (need_to_be_returned <= (row_cnt / 2)) {
+        while (!block_spans_.empty()) {
+          filter_block_spans_.push_back(block_spans_.front());
+          block_spans_.pop_front();
+        }
+        if (filterUpper(need_to_be_returned, &row_cnt) != KStatus::SUCCESS) {
+          return NextBlkStatus::error;
+        }
+      }
+      queried_cnt += row_cnt;
+      continue;
+    }
+
+    cur_block_span_ = block_spans_.front();
+    block_spans_.pop_front();
+
+    if (cur_block_span_.block_item == nullptr) {
+      LOG_WARN("BlockItem[] error: No space has been allocated");
+      continue;
+    }
+    return NextBlkStatus::find_one;
+  }
+  return 0;
+}
+
+KStatus TsOffsetIterator::fetchBlockItems(uint32_t subgroup_id, uint32_t* cnt) {
+  uint32_t row_cnt = 0;
+  deque<BlockItem*> blocks_queue;
+  TsTimePartition* p_table = cur_partition_table_[subgroup_id];
+  p_table->GetAllBlockItems(entity_ids_[subgroup_id], blocks_queue);
+  while (!blocks_queue.empty()) {
+    BlockItem* block_item = blocks_queue.front();
+    blocks_queue.pop_front();
+    std::shared_ptr<MMapSegmentTable> segment_tbl = p_table->getSegmentTable(block_item->block_id);
+    if (segment_tbl == nullptr) {
+      LOG_ERROR("Can not find segment use block [%u], in path [%s]", block_item->block_id, p_table->GetPath().c_str());
+      return KStatus::FAIL;
+    }
+    timestamp64 min_ts, max_ts;
+    TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), min_ts, max_ts);
+    if (!isTimestampInSpans(ts_spans_, min_ts, max_ts)) {
+      continue;
+    } else if (isTimestampWithinSpans(ts_spans_, min_ts, max_ts)) {
+      row_cnt += block_item->publish_row_count;
+      filter_block_spans_.push_back(BlockSpan{block_item, 0, block_item->publish_row_count,
+                                                 subgroup_id, min_ts, max_ts});
+    } else {
+      min_ts = INT64_MAX;
+      max_ts = INT64_MIN;
+      uint32_t first_row = 1;
+      for (uint32_t i = 1; i <= block_item->publish_row_count; ++i) {
+        MetricRowID row_id = block_item->getRowID(i);
+        timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
+        if (!(CheckIfTsInSpan(cur_ts, ts_spans_)) || !segment_tbl->IsRowVaild(block_item, i)) {
+          if (i > first_row) {
+            row_cnt += (i - first_row);
+            filter_block_spans_.push_back({block_item, first_row - 1, i - first_row, subgroup_id, min_ts, max_ts});
+          }
+          min_ts = INT64_MAX;
+          max_ts = INT64_MIN;
+          first_row = i + 1;
+        } else {
+          min_ts = min(min_ts, cur_ts);
+          max_ts = max(max_ts, cur_ts);
+        }
+      }
+      if (first_row <= block_item->publish_row_count) {
+        row_cnt += block_item->publish_row_count - first_row + 1;
+        filter_block_spans_.push_back({block_item, first_row - 1, block_item->publish_row_count - first_row + 1,
+                                          subgroup_id, min_ts, max_ts});
+      }
+    }
+  }
+  *cnt = row_cnt;
+  return KStatus::SUCCESS;
+}
+
+TsOffsetIterator::TsOffsetIterator(std::shared_ptr<TsEntityGroup>& entity_group, uint64_t entity_group_id,
+                                   std::map<SubGroupID, std::vector<EntityID>>& entity_ids,
+                                   std::vector<KwTsSpan>& ts_spans, DATATYPE ts_col_type,
+                                   std::vector<k_uint32>& kw_scan_cols, std::vector<k_uint32>& ts_scan_cols,
+                                   uint32_t table_version, uint32_t offset, uint32_t limit) :
+                                   latch_(LATCH_ID_TSTABLE_ITERATOR_MUTEX),
+                                   entity_group_id_(entity_group_id),
+                                   entity_ids_(entity_ids),
+                                   ts_spans_(ts_spans),
+                                   ts_col_type_(ts_col_type),
+                                   kw_scan_cols_(kw_scan_cols),
+                                   ts_scan_cols_(ts_scan_cols),
+                                   table_version_(table_version),
+                                   entity_group_(entity_group),
+                                   offset_(offset),
+                                   limit_(limit) {
+  entity_group_->RdDropLock();
+}
+
+TsOffsetIterator::~TsOffsetIterator() {
+  if (segment_iter_.second != nullptr) {
+    delete segment_iter_.second;
+    segment_iter_.second = nullptr;
+  }
+  entity_group_->DropUnlock();
+}
+
+KStatus TsOffsetIterator::Init(bool is_reversed) {
+  GetTerminationTime();
+  is_reversed_ = is_reversed;
+  auto sub_grp_mgr = entity_group_->GetSubEntityGroupManager();
+  if (sub_grp_mgr == nullptr) {
+    LOG_ERROR("can not found sub entitygroup manager for entitygroup [%lu].", entity_group_id_);
+    return KStatus::FAIL;
+  }
+  ErrorInfo err_info;
+  for (auto it : entity_ids_) {
+    uint32_t subgroup_id = it.first;
+    auto sub_grp = sub_grp_mgr->GetSubGroup(subgroup_id, err_info);
+    if (!err_info.isOK()) {
+      LOG_ERROR("can not found sub entitygroup for entitygroup [%lu], err_msg: %s.",
+                entity_group_id_, err_info.errmsg.c_str());
+      return KStatus::FAIL;
+    }
+    std::shared_ptr<TsSubGroupPTIterator> p_iter = sub_grp->GetPTIterator(ts_spans_);
+    std::vector<timestamp64> partitions = p_iter->GetPartitions();
+    p_iter->Reset(is_reversed_);
+    for (auto p_time : partitions) {
+      p_times_[p_time].push_back(subgroup_id);
+    }
+    partition_table_iter_[subgroup_id] = p_iter;
+  }
+  p_time_it_ = p_times_.begin();
+  return entity_group_->GetRootTableManager()->GetSchemaInfoIncludeDropped(&attrs_, table_version_);
+}
+
+KStatus TsOffsetIterator::Next(ResultSet* res, k_uint32* count, timestamp64 ts) {
+  KWDB_DURATION(StStatistics::Get().it_next);
+  *count = 0;
+  MUTEX_LOCK(&latch_);
+  Defer defer{[&]() { MUTEX_UNLOCK(&latch_); }};
+  while (true) {
+    // If cur_block_item_ is a null pointer and attempts to call nextBlockItem to retrieve a new BlockItem for querying:
+    // 1. nextBlockItem ended normally, query cur_block_item_
+    // 2. If nextBlockItem returns -1, it indicates that all data on the current entity has been queried and
+    //    needs to be switched to the next entity before attempting to retrieve cur_block_item_
+    // 3. If all entities have been queried, the current query process ends and returns directly
+    if (!cur_block_span_.block_item) {
+      auto ret = nextBlockSpan();
+      if (ret == NextBlkStatus::scan_over) {
+        return KStatus::SUCCESS;
+      } else if (ret == NextBlkStatus::error) {
+        LOG_ERROR("can not get next block item.");
+        return KStatus::FAIL;
+      }
+      continue;
+    }
+    uint32_t subgroup_id = cur_block_span_.subgroup_id;
+    BlockItem* cur_block_item = cur_block_span_.block_item;
+    TsTimePartition* p_table = cur_partition_table_[subgroup_id];
+    std::shared_ptr<MMapSegmentTable> segment_tbl = p_table->getSegmentTable(cur_block_item->block_id);
+    if (segment_tbl == nullptr) {
+      LOG_ERROR("Can not find segment use block [%d], in path [%s]",
+                cur_block_item->block_id, p_table->GetPath().c_str());
+      return KStatus::FAIL;
+    }
+    if (segment_tbl->schemaVersion() > table_version_) {
+      nextBlockSpan();
+      continue;
+    }
+    if (nullptr == segment_iter_.second || segment_iter_.first != subgroup_id ||
+        segment_iter_.second->segment_id() != segment_tbl->segment_id()) {
+      if (segment_iter_.second != nullptr) {
+        delete segment_iter_.second;
+        segment_iter_.second = nullptr;
+      }
+      auto* it = new MMapSegmentTableIterator(segment_tbl, ts_spans_, kw_scan_cols_, ts_scan_cols_, attrs_);
+      segment_iter_ = {subgroup_id, it};
+    }
+
+    *count = cur_block_span_.row_num;
+    uint32_t first_row = cur_block_span_.start_row + 1;
+    auto s = segment_iter_.second->GetBatch(cur_block_item, first_row, res, *count);
+    if (s != KStatus::SUCCESS) {
+      return s;
+    }
+    cur_block_span_ = BlockSpan{};
+    uint32_t entity_id = cur_block_item->entity_id;
+    res->entity_index = {entity_group_id_, entity_id, subgroup_id};
     return SUCCESS;
   }
   KWDB_STAT_ADD(StStatistics::Get().it_num, *count);

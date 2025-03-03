@@ -47,6 +47,10 @@ EEIteratorErrCode StorageHandler::Init(kwdbContext_p ctx) {
   Return(EEIteratorErrCode::EE_OK);
 }
 
+k_uint32 StorageHandler::GetStorageOffset() {
+  return ts_iterator->GetFilterCount();
+}
+
 void StorageHandler::SetSpans(std::vector<KwTsSpan> *ts_spans) {
   ts_spans_ = ts_spans;
 }
@@ -71,7 +75,6 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
 
     row_batch->Reset();
     KStatus ret = ts_iterator->Next(&row_batch->res_, &row_batch->count_, row_batch->ts_);
-    // LOG_DEBUG("TsTableIterator::Next() count:%d", row_batch->count_);
     if (KStatus::FAIL == ret) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
                                   "scanning column data fail");
@@ -116,6 +119,84 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
       break;
     }
   }
+
+  Return(code);
+}
+
+EEIteratorErrCode StorageHandler::TsOffsetNext(kwdbContext_p ctx) {
+  EnterFunc();
+  EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
+  KWThdContext *thd = current_thd;
+  switch (read_mode_) {
+    case TSTableReadMode::tagIndex:
+    case TSTableReadMode::tagIndexTable:
+    case TSTableReadMode::metaTable: {
+      ScanRowBatch data_handle(table_);
+      std::vector<EntityResultIndex> entities;
+      while (true) {
+        KStatus ret = tag_scan_->GetEntities(ctx, &entities, &(data_handle.tag_rowbatch_));
+        if (KStatus::FAIL == ret) {
+          break;
+        }
+
+        entities_.insert(entities_.end(), entities.begin(), entities.end());
+      }
+      break;
+    }
+    case TSTableReadMode::tableTableMeta: {
+      if (IsHasTagFilter()) {
+        ScanRowBatch data_handle(table_);
+        std::vector<EntityResultIndex> entities;
+        while (true) {
+          KStatus ret = tag_scan_->GetEntities(ctx, &entities, &(data_handle.tag_rowbatch_));
+          if (KStatus::FAIL == ret) {
+            break;
+          }
+
+          entities_.insert(entities_.end(), entities.begin(), entities.end());
+        }
+      }
+      break;
+    }
+  }
+
+  if (nullptr == ts_iterator) {
+    KStatus ret = ts_table_->GetOffsetIterator(ctx, entities_, *ts_spans_, table_->scan_cols_,
+                                table_->table_version_, &ts_iterator, table_->offset_, table_->limit_,
+                                table_->is_reverse_);
+    if (KStatus::FAIL == ret) {
+      Return(code);
+    }
+  }
+
+  ScanRowBatch* row_batch = static_cast<ScanRowBatch *>(current_thd->GetRowBatch());
+  row_batch->Reset();
+  KStatus ret = ts_iterator->Next(&row_batch->res_, &row_batch->count_, row_batch->ts_);
+  if (KStatus::FAIL == ret) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_FETCH_DATA_FAILED,
+                                "scanning column data fail");
+    LOG_ERROR("TsTableIterator::Next() Failed\n");
+    code = EEIteratorErrCode::EE_ERROR;
+    Return(code);
+  }
+
+  if (0 == row_batch->count_) {
+    code = EEIteratorErrCode::EE_END_OF_RECORD;
+    Return(code);
+  }
+
+  // 获取tag值
+  TagRowBatchPtr tag_rowbatch = std::make_shared<TagRowBatch>();
+  tag_rowbatch->Init(table_);
+  ret = ts_table_->GetTagList(ctx, {row_batch->res_.entity_index}, table_->scan_tags_,
+                                      &tag_rowbatch->res_, &tag_rowbatch->count_, table_->table_version_);
+  if (KStatus::FAIL == ret) {
+    LOG_ERROR("TsTable::GetTagList() Failed\n");
+    code = EEIteratorErrCode::EE_ERROR;
+    Return(code);
+  }
+  row_batch->tag_rowbatch_ = tag_rowbatch;
+  tag_rowbatch->GetTagData(&(row_batch->tagdata_), &(row_batch->tag_bitmap_), row_batch->res_.entity_index.index);
 
   Return(code);
 }

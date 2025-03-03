@@ -48,6 +48,7 @@ class TagTable {
  protected:
   TagTableVersionManager*        m_version_mgr_{nullptr};
   TagHashIndex*                  m_index_{nullptr};
+  MMapEntityRowHashIndex*        m_entity_row_index_{nullptr};
   TagPartitionTableManager*      m_partition_mgr_{nullptr};
   std::string m_db_path_;
   std::string m_tbl_sub_path_;
@@ -80,6 +81,9 @@ class TagTable {
   int GetEntityIdList(const std::vector<void*>& primary_tags, const std::vector<uint32_t> &scan_tags,
                               std::vector<kwdbts::EntityResultIndex>* entity_id_list,
                               kwdbts::ResultSet* res, uint32_t* count, uint32_t table_version = 0);
+  // query tag by entityid
+  int GetTagList(kwdbContext_p ctx, const std::vector<EntityResultIndex>& entity_id_list,
+             const std::vector<uint32_t>& scan_tags, ResultSet* res, uint32_t* count, uint32_t table_version);
   // query tag by rownum
   int GetColumnsByRownumLocked(TableVersion src_table_version, uint32_t src_row_id,
                               const std::vector<uint32_t>& src_tag_idxes,
@@ -127,6 +131,10 @@ class TagTable {
  private:
 
   int initHashIndex(int flags, ErrorInfo& err_info);
+
+  int initPrevEntityRowData(ErrorInfo& err_info);
+
+  int initEntityRowHashIndex(int flags, ErrorInfo& err_info);
 
   int loadAllVersions(std::vector<TableVersion>& all_versions, ErrorInfo& err_info);
 
@@ -178,6 +186,8 @@ public:
   inline size_t getPrimarySize() {return m_primary_tag_size_;}
 
   void GetAllPartitionTablesLessVersion(std::vector<TagPartitionTable*>& tag_part_tables, TableVersion max_table_version);
+
+  void GetAllPartitionTables(std::vector<std::pair<uint32_t, TagPartitionTable*>>& tag_part_tables);
 
   int RollbackPartitionTableVersion(TableVersion need_rollback_version, ErrorInfo& err_info);
 };

@@ -126,6 +126,7 @@ class TestTSWALTable : public TestBigTableInstance {
 
   k_uint32 GetTableRows(KTableKey table_id, const std::vector<RangeGroup>& rgs, KwTsSpan ts_span, uint16_t entity_num = 1) {
     k_uint32 total_rows = 0;
+    auto ts_type = table_->GetRootTableManager()->GetTsColDataType();
     for (auto& rg : rgs) {
       std::shared_ptr<TsEntityGroup> entity_group;
       KStatus s = table_->GetEntityGroup(ctx_, rg.range_group_id, &entity_group);
@@ -134,8 +135,8 @@ class TestTSWALTable : public TestBigTableInstance {
       k_uint32 entity_id = 1;
       SubGroupID group_id = 1;
       while (entity_id <= entity_num) {
-        TsIterator* iter1;
-        entity_group->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group, {}, false, false);
+        TsStorageIterator* iter1;
+        entity_group->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group, {}, false, false);
         total_rows += GetIterRows(iter1, scan_cols.size());
         entity_id++;
         delete iter1;
@@ -145,7 +146,7 @@ class TestTSWALTable : public TestBigTableInstance {
     return total_rows;
   }
 
-  k_uint32 GetIterRows(TsIterator* iter1, k_uint32 scan_cols_size) {
+  k_uint32 GetIterRows(TsStorageIterator* iter1, k_uint32 scan_cols_size) {
     ResultSet res{scan_cols_size};
     k_uint32 ret_cnt;
     k_uint32 total_rows = 0;
@@ -191,8 +192,8 @@ TEST_F(TestTSWALTable, PutData) {
   std::vector<k_uint32> scan_cols = {0, 1, 2, 3};
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
-  TsIterator* iter1;
-  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg, {}, false, false),
+  TsStorageIterator* iter1;
+  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg, {}, false, false),
             KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_cols.size()};
@@ -238,8 +239,8 @@ TEST_F(TestTSWALTable, batchPutData) {
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
-  TsIterator* iter1;
-  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg, {}, false, false),
+  TsStorageIterator* iter1;
+  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg, {}, false, false),
             KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_cols.size()};
@@ -313,8 +314,8 @@ TEST_F(TestTSWALTable, mulitiInsert) {
   std::vector<k_uint32> scan_cols = {0, 1, 2};
   std::vector<Sumfunctype> scan_agg_types;
   SubGroupID group_id = 1;
-  TsIterator* iter1;
-  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg, {}, false, false),
+  TsStorageIterator* iter1;
+  ASSERT_EQ(log_eg->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter1, log_eg, {}, false, false),
             KStatus::SUCCESS);
 
   ResultSet res{(k_uint32) scan_cols.size()};

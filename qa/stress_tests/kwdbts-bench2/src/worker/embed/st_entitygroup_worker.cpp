@@ -94,11 +94,12 @@ KBStatus TSEntityGroupWriteWorkerWithScan::do_work(KTimestamp  new_ts) {
     }
     
     std::vector<Sumfunctype> scan_agg_types;
-    TsIterator* iter1;
+    TsStorageIterator* iter1;
     KWDB_START();
-        vector<uint32_t> entity_ids = {entityIdList[0].entityId};
+    vector<uint32_t> entity_ids = {entityIdList[0].entityId};
+    auto ts_type = st_inst_->GetTable()->GetRootTableManager()->GetTsColDataType();
     s = entity_group_->GetIterator(ctx, entityIdList[0].subGroupId, entity_ids,
-                                   ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_,
+                                   ts_spans, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_,
                                    {}, false, false);
     assert(s == KStatus::SUCCESS);
     int total_rows = 0;
@@ -157,7 +158,7 @@ KBStatus TSEntityGroupScanWorker::do_work(KTimestamp  new_ts) {
       scan_cols.push_back(i);
     }
     std::vector<Sumfunctype> scan_agg_types;
-    TsIterator* iter1;
+    TsStorageIterator* iter1;
     KTimestamp min_ts = StEngityGroupInstance::Get()->GetMinTS();
     KTimestamp max_ts = StEngityGroupInstance::Get()->GetMaxTS();
     KTimestamp start = 0;
@@ -173,8 +174,9 @@ KBStatus TSEntityGroupScanWorker::do_work(KTimestamp  new_ts) {
     ts_spans.push_back(ts_span);
     KWDB_START();
     vector<uint32_t> entity_ids = {entityIdList[0].entityId};
+    auto ts_type = st_inst_->GetTable()->GetRootTableManager()->GetTsColDataType();
     s = entity_group_->GetIterator(ctx, entityIdList[0].subGroupId, entity_ids,
-                                   ts_spans, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_,
+                                   ts_spans, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter1, entity_group_,
                                     {}, false, false);
     assert(s == KStatus::SUCCESS);
     int total_rows = 0;
