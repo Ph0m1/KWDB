@@ -2613,7 +2613,12 @@ func checkDescsEqual(desc *roachpb.RangeDescriptor) func(*roachpb.RangeDescripto
 				if this.RangeType != nil && that1.RangeType != nil {
 					if *this.RangeType != *that1.RangeType {
 						log.Warningf(context.TODO(), "checkDescsEqual failed. desc.RangeType is %v while desc2.RangeType is %v", *desc.RangeType, *desc2.RangeType)
-
+						// TODO by fyx, I'm not sure what caused the range type to be ts, but it hasn't been converted to ts yet
+						// And this will lead to an infinite retry split process and break.
+						// So for now, try setting it as a ts type. This is only a temporary solution(ZDP-44800)
+						if desc.GetRangeType() == roachpb.DEFAULT_RANGE && desc2.GetRangeType() == roachpb.TS_RANGE {
+							desc.SetRangeType(roachpb.TS_RANGE)
+						}
 						return false
 					}
 				} else if this.RangeType != nil {
