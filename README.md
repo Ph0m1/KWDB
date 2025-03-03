@@ -64,7 +64,7 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
 | 依赖           | 版本    |
 | :-------------| :------ |
 | openssl        | v1.1.1+ |
-| protobuf       | v3.5.0+ |
+| libprotobuf    | v3.6.1+  <br>**注意**：Ubuntu 18.04 默认的 libprotobuf 版本不满足要求，用户需要提前安装所需版本（推荐 3.6.1 和 3.12.4），并在编译时通过 `make PROTOBUF_DIR=<protobuf_directory>` 指定高版本路径。|
 | geos           | v3.3.8+ |
 | xz-libs        | v5.2.0+ |
 | squashfs-tools | any     |
@@ -180,7 +180,8 @@ KWDB 支持在 Linux 操作系统进行安装部署，下表列出了编译和�
 4. 编译和安装项目。
 
    > **提示**：
-      如果编译时出现遗留的 protobuf 自动生成的文件导致报错，可使用`make clean` 清理编译目录。
+   > - 如果编译时出现遗留的 protobuf 自动生成的文件导致报错，可使用`make clean` 清理编译目录。
+   > - 如果需要额外指定 protobuf 的文件路径，请使用 `make PROTOBUF_DIR=<protobuf_directory>`。
 
       ```Bash
       make
