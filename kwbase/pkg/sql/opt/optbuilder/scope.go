@@ -138,6 +138,10 @@ type scope struct {
 	// Gapfill function involved in this scope
 	hasGapfill bool
 
+	// interpolateWithLast is used to limit features not supported by last.
+	// for specific restrictions, see the annotations to the struct definition.
+	interpolateWithLast interpolateWithLast
+
 	// tagsOfStableIDS record the IDs of the template table with a tag in filter.
 	tagsOfStableIDS []cat.StableID
 
@@ -149,6 +153,19 @@ type scope struct {
 
 	//HasMultiTable is used only to disallow the use of last in join scenarios
 	HasMultiTable bool
+}
+
+// interpolateWithLast is used to limit unsupported features.
+// When the interpolate function has a parameter of last,
+// the first argument to time_bucket_gapfill must be
+// the first column of the time_series table.
+type interpolateWithLast struct {
+	// Whether last is an argument to interpolate function in this scope
+	interpolateHasLast bool
+
+	// Whether the first time_series column is an argument to
+	// time_bucket_gapfill function in this scope
+	gapfillWithFirstCol bool
 }
 
 // cteSource represents a CTE in the given query.

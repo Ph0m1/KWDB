@@ -770,6 +770,7 @@ func (b *Builder) buildAggregateFunction(
 			if col, ok := agg.col.expr.(*tree.FuncExpr); ok {
 				if col.Func.FunctionName() == sqlbase.LastAgg || col.Func.FunctionName() == sqlbase.LastRowAgg ||
 					col.Func.FunctionName() == sqlbase.FirstAgg || col.Func.FunctionName() == sqlbase.FirstRowAgg {
+					fromScope.interpolateWithLast.interpolateHasLast = true
 					var column *scopeColumn
 					for i := range agg.FuncExpr.Exprs {
 						if col, ok := agg.FuncExpr.Exprs[i].(*scopeColumn); ok {
@@ -806,6 +807,22 @@ func (b *Builder) buildAggregateFunction(
 		}
 	}
 
+	if def.Name == Gapfillinternal {
+		if col, ok := f.Exprs[0].(*scopeColumn); ok {
+			for _, val := range b.factory.Metadata().AllTables() {
+				if val.HasColumn(col.id) {
+					if val.Table.GetTableType() != tree.RelationalTable && col.id == val.MetaID.ColumnID(0) {
+						fromScope.interpolateWithLast.gapfillWithFirstCol = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if def.Name == Gapfillinternal || def.Name == Interpolate {
+		limitGapFillFirstArg(fromScope)
+	}
 	// Temporarily set b.subquery to nil so we don't add outer columns to the
 	// wrong scope.
 	subq := b.subquery
@@ -874,6 +891,17 @@ func (b *Builder) buildAggregateFunction(
 	}
 
 	return &info
+}
+
+// limitGapFillFirstArg is used to limit unsupported features.
+// When the interpolate function has a parameter of last, the first argument
+// to time_bucket_gapfill must be the first column of the time_series table.
+func limitGapFillFirstArg(fromScope *scope) {
+	if fromScope.interpolateWithLast.interpolateHasLast && !fromScope.interpolateWithLast.gapfillWithFirstCol {
+		panic(pgerror.Newf(pgcode.FeatureNotSupported,
+			"last/last_row as a parameter of the interpolate function, "+
+				"the first parameter of time_bucket_gapfill must be the first column of timeseries table"))
+	}
 }
 
 func (b *Builder) constructWindowFn(name string, args []opt.ScalarExpr) opt.ScalarExpr {
