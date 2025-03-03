@@ -245,6 +245,17 @@ function cfg_check() {
     log_err "secure_mode is missing in deploy.cfg."
     exit 1
   fi
+  # encrypto store
+  push_back "g_encrypto_store"
+  g_encrypto_store=$(read_config_value $g_deploy_path/deploy.cfg global encrypto_store)
+  if [ "$g_encrypto_store" != "true" ] && [ "$g_encrypto_store" != "false" ];then
+    if [ -z "$g_encrypto_store" ];then
+      g_encrypto_store=false
+    else
+      log_err "encrypto_store is invalid."
+      exit 1
+    fi
+  fi
   # management_user check
   push_back "g_user"
   g_user=$(read_config_value $g_deploy_path/deploy.cfg global management_user)
@@ -440,6 +451,11 @@ if [ "$g_kw_cmd" = "install" ];then
       rollback_all "${g_cls_array[*]}" $g_ssh_port $g_ssh_user
       exit 1
     fi
+  fi
+  create_encrypto_key
+  if [ $? -ne 0 ];then
+    rollback_all "${g_cls_array[*]}" $g_ssh_port $g_ssh_user
+    exit 1
   fi
   echo "distribute#configure:80" >&10
   parallel_distribute "${g_cls_array[*]}" $g_ssh_port $g_ssh_user "/etc/kaiwudb/*"

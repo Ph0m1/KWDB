@@ -136,24 +136,19 @@ function user_name() {
 }
 
 function secure_mode() {
-  if [ "$(ls -A /etc/kaiwudb/certs)" = "" ];then
-    echo "insecure"
+  if [ -f /etc/kaiwudb/info/MODE ];then
+    local secure_mode=$(sed -n "8p" /etc/kaiwudb/info/MODE)
+    echo "$secure_mode"
+    return 0
   else
-    if [ -f /etc/kaiwudb/info/MODE ];then
-      local secure_mode=$(sed -n "8p" /etc/kaiwudb/info/MODE)
-      if [ "$secure_mode" != "tls" ] && [ "$secure_mode" != "tlcp" ];then
-        if [ -e /etc/kaiwudb/certs/tlcp_ca.crt ];then
-          echo "tlcp"
-        else
-          echo "tls"
-        fi
-      else
-        echo "$secure_mode"
-      fi
-      return 0
+    if [ -e /etc/kaiwudb/certs/tlcp_ca.crt ];then
+      echo "tlcp"
+    elif [ -e /etc/kaiwudb/certs/ca.crt ];then
+      echo "tls"
     else
-      return 1
+      echo "insecure"
     fi
+    return 0
   fi
 }
 

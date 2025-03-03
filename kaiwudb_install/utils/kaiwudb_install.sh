@@ -57,6 +57,9 @@ function create_compose() {
         limits:
           cpus: '$cpu_usage'"
   fi
+  if [ "$g_encrypto_store" = "true" ];then
+    local encrypto_opt="--store-encryption=path=/kaiwudb/deploy/kaiwudb-container,key=/kaiwudb/certs/sm4.key,cipher=sm4"
+  fi
     sudo bash -c "echo \"version: '3.3'
 services:
   kaiwudb-container:
@@ -87,7 +90,7 @@ services:
       - /bin/bash
       - -c
       - |
-        /kaiwudb/bin/kwbase  $start_type $secure_param --listen-addr=0.0.0.0:26257 --advertise-addr=$1:$g_kwdb_port --http-addr=0.0.0.0:8080 --store=/kaiwudb/deploy/kaiwudb-container $opt_join
+        /kaiwudb/bin/kwbase  $start_type $secure_param --listen-addr=0.0.0.0:26257 --advertise-addr=$1:$g_kwdb_port --http-addr=0.0.0.0:8080 --store=/kaiwudb/deploy/kaiwudb-container $encrypto_opt $opt_join
 \" >/etc/kaiwudb/script/docker-compose.yml"
 }
 
@@ -129,6 +132,7 @@ function install() {
         return 1
       fi
     fi
+    
   else
     # check whether docker is installed
     docker --help >/dev/null 2>&1
@@ -156,6 +160,7 @@ function install() {
       return 1
     fi
     echo $image
+    
   fi
   ret=$(eval $prefix cp -f $base_dir/packages/.version /etc/kaiwudb/info 2>&1)
   if [ $? -ne 0 ];then
@@ -184,6 +189,7 @@ function create_info_files() {
   sudo bash -c "echo $g_rest_port >> /etc/kaiwudb/info/MODE"
   sudo bash -c "echo $g_user >> /etc/kaiwudb/info/MODE"
   sudo bash -c "echo $g_secure_mode >> /etc/kaiwudb/info/MODE"
+  sudo bash -c "echo $g_encrypto_store >> /etc/kaiwudb/info/MODE"
   if [ "$g_install_mode" != "single" ];then
     sudo touch /etc/kaiwudb/info/NODE
     sudo bash -c "echo \"${g_cls_array[*]}\" >> /etc/kaiwudb/info/NODE"
@@ -251,6 +257,29 @@ function create_certificate() {
   fi
   sudo chmod 755 /etc/kaiwudb/certs/*
   log_info_without_console "create certificate files in /etc/kaiwudb/certts successfully."
+}
+
+function create_encrypto_key() {
+  if [ "$g_encrypto_store" = "false" ];then
+    return 0
+  fi
+  local ret=""
+  if [ "$g_deploy_type" = "bare" ];then
+    cd /usr/local/kaiwudb/bin
+    ret=$(sudo bash -c "./kwbase gen encryption-key -s 128 /etc/kaiwudb/certs/sm4.key 2>&1")
+    if [ $? -ne 0 ]; then
+      log_err "Create encrypto key failed: $ret"
+      return 1
+    fi
+  else 
+    ret=$(docker run --rm -it --privileged -w /kaiwudb/bin -v/etc/kaiwudb/certs:/kaiwudb/certs $(install_dir) bash -c "
+          ./kwbase gen encryption-key -s 128 /kaiwudb/certs/sm4.key" 2>&1)
+    if [ $? -ne 0 ]; then
+      log_err "Create encrypto key failed: $ret"
+      return 1
+    fi
+  fi
+  sudo chmod 755 /etc/kaiwudb/certs/sm4.key
 }
 
 # create user and group
@@ -332,6 +361,9 @@ function create_service() {
       local cpu_usage=$(echo $g_cpu_usage $cores | awk '{printf("%.1f", $1*$2*100)}')
       local cpus="CPUQuota=$cpu_usage%"
     fi
+    if [ "$g_encrypto_store" = "true" ];then
+      local encrypto_opt="--store-encryption=path=$g_data_root,key=/etc/kaiwudb/certs/sm4.key,cipher=sm4"
+    fi
     sudo bash -c "echo \"
 [Unit]
 Description=KaiwuDB Service
@@ -347,7 +379,7 @@ $cpus
 WorkingDirectory=/usr/local/kaiwudb/bin
 EnvironmentFile=/etc/kaiwudb/script/kaiwudb_env
 ExecStartPre=/usr/bin/sudo /usr/sbin/sysctl -w vm.max_map_count=10000000
-ExecStart=/usr/local/kaiwudb/bin/kwbase $start_type \\\$KAIWUDB_START_ARG $secure_param --listen-addr=0.0.0.0:$g_kwdb_port --advertise-addr=$1:$g_kwdb_port --http-addr=0.0.0.0:$g_rest_port --store=$g_data_root $opt_join
+ExecStart=/usr/local/kaiwudb/bin/kwbase $start_type \\\$KAIWUDB_START_ARG $secure_param --listen-addr=0.0.0.0:$g_kwdb_port --advertise-addr=$1:$g_kwdb_port --http-addr=0.0.0.0:$g_rest_port --store=$g_data_root $encrypto_opt $opt_join
 ExecStop=/bin/kill \\\$MAINPID
 KillMode=control-group
 # Restart=on-failure
@@ -391,7 +423,10 @@ function compress_certs() {
   if [ "$g_secure_mode" != "insecure" ];then
     log_info_without_console "start compress certs to $g_deploy_path/kaiwudb_certs.tar.gz"
     crt=$(basename $(ls /etc/kaiwudb/certs/*ca*.crt))
-    ret=$(eval $local_cmd_prefix tar -zcvf $g_deploy_path/kaiwudb_certs.tar.gz -C/etc/kaiwudb/certs ca.key $crt 2>&1)
+    if [ "$g_encrypto_store" = "true" ];then
+      encrypto_key="sm4.key"
+    fi
+    ret=$(eval $local_cmd_prefix tar -zcvf $g_deploy_path/kaiwudb_certs.tar.gz -C/etc/kaiwudb/certs ca.key $crt $encrypto_key 2>&1)
     if [ $? -ne 0 ];then
       log_warn "Compress ca failed: $ret. Please manually compress the CA certificate."
       return
