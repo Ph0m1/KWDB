@@ -136,6 +136,9 @@ func (b *Builder) buildJoin(
 			filter := b.buildScalar(
 				outScope.resolveAndRequireType(on.Expr, types.Bool), outScope, nil, nil, nil,
 			)
+			if name, ok1 := memo.CheckGroupWindowExist(filter); ok1 {
+				panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+			}
 			filters = memo.FiltersExpr{b.factory.ConstructFiltersItem(filter)}
 		} else {
 			filters = memo.TrueFilter

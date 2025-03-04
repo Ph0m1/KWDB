@@ -714,6 +714,25 @@ where (subq_4.c0 is NULL)
 -------+------+------+------+------+------+------+------+----+------+-----+-------
   NULL | NULL | NULL | NULL | NULL | NULL | NULL | NULL | 22 | NULL |  67 | NULL
 (1 row)
+> select
+    subq_0.c6 as c0
+from
+    (select
+         ref_0.e15 as c0,
+         ref_0.code10 as c3,
+         ref_0.code7 as c4,
+         ref_0.e5 as c5,
+         ref_0.e14 as c6
+     from
+         public.t1 as ref_0) as subq_0
+        left join (select
+                       case when true then 'test' else 'test' end
+                           as c0
+                   from
+                       public.t1) as subq_1
+                  on (now() > case when (true) or true then time_window(now(), cast(cast(null as text) as text)) else now() end);
+ERROR: time_window() can be only used in groupby
+SQLSTATE: 42601
 > set cluster setting ts.parallel_degree=default;
 SET CLUSTER SETTING
 > use defaultdb;

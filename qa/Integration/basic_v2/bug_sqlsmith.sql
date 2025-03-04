@@ -699,6 +699,26 @@ where (subq_4.c0 is NULL)
     limit 19;
 ---------- fix ZDP-45523 end ----------
 
+---------- fix ZDP-45670 start ----------
+select
+    subq_0.c6 as c0
+from
+    (select
+         ref_0.e15 as c0,
+         ref_0.code10 as c3,
+         ref_0.code7 as c4,
+         ref_0.e5 as c5,
+         ref_0.e14 as c6
+     from
+         public.t1 as ref_0) as subq_0
+        left join (select
+                       case when true then 'test' else 'test' end
+                           as c0
+                   from
+                       public.t1) as subq_1
+                  on (now() > case when (true) or true then time_window(now(), cast(cast(null as text) as text)) else now() end);
+---------- fix ZDP-45670 end ----------
+
 -- delete data
 set cluster setting ts.parallel_degree=default;
 use defaultdb;
