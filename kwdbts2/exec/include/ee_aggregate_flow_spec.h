@@ -374,22 +374,26 @@ EEIteratorErrCode AggregatorSpecParam<T>::ResolveAggCol(kwdbContext_p ctx,
         break;
       }
       case Sumfunctype::FIRSTTS: {
-        func_field = new FieldAggLonglong(i, roachpb::DataType::TIMESTAMP, sizeof(KTimestamp), agg_op_);
+        k_uint32 col = agg.col_idx(1);
+        func_field = new FieldAggLonglong(i, input_fields[col]->get_storage_type(), sizeof(KTimestamp), agg_op_);
         IsAggColNull(func_field);
         break;
       }
       case Sumfunctype::LASTTS: {
-        func_field = new FieldAggLonglong(i, roachpb::DataType::TIMESTAMP, sizeof(KTimestamp), agg_op_);
+        k_uint32 col = agg.col_idx(1);
+        func_field = new FieldAggLonglong(i, input_fields[col]->get_storage_type(), sizeof(KTimestamp), agg_op_);
         IsAggColNull(func_field);
         break;
       }
       case Sumfunctype::FIRSTROWTS: {
-        func_field = new FieldAggLonglong(i, roachpb::DataType::TIMESTAMP, sizeof(KTimestamp), agg_op_);
+        k_uint32 col = agg.col_idx(1);
+        func_field = new FieldAggLonglong(i, input_fields[col]->get_storage_type(), sizeof(KTimestamp), agg_op_);
         IsAggColNull(func_field);
         break;
       }
       case Sumfunctype::LASTROWTS: {
-        func_field = new FieldAggLonglong(i, roachpb::DataType::TIMESTAMP, sizeof(KTimestamp), agg_op_);
+        k_uint32 col = agg.col_idx(1);
+        func_field = new FieldAggLonglong(i, input_fields[col]->get_storage_type(), sizeof(KTimestamp), agg_op_);
         IsAggColNull(func_field);
         break;
       }

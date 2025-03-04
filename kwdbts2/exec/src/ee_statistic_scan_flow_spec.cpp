@@ -71,13 +71,20 @@ EEIteratorErrCode StatisticSpecResolve::ResolveRender(kwdbContext_p ctx,
 
     } else {*/
     k_uint32 tab = params.param(0).value();
+    k_int32 agg_type = spec_->aggtypes(i);
+    if ((Sumfunctype::LASTTS == agg_type) ||
+        (Sumfunctype::LASTROWTS == agg_type) ||
+        (Sumfunctype::FIRSTTS == agg_type) ||
+        (Sumfunctype::FIRSTROWTS == agg_type)) {
+      ts_type_ = table_->GetFieldWithColNum(params.param(1).value())
+                     ->get_storage_type();
+    }
     //  LOG_DEBUG("scan outputcols : %d = %u\n", i, tab);
     Field *field = table_->GetFieldWithColNum(tab);
     //}
     if (nullptr == field) {
       Return(EEIteratorErrCode::EE_ERROR);
     }
-    k_int32 agg_type = spec_->aggtypes(i);
     outputcols_[i] = field;
     if (renders_size_ == 0) {
       Field *new_field = nullptr;
@@ -397,8 +404,15 @@ EEIteratorErrCode StatisticSpecResolve::NewAggBaseField(kwdbContext_p ctx,
           (*field)->set_field_statistic(true);
         }
       } else {
+        roachpb::DataType type = roachpb::DataType::BIGINT;
+        if ((Sumfunctype::LASTTS == agg_type) ||
+            (Sumfunctype::LASTROWTS == agg_type) ||
+            (Sumfunctype::FIRSTTS == agg_type) ||
+            (Sumfunctype::FIRSTROWTS == agg_type)) {
+          type = ts_type_;
+        }
         *field =
-            new FieldLonglong(num, roachpb::DataType::BIGINT, sizeof(k_int64));
+            new FieldLonglong(num, type, sizeof(k_int64));
         if (agg_type == Sumfunctype::COUNT) {
           (*field)->set_field_statistic(true);
         }

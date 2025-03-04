@@ -44,6 +44,7 @@ class StatisticSpecResolve : public PostResolve {
   k_int16 is_insert_ts_index_{0};
   k_int16 insert_last_tag_ts_num_{0};
   k_int32 tag_count_index_{-1};
+  roachpb::DataType ts_type_{roachpb::DataType::TIMESTAMPTZ};
 
  protected:
   k_bool is_have_tag_first_{false};
