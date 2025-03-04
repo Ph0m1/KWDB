@@ -116,6 +116,9 @@ type RelExpr interface {
 
 	// SetAddSynchronizer set need add synchronizer to ts engine
 	SetAddSynchronizer()
+
+	// ResetAddSynchronizer reset need add synchronizer to ts engine
+	ResetAddSynchronizer()
 }
 
 // ScalarPropsExpr is implemented by scalar expressions which cache scalar

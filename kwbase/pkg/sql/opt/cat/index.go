@@ -180,7 +180,7 @@ type Index interface {
 	//
 	PartitionByListPrefixes() []tree.Datums
 
-	IndexColumnIDs(i int) []uint32
+	IndexColumnIDs() []uint32
 }
 
 // IndexColumn describes a single column that is part of an index definition.

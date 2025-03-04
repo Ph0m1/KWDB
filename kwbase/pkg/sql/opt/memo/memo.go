@@ -29,6 +29,7 @@ import (
 	"math"
 	"runtime"
 	"sort"
+	"sync"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
@@ -160,6 +161,7 @@ type Memo struct {
 	dataConversion              sessiondata.DataConversionConfig
 	reorderJoinsLimit           int
 	multiModelReorderJoinsLimit int
+	hashScanMode                int
 	MultiModelEnabled           bool
 	zigzagJoinEnabled           bool
 	optimizerFKs                bool
@@ -262,36 +264,91 @@ func (m *TSCheckHelper) init() {
 // MultimodelHelper is a helper struct designed to assist in setting
 // configurations for multiple model processing.
 type MultimodelHelper struct {
-	TableGroup           [][][]opt.TableID
-	PreGroupedAggregates AggregationStrategy
-	HasBljNode           bool
-	JoinCols             opt.ColList
-	HashTagScan          bool
-	OriginalAccessMode   execinfrapb.TSTableReadMode
-	ResetReasons         map[MultiModelResetReason]struct{}
-	HasLastAgg           bool
+	AggNotPushDown []bool
+	HashTagScan    bool
+	HasLastAgg     bool
+	IsUnion        bool
+	JoinRelations  JoinRelations
+	PlanMode       []PlanMode
+	PreGroupInfos  []PreGroupInfo
+	ResetReasons   map[MultiModelResetReason]struct{}
+	TableData      sync.Map
+	TableGroup     [][]opt.TableID
 }
 
 // init Initializes values for MultimodelHelper
 func (m *MultimodelHelper) init() {
-	m.PreGroupedAggregates = OutsideIn
-	m.TableGroup = nil
-	m.HasBljNode = false
-	m.JoinCols = nil
-	m.HashTagScan = false
-	m.OriginalAccessMode = -1
-	m.ResetReasons = make(map[MultiModelResetReason]struct{})
+	m.AggNotPushDown = []bool{false}
 	m.HasLastAgg = false
+	m.HashTagScan = false
+	m.IsUnion = false
+	m.JoinRelations = make(map[string][]TableJoinInfo)
+	m.PlanMode = []PlanMode{Undefined}
+	m.PreGroupInfos = []PreGroupInfo{}
+	m.ResetReasons = make(map[MultiModelResetReason]struct{})
+	m.TableData = sync.Map{}
+	m.TableGroup = make([][]opt.TableID, 0)
 }
 
-// AggregationStrategy defines the strategy for data aggregation in queries.
+// PreGroupInfo stores information for pre-aggregation node
+type PreGroupInfo struct {
+	//  aggregation functions.
+	AggFuncs []string
+
+	// AVG function columns
+	AvgFuncColumns []opt.ColumnID
+
+	// Mapping between AVG function columns and the corresponding COUNT function
+	// columns that operate on the same column as AVG.
+	AvgToCountMapping []AvgToCountOrSumMapping
+
+	// Mapping between AVG function columns and the corresponding SUM function
+	// columns that operate on the same column as AVG.
+	AvgToSumMapping []AvgToCountOrSumMapping
+
+	// other aggregate function columns, excluding AVG.
+	OtherFuncColumns []opt.ColumnID
+
+	// Aggregation columns used in corresponding aggregation functions.
+	AggColumns []opt.ColumnID
+
+	// Aggregation columns after pre-aggregation.
+	NewAggColumns []opt.ColumnID
+
+	// Whether pre-aggregation should be applied after processing the filter conditions.
+	BuildGroupAfterFilter bool
+
+	// Columns related to the AVG function in pre-aggregation.
+	// Each sub-array contains the following elements in order:
+	// 1. The original column on which AVG is applied.
+	// 2. The COUNT column corresponding to the AVG function after pre-aggregation.
+	// 3. The SUM column corresponding to the AVG function after pre-aggregation.
+	// 4. The SUM(COUNT) column corresponding to the AVG function after pre-aggregation.
+	// 5. The SUM(SUM) column corresponding to the AVG function after pre-aggregation.
+	AvgColumnRelations  [][]opt.ColumnID
+	GroupingCols        []opt.ColumnID
+	GroupByExpr         RelExpr
+	GroupByExprPos      []int
+	BuildingPreGrouping bool
+	HasTimeBucket       bool
+	ProjectExpr         RelExpr
+}
+
+// TableInfo holds information for a specific table
+type TableInfo struct {
+	OriginalAccessMode execinfrapb.TSTableReadMode
+	PrimaryTagCount    int
+	PrimaryFilterLen   int
+}
+
+// PlanMode defines the strategy for data aggregation in queries.
 // for multiple model processing.
-type AggregationStrategy int
+type PlanMode int
 
 const (
 	// OutsideIn represents a strategy where relational data is processed first,
 	// followed by time-series data.
-	OutsideIn AggregationStrategy = iota // 0
+	OutsideIn PlanMode = iota // 0
 
 	// InsideOut represents a strategy that starts with time-series data,
 	// and then relational data is processed.
@@ -299,22 +356,10 @@ const (
 
 	// Hybrid represents a combination of both OutsideIn and InsideOut strategies.
 	Hybrid // 2
-)
 
-// String converts AggregationStrategy to string
-// for multiple model processing.
-func (a AggregationStrategy) String() string {
-	switch a {
-	case OutsideIn:
-		return "outside-in"
-	case InsideOut:
-		return "inside-out"
-	case Hybrid:
-		return "hybrid"
-	default:
-		return "unknown"
-	}
-}
+	// Undefined represents an uninitialized or undefined strategy.
+	Undefined // 3
+)
 
 // MultiModelResetReason defines reasons for resetting the multi-model flag,
 // indicating scenarios where multi-model processing is not supported.
@@ -343,9 +388,9 @@ const (
 	// which is necessary for processing in multi-model contexts.
 	LeftJoinColsPositionMismatch // 4
 
-	// UnsupportedCastOnTagColumn indicates the reset reason is due to a cast operation
+	// UnsupportedCastOnTSColumn indicates the reset reason is due to a cast operation
 	// on a tag column, which is not supported in multi-model contexts.
-	UnsupportedCastOnTagColumn // 5
+	UnsupportedCastOnTSColumn // 5
 
 	// JoinColsTypeOrLengthMismatch indicates the reset reason is due to a mismatch
 	// in the type or length of join columns, which is necessary for processing in multi-model contexts.
@@ -354,6 +399,21 @@ const (
 	// UnsupportedOperation indicates the reset reason is due to an unsupported operation
 	// in a multi-model context.
 	UnsupportedOperation // 7
+	// JoinOnTSMetricsColumn indicates the reset reason is due to a join operation
+	// on time-series metrics columns, which is not supported in multi-model contexts.
+	JoinOnTSMetricsColumn // 8
+
+	// UnsupportedSemiJoin indicates the reset reason is due to a semi join operation,
+	// which is not supported in multi-model contexts.
+	UnsupportedSemiJoin
+
+	// UnsupportedOuterJoin indicates the reset reason is due to an outer join operation,
+	// which is not supported in multi-model contexts.
+	UnsupportedOuterJoin
+
+	// UnsupportedPlanMode indicates the reset reason is due to inapplicable of either outsidein or insideout plan,
+	// which is not supported in multi-model contexts.
+	UnsupportedPlanMode
 )
 
 // String converts MultiModelResetReason to string
@@ -370,16 +430,64 @@ func (r MultiModelResetReason) String() string {
 		return "cross join is not supported in multi-model"
 	case LeftJoinColsPositionMismatch:
 		return "mismatch in left join columns' positions with relationalInfo"
-	case UnsupportedCastOnTagColumn:
-		return "cast on tag column is not supported in multi-model"
+	case UnsupportedCastOnTSColumn:
+		return "cast on time series column is not supported in multi-model"
 	case JoinColsTypeOrLengthMismatch:
 		return "mismatch in join columns' type or length"
 	case UnsupportedOperation:
 		return "unsupported operation in multi-model context"
+	case JoinOnTSMetricsColumn:
+		return "join on time-series metrics column"
+	case UnsupportedSemiJoin:
+		return "semi join is not supported in multi-model"
+	case UnsupportedOuterJoin:
+		return "outer join is not supported in multi-model"
+	case UnsupportedPlanMode:
+		return "the access plan cannot be optimized in multi-model"
 	default:
 		return "unknown"
 	}
 }
+
+// AvgToCountOrSumMapping stores the mapping of an Avg aggregation function
+type AvgToCountOrSumMapping struct {
+	AvgFuncID opt.ColumnID // Avg aggregation's funcID
+	FuncID    opt.ColumnID // Corresponding Count aggregation's funcID
+}
+
+// GetTableIndexFromGroup check and retrieve the index of the table in the table group if the TS table exists.
+func (m *MultimodelHelper) GetTableIndexFromGroup(id opt.TableID) int {
+	for i, group := range m.TableGroup {
+		if len(group) > 0 && group[0] == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// GetTSTableIndexFromGroup check and retrieve the index of the related TS table in the table group if it exists.
+func (m *MultimodelHelper) GetTSTableIndexFromGroup(id opt.TableID) int {
+	for i, group := range m.TableGroup {
+		if len(group) > 0 {
+			for _, tableID := range group {
+				if tableID == id {
+					return i
+				}
+			}
+		}
+	}
+	return -1
+}
+
+// TableJoinInfo stores information about unique columns of a table
+type TableJoinInfo struct {
+	TableID  opt.TableID
+	ColIDs   []opt.ColumnID
+	IsUnique bool
+}
+
+// JoinRelations keeps join information of tables
+type JoinRelations map[string][]TableJoinInfo
 
 // Init initializes a new empty memo instance, or resets existing state so it
 // can be reused. It must be called before use (or reuse). The memo collects
@@ -398,6 +506,7 @@ func (m *Memo) Init(evalCtx *tree.EvalContext) {
 	m.dataConversion = evalCtx.SessionData.DataConversion
 	m.reorderJoinsLimit = evalCtx.SessionData.ReorderJoinsLimit
 	m.multiModelReorderJoinsLimit = evalCtx.SessionData.MultiModelReorderJoinsLimit
+	m.hashScanMode = evalCtx.SessionData.HashScanMode
 	m.MultiModelEnabled = evalCtx.SessionData.MultiModelEnabled
 	m.zigzagJoinEnabled = evalCtx.SessionData.ZigzagJoinEnabled
 	m.optimizerFKs = evalCtx.SessionData.OptimizerFKs
@@ -566,6 +675,7 @@ func (m *Memo) IsStale(
 	if !m.dataConversion.Equals(&evalCtx.SessionData.DataConversion) ||
 		m.reorderJoinsLimit != evalCtx.SessionData.ReorderJoinsLimit ||
 		m.multiModelReorderJoinsLimit != evalCtx.SessionData.MultiModelReorderJoinsLimit ||
+		m.hashScanMode != evalCtx.SessionData.HashScanMode ||
 		m.MultiModelEnabled != evalCtx.SessionData.MultiModelEnabled ||
 		m.zigzagJoinEnabled != evalCtx.SessionData.ZigzagJoinEnabled ||
 		m.optimizerFKs != evalCtx.SessionData.OptimizerFKs ||
@@ -946,6 +1056,51 @@ func (m *Memo) addOrderedColumn(src *bestProps) {
 			}
 		})
 	}
+}
+
+// IsTsColsJoinPredicate checks if a single join predicate satisfies the condition
+// where both columns on the left and right sides are time series columns.
+// for multiple model processing
+func (m *Memo) IsTsColsJoinPredicate(jp FiltersItem) bool {
+	md := m.Metadata()
+	var tsTypeLeft, tsTypeRight int
+
+	getTsType := func(expr opt.Expr) int {
+		switch e := expr.(type) {
+		case *VariableExpr:
+			colID := e.Col
+			if md.ColumnMeta(colID).Table != 0 {
+				return md.ColumnMeta(colID).TSType
+			}
+			return opt.ColNormal
+		case *MultExpr:
+			for i := 0; i < 2; i++ {
+				if varExpr, ok := e.Child(i).(*VariableExpr); ok {
+					colID := varExpr.Col
+					if md.ColumnMeta(colID).Table != 0 {
+						return md.ColumnMeta(colID).TSType
+					}
+					return opt.ColNormal
+				}
+			}
+		}
+		return opt.ColNormal
+	}
+
+	switch expr := jp.Condition.(type) {
+	case *EqExpr, *LtExpr, *LeExpr, *GtExpr, *GeExpr, *LikeExpr:
+		tsTypeLeft = getTsType(expr.Child(0))
+		tsTypeRight = getTsType(expr.Child(1))
+	}
+
+	if tsTypeLeft == opt.TSColNormal || tsTypeRight == opt.TSColNormal {
+		m.MultimodelHelper.ResetReasons[JoinOnTSMetricsColumn] = struct{}{}
+		return true
+	} else if tsTypeLeft > opt.ColNormal && tsTypeRight > opt.ColNormal {
+		m.MultimodelHelper.ResetReasons[JoinBetweenTimeSeriesTables] = struct{}{}
+		return true
+	}
+	return false
 }
 
 // checkOptPruneFinalAgg checkout can prune final agg for single node mode

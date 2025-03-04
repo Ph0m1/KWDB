@@ -536,6 +536,7 @@ func (c *stmtEnvCollector) PrintSettings(w io.Writer) error {
 	}{
 		{sessionSetting: "reorder_joins_limit", clusterSetting: ReorderJoinsLimitClusterValue},
 		{sessionSetting: "multi_model_reorder_joins_limit", clusterSetting: MultiModelReorderJoinsLimitClusterValue},
+		{sessionSetting: "hash_scan_mode", clusterSetting: hashScanMode},
 		{sessionSetting: "enable_multimodel", clusterSetting: multiModelClusterMode},
 		{sessionSetting: "enable_zigzag_join", clusterSetting: zigzagJoinClusterMode},
 		{sessionSetting: "optimizer_foreign_keys", clusterSetting: optDrivenFKClusterMode},

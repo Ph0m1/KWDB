@@ -42,6 +42,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/xform"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/row"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/rowexec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/builtins"
@@ -193,6 +194,7 @@ func (ef *execFactory) ConstructTSScan(
 	tsScan.HintType = private.HintType
 	tsScan.orderedType = private.OrderedScanType
 	tsScan.ScanAggArray = private.ScanAggs
+	tsScan.TableMetaID = private.Table
 
 	// bind tag filter and primary filter to tsScanNode.
 	bindFilter := func(filters []tree.TypedExpr, primaryTag bool) bool {
@@ -2736,35 +2738,68 @@ func walkSort(meta *opt.Metadata, expr memo.RelExpr) bool {
 	}
 }
 
-// updatePlanColumns updates the resultColumns for tsScanNode and synchronizerNode plans
-// based on the columns of a given batchLookUpJoinNode for multiple model processing.
+// UpdatePlanColumns modifies the resultColumns  of tsScanNode, synchronizerNode,
+// and filterNode if they are part of the plan tree under the batch lookup join.
+//
+// The function ensures that the right-side plan of the batchLookUpJoinNode correctly
+// inherits the column structure from the join. If a tsScanNode is found, its resultColumns
+// are updated directly. If a synchronizerNode wraps a tsScanNode, both the synchronizerNode
+// and tsScanNode are updated.
+//
+// Special handling is applied to filterNode due to potential column index mismatches:
+// - filterNode may have a different column ordering than batchLookUpJoinNode.
+// - A column mapping is constructed to remap indexed variables in its comparison expression
+// to the correct column indices in the new schema.
+// - This ensures that filtering conditions remain valid after the column structure is updated.
 func (ef *execFactory) UpdatePlanColumns(blj *exec.Node) bool {
 	success := false
+	updateColumns := func(tsNode *tsScanNode, columns sqlbase.ResultColumns) {
+		tsNode.resultColumns = columns
+		success = true
+	}
+
 	switch node := (*blj).(type) {
 	case *batchLookUpJoinNode:
 		if tsNode, ok := node.right.plan.(*tsScanNode); ok {
-			tsNode.resultColumns = node.columns
-			success = true
+			updateColumns(tsNode, node.columns)
 		}
 
 		if syncNode, ok := node.right.plan.(*synchronizerNode); ok {
 			if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
 				syncNode.columns = node.columns
-				tsNode.resultColumns = node.columns
-				success = true
+				updateColumns(tsNode, node.columns)
 			}
 		}
 		if filterNode, ok := node.right.plan.(*filterNode); ok {
+			columnMapping := make(map[int]int)
+			for i, srcCol := range filterNode.source.columns {
+				for j, nodeCol := range node.columns {
+					if srcCol.Name == nodeCol.Name {
+						columnMapping[i] = j
+						break
+					}
+				}
+			}
+			if comparisonExpr, ok := filterNode.filter.(*tree.ComparisonExpr); ok {
+				if leftVar, ok := comparisonExpr.Left.(*tree.IndexedVar); ok {
+					if newIdx, found := columnMapping[leftVar.Idx]; found {
+						leftVar.Idx = newIdx
+					}
+				}
+				if rightVar, ok := comparisonExpr.Right.(*tree.IndexedVar); ok {
+					if newIdx, found := columnMapping[rightVar.Idx]; found {
+						rightVar.Idx = newIdx
+					}
+				}
+			}
 			filterNode.source.columns = node.columns
 			if tsNode, ok := filterNode.source.plan.(*tsScanNode); ok {
-				tsNode.resultColumns = node.columns
-				success = true
+				updateColumns(tsNode, node.columns)
 			}
 			if syncNode, ok := filterNode.source.plan.(*synchronizerNode); ok {
 				if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
 					syncNode.columns = node.columns
-					tsNode.resultColumns = node.columns
-					success = true
+					updateColumns(tsNode, node.columns)
 				}
 			}
 		}
@@ -2781,25 +2816,26 @@ func (ef *execFactory) UpdateGroupInput(input *exec.Node) exec.Node {
 		return node
 
 	case *renderNode:
-		node.engine = tree.EngineTypeTimeseries
 		if bljNode, ok := node.source.plan.(*batchLookUpJoinNode); ok {
 			node.source.plan = bljNode.right.plan
 			*input = node
+			node.engine = tree.EngineTypeTimeseries
 			return bljNode
 		} else if sortNode, ok := node.source.plan.(*sortNode); ok {
-			sortNode.engine = tree.EngineTypeTimeseries
 			if bljNode, ok := sortNode.plan.(*batchLookUpJoinNode); ok {
+				sortNode.engine = tree.EngineTypeTimeseries
 				sortNode.plan = bljNode.right.plan
+				node.engine = tree.EngineTypeTimeseries
 				*input = node
 				return bljNode
 			}
 		}
 	case *sortNode:
-		node.engine = tree.EngineTypeTimeseries
 		if renderNode, ok := node.plan.(*renderNode); ok {
-			renderNode.engine = tree.EngineTypeTimeseries
 			if bljNode, ok := renderNode.source.plan.(*batchLookUpJoinNode); ok {
+				renderNode.engine = tree.EngineTypeTimeseries
 				renderNode.source.plan = bljNode.right.plan
+				node.engine = tree.EngineTypeTimeseries
 				*input = node
 				return bljNode
 			}
@@ -2853,34 +2889,40 @@ func (ef *execFactory) SetBljRightNode(node1, node2 exec.Node) exec.Node {
 }
 
 // ProcessTsScanNode sets relationalInfo to a tsScanNode for multiple model processing.
-// for multiple model processing.
 func (ef *execFactory) ProcessTsScanNode(
-	node exec.Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol,
+	node exec.Node,
+	leftEq, rightEq *[]uint32,
+	tsCols *[]sqlbase.TSCol,
+	tableID opt.TableID,
+	joinCols opt.ColList,
+	mem *memo.Memo,
+	evalCtx *tree.EvalContext,
 ) bool {
+	// Helper function to process tsScanNode
+	processTsNode := func(tsNode *tsScanNode) {
+		tsNode.RelInfo.RelationalCols = tsCols
+		tsNode.RelInfo.ProbeColIds = leftEq
+		tsNode.RelInfo.HashColIds = rightEq
+		resetAccessMode(tsNode, tableID, joinCols, mem, evalCtx)
+	}
+
 	switch n := node.(type) {
 	case *tsScanNode:
-		n.RelInfo.RelationalCols = tsCols
-		n.RelInfo.ProbeColIds = leftEq
-		n.RelInfo.HashColIds = rightEq
+		processTsNode(n)
 		return true
 	case *synchronizerNode:
 		if tsNode, ok := n.plan.(*tsScanNode); ok {
-			tsNode.RelInfo.RelationalCols = tsCols
-			tsNode.RelInfo.ProbeColIds = leftEq
-			tsNode.RelInfo.HashColIds = rightEq
+			processTsNode(tsNode)
 			return true
 		}
 	case *filterNode:
-		if tsNode, ok := n.source.plan.(*tsScanNode); ok {
-			tsNode.RelInfo.RelationalCols = tsCols
-			tsNode.RelInfo.ProbeColIds = leftEq
-			tsNode.RelInfo.HashColIds = rightEq
+		switch srcPlan := n.source.plan.(type) {
+		case *tsScanNode:
+			processTsNode(srcPlan)
 			return true
-		} else if syncNode, ok := n.source.plan.(*synchronizerNode); ok {
-			if tsNode, ok := syncNode.plan.(*tsScanNode); ok {
-				tsNode.RelInfo.RelationalCols = tsCols
-				tsNode.RelInfo.ProbeColIds = leftEq
-				tsNode.RelInfo.HashColIds = rightEq
+		case *synchronizerNode:
+			if tsNode, ok := srcPlan.plan.(*tsScanNode); ok {
+				processTsNode(tsNode)
 				return true
 			}
 		}
@@ -2888,125 +2930,542 @@ func (ef *execFactory) ProcessTsScanNode(
 	return false
 }
 
+// resetAccessMode determines and sets the access mode for a tsScanNode
+//
+// - If a specific access mode is enforced via session settings, it is applied directly.
+// - Otherwise, it determines the access mode based on primary tag coverage and whether HashTagScan is enabled:
+//   - If all primary tags are present in the join columns, it uses `primaryHashTagScan`.
+//   - If HashTagScan is enabled in MultimodelHelper, it uses `hashTagScan`.
+//   - Otherwise, it defaults to `hashRelScan`.
+func resetAccessMode(
+	tsNode *tsScanNode,
+	tableID opt.TableID,
+	joinCols opt.ColList,
+	mem *memo.Memo,
+	evalCtx *tree.EvalContext,
+) {
+	md := mem.Metadata()
+	var primaryTagCount int
+	if value, ok := mem.MultimodelHelper.TableData.Load(tableID); ok {
+		tableInfo := value.(memo.TableInfo)
+		primaryTagCount = tableInfo.PrimaryTagCount
+	}
+	ptagSet := make(map[int]struct{})
+	for _, joinCol := range joinCols {
+		if md.ColumnMeta(opt.ColumnID(joinCol)).IsPrimaryTag() {
+			ptagSet[int(joinCol)] = struct{}{}
+		}
+	}
+
+	ptagCount := len(ptagSet)
+	accessModeEnforced := evalCtx.SessionData.HashScanMode
+	if accessModeEnforced > 0 && accessModeEnforced < 4 {
+		switch accessModeEnforced {
+		case 1:
+			tsNode.AccessMode = execinfrapb.TSTableReadMode_hashTagScan
+		case 2:
+			tsNode.AccessMode = execinfrapb.TSTableReadMode_primaryHashTagScan
+		case 3:
+			tsNode.AccessMode = execinfrapb.TSTableReadMode_hashRelScan
+		}
+	} else if ptagCount == primaryTagCount {
+		tsNode.AccessMode = execinfrapb.TSTableReadMode_primaryHashTagScan
+	} else if mem.MultimodelHelper.HashTagScan {
+		tsNode.AccessMode = execinfrapb.TSTableReadMode_hashTagScan
+	} else {
+		tsNode.AccessMode = execinfrapb.TSTableReadMode_hashRelScan
+	}
+}
+
 // ResetTsScanAccessMode resets tsScanNode's accessMode when falling back
 // to original plan for multiple model processing.
 func (ef *execFactory) ResetTsScanAccessMode(
-	node exec.Node, originalAccessMode execinfrapb.TSTableReadMode,
+	expr memo.RelExpr, originalAccessMode execinfrapb.TSTableReadMode,
 ) {
-	switch n := node.(type) {
-	case *tsScanNode:
-		n.AccessMode = originalAccessMode
-	case *synchronizerNode:
-		if tsNode, ok := n.plan.(*tsScanNode); ok {
-			tsNode.AccessMode = originalAccessMode
+	setAccessMode := func(e memo.RelExpr) {
+		if tsScanExpr, ok := e.(*memo.TSScanExpr); ok {
+			tsScanExpr.TSScanPrivate.AccessMode = int(originalAccessMode)
 		}
 	}
+
+	var recursiveSetAccessMode func(memo.RelExpr)
+	recursiveSetAccessMode = func(e memo.RelExpr) {
+		if e == nil {
+			return
+		}
+		switch expr := e.(type) {
+		case *memo.TSScanExpr:
+			setAccessMode(expr)
+		case *memo.ProjectExpr:
+			recursiveSetAccessMode(expr.Input)
+		case *memo.SelectExpr:
+			recursiveSetAccessMode(expr.Input)
+		}
+	}
+
+	recursiveSetAccessMode(expr)
 }
 
 // ProcessBljLeftColumns helps build the tsScanNode's relaitonalInfo
 // for multiple model processing.
-func (ef *execFactory) ProcessBljLeftColumns(node exec.Node, mem *memo.Memo) []sqlbase.TSCol {
+func (ef *execFactory) ProcessBljLeftColumns(
+	node exec.Node, mem *memo.Memo,
+) ([]sqlbase.TSCol, bool) {
 	tsCols := make([]sqlbase.TSCol, 0)
-
+	fb := false
+	var columns sqlbase.ResultColumns
 	switch n := node.(type) {
-	case *batchLookUpJoinNode, *exportNode, *groupNode,
-		*indexJoinNode, *joinNode, *lookupJoinNode,
-		*ordinalityNode, *projectSetNode, *renderNode,
-		*scanNode, *tsScanNode, *synchronizerNode,
-		*unionNode, *valuesNode, *windowNode,
-		*zeroNode, *zigzagJoinNode:
-		var columns sqlbase.ResultColumns
-		switch node := n.(type) {
-		case *batchLookUpJoinNode:
-			columns = node.columns
-		case *exportNode:
-			columns = node.columns
-		case *groupNode:
-			columns = node.columns
-		case *indexJoinNode:
-			columns = node.resultColumns
-		case *joinNode:
-			columns = node.columns
-		case *lookupJoinNode:
-			columns = node.columns
-		case *ordinalityNode:
-			columns = node.columns
-		case *projectSetNode:
-			columns = node.columns
-		case *renderNode:
-			columns = node.columns
-		case *scanNode:
-			columns = node.resultColumns
-		case *tsScanNode:
-			columns = node.resultColumns
-		case *synchronizerNode:
-			columns = node.columns
-		case *unionNode:
-			columns = node.columns
-		case *valuesNode:
-			columns = node.columns
-		case *windowNode:
-			columns = node.columns
-		case *zeroNode:
-			columns = node.columns
-		case *zigzagJoinNode:
-			columns = node.columns
-		}
-		// columns := n.columns
-		for _, col := range columns {
-			colType := col.Typ
-			storageType := sqlbase.GetTSDataType(colType)
-			if storageType == sqlbase.DataType_UNKNOWN {
-				storageType = sqlbase.DataType_VARCHAR
-			}
+	case *batchLookUpJoinNode:
+		columns = n.columns
+	case *exportNode:
+		columns = n.columns
+	case *groupNode:
+		columns = n.columns
+	case *indexJoinNode:
+		columns = n.resultColumns
+	case *joinNode:
+		columns = n.columns
+	case *lookupJoinNode:
+		columns = n.columns
+	case *ordinalityNode:
+		columns = n.columns
+	case *projectSetNode:
+		columns = n.columns
+	case *renderNode:
+		columns = n.columns
+	case *scanNode:
+		columns = n.resultColumns
+	case *tsScanNode:
+		columns = n.resultColumns
+	case *synchronizerNode:
+		columns = n.columns
+	case *unionNode:
+		columns = n.columns
+	case *valuesNode:
+		columns = n.columns
+	case *windowNode:
+		columns = n.columns
+	case *zeroNode:
+		columns = n.columns
+	case *zigzagJoinNode:
+		columns = n.columns
+	case *limitNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *applyJoinNode:
+		return ef.ProcessBljLeftColumns(n.input.plan, mem)
+	case *bufferNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *delayedNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *distinctNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *explainDistSQLNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *explainPlanNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *explainVecNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *filterNode:
+		return ef.ProcessBljLeftColumns(n.source.plan, mem)
+	case *max1RowNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *relocateNode:
+		return ef.ProcessBljLeftColumns(n.rows, mem)
+	case *sortNode:
+		return ef.ProcessBljLeftColumns(n.plan, mem)
+	case *splitNode:
+		return ef.ProcessBljLeftColumns(n.rows, mem)
+	case *spoolNode:
+		return ef.ProcessBljLeftColumns(n.source, mem)
+	case *unsplitNode:
+		return ef.ProcessBljLeftColumns(n.rows, mem)
+	case *updateNode:
+		return ef.ProcessBljLeftColumns(n.source, mem)
+	}
 
-			var storageLen uint64
-			stLen := sqlbase.GetStorageLenForFixedLenTypes(storageType)
-			if stLen != 0 {
-				storageLen = uint64(stLen)
-			}
-
-			typeWidth := colType.Width()
-			if storageType == sqlbase.DataType_CHAR || storageType == sqlbase.DataType_NVARCHAR {
-				typeWidth = colType.Width() * 4
-			}
-
-			if typeWidth == 0 {
-				switch storageType {
-				case sqlbase.DataType_CHAR:
-					storageLen = 1
-				case sqlbase.DataType_BYTES:
-					storageLen = 3
-				case sqlbase.DataType_NCHAR:
-					storageLen = 4
-				case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR, sqlbase.DataType_VARBYTES:
-					storageLen = sqlbase.TSMaxVariableTupleLen
-				}
+	varPos := 0
+	for _, col := range columns {
+		colType := col.Typ
+		if !xform.CheckDataType(colType) {
+			if colType.Name() == "text" || colType.Name() == "string" {
 			} else {
-				switch storageType {
-				case sqlbase.DataType_CHAR, sqlbase.DataType_NCHAR:
-					if typeWidth < sqlbase.TSMaxFixedLen {
-						storageLen = uint64(typeWidth) + 1
-					}
-				case sqlbase.DataType_BYTES:
-					if typeWidth < sqlbase.TSMaxFixedLen {
-						storageLen = uint64(typeWidth) + 2
-					}
-				case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR:
-					if typeWidth <= sqlbase.TSMaxVariableLen {
-						storageLen = uint64(typeWidth + 1)
-					}
-				case sqlbase.DataType_VARBYTES:
-					if typeWidth <= sqlbase.TSMaxVariableLen {
-						storageLen = uint64(typeWidth)
+				fb = true
+			}
+		}
+		storageType := sqlbase.GetTSDataType(colType)
+		if colType.Name() == "string" ||
+			colType.Name() == "text" {
+			storageType = sqlbase.DataType_VARCHAR
+		}
+		if storageType == sqlbase.DataType_UNKNOWN {
+			storageType = sqlbase.DataType_VARCHAR
+			fb = true
+		}
+
+		var storageLen uint64
+		stLen := sqlbase.GetStorageLenForFixedLenTypes(storageType)
+		if stLen != 0 {
+			storageLen = uint64(stLen)
+		}
+
+		typeWidth := colType.Width()
+		if storageType == sqlbase.DataType_NCHAR || storageType == sqlbase.DataType_NVARCHAR {
+			typeWidth = colType.Width() * 4
+		}
+
+		if typeWidth == 0 {
+			switch storageType {
+			case sqlbase.DataType_CHAR:
+				storageLen = 1
+			case sqlbase.DataType_BYTES:
+				storageLen = 3
+			case sqlbase.DataType_NCHAR:
+				storageLen = 4
+			case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR, sqlbase.DataType_VARBYTES:
+				storageLen = sqlbase.TSMaxVariableTupleLen
+			}
+		} else {
+			switch storageType {
+			case sqlbase.DataType_CHAR, sqlbase.DataType_NCHAR:
+				if typeWidth < sqlbase.TSMaxFixedLen {
+					storageLen = uint64(typeWidth) + 1
+				} else {
+					fb = true
+				}
+			case sqlbase.DataType_BYTES:
+				if typeWidth < sqlbase.TSMaxFixedLen {
+					storageLen = uint64(typeWidth) + 2
+				} else {
+					fb = true
+				}
+			case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR:
+				if typeWidth <= sqlbase.TSMaxVariableLen {
+					storageLen = uint64(typeWidth + 1)
+				} else {
+					fb = true
+				}
+			case sqlbase.DataType_VARBYTES:
+				if typeWidth <= sqlbase.TSMaxVariableLen {
+					storageLen = uint64(typeWidth)
+				} else {
+					fb = true
+				}
+			}
+		}
+		colNullable := true
+		if col.TableID != 0 {
+			colNullable = mem.Metadata().TableByStableID(cat.StableID(col.TableID)).Column(int(col.PGAttributeNum - 1)).IsNullable()
+		} else {
+			if n, ok := node.(*renderNode); ok {
+				if e, ok := (n.render[varPos]).(tree.TypedExpr); ok {
+					if v, ok := (e).(*tree.IndexedVar); ok {
+						rcol := n.source.columns[v.Idx]
+						if rcol.TableID != 0 {
+							colNullable = mem.Metadata().TableByStableID(cat.StableID(rcol.TableID)).Column(int(rcol.PGAttributeNum - 1)).IsNullable()
+						}
+					} else if vs, ok := (e).(*tree.CastExpr); ok {
+						if v, ok := vs.Expr.(*tree.IndexedVar); ok {
+							rcol := n.source.columns[v.Idx]
+							if rcol.TableID != 0 {
+								colNullable = mem.Metadata().TableByStableID(cat.StableID(rcol.TableID)).Column(int(rcol.PGAttributeNum - 1)).IsNullable()
+							}
+						}
+					} else if vs, ok := (e).(*tree.BinaryExpr); ok {
+						if v, ok := vs.Left.(*tree.IndexedVar); ok {
+							rcol := n.source.columns[v.Idx]
+							if rcol.TableID != 0 {
+								colNullable = mem.Metadata().TableByStableID(cat.StableID(rcol.TableID)).Column(int(rcol.PGAttributeNum - 1)).IsNullable()
+							}
+						} else if v, ok := vs.Right.(*tree.IndexedVar); ok {
+							rcol := n.source.columns[v.Idx]
+							if rcol.TableID != 0 {
+								colNullable = mem.Metadata().TableByStableID(cat.StableID(rcol.TableID)).Column(int(rcol.PGAttributeNum - 1)).IsNullable()
+							}
+						}
 					}
 				}
 			}
-			tsCols = append(tsCols, sqlbase.TSCol{
-				StorageLen:  storageLen,
-				StorageType: storageType,
-			})
+		}
+		tsCols = append(tsCols, sqlbase.TSCol{
+			StorageLen:  storageLen,
+			StorageType: storageType,
+			Nullable:    colNullable,
+		})
+		varPos++
+	}
+	return tsCols, fb
+}
+
+// FindTsScanNode traverses the execution plan tree to locate the occurrence of tsScanNode.
+func (ef *execFactory) FindTsScanNode(node exec.Node, mem *memo.Memo) opt.TableID {
+	switch n := node.(type) {
+	case *batchLookUpJoinNode:
+		if tableID := ef.FindTsScanNode(n.left.plan, mem); tableID != 0 {
+			return tableID
+		}
+		if tableID := ef.FindTsScanNode(n.right.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *exportNode:
+		if tableID := ef.FindTsScanNode(n.source, mem); tableID != 0 {
+			return tableID
+		}
+	case *filterNode:
+		if tableID := ef.FindTsScanNode(n.source.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *groupNode:
+		if tableID := ef.FindTsScanNode(n.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *indexJoinNode:
+		if tableID := ef.FindTsScanNode(n.input, mem); tableID != 0 {
+			return tableID
+		}
+	case *joinNode:
+		if tableID := ef.FindTsScanNode(n.left.plan, mem); tableID != 0 {
+			return tableID
+		}
+		if tableID := ef.FindTsScanNode(n.right.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *lookupJoinNode:
+		if tableID := ef.FindTsScanNode(n.input, mem); tableID != 0 {
+			return tableID
+		}
+	case *ordinalityNode:
+		if tableID := ef.FindTsScanNode(n.source, mem); tableID != 0 {
+			return tableID
+		}
+	case *projectSetNode:
+		if tableID := ef.FindTsScanNode(n.source, mem); tableID != 0 {
+			return tableID
+		}
+	case *renderNode:
+		if tableID := ef.FindTsScanNode(n.source.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *scanNode:
+	case *delayedNode:
+		if tableID := ef.FindTsScanNode(n.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *sortNode:
+		if tableID := ef.FindTsScanNode(n.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *synchronizerNode:
+		if tableID := ef.FindTsScanNode(n.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *tsScanNode:
+		return n.TableMetaID
+	case *unionNode:
+		if tableID := ef.FindTsScanNode(n.left, mem); tableID != 0 {
+			return tableID
+		}
+		if tableID := ef.FindTsScanNode(n.right, mem); tableID != 0 {
+			return tableID
+		}
+	case *valuesNode:
+	case *windowNode:
+		if tableID := ef.FindTsScanNode(n.plan, mem); tableID != 0 {
+			return tableID
+		}
+	case *zeroNode:
+	case *zigzagJoinNode:
+	}
+	return 0
+}
+
+// FindTSTableID traverses a relational expression tree to find the table id of the TSScanExpr.
+func (ef *execFactory) FindTSTableID(expr memo.RelExpr, mem *memo.Memo) opt.TableID {
+	for i := 0; i < expr.ChildCount(); i++ {
+		if v, ok := expr.Child(i).(memo.RelExpr); ok {
+			if tsScanExpr, ok := v.(*memo.TSScanExpr); ok {
+				return tsScanExpr.TSScanPrivate.Table
+			}
+			if tableID := ef.FindTSTableID(v, mem); tableID != 0 {
+				return tableID
+			}
 		}
 	}
-	return tsCols
+	return 0
+}
+
+// MatchGroupingCols finds the corresponding column indices in the execution node that match
+// the grouping columns
+func (ef *execFactory) MatchGroupingCols(
+	mem *memo.Memo, tableGroupIndex int, node exec.Node,
+) []opt.ColumnID {
+	groupingCols := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupingCols
+	var columns sqlbase.ResultColumns
+	var matchedIndices []opt.ColumnID
+	if tsNode, ok := node.(*tsScanNode); ok {
+		columns = tsNode.resultColumns
+	} else if syncNode, ok := node.(*synchronizerNode); ok {
+		columns = syncNode.columns
+	} else if renderNode, ok := node.(*renderNode); ok {
+		columns = renderNode.columns
+	}
+
+	metaData := mem.Metadata()
+	for _, groupingCol := range groupingCols {
+		colID := metaData.GetTagIDByColumnID(groupingCol) + 1
+		tableMetaID := metaData.ColumnMeta(groupingCol).Table
+
+		if tableMetaID != 0 {
+			tableID := mem.Metadata().Table(tableMetaID).ID()
+			for j, column := range columns {
+				if int(column.PGAttributeNum) == colID && int(column.TableID) == int(tableID) {
+					matchedIndices = append(matchedIndices, opt.ColumnID(j))
+					break
+				}
+			}
+		} else {
+			for j, column := range columns {
+				if column.Name == metaData.ColumnMeta(groupingCol).Alias {
+					matchedIndices = append(matchedIndices, opt.ColumnID(j))
+					break
+				}
+			}
+		}
+	}
+
+	return matchedIndices
+}
+
+func contains(list []opt.ColumnID, target opt.ColumnID) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ProcessRenderNode updates the column metadata of a renderNode based on its source plan.
+// for inside-out queries
+func (ef *execFactory) ProcessRenderNode(node exec.Node) error {
+	renderNode, ok := node.(*renderNode)
+	if !ok {
+		return fmt.Errorf("input node is not of type *renderNode")
+	}
+
+	sourcePlan := renderNode.source.plan
+	var columns []sqlbase.ResultColumn
+
+	if tsNode, ok := sourcePlan.(*tsScanNode); ok {
+		columns = tsNode.resultColumns
+	} else if syncNode, ok := sourcePlan.(*synchronizerNode); ok {
+		columns = syncNode.columns
+	} else {
+		return fmt.Errorf("source.plan is of unsupported type: %T", sourcePlan)
+	}
+
+	renderNode.columns = append(renderNode.columns[:1], columns...)
+
+	return nil
+}
+
+// AddAvgFuncColumns processes and updates the column mappings for average functions.
+// This function modifies the AvgColumnRelations to include count and sum functions corresponding to avg functions.
+// for inside-out queries
+func (ef *execFactory) AddAvgFuncColumns(node exec.Node, mem *memo.Memo, tableGroupIndex int) {
+	AggFuncs := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AggFuncs
+	aggColumns := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AggColumns
+	relations := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations
+
+	for i, aggColumn := range aggColumns {
+		if i < len(AggFuncs) && AggFuncs[i] == "AvgExpr" {
+			relations = append(relations, []opt.ColumnID{aggColumn})
+		}
+	}
+
+	mapping := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgToCountMapping
+	mapping2 := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgToSumMapping
+	avgFuncColumns := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgFuncColumns
+
+	for i, avgColumnID := range avgFuncColumns {
+		var countFuncID opt.ColumnID
+		var sumFuncID opt.ColumnID
+		for _, entry := range mapping {
+			if entry.AvgFuncID == avgColumnID {
+				countFuncID = entry.FuncID
+				break
+			}
+		}
+		for _, entry := range mapping2 {
+			if entry.AvgFuncID == avgColumnID {
+				sumFuncID = entry.FuncID
+				break
+			}
+		}
+
+		columnMeta := mem.Metadata().ColumnMeta(avgColumnID)
+		index := 0
+		if countFuncID != 0 && sumFuncID != 0 {
+			relations[i] = append(relations[i], countFuncID)
+
+			relations[i] = append(relations[i], sumFuncID)
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(count)", types.Int)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(sum)", columnMeta.Type)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+		} else if countFuncID != 0 {
+			relations[i] = append(relations[i], countFuncID)
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum", columnMeta.Type)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+			mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns = append(mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns, opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(count)", types.Int)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(sum)", columnMeta.Type)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+		} else if sumFuncID != 0 {
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("count", types.Int)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+			mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns = append(mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns, opt.ColumnID(index))
+
+			relations[i] = append(relations[i], sumFuncID)
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(count)", types.Int)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(sum)", columnMeta.Type)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+		} else {
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("count", types.Int)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+			mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns = append(mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns, opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum", columnMeta.Type)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+			mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns = append(mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns, opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(count)", types.Int)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+
+			index = mem.Metadata().NumColumns() + 1
+			mem.Metadata().AddColumn("sum(sum)", columnMeta.Type)
+			relations[i] = append(relations[i], opt.ColumnID(index))
+		}
+	}
+
+	mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations = relations
 }

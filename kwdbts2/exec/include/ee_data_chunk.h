@@ -24,7 +24,7 @@
 #include "ee_field.h"
 #include "ee_field_func.h"
 #include "ee_global.h"
-#include "ee_row_batch.h"
+#include "ee_tag_row_batch.h"
 #include "ee_string_info.h"
 #include "kwdb_type.h"
 #include "me_metadata.pb.h"
@@ -90,6 +90,11 @@ class DataChunk : public IChunk {
   void setDisorder(bool disorder) { disorder_ = disorder; }
 
   void SetCount(k_uint32 count) { count_ = count; }
+
+  // data size in data chunk
+  inline k_uint32 Size() {
+    return data_size_;
+  }
 
   /* override methods */
   DatumPtr GetData(k_uint32 row, k_uint32 col) override;
@@ -307,6 +312,19 @@ class DataChunk : public IChunk {
   }
 
   /**
+   * @brief Reset the data ptr and free the previous buffer if it's data owner
+   * @param[in] data_ptr  the new data ptr to be set
+   */
+  void ResetDataPtr(char *data_ptr) {
+    if (data_ && is_data_owner_) {
+      kwdbts::EE_MemPoolFree(g_pstBufferPoolInfo, data_);
+    }
+    data_ = data_ptr;
+    current_line_ = -1;
+    is_data_owner_ = false;
+  }
+
+  /**
    * @brief Encode decimal value (actually double64 or int64) using kwbase
    * protocol.
    * @param[in] raw
@@ -393,13 +411,28 @@ class DataChunk : public IChunk {
 
   static k_uint32 ComputeRowSize(vector<ColumnInfo>& column_info);
 
-  KStatus ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data);
+  // convert one row to tag data format
+  KStatus ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data, DatumPtr &rel_data_ptr);
   void GetEncodingBuffer(char** buf, k_uint32* len, k_uint32* count) {
     *buf = encoding_buf_;
     *len = encoding_len_;
     *count = count_;
     is_buf_owner_ = false;
   }
+
+  /**
+   * temporary solution to store entity indexs for tag data,
+   * will remove it after tag scan result is completely changed
+   * from tag row batch to data chunk.
+   */
+  KStatus InsertEntities(TagRowBatch* tag_row_batch);
+
+  /**
+   * temporary solution to get entity index from data chunk,
+   * will remove it after tag scan result is completely changed
+   * from tag row batch to data chunk.
+   */
+  EntityResultIndex& GetEntityIndex(k_uint32 row);
 
  protected:
   bool is_data_owner_{true};
@@ -413,11 +446,18 @@ class DataChunk : public IChunk {
   k_uint32 bitmap_size_{0};  // length of bitmap
   k_uint32 row_size_{0};     // the total length of one row
   k_bits32 col_num_{0};      // the number of col
+  k_uint32 data_size_{0};    // data size (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
 
   k_int32 current_line_{-1};  // current row
   char* encoding_buf_{nullptr};
   k_uint32 encoding_len_{0};
   bool is_buf_owner_{true};
+  /**
+   * temporary solution to store entity indexs for tag data,
+   * will remove it after tag scan result is completely changed
+   * from tag row batch to data chunk.
+   */
+  std::vector<EntityResultIndex> entity_indexs_;
 
  private:
   bool disorder_{false};

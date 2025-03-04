@@ -1,3 +1,4 @@
+set enable_multimodel=off;
 create ts database tpch;
 use tpch;
 set cluster setting sql.stats.ts_automatic_collection.enabled = false;
@@ -1484,3 +1485,4 @@ explain select
 set cluster setting sql.stats.ts_automatic_collection.enabled = true;
 use default;
 drop database tpch cascade;
+set enable_multimodel=on;

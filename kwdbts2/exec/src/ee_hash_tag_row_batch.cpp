@@ -27,6 +27,11 @@ char *HashTagRowBatch::GetData(k_uint32 tagIndex, k_uint32 offset,
   tagIndex -= rel_col_num_;
   return TagRowBatch::GetData(tagIndex, offset, ctype, dt);
 }
+k_uint16 HashTagRowBatch::GetDataLen(k_uint32 tagIndex, k_uint32 offset,
+                    roachpb::KWDBKTSColumn::ColumnType ctype) {
+  tagIndex -= rel_col_num_;
+  return TagRowBatch::GetDataLen(tagIndex, offset, ctype);
+}
 
 bool HashTagRowBatch::IsNull(k_uint32 tagIndex,
                          roachpb::KWDBKTSColumn::ColumnType ctype) {

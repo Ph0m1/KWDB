@@ -576,7 +576,12 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 				}
 
 				if tableType == tree.TimeseriesTable {
-					if cols.Equals(primaryTagCols) {
+					var adjustedCols opt.ColSet
+					for _, col := range cols.Ordered() {
+						colID := sb.md.GetTagIDByColumnID(opt.ColumnID(col)) + 1
+						adjustedCols.Add(opt.ColumnID(colID))
+					}
+					if adjustedCols.Equals(primaryTagCols) {
 						stats.PTagCount = float64(stat.RowCount())
 						if len(stat.SortedHistogram()) > 0 && opt.TSOrderedTable.Get(&sb.evalCtx.Settings.SV) {
 							stats.SortDistribution = &props.SortDistributionStats{}

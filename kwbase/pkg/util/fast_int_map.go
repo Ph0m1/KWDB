@@ -200,7 +200,9 @@ func (m FastIntMap) ForEach(fn func(key, val int)) {
 }
 
 // String prints out the contents of the map in the following format:
-//   map[key1:val1 key2:val2 ...]
+//
+//	map[key1:val1 key2:val2 ...]
+//
 // The keys are in ascending order.
 func (m FastIntMap) String() string {
 	var buf bytes.Buffer
@@ -278,4 +280,18 @@ func (m *FastIntMap) toLarge() map[int]int {
 		}
 	}
 	return res
+}
+
+// DeepCopyFastIntMap makes a deep copy of a FastIntMap
+func (m *FastIntMap) DeepCopyFastIntMap() FastIntMap {
+	var copy FastIntMap
+	if m.large != nil {
+		copy.large = make(map[int]int)
+		for k, v := range m.large {
+			copy.large[k] = v
+		}
+	} else {
+		copy.small = m.small
+	}
+	return copy
 }

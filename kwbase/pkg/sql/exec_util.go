@@ -204,6 +204,12 @@ var hashShardedIndexesEnabledClusterMode = settings.RegisterBoolSetting(
 	false,
 )
 
+var hashScanMode = settings.RegisterIntSetting(
+	"ts.sql.hash_scan_mode",
+	"hash scan mode enforcement in ts",
+	0,
+)
+
 var multiModelClusterMode = settings.RegisterBoolSetting(
 	"sql.defaults.multimodel.enabled",
 	"default value for enable_multimodel session setting; disallows analysis of multi-model processing by default",
@@ -2062,6 +2068,10 @@ func (m *sessionDataMutator) SetForceSavepointRestart(val bool) {
 
 func (m *sessionDataMutator) SetMultiModelEnabled(val bool) {
 	m.data.MultiModelEnabled = val
+}
+
+func (m *sessionDataMutator) SetHashScanMode(val int) {
+	m.data.HashScanMode = val
 }
 
 func (m *sessionDataMutator) SetZigzagJoinEnabled(val bool) {

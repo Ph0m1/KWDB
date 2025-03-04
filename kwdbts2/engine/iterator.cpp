@@ -240,8 +240,12 @@ KStatus TsRawDataIterator::Next(ResultSet* res, k_uint32* count, bool* is_finish
           *is_finished = true;
           return KStatus::SUCCESS;
         }
-         // current entity scan over, we need scan next entity in same subgroup, and scan same partition tables.
+        // current entity scan over, we need scan next entity in same subgroup, and scan same partiton tables.
         partition_table_iter_->Reset(is_reversed_);
+        // current entity scan is over for now, there is no rush to move on to scan next entity,
+        // we need to return and let the table scan to move on to the next entity, and then come back in
+        // to scan the data of next entity
+        return KStatus::SUCCESS;
       } else if (ret == NextBlkStatus::error) {
         LOG_ERROR("can not get next block item.");
         return KStatus::FAIL;

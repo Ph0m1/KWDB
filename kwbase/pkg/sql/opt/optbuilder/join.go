@@ -140,9 +140,45 @@ func (b *Builder) buildJoin(
 
 		left := leftScope.expr.(memo.RelExpr)
 		right := rightScope.expr.(memo.RelExpr)
+		mem := b.factory.Memo()
+		if b.evalCtx.SessionData.MultiModelEnabled && !b.evalCtx.StartDistributeMode &&
+			(join.JoinType == tree.AstInner || join.JoinType == "") &&
+			(b.stmt.StatementTag() == "SELECT" || b.stmt.StatementTag() == "EXPLAIN" ||
+				b.stmt.StatementTag() == "EXPLAIN ANALYZE (DEBUG)" || b.stmt.StatementTag() == "UNION") &&
+			len(mem.MultimodelHelper.ResetReasons) == 0 {
+			leftIsTSScan := isTSScanOrSelectTSScan(left)
+			rightIsTSScan := isTSScanOrSelectTSScan(right)
+			mmfallback := false
+			if leftIsTSScan && rightIsTSScan {
+				mem.QueryType = memo.Unset
+				mmfallback = true
+			}
+			for _, jp := range filters {
+				if _, ok := jp.Condition.(*memo.OrExpr); ok {
+					mem.QueryType = memo.Unset
+					mmfallback = true
+					mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
+				} else if mem.IsTsColsJoinPredicate(jp) {
+					mem.QueryType = memo.Unset
+					mmfallback = true
+				}
+			}
+
+			if !mmfallback {
+				if leftIsTSScan {
+					mem.QueryType = memo.MultiModel
+					mem.SetFlag(opt.FinishOptInsideOut)
+					left, right = right, left
+				} else if rightIsTSScan {
+					mem.QueryType = memo.MultiModel
+					mem.SetFlag(opt.FinishOptInsideOut)
+				}
+			}
+		}
 		outScope.expr = b.constructJoin(
 			joinType, left, right, filters, &memo.JoinPrivate{Flags: flags, HintInfo: hintinfo}, isLateral,
 		)
+
 		return outScope
 
 	default:
@@ -181,6 +217,20 @@ func (b *Builder) validateJoinTableNames(leftScope, rightScope *scope) {
 			))
 		}
 	}
+}
+
+// isTSScanOrSelectTSScan is a helper function to check if the expression is a TSScanExpr or a SelectExpr with a TSScanExpr input
+// for multiple model processing
+func isTSScanOrSelectTSScan(expr memo.RelExpr) bool {
+	switch e := expr.(type) {
+	case *memo.TSScanExpr:
+		return true
+	case *memo.SelectExpr:
+		if _, ok := e.Input.(*memo.TSScanExpr); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // findJoinColsToValidate creates a FastIntSet containing the ordinal of each

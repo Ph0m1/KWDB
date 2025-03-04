@@ -282,6 +282,25 @@ func tsGetNameValue(this *execinfrapb.TSProcessorCoreUnion) int8 {
 	return tsUnknownName
 }
 
+// WaitForBLJ wait for all the BLJ operators to complete pushing before draining
+func (ttr *TsTableReader) WaitForBLJ() {
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if ttr.FlowCtx.PushingBLJCount == 0 {
+				log.Infof(context.TODO(), "No more pushing BLJ operator.")
+				return
+			}
+		case <-timeout:
+			log.Infof(context.TODO(), "Timed out waiting for pushing BLJ operators to complete.")
+			return
+		}
+	}
+}
+
 // Next is part of the RowSource interface.
 func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata) {
 	for ttr.State == execinfra.StateRunning {
@@ -315,6 +334,7 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 			if respInfo.Code == -1 {
 				// Data read completed.
 				ttr.cleanup(ttr.PbCtx())
+				ttr.WaitForBLJ()
 				if ttr.collected {
 					ttr.MoveToDraining(nil)
 					return nil, ttr.DrainHelper()
@@ -324,6 +344,7 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 				if err == nil {
 					err = errors.Newf("There is no error message for this error code. The err code is %d.\n", respInfo.Code)
 				}
+				ttr.WaitForBLJ()
 				ttr.MoveToDraining(err)
 				log.Errorf(context.Background(), err.Error())
 				ttr.cleanup(ttr.PbCtx())

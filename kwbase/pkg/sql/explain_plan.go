@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -427,10 +428,18 @@ func observePlan(
 	}
 
 	// add multi-model flag reset reasons. for multiple model processing
-	if len(resetReasons) > 0 {
+	var reasons []memo.MultiModelResetReason
+	for reason := range resetReasons {
+		reasons = append(reasons, reason)
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		return reasons[i] < reasons[j]
+	})
+
+	if len(reasons) > 0 {
 		observer.attr("", "", "")
 		first := true
-		for reason := range resetReasons {
+		for _, reason := range reasons {
 			if first {
 				observer.addWarningMessage("warning messages", "multi-model fall back", reason.String())
 				first = false

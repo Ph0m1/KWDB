@@ -507,25 +507,7 @@ func (dsp *DistSQLPlanner) checkSupportForNode(node planNode) (distRecommendatio
 	// batchLookUpJoinNode is only used in query plan for multiple model processing
 	// when the switch is on and the server starts with single node mode.
 	case *batchLookUpJoinNode:
-		if err := dsp.checkExpr(n.pred.onCond); err != nil {
-			return cannotDistribute, err
-		}
-		recLeft, err := dsp.checkSupportForNode(n.left.plan)
-		if err != nil {
-			return cannotDistribute, err
-		}
-		recRight, err := dsp.checkSupportForNode(n.right.plan)
-		if err != nil {
-			return cannotDistribute, err
-		}
-		// If either the left or the right side can benefit from distribution, we
-		// should distribute.
-		rec := recLeft.compose(recRight)
-		// If we can do a hash join, we distribute if possible.
-		if len(n.pred.leftEqualityIndices) > 0 {
-			rec = rec.compose(shouldDistribute)
-		}
-		return rec, nil
+		return cannotDistribute, nil
 
 	case *limitNode:
 		if err := dsp.checkExpr(n.countExpr); err != nil {
@@ -5236,7 +5218,7 @@ func (dsp *DistSQLPlanner) createPlanForNode(
 				)
 			}
 
-			if planCtx.IsLocal() {
+			if planCtx.IsLocal() && n.RelInfo.RelationalCols == nil {
 				// add output types
 				plan.AddTSOutputType(false)
 

@@ -1,3 +1,5 @@
+> set enable_multimodel=off;
+SET
 > create ts database tpch;
 CREATE TS DATABASE
 > use tpch;
@@ -3597,3 +3599,5 @@ SET CLUSTER SETTING
 SET
 > drop database tpch cascade;
 DROP DATABASE
+> set enable_multimodel=on;
+SET

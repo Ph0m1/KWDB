@@ -961,7 +961,7 @@ func (ti *Index) PartitionByListPrefixes() []tree.Datums {
 }
 
 // IndexColumnIDs is part of the cat.Index interface.
-func (ti *Index) IndexColumnIDs(i int) []uint32 {
+func (ti *Index) IndexColumnIDs() []uint32 {
 	panic("not implemented")
 }
 

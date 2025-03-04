@@ -499,6 +499,11 @@ func (g *exprsGen) genExprFuncs(define *lang.DefineExpr) {
 		fmt.Fprintf(g.w, "func (e *%s) SetAddSynchronizer() {\n", opTyp.name)
 		fmt.Fprintf(g.w, "  e.addSynchronizer = true\n")
 		fmt.Fprintf(g.w, "}\n\n")
+
+		// Generate the ResetAddSynchronizer method.
+		fmt.Fprintf(g.w, "func (e *%s) ResetAddSynchronizer() {\n", opTyp.name)
+		fmt.Fprintf(g.w, "  e.addSynchronizer = false\n")
+		fmt.Fprintf(g.w, "}\n\n")
 	}
 
 	// Generate the IsTSEngine method.
@@ -614,6 +619,11 @@ func (g *exprsGen) genEnforcerFuncs(define *lang.DefineExpr) {
 	// Generate the SetAddSynchronizer method.
 	fmt.Fprintf(g.w, "func (e *%s) SetAddSynchronizer() {\n", opTyp.name)
 	fmt.Fprintf(g.w, "  e.addSynchronizer = true\n")
+	fmt.Fprintf(g.w, "}\n\n")
+
+	// Generate the ResetAddSynchronizer method.
+	fmt.Fprintf(g.w, "func (e *%s) ResetAddSynchronizer() {\n", opTyp.name)
+	fmt.Fprintf(g.w, "  e.addSynchronizer = false\n")
 	fmt.Fprintf(g.w, "}\n\n")
 
 	// Generate the Relational method.

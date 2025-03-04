@@ -112,6 +112,13 @@ func (ep *execPlan) makeBuildScalarCtx() buildScalarCtx {
 	}
 }
 
+func (ep *execPlan) makeBuildScalarCtx2() buildScalarCtx {
+	return buildScalarCtx{
+		ivh:     tree.MakeIndexedVarHelper(nil /* container */, ep.numOutputCols()),
+		ivarMap: ep.outputCols.DeepCopyFastIntMap(),
+	}
+}
+
 // getColumnOrdinal takes a column that is known to be produced by the execPlan
 // and returns the ordinal index of that column in the result columns of the
 // node.
@@ -156,37 +163,61 @@ func (ep *execPlan) sqlOrdering(ordering opt.Ordering) sqlbase.ColumnOrdering {
 	return colOrder
 }
 
-func checkIsTsScanExpr(child opt.Expr) bool {
-	if _, ok := child.(*memo.TSScanExpr); ok {
-		return true
+// checkIsTsScanExpr checks whether the given expression is a TSScanExpr or
+// contains a TSScanExpr as its input within a SelectExpr or ProjectExpr.
+func checkIsTsScanExpr(child opt.Expr) (bool, opt.TableID) {
+	if tsScanExpr, ok := child.(*memo.TSScanExpr); ok {
+		return true, tsScanExpr.TSScanPrivate.Table
 	}
+
 	if selectExpr, ok := child.(*memo.SelectExpr); ok {
-		if _, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
-			return true
+		if tsScanExpr, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
+			return true, tsScanExpr.TSScanPrivate.Table
 		}
 	}
 	if projectExpr, ok := child.(*memo.ProjectExpr); ok {
-		if _, ok := projectExpr.Input.(*memo.TSScanExpr); ok {
-			return true
+		if tsScanExpr, ok := projectExpr.Input.(*memo.TSScanExpr); ok {
+			return true, tsScanExpr.TSScanPrivate.Table
 		}
 	}
-	return false
+	return false, opt.TableID(0)
 }
 
-// shouldBuildBatchLookUpJoin checks if the join is a batch lookup join
-// for multiple model processing.
 func shouldBuildBatchLookUpJoin(e memo.RelExpr, mem *memo.Memo) bool {
 	if innerJoinExpr, ok := e.(*memo.InnerJoinExpr); ok {
-		if checkIsTsScanExpr(innerJoinExpr.Left) || checkIsTsScanExpr(innerJoinExpr.Right) {
-			joinOn := innerJoinExpr.On
-			if len(joinOn) == 0 {
-				mem.QueryType = memo.Unset
-				mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
-				if mem.MultimodelHelper.HasLastAgg {
-					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-				}
+		leftFound, leftTableID := checkIsTsScanExpr(innerJoinExpr.Left)
+		rightFound, rightTableID := checkIsTsScanExpr(innerJoinExpr.Right)
+
+		if leftFound || rightFound {
+			var targetTableID opt.TableID
+			if leftFound {
+				targetTableID = leftTableID
 			} else {
-				return true
+				targetTableID = rightTableID
+			}
+
+			for i, group := range mem.MultimodelHelper.TableGroup {
+				if len(group) > 0 && group[0] == targetTableID {
+					if mem.MultimodelHelper.PlanMode[i] == memo.OutsideIn {
+						joinOn := innerJoinExpr.On
+						if len(joinOn) == 0 {
+							mem.QueryType = memo.Unset
+							mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
+						} else {
+							for _, jp := range joinOn {
+								if _, ok := jp.Condition.(*memo.OrExpr); ok {
+									mem.QueryType = memo.Unset
+									mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
+									return false
+								} else if mem.IsTsColsJoinPredicate(jp) {
+									mem.QueryType = memo.Unset
+									return false
+								}
+							}
+							return true
+						}
+					}
+				}
 			}
 		}
 	}
@@ -655,7 +686,6 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 			scan.AccessMode = int(execinfrapb.TSTableReadMode_tableTableMeta)
 		}
 	}
-	b.mem.MultimodelHelper.OriginalAccessMode = execinfrapb.TSTableReadMode(scan.AccessMode)
 
 	ctx := res.makeBuildScalarCtx()
 	var tagFilter []tree.TypedExpr
@@ -671,43 +701,326 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 		scan.OrderedScanType = opt.ForceOrderedScan
 	}
 
-	// set access mode for multiple model processing.
-	primaryTagCount := md.TableMeta(scan.Table).PrimaryTagCount
-	if b.mem.MultimodelHelper.HasBljNode {
-		ptagSet := make(map[int]struct{})
-		for _, joinCol := range b.mem.MultimodelHelper.JoinCols {
-			if md.ColumnMeta(joinCol).IsPrimaryTag() {
-				ptagSet[int(joinCol)] = struct{}{}
-			}
-		}
-
-		ptagCount := len(ptagSet)
-		accessModeEnforced := opt.GetTSHashScanMode(b.evalCtx)
-		if accessModeEnforced > 0 && accessModeEnforced < 4 {
-			switch accessModeEnforced {
-			case 1:
-				scan.AccessMode = int(execinfrapb.TSTableReadMode_hashTagScan)
-			case 2:
-				scan.AccessMode = int(execinfrapb.TSTableReadMode_primaryHashTagScan)
-			case 3:
-				scan.AccessMode = int(execinfrapb.TSTableReadMode_hashRelScan)
-			}
-		} else if ptagCount == primaryTagCount || len(primaryFilter) == primaryTagCount {
-			scan.AccessMode = int(execinfrapb.TSTableReadMode_primaryHashTagScan)
-		} else if b.mem.MultimodelHelper.HashTagScan {
-			scan.AccessMode = int(execinfrapb.TSTableReadMode_hashTagScan)
-		} else {
-			scan.AccessMode = int(execinfrapb.TSTableReadMode_hashRelScan)
-		}
+	value, ok := b.mem.MultimodelHelper.TableData.Load(scan.Table)
+	var tableInfo memo.TableInfo
+	if ok {
+		tableInfo = value.(memo.TableInfo)
+	} else {
+		tableInfo = memo.TableInfo{}
 	}
+	tableInfo.PrimaryFilterLen = len(primaryFilter)
+	tableInfo.PrimaryTagCount = md.TableMeta(scan.Table).PrimaryTagCount
+	tableInfo.OriginalAccessMode = execinfrapb.TSTableReadMode(scan.AccessMode)
+	b.mem.MultimodelHelper.TableData.Store(scan.Table, tableInfo)
 
 	// build scanNode.
 	root, err := b.factory.ConstructTSScan(table, &scan.TSScanPrivate, tagFilter, primaryFilter)
 	if err != nil {
 		return execPlan{}, err
 	}
-	res.root = root
+	err = b.processInsideoutForTimesScan(scan, &res, root)
+	if err != nil {
+		return execPlan{}, err
+	}
 	return res, nil
+}
+
+// processInsideoutForTimesScan processes insideout optimization.
+func (b *Builder) processInsideoutForTimesScan(
+	scan *memo.TSScanExpr, res *execPlan, root exec.Node,
+) error {
+	md := b.mem.Metadata()
+	tableGroupIndex := b.mem.MultimodelHelper.GetTableIndexFromGroup(scan.TSScanPrivate.Table)
+	if b.mem.QueryType == memo.MultiModel &&
+		tableGroupIndex >= 0 &&
+		b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.InsideOut &&
+		b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildingPreGrouping &&
+		!b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter {
+		if b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr != nil &&
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].HasTimeBucket {
+			res.root = root
+			if scan.GetAddSynchronizer() {
+				scan.ResetAddSynchronizer()
+			}
+
+			prj := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr
+			passthroughCopy := prj.(*memo.ProjectExpr).Passthrough
+			passthroughCopy = opt.ColSet{}
+			res.outputCols.ForEach(func(key, val int) {
+				passthroughCopy.Add(opt.ColumnID(key))
+			})
+
+			projections := prj.(*memo.ProjectExpr).Projections
+			exprs := make(tree.TypedExprs, 0, len(projections)+prj.(*memo.ProjectExpr).Passthrough.Len())
+			colNames := make([]string, 0, len(exprs))
+			ctx := res.makeBuildScalarCtx()
+
+			for i := range projections {
+				item := &projections[i]
+				expr, err1 := b.buildScalar(&ctx, item.Element)
+				if err1 != nil {
+					return err1
+				}
+				res.outputCols.Set(int(item.Col), i)
+				exprs = append(exprs, expr)
+				colNames = append(colNames, md.ColumnMeta(item.Col).Alias)
+			}
+
+			passthroughCopy.ForEach(func(colID opt.ColumnID) {
+				res.outputCols.Set(int(colID), len(exprs))
+				exprs = append(exprs, b.indexedVar(&ctx, md, colID))
+				colNames = append(colNames, md.ColumnMeta(colID).Alias)
+			})
+			reqOrdering := res.reqOrdering(prj)
+			var err error
+			res.root, err = b.factory.ConstructRender(res.root, exprs, colNames, reqOrdering, true)
+			if err != nil {
+				return err
+			}
+
+			err = b.factory.ProcessRenderNode(res.root)
+			if err != nil {
+				return err
+			}
+
+			err = b.buildGroupNodeForInsideOut(res, tableGroupIndex)
+			if err != nil {
+				return err
+			}
+		} else {
+			res.root = root
+			if scan.GetAddSynchronizer() {
+				scan.ResetAddSynchronizer()
+			}
+
+			err := b.buildGroupNodeForInsideOut(res, tableGroupIndex)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		res.root = root
+	}
+	return nil
+}
+
+// processGroupByExpr processes the aggregation expressions inside a GroupBy or ScalarGroupBy expression.
+// It applies the necessary transformations to the aggregation list based on pre-grouping rules
+func processGroupByExpr(groupByExpr memo.RelExpr, mem *memo.Memo, tableGroupIndex int) {
+	switch e := groupByExpr.(type) {
+	case *memo.GroupByExpr:
+		finalAggregations := processAggregations(e.Aggregations, mem, tableGroupIndex)
+		e.Aggregations = finalAggregations
+	case *memo.ScalarGroupByExpr:
+		finalAggregations := processAggregations(e.Aggregations, mem, tableGroupIndex)
+		e.Aggregations = finalAggregations
+	default:
+	}
+}
+
+// processAggregations processes a list of aggregation expressions and transforms them based on pre-grouping logic.
+// for inside-out queries
+func processAggregations(
+	aggregations memo.AggregationsExpr, mem *memo.Memo, tableGroupIndex int,
+) memo.AggregationsExpr {
+	var newAggregations memo.AggregationsExpr
+	var finalAggregations memo.AggregationsExpr
+	indexes := mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupByExprPos
+	for index, aggregation := range aggregations {
+		isInIndexes := false
+		for _, idx := range indexes {
+			if index == idx {
+				isInIndexes = true
+				break
+			}
+		}
+		if isInIndexes {
+			if avgExpr, ok := aggregation.Agg.(*memo.AvgExpr); ok {
+				var newAggregation1, newAggregation2 memo.AggregationsItem
+
+				for _, relation := range mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations {
+					if v, ok := avgExpr.Input.(*memo.VariableExpr); ok {
+						if v.Col == relation[0] {
+							expr1 := &memo.VariableExpr{
+								Col:                 relation[1],
+								IsConstForLogicPlan: v.IsConstForLogicPlan,
+								Typ:                 types.Int,
+							}
+							newAggregation1.Agg = &memo.SumIntExpr{
+								Input:               expr1,
+								IsConstForLogicPlan: avgExpr.IsConstForLogicPlan,
+								Typ:                 types.Int,
+							}
+							newAggregation1.Col = relation[3]
+							newAggregation1.IsConstForLogicPlan = aggregation.IsConstForLogicPlan
+							newAggregation1.Typ = aggregation.Typ
+
+							expr2 := &memo.VariableExpr{
+								Col:                 relation[2],
+								IsConstForLogicPlan: v.IsConstForLogicPlan,
+								Typ:                 v.Typ,
+							}
+							newAggregation2.Agg = &memo.SumExpr{
+								Input:               expr2,
+								IsConstForLogicPlan: avgExpr.IsConstForLogicPlan,
+								Typ:                 avgExpr.Typ,
+							}
+							newAggregation2.Col = relation[4]
+							newAggregation2.IsConstForLogicPlan = aggregation.IsConstForLogicPlan
+							newAggregation2.Typ = aggregation.Typ
+							break
+						}
+					}
+				}
+
+				newAggregations = append(newAggregations, newAggregation1, newAggregation2)
+			} else {
+				switch agg := aggregation.Agg.(type) {
+				case *memo.CountExpr, *memo.CountRowsExpr, *memo.MinExpr, *memo.MaxExpr, *memo.SumExpr:
+					newAggregations = append(newAggregations, createAggregationItem(agg, aggregation.Col, aggregation, mem))
+				}
+			}
+		} else {
+			newAggregations = append(newAggregations, aggregation)
+		}
+	}
+
+	for _, newAgg := range newAggregations {
+		if _, ok := newAgg.Agg.(*memo.AvgExpr); !ok {
+			finalAggregations = append(finalAggregations, newAgg)
+		}
+	}
+	return finalAggregations
+}
+
+// createAggregationItem constructs a new aggregation item based on the given aggregation type.
+// for inside-out queries
+func createAggregationItem(
+	aggType interface{}, colID opt.ColumnID, aggregation memo.AggregationsItem, mem *memo.Memo,
+) memo.AggregationsItem {
+	expr := &memo.VariableExpr{
+		Col:                 colID,
+		IsConstForLogicPlan: false,
+		Typ:                 mem.Metadata().ColumnMeta(colID).Type,
+	}
+
+	var newAgg memo.AggregationsItem
+	switch agg := aggType.(type) {
+	case *memo.CountExpr:
+		newAgg.Agg = &memo.SumIntExpr{
+			Input:               expr,
+			IsConstForLogicPlan: agg.IsConstForLogicPlan,
+			Typ:                 agg.Typ,
+		}
+	case *memo.CountRowsExpr:
+		newAgg.Agg = &memo.SumExpr{
+			Input:               expr,
+			IsConstForLogicPlan: agg.IsConstForLogicPlan,
+			Typ:                 types.Int,
+		}
+	case *memo.MinExpr:
+		newAgg.Agg = &memo.MinExpr{
+			Input:               expr,
+			IsConstForLogicPlan: agg.IsConstForLogicPlan,
+			Typ:                 agg.Typ,
+		}
+	case *memo.MaxExpr:
+		newAgg.Agg = &memo.MaxExpr{
+			Input:               expr,
+			IsConstForLogicPlan: agg.IsConstForLogicPlan,
+			Typ:                 agg.Typ,
+		}
+	case *memo.SumExpr:
+		newAgg.Agg = &memo.SumExpr{
+			Input:               expr,
+			IsConstForLogicPlan: agg.IsConstForLogicPlan,
+			Typ:                 agg.Typ,
+		}
+	}
+
+	newAgg.Col = colID
+	newAgg.IsConstForLogicPlan = aggregation.IsConstForLogicPlan
+	newAgg.Typ = aggregation.Typ
+	return newAgg
+}
+
+// convertToColumnOrdinal converts a slice of opt.ColumnID values into a slice of exec.ColumnOrdinal values.
+func convertToColumnOrdinal(columns []opt.ColumnID) []exec.ColumnOrdinal {
+	result := make([]exec.ColumnOrdinal, len(columns))
+	for i, colID := range columns {
+		result[i] = exec.ColumnOrdinal(colID)
+	}
+	return result
+}
+
+// transformAggInfos processes a list of aggregation functions, transforming "avg" functions into equivalent
+// "sum" and/or "count" functions based on their indices in the given sets.
+//   - If an "avg" aggregation appears in both `indices` and `indices2`, it is removed.
+//   - (Since both "sum" and "count" already exist for the same column)
+//   - If it appears only in `indices2`, it is converted to a "count" function.
+//   - (The "sum" function already exists for the column)
+//   - If it appears only in `indices`, it is converted to a "sum" function.
+//   - (The "count" function already exists for the column)
+//   - If it appears in neither, it is split into both "sum" and "count" functions.
+func transformAggInfos(aggInfos []exec.AggInfo, indices []int, indices2 []int) []exec.AggInfo {
+	var newAggInfos []exec.AggInfo
+	var delayedAvgInfos []struct {
+		index   int
+		aggInfo exec.AggInfo
+	}
+
+	indexSet := make(map[int]bool)
+	for _, idx := range indices {
+		indexSet[idx] = true
+	}
+
+	indexSet2 := make(map[int]bool)
+	for _, idx := range indices2 {
+		indexSet2[idx] = true
+	}
+
+	for index, aggInfo := range aggInfos {
+		if aggInfo.FuncName == "avg" {
+			delayedAvgInfos = append(delayedAvgInfos, struct {
+				index   int
+				aggInfo exec.AggInfo
+			}{
+				index:   index,
+				aggInfo: aggInfo,
+			})
+		} else {
+			newAggInfos = append(newAggInfos, aggInfo)
+		}
+	}
+
+	for _, item := range delayedAvgInfos {
+		originalIndex := item.index
+		aggInfo := item.aggInfo
+
+		if indexSet[originalIndex] && indexSet2[originalIndex] {
+			continue
+		} else if indexSet2[originalIndex] {
+			countAggInfo := aggInfo
+			countAggInfo.FuncName = "count"
+			countAggInfo.ResultType = types.Int
+			newAggInfos = append(newAggInfos, countAggInfo)
+		} else if indexSet[originalIndex] {
+			sumAggInfo := aggInfo
+			sumAggInfo.FuncName = "sum"
+			newAggInfos = append(newAggInfos, sumAggInfo)
+		} else {
+			countAggInfo := aggInfo
+			countAggInfo.FuncName = "count"
+			countAggInfo.ResultType = types.Int
+
+			sumAggInfo := aggInfo
+			sumAggInfo.FuncName = "sum"
+
+			newAggInfos = append(newAggInfos, countAggInfo, sumAggInfo)
+		}
+	}
+
+	return newAggInfos
 }
 
 // buildTsInsertSelect build tsInsertSelectNode
@@ -788,6 +1101,12 @@ func (b *Builder) buildArrayTypedExpr(
 }
 
 func (b *Builder) buildSelect(sel *memo.SelectExpr) (execPlan, bool, error) {
+	if tsScanExpr, ok := sel.Input.(*memo.TSScanExpr); ok {
+		tableGroupIndex := b.mem.MultimodelHelper.GetTableIndexFromGroup(tsScanExpr.Table)
+		if tableGroupIndex >= 0 && len(b.mem.MultimodelHelper.PreGroupInfos) >= tableGroupIndex+1 {
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter = true
+		}
+	}
 	input, err := b.buildRelational(sel.Input)
 	if err != nil {
 		return execPlan{}, false, err
@@ -852,8 +1171,15 @@ func (b *Builder) buildSelect(sel *memo.SelectExpr) (execPlan, bool, error) {
 	filters := sel.Filters
 	filterChangeToSpan := b.factory.MakeTSSpans(&filters, input.root, b.mem)
 
+	tsTableID := b.factory.FindTsScanNode(input.root, b.mem)
+	tableGroupIndex := b.mem.MultimodelHelper.GetTableIndexFromGroup(tsTableID)
+
 	// All filters have been converted to span, no need to build a filter node.
 	if filterChangeToSpan {
+		err := b.processInsideoutForSelect(sel, &input, tableGroupIndex)
+		if err != nil {
+			return execPlan{}, false, err
+		}
 		return input, true, nil
 	}
 
@@ -870,8 +1196,260 @@ func (b *Builder) buildSelect(sel *memo.SelectExpr) (execPlan, bool, error) {
 	if err != nil {
 		return execPlan{}, true, err
 	}
-
+	err = b.processTimeBucketInsideoutForSelect(sel, &res, tableGroupIndex)
+	if err != nil {
+		return execPlan{}, false, err
+	}
 	return res, true, nil
+}
+
+// processTimeBucketInsideoutForSelect processes insideout optimization for select
+func (b *Builder) processTimeBucketInsideoutForSelect(
+	sel *memo.SelectExpr, res *execPlan, tableGroupIndex int,
+) error {
+	if tableGroupIndex >= 0 && b.mem.QueryType == memo.MultiModel &&
+		b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.InsideOut &&
+		b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildingPreGrouping &&
+		b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter {
+		if b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr != nil &&
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].HasTimeBucket {
+			if sel.GetAddSynchronizer() {
+				sel.ResetAddSynchronizer()
+			}
+
+			prj := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr
+			passthroughCopy := prj.(*memo.ProjectExpr).Passthrough
+			passthroughCopy = opt.ColSet{}
+			res.outputCols.ForEach(func(key, val int) {
+				passthroughCopy.Add(opt.ColumnID(key))
+			})
+
+			projections := prj.(*memo.ProjectExpr).Projections
+			exprs := make(tree.TypedExprs, 0, len(projections)+prj.(*memo.ProjectExpr).Passthrough.Len())
+			colNames := make([]string, 0, len(exprs))
+			ctx := res.makeBuildScalarCtx()
+			md := b.mem.Metadata()
+
+			for i := range projections {
+				item := &projections[i]
+				expr, err1 := b.buildScalar(&ctx, item.Element)
+				if err1 != nil {
+					return err1
+				}
+				res.outputCols.Set(int(item.Col), i)
+				exprs = append(exprs, expr)
+				colNames = append(colNames, md.ColumnMeta(item.Col).Alias)
+			}
+
+			passthroughCopy.ForEach(func(colID opt.ColumnID) {
+				res.outputCols.Set(int(colID), len(exprs))
+				exprs = append(exprs, b.indexedVar(&ctx, md, colID))
+				colNames = append(colNames, md.ColumnMeta(colID).Alias)
+			})
+			reqOrdering := res.reqOrdering(prj)
+			var err error
+			res.root, err = b.factory.ConstructRender(res.root, exprs, colNames, reqOrdering, true)
+			if err != nil {
+				return err
+			}
+
+			err = b.factory.ProcessRenderNode(res.root)
+			if err != nil {
+				return err
+			}
+
+			err = b.buildGroupNodeForInsideOut(res, tableGroupIndex)
+			if err != nil {
+				return err
+			}
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter = false
+		} else {
+			if sel.GetAddSynchronizer() {
+				sel.ResetAddSynchronizer()
+			}
+
+			err := b.buildGroupNodeForInsideOut(res, tableGroupIndex)
+			if err != nil {
+				return err
+			}
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter = false
+		}
+	}
+	return nil
+}
+
+// processInsideoutForSelect processes insideout optimization for select
+func (b *Builder) processInsideoutForSelect(
+	sel *memo.SelectExpr, input *execPlan, tableGroupIndex int,
+) error {
+	if tableGroupIndex >= 0 && b.mem.QueryType == memo.MultiModel &&
+		b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.InsideOut &&
+		b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildingPreGrouping &&
+		b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter {
+		if sel.GetAddSynchronizer() {
+			sel.ResetAddSynchronizer()
+		}
+
+		prj := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr
+		if prj != nil {
+			md := b.mem.Metadata()
+			passthroughCopy := prj.(*memo.ProjectExpr).Passthrough
+			passthroughCopy = opt.ColSet{}
+			input.outputCols.ForEach(func(key, val int) {
+				passthroughCopy.Add(opt.ColumnID(key))
+			})
+
+			projections := prj.(*memo.ProjectExpr).Projections
+			exprs := make(tree.TypedExprs, 0, len(projections)+prj.(*memo.ProjectExpr).Passthrough.Len())
+			colNames := make([]string, 0, len(exprs))
+			ctx := input.makeBuildScalarCtx2()
+			for i := range projections {
+				item := &projections[i]
+				expr, err1 := b.buildScalar(&ctx, item.Element)
+				if err1 != nil {
+					return err1
+				}
+				input.outputCols.Set(int(item.Col), i)
+				exprs = append(exprs, expr)
+				colNames = append(colNames, md.ColumnMeta(item.Col).Alias)
+			}
+			passthroughCopy.ForEach(func(colID opt.ColumnID) {
+				input.outputCols.Set(int(colID), len(exprs))
+				exprs = append(exprs, b.indexedVar(&ctx, md, colID))
+				colNames = append(colNames, md.ColumnMeta(colID).Alias)
+			})
+			reqOrdering := input.reqOrdering(prj)
+			var err error
+			input.root, err = b.factory.ConstructRender(input.root, exprs, colNames, reqOrdering, true)
+			if err != nil {
+				return err
+			}
+
+			err = b.factory.ProcessRenderNode(input.root)
+			if err != nil {
+				return err
+			}
+		}
+
+		err := b.buildGroupNodeForInsideOut(input, tableGroupIndex)
+		if err != nil {
+			return err
+		}
+		b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildGroupAfterFilter = false
+	}
+	return nil
+}
+
+// buildGroupNodeForInsideOut constructs pre-aggregation node
+func (b *Builder) buildGroupNodeForInsideOut(res *execPlan, tableGroupIndex int) error {
+	groupingCols := b.factory.MatchGroupingCols(b.mem, tableGroupIndex, res.root)
+	groupingColIdx := convertToColumnOrdinal(groupingCols)
+
+	aggregations := *b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupByExpr.Child(1).(*memo.AggregationsExpr)
+	var aggInfos []exec.AggInfo
+	var indices []int
+	var indices2 []int
+	pos := 0
+	for i, agg := range aggregations {
+		if b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildingPreGrouping {
+			found := false
+			for _, gPox := range b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupByExprPos {
+				if gPox == i {
+					found = true
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		aggInfos = append(aggInfos, exec.AggInfo{})
+		if err := getAggInfos(agg.Agg, pos, res.getColumnOrdinal, &aggInfos); err != nil {
+			return err
+		}
+		for _, mapping := range b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgToCountMapping {
+			if opt.ColumnID(agg.Col) == mapping.AvgFuncID && mapping.FuncID != 0 {
+				indices = append(indices, i)
+				break
+			}
+		}
+		for _, mapping := range b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgToSumMapping {
+			if opt.ColumnID(agg.Col) == mapping.AvgFuncID && mapping.FuncID != 0 {
+				indices2 = append(indices2, i)
+				break
+			}
+		}
+		pos++
+	}
+	newAggInfos := transformAggInfos(aggInfos, indices, indices2)
+
+	var groupColOrdering sqlbase.ColumnOrdering
+	var groupReqOrdering exec.OutputOrdering
+	var funcs opt.AggFuncNames
+	var private memo.GroupingPrivate
+
+	groupNode, err := b.factory.ConstructGroupBy(res.root, groupingColIdx, groupColOrdering, newAggInfos, groupReqOrdering,
+		&funcs, true, &private, true)
+	if err != nil {
+		return err
+	}
+
+	uniqueCols := make(map[opt.ColumnID]struct{})
+	var colList opt.ColList
+	appendUnique := func(cols []opt.ColumnID) {
+		for _, col := range cols {
+			if _, exists := uniqueCols[col]; !exists {
+				uniqueCols[col] = struct{}{}
+				colList = append(colList, col)
+			}
+		}
+	}
+
+	if len(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgFuncColumns) > 0 {
+		appendUnique(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupingCols)
+		appendUnique(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].OtherFuncColumns)
+		b.factory.AddAvgFuncColumns(groupNode, b.mem, tableGroupIndex)
+		appendUnique(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].NewAggColumns)
+
+		var outCols util.FastIntMap
+		for colIndex, outColID := range colList {
+			outCols.Set(int(outColID), colIndex)
+		}
+
+		res.root = groupNode
+		res.outputCols = outCols
+	} else {
+		colList = append(colList, b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupingCols...)
+		colList = append(colList, b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].OtherFuncColumns...)
+		var outCols util.FastIntMap
+		for colIndex, outColID := range colList {
+			outCols.Set(int(outColID), colIndex)
+		}
+
+		res.root = groupNode
+		res.outputCols = outCols
+	}
+
+	processGroupByExpr(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupByExpr, b.mem, tableGroupIndex)
+	if len(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgFuncColumns) > 0 {
+		for _, relation := range b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations {
+			if v, ok := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr.(*memo.ProjectExpr); ok {
+				if v.Passthrough.Contains(relation[0]) {
+					v.Passthrough.Remove(relation[0])
+					v.Passthrough.Add(relation[1])
+					v.Passthrough.Add(relation[2])
+				}
+			}
+		}
+	}
+	if v, ok := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].ProjectExpr.(*memo.ProjectExpr); ok {
+		for i := range b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].OtherFuncColumns {
+			v.Passthrough.Remove(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AggColumns[i])
+		}
+		for i := range b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].OtherFuncColumns {
+			v.Passthrough.Add(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].OtherFuncColumns[i])
+		}
+	}
+	return nil
 }
 
 // applySimpleProject adds a simple projection on top of an existing plan.
@@ -902,6 +1480,9 @@ func (b *Builder) buildProject(prj *memo.ProjectExpr) (execPlan, error) {
 		return execPlan{}, err
 	}
 
+	tableID := b.factory.FindTsScanNode(input.root, b.mem)
+	tableGroupIndex := b.mem.MultimodelHelper.GetTableIndexFromGroup(tableID)
+
 	projections := prj.Projections
 	if len(projections) == 0 {
 		// We have only pass-through columns.
@@ -911,8 +1492,21 @@ func (b *Builder) buildProject(prj *memo.ProjectExpr) (execPlan, error) {
 	var res execPlan
 	exprs := make(tree.TypedExprs, 0, len(projections)+prj.Passthrough.Len())
 	colNames := make([]string, 0, len(exprs))
+
 	ctx := input.makeBuildScalarCtx()
+
 	for i := range projections {
+		if b.mem.QueryType == memo.MultiModel && tableGroupIndex >= 0 &&
+			b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.InsideOut &&
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].HasTimeBucket {
+			if functionExpr, ok := projections[i].Element.(*memo.FunctionExpr); ok {
+				if functionExpr.FunctionPrivate.Name == "time_bucket" {
+					timebucketColID := projections[i].Col
+					prj.Passthrough.Add(timebucketColID)
+					continue
+				}
+			}
+		}
 		item := &projections[i]
 		expr, err1 := b.buildScalar(&ctx, item.Element)
 		if err1 != nil {
@@ -1165,20 +1759,26 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 	rightExpr := join.Child(1).(memo.RelExpr)
 	filters := join.Child(2).(*memo.FiltersExpr)
 
-	if _, ok := leftExpr.(*memo.TSScanExpr); ok {
-		leftExpr, rightExpr = rightExpr, leftExpr
-	} else if selectExpr, ok := leftExpr.(*memo.SelectExpr); ok {
-		if _, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
-			leftExpr, rightExpr = rightExpr, leftExpr
-		}
-	} else if projectExpr, ok := leftExpr.(*memo.ProjectExpr); ok {
-		if _, ok := projectExpr.Input.(*memo.TSScanExpr); ok {
-			leftExpr, rightExpr = rightExpr, leftExpr
-		} else if selectExpr, ok := leftExpr.(*memo.SelectExpr); ok {
-			if _, ok := selectExpr.Input.(*memo.TSScanExpr); ok {
-				leftExpr, rightExpr = rightExpr, leftExpr
+	isTSScanExpr := func(expr memo.RelExpr) bool {
+		switch e := expr.(type) {
+		case *memo.TSScanExpr:
+			return true
+		case *memo.SelectExpr:
+			_, ok := e.Input.(*memo.TSScanExpr)
+			return ok
+		case *memo.ProjectExpr:
+			if _, ok := e.Input.(*memo.TSScanExpr); ok {
+				return true
+			}
+			if selectExpr, ok := e.Input.(*memo.SelectExpr); ok {
+				_, ok := selectExpr.Input.(*memo.TSScanExpr)
+				return ok
 			}
 		}
+		return false
+	}
+	if isTSScanExpr(leftExpr) {
+		leftExpr, rightExpr = rightExpr, leftExpr
 	}
 
 	leftEq, rightEq := memo.ExtractJoinEqualityColumns(
@@ -1196,9 +1796,6 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 			if leftLength != rightLength {
 				b.mem.QueryType = memo.Unset
 				b.mem.MultimodelHelper.ResetReasons[memo.JoinColsTypeOrLengthMismatch] = struct{}{}
-				if b.mem.MultimodelHelper.HasLastAgg {
-					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-				}
 				return execPlan{}, true, nil
 			}
 		}
@@ -1213,30 +1810,35 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 		telemetry.Inc(opt.JoinTypeToUseCounter(join.Op()))
 	}
 
-	leftRowCount := rightExpr.Relational().Stats.RowCount
+	leftRowCount := leftExpr.Relational().Stats.RowCount
 	var rightRowCount float64
+	var tableID opt.TableID
+	// Helper function to extract info from TSScanExpr
+	extractTSScanInfo := func(expr *memo.TSScanExpr) {
+		rightRowCount = expr.Relational().Stats.PTagCount
+		tableID = expr.TSScanPrivate.Table
+	}
+
 	switch expr := rightExpr.(type) {
 	case *memo.TSScanExpr:
-		rightRowCount = expr.Relational().Stats.PTagCount
+		extractTSScanInfo(expr)
 	case *memo.SelectExpr:
 		if inputExpr, ok := expr.Input.(*memo.TSScanExpr); ok {
-			rightRowCount = inputExpr.Relational().Stats.PTagCount
+			extractTSScanInfo(inputExpr)
 		}
 	case *memo.ProjectExpr:
-		if inputExpr, ok := expr.Input.(*memo.TSScanExpr); ok {
-			rightRowCount = inputExpr.Relational().Stats.PTagCount
-		} else if inputExpr, ok := expr.Input.(*memo.SelectExpr); ok {
-			if inputExpr, ok := inputExpr.Input.(*memo.TSScanExpr); ok {
-				rightRowCount = inputExpr.Relational().Stats.PTagCount
+		switch input := expr.Input.(type) {
+		case *memo.TSScanExpr:
+			extractTSScanInfo(input)
+		case *memo.SelectExpr:
+			if inputExpr, ok := input.Input.(*memo.TSScanExpr); ok {
+				extractTSScanInfo(inputExpr)
 			}
 		}
 	}
 	if rightRowCount > 0 && leftRowCount > rightRowCount {
 		b.mem.MultimodelHelper.HashTagScan = true
 	}
-
-	b.mem.MultimodelHelper.HasBljNode = true
-	b.mem.MultimodelHelper.JoinCols = rightEq
 
 	left, right, onExpr, outputCols, err := b.initJoinBuild(
 		leftExpr,
@@ -1249,7 +1851,11 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 		b.mem.MultimodelHelper.ResetReasons[memo.LeftJoinColsPositionMismatch] = struct{}{}
 	}
 
-	tsCols := b.factory.ProcessBljLeftColumns(left.root, b.mem)
+	tsCols, fb := b.factory.ProcessBljLeftColumns(left.root, b.mem)
+	if fb {
+		fallBack = true
+		b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
+	}
 
 	ep := execPlan{outputCols: outputCols}
 
@@ -1258,24 +1864,25 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 	leftEqOrdinals := eqColsBuf[:len(leftEq):len(leftEq)]
 	rightEqOrdinals := eqColsBuf[len(leftEq):]
 	rightEqValue := make([]uint32, len(leftEq))
+	var OriginalAccessMode execinfrapb.TSTableReadMode
+	if value, ok := b.mem.MultimodelHelper.TableData.Load(tableID); ok {
+		tableInfo := value.(memo.TableInfo)
+		OriginalAccessMode = tableInfo.OriginalAccessMode
+	}
 	for i := range leftEq {
 		leftEqOrdinals[i] = left.getColumnOrdinal(leftEq[i])
 		rightEqOrdinals[i] = right.getColumnOrdinal(rightEq[i])
 		rightEqValue[i] = uint32(b.mem.Metadata().GetTagIDByColumnID(rightEq[i])) + 1
 		if rightEqValue[i] == 0 {
 			b.mem.QueryType = memo.Unset
-			b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedCastOnTagColumn] = struct{}{}
-			OriginalAccessMode := b.mem.MultimodelHelper.OriginalAccessMode
-			b.factory.ResetTsScanAccessMode(right.root, OriginalAccessMode)
-			if b.mem.MultimodelHelper.HasLastAgg {
-				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-			}
+			b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedCastOnTSColumn] = struct{}{}
+			b.factory.ResetTsScanAccessMode(rightExpr, OriginalAccessMode)
 			return execPlan{}, true, err
 		}
 	}
 
 	leftEqValue := convertColumnOrdinalToUint32(leftEqOrdinals)
-	success := b.factory.ProcessTsScanNode(right.root, &leftEqValue, &rightEqValue, &tsCols)
+	success := b.factory.ProcessTsScanNode(right.root, &leftEqValue, &rightEqValue, &tsCols, tableID, rightEq, b.mem, b.evalCtx)
 	if !success {
 		fallBack = true
 		b.mem.MultimodelHelper.ResetReasons[memo.UnsupportedOperation] = struct{}{}
@@ -1303,11 +1910,7 @@ func (b *Builder) buildBatchLookUpJoin(join memo.RelExpr) (execPlan, bool, error
 
 	if fallBack {
 		b.mem.QueryType = memo.Unset
-		OriginalAccessMode := b.mem.MultimodelHelper.OriginalAccessMode
-		b.factory.ResetTsScanAccessMode(right.root, OriginalAccessMode)
-		if b.mem.MultimodelHelper.HasLastAgg {
-			panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-		}
+		b.factory.ResetTsScanAccessMode(rightExpr, OriginalAccessMode)
 		return execPlan{}, true, err
 	}
 
@@ -1476,7 +2079,19 @@ func getAggInfos(agg opt.ScalarExpr, i int, f funcGetOrdinalCol, aggInfos *[]exe
 	return nil
 }
 
+// buildGroupBy builds a plan for a groupNode
 func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
+	var tsScanNodeID opt.TableID
+	tableGroupIndex := -1
+	if b.mem.QueryType == memo.MultiModel {
+		tsScanNodeID = b.factory.FindTSTableID(groupBy, b.mem)
+		tableGroupIndex = b.mem.MultimodelHelper.GetTableIndexFromGroup(tsScanNodeID)
+		if tableGroupIndex >= 0 && len(b.mem.MultimodelHelper.PreGroupInfos) >= tableGroupIndex &&
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].BuildingPreGrouping &&
+			b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.InsideOut {
+			b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].GroupByExpr = groupBy
+		}
+	}
 	input, err := b.buildGroupByInput(groupBy)
 	if err != nil {
 		return execPlan{}, err
@@ -1484,7 +2099,9 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 
 	// update the input for building groupNode for multiple model processing.
 	var blj exec.Node
-	if b.mem.QueryType == memo.MultiModel {
+	if b.mem.QueryType == memo.MultiModel && tableGroupIndex >= 0 &&
+		b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.OutsideIn &&
+		!b.mem.MultimodelHelper.AggNotPushDown[tableGroupIndex] {
 		blj = b.factory.UpdateGroupInput(&input.root)
 	}
 
@@ -1497,10 +2114,10 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 		ep.outputCols.Set(int(i), len(groupingColIdx))                     // add group by col to output
 		groupingColIdx = append(groupingColIdx, input.getColumnOrdinal(i)) // record group by cols ordinal column id
 	}
-
 	aggregations := *groupBy.Child(1).(*memo.AggregationsExpr)
 	aggInfos := make([]exec.AggInfo, len(aggregations))
 	outColIndex := len(groupingColIdx)
+
 	for i := range aggregations {
 		if err = getAggInfos(aggregations[i].Agg, i, input.getColumnOrdinal, &aggInfos); err != nil {
 			return execPlan{}, err
@@ -1548,7 +2165,130 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 		updateRoot = b.factory.SetBljRightNode(blj, ep.root)
 		ep.root = updateRoot
 	}
+
+	if b.mem.QueryType == memo.MultiModel && tableGroupIndex >= 0 && b.mem.MultimodelHelper.PlanMode[tableGroupIndex] == memo.InsideOut {
+		avgNums := len(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgFuncColumns)
+		if avgNums > 0 {
+			ep, err = b.processAvgProjections(ep, input, tableGroupIndex)
+			if err != nil {
+				return execPlan{}, err
+			}
+			return ep, nil
+		}
+	}
+
 	return ep, nil
+}
+
+// processAvgProjections constructs a renderNode for handling
+// average functions in a multi-model query's inside-out plan mode.
+// It transforms each avg function into a corresponding div(sum, count) expression,
+// prepares the projection expressions, and updates the execution plan.
+func (b *Builder) processAvgProjections(
+	ep execPlan, input execPlan, tableGroupIndex int,
+) (execPlan, error) {
+	var ProjectionsExpr memo.ProjectionsExpr
+	avgNums := len(b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgFuncColumns)
+	for i := 0; i < avgNums; i++ {
+		colID := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgFuncColumns[i]
+		colType := b.mem.Metadata().ColumnMeta(colID).Type
+		leftColID := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations[i][4]
+		rightColID := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations[i][3]
+		left := memo.VariableExpr{
+			Col:                 leftColID,
+			IsConstForLogicPlan: false,
+			Typ:                 b.mem.Metadata().ColumnMeta(leftColID).Type,
+		}
+		right := memo.VariableExpr{
+			Col:                 rightColID,
+			IsConstForLogicPlan: false,
+			Typ:                 b.mem.Metadata().ColumnMeta(rightColID).Type,
+		}
+		divExpr := memo.DivExpr{
+			Left:                &left,
+			Right:               &right,
+			IsConstForLogicPlan: false,
+			Typ:                 colType,
+		}
+
+		projectionItem := memo.ProjectionsItem{
+			Element:             &divExpr,
+			Col:                 colID,
+			IsConstForLogicPlan: false,
+			Typ:                 colType,
+		}
+		ProjectionsExpr = append(ProjectionsExpr, projectionItem)
+	}
+	var passThrough opt.ColSet
+
+	ep.outputCols.ForEach(func(key int, val int) {
+		shouldAdd := true
+
+		for i := 0; i < avgNums; i++ {
+			colID1 := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations[i][3]
+			colID2 := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations[i][4]
+
+			if key == int(colID1) || key == int(colID2) {
+				shouldAdd = false
+				break
+			}
+		}
+
+		if shouldAdd {
+			passThrough.Add(opt.ColumnID(key))
+		}
+	})
+
+	prj := memo.ProjectExpr{
+		Projections: ProjectionsExpr,
+		Passthrough: passThrough,
+	}
+
+	relations := b.mem.MultimodelHelper.PreGroupInfos[tableGroupIndex].AvgColumnRelations
+	for _, relation := range relations {
+
+		key1 := int(relation[3])
+		_, ok := input.outputCols.Get(key1)
+		if !ok {
+			input.outputCols.Set(key1, input.outputCols.Len())
+		}
+
+		key2 := int(relation[4])
+		_, ok = input.outputCols.Get(key2)
+		if !ok {
+			input.outputCols.Set(key2, input.outputCols.Len())
+		}
+	}
+
+	var res execPlan
+	md := b.mem.Metadata()
+	projections := prj.Projections
+	exprs := make(tree.TypedExprs, 0, len(projections)+prj.Passthrough.Len())
+	colNames := make([]string, 0, len(exprs))
+	ctx := ep.makeBuildScalarCtx()
+
+	for i := range projections {
+		item := &projections[i]
+		expr, err1 := b.buildScalar(&ctx, item.Element)
+		if err1 != nil {
+			return execPlan{}, err1
+		}
+		res.outputCols.Set(int(item.Col), i)
+		exprs = append(exprs, expr)
+		colNames = append(colNames, md.ColumnMeta(item.Col).Alias)
+	}
+	prj.Passthrough.ForEach(func(colID opt.ColumnID) {
+		res.outputCols.Set(int(colID), len(exprs))
+		exprs = append(exprs, b.indexedVar(&ctx, md, colID))
+		colNames = append(colNames, md.ColumnMeta(colID).Alias)
+	})
+	var reqOrdering exec.OutputOrdering
+	var err error
+	res.root, err = b.factory.ConstructRender(ep.root, exprs, colNames, reqOrdering, false)
+	if err != nil {
+		return execPlan{}, err
+	}
+	return res, nil
 }
 
 func (b *Builder) buildDistinct(distinct memo.RelExpr) (execPlan, error) {
@@ -1642,7 +2382,6 @@ func (b *Builder) buildGroupByInput(groupBy memo.RelExpr) (execPlan, error) {
 		// All columns produced by the input are used.
 		return input, nil
 	}
-
 	// The input is producing columns that are not useful; set up a projection.
 	cols := make([]exec.ColumnOrdinal, 0, neededCols.Len())
 	var newOutputCols opt.ColMap

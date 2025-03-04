@@ -652,15 +652,37 @@ type Factory interface {
 	SetBljRightNode(blj, agg Node) Node
 
 	// ProcessTsScanNode sets relationalInfo to a tsScanNode for multiple model processing.
-	ProcessTsScanNode(node Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol) bool
-
-	// ResetTsScanAccessMode resets tsScanNode's accessMode when falling back
-	// to original plan for multiple model processing.
-	ProcessBljLeftColumns(node Node, mem *memo.Memo) []sqlbase.TSCol
+	ProcessTsScanNode(
+		node Node,
+		leftEq, rightEq *[]uint32,
+		tsCols *[]sqlbase.TSCol,
+		tableID opt.TableID,
+		joinCols opt.ColList,
+		mem *memo.Memo,
+		evalCtx *tree.EvalContext,
+	) bool
 
 	// ProcessBljLeftColumns helps build the tsScanNode's relaitonalInfo
 	// for multiple model processing.
-	ResetTsScanAccessMode(node Node, originalAccessMode execinfrapb.TSTableReadMode)
+	ProcessBljLeftColumns(node Node, mem *memo.Memo) ([]sqlbase.TSCol, bool)
+
+	FindTsScanNode(node Node, mem *memo.Memo) opt.TableID
+
+	FindTSTableID(expr memo.RelExpr, mem *memo.Memo) opt.TableID
+
+	MatchGroupingCols(
+		mem *memo.Memo,
+		tableGroupIndex int,
+		node Node,
+	) []opt.ColumnID
+
+	ProcessRenderNode(node Node) error
+
+	AddAvgFuncColumns(node Node, mem *memo.Memo, tableGroupIndex int)
+
+	// ResetTsScanAccessMode resets tsScanNode's accessMode when falling back
+	// to original plan for multiple model processing.
+	ResetTsScanAccessMode(expr memo.RelExpr, originalAccessMode execinfrapb.TSTableReadMode)
 }
 
 // OutputOrdering indicates the required output ordering on a Node that is being

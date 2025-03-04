@@ -1,3 +1,4 @@
+set enable_multimodel=off;
 CREATE TS DATABASE db_pipec;
 CREATE TABLE db_pipec.t_point (
                                   k_timestamp timestamp NOT NULL,
@@ -112,3 +113,4 @@ explain SELECT si.workarea_name,
 set cluster setting ts.sql.query_opt_mode=01110;
 drop DATABASE db_pipec cascade;
 drop DATABASE pipec_r cascade;
+set enable_multimodel=on;

@@ -57,6 +57,13 @@ type CustomFuncs struct {
 	e *explorer
 }
 
+const (
+	// coefficient for the selectivity comparison adjustment
+	ffCompFactor = 10
+	// const threshold value of the small result set
+	smallRSThreshold = 1000.0
+)
+
 // Init initializes a new CustomFuncs with the given explorer.
 func (c *CustomFuncs) Init(e *explorer) {
 	c.CustomFuncs.Init(e.f)
@@ -2250,6 +2257,68 @@ func (c *CustomFuncs) ShouldReorderJoins(left, right memo.RelExpr) bool {
 	return size <= c.e.evalCtx.SessionData.ReorderJoinsLimit
 }
 
+// SetPlanMode sets the plan mode for the ts table and its related relational table group.
+// In multiple model query processing, when the join happens between a
+// relational table group and a timeseries table, set the plan mode based on the analysis and the
+// selectivity comparison.
+func (c *CustomFuncs) SetPlanMode(
+	left memo.RelExpr, right memo.RelExpr, child *memo.TSScanExpr, parent *memo.SelectExpr,
+) bool {
+	i := left.Memo().MultimodelHelper.GetTableIndexFromGroup(child.TSScanPrivate.Table)
+	// check if the table to be checked is not found in the group, then skip the plan mode setting
+	if i == -1 {
+		return false
+	}
+
+	// if its plan mode is already set, don't overwrite the plan mode
+	if left.Memo().MultimodelHelper.PlanMode[i] == memo.InsideOut {
+		if len(left.Memo().MultimodelHelper.AggNotPushDown) > i &&
+			!left.Memo().MultimodelHelper.AggNotPushDown[i] &&
+			len(left.Memo().MultimodelHelper.PreGroupInfos) > i &&
+			len(left.Memo().MultimodelHelper.PreGroupInfos[i].AggFuncs) > 0 {
+			return true
+		}
+		// if the plan mode is already set to inside-out in analyze phase but aggregation can't be pushed down,
+		// set the query type to unset and leave the plan mode in case it is overridden because of plan enumeration
+		left.Memo().QueryType = memo.Unset
+		return false
+	} else if left.Memo().MultimodelHelper.PlanMode[i] == memo.OutsideIn {
+		return true
+	}
+
+	// add a check if the table's plan mode is already set or not, can't overwrite if the plan mode is already set to inside-out
+	ff := 1.0
+	rc := 10000.0
+	if parent != nil {
+		ff = parent.Relational().Stats.Selectivity
+		rc = parent.Relational().Stats.RowCount
+	} else {
+		ff = child.Relational().Stats.Selectivity
+		rc = child.Relational().Stats.RowCount
+	}
+
+	// if the selectivity of the ts table is less than the selectivity of the relational table
+	// and aggregation can be pushed down to ts engine, set the plan mode to inside-out and allow join commutativity
+	// otherwise set the plan mode to outside-in
+	if !left.Memo().MultimodelHelper.AggNotPushDown[i] &&
+		len(left.Memo().MultimodelHelper.PreGroupInfos) > 0 &&
+		len(left.Memo().MultimodelHelper.PreGroupInfos[i].AggFuncs) > 0 &&
+		ff*ffCompFactor < right.FirstExpr().Relational().Stats.Selectivity {
+		left.Memo().MultimodelHelper.PlanMode[i] = memo.InsideOut
+		return true
+	}
+
+	// if the aggregation can't be pushed down and the total qualified row count of ts table is less than 1000,
+	// still don't choose outside-in
+	if left.Memo().MultimodelHelper.AggNotPushDown[i] &&
+		rc <= smallRSThreshold {
+		return false
+	}
+
+	left.Memo().MultimodelHelper.PlanMode[i] = memo.OutsideIn
+	return true
+}
+
 // NewShouldReorderJoins returns whether the optimizer should attempt to find
 // a better ordering for a join tree. This is the case if the given expression
 // is the first expression of its group, and the join tree rooted at the
@@ -2286,9 +2355,8 @@ func (c *CustomFuncs) ReorderJoins(grp memo.RelExpr) memo.RelExpr {
 
 // NoJoinManipulation returns whether the join has alternatives.
 // In multiple model query processing, when the join happens between a
-// relational table and a timeseries table, force the join sequence and
-// method to favor outside-in and BLJ at the moment. Later on, will update to support
-// inside-out and hybrid scenario.
+// relational table group and a timeseries table, set the plan mode based on the analysis result
+// and do not proceed with further join manipulations.
 func (c *CustomFuncs) NoJoinManipulation(left, right memo.RelExpr) bool {
 	// Check if the left or right expression is a relational table, when multiple model
 	// query processing is enabled and the current query is a multi-model query.
@@ -2298,21 +2366,64 @@ func (c *CustomFuncs) NoJoinManipulation(left, right memo.RelExpr) bool {
 			right.Memo().QueryType == memo.MultiModel) {
 		switch lchild := left.FirstExpr().(type) {
 		case *memo.TSScanExpr:
+			if ret := c.SetPlanMode(left, right, lchild, nil); !ret {
+				break
+			}
 			return false
 		case *memo.SelectExpr:
-			//tab = left.Memo().Metadata().Table(lchild.Child(0).Private().Table)
-			switch lchild.Child(0).(type) {
+			switch lgchild := lchild.Child(0).(type) {
 			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, right, lgchild, lchild); !ret {
+					break
+				}
 				return false
+			}
+		case *memo.ProjectExpr:
+			switch lgchild := lchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, right, lgchild, nil); !ret {
+					break
+				}
+				return false
+			case *memo.SelectExpr:
+				switch lggchild := lgchild.Child(0).(type) {
+				case *memo.TSScanExpr:
+					if ret := c.SetPlanMode(left, right, lggchild, lgchild); !ret {
+						break
+					}
+					return false
+				}
 			}
 		}
 		switch rchild := right.FirstExpr().(type) {
 		case *memo.TSScanExpr:
+			if ret := c.SetPlanMode(left, left, rchild, nil); !ret {
+				break
+			}
 			return false
 		case *memo.SelectExpr:
-			switch rchild.Child(0).(type) {
+			switch rgchild := rchild.Child(0).(type) {
 			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, left, rgchild, rchild); !ret {
+					break
+				}
 				return false
+			}
+		case *memo.ProjectExpr:
+			switch rgchild := rchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, left, rgchild, nil); !ret {
+					break
+				}
+				return false
+			case *memo.SelectExpr:
+				switch rggchild := rgchild.Child(0).(type) {
+				case *memo.TSScanExpr:
+					if ret := c.SetPlanMode(left, left, rggchild, rgchild); !ret {
+						break
+					}
+					return false
+				}
 			}
 		}
 	}
@@ -2331,11 +2442,23 @@ func (c *CustomFuncs) NoLookupJoinManipulation(left memo.RelExpr) bool {
 		(left.Memo().QueryType == memo.MultiModel) {
 		switch lchild := left.FirstExpr().(type) {
 		case *memo.TSScanExpr:
-			return false
-		case *memo.SelectExpr:
-			switch lchild.Child(0).(type) {
-			case *memo.TSScanExpr:
+			i := left.Memo().MultimodelHelper.GetTableIndexFromGroup(lchild.TSScanPrivate.Table)
+			if i == -1 {
+				break
+			}
+			if left.Memo().MultimodelHelper.PlanMode[i] == memo.OutsideIn {
 				return false
+			}
+		case *memo.SelectExpr:
+			switch lgchild := lchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				i := left.Memo().MultimodelHelper.GetTableIndexFromGroup(lgchild.TSScanPrivate.Table)
+				if i == -1 {
+					break
+				}
+				if left.Memo().MultimodelHelper.PlanMode[i] == memo.OutsideIn {
+					return false
+				}
 			}
 		}
 	}
@@ -2890,7 +3013,7 @@ func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.Filter
 	for _, jp := range on {
 		if _, ok := jp.Condition.(*memo.OrExpr); ok {
 			return false
-		} else if isTsColsJoinPredicate(jp, c.e.mem) {
+		} else if c.e.mem.IsTsColsJoinPredicate(jp) {
 			return false
 		}
 	}

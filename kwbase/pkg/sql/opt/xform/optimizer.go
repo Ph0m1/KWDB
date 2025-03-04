@@ -26,6 +26,7 @@ package xform
 
 import (
 	"math/rand"
+	"reflect"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
@@ -37,6 +38,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil"
@@ -1190,17 +1192,10 @@ func walk(expr opt.Expr) bool {
 	return walk(e)
 }
 
-// ColumnMapping defines the mapping of a column within a specific table
-// for multi-model processing.
-type ColumnMapping struct {
-	TableIndex  int
-	ColumnIndex int
-}
-
 // IndexMapping defines the mapping for indexes associated with a specific table
 // for multi-model processing.
 type IndexMapping struct {
-	TableIndex int
+	TableIndex opt.TableID
 	IndexID    []uint32
 }
 
@@ -1210,28 +1205,18 @@ type IndexMapping struct {
 func (o *Optimizer) CheckMultiModel() {
 	mem := o.mem
 	root := mem.RootExpr().(memo.RelExpr)
-	allTables := mem.Metadata().AllTables()
-	colMapping := make(map[int]ColumnMapping)
-	columnIndex := 1
-	tableIndex := 0
-	for _, table := range allTables {
-		for i := 0; i < table.Table.ColumnCount(); i++ {
-			colMapping[columnIndex] = ColumnMapping{
-				TableIndex:  tableIndex,
-				ColumnIndex: i,
-			}
-			columnIndex++
-		}
-		tableIndex++
-	}
-
-	processRootExpr(root, mem, colMapping)
+	processRootExpr(root, mem)
+	processRemainingRelTables(mem)
 }
 
 // isTSScanOrSelectTSScan is a helper function to check if the expression is a TSScanExpr or a SelectExpr with a TSScanExpr input
 // for multiple model processing
 func isTSScanOrSelectTSScan(expr memo.RelExpr) bool {
 	switch e := expr.(type) {
+	case *memo.Max1RowExpr:
+		return isTSScanOrSelectTSScan(e.Input)
+	case *memo.ProjectExpr:
+		return isTSScanOrSelectTSScan(e.Input)
 	case *memo.TSScanExpr:
 		return true
 	case *memo.SelectExpr:
@@ -1245,113 +1230,102 @@ func isTSScanOrSelectTSScan(expr memo.RelExpr) bool {
 // processRootExpr examines the expressions within the memo structure to determine
 // if the multi-model flag needs to be reset.
 // for multiple model processing
-func processRootExpr(root memo.RelExpr, mem *memo.Memo, colMapping map[int]ColumnMapping) {
+func processRootExpr(root memo.RelExpr, mem *memo.Memo) {
 	allTables := mem.Metadata().AllTables()
 	switch expr := root.(type) {
 	case *memo.ProjectExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
+		for _, proj := range expr.Projections {
+			if castExpr, ok := proj.Element.(*memo.CastExpr); ok {
+				if variableExpr, ok := castExpr.Input.(*memo.VariableExpr); ok {
+					colID := variableExpr.Col
+					tableID := mem.Metadata().ColumnMeta(colID).Table
+					tableGroupID := mem.MultimodelHelper.GetTSTableIndexFromGroup(tableID)
+					if tableGroupID >= 0 {
+						mem.MultimodelHelper.PreGroupInfos[tableGroupID].ProjectExpr = expr
+					}
+				}
+			}
+			if functionExpr, ok := proj.Element.(*memo.FunctionExpr); ok {
+				if functionExpr.FunctionPrivate.Name == "time_bucket" {
+					if len(functionExpr.Args) > 0 {
+						if variableExpr, ok := functionExpr.Args[0].(*memo.VariableExpr); ok {
+							colID := variableExpr.Col
+							tableID := mem.Metadata().ColumnMeta(colID).Table
+							tableGroupID := mem.MultimodelHelper.GetTableIndexFromGroup(tableID)
+							if tableGroupID >= 0 {
+								aggColID := proj.Col
+								if !containsColumn(mem.MultimodelHelper.PreGroupInfos[tableGroupID].GroupingCols, aggColID) {
+									mem.MultimodelHelper.PreGroupInfos[tableGroupID].GroupingCols = append(
+										mem.MultimodelHelper.PreGroupInfos[tableGroupID].GroupingCols, aggColID)
+								}
+								mem.MultimodelHelper.PreGroupInfos[tableGroupID].HasTimeBucket = true
+								mem.MultimodelHelper.PreGroupInfos[tableGroupID].ProjectExpr = expr
+							}
+						}
+					}
+				}
+			}
+		}
 	case *memo.SelectExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.DistinctOnExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.UpsertDistinctOnExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.LimitExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.OffsetExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.SortExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.IndexJoinExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.LookupJoinExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.OrdinalityExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.Max1RowExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.ProjectSetExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.WindowExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.InsertExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.UpdateExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.UpsertExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.DeleteExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.CreateTableExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.ExplainExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.AlterTableSplitExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.AlterTableUnsplitExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.AlterTableRelocateExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.ControlJobsExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.CancelQueriesExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.CancelSessionsExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.ExportExpr:
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
 	case *memo.TSInsertSelectExpr:
-		processRootExpr(expr.Input, mem, colMapping)
-	case *memo.ScalarGroupByExpr:
-		processRootExpr(expr.Input, mem, colMapping)
-	case *memo.GroupByExpr:
-		unsupportedMultiModal := false
-		if projectExpr, ok := expr.Input.(*memo.ProjectExpr); ok {
-			for _, proj := range projectExpr.Projections {
-				if element, ok := proj.Element.(opt.Expr); ok {
-					if execInTSEngine, _ := memo.CheckExprCanExecInTSEngine(element, memo.ExprPosProjList,
-						mem.GetWhiteList().CheckWhiteListParam, false); !execInTSEngine {
-						unsupportedMultiModal = true
-						mem.MultimodelHelper.ResetReasons[memo.UnsupportedAggFuncOrExpr] = struct{}{}
-					}
-				}
-			}
-		}
-
-		for _, agg := range expr.Aggregations {
-			for i := 0; i < agg.Child(0).ChildCount(); i++ {
-				if scalarExpr, ok := agg.Child(0).Child(i).(opt.ScalarExpr); ok {
-					if !checkDataType(scalarExpr.DataType()) {
-						unsupportedMultiModal = true
-						mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
-					}
-				}
-			}
-
-			srcExpr := agg.Agg
-			hashCode := memo.GetExprHash(srcExpr)
-			if !mem.GetWhiteList().CheckWhiteListParam(hashCode, memo.ExprPosProjList) {
-				unsupportedMultiModal = true
-				mem.MultimodelHelper.ResetReasons[memo.UnsupportedAggFuncOrExpr] = struct{}{}
-			}
-		}
-
-		if unsupportedMultiModal {
-			mem.QueryType = memo.Unset
-			if mem.MultimodelHelper.HasLastAgg {
-				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-			}
-		}
-
-		processRootExpr(expr.Input, mem, colMapping)
+		processRootExpr(expr.Input, mem)
+	case *memo.GroupByExpr, *memo.ScalarGroupByExpr:
+		processGroupByOrScalarGroupByExpr(expr, mem)
 	case *memo.InnerJoinExpr:
 		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
 		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
 		if leftIsTSScan && rightIsTSScan {
 			mem.QueryType = memo.Unset
-			if mem.MultimodelHelper.HasLastAgg {
-				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-			}
 		}
 
 		joinPredicates := expr.On
@@ -1360,55 +1334,601 @@ func processRootExpr(root memo.RelExpr, mem *memo.Memo, colMapping map[int]Colum
 			if _, ok := jp.Condition.(*memo.OrExpr); ok {
 				mem.QueryType = memo.Unset
 				mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
-				if mem.MultimodelHelper.HasLastAgg {
-					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
-				}
-			} else if isTsColsJoinPredicate(jp, mem) {
+			} else if mem.IsTsColsJoinPredicate(jp) {
 				mem.QueryType = memo.Unset
-				mem.MultimodelHelper.ResetReasons[memo.JoinBetweenTimeSeriesTables] = struct{}{}
-				if mem.MultimodelHelper.HasLastAgg {
-					panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", "last"))
+			}
+		}
+
+		indexMapping := make(map[opt.TableID][][]opt.ColumnID)
+		for _, table := range allTables {
+			tableID := table.MetaID
+			for i := 0; i < table.Table.IndexCount(); i++ {
+				index := table.Table.Index(i)
+				if index.IsUnique() {
+					uint32IDs := index.IndexColumnIDs()
+					columnIDs := make([]opt.ColumnID, len(uint32IDs))
+					for j, id := range uint32IDs {
+						columnIDs[j] = opt.ColumnID(id)
+					}
+					indexMapping[tableID] = append(indexMapping[tableID], columnIDs)
 				}
 			}
 		}
 
-		indexMapping := make(map[int]IndexMapping)
-		tableIndex2 := 0
-		for _, table := range allTables {
-			for i := 0; i < table.Table.IndexCount(); i++ {
-				index := table.Table.Index(i)
-				if index.IsUnique() {
-					columnIDs := index.IndexColumnIDs(i)
-					indexMapping[tableIndex2] = IndexMapping{
-						TableIndex: tableIndex2,
-						IndexID:    columnIDs,
+		processJoinRelations(joinPredicates, expr.Left, expr.Right, mem)
+
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.SemiJoinExpr:
+		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
+		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
+		if leftIsTSScan || rightIsTSScan {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedSemiJoin] = struct{}{}
+		}
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.SemiJoinApplyExpr:
+		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
+		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
+		if leftIsTSScan || rightIsTSScan {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedSemiJoin] = struct{}{}
+		}
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.AntiJoinExpr:
+		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
+		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
+		if leftIsTSScan || rightIsTSScan {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedSemiJoin] = struct{}{}
+		}
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.AntiJoinApplyExpr:
+		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
+		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
+		if leftIsTSScan || rightIsTSScan {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedSemiJoin] = struct{}{}
+		}
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.LeftJoinApplyExpr:
+		leftIsTSScan := isTSScanOrSelectTSScan(expr.Left)
+		rightIsTSScan := isTSScanOrSelectTSScan(expr.Right)
+		if leftIsTSScan || rightIsTSScan {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedOuterJoin] = struct{}{}
+		}
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.UnionAllExpr:
+		mem.MultimodelHelper.IsUnion = true
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.UnionExpr:
+		mem.MultimodelHelper.IsUnion = true
+		processRootExpr(expr.Left, mem)
+		processRootExpr(expr.Right, mem)
+	case *memo.WithExpr:
+		processRootExpr(expr.Binding, mem)
+		processRootExpr(expr.Main, mem)
+	default:
+	}
+}
+
+// processRemainingRelTables processes the remaining tables in the memo structure
+// and adds them to the table group
+func processRemainingRelTables(mem *memo.Memo) {
+	metadata := mem.Metadata()
+	if len(mem.MultimodelHelper.TableGroup) == 0 {
+		var component []opt.TableID
+		for _, table := range metadata.AllTables() {
+			if metadata.TableMeta(table.MetaID).Table.GetTableType() != tree.TimeseriesTable {
+				component = append(component, table.MetaID)
+			} else {
+				mem.MultimodelHelper.TableGroup = append(mem.MultimodelHelper.TableGroup, []opt.TableID{table.MetaID})
+				mem.MultimodelHelper.PreGroupInfos = append(mem.MultimodelHelper.PreGroupInfos, memo.PreGroupInfo{})
+				mem.MultimodelHelper.AggNotPushDown = append(mem.MultimodelHelper.AggNotPushDown, false)
+				mem.MultimodelHelper.PlanMode = append(mem.MultimodelHelper.PlanMode, memo.Undefined)
+			}
+		}
+		mem.MultimodelHelper.TableGroup[0] = append(mem.MultimodelHelper.TableGroup[0], component...)
+	} else {
+		for _, table := range metadata.AllTables() {
+			tgIdx := mem.MultimodelHelper.GetTSTableIndexFromGroup(table.MetaID)
+			if tgIdx == -1 && metadata.TableMeta(table.MetaID).Table.GetTableType() != tree.TimeseriesTable {
+				mem.MultimodelHelper.TableGroup[0] = append(mem.MultimodelHelper.TableGroup[0], table.MetaID)
+			}
+		}
+	}
+}
+
+func findTSTableID(expr memo.RelExpr, mem *memo.Memo) opt.TableID {
+	for i := 0; i < expr.ChildCount(); i++ {
+		if v, ok := expr.Child(i).(memo.RelExpr); ok {
+			if tsScanExpr, ok := v.(*memo.TSScanExpr); ok {
+				return tsScanExpr.TSScanPrivate.Table
+			}
+			if tableID := findTSTableID(v, mem); tableID != 0 {
+				return tableID
+			}
+		}
+	}
+	return 0
+}
+
+// getColIDOfExpr returns the col ID of aggregation.
+func getColIDOfExpr(input opt.Expr, pIdx int, origColID opt.ColumnID) opt.ColumnID {
+	switch src := (input).(type) {
+	case *memo.VariableExpr:
+		return src.Col
+	case *memo.AggDistinctExpr:
+		return getColIDOfExpr(src.Input, 0, origColID)
+	case *memo.CountExpr:
+		return getColIDOfExpr(src.Input, 0, origColID)
+	case *memo.ProjectExpr:
+		if origColID != -1 && len(src.Projections) > pIdx &&
+			src.Projections[pIdx].Col == origColID {
+			return getColIDOfExpr(src.Projections[pIdx].Element, 0, origColID)
+		}
+	case *memo.CastExpr:
+		return getColIDOfExpr(src.Input, 0, origColID)
+	case *memo.CaseExpr:
+		return getColIDOfExpr(src.Whens[0], 0, origColID)
+	case *memo.WhenExpr:
+		return getColIDOfExpr(src.Condition, 0, origColID)
+	case *memo.GtExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.LtExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.GeExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.LeExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.EqExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.NeExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.DivExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.AndExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.OrExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.MultExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.PlusExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.MinusExpr:
+		colID := getColIDOfExpr(src.Left, 0, origColID)
+		if colID == -1 {
+			colID = getColIDOfExpr(src.Right, 0, origColID)
+		}
+		return colID
+	case *memo.FunctionExpr:
+		for _, arg := range src.Args {
+			colID := getColIDOfExpr(arg, 0, origColID)
+			if colID != -1 {
+				return colID
+			}
+		}
+	default:
+	}
+	return -1
+}
+
+func getColIDsOfExpr(input opt.Expr, pIdx int, origColID opt.ColumnID) []opt.ColumnID {
+	var colIDs []opt.ColumnID
+
+	switch src := input.(type) {
+	case *memo.VariableExpr:
+		colIDs = append(colIDs, src.Col)
+
+	case *memo.AggDistinctExpr, *memo.CountExpr, *memo.CastExpr:
+		colIDs = append(colIDs, getColIDsOfExpr(src.Child(0), 0, origColID)...)
+
+	case *memo.ProjectExpr:
+		if origColID != -1 && len(src.Projections) > pIdx &&
+			src.Projections[pIdx].Col == origColID {
+			colIDs = append(colIDs, getColIDsOfExpr(src.Projections[pIdx].Element, 0, origColID)...)
+		}
+
+	case *memo.CaseExpr:
+		colIDs = append(colIDs, getColIDsOfExpr(src.Whens[0], 0, origColID)...)
+
+	case *memo.WhenExpr:
+		colIDs = append(colIDs, getColIDsOfExpr(src.Condition, 0, origColID)...)
+
+	case *memo.GtExpr, *memo.LtExpr, *memo.GeExpr, *memo.LeExpr, *memo.EqExpr, *memo.PlusExpr, *memo.MinusExpr,
+		*memo.NeExpr, *memo.DivExpr, *memo.AndExpr, *memo.OrExpr, *memo.MultExpr:
+		colIDs = append(colIDs, getColIDsOfExpr(src.Child(0), 0, origColID)...)
+		colIDs = append(colIDs, getColIDsOfExpr(src.Child(1), 0, origColID)...)
+
+	case *memo.FunctionExpr:
+		for _, arg := range src.Args {
+			colIDs = append(colIDs, getColIDsOfExpr(arg, 0, origColID)...)
+		}
+	}
+
+	return removeDuplicateColIDs(colIDs)
+}
+
+func removeDuplicateColIDs(colIDs []opt.ColumnID) []opt.ColumnID {
+	colIDMap := make(map[opt.ColumnID]struct{})
+	var uniqueColIDs []opt.ColumnID
+
+	for _, colID := range colIDs {
+		if colID != -1 {
+			if _, exists := colIDMap[colID]; !exists {
+				colIDMap[colID] = struct{}{}
+				uniqueColIDs = append(uniqueColIDs, colID)
+			}
+		}
+	}
+	return uniqueColIDs
+}
+
+// processGroupByOrScalarGroupByExpr analyzes a GroupByExpr or ScalarGroupByExpr
+// to determine whether multi-model optimization is supported, whether aggregation
+// can be pushed down to the TS engine, and to record pre-grouping information.
+func processGroupByOrScalarGroupByExpr(expr memo.RelExpr, mem *memo.Memo) {
+	processRootExpr(expr.Child(0).(memo.RelExpr), mem)
+	processRemainingRelTables(mem)
+	unsupportedMultiModel := false
+	metaData := mem.Metadata()
+	if projectExpr, ok := expr.Child(0).(*memo.ProjectExpr); ok {
+		for _, proj := range projectExpr.Projections {
+			if element, ok := proj.Element.(opt.Expr); ok {
+				if execInTSEngine, _ := memo.CheckExprCanExecInTSEngine(element, memo.ExprPosProjList,
+					mem.GetWhiteList().CheckWhiteListParam, false); !execInTSEngine {
+					// this path used to fallback because of memo.UnsupportedAggFuncOrExpr in outside-in plan,
+					// but now outside-in supports this path and leave unsupported agg/expr to relational side
+					colIDs := getColIDsOfExpr(element, 0, -1)
+					tableIDs := make(map[opt.TableID]struct{})
+
+					// if we can't find the colID or table group id, we can't determine the plan mode
+					hasInvalidColID := false
+					hasInvalidTgIdx := false
+
+					for _, colID := range colIDs {
+						if colID == -1 {
+							hasInvalidColID = true
+						}
+						if colID != -1 {
+							tableID := metaData.ColumnMeta(colID).Table
+							tgIdx := mem.MultimodelHelper.GetTSTableIndexFromGroup(tableID)
+							tableIDs[tableID] = struct{}{}
+							if tgIdx == -1 {
+								hasInvalidTgIdx = true
+							}
+						}
+					}
+
+					if hasInvalidColID || hasInvalidTgIdx {
+						// if there is only one table group, we can still safely set its flag
+						if len(mem.MultimodelHelper.TableGroup) == 1 {
+							mem.MultimodelHelper.AggNotPushDown[0] = true
+						} else {
+							// otherwise, we need to set the flag to unsupported and fallback
+							unsupportedMultiModel = true
+							mem.MultimodelHelper.ResetReasons[memo.UnsupportedAggFuncOrExpr] = struct{}{}
+						}
+					} else {
+						// only if the table is a timeseries table, we can't push down the aggregation,
+						// otherwise we can consider both inside-out and outside-in
+						for tableID := range tableIDs {
+							if metaData.TableMeta(tableID).Table.GetTableType() == tree.TimeseriesTable {
+								tgIdx := mem.MultimodelHelper.GetTSTableIndexFromGroup(tableID)
+								if tgIdx != -1 {
+									mem.MultimodelHelper.AggNotPushDown[tgIdx] = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// check data types of grouping cols
+	groupingCols := expr.Private().(*memo.GroupingPrivate).GroupingCols
+	groupingCols.ForEach(func(col opt.ColumnID) {
+		if !CheckDataType(metaData.ColumnMeta(col).Type) ||
+			!checkDataLength(metaData.ColumnMeta(col).Type) {
+			tableID := metaData.ColumnMeta(col).Table
+			if tableID == 0 {
+				if projectExpr, ok := expr.Child(0).(*memo.ProjectExpr); ok {
+					for _, proj := range projectExpr.Projections {
+						if proj.Col == col {
+							if element, ok := proj.Element.(opt.Expr); ok {
+								colID := getColIDOfExpr(element, 0, col)
+								if colID != -1 {
+									tableID = metaData.ColumnMeta(colID).Table
+								}
+							}
+						}
+					}
+				}
+			}
+			tgIdx := mem.MultimodelHelper.GetTSTableIndexFromGroup(tableID)
+			if tgIdx >= 0 && !mem.MultimodelHelper.AggNotPushDown[tgIdx] {
+				if mem.MultimodelHelper.PlanMode[tgIdx] == memo.OutsideIn {
+					mem.QueryType = memo.Unset
+					mem.MultimodelHelper.ResetReasons[memo.UnsupportedPlanMode] = struct{}{}
+				} else {
+					mem.MultimodelHelper.PlanMode[tgIdx] = memo.InsideOut
+				}
+			} else {
+				unsupportedMultiModel = true
+				mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
+			}
+		}
+	})
+
+	handleGroupByOrdering := false
+	hasCountRow := false
+	countRowTableIdx := -1
+	skipProj := 0
+
+	var avgAggs []struct {
+		FuncID opt.ColumnID
+		ColID  opt.ColumnID
+	}
+	countAggs := make(map[opt.ColumnID]opt.ColumnID)
+	sumAggs := make(map[opt.ColumnID]opt.ColumnID)
+
+	// check data types of aggregation columns
+	aggregations := *expr.Child(1).(*memo.AggregationsExpr)
+	for pIdx, agg := range aggregations {
+		var aggColID opt.ColumnID
+		var aggColTableID opt.TableID
+
+		aggFuncID := agg.Col
+		noPreGrouping := false
+		// skip the pregrouping analysis for count(*) expression
+		if agg.Agg.ChildCount() == 0 {
+			if _, ok := agg.Agg.(*memo.CountRowsExpr); ok {
+				aggColTableID = findTSTableID(expr, mem)
+				hasCountRow = true
+			}
+		} else {
+			aggColID = getColIDOfExpr(agg.Agg.Child(0), 0, -1)
+			aggColTableID = mem.Metadata().ColumnMeta(aggColID).Table
+		}
+
+		if aggColTableID == 0 {
+			noPreGrouping = true
+			aggColID = getColIDOfExpr(expr.Child(0), pIdx-skipProj, aggColID)
+			if aggColID != -1 {
+				aggColTableID = mem.Metadata().ColumnMeta(aggColID).Table
+			} else {
+				skipProj++
+			}
+		} else {
+			skipProj++
+		}
+		aggType := reflect.TypeOf(agg.Agg).Elem().Name()
+		preGroupInfos := mem.MultimodelHelper.PreGroupInfos
+		if len(preGroupInfos) < len(mem.MultimodelHelper.TableGroup) {
+			for len(preGroupInfos) < len(mem.MultimodelHelper.TableGroup) {
+				preGroupInfos = append(preGroupInfos, memo.PreGroupInfo{})
+			}
+		}
+
+		groupIndex := mem.MultimodelHelper.GetTSTableIndexFromGroup(aggColTableID)
+		if hasCountRow && countRowTableIdx == -1 {
+			countRowTableIdx = groupIndex
+		}
+
+		if noPreGrouping {
+			if aggColTableID == 0 {
+				continue
+			}
+			if metaData.TableMeta(aggColTableID).Table.GetTableType() == tree.TimeseriesTable {
+				mem.MultimodelHelper.AggNotPushDown[groupIndex] = true
+				continue
+			}
+		}
+
+		for i := 0; i < agg.Child(0).ChildCount(); i++ {
+			if scalarExpr, ok := agg.Child(0).Child(i).(opt.ScalarExpr); ok {
+				if !CheckDataType(scalarExpr.DataType()) {
+					if groupIndex >= 0 && !mem.MultimodelHelper.AggNotPushDown[groupIndex] {
+						if mem.MultimodelHelper.PlanMode[groupIndex] == memo.OutsideIn {
+							mem.QueryType = memo.Unset
+							mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
+						} else {
+							mem.MultimodelHelper.PlanMode[groupIndex] = memo.InsideOut
+						}
+					} else {
+						unsupportedMultiModel = true
+						mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
 					}
 				}
 			}
 		}
 
-		if _, ok := expr.Left.(*memo.TSScanExpr); ok {
-			if _, ok := expr.Right.(*memo.InnerJoinExpr); ok {
-				checkJoinexprTsCols(joinPredicates, false, colMapping, mem)
-			}
-		}
-		if _, ok := expr.Right.(*memo.TSScanExpr); ok {
-			if _, ok := expr.Left.(*memo.InnerJoinExpr); ok {
-				checkJoinexprTsCols(joinPredicates, true, colMapping, mem)
-			}
+		if metaData.TableMeta(aggColTableID).Table.GetTableType() != tree.TimeseriesTable {
+			continue
 		}
 
-		processRootExpr(expr.Left, mem, colMapping)
-		processRootExpr(expr.Right, mem, colMapping)
+		if groupIndex != -1 {
+			preGroupInfos[groupIndex].AggColumns = append(preGroupInfos[groupIndex].AggColumns, aggColID)
+			preGroupInfos[groupIndex].AggFuncs = append(preGroupInfos[groupIndex].AggFuncs, aggType)
+			switch aggType {
+			case "CountExpr", "CountRowsExpr":
+				// preGroupInfos[groupIndex].NewAggColumns = append(preGroupInfos[groupIndex].NewAggColumns, aggFuncID)
+				preGroupInfos[groupIndex].OtherFuncColumns = append(preGroupInfos[groupIndex].OtherFuncColumns, aggFuncID)
+				countAggs[aggColID] = aggFuncID
+			case "AvgExpr":
+				preGroupInfos[groupIndex].AvgFuncColumns = append(preGroupInfos[groupIndex].AvgFuncColumns, aggFuncID)
+				avgAggs = append(avgAggs, struct {
+					FuncID opt.ColumnID
+					ColID  opt.ColumnID
+				}{
+					FuncID: aggFuncID,
+					ColID:  aggColID,
+				})
+			case "SumExpr":
+				preGroupInfos[groupIndex].OtherFuncColumns = append(preGroupInfos[groupIndex].OtherFuncColumns, aggFuncID)
+				sumAggs[aggColID] = aggFuncID
+			case "MaxExpr", "MinExpr":
+				preGroupInfos[groupIndex].OtherFuncColumns = append(preGroupInfos[groupIndex].OtherFuncColumns, aggFuncID)
+			case "LastExpr", "FirstExpr", "LastRowExpr", "FirstRowExpr":
+				preGroupInfos[groupIndex].OtherFuncColumns = append(preGroupInfos[groupIndex].OtherFuncColumns, aggFuncID)
+				mem.MultimodelHelper.HasLastAgg = true
+				if mem.MultimodelHelper.PlanMode[groupIndex] == memo.InsideOut {
+					mem.QueryType = memo.Unset
+					mem.MultimodelHelper.ResetReasons[memo.UnsupportedPlanMode] = struct{}{}
+				} else {
+					mem.MultimodelHelper.PlanMode[groupIndex] = memo.OutsideIn
+				}
+			case "AggDistinctExpr":
+				if mem.MultimodelHelper.PlanMode[groupIndex] != memo.InsideOut {
+					mem.MultimodelHelper.PlanMode[groupIndex] = memo.OutsideIn
+				} else {
+					mem.MultimodelHelper.PlanMode[groupIndex] = memo.Undefined
+					mem.MultimodelHelper.AggNotPushDown[groupIndex] = true
+				}
+			default:
+				mem.MultimodelHelper.AggNotPushDown[groupIndex] = true
+			}
+			preGroupInfos[groupIndex].GroupByExprPos = append(preGroupInfos[groupIndex].GroupByExprPos, pIdx)
+			preGroupInfos[groupIndex].BuildingPreGrouping = true
 
-	default:
+			var mappings1 []memo.AvgToCountOrSumMapping
+			for _, avg := range avgAggs {
+				countFuncID := opt.ColumnID(0)
+				if matchedFuncID, exists := countAggs[avg.ColID]; exists {
+					countFuncID = matchedFuncID
+				}
 
+				mappings1 = append(mappings1, memo.AvgToCountOrSumMapping{
+					AvgFuncID: avg.FuncID,
+					FuncID:    countFuncID,
+				})
+			}
+			preGroupInfos[groupIndex].AvgToCountMapping = mappings1
+
+			var mappings2 []memo.AvgToCountOrSumMapping
+			for _, avg := range avgAggs {
+				sumFuncID := opt.ColumnID(0)
+				if matchedFuncID, exists := sumAggs[avg.ColID]; exists {
+					sumFuncID = matchedFuncID
+				}
+
+				mappings2 = append(mappings2, memo.AvgToCountOrSumMapping{
+					AvgFuncID: avg.FuncID,
+					FuncID:    sumFuncID,
+				})
+			}
+			preGroupInfos[groupIndex].AvgToSumMapping = mappings2
+
+			if !handleGroupByOrdering {
+				groupByInput := expr.Child(0).(memo.RelExpr)
+				for _, c := range groupByInput.ProvidedPhysical().Ordering {
+					found := false
+					for _, col := range preGroupInfos[groupIndex].GroupingCols {
+						if col == c.ID() {
+							found = true
+							break
+						}
+					}
+					if !found {
+						if !containsColumn(preGroupInfos[groupIndex].GroupingCols, aggColID) {
+							preGroupInfos[groupIndex].GroupingCols = append(preGroupInfos[groupIndex].GroupingCols, c.ID())
+						}
+					}
+				}
+				handleGroupByOrdering = true
+			}
+		}
+
+		mem.MultimodelHelper.PreGroupInfos = preGroupInfos
+
+		srcExpr := agg.Agg
+		hashCode := memo.GetExprHash(srcExpr)
+		if groupIndex >= 0 && !mem.GetWhiteList().CheckWhiteListParam(hashCode, memo.ExprPosProjList) {
+			mem.MultimodelHelper.AggNotPushDown[groupIndex] = true
+		}
+	}
+
+	// if the agg in the multi-model query is countrows only so far, then don't choose inside-out plan
+	// to guarantee the correct result as it is under join context
+	if hasCountRow && countRowTableIdx != -1 && len(mem.MultimodelHelper.PreGroupInfos[countRowTableIdx].AggFuncs) == 1 {
+		if mem.MultimodelHelper.PlanMode[countRowTableIdx] == memo.InsideOut {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedPlanMode] = struct{}{}
+		} else {
+			mem.MultimodelHelper.PlanMode[countRowTableIdx] = memo.OutsideIn
+		}
+	}
+
+	// handle reduced grouping columns
+	groupingCols.ForEach(func(col opt.ColumnID) {
+		tgIdx := mem.MultimodelHelper.GetTableIndexFromGroup(metaData.ColumnMeta(col).Table)
+		if tgIdx >= 0 {
+			if !containsColumn(mem.MultimodelHelper.PreGroupInfos[tgIdx].GroupingCols, col) {
+				mem.MultimodelHelper.PreGroupInfos[tgIdx].GroupingCols = append(mem.MultimodelHelper.PreGroupInfos[tgIdx].GroupingCols, col)
+			}
+		}
+	})
+
+	if unsupportedMultiModel {
+		mem.QueryType = memo.Unset
 	}
 }
 
-// checkDataType determines if a given data type (typ) is supported by the time-series engine.
+// CheckDataType determines if a given data type (typ) is supported by the time-series engine.
 // for multiple model processing
-func checkDataType(typ *types.T) bool {
+func CheckDataType(typ *types.T) bool {
 	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
 		return false
 	}
@@ -1420,85 +1940,280 @@ func checkDataType(typ *types.T) bool {
 	}
 }
 
-// isTsColsJoinPredicate checks if a single join predicate satisfies the condition
-// where both columns on the left and right sides are time series columns.
+// checkDataLength determines if the length of a given column is supported by the time-series engine.
 // for multiple model processing
-func isTsColsJoinPredicate(jp memo.FiltersItem, mem *memo.Memo) bool {
-	md := mem.Metadata()
-	var tsTypeLeft, tsTypeRight int
-
-	getTsType := func(expr opt.Expr) int {
-		switch e := expr.(type) {
-		case *memo.VariableExpr:
-			colID := e.Col
-			return md.ColumnMeta(colID).TSType
-		case *memo.MultExpr:
-			for i := 0; i < 2; i++ {
-				if varExpr, ok := e.Child(i).(*memo.VariableExpr); ok {
-					colID := varExpr.Col
-					return md.ColumnMeta(colID).TSType
-				}
-			}
+func checkDataLength(typ *types.T) bool {
+	storageType := sqlbase.GetTSDataType(typ)
+	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
+		return false
+	}
+	typeWidth := typ.Width()
+	if storageType == sqlbase.DataType_CHAR || storageType == sqlbase.DataType_NVARCHAR {
+		typeWidth = typ.Width() * 4
+	}
+	switch storageType {
+	case sqlbase.DataType_CHAR, sqlbase.DataType_NCHAR:
+		if typeWidth >= sqlbase.TSMaxFixedLen {
+			return false
 		}
-		return -1
+	case sqlbase.DataType_BYTES:
+		if typeWidth >= sqlbase.TSMaxFixedLen {
+			return false
+		}
+	case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR:
+		if typeWidth > sqlbase.TSMaxVariableLen {
+			return false
+		}
+	case sqlbase.DataType_VARBYTES:
+		if typeWidth > sqlbase.TSMaxVariableLen {
+			return false
+		}
 	}
-
-	switch expr := jp.Condition.(type) {
-	case *memo.EqExpr, *memo.LtExpr, *memo.LeExpr, *memo.GtExpr, *memo.GeExpr:
-		tsTypeLeft = getTsType(expr.Child(0))
-		tsTypeRight = getTsType(expr.Child(1))
-	}
-
-	return (tsTypeLeft == 1 || tsTypeRight == 1) || (tsTypeLeft > 0 && tsTypeRight > 0)
+	return true
 }
 
-// checkJoinexprTsCols evaluates the join predicates to determine if any of the join columns
-// are from a time-series table.
-func checkJoinexprTsCols(
-	joinPredicates memo.FiltersExpr, isLeft bool, colMapping map[int]ColumnMapping, mem *memo.Memo,
+// processJoinRelations constructs TableGroup, a two-dimensional array that
+// organizes time-series and relational tables based on their join relationships.
+//
+//   - Each subarray in TableGroup represents a group of related tables.
+//   - The first element in each subarray is a timeseries table's TableID.
+//   - The subsequent elements are relational tables that have a direct join
+//     relationship with the timeseries table.
+//   - If a table does not directly join a timeseries table but joins another
+//     relational table, it is added to the same subarray as that relational table.
+//
+// **Limitations:**
+//   - Cross joins are not supported, and if no no valid tables are found to
+//     construct TableGroup, the plan will fall back
+//   - Only equality conditions (EqExpr) are considered for table grouping;
+//   - TableIDs must be resolvable from ColumnIDs; virtual or derived columns
+//     without a clear TableID will not be included in TableGroup.
+func processJoinRelations(
+	joinPredicates memo.FiltersExpr, left memo.RelExpr, right memo.RelExpr, mem *memo.Memo,
 ) {
-	allTables := mem.Metadata().AllTables()
+	tableGroup := mem.MultimodelHelper.TableGroup
+	pendingRelations := make(map[opt.TableID][]opt.TableID)
+
+	if joinPredicates.ChildCount() == 0 {
+		if len(mem.MultimodelHelper.TableGroup) == 0 {
+			mem.QueryType = memo.Unset
+			mem.MultimodelHelper.ResetReasons[memo.UnsupportedCrossJoin] = struct{}{}
+		} else {
+			switch lc := left.(type) {
+			case *memo.ScanExpr:
+				if mem.MultimodelHelper.GetTSTableIndexFromGroup(lc.ScanPrivate.Table) == -1 {
+					mem.MultimodelHelper.TableGroup[0] = append(mem.MultimodelHelper.TableGroup[0], lc.ScanPrivate.Table)
+				}
+			default:
+			}
+			switch rc := right.(type) {
+			case *memo.ScanExpr:
+				if mem.MultimodelHelper.GetTSTableIndexFromGroup(rc.ScanPrivate.Table) == -1 {
+					mem.MultimodelHelper.TableGroup[0] = append(mem.MultimodelHelper.TableGroup[0], rc.ScanPrivate.Table)
+				}
+			default:
+			}
+		}
+		return
+	}
+
 	for _, jp := range joinPredicates {
 		if eqExpr, ok := jp.Condition.(*memo.EqExpr); ok {
-			var varExpr *memo.VariableExpr
-			if isLeft {
-				varExpr, ok = eqExpr.Left.(*memo.VariableExpr)
-			} else {
-				varExpr, ok = eqExpr.Right.(*memo.VariableExpr)
-			}
+			var leftTableID, rightTableID opt.TableID
+			var leftColID, rightColID opt.ColumnID
+			var leftIsTimeSeries, rightIsTimeSeries bool
 
-			if ok {
-				colID := varExpr.Col
-				if mappingInfo, ok := colMapping[int(colID)]; ok {
-					table := allTables[mappingInfo.TableIndex].Table
-					if table.GetTableType() == tree.TimeseriesTable {
-						mem.MultimodelHelper.PreGroupedAggregates = memo.OutsideIn
+			if leftVar, ok := eqExpr.Left.(*memo.VariableExpr); ok {
+				leftColID = leftVar.Col
+				leftTableID = mem.Metadata().ColumnMeta(leftColID).Table
+
+				// handle virtual column
+				if leftTableID == 0 {
+					leftColID = getColIDOfExpr(left, 0, leftColID)
+					if leftColID >= 0 {
+						leftTableID = mem.Metadata().ColumnMeta(leftColID).Table
 					}
 				}
+				if leftTableID != 0 {
+					leftTable := mem.Metadata().Table(leftTableID)
+					leftIsTimeSeries = leftTable.GetTableType() == tree.TimeseriesTable
+				}
+			}
+
+			if rightVar, ok := eqExpr.Right.(*memo.VariableExpr); ok {
+				rightColID = rightVar.Col
+				rightTableID = mem.Metadata().ColumnMeta(rightColID).Table
+
+				// handle virtual column
+				if rightTableID == 0 {
+					rightColID = getColIDOfExpr(right, 0, rightColID)
+					if rightColID >= 0 {
+						rightTableID = mem.Metadata().ColumnMeta(rightColID).Table
+					}
+				}
+				if rightTableID != 0 {
+					rightTable := mem.Metadata().Table(rightTableID)
+					rightIsTimeSeries = rightTable.GetTableType() == tree.TimeseriesTable
+				}
+			}
+
+			if leftIsTimeSeries || rightIsTimeSeries {
+				tsTableID := leftTableID
+				relTableID := rightTableID
+				groupingColID := leftColID
+				if !leftIsTimeSeries {
+					tsTableID, relTableID = rightTableID, leftTableID
+					groupingColID = rightColID
+				}
+
+				found := false
+				var index int
+				for i, component := range tableGroup {
+					if component[0] == tsTableID {
+						if !contains(component, relTableID) && relTableID != 0 {
+							tableGroup[i] = append(component, relTableID)
+						}
+						index = i
+						found = true
+						break
+					}
+				}
+				if !found && tsTableID != 0 {
+					index = len(tableGroup)
+					if relTableID != 0 {
+						tableGroup = append(tableGroup, []opt.TableID{tsTableID, relTableID})
+					} else {
+						tableGroup = append(tableGroup, []opt.TableID{tsTableID})
+					}
+				}
+
+				if leftIsTimeSeries {
+					if rightColID != -1 && (!CheckDataType(mem.Metadata().ColumnMeta(rightColID).Type) ||
+						!checkDataLength(mem.Metadata().ColumnMeta(rightColID).Type)) {
+						if mem.MultimodelHelper.PlanMode[index] == memo.OutsideIn {
+							mem.QueryType = memo.Unset
+							mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
+						} else {
+							mem.MultimodelHelper.PlanMode[index] = memo.InsideOut
+						}
+					}
+				} else {
+					if leftColID != -1 && (!CheckDataType(mem.Metadata().ColumnMeta(leftColID).Type) ||
+						!checkDataLength(mem.Metadata().ColumnMeta(leftColID).Type)) {
+						if mem.MultimodelHelper.PlanMode[index] == memo.OutsideIn {
+							mem.QueryType = memo.Unset
+							mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
+						} else {
+							mem.MultimodelHelper.PlanMode[index] = memo.InsideOut
+						}
+					}
+				}
+
+				for len(mem.MultimodelHelper.PreGroupInfos) <= index {
+					mem.MultimodelHelper.PreGroupInfos = append(mem.MultimodelHelper.PreGroupInfos, memo.PreGroupInfo{})
+					mem.MultimodelHelper.AggNotPushDown = append(mem.MultimodelHelper.AggNotPushDown, false)
+					mem.MultimodelHelper.PlanMode = append(mem.MultimodelHelper.PlanMode, memo.Undefined)
+				}
+				if !containsColumn(mem.MultimodelHelper.PreGroupInfos[index].GroupingCols, groupingColID) {
+					mem.MultimodelHelper.PreGroupInfos[index].GroupingCols = append(mem.MultimodelHelper.PreGroupInfos[index].GroupingCols, groupingColID)
+				}
+			} else {
+				pendingRelations[leftTableID] = append(pendingRelations[leftTableID], rightTableID)
+				pendingRelations[rightTableID] = append(pendingRelations[rightTableID], leftTableID)
 			}
 		}
 	}
-}
 
-// SetTsRelGroup categorizes tables into two distinct groups:
-// relational tables and time-series tables.
-// for multiple model processing.
-func (o *Optimizer) SetTsRelGroup() {
-	mem := o.mem
-	allTables := mem.Metadata().AllTables()
-	var groups [][][]opt.TableID
-	var relTable, tsTable []opt.TableID
-	for _, table := range allTables {
-		metaID := table.MetaID
-		switch table.Table.GetTableType() {
-		case tree.RelationalTable:
-			relTable = append(relTable, metaID)
-		case tree.TimeseriesTable:
-			tsTable = append(tsTable, metaID)
+	if len(pendingRelations) > 0 {
+		processed := make(map[opt.TableID]bool)
+
+		for tableID, connectedTables := range pendingRelations {
+			alreadyAssigned := false
+			for _, component := range tableGroup {
+				if contains(component, tableID) {
+					alreadyAssigned = true
+					break
+				}
+			}
+			if alreadyAssigned {
+				processed[tableID] = true
+				continue
+			}
+
+			assigned := false
+			for i, component := range tableGroup {
+				for _, tID := range component {
+					if contains(connectedTables, tID) {
+						tableGroup[i] = append(component, tableID)
+						assigned = true
+						break
+					}
+				}
+				if assigned {
+					break
+				}
+			}
+
+			if assigned {
+				processed[tableID] = true
+			}
 		}
 	}
-	groups = append(groups, [][]opt.TableID{relTable, tsTable})
-	mem.MultimodelHelper.TableGroup = groups
+
+	mem.MultimodelHelper.TableGroup = tableGroup
+}
+
+func contains(list []opt.TableID, target opt.TableID) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsColumn(list []opt.ColumnID, target opt.ColumnID) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func checkIfJoinColsContainUniqueIndex(
+	tableID opt.TableID,
+	joinColIDs []opt.ColumnID,
+	indexMapping map[opt.TableID][][]opt.ColumnID,
+	mem *memo.Memo,
+) bool {
+	uniqueIndexes, exists := indexMapping[tableID]
+	if !exists {
+		return false
+	}
+
+	joinColSet := make(map[opt.ColumnID]bool)
+	for _, col := range joinColIDs {
+		adjustCol := mem.Metadata().GetTagIDByColumnID(col) + 1
+		joinColSet[opt.ColumnID(adjustCol)] = true
+	}
+
+	for _, uniqueIndexCols := range uniqueIndexes {
+		if isSubset(uniqueIndexCols, joinColSet) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isSubset(indexCols []opt.ColumnID, joinColSet map[opt.ColumnID]bool) bool {
+	for _, col := range indexCols {
+		if !joinColSet[col] {
+			return false
+		}
+	}
+	return true
 }
 
 // JoinOrderBuilder returns the JoinOrderBuilder instance that the optimizer is

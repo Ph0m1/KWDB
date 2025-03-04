@@ -75,6 +75,8 @@ type SessionData struct {
 	// ZigzagJoinEnabled indicates whether the optimizer should try and plan a
 	// zigzag join.
 	ZigzagJoinEnabled bool
+	// HashScanMode indicates which mode the tagreader should use for multi-model analysis.
+	HashScanMode int
 	// MultiModelEnabled indicates whether the optimizer should do multi-model analysis and
 	// consider the optimal plan for a multi-model query.
 	MultiModelEnabled bool

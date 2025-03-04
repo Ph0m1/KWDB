@@ -1290,9 +1290,7 @@ func (b *Builder) buildFromTables(
 		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&b.evalCtx.Settings.SV), opt.OutsideInUseCBO) &&
 		!b.evalCtx.StartDistributeMode &&
 		(b.stmt.StatementTag() == "SELECT" || b.stmt.StatementTag() == "EXPLAIN" ||
-			b.stmt.StatementTag() == "EXPLAIN ANALYZE (DEBUG)" || b.stmt.StatementTag() == "UNION" ||
-			b.stmt.StatementTag() == "INSERT" || b.stmt.StatementTag() == "UPDATE" ||
-			b.stmt.StatementTag() == "DELETE") {
+			b.stmt.StatementTag() == "EXPLAIN ANALYZE (DEBUG)" || b.stmt.StatementTag() == "UNION") {
 		tables = b.adjustTableSequenceForJoinBuild(tables, inScope)
 	}
 	// If there are any lateral data sources, we need to build the join tree
@@ -1320,7 +1318,6 @@ func (b *Builder) adjustTableSequenceForJoinBuild(
 	var relTables tree.TableExprs
 	var tsTables tree.TableExprs
 	mem := b.factory.Memo()
-
 	//traverse the tables to check if the query is a multiple model query and all the tables
 	//involved in the query are either relational or timeseries tables.
 	for i := range tables {
@@ -1363,6 +1360,16 @@ func (b *Builder) adjustTableSequenceForJoinBuild(
 						relTables = append(relTables, tables[i])
 					}
 				}
+			case *tree.Subquery:
+				// if the table is table expression, then check if the query already has at least one timeseries
+				// table in the query. If not, then set the query type in the memo to "REL_ONLY". If the query already
+				// has a timeseries table, then set the query type in the memo to MultiModel.
+				if mem.QueryType == memo.Unset || mem.QueryType == memo.RelOnly {
+					mem.QueryType = memo.RelOnly
+				} else if mem.QueryType == memo.TSOnly {
+					mem.QueryType = memo.MultiModel
+				}
+				relTables = append(relTables, tables[i])
 			default:
 				relTables = append(relTables, tables[i])
 			}
@@ -1374,6 +1381,7 @@ func (b *Builder) adjustTableSequenceForJoinBuild(
 	//if the query is a multiple model query, then return the new table sequence;
 	//otherwise return the original table sequence.
 	if mem.QueryType == memo.MultiModel {
+		mem.SetFlag(opt.FinishOptInsideOut)
 		tsTables = append(tsTables, relTables...)
 		return tsTables
 	}

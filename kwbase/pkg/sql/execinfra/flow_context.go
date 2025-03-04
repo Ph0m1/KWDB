@@ -96,6 +96,14 @@ type FlowCtx struct {
 	// when the switch is on and the server starts with single node mode.
 	TsHandleMap map[int32]unsafe.Pointer
 
+	// Identify whether the tse connection is still valid
+	// used only to jump out of the waiting loop in BLJ operator
+	// when tse returns an error.
+	TsHandleBreak bool
+
+	// PushingBLJCount define the number of BLJ operators pussing rel data into ts engine
+	PushingBLJCount int
+
 	// Mu is the Mutex to protect TsHandleMap
 	// only used to get tshandle when the switch is on and the server starts
 	// with single node mode.

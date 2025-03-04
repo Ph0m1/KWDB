@@ -46,6 +46,7 @@ enum EEIteratorErrCode {
   EE_Sample,
   EE_TIMESLICE_OUT,
   EE_ERROR_ZERO,
+  EE_PTAG_COUNT_NOT_MATCHED
 };
 /*
  * exclude info

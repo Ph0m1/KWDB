@@ -95,11 +95,12 @@ void DmlExec::ClearTsScans(kwdbContext_p ctx) {
 
 KStatus DmlExec::CreateRelBatchQueue(kwdbContext_p ctx, std::vector<Field*> &output_fields) {
   EnterFunc();
-  rel_batch_queue_ = new RelBatchQueue(output_fields);
+  rel_batch_queue_ = new RelBatchQueue();
   if (rel_batch_queue_ == nullptr) {
     Return(KStatus::FAIL);
   }
-  Return(KStatus::SUCCESS);
+  KStatus res = rel_batch_queue_->Init(output_fields);
+  Return(res);
 }
 
 RelBatchQueue* DmlExec::GetRelBatchQueue() {

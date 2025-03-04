@@ -1,3 +1,5 @@
+> set enable_multimodel=off;
+SET
 > CREATE TS DATABASE db_pipec;
 CREATE TS DATABASE
 > CREATE TABLE db_pipec.t_point (
@@ -212,3 +214,5 @@ SET CLUSTER SETTING
 DROP DATABASE
 > drop DATABASE pipec_r cascade;
 DROP DATABASE
+> set enable_multimodel=on;
+SET

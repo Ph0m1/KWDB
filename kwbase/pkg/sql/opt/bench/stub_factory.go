@@ -522,19 +522,49 @@ func (f *stubFactory) SetBljRightNode(blj, agg exec.Node) exec.Node {
 
 // for multiple model processing.
 func (f *stubFactory) ProcessTsScanNode(
-	node exec.Node, leftEq, rightEq *[]uint32, tsCols *[]sqlbase.TSCol,
+	node exec.Node,
+	leftEq, rightEq *[]uint32,
+	tsCols *[]sqlbase.TSCol,
+	tableID opt.TableID,
+	joinCols opt.ColList,
+	mem *memo.Memo,
+	evalCtx *tree.EvalContext,
 ) bool {
 	return false
 }
 
 // for multiple model processing.
-func (f *stubFactory) ProcessBljLeftColumns(node exec.Node, mem *memo.Memo) []sqlbase.TSCol {
+func (f *stubFactory) ProcessBljLeftColumns(
+	node exec.Node, mem *memo.Memo,
+) ([]sqlbase.TSCol, bool) {
+	return nil, false
+}
+
+func (f *stubFactory) FindTsScanNode(node exec.Node, mem *memo.Memo) opt.TableID {
+	return 0
+}
+
+func (f *stubFactory) FindTSTableID(expr memo.RelExpr, mem *memo.Memo) opt.TableID {
+	return 0
+}
+
+func (f *stubFactory) MatchGroupingCols(
+	mem *memo.Memo, tableGroupIndex int, node exec.Node,
+) []opt.ColumnID {
 	return nil
+}
+
+func (f *stubFactory) ProcessRenderNode(node exec.Node) error {
+	return nil
+}
+
+func (f *stubFactory) AddAvgFuncColumns(node exec.Node, mem *memo.Memo, tableGroupIndex int) {
+
 }
 
 // for multiple model processing.
 func (f *stubFactory) ResetTsScanAccessMode(
-	node exec.Node, originalAccessMode execinfrapb.TSTableReadMode,
+	expr memo.RelExpr, originalAccessMode execinfrapb.TSTableReadMode,
 ) {
 
 }

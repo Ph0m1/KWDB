@@ -32,12 +32,15 @@ class RelBatchQueue {
   bool no_more_data_chunk{false};
 
  public:
-  /**
-   * @brief Construct RelBatchQueue with output fields
-   * @param[in] output_fields the output fields
-   */
-  explicit RelBatchQueue(std::vector<Field*> &output_fields);
+  RelBatchQueue();
   ~RelBatchQueue();
+
+  /**
+   * @brief Initialize relational batch queue
+   * @param[in] output_fields the output fields
+   * @return Status
+   */
+  KStatus Init(std::vector<Field*> &output_fields);
 
   /**
    * @brief Add a batch of relational data into RelBatchQueue

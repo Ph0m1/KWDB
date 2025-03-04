@@ -49,6 +49,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"github.com/lib/pq/oid"
 	"github.com/opentracing/opentracing-go"
+	"github.com/pkg/errors"
 )
 
 // batchLookupJoinerInitialBufferSize controls the size of the initial buffering phase
@@ -107,26 +108,6 @@ type batchLookupJoiner struct {
 	useTempStorage bool
 	storedRows     rowcontainer.HashRowContainer
 
-	// Used by tests to force a storedSide.
-	forcedStoredSide *joinSide
-
-	// probingRowState is state used when bljProbingRow.
-	probingRowState struct {
-		// row is the row being probed with.
-		row sqlbase.EncDatumRow
-		// iter is an iterator over the bucket that matches row on the equality
-		// columns.
-		iter rowcontainer.RowMarkerIterator
-		// matched represents whether any row that matches row on equality columns
-		// has also passed the ON condition.
-		matched bool
-	}
-
-	// emittingUnmatchedState is used when bljEmittingUnmatched.
-	emittingUnmatchedState struct {
-		iter rowcontainer.RowIterator
-	}
-
 	// testingKnobMemFailPoint specifies a state in which the batchLookupJoiner will
 	// fail at a random point during this phase.
 	testingKnobMemFailPoint batchLookupJoinerState
@@ -140,6 +121,8 @@ type batchLookupJoiner struct {
 	leftRemains bool
 
 	rowCount uint32
+	// batch count for plan display
+	batchCount uint32
 }
 
 var _ execinfra.Processor = &batchLookupJoiner{}
@@ -227,6 +210,7 @@ func newBatchLookupJoiner(
 	}
 
 	h.rowCount = 0
+	h.batchCount = 0
 
 	return h, nil
 }
@@ -234,11 +218,29 @@ func newBatchLookupJoiner(
 // Start is part of the RowSource interface.
 func (h *batchLookupJoiner) Start(ctx context.Context) context.Context {
 	h.leftSource.Start(ctx)
-	h.rightSource.Start(ctx)
-	h.FlowCtx.TsBatchLookupInput = nil
-	ctx = h.StartInternal(ctx, batchLookupJoinerProcName)
 	h.cancelChecker = sqlbase.NewCancelChecker(ctx)
+	// get relational data and push to AE for actual join process
+	// start with buildAndConsumeStoredSide
 	h.runningState = bljBuildAndConsumingStoredSide
+	h.FlowCtx.PushingBLJCount++
+	var leftStartDone = false
+	for !leftStartDone {
+		switch h.runningState {
+		case bljBuildAndConsumingStoredSide:
+			h.runningState, _, _ = h.buildAndConsumeStoredSide()
+		case bljPushingToProbeSide:
+			h.runningState, _, _ = h.pushToProbeSide()
+		default:
+			// bljPullFromProbeSide: pull data in Next()
+			// bljStateUnknown: trigger log.Fatal and DrainHelper in Next()
+			leftStartDone = true
+		}
+		// no need to double check meta errors, when meta.Err != nil
+		// runningState is set to bljStateUnknown in buildAndConsumeStoredSide and pushToProbeSide
+	}
+	h.FlowCtx.PushingBLJCount--
+	h.rightSource.Start(ctx)
+	ctx = h.StartInternal(ctx, batchLookupJoinerProcName)
 	return ctx
 }
 
@@ -247,17 +249,11 @@ func (h *batchLookupJoiner) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMe
 	for h.State == execinfra.StateRunning {
 		var row sqlbase.EncDatumRow
 		var meta *execinfrapb.ProducerMetadata
-		switch h.runningState {
-		case bljBuildAndConsumingStoredSide:
-			h.runningState, row, meta = h.buildAndConsumeStoredSide()
-		case bljPushingToProbeSide:
-			h.runningState, row, meta = h.pushToProbeSide()
-		case bljPullFromProbeSide:
-			h.runningState, row, meta = h.pullFromProbeSide()
-		default:
+		if h.runningState != bljPullFromProbeSide {
 			log.Fatalf(h.PbCtx(), "unsupported state: %d", h.runningState)
+			break
 		}
-
+		h.runningState, row, meta = h.pullFromProbeSide()
 		if row == nil && meta == nil {
 			continue
 		}
@@ -283,12 +279,8 @@ func (h *batchLookupJoiner) buildAndConsumeStoredSide() (
 	sqlbase.EncDatumRow,
 	*execinfrapb.ProducerMetadata,
 ) {
-	if h.forcedStoredSide != nil {
-		h.storedSide = *h.forcedStoredSide
-	} else {
-		// Use leftSide as the stored side unless it is fully consumed.
-		h.storedSide = leftSide
-	}
+	// for blj storedside is always leftSide
+	h.storedSide = leftSide
 
 	// Initialize the storedRows container if needed.
 	if err := h.initStoredRows(); err != nil {
@@ -298,7 +290,7 @@ func (h *batchLookupJoiner) buildAndConsumeStoredSide() (
 
 	// Process rows for the left side and stored side.
 	for h.rowCount < batchSize {
-		row, meta, emitDirectly, err := h.receiveNext(h.storedSide)
+		row, meta, err := h.receiveNext(h.storedSide)
 		if err != nil {
 			h.MoveToDraining(err)
 			return bljStateUnknown, nil, h.DrainHelper()
@@ -309,8 +301,6 @@ func (h *batchLookupJoiner) buildAndConsumeStoredSide() (
 			}
 			h.AppendTrailingMeta(*meta)
 			continue
-		} else if emitDirectly {
-			return bljBuildAndConsumingStoredSide, row, nil
 		}
 
 		if row == nil {
@@ -382,6 +372,22 @@ func InsertData(
 	dc tse.DataChunkGo, row uint32, col uint32, colPrecision int32, coldata sqlbase.EncDatum,
 ) {
 	colOffset := row*dc.ColInfo[col].FixedStorageLen + dc.ColOffset[col]
+	// set null bitmap first
+	// get cur col's offset
+	bitmapOffset := dc.BitmapOffset[col]
+	// get cur col's data
+	bitmap := dc.Data[bitmapOffset:]
+	// get the byte where the row is in
+	index := row >> 3 // row / 8
+	// get the row pos in byte
+	pos := uint8(1 << 7)     // binary 1000 0000
+	mask := pos >> (row & 7) // pos >> (row % 8)
+	// Check NULL first
+	if coldata.IsNull() {
+		bitmap[index] |= mask // Set the bit to 1
+		return                // Exit early since there's no data to insert
+	}
+	// Data is not null, proceed with type checking
 	switch d := coldata.Datum.(type) {
 	case *tree.DBool:
 		data := bool(*d)
@@ -459,16 +465,7 @@ func InsertData(
 		binary.LittleEndian.PutUint64(dc.Data[colOffset:], uint64(value))
 	}
 	// SetNotNull(row, col)
-	// get cur col's offset
-	bitmapOffset := dc.BitmapOffset[col]
-	// get cur col's data
-	bitmap := dc.Data[bitmapOffset:]
-	// get the byte where the row is in
-	index := row >> 3 // row / 8
-	// get the row pos in byte
-	pos := uint8(1 << 7)     // binary 1000 0000
-	mask := pos >> (row & 7) // pos >> (row % 8)
-	// set bit: 将相应位清零
+	// set bit: clear corresponding null bit, set to 0
 	bitmap[index] &^= mask
 }
 
@@ -480,16 +477,11 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 ) {
 	side := otherSide(h.storedSide)
 
-	var row sqlbase.EncDatumRow
 	// First process the rows that were already buffered.
 	if h.rows[side].Len() > 0 { // skip
-		row = h.rows[side].EncRow(0)
 		h.rows[side].PopFirst()
 	} else {
 		var meta *execinfrapb.ProducerMetadata
-		// starting point, encode left and send to right
-		// 1. how to encode the h.rows[leftSide]
-		// 2. send this encoded buffer to TsTableReaders.buffer/relational field
 		// get relational data iterator
 		i := h.storedRows.NewUnmarkedIterator(h.PbCtx())
 		i.Rewind()
@@ -563,24 +555,27 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 			// Lack of sde type, ignore for now
 			case types.StringFamily, types.BytesFamily:
 				colWidth := uint32(outputType[colIdx].InternalType.Width)
+				if colType == oid.Oid(91002) || colType == oid.Oid(91004) {
+					colWidth *= 4
+				}
 				if colWidth == 0 {
 					switch colType {
-					case oid.T_char:
+					case oid.T_char, oid.T_bpchar:
 						storeLen = 1
-						fixedStoreLen = 1
+						fixedStoreLen = 3 // + stringwide
 					case oid.T_bytea:
 						storeLen = 3
-						fixedStoreLen = 3
+						fixedStoreLen = 5 // + stringwide
 					case oid.Oid(91002): // NCHAR in type.go
 						storeLen = 4
-						fixedStoreLen = 4
+						fixedStoreLen = 6 // + stringwide
 					case oid.T_varchar, oid.T_varbytea, oid.Oid(91004), oid.T_text: // NVARCHAR in type.go
 						storeLen = 255      // according to table.go TSMaxVariableTupleLen
 						fixedStoreLen = 257 // + stringwide
 					}
 				} else {
 					switch colType {
-					case oid.T_char, oid.Oid(91002), oid.T_varchar, oid.Oid(91004):
+					case oid.T_char, oid.T_bpchar, oid.Oid(91002), oid.T_varchar, oid.Oid(91004):
 						// 1 more bytes for TS decode wrt mutation.go & table.go, -> bug ZDP-31516
 						storeLen = colWidth + 1
 						fixedStoreLen = storeLen + stringWide // + STRING_WIDE in ee_data_chunk.cpp
@@ -657,6 +652,11 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 				tsQueryInfo.Handle = handle
 				break
 			}
+			if h.FlowCtx.TsHandleBreak {
+				err := errors.New("tse returned an error, please check the error code")
+				h.MoveToDraining(err)
+				return bljStateUnknown, nil, h.DrainHelper()
+			}
 			time.Sleep(10 * time.Millisecond)
 		}
 		tsQueryInfo.Buf = []byte("pushdata tsflow")
@@ -669,6 +669,7 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 				log.Warning(h.PbCtx(), pushErr)
 			}
 			h.rowCount = 0
+			h.batchCount++
 		}
 
 		i.Close()
@@ -698,7 +699,7 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 	if pushErr != nil {
 		log.Warning(h.PbCtx(), pushErr)
 	}
-	return bljPullFromProbeSide, row, nil
+	return bljPullFromProbeSide, nil, nil
 }
 
 // pullFromProbeSide helps pull batchlookup join results from tse
@@ -757,12 +758,6 @@ func (h *batchLookupJoiner) close() {
 			// side container explicitly.
 			h.rows[h.storedSide].Close(h.PbCtx())
 		}
-		if h.probingRowState.iter != nil {
-			h.probingRowState.iter.Close()
-		}
-		if h.emittingUnmatchedState.iter != nil {
-			h.emittingUnmatchedState.iter.Close()
-		}
 		h.MemMonitor.Stop(h.PbCtx())
 		if h.diskMonitor != nil {
 			h.diskMonitor.Stop(h.PbCtx())
@@ -778,20 +773,20 @@ func (h *batchLookupJoiner) close() {
 // returned row may be emitted directly.
 func (h *batchLookupJoiner) receiveNext(
 	side joinSide,
-) (sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata, bool, error) {
+) (sqlbase.EncDatumRow, *execinfrapb.ProducerMetadata, error) {
 	source := h.leftSource
 	if side == rightSide {
 		source = h.rightSource
 	}
 	for {
 		if err := h.cancelChecker.Check(); err != nil {
-			return nil, nil, false, err
+			return nil, nil, err
 		}
 		row, meta := source.Next()
 		if meta != nil {
-			return nil, meta, false, nil
+			return nil, meta, nil
 		} else if row == nil {
-			return nil, nil, false, nil
+			return nil, nil, nil
 		}
 		hasNull := false
 		for _, c := range h.eqCols[side] {
@@ -803,28 +798,11 @@ func (h *batchLookupJoiner) receiveNext(
 		// row has no NULLs in its equality columns (or we are considering NULLs to
 		// be equal), so it might match a row from the other side.
 		if !hasNull || h.nullEquality {
-			return row, nil, false, nil
+			return row, nil, nil
 		}
-
-		if renderedRow, shouldEmit := h.shouldEmitUnmatched(row, side); shouldEmit {
-			return renderedRow, nil, true, nil
-		}
-
 		// If this point is reached, row had NULLs in its equality columns but
 		// should not be emitted. Throw it away and get the next row.
 	}
-}
-
-// shouldEmitUnmatched returns whether this row should be emitted if it doesn't
-// match. If this is the case, a rendered row ready for emitting is returned as
-// well.
-func (h *batchLookupJoiner) shouldEmitUnmatched(
-	row sqlbase.EncDatumRow, side joinSide,
-) (sqlbase.EncDatumRow, bool) {
-	if !shouldEmitUnmatchedRow(side, h.joinType) {
-		return nil, false
-	}
-	return h.renderUnmatchedRow(row, side), true
 }
 
 // initStoredRows initializes a hashRowContainer and sets h.storedRows.
@@ -844,7 +822,7 @@ func (h *batchLookupJoiner) initStoredRows() error {
 	}
 	return h.storedRows.Init(
 		h.PbCtx(),
-		shouldMarkForBLJ(h.storedSide, h.joinType),
+		false,
 		h.rows[h.storedSide].Types(),
 		h.eqCols[h.storedSide],
 		h.nullEquality,
@@ -864,9 +842,11 @@ func (bljs *BatchLookupJoinerStats) Stats() map[string]string {
 	for k, v := range rightInputStatsMap {
 		statsMap[k] = v
 	}
+
 	statsMap[batchLookupJoinerTagPrefix+"stored_side"] = bljs.StoredSide
 	statsMap[batchLookupJoinerTagPrefix+MaxMemoryTagSuffix] = humanizeutil.IBytes(bljs.MaxAllocatedMem)
 	statsMap[batchLookupJoinerTagPrefix+MaxDiskTagSuffix] = humanizeutil.IBytes(bljs.MaxAllocatedDisk)
+	statsMap[batchLookupJoinerTagPrefix+"batch_num"] = fmt.Sprintf("%d", bljs.BatchNum)
 	return statsMap
 }
 
@@ -890,6 +870,8 @@ func (bljs *BatchLookupJoinerStats) StatsForQueryPlan() []string {
 		stats = append(stats,
 			fmt.Sprintf("%s: %s", MaxDiskQueryPlanSuffix, humanizeutil.IBytes(bljs.MaxAllocatedDisk)))
 	}
+
+	stats = append(stats, fmt.Sprintf("number of batches: %d", bljs.BatchNum))
 
 	return stats
 }
@@ -919,40 +901,9 @@ func (h *batchLookupJoiner) outputStatsToTrace() {
 				StoredSide:       h.storedSide.String(),
 				MaxAllocatedMem:  h.MemMonitor.MaximumBytes(),
 				MaxAllocatedDisk: h.diskMonitor.MaximumBytes(),
+				BatchNum:         int64(h.batchCount),
 			},
 		)
-	}
-}
-
-// Some types of joins need to mark rows that matched.
-func shouldMarkForBLJ(storedSide joinSide, joinType sqlbase.JoinType) bool {
-	switch {
-	case joinType == sqlbase.LeftSemiJoin && storedSide == leftSide:
-		return true
-	case joinType == sqlbase.LeftAntiJoin && storedSide == leftSide:
-		return true
-	case joinType == sqlbase.ExceptAllJoin:
-		return true
-	case joinType == sqlbase.IntersectAllJoin:
-		return true
-	case shouldEmitUnmatchedRow(storedSide, joinType):
-		return true
-	default:
-		return false
-	}
-}
-
-// Some types of joins only need to know of the existence of a matching row in
-// the storedSide, depending on the storedSide, and don't need to know all the
-// rows. These can 'short circuit' to avoid iterating through them all.
-func shouldShortCircuitForBLJ(storedSide joinSide, joinType sqlbase.JoinType) bool {
-	switch joinType {
-	case sqlbase.LeftSemiJoin:
-		return storedSide == rightSide
-	case sqlbase.ExceptAllJoin:
-		return true
-	default:
-		return false
 	}
 }
 

@@ -63,6 +63,12 @@ class MMapFile {
 
   int open(const std::string &file_path, int flags);
 
+  /**
+   * @brief open temporary file for mmap file.
+   * @return >= 0 if succeed, otherwise -1.
+   */
+  int openTemp();
+
   // open file in the home directory
   /**
    * @brief	open and memory map a file.

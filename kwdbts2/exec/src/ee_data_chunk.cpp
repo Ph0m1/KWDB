@@ -72,10 +72,11 @@ k_bool DataChunk::Initialize() {
     // (capacity_ + 7)/8 * col_num_ + capacity_ * row_size_ <= DataChunk::SIZE_LIMIT
     capacity_ = EstimateCapacity(col_info_);
   }
+  data_size_ = (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
 
   if (is_data_owner_) {
     if (capacity_ * row_size_ > 0) {
-      k_uint64 data_len = (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
+      k_uint64 data_len = Size();
       if (data_len <= DataChunk::SIZE_LIMIT) {
         data_ = kwdbts::EE_MemPoolMalloc(g_pstBufferPoolInfo, ROW_BUFFER_SIZE);
         data_len = ROW_BUFFER_SIZE;
@@ -1396,23 +1397,41 @@ k_uint32 DataChunk::ComputeRowSize(vector<ColumnInfo>& column_info) {
   return row_size;
 }
 
-KStatus DataChunk::ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data) {
+KStatus DataChunk::ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col,
+                                    TagRawData& tag_raw_data, DatumPtr &rel_data_ptr) {
   EnterFunc();
+  tag_raw_data.tag_data = rel_data_ptr;
+  // get the original rel data pointer
   DatumPtr p = data_ + row * col_info_[col].fixed_storage_len + col_offset_[col];
   if (IsStringType(col_info_[col].storage_type)) {
     std::memcpy(&tag_raw_data.size, p, STRING_WIDE);
     p += STRING_WIDE;
+    // copy data into the buffer
+    memcpy(rel_data_ptr, p, tag_raw_data.size + 1);
+    rel_data_ptr += tag_raw_data.size + 1;
   } else if (col_info_[col].storage_type == roachpb::DataType::DECIMAL) {
     std::memcpy(&tag_raw_data.size, p, BOOL_WIDE);
     p += BOOL_WIDE;
+    // copy data into the buffer
+    memcpy(rel_data_ptr, p, tag_raw_data.size);
+    rel_data_ptr += tag_raw_data.size;
   } else {
     tag_raw_data.size = GetColumnInfo()[col].storage_len;
+    // copy data into the buffer
+    memcpy(rel_data_ptr, p, tag_raw_data.size);
+    rel_data_ptr += tag_raw_data.size;
   }
-  tag_raw_data.tag_data = p;
   tag_raw_data.is_null = IsNull(row, col);
   Return(KStatus::SUCCESS);
 }
 
+KStatus DataChunk::InsertEntities(TagRowBatch* tag_row_batch) {
+  return tag_row_batch->GetEntities(&entity_indexs_);
+}
+
+EntityResultIndex& DataChunk::GetEntityIndex(k_uint32 row) {
+  return entity_indexs_[row];
+}
 
 KStatus DataChunk::OffsetSort(std::vector<k_uint32> &selection, bool is_reverse) {
   for (k_uint32 i = 0; i < count_; ++i) {

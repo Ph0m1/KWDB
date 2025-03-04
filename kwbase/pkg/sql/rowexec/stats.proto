@@ -96,6 +96,7 @@ message BatchLookupJoinerStats {
   string stored_side = 3;
   int64 max_allocated_mem = 4;
   int64 max_allocated_disk = 5;
+  int64 batch_num = 6;
 }
 
 // AggregatorStats are the stats collected during an aggregator run.

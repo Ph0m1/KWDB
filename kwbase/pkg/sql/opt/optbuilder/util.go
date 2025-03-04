@@ -997,6 +997,9 @@ func handleLastAgg(s *scope, e tree.Expr, funcName string) {
 	if f, ok1 := e.(*tree.FuncExpr); ok1 {
 		if col, ok := f.Exprs[0].(*scopeColumn); ok {
 			tblID := s.builder.factory.Metadata().ColumnMeta(col.id).Table
+			if tblID == 0 {
+				panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() can only be used in timeseries table query or subquery", funcName))
+			}
 			tbl := s.builder.factory.Metadata().Table(tblID)
 			typ := tbl.Column(0).DatumType()
 			checkBoundary(s, *f, funcName, typ)

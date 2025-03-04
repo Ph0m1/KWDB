@@ -403,7 +403,7 @@ select diff(NULL) over (partition by code1,code14,code8,code16) from test_select
 
 select k_timestamp,e1,diff(k_timestamp) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 
-select id,k_timestamp,e1,diff(e1) over (partition by code1,code14,code8,code16 order by k_timestamp) diffe1 from test_select_diff.t1 where code1=1 or code1=2 order by diffe1;
+select id,k_timestamp,e1,diff(e1) over (partition by code1,code14,code8,code16 order by k_timestamp) diffe1 from test_select_diff.t1 where code1=1 or code1=2 order by diffe1, k_timestamp;
 
 select id,k_timestamp,e1,diff(e1) over (partition by 12345 order by k_timestamp) from test_select_diff.t1 where code1=1 or code1=2 order by id;
 

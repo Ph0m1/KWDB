@@ -372,6 +372,29 @@ var varGen = map[string]sessionVar{
 	},
 
 	// KaiwuDB extension.
+	`hash_scan_mode`: {
+		GetStringVal: makeIntGetStringValFn(`hash_scan_mode`),
+		Set: func(_ context.Context, m *sessionDataMutator, s string) error {
+			b, err := strconv.ParseInt(s, 10, 64)
+			if err != nil {
+				return err
+			}
+			if b < 0 {
+				return pgerror.Newf(pgcode.InvalidParameterValue,
+					"cannot set hash_scan_mode to a negative value: %d", b)
+			}
+			m.SetHashScanMode(int(b))
+			return nil
+		},
+		Get: func(evalCtx *extendedEvalContext) string {
+			return strconv.FormatInt(int64(evalCtx.SessionData.HashScanMode), 10)
+		},
+		GlobalDefault: func(sv *settings.Values) string {
+			return strconv.FormatInt(hashScanMode.Get(sv), 10)
+		},
+	},
+
+	// KaiwuDB extension.
 	`enable_multimodel`: {
 		GetStringVal: makePostgresBoolGetStringValFn(`enable_multimodel`),
 		Set: func(_ context.Context, m *sessionDataMutator, s string) error {

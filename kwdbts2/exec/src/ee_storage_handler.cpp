@@ -24,6 +24,7 @@
 #include "lg_api.h"
 #include "tag_iterator.h"
 #include "ts_table.h"
+#include "ee_hash_tag_row_batch.h"
 
 namespace kwdbts {
 
@@ -201,12 +202,45 @@ EEIteratorErrCode StorageHandler::TsOffsetNext(kwdbContext_p ctx) {
   Return(code);
 }
 
-EEIteratorErrCode StorageHandler::SingletonTagNext(kwdbContext_p ctx, Field *tag_filter) {
+EEIteratorErrCode StorageHandler::NextTagDataChunk(kwdbContext_p ctx,
+  TSTagReaderSpec *spec,
+  Field *tag_filter,
+  std::vector<void *> &primary_tags,
+  std::vector<void *> &secondary_tags,
+  const vector<k_uint32> tag_other_join_cols,
+  Field ** renders,
+  std::vector<ColumnInfo> &col_info,
+  DataChunkPtr &data_chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThdContext *thd = current_thd;
-  RowBatch* ptr = thd->GetRowBatch();
-  thd->SetRowBatch(tag_rowbatch_.get());
+  if (primary_tags.size() > 0) {
+    if (tag_iterator) {
+      tag_iterator = nullptr;
+      code = GetTagDataChunkWithPrimaryTags(ctx, spec, tag_filter, primary_tags, secondary_tags,
+                                            tag_other_join_cols, renders, col_info, data_chunk);
+    } else {
+      code = EEIteratorErrCode::EE_END_OF_RECORD;
+    }
+  } else {
+    code = NextTagDataChunk(ctx, tag_filter, renders, col_info, data_chunk);
+  }
+  Return(code);
+}
+
+EEIteratorErrCode StorageHandler::NextTagDataChunk(kwdbContext_p ctx, Field *tag_filter, Field ** renders,
+                                                  std::vector<ColumnInfo> &col_info, DataChunkPtr &data_chunk) {
+  EnterFunc();
+  EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
+
+  // Create tag_rowbatch for tag data
+  tag_rowbatch_ = std::make_shared<HashTagRowBatch>();
+  tag_rowbatch_->Init(table_);
+  RowBatch* ptr = current_thd->GetRowBatch();
+  current_thd->SetRowBatch(tag_rowbatch_.get());
+  Defer defer{[&]() {
+    current_thd->SetRowBatch(ptr);
+  }};
+
   while (true) {
     tag_rowbatch_->Reset();
     KStatus ret = tag_iterator->Next(&(tag_rowbatch_->entity_indexs_),
@@ -217,7 +251,6 @@ EEIteratorErrCode StorageHandler::SingletonTagNext(kwdbContext_p ctx, Field *tag
     }
 
     code = EEIteratorErrCode::EE_OK;
-    // LOG_DEBUG("Handler::TagNext count:%d", tag_rowbatch_->count_);
     if (0 == tag_rowbatch_->count_) {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
       break;
@@ -232,7 +265,29 @@ EEIteratorErrCode StorageHandler::SingletonTagNext(kwdbContext_p ctx, Field *tag
     }
   }
   tag_rowbatch_->SetPipeEntityNum(ctx, 1);
-  thd->SetRowBatch(ptr);
+
+  // Init a data chunk
+  data_chunk = std::make_unique<DataChunk>(col_info, tag_rowbatch_->Count());
+  if (data_chunk->Initialize() != true) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    data_chunk = nullptr;
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  // Transform tag row batch to data chunk
+  KStatus status = data_chunk->AddRowBatchData(ctx, tag_rowbatch_.get(), renders);
+  if (status != KStatus::SUCCESS) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Failed to transform tag row batch to data chunk.");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  // Add entity id to data_chunk
+  status = data_chunk->InsertEntities(tag_rowbatch_.get());
+  if (status != KStatus::SUCCESS) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Failed to insert entities to data chunk.");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
   Return(code);
 }
 
@@ -441,22 +496,49 @@ EEIteratorErrCode StorageHandler::GetEntityIdList(kwdbContext_p ctx,
   Return(code);
 }
 
-EEIteratorErrCode StorageHandler::GetRelEntityIdList(kwdbContext_p ctx,
-                                           TSTagReaderSpec *spec,
-                                           Field *tag_filter,
-                                           std::vector<void *>& primary_tags,
-                                           std::vector<void *>& secondary_tags,
-                                           const vector<k_uint32> tag_other_join_cols) {
+std::vector<void *> StorageHandler::findCommonTags(const std::vector<void *> &primary_tag1,
+                    const std::vector<void *> &primary_tag2, int data_size) {
+  std::vector<void *> commonElements;
+
+  // Iterate through the first vector
+  for (void* element1 : primary_tag1) {
+    // Iterate through the second vector and compare content
+    for (void* element2 : primary_tag2) {
+      // Compare the binary data using memcmp
+      if (std::memcmp(element1, element2, data_size) == 0) {
+        commonElements.push_back(element1);
+        break;  // Once we find a match, we can stop searching for this element
+      }
+    }
+  }
+  return commonElements;
+}
+
+EEIteratorErrCode StorageHandler::GetTagDataChunkWithPrimaryTags(kwdbContext_p ctx,
+                                            TSTagReaderSpec *spec,
+                                            Field *tag_filter,
+                                            std::vector<void *> &primary_tags,
+                                            std::vector<void *> &secondary_tags,
+                                            const vector<k_uint32> tag_other_join_cols,
+                                            Field ** renders,
+                                            std::vector<ColumnInfo> &col_info,
+                                            DataChunkPtr &data_chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
-  KWThdContext *thd = current_thd;
-  RowBatch* old_ptr = thd->GetRowBatch();
-  tag_rowbatch_->Reset();
-  thd->SetRowBatch(tag_rowbatch_.get());
+
+  // Create tag_rowbatch for tag data
+  tag_rowbatch_ = std::make_shared<HashTagRowBatch>();
+  tag_rowbatch_->Init(table_);
+  RowBatch* ptr = current_thd->GetRowBatch();
+  current_thd->SetRowBatch(tag_rowbatch_.get());
+  Defer defer{[&]() {
+    current_thd->SetRowBatch(ptr);
+  }};
+
   do {
     KStatus ret = ts_table_->GetEntityIdList(
-        ctx, primary_tags, table_->scan_tags_, &tag_rowbatch_->entity_indexs_,
-        &tag_rowbatch_->res_, &tag_rowbatch_->count_);
+      ctx, primary_tags, table_->scan_tags_, &tag_rowbatch_->entity_indexs_,
+      &tag_rowbatch_->res_, &tag_rowbatch_->count_);
     if (ret != SUCCESS) {
       break;
     }
@@ -476,7 +558,29 @@ EEIteratorErrCode StorageHandler::GetRelEntityIdList(kwdbContext_p ctx,
     code = EEIteratorErrCode::EE_OK;
   } while (0);
   tag_rowbatch_->SetPipeEntityNum(ctx, 1);
-  thd->SetRowBatch(old_ptr);
+
+  // Init a data chunk
+  data_chunk = std::make_unique<DataChunk>(col_info, tag_rowbatch_->Count());
+  if (data_chunk->Initialize() != true) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    data_chunk = nullptr;
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  // Transform tag row batch to data chunk
+  KStatus status = data_chunk->AddRowBatchData(ctx, tag_rowbatch_.get(), renders);
+  if (status != KStatus::SUCCESS) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Failed to transform tag row batch to data chunk.");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
+  // Add entity id to data_chunk
+  status = data_chunk->InsertEntities(tag_rowbatch_.get());
+  if (status != KStatus::SUCCESS) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "Failed to insert entities to data chunk.");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+
   Return(code);
 }
 

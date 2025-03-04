@@ -1,4 +1,5 @@
 --- Time-Series
+set cluster setting ts.sql.query_opt_mode = 1100;
 CREATE TS DATABASE runba;
 
 CREATE TABLE runba.firegases00001 (
@@ -1473,8 +1474,6 @@ INSERT INTO runba.firegases450470 VALUES
 ('2023-11-25 17:50:33+00:00', 0, '40006', '4', '450470', '珠海保税区丽珠合成制药有限公司', '气体', '吉安达', '正常在线', '402岗位东罐区东北角', '2', '1', '可燃气体', '%'),
 ('2023-11-25 17:56:33+00:00', 1, '40006', '4', '450470', '珠海保税区丽珠合成制药有限公司', '气体', '吉安达', '正常在线', '402岗位东罐区东北角', '2', '1', '可燃气体', '%');
 
-CREATE STATISTICS _stats_ FROM runba.firegases450470;
-
 -- 2
 INSERT INTO runba.firegases451909 VALUES 
 ('2024-04-25 13:55:22+00:00', 0, '40003', '3', '451909', '珠海中油油品配送中心有限公司', '气体', '山东瑶安', '正常在线', '1000M³罐出油口', '1', '1', '可燃气体', '%'),
@@ -1483,8 +1482,6 @@ INSERT INTO runba.firegases451909 VALUES
 ('2024-04-25 13:57:38+00:00', 0, '40003', '3', '451909', '珠海中油油品配送中心有限公司', '气体', '山东瑶安', '正常在线', '1000M³罐出油口', '1', '1', '可燃气体', '%'),
 ('2024-04-25 13:58:23+00:00', 0, '40003', '3', '451909', '珠海中油油品配送中心有限公司', '气体', '山东瑶安', '正常在线', '1000M³罐出油口', '1', '1', '可燃气体', '%');
 
-CREATE STATISTICS _stats_ FROM runba.firegases451909;
-
 -- 3
 INSERT INTO runba.opcdata411 VALUES 
 ('2024-06-04 20:34:27+00:00', 23, '40039', 'CH39', 411, '222', '温度', '温度计', 'V-039', '0', '35', '0', '0', '戊二烯8#罐温度', '罐区间', '1', 'TQ_24', '℃'),
@@ -1492,8 +1489,6 @@ INSERT INTO runba.opcdata411 VALUES
 ('2024-06-04 20:34:47+00:00', 23, '40039', 'CH39', 411, '222', '温度', '温度计', 'V-039', '0', '35', '0', '0', '戊二烯8#罐温度', '罐区间', '1', 'TQ_24', '℃'),
 ('2024-06-04 20:34:57+00:00', 23, '40039', 'CH39', 411, '222', '温度', '温度计', 'V-039', '0', '35', '0', '0', '戊二烯8#罐温度', '罐区间', '1', 'TQ_24', '℃'),
 ('2024-06-04 20:35:07+00:00', 23, '40039', 'CH39', 411, '222', '温度', '温度计', 'V-039', '0', '35', '0', '0', '戊二烯8#罐温度', '罐区间', '1', 'TQ_24', '℃');
-
-CREATE STATISTICS _stats_ FROM runba.opcdata411;
 
 -- 4
 INSERT INTO runba.opcdata449600 VALUES 
@@ -1508,8 +1503,6 @@ INSERT INTO runba.opcdata449600 VALUES
 ('2023-11-30 18:04:39+00:00', 1716.28, '400547', 'CH274', 449600, '珠海长炼石化设备有限公司', '液位', '液位计', 'V-223A', '2500', '2400', '500', '600', '-', '液化烃罐区', '1', 'MLT_223A', 'mm'),
 ('2023-11-30 18:05:09+00:00', 1716.345, '400547', 'CH275', 449600, '珠海长炼石化设备有限公司', '液位', '液位计', 'V-223A', '2500', '2400', '500', '600', '-', '液化烃罐区', '1', 'MLT_223A', 'mm');
 
-CREATE STATISTICS _stats_ FROM runba.opcdata449600;
-
 -- 5
 INSERT INTO runba.opcdata449652 VALUES 
 ('2023-12-01 21:10:16+00:00', 14.40972, '40037', 'CH19', 449652, '珠海金鸡化工有限公司', '温度', '3#苯乙烯罐', 'V103C', '20', '19', '2', '5', '底部温度', '苯乙烯罐区', '1', 'TI10203', '℃'),
@@ -1517,8 +1510,6 @@ INSERT INTO runba.opcdata449652 VALUES
 ('2023-12-01 21:11:16+00:00', 14.40972, '40037', 'CH19', 449652, '珠海金鸡化工有限公司', '温度', '3#苯乙烯罐', 'V103C', '20', '19', '2', '5', '底部温度', '苯乙烯罐区', '1', 'TI10203', '℃'),
 ('2023-12-01 21:12:57+00:00', 14.40683, '40037', 'CH19', 449652, '珠海金鸡化工有限公司', '温度', '3#苯乙烯罐', 'V103C', '20', '19', '2', '5', '底部温度', '苯乙烯罐区', '1', 'TI10203', '℃'),
 ('2023-12-01 21:13:27+00:00', 14.39815, '40037', 'CH19', 449652, '珠海金鸡化工有限公司', '温度', '3#苯乙烯罐', 'V103C', '20', '19', '2', '5', '底部温度', '苯乙烯罐区', '1', 'TI10203', '℃');
-
-CREATE STATISTICS _stats_ FROM runba.opcdata449652;
 
 -- 6
 INSERT INTO runba.opcdata450081 VALUES 
@@ -1528,8 +1519,6 @@ INSERT INTO runba.opcdata450081 VALUES
 ('2024-04-25 12:41:50+00:00', 0, '40030', 'CH30', 450081, '华创石油', '水高', '水高修正', 'V-6', '0', '0', '0', '0', '水高修正', '6号罐', '1', 'MTH6', 'm'),
 ('2024-04-25 12:41:52+00:00', 0, '40030', 'CH30', 450081, '华创石油', '水高', '水高修正', 'V-6', '0', '0', '0', '0', '水高修正', '6号罐', '1', 'MTH6', 'm');
 
-CREATE STATISTICS _stats_ FROM runba.opcdata450081;
-
 -- 7
 INSERT INTO runba.opcdata451732 VALUES 
 ('2024-06-04 20:46:18+00:00', 0.178, '40029', 'CH29', 451732, '惠州市聚辉环保材料有限公司', '压力', '压力表', 'V-029', '0', '0.2', '0', '0', '戊二烯6#罐压力', '罐区间', '1', NULL, 'MPa'),
@@ -1537,8 +1526,6 @@ INSERT INTO runba.opcdata451732 VALUES
 ('2024-06-04 20:46:38+00:00', 0.178, '40029', 'CH29', 451732, '惠州市聚辉环保材料有限公司', '压力', '压力表', 'V-029', '0', '0.2', '0', '0', '戊二烯6#罐压力', '罐区间', '1', NULL, 'MPa'),
 ('2024-06-04 20:46:48+00:00', 0.178, '40029', 'CH29', 451732, '惠州市聚辉环保材料有限公司', '压力', '压力表', 'V-029', '0', '0.2', '0', '0', '戊二烯6#罐压力', '罐区间', '1', NULL, 'MPa'),
 ('2024-06-04 20:46:58+00:00', 0.178, '40029', 'CH29', 451732, '惠州市聚辉环保材料有限公司', '压力', '压力表', 'V-029', '0', '0.2', '0', '0', '戊二烯6#罐压力', '罐区间', '1', NULL, 'MPa');
-
-CREATE STATISTICS _stats_ FROM runba.opcdata451732;
 
 -- 8
 INSERT INTO runba_tra.aqsc_donggongka VALUES 
@@ -1548,8 +1535,6 @@ INSERT INTO runba_tra.aqsc_donggongka VALUES
 (37, 'runbayun', 1, 398934, '上海妆佳电子商务有限公司', '上海妆佳电子商务有限公司', 1608206520, 1608217320, '哈哈', '哈哈', '哈哈', 1608134400, NULL, '哈哈', 0, 0, ';454823_0', ';', 0, 1608207701, 1, 1, 'a:1:{i:0;a:3:{s:6:"detail";s:36:"作业人员身体条件符合要求";s:6:"result";s:1:"1";s:6:"person";s:6:"哈哈";}}', 1608207701, '', 1, 0, '', '', '', 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1608206520, 1608217320, 1608206520, 1608217320, '121.8614526', '31.48667343', 0, '', '8b9f9330-4a4f-11ed-9c80-506b4b46e57c', NULL, NULL, 2, 2, 2, 2, NULL, NULL),
 (38, 'runbayun', 2, 398934, '上海妆佳电子商务有限公司', '上海妆佳电子商务有限公司', 1608206520, 1608217320, '哈哈', '哈哈', '哈哈', 1608134400, NULL, '哈哈', 1, 0, ';454821_3234', ';', 0, 1608208104, 1, 1, 'a:1:{i:0;a:3:{s:6:"detail";s:36:"作业人员身体条件符合要求";s:6:"result";s:1:"1";s:6:"person";s:6:"哈哈";}}', 1608208104, '', 1, 0, '', '', '', 0, 0, 69, 0, 1, 0, 69, 0, 0, 0, 0, 0, 0, 1608206520, 1608217320, 1608206520, 1608217320, '121.8614526', '31.48667343', 0, '', '8b9f9413-4a4f-11ed-9c80-506b4b46e57c', NULL, NULL, 2, 2, 2, 2, NULL, NULL);
 
-CREATE STATISTICS _stats_ FROM runba_tra.aqsc_donggongka;
-
 -- 9
 INSERT INTO runba_tra.cd_behavior_area VALUES 
 (0, '', 0, NULL, 1, '', NULL, 0, 0, 0, '', '', '2024-03-30 20:58:27+00:00', '2024-03-30 20:58:43+00:00', 0, '', '', '', '2024-03-30 20:58:27+00:00', '2024-03-30 20:58:43+00:00', ''),
@@ -1557,8 +1542,6 @@ INSERT INTO runba_tra.cd_behavior_area VALUES
 (5, '循环水泵房北', 443118, '济宁协力能源有限公司', 1, '116.3706619592664,35.73295615377787', 1, 0, 0, 0, '', '', '2023-05-23 20:48:55+00:00', '2024-02-19 09:03:11+00:00', 0, '', '', '', '2024-03-30 14:18:46+00:00', '2024-03-30 14:18:46+00:00', ''),
 (6, '1000立方罐罐顶', 443118, '济宁协力能源有限公司', 1, '16.36986366837378,35.73290085451418', 1, 0, 0, 0, '', '', '2023-05-23 20:48:55+00:00', '2023-12-28 13:01:50+00:00', 0, '', '', '', '2024-03-30 14:18:46+00:00', '2024-03-30 14:18:46+00:00', ''),
 (7, '冷箱球机-可移动', 443118, '济宁协力能源有限公司', 1, '116.36801882341574,35.73330927720075', 1, 0, 0, 0, '', '', '2023-05-23 20:48:55+00:00', '2023-12-28 13:01:39+00:00', 0, '', '', '', '2024-03-30 14:18:46+00:00', '2024-03-30 14:18:46+00:00', '');
-
-CREATE STATISTICS _stats_ FROM runba_tra.cd_behavior_area;
 
 -- 10
 INSERT INTO runba_tra.cd_device_point VALUES 
@@ -1568,8 +1551,6 @@ INSERT INTO runba_tra.cd_device_point VALUES
 (4, 'LI_01', NULL, '2#溴储罐', 4, 7, '2.000000', '0.000000', 399551, '2023-06-12 17:55:50+00:00', '2023-11-19 09:15:38+00:00'),
 (5, 'LI_02', NULL, '1#溴储罐', 5, 7, '2.000000', '0.000000', 399551, '2023-06-12 17:55:50+00:00', '2023-11-19 09:16:01+00:00');
 
-CREATE STATISTICS _stats_ FROM runba_tra.cd_device_point;
-
 -- 11
 INSERT INTO runba_tra.cd_security_device VALUES 
 (1, 1, '2', 'MLT_223A', '1002', 0, '', '', 449600, '济宁协力能源有限公司', 2, 5, 0, '', '', 0, 0, 8, '', NULL, '', '', 1, 0),
@@ -1577,8 +1558,6 @@ INSERT INTO runba_tra.cd_security_device VALUES
 (3, 0, '3', 'MLT_223A', '1003', 0, '', '', 449600, '济宁协力能源有限公司', 3, 5, 0, '', '', 0, 0, 8, '', NULL, '', '', 2, 0),
 (4, 0, '3', 'MLT_223A', '1004', 0, '', '', 449600, '济宁协力能源有限公司', 4, 5, 0, '', '', 0, 0, 8, '', NULL, '', '', 3, 0),
 (5, 0, '3', 'MLT_223A', '1005', 0, '', '', 443118, '济宁协力能源有限公司', 5, 1, 0, '', '', 0, 0, 8, '', NULL, '', '', 1, 0);
-
-CREATE STATISTICS _stats_ FROM runba_tra.cd_security_device;
 
 -- 12
 INSERT INTO runba_tra.cd_tijian_item_index VALUES 
@@ -1591,8 +1570,6 @@ INSERT INTO runba_tra.cd_tijian_item_index VALUES
 (7, '液位', 'M', '2023-06-12 17:12:41+00:00', '2023-06-12 17:12:41+00:00'),
 (8, '气体', '%LEL', '2023-11-25 18:27:41+00:00', '2023-11-30 18:53:57+00:00');
 
-CREATE STATISTICS _stats_ FROM runba_tra.cd_tijian_item_index;
-
 -- 13
 INSERT INTO runba_tra.plat_company VALUES 
 (6673, 0, NULL, NULL, NULL, NULL, '', 0, 1, 1, 0, '', '', '', 0, 0, 0, 0, '', '', '', '', 0, '', 0, 1485164305, 1371, 0, 0, '', 0, '', '', 0, '', '', 0, '', '', 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, '', 1, 0, 0, 1, '', NULL, 0, '0', 0, NULL, NULL, 0, 0, 0, 0, 0, '', 0, 0, '', '', '', 0, 0, '', '', 0, 1, 0, 0, NULL, NULL, '', '', 0, 0, 0, '', NULL, NULL, NULL, NULL, NULL, 0, '', '', '', NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, '', 0, 6, 1, '', 0, 0, '', '', 1, '', '', 0, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', '', '', '', '', 0, NULL, NULL, '', '', 0, 0, 0, '0.00', '0.00', 0, '', 0, '', 0, NULL, 0, 0, '', 0, '', '', 0, 0, 1, '', '', 0, '', 0, '', '', '', '', '', ''),
@@ -1600,8 +1577,6 @@ INSERT INTO runba_tra.plat_company VALUES
 (6676, 0, NULL, NULL, NULL, NULL, '', 0, 1, 1, 0, '', '', '', 0, 0, 0, 0, '', '', '', '', 0, '', 0, 1485164589, 1373, 0, 0, '', 0, '', '', 0, '', '', 0, '', '', 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, '', 1, 0, 0, 1, '', NULL, 0, '0', 0, NULL, NULL, 0, 0, 0, 0, 0, '', 0, 0, '', '', '', 0, 0, '', '', 0, 1, 0, 0, NULL, NULL, '', '', 0, 0, 0, '', NULL, NULL, NULL, NULL, NULL, 0, '', '', '', NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, '', 0, 6, 1, '', 0, 0, '', '', 1, '', '', 0, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', '', '', '', '', 0, NULL, NULL, '', '', 0, 0, 0, '0.00', '0.00', 0, '', 0, '', 0, NULL, 0, 0, '', 0, '', '', 0, 0, 1, '', '', 0, '', 0, '', '', '', '', '', ''),
 (6677, 0, NULL, NULL, NULL, NULL, '', 0, 1, 1, 0, '', '', '', 0, 0, 0, 0, '', '', '', '', 0, '', 0, 1485164751, 1374, 0, 0, '', 0, '', '', 0, '', '', 0, '', '', 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, '', 1, 0, 0, 1, '', NULL, 0, '0', 0, NULL, NULL, 0, 0, 0, 0, 0, '', 0, 0, '', '', '', 0, 0, '', '', 0, 1, 0, 0, NULL, NULL, '', '', 0, 0, 0, '', NULL, NULL, NULL, NULL, NULL, 0, '', '', '', NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, '', 0, 6, 1, '', 0, 0, '', '', 1, '', '', 0, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', '', '', '', '', 0, NULL, NULL, '', '', 0, 0, 0, '0.00', '0.00', 0, '', 0, '', 0, NULL, 0, 0, '', 0, '', '', 0, 0, 1, '', '', 0, '', 0, '', '', '', '', '', ''),
 (6678, 0, NULL, NULL, NULL, NULL, '', 0, 1, 1, 0, '', '', '', 0, 0, 0, 0, '', '', '', '', 0, '', 0, 1485166243, 1375, 0, 0, '', 0, '', '', 0, '', '', 0, '', '', 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, '', 1, 0, 0, 1, '', NULL, 0, '0', 0, NULL, NULL, 0, 0, 0, 0, 0, '', 0, 0, '', '', '', 0, 0, '', '', 0, 1, 0, 0, NULL, NULL, '', '', 0, 0, 0, '', NULL, NULL, NULL, NULL, NULL, 0, '', '', '', NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, '', 0, 6, 1, '', 0, 0, '', '', 1, '', '', 0, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', '', '', '', '', 0, NULL, NULL, '', '', 0, 0, 0, '0.00', '0.00', 0, '', 0, '', 0, NULL, 0, 0, '', 0, '', '', 0, 0, 1, '', '', 0, '', 0, '', '', '', '', '', '');
-
-CREATE STATISTICS _stats_ FROM runba_tra.plat_company;
 
 -- 14
 INSERT INTO runba_tra.plat_datav_riskpoint_type VALUES 
@@ -1611,8 +1586,6 @@ INSERT INTO runba_tra.plat_datav_riskpoint_type VALUES
 (4, 1, 1, 4, 399547),
 (5, 1, 1, 1, 399551);
 
-CREATE STATISTICS _stats_ FROM runba_tra.plat_datav_riskpoint_type;
-
 -- 15
 INSERT INTO runba_tra.plat_device_info VALUES 
 (1, 'DGFHR7688779', '', '变压器OERI02349', '', '', '上海徐汇测试有限公司', '乐山大佛进而为', '1', '乐山大佛进而为', '', '', '1', '', '2020-12-31', '', '', '', '乐山大佛进而为', '03', '03.01', '03.01.03', 449600, 0, '', '', '', 0, '', '', 0, '', '', 0, 0, 4, 0, '', '', '', '', ''),
@@ -1620,8 +1593,6 @@ INSERT INTO runba_tra.plat_device_info VALUES
 (3, 'EPRTIOTY398594', '', 'SF9W8RW电梯', '', '', '上海海港航线发展有限公司', '云安集团有限公司', '1', '1号楼5层东侧', '', '', '1', '', '2020-12-31', '', '', '', '已检测', '06', '06.01', '06.01.02', 449600, 0, '', '', '', 0, '', '', 0, '', '', 0, 0, 6, 0, '', '', '', '', ''),
 (4, '311121', '', '温度计', '', '', '营口港务集团有限公司', '', '1', '', '', '', '', '', '2020-10-29', '', '', '', '', '01', '01.01', '01.01.01', 449600, 0, '', '', '', 0, '', '', 0, '', '', 0, 0, 7, 0, '', '', '', '', ''),
 (5, 'HDFR101202019050020', '', '电动单梁起重机', '', '', '润吧云产品用户体验版', '科尼起重机设备（上海）有限公司', '1', '上海市秋月路28弄', '', '', '1', '', '2020-12-31', '', '', '', '定期检测', '06', '06.02', '06.02.04', 449600, 0, '', '', '', 0, '', '', 0, '', '', 0, 0, 8, 0, '', '', '', '', '');
-
-CREATE STATISTICS _stats_ FROM runba_tra.plat_device_info;
 
 -- 16 
 INSERT INTO runba_tra.plat_drill VALUES 
@@ -1631,8 +1602,6 @@ INSERT INTO runba_tra.plat_drill VALUES
 (12, 1, '核对公司', '名称名称', 1, '1', 1, 1667557800, 1667561400, '4,5', '6,7', '地点哦', 33, NULL, '总指挥', '总指挥职位', '演练总策划', '演练总策划职务', 0, 0, '2022-11-10 11:07:46+00:00', '2022-11-10 11:07:46+00:00'),
 (13, 1, '核对公司aa', '名称名称', 1, '1', 1, 1667557800, 1667561400, '4,5', '6,7', '地点哦', 33, NULL, '总指挥', '总指挥职位', '演练总策划', '演练总策划职务', 0, 0, '2022-11-10 14:51:46+00:00', '2022-11-10 14:51:46+00:00');
 
-CREATE STATISTICS _stats_ FROM runba_tra.plat_drill;
-
 -- 17
 INSERT INTO runba_tra.plat_drill_plan VALUES 
 (1, 422098, '企业一（正式）', '第二季度演练计划', 3, 1, '作废啦', 0, NULL, 1667642400, 1, 2, '2022-11-10 15:25:30+00:00', '2022-11-10 15:25:30+00:00'),
@@ -1640,8 +1609,6 @@ INSERT INTO runba_tra.plat_drill_plan VALUES
 (4, 422098, '企业一（正式）', '第三季度演练计划', 2, 1, '', 0, NULL, 0, 0, 0, '2022-11-07 17:26:49+00:00', '2022-11-07 17:26:49+00:00'),
 (6, 422098, '企业一（正式）', '我给了', 1, 0, '，，', 540861, '李丰雨', 1668072581, 1, 3, '2022-11-10 17:29:25+00:00', '2022-11-10 17:29:25+00:00'),
 (8, 443143, '润吧云（山东）信息技术有限公司', '办公室火灾演练计划', 2, 1, '', 0, NULL, 0, 0, 0, '2022-11-24 22:29:21+00:00', '2022-11-24 22:29:21+00:00');
-
-CREATE STATISTICS _stats_ FROM runba_tra.plat_drill_plan;
 
 -- 18
 INSERT INTO runba_tra.plat_drill_plan_theme VALUES 
@@ -1651,8 +1618,6 @@ INSERT INTO runba_tra.plat_drill_plan_theme VALUES
 (12, 4, '2323', '底子地址', 1, '2022', '12', '大沙发电视', 2, '2022-11-07 17:26:49+00:00', '2022-11-07 17:26:49+00:00'),
 (21, 1, '，，，', '，，，', 1, '2022', '09', '，，，', 1, '2022-11-23 19:00:59+00:00', '2022-11-10 15:25:30+00:00');
 
-CREATE STATISTICS _stats_ FROM runba_tra.plat_drill_plan_theme;
-
 -- 19
 INSERT INTO runba_tra.plat_risk_analyse_objects VALUES 
 (310, 449600, '4020生产装置', '', '', 1, 562001, '珞珈', '2022-08-28 11:55:50+00:00', '2024-01-23 11:03:24+00:00', '4020生产装置', '589640909', '一级', '', '', '', '', '', '', '', '', '', '', '', '一级', '', '', 1, 5, 0),
@@ -1660,8 +1625,6 @@ INSERT INTO runba_tra.plat_risk_analyse_objects VALUES
 (312, 449600, '环氧乙烷罐区', '', '', 1, 553458, '韩晗', '2022-08-29 12:36:34+00:00', '2023-08-19 17:47:45+00:00', '环氧乙烷罐区', '370780002001', '三级', '', '', '', '', '', '', '', '', '', '', '', '储存单元', '', '', 1, 5, 0),
 (313, 449600, '4020罐区', '', '', 1, 470462, '超级管理员', '2022-08-29 13:57:31+00:00', '2023-07-06 19:00:23+00:00', '4020罐区', '371700060005', '四级', '', '', '', '', '', '', '', '', '', '', '', '储存单元', '', '', 1, 5, 0),
 (314, 449600, '液氯库', '', '', 1, 470462, '超级管理员', '2022-08-29 13:59:39+00:00', '2023-09-25 10:08:13+00:00', '液氯库', '371700060003', '一级', '', '', '', '', '', '', '', '', '', '', '', '储存单元', '', '', 1, 0, 0);
-
-CREATE STATISTICS _stats_ FROM runba_tra.plat_risk_analyse_objects;
 
 -- 20
 INSERT INTO runba_tra.plat_risk_area VALUES 
@@ -1671,8 +1634,6 @@ INSERT INTO runba_tra.plat_risk_area VALUES
 (7, 313, 137, 'desc', '2023-12-08 13:53:31+00:00', '2023-12-08 13:53:31+00:00'),
 (8, 313, 138, 'desc', '2023-12-08 13:53:31+00:00', '2023-12-08 13:53:31+00:00');
 
-CREATE STATISTICS _stats_ FROM runba_tra.plat_risk_area;
-
 -- 21
 INSERT INTO runba_tra.plat_risk_point VALUES 
 (1, 399013, 479167, '熔炼作业风险点（仪表车间2）', 2, 0, '0', '熔炼作业', 1, 4, 1645596179),
@@ -1681,8 +1642,6 @@ INSERT INTO runba_tra.plat_risk_point VALUES
 (4, 422098, 478054, 'iOS测试', 2, 0, '0', '步骤一', 1, 2, 1619423812),
 (5, 422098, 478054, '测试', 1, 2, '2', '测试', 1, 5, 1619423818);
 
-CREATE STATISTICS _stats_ FROM runba_tra.plat_risk_point;
-
 -- 22
 INSERT INTO runba_tra.plat_tijian_item VALUES 
 (13298, '气瓶状况', '在检验周期内使用：', 399018, 1, 1568169029, 1568169029, 1, 1, '工业气瓶专业体检卡', 1, 0, 1, 0, '', 0, 1),
@@ -1690,8 +1649,6 @@ INSERT INTO runba_tra.plat_tijian_item VALUES
 (63, '气瓶状况', '外观无机械性损伤及严重腐蚀，表面漆色、字样和色环标记正确、明显；瓶阀、瓶帽、防震圈等安全附件齐全、完好。', 399018, 1, 1568169029, 1568169029, 1, 1, '工业气瓶专业体检卡', 1, 0, 1, 1, '', 0, 1),
 (13301, '气瓶状况', '漆色及标志正确、明显', 399018, 1, 1568169029, 1568169029, 1, 1, '工业气瓶专业体检卡', 1, 0, 1, 0, '', 0, 1),
 (13302, '气瓶状况', '安全附件齐全、完好', 399018, 1, 1568169029, 1568169029, 1, 1, '工业气瓶专业体检卡', 1, 0, 1, 0, '', 0, 1);
-
-CREATE STATISTICS _stats_ FROM runba_tra.plat_tijian_item;
 
 -- 23
 INSERT INTO runba_tra.plat_tijian_item_index VALUES 
@@ -1702,8 +1659,6 @@ INSERT INTO runba_tra.plat_tijian_item_index VALUES
 (5, '震动', 'Hz', '2023-06-12 17:11:17+00:00', '2023-12-28 15:39:41+00:00'),
 (6, '空间氧含量', 'kPa', '2023-06-12 17:11:32+00:00', '2023-12-28 15:40:10+00:00');
 
-CREATE STATISTICS _stats_ FROM runba_tra.plat_tijian_item_index;
-
 -- 24
 INSERT INTO runba_tra.plat_tijiancard_item_relation VALUES 
 (1, 1001075, 'AYvsIbMtozZn7RfPYG6o', '10198', 1, 444, '2024-03-13 11:30:01+00:00', '2024-03-13 11:30:01+00:00', 0),
@@ -1711,8 +1666,6 @@ INSERT INTO runba_tra.plat_tijiancard_item_relation VALUES
 (3, 449600, 'AX5X4MOWmHcpSHXnzJWe', '6,63', '-1', '4', '2024-03-13 11:30:02+00:00', '2024-03-13 11:30:02+00:00', 0),
 (4, 1000131, 'AX5X-4QMUEbf2HO14aOs', '63', '-1', '-1', '2024-03-13 11:30:02+00:00', '2024-03-13 11:30:02+00:00', 0),
 (5, 451964, 'AY4dKHY5t11NteO2orMy', '7627246,7627247,7627248,7627249,7627250,7627251,7627252,7627253', '-1', '-1', '2024-03-13 11:30:02+00:00', '2024-03-13 11:30:02+00:00', 0);
-
-CREATE STATISTICS _stats_ FROM runba_tra.plat_tijiancard_item_relation;
 
 -- 25
 INSERT INTO runba_tra.plat_zone_member VALUES 
@@ -1722,11 +1675,59 @@ INSERT INTO runba_tra.plat_zone_member VALUES
 (15, 'M01000015', '', 0, '测试0311', '', '', '', '', 0, 0, 0, NULL, 189, 68, 2, 1457676379, 0, 1457676379, 412, NULL, NULL, 0, 0, 1, 0, 0, NULL, NULL, 1457676379, 1, 1, 1, '', '', 1, 0, '', 0, NULL, '', 0, NULL, '', 0, NULL, '', 0, NULL, '', 0, NULL, 0, 0, '0.00', 0, 0, NULL, NULL, 1, 6, 1, '', 0, 0, '', '', 0, 0, 0, 0, '', '', '', '', '', '', 'MLT_223A', '1', 2, 3, 0),
 (16, 'M01000016', '', 0, '测试03111', '', '', '', '', 0, 0, 0, NULL, 190, 68, 2, 1457677104, 0, 1457677104, 413, NULL, NULL, 0, 0, 1, 0, 0, NULL, NULL, 1457677104, 1, 1, 1, '', '', 1, 0, '', 0, NULL, '', 0, NULL, '', 0, NULL, '', 0, NULL, '', 0, NULL, 0, 0, '0.00', 0, 0, NULL, NULL, 1, 6, 1, '', 0, 0, '', '', 0, 0, 0, 0, '', '', '', '', '', '', 'V-223A', '1', 2, 3, 0);
 
+-- create stats to avoid inconsistency when explain wrt stats
+CREATE STATISTICS _stats_ FROM runba.firegases450470;
+CREATE STATISTICS _stats_ FROM runba.firegases451909;
+CREATE STATISTICS _stats_ FROM runba.opcdata411;
+CREATE STATISTICS _stats_ FROM runba.opcdata449600;
+CREATE STATISTICS _stats_ FROM runba.opcdata449652;
+CREATE STATISTICS _stats_ FROM runba.opcdata450081;
+CREATE STATISTICS _stats_ FROM runba.opcdata451732;
+CREATE STATISTICS _stats_ FROM runba_tra.aqsc_donggongka;
+CREATE STATISTICS _stats_ FROM runba_tra.cd_behavior_area;
+CREATE STATISTICS _stats_ FROM runba_tra.cd_device_point;
+CREATE STATISTICS _stats_ FROM runba_tra.cd_security_device;
+CREATE STATISTICS _stats_ FROM runba_tra.cd_tijian_item_index;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_company;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_datav_riskpoint_type;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_device_info;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_drill;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_drill_plan;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_drill_plan_theme;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_risk_analyse_objects;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_risk_area;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_risk_point;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_tijian_item;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_tijian_item_index;
+CREATE STATISTICS _stats_ FROM runba_tra.plat_tijiancard_item_relation;
 CREATE STATISTICS _stats_ FROM runba_tra.plat_zone_member;
 
 set enable_multimodel=true;
 
 -- Standard Q7
+explain SELECT
+    "time",
+    "value",
+    "device",
+    "datatype"
+FROM
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_tijiancard_item_relation ptir,
+    runba_tra.plat_tijian_item pti,
+    runba_tra.plat_device_info pdi,
+    runba_tra.plat_tijian_item_index ptii
+WHERE
+    ptir."tijiancard_id" = 'AX5X4MOWmHcpSHXnzJWe'
+    AND opcdata.companyid = ptir.company_id
+    AND (cast(pti.id as string) = ANY string_to_array(ptir.item_ids, ','))
+    AND ptir.obj_id = pdi.id
+    AND pti.index_id = ptii.id
+    AND opcdata.device = pdi.name
+    AND opcdata.datatype = ptii.index_name
+ORDER BY
+    "time" DESC
+LIMIT 1;
+
 SELECT
     "time",
     "value",
@@ -1750,37 +1751,82 @@ ORDER BY
     "time" DESC
 LIMIT 1;
 
--- -- Standard Q8 -- hang in oss, will fix later
--- SELECT time_bucket(o.time, '10s') as timebucket,
---        AVG(o.value) as avg_value
--- FROM runba.opcdata449600 o,
---      runba_tra.cd_security_device csd,
---      runba_tra.cd_device_point cdp,
---      runba_tra.cd_tijian_item_index ctii
--- WHERE o.companyid = csd.company_id
---   AND o.tag = csd.device_no
---   AND csd.id = cdp.device_id
---   AND ctii.id = cdp.index_id
---   AND csd.device_info_id in (
---       SELECT id
---       FROM runba_tra.plat_device_info pd
---       WHERE pd.area_id in (
---             SELECT id 
---             FROM runba_tra.plat_risk_area pra
---             WHERE risk_id in (
---                   SELECT id
---                   FROM runba_tra.plat_risk_analyse_objects prab
---                   WHERE prab.company_id = pd.company_id
---                     AND prab.category = 1
---                     AND prab.danger_level = '四级'
---                     AND prab.risk_type = 5))
---          AND pd.company_id = csd.company_id)
---   AND csd.company_id = 449600
---   AND csd.category = 5
--- GROUP BY timebucket
--- ORDER BY timebucket ASC;
+-- Standard Q8
+explain SELECT time_bucket(o.time, '10s') as timebucket,
+       AVG(o.value) as avg_value
+FROM runba.opcdata449600 o,
+     runba_tra.cd_security_device csd,
+     runba_tra.cd_device_point cdp,
+     runba_tra.cd_tijian_item_index ctii
+WHERE o.companyid = csd.company_id
+  AND o.tag = csd.device_no
+  AND csd.id = cdp.device_id
+  AND ctii.id = cdp.index_id
+  AND csd.device_info_id in (
+      SELECT id
+      FROM runba_tra.plat_device_info pd
+      WHERE pd.area_id in (
+            SELECT id 
+            FROM runba_tra.plat_risk_area pra
+            WHERE risk_id in (
+                  SELECT id
+                  FROM runba_tra.plat_risk_analyse_objects prab
+                  WHERE prab.company_id = pd.company_id
+                    AND prab.category = 1
+                    AND prab.danger_level = '四级'
+                    AND prab.risk_type = 5))
+         AND pd.company_id = csd.company_id)
+  AND csd.company_id = 449600
+  AND csd.category = 5
+GROUP BY timebucket
+ORDER BY timebucket ASC;
+
+SELECT time_bucket(o.time, '10s') as timebucket,
+       AVG(o.value) as avg_value
+FROM runba.opcdata449600 o,
+     runba_tra.cd_security_device csd,
+     runba_tra.cd_device_point cdp,
+     runba_tra.cd_tijian_item_index ctii
+WHERE o.companyid = csd.company_id
+  AND o.tag = csd.device_no
+  AND csd.id = cdp.device_id
+  AND ctii.id = cdp.index_id
+  AND csd.device_info_id in (
+      SELECT id
+      FROM runba_tra.plat_device_info pd
+      WHERE pd.area_id in (
+            SELECT id 
+            FROM runba_tra.plat_risk_area pra
+            WHERE risk_id in (
+                  SELECT id
+                  FROM runba_tra.plat_risk_analyse_objects prab
+                  WHERE prab.company_id = pd.company_id
+                    AND prab.category = 1
+                    AND prab.danger_level = '四级'
+                    AND prab.risk_type = 5))
+         AND pd.company_id = csd.company_id)
+  AND csd.company_id = 449600
+  AND csd.category = 5
+GROUP BY timebucket
+ORDER BY timebucket ASC;
 
 -- Q15
+explain SELECT
+    last("time"), last("value"), last("device"), last("datatype")
+FROM
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_tijiancard_item_relation ptir,
+    runba_tra.plat_tijian_item pti,
+    runba_tra.plat_device_info pdi,
+    runba_tra.plat_tijian_item_index ptii
+WHERE
+    ptir."tijiancard_id" = 'AX5X4MOWmHcpSHXnzJWe'
+    AND opcdata.companyid = ptir.company_id
+    AND (cast(pti.id as char) = ANY string_to_array(ptir.item_ids, ','))
+    AND pti.index_id = ptii.id
+    AND opcdata.device = cast(pdi.name as string)
+    AND pti.create_user_id > 0;
+
 SELECT
     last("time"), last("value"), last("device"), last("datatype")
 FROM
@@ -1798,6 +1844,36 @@ WHERE
     AND pti.create_user_id > 0;
 
 -- Q20
+explain SELECT 
+    time_bucket(opcdata."time", '200s') AS timebucket,
+    SUM(opcdata."value") as avg_val,
+    "device",
+    "datatype",
+    ptir.company_id
+FROM 
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_tijiancard_item_relation ptir,
+    runba_tra.plat_tijian_item pti,
+    runba_tra.plat_device_info pdi,
+    runba_tra.plat_tijian_item_index ptii
+WHERE
+    ptir."tijiancard_id" = 'AX5X4MOWmHcpSHXnzJWe'
+    AND opcdata.companyid = ptir.company_id
+    AND (cast(pti.id as string) = ANY string_to_array(ptir.item_ids, ','))
+    AND ptir.obj_id = pdi.id
+    AND pti.index_id = ptii.id
+    AND opcdata.device = pdi.name
+    AND opcdata.datatype = ptii.index_name
+GROUP BY
+    opcdata.device,
+    opcdata.datatype,
+    ptir.company_id,
+    timebucket
+ORDER BY
+    opcdata.device,
+    opcdata.datatype,
+    timebucket;
+
 SELECT 
     time_bucket(opcdata."time", '200s') AS timebucket,
     SUM(opcdata."value") as avg_val,
@@ -1829,6 +1905,20 @@ ORDER BY
     timebucket;
 
 -- Q22
+explain SELECT
+    COUNT(*),
+    AVG(opcdata."value"),
+    last(opcdata."value")
+FROM
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_zone_member pzm
+WHERE
+    pzm."tag" = opcdata."tag"
+    AND pzm.company_id = opcdata.companyid
+    AND opcdata."time" > '2023-05-29 10:10:10'
+    AND opcdata."time" <= '2024-05-29 16:10:10'
+    AND pzm.contract_email = 'ningmeng0823@hotmail.com';
+
 SELECT
     COUNT(*),
     AVG(opcdata."value"),
@@ -1843,8 +1933,55 @@ WHERE
     AND opcdata."time" <= '2024-05-29 16:10:10'
     AND pzm.contract_email = 'ningmeng0823@hotmail.com';
 
+-- Q24
+explain select * from (
+   SELECT
+    COUNT(*),
+    AVG(opcdata."value")
+   FROM
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_zone_member pzm
+   where pzm."tag" = opcdata."tag"
+    AND pzm.company_id = opcdata.companyid
+    AND  opcdata."time" > '2023-05-29 10:10:10'
+    AND opcdata."time" <= '2024-05-29 16:10:10'
+    AND pzm.contract_email = 'ningmeng0823@hotmail.com');
+    
+-- Q25
+explain select * from (SELECT
+    COUNT(*),
+    AVG(opcdata."value")
+  FROM
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_zone_member pzm
+  where pzm."tag" = opcdata."tag"
+    AND pzm.company_id = opcdata.companyid
+    AND  opcdata."time" > '2023-05-29 10:10:10'
+    AND opcdata."time" <= '2024-05-29 16:10:10'
+    AND pzm.contract_email = 'ningmeng0823@hotmail.com' 
+    AND pzm.contract_mobile = opcdata.channel);
 
 -- Q28
+explain SELECT
+    *
+FROM 
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_tijiancard_item_relation ptir,
+    runba_tra.plat_tijian_item pti,
+    runba_tra.plat_device_info pdi,
+    runba_tra.plat_tijian_item_index ptii
+WHERE
+    (ptir."tijiancard_id" = 'AYvsIbMtozZn7RfPYG6o'
+      OR ptir."tijiancard_id" = 'AX5X4MOWmHcpSHXnzJWe')
+    AND opcdata.companyid = ptir.company_id
+    AND (cast(pti.id as string) = ANY string_to_array(ptir.item_ids, ','))
+    AND ptir.obj_id = pdi.id
+    AND pti.index_id = ptii.id
+    AND opcdata.device = pdi.name
+    AND opcdata.datatype = ptii.index_name
+ORDER BY opcdata."time"
+LIMIT 100;
+
 SELECT
     *
 FROM 
@@ -1866,6 +2003,40 @@ ORDER BY opcdata."time"
 LIMIT 100;
 
 -- Q29
+explain SELECT 
+    time_bucket(opcdata."time", '200s') AS timebucket,
+    SUM(opcdata."value") / COUNT(opcdata."value") + MAX(opcdata."value") - MIN(opcdata."value") as avg_val,
+    COUNT("device"),
+    "datatype",
+    COUNT(distinct ptir.company_id),
+    AVG(pdi.check_period),
+    MAX(pdi.area_id)
+FROM 
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_tijiancard_item_relation ptir,
+    runba_tra.plat_tijian_item pti,
+    runba_tra.plat_device_info pdi,
+    runba_tra.plat_tijian_item_index ptii
+WHERE
+    ptir."tijiancard_id" = 'AX5X4MOWmHcpSHXnzJWe'
+    AND opcdata.companyid = ptir.company_id
+    AND (cast(pti.id as string) = ANY string_to_array(ptir.item_ids, ','))
+    AND ptir.obj_id = pdi.id
+    AND pti.index_id = ptii.id
+    AND opcdata.device = pdi.name
+    AND opcdata.datatype = ptii.index_name
+GROUP BY
+    opcdata.device,
+    opcdata.datatype,
+    ptir.company_id,
+    timebucket
+HAVING
+    AVG(opcdata."value") > 60.0
+ORDER BY
+    opcdata.device,
+    opcdata.datatype,
+    timebucket;
+
 SELECT 
     time_bucket(opcdata."time", '200s') AS timebucket,
     SUM(opcdata."value") / COUNT(opcdata."value") + MAX(opcdata."value") - MIN(opcdata."value") as avg_val,
@@ -1900,8 +2071,30 @@ ORDER BY
     opcdata.datatype,
     timebucket;
 
-
 -- Q30
+explain SELECT
+    time_bucket(opcdata."time", '10s') AS timebucket,
+    AVG(opcdata."value"),
+    MIN(opcdata."value"),
+    MAX(opcdata."value"),
+    SUM(opcdata."value")
+FROM
+    runba.opcdata449600 opcdata,
+    runba_tra.plat_zone_member pzm
+WHERE
+    pzm."tag" = opcdata."tag"
+    AND pzm.company_id = opcdata.companyid
+    AND opcdata."time" > '2023-05-29 10:10:10'
+    AND opcdata."time" <= '2024-05-29 16:10:10'
+    AND pzm.contract_email = 'ningmeng0823@hotmail.com'
+GROUP BY
+    timebucket
+HAVING
+    AVG(opcdata."value") > 65.0
+    AND MAX(pzm.zone_company_id) > 100
+ORDER BY
+    timebucket desc;
+
 SELECT
     time_bucket(opcdata."time", '10s') AS timebucket,
     AVG(opcdata."value"),
@@ -1924,6 +2117,118 @@ HAVING
     AND MAX(pzm.zone_company_id) > 100
 ORDER BY
     timebucket desc;
+
+-- Q32
+explain SELECT
+    time_bucket(opcdata."time", '10s') AS timebucket,
+    AVG(opcdata."value"),
+    MIN(opcdata."value"),
+    MAX(opcdata."value"),
+    SUM(opcdata."value")
+   FROM
+    runba.opcdata449600 opcdata,
+    (select c.company_id as company_id, p.company_id as c_id  
+          from runba_tra.plat_zone_member p 
+          left outer join runba_tra.cd_security_device c 
+          on p.company_id = c.company_id limit 100
+         ) as pzm
+   WHERE
+    pzm.company_id = opcdata.companyid
+    AND opcdata."time" > '2023-05-29 10:10:10'
+    AND opcdata."time" <= '2024-05-29 11:10:10'
+   GROUP BY
+    timebucket
+   ORDER BY
+    timebucket;
+
+  SELECT
+    time_bucket(opcdata."time", '10s') AS timebucket,
+    AVG(opcdata."value"),
+    MIN(opcdata."value"),
+    MAX(opcdata."value"),
+    SUM(opcdata."value")
+   FROM
+    runba.opcdata449600 opcdata,
+    (select c.company_id as company_id, p.company_id as c_id  
+          from runba_tra.plat_zone_member p 
+          left outer join runba_tra.cd_security_device c 
+          on p.company_id = c.company_id limit 100
+         ) as pzm
+   WHERE
+    pzm.company_id = opcdata.companyid
+    AND opcdata."time" > '2023-05-29 10:10:10'
+    AND opcdata."time" <= '2024-05-29 11:10:10'
+   GROUP BY
+    timebucket
+   ORDER BY
+    timebucket;
+
+-- ZDP-44320 bug
+set hash_scan_mode=2;
+select
+    sum(ts_t."value"),
+    count(*),
+    rel_t.company_id
+from
+    ((select
+        t3.company_id as "company_id",
+        t3.tijiancard_id as "tijiancard_id",
+        t3.obj_type as "obj_type",
+        t3.obj_id as "obj_id",
+        t3.name as "name",
+        t3.devicenumber as "devicenumber",
+        t4.company_id as "company_id_1",
+        t4.tijiancard_id as "tijiancard_id_1",
+        t4.obj_type as "obj_type_1",
+        t4.obj_id as "obj_id_1",
+        'CH271' as "channel"
+    from
+        (select
+            * 
+        from
+            runba_tra.plat_tijiancard_item_relation t1,
+            runba_tra.plat_device_info t2
+        where
+            t1.obj_id = t2.id
+        ) t3,
+        (select * from runba_tra.plat_tijiancard_item_relation where company_id % 100 = 0 limit 1) t4
+    where
+        t3.company_id = t4.company_id
+    limit 1)
+    union
+    (select
+        t3.company_id as "company_id",
+        t3.tijiancard_id as "tijiancard_id",
+        t3.obj_type as "obj_type",
+        t3.obj_id as "obj_id",
+        t3.name as "name",
+        t3.devicenumber as "devicenumber",
+        t4.company_id as "company_id_1",
+        t4.tijiancard_id as "tijiancard_id_1",
+        t4.obj_type as "obj_type_1",
+        t4.obj_id as "obj_id_1",
+        'CH271' as "channel"
+    from
+        (select
+            * 
+        from
+            runba_tra.plat_tijiancard_item_relation t1,
+            runba_tra.plat_device_info t2
+        where
+            t1.obj_id = t2.id
+        ) t3,
+        (select * from runba_tra.plat_tijiancard_item_relation where company_id % 100 = 0 limit 1) t4
+    where
+        t3.company_id = t4.company_id
+    limit 1)
+    ) rel_t,
+    runba.opcdata449600 ts_t
+where
+    rel_t.company_id = ts_t.companyid
+    and rel_t.channel = ts_t.channel
+group by
+    rel_t.company_id;
+set hash_scan_mode=0;
 
 set enable_multimodel=false;
 
@@ -1959,3 +2264,4 @@ DROP TABLE runba_tra.testa;
 
 DROP DATABASE runba_tra;
 DROP DATABASE runba;
+set cluster setting ts.sql.query_opt_mode = 1110;

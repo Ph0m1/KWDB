@@ -84,6 +84,9 @@ type tsScanNode struct {
 
 	// ts table ordered type
 	orderedType opt.OrderedTableType
+
+	// ts table id
+	TableMetaID opt.TableID
 }
 
 // RelationalInfo contains relational information from the other side of

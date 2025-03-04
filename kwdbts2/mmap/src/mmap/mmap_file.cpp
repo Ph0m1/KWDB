@@ -43,19 +43,29 @@ int MMapFile::open() {
   if (flags_ & (O_ANONYMOUS|O_MATERIALIZATION))
     return 0;
 
-  if ((fd = ::open(absolute_file_path_.c_str(), flags_,
-    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) < 0) {
-    if (errno == EROFS) {
-      flags_ = (flags_ & ~O_RDWR);
-      if ((fd = ::open(absolute_file_path_.c_str(), flags_,
-        S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) < 0) {
-open_error:
-        mem_ = 0;
-        LOG_ERROR("open() failed: errno[%d], file[%s]", errno, absolute_file_path_.c_str());
-        return reportError();
+  if (absolute_file_path_ == "") {
+    // create a temporary file for mmap file since absolute_file_path_ is empty
+    char file_name_template[] = "/tmp/kwdb_XXXXXX";
+    if ((fd = ::mkstemp(file_name_template)) < 0) {
+      LOG_ERROR("open() temporary file failed: errno[%d]", errno);
+      return reportError();
+    }
+    absolute_file_path_ = file_name_template;
+  } else {
+    if ((fd = ::open(absolute_file_path_.c_str(), flags_,
+      S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) < 0) {
+      if (errno == EROFS) {
+        flags_ = (flags_ & ~O_RDWR);
+        if ((fd = ::open(absolute_file_path_.c_str(), flags_,
+          S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) < 0) {
+  open_error:
+          mem_ = 0;
+          LOG_ERROR("open() failed: errno[%d], file[%s]", errno, absolute_file_path_.c_str());
+          return reportError();
+        }
+      } else {
+        goto open_error;
       }
-    } else {
-      goto open_error;
     }
   }
   file_length_ = lseek(fd, 0, SEEK_END);
@@ -75,6 +85,14 @@ open_error:
   }
   new_length_ = file_length_;
   return 0;
+}
+
+int MMapFile::openTemp() {
+  // set file_path_ to empty and let it create a temporary file.
+  file_path_ = "";
+  absolute_file_path_ = file_path_;
+  flags_ = O_CREAT;
+  return open();
 }
 
 int MMapFile::open(const std::string &file_path, int flags) {

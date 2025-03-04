@@ -24,13 +24,16 @@ namespace kwdbts {
 
 struct OperatorFetcher {
   void Update(k_int32 read_rows, k_int64 stall_time, k_int64 bytes_read, k_int64 max_memory_use,
-                  k_int64 max_disk_use, k_int64 output_rows) {
+                  k_int64 max_disk_use, k_int64 output_rows, k_int64 build_time = 0) {
     read_rows_ += read_rows;
     stall_time_ += stall_time;
     bytes_read_ += bytes_read;
     max_memory_use_ += max_memory_use;
     max_disk_use_ += max_disk_use;
     output_rows_ += output_rows;
+    // build_time_ is only used for hash_tag_scan_op
+    // denoting the hash index contruction time cost
+    build_time_ += build_time;
   }
 
   void Reset() {
@@ -40,6 +43,7 @@ struct OperatorFetcher {
     max_memory_use_ = 0;
     max_disk_use_ = 0;
     output_rows_ = 0;
+    build_time_ = 0;
   }
 
   k_int32 read_rows_{0};
@@ -48,6 +52,7 @@ struct OperatorFetcher {
   k_int64 max_memory_use_{0};
   k_int64 max_disk_use_{0};
   k_int64 output_rows_{0};
+  k_int64 build_time_{0};
 };
 
 class TsFetcherCollection {
@@ -77,6 +82,7 @@ class TsFetcherCollection {
             fetcher->max_allocated_mem += f->max_memory_use_;
             fetcher->max_allocated_disk += f->max_disk_use_;
             fetcher->output_row_num += f->output_rows_;
+            fetcher->build_time += f->build_time_;
           }
         }
       }

@@ -9,6 +9,7 @@
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 
+#include "ee_common.h"
 #include "ee_tag_row_batch.h"
 #include "ee_kwthd_context.h"
 #include "ee_data_chunk.h"
@@ -64,7 +65,7 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
 
   col_info.emplace_back(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
   col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info.emplace_back(8, roachpb::DataType::DECIMAL, KWDBTypeFamily::DecimalFamily);
   col_info.emplace_back(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
   col_info.emplace_back(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
 
@@ -87,7 +88,8 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   chunk->InsertData(0, 3, const_cast<char*>(v3.c_str()), v3.length());
   chunk->InsertData(0, 4, reinterpret_cast<char*>(&v4), sizeof(bool));
 
-  RelBatchQueue* relBatch = new RelBatchQueue(output_fields);
+  RelBatchQueue* relBatch = new RelBatchQueue();
+  ASSERT_EQ(relBatch->Init(output_fields), KStatus::SUCCESS);
   relBatch->Add(ctx, chunk->GetData(), capacity);
   DataChunkPtr data;
   ASSERT_EQ(relBatch->Next(ctx, data), EEIteratorErrCode::EE_OK);
@@ -97,7 +99,7 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   ASSERT_EQ(data->Capacity(), capacity);
   ASSERT_EQ(data->isFull(), true);
   ASSERT_EQ(data->ColumnNum(), 5);
-  ASSERT_EQ(data->RowSize(), 59);
+  ASSERT_EQ(data->RowSize(), 60);
 
   auto ptr1 = chunk->GetData(0, 0);
   k_int64 check_ts;
@@ -113,7 +115,7 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   memcpy(&check_double, ptr2, col_info[1].storage_len);
   ASSERT_EQ(check_double, v2);
 
-  auto ptr3 = data->GetData(0, 1);
+  auto ptr3 = data->GetData(0, 2) + BOOL_WIDE;
   memcpy(&check_double, ptr3, col_info[2].storage_len);
   ASSERT_EQ(check_double, v2);
 
@@ -151,7 +153,7 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   memcpy(&check_double, ptr2, col_info[1].storage_len);
   ASSERT_EQ(check_double, d2);
 
-  ptr3 = data->GetData(0, 1);
+  ptr3 = data->GetData(0, 2) + BOOL_WIDE;
   memcpy(&check_double, ptr3, col_info[2].storage_len);
   ASSERT_EQ(check_double, d2);
 

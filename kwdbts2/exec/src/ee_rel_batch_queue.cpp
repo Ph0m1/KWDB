@@ -13,15 +13,22 @@
 
 namespace kwdbts {
 
-RelBatchQueue::RelBatchQueue(std::vector<Field*> &output_fields) {
+RelBatchQueue::RelBatchQueue() {}
+
+RelBatchQueue::~RelBatchQueue() {}
+
+
+KStatus RelBatchQueue::Init(std::vector<Field*> &output_fields) {
   output_col_info_.reserve(output_fields.size());
 
   for (auto field : output_fields) {
+    if (field->get_storage_length() == 0) {
+      return KStatus::FAIL;
+    }
     output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
   }
+  return KStatus::SUCCESS;
 }
-
-RelBatchQueue::~RelBatchQueue() {}
 
 KStatus RelBatchQueue::Add(kwdbContext_p ctx, char *batchData, k_uint32 count) {
   EnterFunc();

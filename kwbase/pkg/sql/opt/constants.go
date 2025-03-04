@@ -77,12 +77,6 @@ var TSParallelDegree = settings.RegisterPublicIntSetting(
 	"degree of parallelism in ts",
 	0)
 
-// TSHashScanMode ts engine hash tag scan mode enforcement
-var TSHashScanMode = settings.RegisterPublicIntSetting(
-	"ts.hash_scan_mode",
-	"hash scan mode enforcement in ts",
-	0)
-
 // TSQueryOptMode is a cluster setting that controls each optimization switch.
 // The value of cluster setting ts.sql.query_opt_mode represents
 // the level of the four optimization items, and its value is a four-digit int value,

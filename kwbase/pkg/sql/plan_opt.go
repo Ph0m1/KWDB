@@ -370,6 +370,13 @@ func (opc *optPlanningCtx) buildReusableMemo(ctx context.Context) (_ *memo.Memo,
 	if err := bld.Build(); err != nil {
 		return nil, err
 	}
+	if opc.optimizer.Memo().QueryType == memo.MultiModel {
+		if len(opc.optimizer.Memo().Metadata().AllTables()) > 1 {
+			opc.optimizer.CheckMultiModel()
+		} else {
+			opc.optimizer.Memo().QueryType = memo.Unset
+		}
+	}
 	opc.p.TsInScopeFlag = bld.PhysType == tree.TS
 	f.Memo().ColsUsage = bld.ColsUsage
 
@@ -462,8 +469,11 @@ func (opc *optPlanningCtx) reuseMemo(cachedMemo *memo.Memo) (*memo.Memo, error) 
 	opc.optimizer.Memo().SetTsDop(cachedMemo.GetTsDop())
 	if opc.optimizer.Memo().QueryType == memo.MultiModel &&
 		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&opc.p.ExecCfg().Settings.SV), opt.OutsideInUseCBO) {
-		opc.optimizer.SetTsRelGroup()
-		opc.optimizer.CheckMultiModel()
+		if len(opc.optimizer.Memo().Metadata().AllTables()) > 1 {
+			opc.optimizer.CheckMultiModel()
+		} else {
+			opc.optimizer.Memo().QueryType = memo.Unset
+		}
 	}
 	if _, err := opc.optimizer.Optimize(); err != nil {
 		return nil, err
@@ -556,8 +566,11 @@ func (opc *optPlanningCtx) buildExecMemo(
 	// check if the query satisfies the requirements for multiple model processing.
 	if opc.optimizer.Memo().QueryType == memo.MultiModel &&
 		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&opc.p.ExecCfg().Settings.SV), opt.OutsideInUseCBO) {
-		opc.optimizer.SetTsRelGroup()
-		opc.optimizer.CheckMultiModel()
+		if len(opc.optimizer.Memo().Metadata().AllTables()) > 1 {
+			opc.optimizer.CheckMultiModel()
+		} else {
+			opc.optimizer.Memo().QueryType = memo.Unset
+		}
 	}
 
 	if opt.CheckTsProperty(bld.TSInfo.TSProp, optbuilder.TSPropSTableWithoutChild) {

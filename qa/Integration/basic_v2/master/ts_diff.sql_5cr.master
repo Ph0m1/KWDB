@@ -1286,11 +1286,11 @@ SQLSTATE: 42601
 > select k_timestamp,e1,diff(k_timestamp) over (partition by code1,code14,code8,code16) from test_select_diff.t1;
 ERROR: diff function not supports the type
 SQLSTATE: 42601
-> select id,k_timestamp,e1,diff(e1) over (partition by code1,code14,code8,code16 order by k_timestamp) diffe1 from test_select_diff.t1 where code1=1 or code1=2 order by diffe1;
+> select id,k_timestamp,e1,diff(e1) over (partition by code1,code14,code8,code16 order by k_timestamp) diffe1 from test_select_diff.t1 where code1=1 or code1=2 order by diffe1, k_timestamp;
   id |        k_timestamp        | e1 | diffe1
 -----+---------------------------+----+---------
-  22 | 2024-06-03 06:00:00+00:00 | -2 |     -1
   12 | 2024-06-01 06:00:00+00:00 | -2 |     -1
+  22 | 2024-06-03 06:00:00+00:00 | -2 |     -1
 (2 rows)
 > select id,k_timestamp,e1,diff(e1) over (partition by 12345 order by k_timestamp) from test_select_diff.t1 where code1=1 or code1=2 order by id;
   id |        k_timestamp        | e1 | diff

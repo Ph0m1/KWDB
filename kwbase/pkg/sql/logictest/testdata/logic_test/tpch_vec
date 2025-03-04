@@ -1,6 +1,8 @@
 # LogicTest: local-vec
 
 # Note that statistics are populated for TPCH Scale Factor 1.
+statement ok
+set enable_multimodel=off
 
 statement ok
 CREATE TABLE public.region

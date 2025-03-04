@@ -31,10 +31,12 @@ class HashTagRowBatch : public TagRowBatch {
 
  public:
   void Init(TABLE *table) override;
-  char *GetData(k_uint32 col, k_uint32 offset,
+  char *GetData(k_uint32 tagIndex, k_uint32 offset,
                 roachpb::KWDBKTSColumn::ColumnType ctype,
                 roachpb::DataType dt) override;
-  bool IsNull(k_uint32 col, roachpb::KWDBKTSColumn::ColumnType ctype) override;
+  k_uint16 GetDataLen(k_uint32 tagIndex, k_uint32 offset,
+                      roachpb::KWDBKTSColumn::ColumnType ctype) override;
+  bool IsNull(k_uint32 tagIndex, roachpb::KWDBKTSColumn::ColumnType ctype) override;
 };
 
 };  // namespace kwdbts

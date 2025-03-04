@@ -112,16 +112,6 @@ class StorageHandler {
   virtual EEIteratorErrCode TagNext(kwdbContext_p ctx, Field *tag_filter);
 
   /**
-   * @brief           singleton read data without pipe parallelism for multiple model processing
-   *
-   * @param ctx
-   * @param data
-   * @param count
-   * @return EEIteratorErrCode
-   */
-  virtual EEIteratorErrCode SingletonTagNext(kwdbContext_p ctx, Field *tag_filter);
-
-  /**
    * @brief               Close the query
    *
    * @param ctx
@@ -144,10 +134,26 @@ class StorageHandler {
   virtual EEIteratorErrCode GetNextTagData(kwdbContext_p ctx, ScanRowBatch *row_batch);
 
   EEIteratorErrCode GetEntityIdList(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter);
+
+  // support function to find intersection of two primary tag list.
+  std::vector<void *> findCommonTags(const std::vector<void *>& primary_tag1,
+                          const std::vector<void *>& primary_tag2, int data_size);
   // get entity id list in HashTagScan to scan tag data for multiple model processing
-  EEIteratorErrCode GetRelEntityIdList(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter,
+  EEIteratorErrCode GetTagDataChunkWithPrimaryTags(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter,
           std::vector<void *>& primary_tags, std::vector<void *>& secondary_tags,
-          const vector<k_uint32> tag_other_join_cols);
+          const vector<k_uint32> tag_other_join_cols, Field ** renders,
+          std::vector<ColumnInfo> &col_info, DataChunkPtr &data_chunk);
+
+  // Read next data chunk for tag data with tag filter and ptag filter for multiple model processing
+  EEIteratorErrCode NextTagDataChunk(kwdbContext_p ctx,
+                                            TSTagReaderSpec *spec,
+                                            Field *tag_filter,
+                                            std::vector<void *> &primary_tags,
+                                            std::vector<void *> &secondary_tags,
+                                            const vector<k_uint32> tag_other_join_cols,
+                                            Field ** renders,
+                                            std::vector<ColumnInfo> &col_info,
+                                            DataChunkPtr &data_chunk);
 
   // genearate primary tags, which can also be used in HashTagScan for multiple model processing
   static KStatus GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
@@ -165,6 +171,19 @@ class StorageHandler {
   bool isDisorderedMetrics();
 
  private:
+  /**
+   * @brief           Read next data chunk for tag data
+   *
+   * @param ctx
+   * @param tag_filter    tag filter
+   * @param renders       renders to convert tag row batch into data chunk
+   * @param col_info      column infos to convert tag row batch into data chunk
+   * @param data_chunk    next data chunk
+   * @return EEIteratorErrCode
+   */
+  EEIteratorErrCode NextTagDataChunk(kwdbContext_p ctx, Field *tag_filter, Field ** renders,
+                                    std::vector<ColumnInfo> &col_info, DataChunkPtr &data_chunk);
+
   TABLE *table_{nullptr};
   std::shared_ptr<TsTable> ts_table_{nullptr};
   std::vector<KwTsSpan> *ts_spans_{nullptr};

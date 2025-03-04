@@ -1,3 +1,4 @@
+set cluster setting ts.sql.query_opt_mode = 1100;
 CREATE TS DATABASE db_pipec;
 -- TS table
 CREATE TABLE db_pipec.t_point (
@@ -25,9 +26,6 @@ insert into db_pipec.t_point values('2024-08-29 10:00:00',15.5,'a5','b5','c5','d
 insert into db_pipec.t_point values('2024-08-28 11:00:00',10.5,'a6','b6','c6','d6','e6',4,'f6');
 insert into db_pipec.t_point values('2024-08-28 12:00:00',11.5,'a7','b7','c7','d7','e7',4,'f7');
 
--- create stats
-CREATE STATISTICS _stats_ FROM db_pipec.t_point;
-
 -- relational table 
 CREATE DATABASE pipec_r;
 CREATE TABLE pipec_r.station_info (
@@ -47,9 +45,6 @@ insert into pipec_r.station_info values('d3','dd','c3','aa','b','bb');
 insert into pipec_r.station_info values('d4','dd','c4','aa','b','bb');
 insert into pipec_r.station_info values('d5','dd','c5','aa','b','bb');
 
--- create stats
-CREATE STATISTICS _stats_ FROM pipec_r.station_info;
-
 CREATE TABLE pipec_r.pipeline_info (
     pipeline_sn varchar(16) PRIMARY KEY,
     pipeline_name varchar(60),
@@ -66,9 +61,6 @@ insert into pipec_r.pipeline_info values('e3','pipeline_3','a','aa','b');
 insert into pipec_r.pipeline_info values('e4','pipeline_4','a','aa','b');
 insert into pipec_r.pipeline_info values('e5','pipeline_5','a','aa','b');
 
--- create stats
-CREATE STATISTICS _stats_ FROM pipec_r.pipeline_info;
-
 CREATE TABLE pipec_r.point_info (
     point_sn varchar(64) PRIMARY KEY,
     signal_code varchar(120),
@@ -84,9 +76,6 @@ insert into pipec_r.point_info values('a3','ee','a','aa','d3','e3');
 insert into pipec_r.point_info values('a4','ee','a','aa','d4','e4');
 insert into pipec_r.point_info values('a5','ee','a','aa','d5','e5');
 
--- create stats
-CREATE STATISTICS _stats_ FROM pipec_r.point_info;
-
 CREATE TABLE pipec_r.workarea_info (
   work_area_sn varchar(16) PRIMARY KEY,
   work_area_name varchar(80),
@@ -101,9 +90,6 @@ insert into pipec_r.workarea_info values('c3','work_area_3','l3','aa');
 insert into pipec_r.workarea_info values('c4','work_area_4','l4','aa');
 insert into pipec_r.workarea_info values('c5','work_area_5','l5','aa');
 
--- create stats
-CREATE STATISTICS _stats_ FROM pipec_r.workarea_info;
-
 create database test_rel;
 create table test_rel.rel_t1(c1 UUID NOT NULL DEFAULT gen_random_uuid(), 
                              c2 BIT, c3 INET, c4 JSONB, c5 INT ARRAY, 
@@ -115,9 +101,6 @@ insert into test_rel.rel_t1(c2, c3, c4, c5, c6, c7, c8) values
 insert into test_rel.rel_t1(c2, c3, c4, c5, c6, c7, c8) values 
    (B'0', '192.168.0.2', '{"type": "account creation", "username": "hungrygame"}', 
     ARRAY[15,25,35], 4, 65.31, TIMESTAMP '2024-01-04 14:33:01');
-
--- create stats
-CREATE STATISTICS _stats_ FROM pipec_r.rel_t1;
 
 set enable_multimodel=true;
 
@@ -179,39 +162,39 @@ WHERE wi.work_area_name = 'work_area_1'
 GROUP BY si.station_name
 ORDER BY si.station_name;
 
--- -- query 5
--- -- unsupported data type -- multi unsupport order is not guaranteed, disabled for now
--- explain SELECT rt.c4,
---        COUNT(si.station_sn),
---        COUNT(rt.c2),
---        AVG(t.measure_value)
--- FROM pipec_r.station_info si,              -- 436
---      pipec_r.workarea_info wi,             -- 41
---      db_pipec.t_point t,                   -- 45M
---      test_rel.rel_t1 rt
--- WHERE wi.work_area_sn = si.work_area_sn    -- 41, 41
---   AND si.station_sn = t.station_sn         -- 436, 401
---   AND t.measure_type = rt.c6
---   AND t.measure_value > 80                 -- est 1/3, act 8995243/45M = 0.19989
--- GROUP BY rt.c4;
+-- query 5
+-- unsupported data type
+explain SELECT rt.c4,
+       COUNT(si.station_sn),
+       COUNT(rt.c2),
+       AVG(t.measure_value)
+FROM pipec_r.station_info si,              -- 436
+     pipec_r.workarea_info wi,             -- 41
+     db_pipec.t_point t,                   -- 45M
+     test_rel.rel_t1 rt
+WHERE wi.work_area_sn = si.work_area_sn    -- 41, 41
+  AND si.station_sn = t.station_sn         -- 436, 401
+  AND t.measure_type = rt.c6
+  AND t.measure_value > 80                 -- est 1/3, act 8995243/45M = 0.19989
+GROUP BY rt.c4;
 
 -- query 6
--- cast on tag columns are not supported -- multi unsupport order is not guaranteed, disabled for now
--- explain SELECT wi.work_area_name,
---        t.measure_type,
---        COUNT(DISTINCT t.point_sn) AS measure_point_count
--- FROM pipec_r.pipeline_info li,          -- 26
---      pipec_r.station_info si,           -- 436
---      pipec_r.workarea_info wi,          -- 41
---      db_pipec.t_point t                 -- 45M
--- WHERE cast(li.pipeline_sn as string(9)) = cast(t.pipeline_sn as string(8))    -- 26, 21
---   AND si.work_area_sn = wi.work_area_sn -- 41, 41
---   AND si.work_area_sn = t.work_area_sn  -- 41, 41
---   AND li.pipeline_name = 'pipeline_1'   -- 1/26
--- GROUP BY
---     wi.work_area_name, t.measure_type
--- ORDER BY
---     wi.work_area_name, t.measure_type;
+-- cast on tag columns are not supported 
+explain SELECT wi.work_area_name,
+       t.measure_type,
+       COUNT(DISTINCT t.point_sn) AS measure_point_count
+FROM pipec_r.pipeline_info li,          -- 26
+     pipec_r.station_info si,           -- 436
+     pipec_r.workarea_info wi,          -- 41
+     db_pipec.t_point t                 -- 45M
+WHERE cast(li.pipeline_sn as string(9)) = cast(t.pipeline_sn as string(8))    -- 26, 21
+  AND si.work_area_sn = wi.work_area_sn -- 41, 41
+  AND si.work_area_sn = t.work_area_sn  -- 41, 41
+  AND li.pipeline_name = 'pipeline_1'   -- 1/26
+GROUP BY
+    wi.work_area_name, t.measure_type
+ORDER BY
+    wi.work_area_name, t.measure_type;
 
 -- query 7
 -- mismatch in left join columns' positions with relationalInfo
@@ -328,29 +311,29 @@ GROUP BY
     (CASE 
         WHEN t.measure_value > 100 THEN 'High'
         ELSE 'Low'
-    END);  
+    END);
 
--- -- haning bug:
--- set enable_multimodel=false;
+-- haning bug:
+set enable_multimodel=false;
 
--- SELECT si.station_name,
---        COUNT(DISTINCT point_sn) AS abnormal_point_count
--- FROM pipec_r.pipeline_info li,
---      pipec_r.station_info si,
---      db_pipec.t_point t
--- WHERE li.pipeline_sn = t.pipeline_sn
---     AND t.station_sn = si.station_sn
---     AND li.pipeline_name = 'pipeline_1'
---     AND t.k_timestamp >= '2023-08-01 00:00:00'
---     AND t.k_timestamp <= '2025-08-01 01:00:00'
---     AND t.measure_value < 2 * (
---         SELECT AVG(t1.measure_value)
---         FROM db_pipec.t_point t1
---         WHERE t1.pipeline_sn = li.pipeline_sn)
--- GROUP BY
---     si.station_name
--- ORDER BY
---     abnormal_point_count DESC;
+SELECT si.station_name,
+       COUNT(DISTINCT point_sn) AS abnormal_point_count
+FROM pipec_r.pipeline_info li,
+     pipec_r.station_info si,
+     db_pipec.t_point t
+WHERE li.pipeline_sn = t.pipeline_sn
+    AND t.station_sn = si.station_sn
+    AND li.pipeline_name = 'pipeline_1'
+    AND t.k_timestamp >= '2023-08-01 00:00:00'
+    AND t.k_timestamp <= '2025-08-01 01:00:00'
+    AND t.measure_value < 2 * (
+        SELECT AVG(t1.measure_value)
+        FROM db_pipec.t_point t1
+        WHERE t1.pipeline_sn = li.pipeline_sn)
+GROUP BY
+    si.station_name
+ORDER BY
+    abnormal_point_count DESC;
 
 set enable_multimodel=true;
 
@@ -373,17 +356,99 @@ GROUP BY
 ORDER BY
     abnormal_point_count DESC;
 
--- Drop tables in the correct order to avoid foreign key constraints
-DROP TABLE test_rel.rel_t1;
-DROP TABLE pipec_r.workarea_info;
-DROP TABLE pipec_r.point_info;
-DROP TABLE pipec_r.pipeline_info;
-DROP TABLE pipec_r.station_info;
-DROP TABLE db_pipec.t_point;
+DROP DATABASE IF EXISTS test_select_last_add cascade;
+CREATE ts DATABASE test_select_last_add;
+CREATE TABLE test_select_last_add.t1(
+                k_timestamp TIMESTAMPTZ NOT NULL,
+                id INT NOT NULL,
+                e1 INT2,
+                e2 INT,
+                e3 INT8,
+                e4 FLOAT4,
+                e5 FLOAT8,
+                e6 BOOL,
+                e7 TIMESTAMPTZ,
+                e8 CHAR(1023),
+                e9 NCHAR(255),
+                e10 VARCHAR(4096),
+                e11 CHAR,
+                e12 CHAR(255),
+                e13 NCHAR,
+                e14 NVARCHAR(4096),
+                e15 VARCHAR(1023),
+                e16 NVARCHAR(200),
+                e17 NCHAR(255),
+                e18 CHAR(200),
+                e19 VARBYTES,
+                e20 VARBYTES(60),
+                e21 VARCHAR,
+                e22 NVARCHAR)
+ATTRIBUTES (
+            code1 INT2 NOT NULL,code2 INT,code3 INT8,
+            code4 FLOAT4 ,code5 FLOAT8,
+            code6 BOOL,
+            code7 VARCHAR,code8 VARCHAR(128) NOT NULL,
+            code9 VARBYTES,code10 VARBYTES(60),
+            code11 VARCHAR,code12 VARCHAR(60),
+            code13 CHAR(2),code14 CHAR(1023) NOT NULL,
+            code15 NCHAR,code16 NCHAR(254) NOT NULL)
+PRIMARY TAGS(code1,code14,code8,code16);
 
--- Then drop the databases
-DROP DATABASE pipec_r;
-DROP DATABASE db_pipec;
-DROP DATABASE test_rel;
+SELECT
+	e5,e21,code16,code8
+FROM
+	test_select_last_add.t1 as tab1
+	JOIN (
+		SELECT
+			last(e5 ,'1980-01-31 19:01:01') LAST5,
+			last(e21,'1970-01-01 00:00:00.001') AS LAST21,
+			last(code16) AS LAST16,last(code8,'2970-01-01 00:00:00') AS LAST8
+		FROM
+			test_select_last_add.t1
+	) as tab2
+	ON
+		tab1.e21 >= tab2.LAST21
+		AND tab1.e8 = tab2.LAST8
+ORDER BY e5,e21,code16,code8;
+
+SELECT
+    count(LE)
+FROM (
+    SELECT
+        id, last(e1 ,'1970-01-01 00:00:00')  LE
+    FROM
+        test_select_last_add.t1 t1
+    WHERE
+        e11 != (
+            SELECT
+                max(e11)
+            FROM
+                test_select_last_add.t1 t2
+            WHERE
+                t1.e12 <t2.e12
+                AND t1.code13 LIKE 't3'
+                OR code1 IN (0)
+            )
+    GROUP BY id,e11 HAVING e11 >='t'
+    ORDER BY id
+    );
+
+SELECT
+	max(e1),min(e2),avg(e4),sum(e5)
+FROM
+	test_select_last_add.t1 as t1
+	JOIN (
+		SELECT last(e1 ,'1970-01-01 00:00:00'), last(e2 ,'1970-01-01 00:00:00.001'),last(e4 ,'1979-02-28 11:59:01.999'),last(e5 ,'1980-01-31 19:01:01')
+		FROM test_select_last_add.t1 as t2
+	)
+	ON t1.code2 IN (SELECT t1.code2 FROM test_select_last_add.t1 WHERE e1>0)
+GROUP BY e1,e2,e4,e5
+HAVING max(e1)>1000
+ORDER BY e1,e2,e4,e5;
 
 set enable_multimodel=false;
+drop database test_select_last_add cascade;
+drop database pipec_r cascade;
+drop database db_pipec cascade;
+drop database test_rel cascade;
+set cluster setting ts.sql.query_opt_mode = 1110;

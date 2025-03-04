@@ -16,13 +16,14 @@
 
 namespace kwdbts {
 
+// time-series data for test cases
 vector<vector<vector<string>>> tsTableData = {
   // case 0
   {
     {"001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011",
         "01234567890123456789012345678", "01334567890123456789012345678", "014", "015", "016", "017", "018", "019", "020", "021"},
     {"101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111",
-        "11234567890123456789012345678", "11334567890123456789012345678", "114", "115", "116", "117", "118", "119", "120", "121"},
+        "11234567890123456789012345678", "11334567890123456789012345678", "114", "115", "116", "117", "118", "119", "120", "121"}
   },
   // case 1
   {
@@ -31,61 +32,205 @@ vector<vector<vector<string>>> tsTableData = {
     {"101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111",
         "11234567890123456789012345678", "11334567890123456789012345678", "114", "115", "116", "117", "118", "119", "120", "121"},
     {"201", "202", "203", "204", "205", "206", "207", "208", "209", "210", "211",
-        "11234567890123456789012345678", "11334567890123456789012345678", "214", "215", "216", "217", "218", "219", "220", "221"},
+        "21234567890123456789012345678", "21334567890123456789012345678", "214", "215", "216", "217", "218", "219", "220", "221"},
     {"301", "302", "303", "304", "305", "306", "307", "308", "309", "310", "311",
         "31234567890123456789012345678", "31334567890123456789012345678", "314", "315", "316", "317", "318", "319", "320", "321"}
+  },
+  // case 2
+  {
+    {"001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011",
+        "01234567890123456789012345678", "01334567890123456789012345678", "014", "015", "016", "017", "018", "019", "020", "021"},
+    {"101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111",
+        "11234567890123456789012345678", "11334567890123456789012345678", "114", "115", "116", "117", "118", "119", "120", "121"}
+  },
+  // case 3
+  {
+    {"001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011",
+        "01234567890123456789012345678", "01334567890123456789012345678", "014", "015", "016", "017", "018", "019", "020", "021"},
+    {"101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111",
+        "11234567890123456789012345678", "11334567890123456789012345678", "114", "115", "116", "117", "118", "119", "120", "121"}
   }
 };
 
-vector<vector<vector<string>>> relTableData = {
+// relational data type for test cases
+vector<vector<ColumnInfo>> relTableColumnType = {
   // case 0
   {
-    {"11234567890123456789012345678", "11334567890123456789012345678", "host_1"}
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
   },
   // case 1
   {
-    {"11234567890123456789012345678", "11334567890123456789012345678", "host_1"},
-    {"11234567890123456789012345678", "11334567890123456789012345678", "host_2"},
-    {"11234567890123456789012345678", "11334567890123456789012345678", "host_3"}
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
+  },
+  // case 2
+  {
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
+  },
+  // case 3
+  {
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
   }
 };
 
-// generate info data for multiple model processing
-DataChunkPtr GenerateInfoData() {
-  // result of the query
-  vector<string> infoData{"102",
-                          "103",
-                          "104",
-                          "105",
-                          "11234567890123456789012345678",
-                          "11334567890123456789012345678",
-                          "114"};
-  DataChunkPtr chunk = nullptr;
-
-  k_uint32 capacity{1};
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(1);
-
-  for (int i = 0; i < infoData.size(); i++) {
-    if (i < 4) {
-      col_info.emplace_back(8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily);
-    } else {
-      col_info.emplace_back(30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
+// relational data for test cases
+vector<vector<vector<vector<char*>>>> relTableData = {
+  // case 0
+  {
+    // batch 0
+    {
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_1"}
     }
+  },
+  // case 1
+  {
+    // batch 0
+    {
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_1"},
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_2"},
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_3"}
+    }
+  },
+  // case 2
+  {
+    // batch 0
+    {
+      {nullptr, "11334567890123456789012345678", "host_1"},
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_2"},
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_3"}
+    }
+  },
+  // case 3
+  {
+    // batch 0
+    {
+      {nullptr, "col_01", "col_02"},
+      {"col_10", "col_11", "col_12"},
+      {"col_20", "col_20", "col_20"}
+    },
+    // batch 1
+    {
+      {nullptr, "11334567890123456789012345678", "host_1"},
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_2"},
+      {"11234567890123456789012345678", "11334567890123456789012345678", "host_3"}
+    }
+  }
+};
+
+// query result data type for test cases
+vector<vector<ColumnInfo>> resultType = {
+  // case 0
+  {
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
+  },
+  // case 1
+  {
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
+  },
+  // case 2
+  {
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
+  },
+  // case 3
+  {
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {8, roachpb::DataType::BIGINT, KWDBTypeFamily::IntFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily},
+    {30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily}
+  }
+};
+
+// query result data for test cases
+vector<vector<vector<char*>>> resultData = {
+  // case 0
+  {
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"}
+  },
+  // case 1
+  {
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"},
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"},
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"}
+  },
+  // case 2
+  {
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"},
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"}
+  },
+  // case 3
+  {
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"},
+    {"102", "103", "104", "105", "11234567890123456789012345678", "11334567890123456789012345678", "114"}
+  }
+};
+
+// generate relational data for multiple model processing
+void GenerateRelData(vector<ColumnInfo>& data_type, vector<vector<char*>>& batch_data, DataChunkPtr& chunk) {
+  if (batch_data.size() > 0) {
+    ASSERT_EQ(batch_data[0].size(), data_type.size());
+  }
+  k_uint32 capacity = batch_data.size();
+  std::vector<ColumnInfo> col_info;
+  col_info.reserve(capacity);
+
+  for (int i = 0; i < data_type.size(); ++i) {
+    col_info.emplace_back(data_type[i]);
   }
   chunk = std::make_unique<kwdbts::DataChunk>(col_info, capacity);
   chunk->Initialize();
-  chunk->AddCount();
 
-  for (int i = 0; i < infoData.size(); i++) {
-    if (i < 4) {
-      k_int64 converted_value = std::stoll(infoData[i]);
-      chunk->InsertData(0, i, reinterpret_cast<char*>(&converted_value), sizeof(k_int64));
-    } else {
-      chunk->InsertData(0, i, const_cast<char*>(infoData[i].c_str()), infoData[i].length());
+  for (int i = 0; i < capacity; i++) {
+    chunk->AddCount();
+    for (int j = 0; j < batch_data[i].size(); ++j) {
+      if (batch_data[i][j] == nullptr) {
+        chunk->SetNull(i, j);
+        continue;
+      }
+      switch (data_type[j].storage_type) {
+        case roachpb::DataType::BIGINT: {
+              k_int64 converted_value = std::stoll(batch_data[i][j]);
+              chunk->InsertData(i, j, reinterpret_cast<char*>(&converted_value), sizeof(k_int64));
+              break;
+            }
+        case roachpb::DataType::CHAR: {
+              chunk->InsertData(i, j, const_cast<char*>(batch_data[i][j]), strlen(batch_data[i][j]));
+              break;
+            }
+        default:
+              // data type not supported yet
+              break;
+      }
     }
   }
-  return chunk;
+  return;
 }
 
 // TestHashTagScanOp for multiple model processing
@@ -115,7 +260,7 @@ class TestHashTagScanOp : public OperatorTestBase {
   }
 
   void InsertRecords(k_uint32 case_num) {
-    for (int i = 0; i < tsTableData.size(); ++i) {
+    for (int i = 0; i < tsTableData[case_num].size(); ++i) {
       k_uint32 p_len = 0;
       KTimestamp start_ts = 0;
       auto data_value = TSBSSchema::genPayloadData(ctx_, row_num_per_payload, p_len, start_ts, meta_, tsTableData[case_num][i]);
@@ -126,32 +271,6 @@ class TestHashTagScanOp : public OperatorTestBase {
       engine_->PutData(ctx_, table_id_, test_range.range_group_id, &payload, 1,
                        0, &inc_entity_cnt, &inc_unordered_cnt, &dedup_result);
     }
-  }
-
-  DataChunkPtr GenerateRelData(k_uint32 case_num) {
-    DataChunkPtr chunk = nullptr;
-
-    k_uint32 capacity = relTableData[case_num].size();
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(3);
-
-    col_info.emplace_back(30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-    col_info.emplace_back(30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-    col_info.emplace_back(30, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-
-    chunk = std::make_unique<kwdbts::DataChunk>(col_info, capacity);
-    chunk->Initialize();
-
-    for (int i = 0; i < relTableData[case_num].size(); ++i) {
-      chunk->AddCount();
-      chunk->InsertData(0, 0, const_cast<char*>(relTableData[case_num][i][0].c_str()),
-                                                relTableData[case_num][i][0].length());
-      chunk->InsertData(0, 1, const_cast<char*>(relTableData[case_num][i][1].c_str()),
-                                                relTableData[case_num][i][1].length());
-      chunk->InsertData(0, 2, const_cast<char*>(relTableData[case_num][i][2].c_str()),
-                                                relTableData[case_num][i][2].length());
-    }
-    return chunk;
   }
 
   void DeleteTable() {
@@ -221,8 +340,11 @@ class TestHashTagScanOp : public OperatorTestBase {
     SetupHashTagScan(request, response);
 
     // Generate rel data and push it down
-    DataChunkPtr rel_data_chunk = GenerateRelData(case_num);
-    PushRelData(rel_data_chunk->GetData(), rel_data_chunk->Count(), request, response);
+    DataChunkPtr rel_data_chunk = nullptr;
+    for (int i = 0; i < relTableData[case_num].size(); ++i) {
+      GenerateRelData(relTableColumnType[i], relTableData[case_num][i], rel_data_chunk);
+      PushRelData(rel_data_chunk->GetData(), rel_data_chunk->Count(), request, response);
+    }
 
     // Complete rel data push down
     PushRelData(nullptr, 0, request, response);
@@ -231,12 +353,13 @@ class TestHashTagScanOp : public OperatorTestBase {
     ASSERT_NE(response->value, nullptr);
     ASSERT_EQ(response->code, 1);
 
-    auto infoChunk = GenerateInfoData();
+    DataChunkPtr resultChunk = nullptr;
+    GenerateRelData(resultType[case_num], resultData[case_num], resultChunk);
     kwdbts::EE_StringInfo tmp_info = nullptr;
     tmp_info = kwdbts::ee_makeStringInfo();
-    for (k_uint32 row = 0; row < infoChunk->Count(); ++row) {
-      for (k_uint32 col = 0; col < infoChunk->ColumnNum(); ++col) {
-        infoChunk->EncodingValue(ctx_, row, col, tmp_info);
+    for (k_uint32 row = 0; row < resultChunk->Count(); ++row) {
+      for (k_uint32 col = 0; col < resultChunk->ColumnNum(); ++col) {
+        resultChunk->EncodingValue(ctx_, row, col, tmp_info);
       }
     }
     char* serialized_data = static_cast<char*>(response->value);
@@ -264,8 +387,46 @@ TEST_F(TestHashTagScanOp, TestDmlExecHashTagScan) {
   RunTestCase(0, TSTableReadMode::hashTagScan);
 
   DeleteTable();
-  // need to add more test cases for HashTagScan in near future
-  // RunTestCase(1);
+
+  RunTestCase(0, TSTableReadMode::hashRelScan);
+
+  DeleteTable();
+
+  RunTestCase(1, TSTableReadMode::primaryHashTagScan);
+
+  DeleteTable();
+
+  RunTestCase(1, TSTableReadMode::hashRelScan);
+
+  DeleteTable();
+
+  RunTestCase(1, TSTableReadMode::hashTagScan);
+
+  DeleteTable();
+
+  RunTestCase(2, TSTableReadMode::primaryHashTagScan);
+
+  DeleteTable();
+
+  RunTestCase(2, TSTableReadMode::hashRelScan);
+
+  DeleteTable();
+
+  RunTestCase(2, TSTableReadMode::hashTagScan);
+
+  DeleteTable();
+
+  RunTestCase(3, TSTableReadMode::primaryHashTagScan);
+
+  DeleteTable();
+
+  RunTestCase(3, TSTableReadMode::hashRelScan);
+
+  DeleteTable();
+
+  RunTestCase(3, TSTableReadMode::hashTagScan);
+
+  DeleteTable();
 }
 
 }  // namespace kwdbts
