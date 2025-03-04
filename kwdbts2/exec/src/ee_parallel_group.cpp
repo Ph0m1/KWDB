@@ -55,6 +55,10 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
   auto &instance = ExecPool::GetInstance();
   auto &g_error_info = EEPgErrorInfo::GetPgErrorInfo();
   try {
+    if (is_stop_ || CheckCancel(ctx) != SUCCESS) {
+      Close(ctx, code);
+      return;
+    }
     if (ps_ == PS_TASK_INIT) {
       code = iterator_->Start(ctx);
       if (code != EE_OK || g_error_info.code > 0 ||
@@ -64,8 +68,12 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
       }
     }
     if (ps_ == PS_TASK_PAUSE && chunk_) {
-      bool wait = ExecPool::GetInstance().GetWaitThreadNum() > 0 ? true : false;
-      KStatus ret = sparent_->PushData(chunk_, wait);
+      bool wait = instance.GetWaitThreadNum() > 0 ? true : false;
+      bool reduce_dop = false;
+      KStatus ret = sparent_->PushData(chunk_, reduce_dop, wait);
+      if (!wait && reduce_dop && index_ > 1) {
+        thd_->auto_quit_ = true;
+      }
       if (ret != KStatus::SUCCESS) {
         repeat_++;
         Pause();
@@ -89,8 +97,7 @@ void ParallelGroup::Run(kwdbContext_p ctx) {
         break;
       }
       ptr->ResetLine();
-      bool wait =
-          (index_ < 2 || instance.GetWaitThreadNum() > 0) ? true : false;
+      bool wait = instance.GetWaitThreadNum() > 0 ? true : false;
       bool reduce_dop = false;
       KStatus ret = sparent_->PushData(ptr, reduce_dop, wait);
       if (!wait && reduce_dop && index_ > 1) {
