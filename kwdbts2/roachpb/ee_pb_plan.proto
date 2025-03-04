@@ -796,6 +796,8 @@ message TSStatisticReaderSpec {
   required uint32 tableVersion = 6;
 
   optional bool scalar = 7;
+
+  required bool LastRowOpt = 8;
 }
 
 message HashpointSpan{

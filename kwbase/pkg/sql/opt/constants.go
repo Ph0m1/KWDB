@@ -234,6 +234,8 @@ const (
 	ScalarGroupByWithSumInt = 1 << 3
 	// UseStatistic represents push local agg to scan and use statistic scan
 	UseStatistic = 1 << 4
+	// PruneTSFinalAgg represents prune ae engine final agg
+	PruneTSFinalAgg = 1 << 5
 )
 
 // TimeBucketOpt return true if has TimeBucketPushAgg opt
@@ -256,6 +258,11 @@ func (v GroupOptType) PruneFinalAggOpt() bool {
 	return v&PruneFinalAgg > 0
 }
 
+// PruneTSFinalAggOpt return true if has PruneTSFinalAgg opt
+func (v GroupOptType) PruneTSFinalAggOpt() bool {
+	return v&PruneTSFinalAgg > 0
+}
+
 // WithSumInt return true if scalarGroupBy with sum_Int agg in inside_out case.
 func (v GroupOptType) WithSumInt() bool {
 	return v&ScalarGroupByWithSumInt > 0
@@ -264,6 +271,32 @@ func (v GroupOptType) WithSumInt() bool {
 // UseStatisticOpt return true that has UseStatistic opt
 func (v GroupOptType) UseStatisticOpt() bool {
 	return v&UseStatistic > 0
+}
+
+// String return opt all type name
+func (v GroupOptType) String() string {
+	ret := ""
+	if v.PushLocalAggToScanOpt() {
+		if v.TimeBucketOpt() {
+			ret += "PushLocalToScan(time_bucket) | "
+		} else if v.UseStatisticOpt() {
+			ret += "PushLocalToScan(statistic) | "
+		}
+	}
+	if v.PruneLocalAggOpt() {
+		ret += "PruneLocal | "
+	}
+	if v.PruneTSFinalAggOpt() {
+		ret += "PruneTSFinal | "
+	}
+	if v.PruneFinalAggOpt() {
+		ret += "PruneFinal | "
+	}
+
+	if ret == "" {
+		return ""
+	}
+	return ret[:len(ret)-2]
 }
 
 // LimitOptType represents Limit expr opt type

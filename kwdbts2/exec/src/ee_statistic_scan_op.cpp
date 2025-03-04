@@ -154,6 +154,8 @@ EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
     // resolve scalar
     is_scalar_ = param_.spec_->scalar();
 
+    is_lastrow_optimize_ = param_.spec_->lastrowopt();
+
     // dispose Output Fields
     ret = param_.ResolveOutputFields(ctx, renders_, num_, output_fields_);
     if (EEIteratorErrCode::EE_OK != ret) {
@@ -212,7 +214,11 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
     }
 
     while (!is_done_) {
-      code = handler_->TsNext(ctx);
+      if (!is_lastrow_optimize_) {
+        code = handler_->TsNext(ctx);
+      } else {
+        code = handler_->TsStatisticCacheNext(ctx);
+      }
       if (EEIteratorErrCode::EE_OK != code) {
         is_done_ = true;
         code = EEIteratorErrCode::EE_END_OF_RECORD;

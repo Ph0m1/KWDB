@@ -200,6 +200,8 @@ message TSStatisticReaderSpec {
   required uint32 tableVersion = 6 [(gogoproto.nullable) = false];
 
   optional bool scalar = 7 [(gogoproto.nullable) = false];
+
+  required bool LastRowOpt = 8 [(gogoproto.nullable) = false];
 }
 message HashpointSpan{
   required uint32 hashpoint = 1 [(gogoproto.nullable) = false];

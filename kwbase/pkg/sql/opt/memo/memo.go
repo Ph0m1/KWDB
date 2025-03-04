@@ -1191,6 +1191,8 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 			gp.OptFlags |= opt.PruneLocalAgg
 			// set ts scan use ordered scan table
 			walkDealTSScan(src, setOrderedForce)
+		} else if gp.OptFlags.PruneTSFinalAggOpt() {
+			gp.OptFlags |= opt.PruneLocalAgg
 		}
 	}
 
@@ -1328,6 +1330,8 @@ func (m *Memo) tsScanFillStatistic(tsScan *TSScanExpr, gp *GroupingPrivate) {
 
 	if gp.GroupingCols.Len() > 0 || m.CheckOnlyOnePTagValue() {
 		gp.OptFlags |= opt.PruneFinalAgg
+	} else if tsScan.HintType.LastRowOpt() {
+		gp.OptFlags |= opt.PruneTSFinalAgg
 	}
 
 	tsScan.ScanAggs = true
@@ -1807,6 +1811,10 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 		m.CheckHelper.orderedCols.Add(source.Table.ColumnID(0))
 	}
 	m.CheckHelper.orderedScanType = source.OrderedScanType
+
+	if source.HintType.LastRowOpt() {
+		ret.hasAddSynchronizer = true
+	}
 	return ret
 }
 

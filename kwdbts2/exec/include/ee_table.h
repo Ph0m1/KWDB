@@ -131,6 +131,7 @@ class TABLE {
   bool optimize_offset_{false};
   k_uint32 offset_{0};
   k_uint32 limit_{0};
+  bool contain_tag_for_statistic{false};  // for statistic last_row
 
  protected:
   // relational fields for multiple model processing

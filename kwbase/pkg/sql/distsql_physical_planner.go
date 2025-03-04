@@ -2115,7 +2115,7 @@ func (p *PhysicalPlan) buildPhyPlanForTSReaders(
 	//construct TSReaderSpec
 	if n.ScanAggArray && !planCtx.IsLocal() {
 		tr := execinfrapb.TSStatisticReaderSpec{TableID: uint64(n.Table.ID()), TsSpans: n.tsSpans, TsCols: colMetas,
-			TableVersion: n.Table.GetTSVersion()}
+			TableVersion: n.Table.GetTSVersion(), LastRowOpt: n.HintType.LastRowOpt()}
 		err := p.initPhyPlanForStatisticReaders(tr)
 		if err != nil {
 			return err
@@ -4376,8 +4376,8 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 	p.PlanToStreamColMap = identityMap(p.PlanToStreamColMap, len(aggregations))
 
 	afterAddOutPutType := true
-	// prune all aggregator operator
-	if pruneFinalAgg && (n.optType.PruneLocalAggOpt() || n.optType.UseStatisticOpt()) {
+	if pruneFinalAgg && (n.optType.PruneLocalAggOpt() || n.optType.UseStatisticOpt()) ||
+		len(p.ResultRouters) == 1 && n.optType.PruneTSFinalAggOpt() { // prune all aggregator operator
 		tsPost := createTSPostSpec(&finalOutTypes)
 		if err = pushAggToScan(p, coreUnion.Aggregator, &tsPost, finalOutTypes, n.optType.PruneLocalAggOpt(), n); err != nil {
 			return true, err
@@ -6893,7 +6893,7 @@ func addHashPointMap(
 //     for the same reason: the grouping covers all primary tag columns.
 func needsTSTwiceAggregation(n *groupNode, planCtx *PlanningCtx) (bool, error) {
 	// No grouping by condition requires two aggregates
-	if n.optType.TimeBucketOpt() {
+	if n.optType.TimeBucketOpt() || n.optType.PruneTSFinalAggOpt() {
 		return false, nil
 	}
 

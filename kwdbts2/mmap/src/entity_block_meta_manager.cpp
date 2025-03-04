@@ -149,11 +149,9 @@ int EntityBlockMetaManager::sync(int flags) {
 
 int EntityBlockMetaManager::GetAllBlockItems(vector<uint32_t>& entity_ids, std::deque<BlockItem*>& block_items) {
   if (entity_ids.empty()) {
-    for (int i = 0; i < meta_num_; ++i) {
-      uint32_t min_block = entity_block_metas_[i]->GetMinBlockId(), max_block = entity_block_metas_[i]->GetMaxBlockId();
-      for (uint32_t id = min_block; id <= max_block; ++id) {
-        block_items.emplace_back(GetBlockItem(id));
-      }
+    BLOCK_ID max_block_id = getEntityHeader()->cur_block_id;
+    for (uint32_t id = 1; id <= max_block_id; ++id) {
+      block_items.emplace_back(GetBlockItem(id));
     }
   } else {
     for (auto entity_id : entity_ids) {

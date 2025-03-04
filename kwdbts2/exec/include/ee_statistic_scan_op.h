@@ -57,5 +57,6 @@ class TableStatisticScanOperator : public BaseOperator {
   k_int32 tag_count_read_index_{-1};
   k_bool is_has_data_for_scalar_{false};
   k_bool is_scalar_{false};
+  k_bool is_lastrow_optimize_{false};
 };
 }  // namespace kwdbts

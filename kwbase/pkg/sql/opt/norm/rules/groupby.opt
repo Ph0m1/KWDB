@@ -2,6 +2,24 @@
 # groupby.opt contains normalization rules for the GroupBy operator.
 # =============================================================================
 
+# OptimizeTSTableLastRow flags tsscanExpr to use lastrow optimize hint
+# eg:
+# select lastrow(*) from tstable;
+# can not exists where filter and grouping 
+[OptimizeTSTableLastRow, Normalize]
+(ScalarGroupBy
+    $input:(TSScan $tsScanPrivate:*)
+    $aggregations:*
+    $groupingPrivate:* &
+        (CheckForLastRowOpt $tsScanPrivate $aggregations $groupingPrivate)
+)
+=>
+((OpName)
+    (DealForLastRowOpt $tsScanPrivate)
+    $aggregations
+    $groupingPrivate
+)
+
 # OptimizeTSTableScanTypeSelect change ts table scan type to only scan tag table,
 # TS table optimize need on top
 # eg:

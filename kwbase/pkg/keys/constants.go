@@ -470,6 +470,8 @@ const (
 	ForceTagTableHint
 	// TagOnlyHint represents use TagOnly mode.
 	TagOnlyHint
+	// LastRowOptHint represents use LastRow Cache for table.
+	LastRowOptHint
 )
 
 // JoinMethodHintType represents Join method Hint type
@@ -591,4 +593,9 @@ func (s ScanMethodHintType) String() string {
 // OnlyTag check hint is only tag
 func (s ScanMethodHintType) OnlyTag() bool {
 	return s == TagOnlyHint
+}
+
+// LastRowOpt check hint is lastRow optimize
+func (s ScanMethodHintType) LastRowOpt() bool {
+	return s == LastRowOptHint
 }

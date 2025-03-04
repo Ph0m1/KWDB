@@ -409,6 +409,17 @@ KStatus TsEntityGroup::putDataColumnar(kwdbContext_p ctx, int32_t group_id, int3
     }
     return KStatus::FAIL;
   }
+  // update sub_group entity_id.
+  {
+    timestamp64 max_ts = payload.GetTimestamp(0);
+    for (size_t i = 1; i < payload.GetRowCount(); i++) {
+      auto cur_ts = payload.GetTimestamp(i);
+      if (max_ts < cur_ts) {
+        max_ts = cur_ts;
+      }
+    }
+    sub_group->UpdateEntityAndMaxTs(max_ts, entity_id);
+  }
   LOG_DEBUG("table[%s] input data num[%d].", this->tbl_sub_path_.c_str(), payload.GetRowCount());
   return KStatus::SUCCESS;
 }
@@ -553,6 +564,11 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
   delete_data_latch->Unlock(entity_id);
   if (del_failed) {
     return KStatus::FAIL;
+  }
+  // check if need reset entity max ts, after data deleted.
+  TsSubEntityGroup* subgroup = ebt_manager_->GetSubGroup(subgroup_id, err_info, false);
+  if (subgroup != nullptr) {
+    subgroup->ResetEntityMaxTs(max_ts, {entity_id});
   }
   return KStatus::SUCCESS;
 }
@@ -1187,6 +1203,34 @@ TsEntityGroup::GetTagColumnInfo(kwdbContext_p ctx, struct TagInfo& tag_info, roa
   }
   return KStatus::SUCCESS;
 }
+
+KStatus TsTable::GetLastRowEntity(EntityResultIndex& entity_id) {
+  timestamp64 entity_max_ts = INT64_MIN;
+  entity_id = {0, 0, 0};
+
+  pair<timestamp64, EntityID> cur_last_entity;
+  for (auto& e_grp : entity_groups_) {
+    std::list<TsSubEntityGroup*> cur_e_grp_sub_grps;
+    e_grp.second->GetSubEntityGroupManager()->GetAllSubGroups(cur_e_grp_sub_grps);
+    for (auto& sub_grp : cur_e_grp_sub_grps) {
+      if (sub_grp->GetLastRowEntity(cur_last_entity) < 0) {
+        LOG_ERROR("Subgroup %d GetLastRowEntity failed.", sub_grp->GetID());
+        return KStatus::FAIL;
+      }
+      if (cur_last_entity.second == 0) {
+        LOG_WARN("cannot found last row entity for subgrp[%d]", sub_grp->GetID());
+        continue;
+      }
+      if (cur_last_entity.first > entity_max_ts) {
+        entity_id.entityGroupId = e_grp.first;
+        entity_id.subGroupId = sub_grp->GetID();
+        entity_id.entityId = cur_last_entity.second;
+      }
+    }
+  }
+  return KStatus::SUCCESS;
+}
+
 /// @brief RangeGroupID compute function. new used in hashPoint. RangeGroupID % 65535. hashPoint % 10
 /// @param data primaryKey to compute which HashPoint it belongs to
 /// @param length how long the primaryKey to compute
@@ -2304,6 +2348,8 @@ KStatus TsTable::DeleteTotalRange(kwdbContext_p ctx, uint64_t begin_hash, uint64
         }
         ReleaseTable(partition);
       }
+      // check if need reset entity max ts, after data deleted.
+      cur_sub_group->ResetEntityMaxTs(ts_span.end, sub_grp.second);
     }
   }
 #ifdef K_DEBUG

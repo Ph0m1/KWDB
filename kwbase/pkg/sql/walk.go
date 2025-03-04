@@ -259,6 +259,8 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 			}
 			if n.HintType.OnlyTag() {
 				v.observer.attr(name, "only tag", "true")
+			} else if n.HintType.LastRowOpt() {
+				v.observer.attr(name, "hint", "last row optimize")
 			}
 			v.observer.attr(name, "access mode", n.AccessMode.String())
 			if n.ScanAggArray {
@@ -601,6 +603,9 @@ func (v *planVisitor) visitInternal(plan planNode, name string) {
 			}
 			if n.optType.PruneLocalAggOpt() {
 				v.observer.attr(name, "pruneLocalAgg ", "true")
+			}
+			if n.optType.PruneTSFinalAggOpt() {
+				v.observer.attr(name, "pruneTSFinalAgg ", "true")
 			}
 			if n.optType.PruneFinalAggOpt() {
 				v.observer.attr(name, "pruneFinalAgg ", "true")

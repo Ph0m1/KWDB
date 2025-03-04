@@ -432,3 +432,37 @@ func (c *CustomFuncs) ChangeTSTableScanTypeForProject(projectExpr memo.RelExpr) 
 	}
 	return projectExpr
 }
+
+// CheckForLastRowOpt checks ts table scan for last row optimize
+func (c *CustomFuncs) CheckForLastRowOpt(
+	tsScan *memo.TSScanPrivate, aggs memo.AggregationsExpr, private *memo.GroupingPrivate,
+) bool {
+	if tsScan.HintType == keys.LastRowOptHint || tsScan.PrimaryTagFilter != nil || tsScan.TagFilter != nil ||
+		!private.GroupingCols.Empty() {
+		return false
+	}
+
+	for _, agg := range aggs {
+		switch agg.Agg.(type) {
+		case *memo.LastRowExpr:
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// DealForLastRowOpt flags tsScanExpr for last row optimize
+func (c *CustomFuncs) DealForLastRowOpt(tsScan *memo.TSScanPrivate) memo.RelExpr {
+	return c.f.ConstructTSScan(&memo.TSScanPrivate{
+		Table:            tsScan.Table,
+		Cols:             tsScan.Cols,
+		AccessMode:       tsScan.AccessMode,
+		ScanAggs:         tsScan.ScanAggs,
+		TagFilter:        tsScan.TagFilter,
+		PrimaryTagFilter: tsScan.PrimaryTagFilter,
+		PrimaryTagValues: tsScan.PrimaryTagValues,
+		HintType:         keys.LastRowOptHint,
+	})
+}

@@ -527,6 +527,7 @@ class TsTable {
   KStatus AddTagSchemaVersion(const std::vector<TagInfo>& schema, uint32_t new_version);
 
  public:
+  KStatus GetLastRowEntity(EntityResultIndex& entity_id);
   // TODO(lfl): 此hash算法和GO层一致，后续修改为此算法
   static uint32_t GetConsistentHashId(const char* data, size_t length);
 

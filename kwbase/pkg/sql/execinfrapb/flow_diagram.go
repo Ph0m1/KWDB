@@ -346,6 +346,9 @@ func (ts *TSStatisticReaderSpec) summary() (string, []string) {
 	if ts.Scalar {
 		details = append(details, "scalar")
 	}
+	if ts.LastRowOpt {
+		details = append(details, "LastRowOpt")
+	}
 	return "StatisticReader", details
 }
 

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <climits>
+#include <list>
 #include <string>
 #include <vector>
 #include "libkwdbts2.h"
@@ -173,6 +174,14 @@ class SubEntityGroupManager : public TSObject {
    * @return void
    */
   void TierMigrate();
+
+  void GetAllSubGroups(std::list<TsSubEntityGroup*>& sub_grps) {
+    rdLock();
+    Defer defer{[&]() { unLock(); }};
+    for (auto& kv : subgroups_) {
+      sub_grps.push_back(kv.second);
+    }
+  }
 
  private:
   std::string db_path_;

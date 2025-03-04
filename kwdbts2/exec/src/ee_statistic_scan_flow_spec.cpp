@@ -161,6 +161,7 @@ EEIteratorErrCode StatisticSpecResolve::ResolveScanCols(kwdbContext_p ctx) {
         is_contain_last_point = true;
         tmp_tag_points_.push_back(params.param(2).value());
       }
+      table_->contain_tag_for_statistic = true;
     }
 
     if (field->get_num() >= table_->min_tag_id_ &&

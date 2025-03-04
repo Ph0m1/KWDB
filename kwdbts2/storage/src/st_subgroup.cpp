@@ -280,7 +280,7 @@ timestamp64 TsSubEntityGroup::MaxPartitionTime() {
   if (partitions_ts_.size() > 0) {
     return (--partitions_ts_.end())->first;
   }
-  return 0;
+  return INVALID_TS;
 }
 
 vector<timestamp64> TsSubEntityGroup::GetPartitions(const KwTsSpan& ts_span) {
@@ -299,7 +299,7 @@ vector<timestamp64> TsSubEntityGroup::GetPartitions(const KwTsSpan& ts_span) {
 }
 
 TsTimePartition* TsSubEntityGroup::GetPartitionTable(timestamp64 ts, ErrorInfo& err_info,
-                                                      bool create_if_not_exist, bool lru_push_back) {
+                                                     bool create_if_not_exist, bool lru_push_back) {
   timestamp64 max_ts;
   timestamp64 p_time = PartitionTime(ts, max_ts);
   TsTimePartition* mt_table = partition_cache_.Get(p_time);
@@ -829,6 +829,91 @@ void TsSubEntityGroup::calcPartitionTierLevel(KTimestamp partition_max_ts, int* 
 }
 
 void TsSubEntityGroup::PartitionsTierMigrate() {
+}
+
+int TsSubEntityGroup::GetLastRowEntity(pair<timestamp64, uint32_t>& last_row_entity) {
+  if (last_row_checked_ && last_row_entity_.second != 0) {
+    last_row_entity = last_row_entity_;
+    return 0;
+  }
+  rdLock();
+  Defer defer{[&]() { unLock(); }};
+
+  if (partitions_ts_.size() == 0) {
+    last_row_entity = {INT64_MIN, 0};
+    last_row_checked_ = true;
+    return 0;
+  }
+  bool last_row_found = false;
+  auto it = partitions_ts_.rbegin();
+  while (!last_row_found && it != partitions_ts_.rend()) {
+    timestamp64 partition = it->first;
+    ++it;
+    ErrorInfo err_info;
+    TsTimePartition* p_table = GetPartitionTable(partition, err_info);
+    if (err_info.errcode < 0) {
+      LOG_ERROR("GetPartitionTable failed");
+      return err_info.errcode;
+    }
+    p_table->rdLock();
+    Defer defer2{[&]() {
+      p_table->unLock();
+      ReleaseTable(p_table);
+    }};
+
+    vector<uint32_t> entity_ids;
+    std::deque<BlockItem*> block_items;
+    p_table->GetAllBlockItems(entity_ids, block_items);
+
+    class cmp {
+     public:
+      bool operator()(const pair<timestamp64, BlockItem*>& a, const pair<timestamp64, BlockItem*>& b) {
+        return a.first < b.first;
+      }
+    };
+    std::priority_queue<pair<timestamp64, BlockItem*>, vector<pair<timestamp64, BlockItem*>>, cmp> pque;
+    while (!block_items.empty()) {
+      BlockItem* block_item = block_items.front();
+      block_items.pop_front();
+      std::shared_ptr<MMapSegmentTable> segment_tbl = p_table->getSegmentTable(block_item->block_id);
+      if (segment_tbl == nullptr) {
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]", block_item->block_id, p_table->GetPath().c_str());
+        return -1;
+      }
+      timestamp64 min_ts, max_ts;
+      TsTimePartition::GetBlkMinMaxTs(block_item, segment_tbl.get(), min_ts, max_ts);
+      pque.push({max_ts, block_item});
+    }
+
+    last_row_entity = {INT64_MIN, 0};
+    while (!pque.empty() && last_row_entity.first < pque.top().first) {
+      timestamp64 ts = pque.top().first;
+      BlockItem* blk = pque.top().second;
+      pque.pop();
+
+      std::shared_ptr<MMapSegmentTable> segment_tbl = p_table->getSegmentTable(blk->block_id);
+      if (segment_tbl == nullptr) {
+        LOG_ERROR("Can not find segment use block [%u], in path [%s]", blk->block_id, p_table->GetPath().c_str());
+        return -1;
+      }
+      timestamp64 blk_max_ts = INT64_MIN;
+      for (uint32_t i = 1; i <= blk->publish_row_count; ++i) {
+        if (!segment_tbl->IsRowVaild(blk, i)) continue;
+        MetricRowID row_id = blk->getRowID(i);
+        timestamp64 cur_ts = KTimestamp(segment_tbl->columnAddr(row_id, 0));
+        blk_max_ts = max(blk_max_ts, cur_ts);
+      }
+      if (blk_max_ts > last_row_entity.first) {
+        last_row_entity = {blk_max_ts, blk->entity_id};
+        last_row_found = true;
+      }
+    }
+  }
+
+  UpdateEntityAndMaxTs(last_row_entity.first, last_row_entity.second);
+  last_row_checked_ = true;
+  last_row_entity = last_row_entity_;
+  return 0;
 }
 
 }  // namespace kwdbts

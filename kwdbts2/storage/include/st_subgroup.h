@@ -233,6 +233,30 @@ class TsSubEntityGroup : public TSObject {
    */
   void PartitionsTierMigrate();
 
+  void UpdateEntityAndMaxTs(timestamp64 max_ts, EntityID entity_id) {
+    MUTEX_LOCK(sub_entity_group_mutex_);
+    if (max_ts >= last_row_entity_.first) {
+      last_row_entity_ = {max_ts, entity_id};
+    }
+    MUTEX_UNLOCK(sub_entity_group_mutex_);
+  }
+
+  void ResetEntityMaxTs(timestamp64 max_ts, const vector<EntityID>& entity_ids) {
+    MUTEX_LOCK(sub_entity_group_mutex_);
+    if (max_ts >= last_row_entity_.first) {
+      for (auto entity_id : entity_ids) {
+        if (entity_id == last_row_entity_.second) {
+          last_row_entity_ = {INT64_MIN, 0};
+          last_row_checked_ = false;
+          break;
+        }
+      }
+    }
+    MUTEX_UNLOCK(sub_entity_group_mutex_);
+  }
+
+  int GetLastRowEntity(pair<timestamp64, uint32_t>& last_row_entity);
+
  private:
   std::string db_path_;
   std::string tbl_sub_path_;
@@ -250,6 +274,8 @@ class TsSubEntityGroup : public TSObject {
   map<timestamp64, timestamp64> deleted_partitions_;
   // Using LRU to cache commonly used partition tables, key=partition time
   PartitionLRUCache partition_cache_;
+  bool last_row_checked_ = false;
+  pair<timestamp64, uint32_t> last_row_entity_ = {INT64_MIN, 0};
 
   using TsSubEntityGroupEntityLatch = KLatch;
   std::vector<TsSubEntityGroupEntityLatch* > entity_mutexes_;

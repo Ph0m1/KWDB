@@ -101,6 +101,8 @@ class StorageHandler {
 
   virtual EEIteratorErrCode TsOffsetNext(kwdbContext_p ctx);
 
+  virtual EEIteratorErrCode TsStatisticCacheNext(kwdbContext_p ctx);
+
   /**
    * @brief           read data
    *
