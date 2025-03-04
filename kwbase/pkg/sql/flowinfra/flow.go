@@ -514,7 +514,6 @@ func (f *FlowBase) Run(ctx context.Context, doneFn func()) error {
 	if f.isTimeSeries {
 		if f.IsShortCircuitForPgEncode() {
 			// Output encoding optimization.
-			log.Infof(ctx, "enter the pg-encode-short-circuit process.")
 			var closed int
 			f.TsTableReaders[0].Start(ctx)
 			for {
