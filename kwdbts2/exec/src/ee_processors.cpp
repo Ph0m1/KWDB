@@ -239,19 +239,22 @@ KStatus Processors::RunWithEncoding(kwdbContext_p ctx, char** buffer,
     break;
   } while (true);
 
-  if (ret != EEIteratorErrCode::EE_OK) {
+  if (ret == EEIteratorErrCode::EE_OK) {
+    Return(KStatus::SUCCESS);
+  } else if (ret == EEIteratorErrCode::EE_END_OF_RECORD) {
     *is_last_record = KTRUE;
     collection_.GetAnalyse(ctx);
     KStatus st = CloseIterator(ctx);
     if (st != KStatus::SUCCESS) {
       LOG_ERROR("Failed to close operator.");
       ret = EEIteratorErrCode::EE_ERROR;
-    }
-    if (ret == EEIteratorErrCode::EE_ERROR) {
       Return(KStatus::FAIL);
+    } else {
+      Return(KStatus::SUCCESS);
     }
+  } else {
+    Return(KStatus::FAIL);
   }
-  Return(KStatus::SUCCESS);
 }
 
 }  // namespace kwdbts

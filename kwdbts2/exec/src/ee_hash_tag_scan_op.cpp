@@ -63,6 +63,7 @@ KStatus HashTagScanOperator::Close(kwdbContext_p ctx) {
 
   if (tag_renders_) {
     free(tag_renders_);
+    tag_renders_ = nullptr;
   }
   SafeDeleteArray(tag_col_info_);
   Return(KStatus::SUCCESS);

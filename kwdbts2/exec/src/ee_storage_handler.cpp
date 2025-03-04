@@ -254,6 +254,7 @@ EEIteratorErrCode StorageHandler::TsOffsetNext(kwdbContext_p ctx) {
   }
   row_batch->tag_rowbatch_ = tag_rowbatch;
   tag_rowbatch->GetTagData(&(row_batch->tagdata_), &(row_batch->tag_bitmap_), row_batch->res_.entity_index.index);
+  row_batch->ResetLine();
 
   Return(code);
 }

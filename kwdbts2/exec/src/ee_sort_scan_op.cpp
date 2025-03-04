@@ -36,6 +36,7 @@ SortScanOperator::~SortScanOperator() {
   if (is_offset_opt_) {
     SafeDeletePointer(tmp_renders_);
     SafeDeletePointer(new_field_);
+    SafeDeleteArray(tmp_output_col_info_)
   }
 }
 
@@ -76,7 +77,7 @@ EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
 
     order_field_ = param_.GetOutputField(ctx, idx);
     code = InitOutputColInfo(output_fields_);
-    if (code == EE_ERROR) {
+    if (code == EEIteratorErrCode::EE_ERROR) {
       break;
     }
     if (is_offset_opt_) {
@@ -84,6 +85,7 @@ EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
     } else {
       tmp_renders_ = renders_;
       tmp_output_fields_ = output_fields_;
+      tmp_output_col_info_ = output_col_info_;
     }
   } while (0);
 
@@ -131,7 +133,8 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
     cur_offset_ = offset_ - storage_offset;
 
     if (nullptr == data_chunk_) {
-      code = initContainer(ctx, data_chunk_, tmp_output_fields_, limit_ + cur_offset_);
+      code = initContainer(ctx, data_chunk_, tmp_output_col_info_,
+                            is_offset_opt_ ? output_col_num_ + 1 : output_col_num_, limit_ + cur_offset_);
       if (code != EEIteratorErrCode::EE_OK) {
         return code;
       }
@@ -145,8 +148,9 @@ EEIteratorErrCode SortScanOperator::Start(kwdbContext_p ctx) {
     // sort
     PrioritySort(ctx, row_batch_, limit_ + cur_offset_);
   }
-  if (nullptr == data_chunk_) {
-    code = initContainer(ctx, data_chunk_, tmp_output_fields_, limit_);
+  if (nullptr == data_chunk_ && code != EEIteratorErrCode::EE_ERROR) {
+    code = initContainer(ctx, data_chunk_, tmp_output_col_info_,
+                            is_offset_opt_ ? output_col_num_ + 1 : output_col_num_, 1);
     if (code != EEIteratorErrCode::EE_OK) {
       return code;
     }
@@ -173,7 +177,7 @@ EEIteratorErrCode SortScanOperator::Next(kwdbContext_p ctx,
   if (!is_offset_opt_) {
     chunk = std::move(data_chunk_);
   } else {
-    code = initContainer(ctx, chunk, output_fields_, limit_);
+    code = initContainer(ctx, chunk, output_col_info_, output_col_num_, limit_);
     if (code != EEIteratorErrCode::EE_OK) {
       return code;
     }
@@ -249,16 +253,36 @@ EEIteratorErrCode SortScanOperator::mallocTempField(kwdbContext_p ctx) {
   tmp_output_fields_.insert(tmp_output_fields_.end(), output_fields_.begin(), output_fields_.end());
   tmp_output_fields_.push_back(new_field_);
 
-  Return(EEIteratorErrCode::EE_OK);
+  EEIteratorErrCode code = InitTmpOutputColInfo(ctx);
+  if (EEIteratorErrCode::EE_ERROR == code) {
+    SafeDeletePointer(tmp_renders_);
+    SafeDeletePointer(new_field_);
+  }
+
+  Return(code);
+}
+
+EEIteratorErrCode SortScanOperator::InitTmpOutputColInfo(kwdbContext_p ctx) {
+  tmp_output_col_info_ = KNEW ColumnInfo[tmp_output_fields_.size()];
+  if (tmp_output_col_info_ == nullptr) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    return EEIteratorErrCode::EE_ERROR;
+  }
+  for (k_int32 i = 0; i < tmp_output_fields_.size(); i++) {
+    tmp_output_col_info_[i] = ColumnInfo(tmp_output_fields_[i]->get_storage_length(),
+                                      tmp_output_fields_[i]->get_storage_type(),
+                                      tmp_output_fields_[i]->get_return_type());
+    tmp_output_col_info_[i].allow_null = tmp_output_fields_[i]->is_allow_null();
+  }
+  return EEIteratorErrCode::EE_OK;
 }
 
 EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx, DataChunkPtr&chunk,
-                                                        const std::vector<Field*> &cols, k_uint32 line) {
+                                    ColumnInfo* output_col_info, k_int32 output_col_num, k_uint32 line) {
   // init col
-  k_uint64 lines = limit_ + offset_;
-  k_uint32 row_size = DataChunk::ComputeRowSize(output_col_info_, output_col_num_);
-  if (lines * row_size < BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE) {
-    chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_, lines);
+  k_uint32 row_size = DataChunk::ComputeRowSize(output_col_info, output_col_num);
+  if (line * row_size < BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE) {
+    chunk = std::make_unique<DataChunk>(output_col_info, output_col_num, line);
   }
   if (!chunk || chunk->Initialize() != true) {
     chunk = nullptr;

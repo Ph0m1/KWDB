@@ -333,8 +333,9 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 			}
 			if respInfo.Code == -1 {
 				// Data read completed.
-				ttr.cleanup(ttr.PbCtx())
 				ttr.WaitForBLJ()
+				// BLJ operator must stop pushing down data before cleanup
+				ttr.cleanup(ttr.PbCtx())
 				if ttr.collected {
 					ttr.MoveToDraining(nil)
 					return nil, ttr.DrainHelper()

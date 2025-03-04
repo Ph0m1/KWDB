@@ -68,8 +68,9 @@ class SortScanOperator : public TableScanOperator {
 
  private:
   EEIteratorErrCode mallocTempField(kwdbContext_p ctx);
+  EEIteratorErrCode InitTmpOutputColInfo(kwdbContext_p ctx);
   EEIteratorErrCode initContainer(kwdbContext_p ctx, DataChunkPtr&chunk,
-                                              const std::vector<Field*> &cols, k_uint32 line);
+                        ColumnInfo* output_col_info, k_int32 output_col_num_, k_uint32 line);
   EEIteratorErrCode ResolveFilter(kwdbContext_p ctx, ScanRowBatch* row_batch);
   EEIteratorErrCode PrioritySort(kwdbContext_p ctx, ScanRowBatch* row_batch, k_uint32 limit);
 
@@ -83,6 +84,7 @@ class SortScanOperator : public TableScanOperator {
   Field **tmp_renders_{nullptr};
   std::vector<Field*> tmp_output_fields_;
   Field *new_field_{nullptr};
+  ColumnInfo *tmp_output_col_info_{nullptr};
   bool is_offset_opt_{false};
 };
 

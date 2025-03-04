@@ -24,6 +24,7 @@ DmlExec::~DmlExec() {
   auto ctx = ContextManager::GetThreadContext();
   if (rel_batch_queue_) {
     delete rel_batch_queue_;
+    rel_batch_queue_ = nullptr;
   }
   ClearTsScans(ctx);
   if (thd_) {

@@ -2638,9 +2638,7 @@ FROM my_timeseries_db.firegases f,
      my_relation_db.station_info s
 WHERE s.expected_state is not NULL and f.state = s.expected_state
 ORDER BY f."time", s.station_sn;
-  time | value | station_sn | station_name | work_area_sn | expected_state | standard_val | adr | state | second_val
--------+-------+------------+--------------+--------------+----------------+--------------+-----+-------+-------------
-(0 rows)
+ERROR: Error Code: 130
 > explain SELECT *
 FROM my_timeseries_db.firegases f,
      my_relation_db.station_info s

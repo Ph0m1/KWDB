@@ -22,6 +22,20 @@ INSERT 1
 INSERT 1
 > insert into test.t1 values('2025-02-18 03:20:59.688', 10, 10, 5, 5, 5);
 INSERT 1
+> select * from test.t1 order by ts;
+               ts               | a  | b  | x | y | z
+--------------------------------+----+----+---+---+----
+  2025-02-18 03:11:59.688+00:00 |  1 |  1 | 1 | 1 | 1
+  2025-02-18 03:12:59.688+00:00 |  2 |  2 | 1 | 1 | 1
+  2025-02-18 03:13:59.688+00:00 |  3 |  3 | 1 | 1 | 1
+  2025-02-18 03:14:59.688+00:00 |  4 |  4 | 2 | 2 | 2
+  2025-02-18 03:15:59.688+00:00 |  5 |  5 | 2 | 2 | 2
+  2025-02-18 03:16:59.688+00:00 |  6 |  6 | 3 | 3 | 3
+  2025-02-18 03:17:59.688+00:00 |  7 |  7 | 4 | 4 | 4
+  2025-02-18 03:18:59.688+00:00 |  8 |  8 | 4 | 4 | 4
+  2025-02-18 03:19:59.688+00:00 |  9 |  9 | 4 | 4 | 4
+  2025-02-18 03:20:59.688+00:00 | 10 | 10 | 5 | 5 | 5
+(10 rows)
 > select * from test.t1 order by ts offset 2 limit 3;
                ts               | a | b | x | y | z
 --------------------------------+---+---+---+---+----
@@ -71,13 +85,74 @@ INSERT 1
 ----+----
   9 | 9
 (1 row)
-> select * from test.t1 where x = 4, y = 4 order by ts offset 2 limit 3;
-ERROR: at or near ",": syntax error
-SQLSTATE: 42601
-DETAIL: source SQL:
-select * from test.t1 where x = 4, y = 4 order by ts offset 2 limit 3
-                                 ^
+> select * from test.t1 where x = 4 and y = 4 order by ts offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:19:59.688+00:00 | 9 | 9 | 4 | 4 | 4
+(1 row)
+> select * from test.t1 order by ts desc offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:18:59.688+00:00 | 8 | 8 | 4 | 4 | 4
+  2025-02-18 03:17:59.688+00:00 | 7 | 7 | 4 | 4 | 4
+  2025-02-18 03:16:59.688+00:00 | 6 | 6 | 3 | 3 | 3
+(3 rows)
+> select a, b from test.t1 order by ts desc offset 2 limit 3;
+  a | b
+----+----
+  8 | 8
+  7 | 7
+  6 | 6
+(3 rows)
+> select x, y from test.t1 order by ts desc offset 2 limit 3;
+  x | y
+----+----
+  4 | 4
+  4 | 4
+  3 | 3
+(3 rows)
+> select * from test.t1 where x = 4 order by ts desc offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:17:59.688+00:00 | 7 | 7 | 4 | 4 | 4
+(1 row)
+> select * from test.t1 where x = 5 order by ts desc offset 2 limit 3;
+  ts | a | b | x | y | z
+-----+---+---+---+---+----
+(0 rows)
+> select * from test.t1 where x = 6 order by ts desc offset 2 limit 3;
+  ts | a | b | x | y | z
+-----+---+---+---+---+----
+(0 rows)
+> select * from test.t1 where x > 2 and x < 5 order by ts desc offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:17:59.688+00:00 | 7 | 7 | 4 | 4 | 4
+  2025-02-18 03:16:59.688+00:00 | 6 | 6 | 3 | 3 | 3
+(2 rows)
+> select * from test.t1 where y = 3 order by ts desc offset 2 limit 3;
+  ts | a | b | x | y | z
+-----+---+---+---+---+----
+(0 rows)
+> select a,b from test.t1 where y = 4 order by ts desc offset 2 limit 3;
+  a | b
+----+----
+  7 | 7
+(1 row)
+> select * from test.t1 where x = 4 and y = 4 order by ts desc offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:17:59.688+00:00 | 7 | 7 | 4 | 4 | 4
+(1 row)
 > use defaultdb;
 SET
 > drop database test cascade;
+DROP DATABASE
+> CREATE TS DATABASE db_digital_ent;
+CREATE TS DATABASE
+> CREATE TABLE db_digital_ent.stbl_event (ts timestamptz NOT NULL,data_write_time timestamp,type varchar(10),params varchar(1000)) ATTRIBUTES (device varchar(64) NOT NULL,identifier nchar(64) NOT NULL) primary tags(device, identifier) activetime 1h;
+CREATE TABLE
+> select ts as timestamp, * from db_digital_ent.stbl_event where ts >= '2025-02-10 00:00:00' and ts <= '2025-02-18 00:00:00' order by ts desc limit 10 offset 100000000;
+ERROR: Error Code: 130
+> drop database db_digital_ent cascade;
 DROP DATABASE
