@@ -53,7 +53,9 @@ KStatus WALFileMgr::Open(uint16_t start_file_no) {
 }
 
 KStatus WALFileMgr::Close() {
-  file_.close();
+  if (file_.is_open()) {
+      file_.close();
+  }
   return SUCCESS;
 }
 

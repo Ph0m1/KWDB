@@ -189,10 +189,11 @@ KStatus WALMgr::CreateCheckpointWithoutFlush(kwdbts::kwdbContext_p ctx) {
 }
 
 KStatus WALMgr::Close() {
-  file_mgr_->Close();
-  meta_file_.close();
-
-  return SUCCESS;
+    file_mgr_->Close();
+    if (meta_file_.is_open()) {
+        meta_file_.close();
+    }
+    return SUCCESS;
 }
 
 KStatus WALMgr::Drop() {
