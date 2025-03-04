@@ -156,6 +156,36 @@ void ScanRowBatch::CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_le
   }
 }
 
+bool ScanRowBatch::SetCurrentLine(k_int32 line) {
+  if (is_filter_) {
+    if (line >= effect_count_) {
+      return false;
+    }
+    current_line_ = line;
+    current_batch_no_ = selection_[current_line_].batch_;
+    current_batch_line_ = selection_[current_line_].line_;
+  } else {
+    if (line >= count_) {
+      return false;
+    }
+    if (res_.col_num_ > 0) {
+      k_int32 tmp = 0;
+      for (k_int32 i = 0; i < res_.data[0].size(); i++) {
+        auto batch = res_.data[0][i];
+        tmp = tmp + batch->count;
+        if (line < tmp) {
+          current_batch_no_ = i;
+          current_batch_line_ = line - (tmp - batch->count);
+          current_batch_count_ = res_.data[0][current_batch_no_]->count;
+          break;
+        }
+      }
+    }
+    current_line_ = line;
+  }
+  return true;
+}
+
 /**
  *  nextline
  */
@@ -229,6 +259,36 @@ void ReverseScanRowBatch::CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 
       }
     }
   }
+}
+
+bool ReverseScanRowBatch::SetCurrentLine(k_int32 line) {
+  if (is_filter_) {
+    if (line >= effect_count_) {
+      return false;
+    }
+    current_line_ = line;
+    current_batch_no_ = selection_[current_line_].batch_;
+    current_batch_line_ = selection_[current_line_].line_;
+  } else {
+    if (line >= count_) {
+      return false;
+    }
+    if (res_.col_num_ > 0) {
+      k_int32 tmp = 0;
+      for (k_int32 i = 0; i < res_.data[0].size(); i++) {
+        auto batch = res_.data[0][i];
+        tmp = tmp + batch->count;
+        if (line < tmp) {
+          current_batch_no_ = i;
+          current_batch_line_ = tmp - line - 1;
+          current_batch_count_ = res_.data[0][current_batch_no_]->count;
+          break;
+        }
+      }
+    }
+    current_line_ = line;
+  }
+  return true;
 }
 
 }  // namespace kwdbts

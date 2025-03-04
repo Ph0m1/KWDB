@@ -52,12 +52,22 @@ struct ColumnInfo {
   k_uint32 fixed_storage_len{0};
   roachpb::DataType storage_type;
   KWDBTypeFamily return_type;
-
+  bool is_string{false};
+  bool allow_null{true};
+  ColumnInfo() {}
   ColumnInfo(k_uint32 storage_len, roachpb::DataType storage_type,
              KWDBTypeFamily return_type)
       : storage_len(storage_len),
         storage_type(storage_type),
         return_type(return_type) {
+    if (storage_type == roachpb::DataType::CHAR ||
+        storage_type == roachpb::DataType::VARCHAR ||
+        storage_type == roachpb::DataType::NCHAR ||
+        storage_type == roachpb::DataType::BINARY ||
+        storage_type == roachpb::DataType::NVARCHAR ||
+        storage_type == roachpb::DataType::VARBINARY) {
+      is_string = true;
+    }
   }
 };
 
@@ -102,7 +112,7 @@ class IChunk {
    * @brief Get the Chunk Schema
    * @return
    */
-  virtual std::vector<ColumnInfo>& GetColumnInfo() = 0;
+  virtual ColumnInfo* GetColumnInfo() = 0;
 
   /**
    * @brief Move to next line

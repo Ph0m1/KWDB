@@ -51,9 +51,9 @@ inline std::string replaceTimeUnit(KString timestring) {
     return result;
 }
 
-inline k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket,
-                        KString *in_unit, KString timestring,
-                        std::string& error_info) {
+inline k_int64 getIntervalSeconds(KString timestring, k_bool& var_interval,
+                                  k_bool& year_bucket, KString* in_unit,
+                                  std::string& error_info, bool max_to_week) {
   // std::string timestring = {args_[1]->ValStr().getptr(),
   //                           args_[1]->ValStr().length_};
   k_uint32 code = ERRCODE_INVALID_DATETIME_FORMAT;
@@ -62,8 +62,7 @@ inline k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket,
   do {
     if (timestring.length() < 2) {
       error_info =
-          "invalid input interval time for time_bucket or "
-          "time_bucket_gapfill.";
+          "invalid input interval time.";
       code = ERRCODE_INVALID_PARAMETER_VALUE;
       break;
     }
@@ -81,6 +80,10 @@ inline k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket,
     } else {
       intervalStr = timestring.substr(0, timestring.size() - 1);
     }
+    if (max_to_week && (unit == "y" || unit == "n")) {
+      error_info = "invalid input syntax: " + timestring + ".";
+      break;
+    }
     try {
       if (std::stol(intervalStr) <= 0) {
         error_info = "second arg should be a positive interval.";
@@ -94,8 +97,7 @@ inline k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket,
     for (char c : intervalStr) {
       if (c > '9' || c < '0') {
         error_info =
-            "invalid input interval time for time_bucket or "
-            "time_bucket_gapfill.";
+          "invalid input interval time.";
         code = ERRCODE_INVALID_PARAMETER_VALUE;
         break;
       }
@@ -106,7 +108,7 @@ inline k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket,
     EEPgErrorInfo::SetPgErrorInfo(code, error_info.c_str());
     return 0;
   }
-  k_int64 interval_seconds_ = stoll(intervalStr);
+  k_int64 interval_seconds = stoll(intervalStr);
 
   // Convert interval to milliseconds based on unit
   if (unit == "y") {
@@ -117,18 +119,18 @@ inline k_int64 getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket,
     var_interval = true;
     // Do not convert interval_seconds_ as it is a variable interval
   } else if (unit == "s") {
-    interval_seconds_ *= 1000;
+    interval_seconds *= MILLISECOND_PER_SECOND;
   } else if (unit == "m") {
-    interval_seconds_ *= 60000;
+    interval_seconds *= MILLISECOND_PER_MINUTE;
   } else if (unit == "h") {
-    interval_seconds_ *= 3600000;
+    interval_seconds *= MILLISECOND_PER_HOUR;
   } else if (unit == "d") {
-    interval_seconds_ *= 86400000;
+    interval_seconds *= MILLISECOND_PER_DAY;
   } else if (unit == "w") {
-    interval_seconds_ *= 604800000;
+    interval_seconds *= MILLISECOND_PER_WEEK;
   }
 
-  return interval_seconds_;
+  return interval_seconds;
 }
 
 inline roachpb::DataType getTimeFieldType(roachpb::DataType var_type,

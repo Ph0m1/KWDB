@@ -498,7 +498,7 @@ func (f *Factory) checkProjectExpr(source *memo.ProjectExpr) bool {
 		for _, proj := range source.Projections {
 			// projection list every one is all leave or all delete
 			push, hashcode := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
-				f.TSWhiteListMap.CheckWhiteListParam, false)
+				f.TSWhiteListMap.CheckWhiteListParam, false, f.mem.CheckOnlyOnePTagValue())
 			if !push {
 				return false
 			}
@@ -519,7 +519,7 @@ func (f *Factory) checkSelectExpr(source *memo.SelectExpr) bool {
 	if childExecInTS {
 		for _, filter := range source.Filters {
 			if !memo.CheckFilterExprCanExecInTSEngine(filter.Condition, memo.ExprPosSelect,
-				f.Memo().GetWhiteList().CheckWhiteListParam) {
+				f.Memo().GetWhiteList().CheckWhiteListParam, f.mem.CheckOnlyOnePTagValue()) {
 				return false
 			}
 		}

@@ -36,23 +36,22 @@ class MemCompare {
   bool is_reverse_{false};
 };
 
+DataChunk::DataChunk(ColumnInfo *col_info, k_int32 col_num, k_uint32 capacity) :
+    col_info_(col_info), col_num_(col_num), capacity_(capacity) {}
 
-
-
-DataChunk::DataChunk(vector<ColumnInfo>& col_info, k_uint32 capacity) :
-    col_info_(col_info), capacity_(capacity) {}
-
-DataChunk::DataChunk(vector<ColumnInfo>& col_info, const char* buf,
+DataChunk::DataChunk(ColumnInfo* col_info, k_int32 col_num, const char* buf,
                      k_uint32 count, k_uint32 capacity)
-    : data_(const_cast<char*>(buf)), col_info_(col_info), capacity_(capacity),
+    : data_(const_cast<char*>(buf)),
+      col_info_(col_info),
+      col_num_(col_num),
+      capacity_(capacity),
       count_(count) {
   is_data_owner_ = false;
 }
 
 DataChunk::~DataChunk() {
-  col_info_.clear();
-  col_offset_.clear();
-  bitmap_offset_.clear();
+  SafeDeleteArray(col_offset_);
+  SafeDeleteArray(bitmap_offset_);
   if (is_data_owner_) {
     kwdbts::EE_MemPoolFree(g_pstBufferPoolInfo, data_);
     data_ = nullptr;
@@ -64,13 +63,12 @@ DataChunk::~DataChunk() {
 
 k_bool DataChunk::Initialize() {
   // null bitmap
-  col_num_ = col_info_.size();
   // calculate row width and length
-  row_size_ = ComputeRowSize(col_info_);
+  row_size_ = ComputeRowSize(col_info_, col_num_);
 
   if (capacity_ == 0) {
     // (capacity_ + 7)/8 * col_num_ + capacity_ * row_size_ <= DataChunk::SIZE_LIMIT
-    capacity_ = EstimateCapacity(col_info_);
+    capacity_ = EstimateCapacity(col_info_, col_num_);
   }
   data_size_ = (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
 
@@ -95,25 +93,33 @@ k_bool DataChunk::Initialize() {
   bitmap_size_ = (capacity_ + 7) / 8;
 
   k_uint32 bitmap_offset = 0;
-  for (auto& info : col_info_) {
-    bitmap_offset_.push_back(bitmap_offset);
-    col_offset_.push_back(bitmap_offset + bitmap_size_);
-    bitmap_offset += info.fixed_storage_len * capacity_ + bitmap_size_;
+  bitmap_offset_ = KNEW k_uint32[col_num_];
+  col_offset_ = KNEW k_uint32[col_num_];
+  if (bitmap_offset_ == nullptr || col_offset_ == nullptr) {
+    LOG_ERROR("Allocate buffer in DataChunk failed.");
+    return false;
+  }
+  for (k_int32 i = 0; i < col_num_; i++) {
+    bitmap_offset_[i] = bitmap_offset;
+    col_offset_[i] = bitmap_offset + bitmap_size_;
+    bitmap_offset += col_info_[i].fixed_storage_len * capacity_ + bitmap_size_;
   }
 
   return true;
 }
 
-KStatus DataChunk::InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len) {
+KStatus DataChunk::InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len, bool set_not_null) {
   k_uint32 col_offset = row * col_info_[col].fixed_storage_len + col_offset_[col];
 
-  if (IsStringType(col_info_[col].storage_type)) {
+  if (col_info_[col].is_string) {
     std::memcpy(data_ + col_offset, &len, STRING_WIDE);
     std::memcpy(data_ + col_offset + STRING_WIDE, value, len);
   } else {
     std::memcpy(data_ + col_offset, value, len);
   }
-  SetNotNull(row, col);
+  if (set_not_null) {
+    SetNotNull(row, col);
+  }
   return SUCCESS;
 }
 
@@ -330,7 +336,7 @@ DatumPtr DataChunk::GetDataPtr(k_uint32 row, k_uint32 col) {
     return nullptr;
   }
   DatumPtr p = data_ + row * col_info_[col].fixed_storage_len + col_offset_[col];
-  if (IsStringType(col_info_[col].storage_type)) {
+  if (col_info_[col].is_string) {
     p += STRING_WIDE;
   } else if (col_info_[col].storage_type == roachpb::DataType::DECIMAL) {
     p += BOOL_WIDE;
@@ -353,6 +359,9 @@ DatumPtr DataChunk::GetData(k_uint32 col) {
 }
 
 bool DataChunk::IsNull(k_uint32 row, k_uint32 col) {
+  if (!col_info_[col].allow_null) {
+    return false;
+  }
   char* bitmap = reinterpret_cast<char*>(data_ + bitmap_offset_[col]);
   if (bitmap == nullptr) {
     return true;
@@ -1085,7 +1094,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
   switch (field->get_storage_type()) {
     case roachpb::DataType::BOOL: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1106,7 +1115,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1120,7 +1129,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     case roachpb::DataType::INT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1133,7 +1142,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     case roachpb::DataType::SMALLINT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1146,7 +1155,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     case roachpb::DataType::FLOAT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1159,7 +1168,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     case roachpb::DataType::DOUBLE: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1177,7 +1186,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     case roachpb::DataType::BINARY:
     case roachpb::DataType::VARBINARY: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1197,7 +1206,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     case roachpb::DataType::DECIMAL: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
           continue;
@@ -1219,7 +1228,7 @@ void DataChunk::AddRecordByRow(kwdbContext_p ctx, RowBatch* row_batch, k_uint32 
     }
     default: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           SetNull(count_ + row, col);
           row_batch->NextLine();
         }
@@ -1262,7 +1271,7 @@ KStatus DataChunk::AddRecordByColumn(kwdbContext_p ctx, RowBatch* row_batch, Fie
                                       field->get_storage_type());
 
             for (int row = 0; row < row_batch->Count(); ++row) {
-              if (field->isNullable() && field->is_nullable()) {
+              if (field->CheckNull()) {
                 SetNull(count_ + row, col);
               }
               row_batch->NextLine();
@@ -1277,7 +1286,7 @@ KStatus DataChunk::AddRecordByColumn(kwdbContext_p ctx, RowBatch* row_batch, Fie
         case roachpb::DataType::BINARY:
         case roachpb::DataType::VARBINARY: {
           for (int row = 0; row < row_batch->Count(); ++row) {
-            if (field->isNullable() && field->is_nullable()) {
+            if (field->CheckNull()) {
               SetNull(count_ + row, col);
               row_batch->NextLine();
               continue;
@@ -1353,9 +1362,8 @@ k_uint32 DataChunk::Count() {
   return count_;
 }
 
-k_uint32 DataChunk::EstimateCapacity(vector<ColumnInfo>& column_info) {
-  auto col_num = (k_int32) column_info.size();
-  auto row_size = (k_int32) ComputeRowSize(column_info);
+k_uint32 DataChunk::EstimateCapacity(ColumnInfo* column_info, k_int32 col_num) {
+  auto row_size = (k_int32) ComputeRowSize(column_info, col_num);
 
   // (capacity_ + 7)/8 * col_num_ + capacity_ * row_size_ <= DataChunk::SIZE_LIMIT
   k_int32 capacity = (DataChunk::SIZE_LIMIT * 8 - 7 * col_num) / (col_num + 8 * row_size);
@@ -1366,9 +1374,7 @@ k_uint32 DataChunk::EstimateCapacity(vector<ColumnInfo>& column_info) {
   return capacity;
 }
 
-k_uint32 DataChunk::ComputeRowSize(vector<ColumnInfo>& column_info) {
-  k_uint32 col_num = column_info.size();
-
+k_uint32 DataChunk::ComputeRowSize(ColumnInfo *column_info, k_int32 col_num) {
   k_uint32 row_size = 0;
   for (int i = 0; i < col_num; ++i) {
     /**
@@ -1379,7 +1385,7 @@ k_uint32 DataChunk::ComputeRowSize(vector<ColumnInfo>& column_info) {
      * necessary changes on all derived Field classes. Now we temporarily make
      * row size adjustment in several places.
      */
-    if (IsStringType(column_info[i].storage_type)) {
+    if (column_info[i].is_string) {
       row_size += STRING_WIDE;
       column_info[i].fixed_storage_len = column_info[i].storage_len + STRING_WIDE;
     } else if (column_info[i].storage_type == roachpb::DataType::DECIMAL) {
@@ -1403,7 +1409,7 @@ KStatus DataChunk::ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 co
   tag_raw_data.tag_data = rel_data_ptr;
   // get the original rel data pointer
   DatumPtr p = data_ + row * col_info_[col].fixed_storage_len + col_offset_[col];
-  if (IsStringType(col_info_[col].storage_type)) {
+  if (col_info_[col].is_string) {
     std::memcpy(&tag_raw_data.size, p, STRING_WIDE);
     p += STRING_WIDE;
     // copy data into the buffer

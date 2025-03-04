@@ -22,7 +22,9 @@
 #include "ee_field_func_math.h"
 #include "ee_field_func_string.h"
 #include "ee_field_typecast.h"
+#include "ee_field_window.h"
 #include "ee_lexer.h"
+#include "ee_kwthd_context.h"
 #include "ee_parse_query.h"
 #include "ee_pb_plan.pb.h"
 #include "ee_table.h"
@@ -147,6 +149,7 @@ EEIteratorErrCode PostResolve::ResolveOutputFields(kwdbContext_p ctx,
       new_field->set_return_type(field->get_return_type());
       // DataChunk columns are treated as TYPEDATA
       new_field->set_column_type(::roachpb::KWDBKTSColumn::ColumnType::KWDBKTSColumn_ColumnType_TYPE_DATA);
+      new_field->set_allow_null(field->is_allow_null());
       output_fields.push_back(new_field);
     } else {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -180,7 +183,7 @@ EEIteratorErrCode PostResolve::ResolveFilter(kwdbContext_p ctx, Field **field, b
     // resolve binary tree
     *field = ResolveBinaryTree(ctx, expr);
     if (nullptr == *field) {
-      LOG_ERROR("Resolve filter failed, filter is %s.", filter);
+      LOG_ERROR("Resolve filter failed, filter is %s.", filter.c_str());
       code = EEIteratorErrCode::EE_ERROR;
       break;
     }
@@ -1086,6 +1089,29 @@ Field *PostResolve::ResolveFuncOperator(kwdbContext_p ctx, KString &func_name,
     field = KNEW FieldFuncString(func_name, args);
   } else if (func_name == "cast_check_ts") {
     field = KNEW FieldFuncCastCheckTs(args.front(), right);
+  } else if (func_name == "state_window") {
+    field = KNEW FieldFuncStateWindow(args.front());
+    current_thd->wtyp_ = WindowGroupType::EE_WGT_STATE;
+    current_thd->window_field_ = field;
+  } else if (func_name == "event_window") {
+    field = KNEW FieldFuncEventWindow(args.front(), right);
+    current_thd->wtyp_ = WindowGroupType::EE_WGT_EVENT;
+    current_thd->window_field_ = field;
+  } else if (func_name == "session_window") {
+    field = KNEW FieldFuncSessionWindow(args.front(), right);
+    current_thd->wtyp_ = WindowGroupType::EE_WGT_SESSION;
+    current_thd->window_field_ = field;
+  } else if (func_name == "count_window") {
+    field = KNEW FieldFuncCountWindow(args);
+    current_thd->wtyp_ = WindowGroupType::EE_WGT_COUNT;
+    if ((static_cast<FieldFuncCountWindow *>(field))->IsSilding()) {
+      current_thd->wtyp_ = WindowGroupType::EE_WGT_COUNT_SLIDING;
+    }
+    current_thd->window_field_ = field;
+  } else if (func_name == "time_window") {
+    field = KNEW FieldFuncTimeWindow(args, ctx->timezone);
+    current_thd->wtyp_ = WindowGroupType::EE_WGT_TIME;
+    current_thd->window_field_ = field;
   } else {  // MathFields
     if (args.size() == 1) {
       for (k_int32 i = 0; i < mathFuncBuiltinsNum1; i++) {

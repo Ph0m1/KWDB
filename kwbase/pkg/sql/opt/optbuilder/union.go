@@ -25,6 +25,7 @@
 package optbuilder
 
 import (
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
@@ -47,6 +48,9 @@ func (b *Builder) buildUnionClause(
 		desiredTypes = leftScope.makeColumnTypes()
 	}
 	rightScope := b.buildStmt(clause.Right, desiredTypes, inScope)
+	if b.factory.Memo().CheckFlag(opt.GroupWindowUseOrderScan) {
+		panic(pgerror.Newf(pgcode.Syntax, "group window function cannot be used in UNION."))
+	}
 	return b.buildSetOp(clause.Type, clause.All, inScope, leftScope, rightScope)
 }
 

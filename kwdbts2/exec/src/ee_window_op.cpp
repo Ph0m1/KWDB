@@ -82,6 +82,7 @@ WindowOperator::~WindowOperator() {
     }
   }
   group_by_cols_.clear();
+  SafeDeleteArray(output_filter_col_info_);
 }
 
 EEIteratorErrCode WindowOperator::Init(kwdbContext_p ctx) {
@@ -143,29 +144,39 @@ EEIteratorErrCode WindowOperator::Init(kwdbContext_p ctx) {
     }
 
     // init column info used by data chunk.
-    output_col_info_.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      output_col_info_.emplace_back(field->get_storage_length(),
-                                    field->get_storage_type(),
-                                    field->get_return_type());
+    code = InitOutputColInfo(output_fields_);
+    if (code != EEIteratorErrCode::EE_OK) {
+      Return(EEIteratorErrCode::EE_ERROR);
     }
 
     if (nullptr != filter_) {
       output_filter_col_info_ = output_col_info_;
-      output_col_info_.reserve(output_fields_.size() +
+      output_filter_col_num_ = output_col_num_;
+      output_col_num_ = output_fields_.size() +
                                filter_fields_.size() +
-                               win_func_fields_.size());
-
+                               win_func_fields_.size();
+      output_col_info_ = KNEW ColumnInfo[output_col_num_];
+      if (output_col_info_ == nullptr) {
+        EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                      "Insufficient memory");
+        Return(EEIteratorErrCode::EE_ERROR);
+      }
+      k_int32 index = 0;
+      for (index = 0; index < output_filter_col_num_; index++) {
+        output_col_info_[index] = output_filter_col_info_[index];
+      }
       for (auto field : filter_fields_) {
-        output_col_info_.emplace_back(field->get_storage_length(),
-                                      field->get_storage_type(),
-                                      field->get_return_type());
+        output_col_info_[index] =
+            ColumnInfo(field->get_storage_length(), field->get_storage_type(),
+                       field->get_return_type());
+        index++;
       }
 
       for (auto field : win_func_fields_) {
-        output_col_info_.emplace_back(field->get_storage_length(),
-                                      field->get_storage_type(),
-                                      field->get_return_type());
+        output_col_info_[index] =
+            ColumnInfo(field->get_storage_length(), field->get_storage_type(),
+                       field->get_return_type());
+        index++;
       }
     }
     constructDataChunk();
@@ -349,7 +360,7 @@ EEIteratorErrCode WindowOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
               output_queue_.push(std::move(current_data_chunk_));
             }
           }
-          k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_);
+          k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_, output_col_num_);
           if (capacity >= row_batch_->Count()) {
             constructDataChunk();
           } else {
@@ -410,7 +421,7 @@ EEIteratorErrCode WindowOperator::DoFilter(kwdbContext_p ctx) {
   }
   ProcessFilterCols(true);
 
-  constructFilterDataChunk(output_filter_col_info_,
+  constructFilterDataChunk(output_filter_col_info_, output_filter_col_num_,
                            current_data_chunk_->Count());
   if (current_filter_data_chunk_ == nullptr) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -448,7 +459,7 @@ k_int32 WindowOperator::PreComputeRowIndex(RowBatch* row_batch) {
   Field* field = win_func_fields_[win_func_fields_.size() - 1];
   row_batch->ResetLine();
   for (int row = 0; row < row_batch->Count(); ++row) {
-    if (field->isNullable() && field->is_nullable()) {
+    if (field->CheckNull()) {
       row_batch->NextLine();
       continue;
     }
@@ -520,7 +531,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
   switch (field->get_storage_type()) {
     case roachpb::DataType::BOOL: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!(row == row_start_index_)) {
             current_data_chunk_->SetNull(count_index_ + row - SkipRowCount(row),
                                          col);
@@ -548,7 +559,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     case roachpb::DataType::DATE:
     case roachpb::DataType::BIGINT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!((row == row_start_index_) && !is_diff_func)) {
             current_data_chunk_->SetNull(
                 count_index_ + row -
@@ -576,7 +587,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     case roachpb::DataType::INT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!((row == row_start_index_) && !is_diff_func)) {
             current_data_chunk_->SetNull(
                 count_index_ + row -
@@ -603,7 +614,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     case roachpb::DataType::SMALLINT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!((row == row_start_index_) && !is_diff_func)) {
             current_data_chunk_->SetNull(
                 count_index_ + row -
@@ -630,7 +641,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     case roachpb::DataType::FLOAT: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!((row == row_start_index_) && !is_diff_func)) {
             current_data_chunk_->SetNull(
                 count_index_ + row -
@@ -657,7 +668,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     case roachpb::DataType::DOUBLE: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!((row == row_start_index_) && !is_diff_func)) {
             current_data_chunk_->SetNull(
                 count_index_ + row -
@@ -689,7 +700,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     case roachpb::DataType::BINARY:
     case roachpb::DataType::VARBINARY: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!(row == row_start_index_)) {
             current_data_chunk_->SetNull(count_index_ + row - SkipRowCount(row),
                                          col);
@@ -716,7 +727,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     case roachpb::DataType::DECIMAL: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!(row == row_start_index_)) {
             current_data_chunk_->SetNull(count_index_ + row - SkipRowCount(row),
                                          col);
@@ -745,7 +756,7 @@ void WindowOperator::ProcessDataValue(kwdbContext_p ctx, RowBatch* row_batch,
     }
     default: {
       for (int row = 0; row < row_batch->Count(); ++row) {
-        if (field->isNullable() && field->is_nullable()) {
+        if (field->CheckNull()) {
           if (!((row == row_start_index_) && !is_diff_func)) {
             current_data_chunk_->SetNull(
                 count_index_ + row - (diff_first ? 1 : SkipRowCount(row)), col);

@@ -178,7 +178,10 @@ func (a *AggregatorSpec) summary() (string, []string) {
 	}
 	if len(a.OrderedGroupCols) > 0 {
 		details = append(details, fmt.Sprintf("Ordered: %s", colListStr(a.OrderedGroupCols)))
+	} else if a.GroupWindowId >= 0 {
+		details = append(details, fmt.Sprint("GroupWindowForceOrdered: true"))
 	}
+
 	for _, agg := range a.Aggregations {
 		var buf bytes.Buffer
 		buf.WriteString(agg.Func.String())
@@ -311,7 +314,6 @@ func (tr *TSTagReaderSpec) summary() (string, []string) {
 	for _, val := range tr.PrimaryTags {
 		res = append(res, fmt.Sprintf("ptag [%v]: %v", val.Colid, val.TagValues))
 	}
-
 	return "TagReader", res
 }
 

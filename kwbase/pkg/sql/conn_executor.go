@@ -2315,6 +2315,9 @@ func (ex *connExecutor) resetEvalCtx(evalCtx *extendedEvalContext, txn *kv.Txn, 
 	evalCtx.Mon = ex.state.mon
 	evalCtx.PrepareOnly = false
 	evalCtx.SkipNormalize = false
+	evalCtx.GroupWindow = &tree.GroupWindow{
+		GroupWindowFunc: tree.GroupWindowUnknown,
+	}
 }
 
 // getTransactionState retrieves a text representation of the given state.

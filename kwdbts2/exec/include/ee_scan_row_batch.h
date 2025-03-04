@@ -69,6 +69,17 @@ class ScanRowBatch : public RowBatch {
     res_.setColumnNum(table_->scan_cols_.size());
   }
 
+  void Copy(ScanRowBatch *handle) {
+    typ_ = RowBatchType::RowBatchTypeScan;
+    stage_ = Stage::STAGE_SCAN;
+    tagdata_ = handle->tagdata_;
+    tag_bitmap_ = handle->tag_bitmap_;
+    tag_col_offset_ = handle->tag_col_offset_;
+    table_ = handle->table_;
+    tag_rowbatch_ = handle->tag_rowbatch_;
+    res_.setColumnNum(table_->scan_cols_.size());
+  }
+
   char *GetData(k_uint32 col, k_uint32 offset,
                 roachpb::KWDBKTSColumn::ColumnType ctype,
                 roachpb::DataType dt) override;
@@ -112,6 +123,7 @@ class ScanRowBatch : public RowBatch {
 
   virtual void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
                       roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt);
+  virtual bool SetCurrentLine(k_int32 line);
   void SetCount(k_uint32 count) {
     if (is_filter_) {
       effect_count_ = count;
@@ -128,6 +140,7 @@ class ReverseScanRowBatch : public ScanRowBatch {
   void ResetLine() override;
   void CopyColumnData(k_uint32 col_idx, char* dest, k_uint32 data_len,
                       roachpb::KWDBKTSColumn::ColumnType ctype, roachpb::DataType dt) override;
+  bool SetCurrentLine(k_int32 line) override;
 };
 
 };  // namespace kwdbts

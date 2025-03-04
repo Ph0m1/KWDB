@@ -2037,6 +2037,7 @@ INSERT 2
                                         | vectorized   | false
   root                                  |              |
    ├── render                           |              |
+   │    │                               | engine type  | time series
    │    │                               | ?column?     | 2025.0 = ANY (SELECT e4 FROM test_ts.ts_table2)
    │    │                               | case         | CASE e2 WHEN 1000000 THEN 10 WHEN 2000000 THEN 20 END
    │    └── limit                       |              |
@@ -2059,7 +2060,7 @@ INSERT 2
              └── ts scan                |              |
                                         | ts-table     | ts_table2
                                         | access mode  | metaTable
-(26 rows)
+(27 rows)
 > explain select extract('year', localtimestamp()) from test_ts.ts_table as t1 join test_ts.ts_table2 as t2 on t1.e1=t2.e1 order by t1.e2;
                 tree               |    field    | description
 -----------------------------------+-------------+--------------

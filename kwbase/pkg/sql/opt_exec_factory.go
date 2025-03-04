@@ -632,14 +632,16 @@ func (ef *execFactory) ConstructScalarGroupBy(
 		engine = tree.EngineTypeTimeseries
 	}
 	n := &groupNode{
-		plan:            input.(planNode),
-		funcs:           make([]*aggregateFuncHolder, 0, len(aggregations)),
-		columns:         make(sqlbase.ResultColumns, 0, len(aggregations)),
-		isScalar:        true,
-		aggFuncs:        funcs,
-		engine:          engine,
-		addSynchronizer: addSynchronizer,
-		optType:         private.OptFlags,
+		plan:               input.(planNode),
+		funcs:              make([]*aggregateFuncHolder, 0, len(aggregations)),
+		columns:            make(sqlbase.ResultColumns, 0, len(aggregations)),
+		groupWindowID:      -1,
+		groupWindowTSColID: -1,
+		isScalar:           true,
+		aggFuncs:           funcs,
+		engine:             engine,
+		addSynchronizer:    addSynchronizer,
+		optType:            private.OptFlags,
 	}
 	if err := ef.addAggregations(n, aggregations); err != nil {
 		return nil, err
@@ -663,17 +665,23 @@ func (ef *execFactory) ConstructGroupBy(
 	if execInTSEngine {
 		engine = tree.EngineTypeTimeseries
 	}
+	var groupWindowID int32 = -1
+	if private.GroupWindowId > 0 {
+		groupWindowID = int32(private.GroupWindowIdOrdinal)
+	}
 	n := &groupNode{
-		plan:             input.(planNode),
-		funcs:            make([]*aggregateFuncHolder, 0, len(groupCols)+len(aggregations)),
-		columns:          make(sqlbase.ResultColumns, 0, len(groupCols)+len(aggregations)+len(*funcs)),
-		groupCols:        make([]int, len(groupCols)),
-		groupColOrdering: groupColOrdering,
-		gapFillColID:     int32(private.TimeBucketGapFillColIdOrdinal),
-		isScalar:         false,
-		reqOrdering:      ReqOrdering(reqOrdering),
-		aggFuncs:         funcs,
-		engine:           engine,
+		plan:               input.(planNode),
+		funcs:              make([]*aggregateFuncHolder, 0, len(groupCols)+len(aggregations)),
+		columns:            make(sqlbase.ResultColumns, 0, len(groupCols)+len(aggregations)+len(*funcs)),
+		groupCols:          make([]int, len(groupCols)),
+		groupColOrdering:   groupColOrdering,
+		gapFillColID:       int32(private.TimeBucketGapFillColIdOrdinal),
+		groupWindowID:      groupWindowID,
+		groupWindowTSColID: int32(private.GroupWindowTSColOrdinal),
+		isScalar:           false,
+		reqOrdering:        ReqOrdering(reqOrdering),
+		aggFuncs:           funcs,
+		engine:             engine,
 		//statisticIndex:   private.AggIndex,
 		addSynchronizer: addSynchronizer,
 		optType:         private.OptFlags,

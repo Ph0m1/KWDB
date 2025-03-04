@@ -24,7 +24,8 @@ namespace kwdbts {
 // relational batch queue to receive relational data from ME for multiple model processing
 class RelBatchQueue {
  private:
-  std::vector<ColumnInfo> output_col_info_;
+  ColumnInfo* output_col_info_{nullptr};
+  k_int32 output_col_num_{0};
   std::mutex mutex_;
   std::condition_variable cv;
 

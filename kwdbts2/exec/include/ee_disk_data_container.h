@@ -27,15 +27,15 @@ namespace kwdbts {
 
 class DiskDataContainer : public DataContainer {
  public:
-  explicit DiskDataContainer(std::vector<ColumnInfo>& col_info)
-      : col_info_(col_info) {
-    row_size_ = DataChunk::ComputeRowSize(col_info);
+  explicit DiskDataContainer(ColumnInfo* col_info, k_int32 col_num)
+      : col_info_(col_info), col_num_(col_num) {
+    row_size_ = DataChunk::ComputeRowSize(col_info, col_num);
     capacity_ = ComputeCapacity();
   }
 
-  DiskDataContainer(std::vector<ColumnOrderInfo>& order_info, std::vector<ColumnInfo>& col_info)
-      : order_info_(order_info), col_info_(col_info) {
-    row_size_ = DataChunk::ComputeRowSize(col_info);
+  DiskDataContainer(std::vector<ColumnOrderInfo>& order_info, ColumnInfo* col_info, k_int32 col_num)
+      : order_info_(order_info), col_info_(col_info), col_num_(col_num) {
+    row_size_ = DataChunk::ComputeRowSize(col_info, col_num);
     capacity_ = ComputeCapacity();
   }
 
@@ -59,7 +59,7 @@ class DiskDataContainer : public DataContainer {
 
   DatumPtr GetData(k_uint32 col) override;
 
-  std::vector<ColumnInfo>& GetColumnInfo() override { return col_info_; }
+  ColumnInfo* GetColumnInfo() override { return col_info_; }
 
   k_int32 NextLine() override;
 
@@ -83,7 +83,8 @@ class DiskDataContainer : public DataContainer {
   std::vector<ColumnOrderInfo> order_info_;
   std::vector<k_uint32> selection_;
 
-  std::vector<ColumnInfo> col_info_;  // column info
+  ColumnInfo* col_info_{nullptr};  // column info
+  k_int32 col_num_{0};
   k_uint32 row_size_{0};
   k_uint32 capacity_{0};
   k_uint32 count_{0};  // total row number

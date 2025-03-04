@@ -43,7 +43,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 	"github.com/shirou/gopsutil/mem"
@@ -1182,13 +1181,13 @@ func (m *Memo) dealWithGroupBy(src RelExpr, child RelExpr, ret *aggCrossEngCheck
 	m.checkStatisticOpt(&child, aggs, gp)
 
 	if ret.commonRet.canTimeBucketOptimize {
-		checkOptPruneFinalAgg(gp, m.Metadata(), m.CheckHelper.onlyOnePTagValue)
+		checkOptPruneFinalAgg(gp, m.Metadata(), m.CheckOnlyOnePTagValue())
 
 		gp.OptFlags |= opt.TimeBucketPushAgg
 		ret.commonRet.canLimitOptimize = true
 
 		// single device can prune local agg
-		if m.CheckHelper.onlyOnePTagValue || gp.OptFlags.PruneFinalAggOpt() {
+		if m.CheckOnlyOnePTagValue() || gp.OptFlags.PruneFinalAggOpt() {
 			gp.OptFlags |= opt.PruneLocalAgg
 			// set ts scan use ordered scan table
 			walkDealTSScan(src, setOrderedForce)
@@ -1327,7 +1326,7 @@ func (m *Memo) tsScanFillStatistic(tsScan *TSScanExpr, gp *GroupingPrivate) {
 		return
 	}
 
-	if gp.GroupingCols.Len() > 0 || m.CheckHelper.onlyOnePTagValue {
+	if gp.GroupingCols.Len() > 0 || m.CheckOnlyOnePTagValue() {
 		gp.OptFlags |= opt.PruneFinalAgg
 	}
 
@@ -1563,6 +1562,24 @@ func (m *Memo) CheckWhiteListAndAddSynchronizeImp(src *RelExpr) (ret CrossEngChe
 			addSortExprForTwaFunc(source, sortExpr, ok)
 		}
 
+		// set sortExpr to input of project if group window function not exec in ts engine.
+		// sort columns are ptag(if group cols contain ptag) and tsCol.
+		if proj, ok1 := input.(*ProjectExpr); ok1 && !retAgg.commonRet.execInTSEngine &&
+			m.CheckFlag(opt.GroupWindowUseOrderScan) {
+			sortExpr1 := &SortExpr{Input: proj.Input}
+			provided := sortExpr1.ProvidedPhysical()
+			if source.GroupingCols.Len() > 1 {
+				source.GroupingCols.ForEach(func(colID opt.ColumnID) {
+					if m.Metadata().ColumnMeta(colID).IsPrimaryTag() {
+						provided.Ordering = append(provided.Ordering, opt.MakeOrderingColumn(colID, false))
+					}
+				})
+			}
+			provided.Ordering = append(provided.Ordering, opt.MakeOrderingColumn(opt.ColumnID(TsColID), false))
+			proj.Input = sortExpr1
+			source.Input = proj
+		}
+
 		if source.OptFlags.PruneFinalAggOpt() {
 			m.addOrderedColumn(source.bestProps())
 		}
@@ -1728,6 +1745,13 @@ func (m *Memo) dealCanNotAddSynchronize(child *RelExpr) CrossEngCheckResults {
 	return ret
 }
 
+// set OrderedScanType with opt.ForceOrderedScan
+func (m *Memo) setForceOrderScan(source *TSScanExpr) {
+	if m.CheckFlag(opt.DiffUseOrderScan) || m.CheckFlag(opt.GroupWindowUseOrderScan) {
+		source.OrderedScanType = opt.ForceOrderedScan
+	}
+}
+
 // CheckTSScan deal with memo.TSScanExpr of memo tree.
 // Record the columns in PushHelper for future memo expr to
 // determine if they can be executed in ts engine.
@@ -1776,6 +1800,8 @@ func (m *Memo) CheckTSScan(source *TSScanExpr) (ret CrossEngCheckResults) {
 			}
 		}
 	}
+
+	m.setForceOrderScan(source)
 
 	if source.OrderedScanType != opt.NoOrdered {
 		m.CheckHelper.orderedCols.Add(source.Table.ColumnID(0))
@@ -1836,7 +1862,7 @@ func (m *Memo) checkSelect(source *SelectExpr) (ret CrossEngCheckResults) {
 		}
 
 		if ret.execInTSEngine {
-			if CheckFilterExprCanExecInTSEngine(filter.Condition, ExprPosSelect, m.CheckHelper.whiteList.CheckWhiteListParam) {
+			if CheckFilterExprCanExecInTSEngine(filter.Condition, ExprPosSelect, m.CheckHelper.whiteList.CheckWhiteListParam, m.CheckOnlyOnePTagValue()) {
 				if ret.canTimeBucketOptimize {
 					ret.canTimeBucketOptimize = m.checkFilterOptTimeBucket(filter.Condition)
 				}
@@ -1893,7 +1919,7 @@ func (m *Memo) checkProject(source *ProjectExpr) (ret CrossEngCheckResults) {
 		if ret.execInTSEngine {
 			// check if element of ProjectionExpr can execute in ts engine.
 			if execInTSEngine, hashcode := CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), ExprPosProjList,
-				m.CheckHelper.whiteList.CheckWhiteListParam, false); execInTSEngine {
+				m.CheckHelper.whiteList.CheckWhiteListParam, false, m.CheckOnlyOnePTagValue()); execInTSEngine {
 				m.AddColumn(proj.Col, "", GetExprType(proj.Element), ExprPosProjList, hashcode, false)
 			} else {
 				selfExecInTS = false
@@ -1954,12 +1980,12 @@ func (m *Memo) checkGrouping(cols opt.ColSet, optTimeBucket *bool) bool {
 	execInTSEngine := true
 	cols.ForEach(func(colID opt.ColumnID) {
 		colMeta := m.metadata.ColumnMeta(colID)
-		if !m.CheckExecInTS(colID, ExprPosGroupBy) || colMeta.Type.Family() == types.BytesFamily {
+		if !m.CheckExecInTS(colID, ExprPosGroupBy) {
 			execInTSEngine = false
 		}
 
 		if v, ok := m.CheckHelper.PushHelper.Find(colID); ok {
-			if !v.IsTimeBucket && !m.metadata.ColumnMeta(colID).IsPrimaryTag() {
+			if !v.IsTimeBucket && !colMeta.IsPrimaryTag() {
 				*optTimeBucket = false
 			}
 		} else {
@@ -1969,7 +1995,14 @@ func (m *Memo) checkGrouping(cols opt.ColSet, optTimeBucket *bool) bool {
 	if cols.Empty() && (*optTimeBucket) {
 		*optTimeBucket = false
 	}
-
+	// check whether group window function can exec in ts.
+	// case1: there is only one primary tag value in filters and group cols has group window function only
+	// case2: group cols has group window function and primary tag t
+	if m.CheckFlag(opt.GroupWindowUseOrderScan) {
+		if !m.CheckOnlyOnePTagValue() && cols.Len() < 2 {
+			execInTSEngine = false
+		}
+	}
 	return execInTSEngine
 }
 
@@ -2389,6 +2422,11 @@ func (m *Memo) SetTsDop(num uint32) {
 	m.tsDop = num
 }
 
+// CheckOnlyOnePTagValue return onlyOnePTagValue
+func (m *Memo) CheckOnlyOnePTagValue() bool {
+	return m.CheckHelper.onlyOnePTagValue
+}
+
 // InsideOutOptHelper records agg functions and projections which can push down ts engine side.
 type InsideOutOptHelper struct {
 	Aggs     []AggregationsItem
@@ -2532,4 +2570,43 @@ func addSortExprForTwaFunc(source RelExpr, sortExpr *SortExpr, hasSortExpr bool)
 			}
 		}
 	}
+}
+
+const (
+	// StateWindow name
+	StateWindow = "state_window"
+	// EventWindow name
+	EventWindow = "event_window"
+	// CountWindow name
+	CountWindow = "count_window"
+	// TimeWindow name
+	TimeWindow = "time_window"
+	// SessionWindow name
+	SessionWindow = "session_window"
+
+	// TsColID ts column ID
+	TsColID = 1
+)
+
+var groupWindowNamelist = []string{StateWindow, EventWindow, CountWindow, TimeWindow, SessionWindow}
+
+// CheckGroupWindowExist if expr contains grouping window function, return true
+func CheckGroupWindowExist(expr opt.Expr) (string, bool) {
+	if expr != nil {
+		if f, ok := expr.(*FunctionExpr); ok {
+			for _, name := range groupWindowNamelist {
+				if f.Name == name {
+					return name, true
+				}
+			}
+		}
+		if expr.ChildCount() > 0 {
+			for i := 0; i < expr.ChildCount(); i++ {
+				if name, ok := CheckGroupWindowExist(expr.Child(i)); ok {
+					return name, true
+				}
+			}
+		}
+	}
+	return "", false
 }

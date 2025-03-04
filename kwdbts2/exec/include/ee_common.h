@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "me_metadata.pb.h"
 #include "ee_field.h"
 #include "ee_field_agg.h"
@@ -42,4 +44,6 @@ KStatus CreateAggField(k_int32 i, Field* input_field, BaseOperator* agg_op, Fiel
 // convert field to chunk
 void FieldsToChunk(Field** fields, k_uint32 field_num, k_uint32 row, DataChunkPtr& chunk);
 
+KTimestampTz TimeAddDuration(KTimestampTz ts, k_int64 duration,
+                             k_bool var_interval, k_bool year_bucket);
 }       // namespace kwdbts

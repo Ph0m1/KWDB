@@ -54,6 +54,10 @@ type groupNode struct {
 	// gapFillColID representing the column ID of timebucketGapFill in the group.
 	gapFillColID int32
 
+	groupWindowID int32
+
+	groupWindowTSColID int32
+
 	// isScalar is set for "scalar groupby", where we want a result
 	// even if there are no input rows, e.g. SELECT MIN(x) FROM t.
 	isScalar bool

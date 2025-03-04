@@ -198,13 +198,12 @@ void GenerateRelData(vector<ColumnInfo>& data_type, vector<vector<char*>>& batch
     ASSERT_EQ(batch_data[0].size(), data_type.size());
   }
   k_uint32 capacity = batch_data.size();
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(capacity);
-
-  for (int i = 0; i < data_type.size(); ++i) {
-    col_info.emplace_back(data_type[i]);
+  k_int32 col_num = data_type.size();
+  ColumnInfo *col_info = new ColumnInfo[col_num];
+  for (int i = 0; i < data_type.size(); i++) {
+    col_info[i] = data_type[i];
   }
-  chunk = std::make_unique<kwdbts::DataChunk>(col_info, capacity);
+  chunk = std::make_unique<kwdbts::DataChunk>(col_info, col_num, capacity);
   chunk->Initialize();
 
   for (int i = 0; i < capacity; i++) {
@@ -242,7 +241,7 @@ class TestHashTagScanOp : public OperatorTestBase {
 
  protected:
   roachpb::CreateTsTable meta_;
-
+  ColumnInfo col_info_[3];
   void SetUp() override {
     // OperatorTestBase::SetUp();
     ExecPool::GetInstance().Init(ctx_);
@@ -344,6 +343,7 @@ class TestHashTagScanOp : public OperatorTestBase {
     for (int i = 0; i < relTableData[case_num].size(); ++i) {
       GenerateRelData(relTableColumnType[i], relTableData[case_num][i], rel_data_chunk);
       PushRelData(rel_data_chunk->GetData(), rel_data_chunk->Count(), request, response);
+      delete[](rel_data_chunk->GetColumnInfo());
     }
 
     // Complete rel data push down
@@ -375,6 +375,7 @@ class TestHashTagScanOp : public OperatorTestBase {
     ASSERT_EQ(response->value, nullptr);
     ASSERT_EQ(response->code, -1);
     CloseHashTagScan(request, response);
+    delete[](resultChunk->GetColumnInfo());
   }
 };
 

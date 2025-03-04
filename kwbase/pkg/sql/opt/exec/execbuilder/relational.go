@@ -697,9 +697,6 @@ func (b *Builder) buildTimesScan(scan *memo.TSScanExpr) (execPlan, error) {
 	if !b.buildArrayTypedExpr(scan.PrimaryTagFilter, &ctx, &primaryFilter) {
 		return execPlan{}, nil
 	}
-	if b.mem.CheckFlag(opt.DiffUseOrderScan) && b.mem.CheckFlag(opt.SingleMode) {
-		scan.OrderedScanType = opt.ForceOrderedScan
-	}
 
 	value, ok := b.mem.MultimodelHelper.TableData.Load(scan.Table)
 	var tableInfo memo.TableInfo
@@ -2110,9 +2107,11 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 	groupingCols := private.GroupingCols
 	funcs := private.Func
 	groupingColIdx := make([]exec.ColumnOrdinal, 0, groupingCols.Len())
+	var groupOrdering physical.OrderingChoice
 	for i, ok := groupingCols.Next(0); ok; i, ok = groupingCols.Next(i + 1) {
 		ep.outputCols.Set(int(i), len(groupingColIdx))                     // add group by col to output
 		groupingColIdx = append(groupingColIdx, input.getColumnOrdinal(i)) // record group by cols ordinal column id
+		groupOrdering.AppendCol(i, false)
 	}
 	aggregations := *groupBy.Child(1).(*memo.AggregationsExpr)
 	aggInfos := make([]exec.AggInfo, len(aggregations))
@@ -2142,13 +2141,26 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 	} else {
 		var groupingColOrder sqlbase.ColumnOrdering
 		if groupBy.RequiredPhysical() != nil {
-			groupingColOrder = input.sqlOrdering(ordering.StreamingGroupingColOrdering(
-				private, &groupBy.RequiredPhysical().Ordering,
-			))
 			if private.TimeBucketGapFillColId > 0 {
 				// get ordinal col id from TimeBucketGapFillColId.
 				private.TimeBucketGapFillColIdOrdinal = opt.ColumnID(input.getColumnOrdinal(private.TimeBucketGapFillColId))
 			}
+			if private.GroupWindowId > 0 {
+				// we must use order aggregation if sql has group window function, so we must add group column to order column of aggregation.
+				if !groupBy.IsTSEngine() {
+					private.Ordering = groupOrdering
+				}
+				private.GroupWindowIdOrdinal = opt.ColumnID(input.getColumnOrdinal(private.GroupWindowId))
+				// set ts col to GroupWindowTSColOrdinal
+				if v, ok := input.outputCols.Get(memo.TsColID); ok {
+					private.GroupWindowTSColOrdinal = opt.ColumnID(v)
+				} else {
+					private.GroupWindowTSColOrdinal = -1
+				}
+			}
+			groupingColOrder = input.sqlOrdering(ordering.StreamingGroupingColOrdering(
+				private, &groupBy.RequiredPhysical().Ordering,
+			))
 		}
 
 		reqOrdering := ep.reqOrdering(groupBy)

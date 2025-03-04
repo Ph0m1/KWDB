@@ -1266,7 +1266,7 @@ SQLSTATE: 42725
 ERROR: time_bucket_gapfill(): second arg should be a positive interval
 SQLSTATE: 22023
 > select time_bucket_gapfill(k_timestamp,'5.5s') as tb, e2 from test_select_timebucket_gapfill.tb group by tb,e2 order by tb,e2 limit 10;
-ERROR: time_bucket_gapfill(): invalid input interval time for time_bucket or time_bucket_gapfill
+ERROR: time_bucket_gapfill(): invalid input interval time
 SQLSTATE: 22023
 > select time_bucket_gapfill(k_timestamp,'-1000000s') as tb, e2 from test_select_timebucket_gapfill.tb group by tb,e2 order by tb,e2 limit 10;
 ERROR: time_bucket_gapfill(): second arg should be a positive interval
@@ -1306,16 +1306,16 @@ SQLSTATE: 22007
 ERROR: time_bucket_gapfill(): wrong interval time unit for time_bucket or time_bucket_gapfill
 SQLSTATE: 22023
 > select time_bucket_gapfill(k_timestamp,'5min1s') as tb from test_select_timebucket_gapfill.tb group by tb order by tb limit 10;
-ERROR: time_bucket_gapfill(): invalid input interval time for time_bucket or time_bucket_gapfill
+ERROR: time_bucket_gapfill(): invalid input interval time
 SQLSTATE: 22023
 > select time_bucket_gapfill(k_timestamp,'2h3min') as tb from test_select_timebucket_gapfill.tb group by tb order by tb limit 10;
-ERROR: time_bucket_gapfill(): invalid input interval time for time_bucket or time_bucket_gapfill
+ERROR: time_bucket_gapfill(): invalid input interval time
 SQLSTATE: 22023
 > select time_bucket_gapfill(k_timestamp,'1d2w') as tb from test_select_timebucket_gapfill.tb group by tb order by tb limit 10;
-ERROR: time_bucket_gapfill(): invalid input interval time for time_bucket or time_bucket_gapfill
+ERROR: time_bucket_gapfill(): invalid input interval time
 SQLSTATE: 22023
 > select time_bucket_gapfill(k_timestamp,'2y5mons') as tb from test_select_timebucket_gapfill.tb group by tb order by tb limit 10;
-ERROR: time_bucket_gapfill(): invalid input interval time for time_bucket or time_bucket_gapfill
+ERROR: time_bucket_gapfill(): invalid input interval time
 SQLSTATE: 22023
 > select time_bucket_gapfill(,'10s') as tb from test_select_timebucket_gapfill.tb group by tb order by tb limit 10;
 ERROR: at or near ",": syntax error

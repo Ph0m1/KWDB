@@ -19,6 +19,7 @@
 #include <random>
 #include <sstream>
 
+#include "ee_common.h"
 #include "ee_crc32.h"
 #include "ee_field_common.h"
 #include "ee_fnv.h"
@@ -766,7 +767,7 @@ Field *FieldFuncRightShift::field_to_copy() {
 }
 
 k_int64 FieldFuncTimeBucket::ValInt() {
-  if (args_[0]->isNullable() && args_[0]->is_nullable()) {
+  if (args_[0]->CheckNull()) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
                                   "time_bucket(): first arg can not be null.");
     return 0;
@@ -794,13 +795,8 @@ k_int64 FieldFuncTimeBucket::ValInt() {
     } else {
       // use 0000-01-01 00:00:00 as start
       // -62135596800000 is the timestamp of 0000-01-01 00:00:00
-      k_int64 interval =
-          ((original_timestamp % interval_seconds_) + time_diff_mo_) %
-          interval_seconds_;
-      if (interval < 0) {
-        interval = interval_seconds_ + interval;
-      }
-      last_time_bucket_value_ = original_timestamp - interval;
+      // Negative timestamp needs to be rounded down
+      last_time_bucket_value_ = CALCULATE_TIME_BUCKET_VALUE(original_timestamp, time_diff_mo_, interval_seconds_);
       return last_time_bucket_value_;
     }
   } else {
@@ -1481,14 +1477,12 @@ Field *FieldFuncCase::field_to_copy() {
 }
 
 k_bool FieldFuncCase::is_nullable() {
-  if (arg_count_ == 1) {
-    k_int64 Val_left = args_[0]->ValInt();
-    if (!args_[0]->is_condition_met()) {
-      return KTRUE;
+  for (k_int32 i = 0; i < arg_count_; i++) {
+    if (!args_[i]->is_nullable()) {
+      return KFALSE;
     }
-    return args_[0]->is_nullable();
   }
-  return args_[0]->is_nullable() || args_[1]->is_nullable();
+  return KTRUE;
 }
 
 k_bool FieldFuncCase::is_condition_met() { return condition_met; }
@@ -1508,7 +1502,7 @@ k_int64 FieldFuncThen::ValInt() {
 }
 
 k_double64 FieldFuncThen::ValReal() {
-  if (args_[0]->ValReal()) {
+  if (args_[0]->ValInt()) {
     condition_met = KTRUE;
     return args_[1]->ValReal();
   }
@@ -1521,8 +1515,7 @@ String FieldFuncThen::ValStr() {
   if (nullptr != ptr) {
     return FieldFunc::ValStr(ptr);
   } else {
-    String s1 = args_[0]->ValStr();
-    if (s1.getptr() == "1") {
+    if (args_[0]->ValInt()) {
       condition_met = KTRUE;
       return args_[1]->ValStr();
     }
@@ -1545,7 +1538,7 @@ k_bool FieldFuncThen::is_nullable() {
       return args_[1]->is_nullable();
     }
   }
-  return KFALSE;
+  return KTRUE;
 }
 
 k_int64 FieldFuncElse::ValInt() {

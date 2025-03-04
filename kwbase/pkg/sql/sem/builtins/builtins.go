@@ -4482,6 +4482,308 @@ may increase either contention or retry errors, or both.`,
 			Info:       "time_bucket_gapfill groups timestamps by interval.",
 		},
 	),
+	"state_window": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"col", types.Int}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				evalCtx.GroupWindow.GroupWindowFunc = tree.StateWindow
+				return args[0], nil
+			},
+			Info: "use int or string to identify the state of the device, same state is a group. close the group when the state changes.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"col", types.Bool}},
+			ReturnType: tree.FixedReturnType(types.Bool),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				evalCtx.GroupWindow.GroupWindowFunc = tree.StateWindow
+				return args[0], nil
+			},
+			Info: "use int or string to identify the state of the device, same state is a group. close the group when the state changes.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"col", types.VarChar}},
+			ReturnType: tree.FixedReturnType(types.VarChar),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				evalCtx.GroupWindow.GroupWindowFunc = tree.StateWindow
+				return args[0], nil
+			},
+			Info: "use int or string to identify the state of the device, same state is a group. close the group when the state changes.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"col", types.Bytes}},
+			ReturnType: tree.FixedReturnType(types.Bytes),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				evalCtx.GroupWindow.GroupWindowFunc = tree.StateWindow
+				return args[0], nil
+			},
+			Info: "use int or string to identify the state of the device, same state is a group. close the group when the state changes.",
+		},
+	),
+	"event_window": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"start", types.Bool}, {"end", types.Bool}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				evalCtx.GroupWindow.GroupWindowFunc = tree.EventWindow
+				var result1, result2 *tree.DBool
+				var ok bool
+				if result1, ok = args[0].(*tree.DBool); !ok {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "start arg should be bool.")
+				}
+				if result2, ok = args[1].(*tree.DBool); !ok {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "end arg should be bool.")
+				}
+				evalCtx.GroupWindow.EventWindowHelper = tree.EventWindowHelper{
+					StartFlag: bool(*result1),
+					EndFlag:   bool(*result2),
+				}
+				return tree.NewDInt(0), nil
+			},
+			Info: "group based on the start and end conditions.",
+		},
+	),
+	"session_window": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}, {"interval", types.String}},
+			ReturnType: tree.FixedReturnType(types.Timestamp),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				if evalCtx.GroupWindow.GroupWindowFunc == tree.GroupWindowUnknown {
+					if _, ok := args[0].(*tree.DTimestamp); !ok {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg should be Timestamp or TimestampTZ.")
+					}
+					intervalStr, ok := args[1].(*tree.DString)
+					if !ok {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg should be string.")
+					}
+					dur, err := parseIntervalForSessionWindow(string(*intervalStr))
+					if err != nil {
+						return nil, err
+					}
+					evalCtx.GroupWindow.SessionWindowHelper = tree.SessionWindowHelper{Dur: dur}
+					evalCtx.GroupWindow.GroupWindowFunc = tree.SessionWindow
+				}
+				return args[0], nil
+			},
+			Info: "group based on the session_window.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamptz", types.TimestampTZ}, {"interval", types.String}},
+			ReturnType: tree.FixedReturnType(types.TimestampTZ),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				if evalCtx.GroupWindow.GroupWindowFunc == tree.GroupWindowUnknown {
+					if _, ok := args[0].(*tree.DTimestampTZ); !ok {
+						return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "first arg should be Timestamp or TimestampTZ.")
+					}
+					intervalStr, ok := args[1].(*tree.DString)
+					if !ok {
+						return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "first arg should be string.")
+					}
+					dur, err := parseIntervalForSessionWindow(string(*intervalStr))
+					if err != nil {
+						return nil, err
+					}
+					evalCtx.GroupWindow.SessionWindowHelper = tree.SessionWindowHelper{Dur: dur}
+					evalCtx.GroupWindow.GroupWindowFunc = tree.SessionWindow
+				}
+				return args[0], nil
+			},
+			Info: "group based on the session_window.",
+		},
+	),
+	"count_window": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"count_val", types.Int}, {"sliding_value", types.Int}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				var windowNum, slidingWindowSize *tree.DInt
+				var ok bool
+				if evalCtx.GroupWindow.GroupWindowFunc == tree.GroupWindowUnknown {
+					if windowNum, ok = args[0].(*tree.DInt); !ok {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg should be int.")
+					}
+					if slidingWindowSize, ok = args[1].(*tree.DInt); !ok {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "second arg should be int.")
+					}
+					if *windowNum < *slidingWindowSize || *slidingWindowSize <= 0 || *windowNum <= 0 {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "ERROR: invalid sliding value.")
+					}
+					evalCtx.GroupWindow.CountWindowHelper = tree.CountWindowHelper{
+						WindowNum:         int(*windowNum),
+						SlidingWindowSize: int(*slidingWindowSize),
+						IsSlide:           *windowNum != *slidingWindowSize,
+					}
+					evalCtx.GroupWindow.GroupWindowFunc = tree.CountWindow
+				}
+				return tree.NewDInt(0), nil
+			},
+			Info: "group based on the count of data.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"count_val", types.Int}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				var windowNum *tree.DInt
+				var ok bool
+				if evalCtx.GroupWindow.GroupWindowFunc == tree.GroupWindowUnknown {
+					if windowNum, ok = args[0].(*tree.DInt); !ok {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg should be int.")
+					}
+					if *windowNum <= 0 {
+						return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "ERROR: invalid sliding value.")
+					}
+					evalCtx.GroupWindow.CountWindowHelper = tree.CountWindowHelper{
+						WindowNum:         int(*windowNum),
+						SlidingWindowSize: int(*windowNum),
+						IsSlide:           false,
+					}
+					evalCtx.GroupWindow.GroupWindowFunc = tree.CountWindow
+				}
+				return tree.NewDInt(0), nil
+			},
+			Info: "group based on the count of data.",
+		},
+	),
+	"time_window": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
+		tree.Overload{
+			Types: tree.ArgTypes{{"timestamp", types.Timestamp}, {"interval", types.String},
+				{"sliding_time", types.String}},
+			ReturnType: tree.FixedReturnType(types.Timestamp),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				var ok bool
+				if _, ok = args[0].(*tree.DTimestamp); !ok {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "timestamp arg should be time.")
+				}
+				var area tree.DString
+				area = "10ms"
+				areaTime, err := GetTimeInterval(&area)
+				if err != nil {
+					return &tree.DTimestamp{}, err
+				}
+				dur, err := GetTimeInterval(args[1])
+				if err != nil {
+					return &tree.DTimestamp{}, err
+				}
+				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+				}
+				sliding, err := GetTimeInterval(args[2])
+				if err != nil {
+					return &tree.DTimestamp{}, err
+				}
+				if dur.Duration.Sub(sliding.Duration).AsFloat64() < 0 {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "sliding time value no larger than the duration value.")
+				}
+				evalCtx.GroupWindow.TimeWindowHelper = tree.TimeWindowHelper{
+					IfTZ:        false,
+					Duration:    dur,
+					SlidingTime: sliding,
+					IsSlide:     true,
+				}
+				evalCtx.GroupWindow.GroupWindowFunc = tree.TimeWindow
+				return args[0], nil
+			},
+			Info: "group based on the time.",
+		},
+		tree.Overload{
+			Types: tree.ArgTypes{{"timestamp", types.TimestampTZ}, {"interval", types.String},
+				{"sliding_time", types.String}},
+			ReturnType: tree.FixedReturnType(types.TimestampTZ),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				var ok bool
+				if _, ok = args[0].(*tree.DTimestampTZ); !ok {
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "timestamp arg should be timeTZ.")
+				}
+				var area tree.DString
+				area = "10ms"
+				areaTime, err := GetTimeInterval(&area)
+				if err != nil {
+					return &tree.DTimestampTZ{}, err
+				}
+				dur, err := GetTimeInterval(args[1])
+				if err != nil {
+					return &tree.DTimestampTZ{}, err
+				}
+				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+				}
+				sliding, err := GetTimeInterval(args[2])
+				if err != nil {
+					return &tree.DTimestampTZ{}, err
+				}
+				if dur.Duration.Sub(sliding.Duration).AsFloat64() < 0 {
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "sliding time value no larger than the duration value.")
+				}
+				evalCtx.GroupWindow.TimeWindowHelper = tree.TimeWindowHelper{
+					IfTZ:        true,
+					Duration:    dur,
+					SlidingTime: sliding,
+					IsSlide:     true,
+				}
+				evalCtx.GroupWindow.GroupWindowFunc = tree.TimeWindow
+				return args[0], nil
+			},
+			Info: "group based on the time.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}, {"interval", types.String}},
+			ReturnType: tree.FixedReturnType(types.Timestamp),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				var ok bool
+				if _, ok = args[0].(*tree.DTimestamp); !ok {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "timestamp arg should be timeTZ.")
+				}
+				var area tree.DString
+				area = "10ms"
+				areaTime, err := GetTimeInterval(&area)
+				if err != nil {
+					return &tree.DTimestamp{}, err
+				}
+				dur, err := GetTimeInterval(args[1])
+				if err != nil {
+					return &tree.DTimestamp{}, err
+				}
+				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+				}
+				evalCtx.GroupWindow.TimeWindowHelper = tree.TimeWindowHelper{
+					Duration: dur,
+				}
+				evalCtx.GroupWindow.GroupWindowFunc = tree.TimeWindow
+				return args[0], nil
+			},
+			Info: "group based on the time.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamp", types.TimestampTZ}, {"interval", types.String}},
+			ReturnType: tree.FixedReturnType(types.TimestampTZ),
+			Fn: func(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				var ok bool
+				if _, ok = args[0].(*tree.DTimestampTZ); !ok {
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "timestamp arg should be timeTZ.")
+				}
+				var area tree.DString
+				area = "10ms"
+				areaTime, err := GetTimeInterval(&area)
+				if err != nil {
+					return &tree.DTimestampTZ{}, err
+				}
+				dur, err := GetTimeInterval(args[1])
+				if err != nil {
+					return &tree.DTimestampTZ{}, err
+				}
+				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+				}
+				evalCtx.GroupWindow.TimeWindowHelper = tree.TimeWindowHelper{
+					Duration: dur,
+				}
+				evalCtx.GroupWindow.GroupWindowFunc = tree.TimeWindow
+				return args[0], nil
+			},
+			Info: "group based on the time.",
+		},
+	),
 	//"change_ts_distribute": makeBuiltin(tree.FunctionProperties{NullableArgs: true},
 	//	tree.Overload{
 	//		Types: tree.ArgTypes{
@@ -4531,7 +4833,7 @@ func timeBucketOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Datum
 	if !ok {
 		return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
 	}
-	dInterval, err := getTimeInterval(args[1])
+	dInterval, err := GetTimeInterval(args[1])
 	if err != nil {
 		return &tree.DTimestamp{}, err
 	}
@@ -4546,7 +4848,7 @@ func timeBucketTZOverload(evalCtx *tree.EvalContext, args tree.Datums) (tree.Dat
 	if !ok {
 		return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
 	}
-	dInterval, err := getTimeInterval(args[1])
+	dInterval, err := GetTimeInterval(args[1])
 	if err != nil {
 		return &tree.DTimestampTZ{}, err
 	}

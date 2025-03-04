@@ -64,8 +64,6 @@ class DistinctOperator : public BaseOperator {
   // resolve distinct cols
   KStatus ResolveDistinctCols(kwdbContext_p ctx);
 
-  void encodeDistinctCols(DataChunkPtr& chunk, k_uint32 line, CombinedGroupKey& distinct_keys);
-
   DistinctSpec* spec_;
   TSPostProcessSpec* post_;
   BaseOperator* input_{nullptr};

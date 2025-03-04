@@ -534,6 +534,11 @@ define GroupingPrivate {
     TimeBucketGapFillColId ColumnID
     TimeBucketGapFillColIdOrdinal ColumnID
 
+    GroupWindowId ColumnID
+    GroupWindowIdOrdinal ColumnID
+    # GroupWindowTSColOrdinal: set idx of ts col, default value is 0
+    GroupWindowTSColOrdinal ColumnID
+
     # OptFlags flags of group by type, type is opt.GroupOptType
     OptFlags TSGroupOptType
 

@@ -80,6 +80,10 @@ EEIteratorErrCode TagScanOperator::Init(kwdbContext_p ctx) {
         LOG_ERROR("ResolveOutputFields() failed");
         break;
       }
+      ret = InitOutputColInfo(output_fields_);
+      if (ret != EEIteratorErrCode::EE_OK) {
+        break;
+      }
     }
   } while (0);
   is_init_ = true;
@@ -192,14 +196,7 @@ EEIteratorErrCode TagScanOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) 
     if (tag_rowbatch_->Count() > 0) {
       // init DataChunk
       if (nullptr == chunk) {
-        // init column
-        std::vector<ColumnInfo> col_info;
-        for (int i = 0; i < GetRenderSize(); i++) {
-          Field* field = GetRender(i);
-          col_info.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
-        }
-
-        chunk = std::make_unique<DataChunk>(col_info, tag_rowbatch_->Count());
+        chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_, tag_rowbatch_->Count());
         if (chunk->Initialize() != true) {
           EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
           chunk = nullptr;

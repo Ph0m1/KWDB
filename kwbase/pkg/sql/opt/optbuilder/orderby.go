@@ -27,6 +27,7 @@ package optbuilder
 import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/privilege"
@@ -124,7 +125,18 @@ func (b *Builder) addOrderByOrDistinctOnColumn(
 	); col != nil {
 		extraCol.id = col.id
 	} else {
-		b.buildScalar(extraCol.getExpr(), inScope, extraColsScope, extraCol, nil)
+		// group window function can be only used in groupby
+		if scalar := b.buildScalar(extraCol.getExpr(), inScope, extraColsScope, extraCol, nil); scalar != nil {
+			if name, ok := memo.CheckGroupWindowExist(scalar); ok {
+				panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+			}
+		} else if inScope.groupby != nil && len(inScope.groupby.groupStrs) > 0 {
+			if groupCol, ok := inScope.groupby.groupStrs[symbolicExprStr(extraCol.getExpr())]; ok {
+				if name, ok := memo.CheckGroupWindowExist(groupCol.scalar); ok {
+					panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+				}
+			}
+		}
 	}
 }
 

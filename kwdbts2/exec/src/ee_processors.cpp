@@ -108,6 +108,10 @@ KStatus Processors::Init(kwdbContext_p ctx, const TSFlowSpec* fspec) {
     LOG_ERROR("Preinit iterator error when initing processors.");
     Return(KStatus::FAIL);
   }
+  if (EEPgErrorInfo::IsError() || CheckCancel(ctx) != SUCCESS) {
+    root_iterator_->Close(ctx);
+    Return(KStatus::FAIL);
+  }
   b_init_ = KTRUE;
   Return(KStatus::SUCCESS);
 }

@@ -38,9 +38,7 @@ KStatus ParallelGroup::Init(kwdbContext_p ctx) {
     LOG_ERROR("New KWThd failed.");
     Return(FAIL);
   }
-  thd_->SetPgEncode(main_thd->GetPgEncode());
-  thd_->SetCommandLimit(main_thd->GetCommandLimit());
-  thd_->SetCountForLimit(main_thd->GetCountForLimit());
+  thd_->Copy(main_thd);
   ps_ = PS_TASK_INIT;
   Return(SUCCESS);
 }

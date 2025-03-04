@@ -1567,6 +1567,10 @@ func BuildSharedProps(e opt.Expr, shared *props.Shared) {
 			// Impure functions can return different value on each call.
 			shared.CanHaveSideEffects = true
 		}
+		// we must add ts cols to ensure order col is existed when function is group window function
+		if _, ok := CheckGroupWindowExist(t); ok {
+			shared.OuterCols.Add(opt.ColumnID(TsColID))
+		}
 
 	default:
 		if opt.IsMutationOp(e) {

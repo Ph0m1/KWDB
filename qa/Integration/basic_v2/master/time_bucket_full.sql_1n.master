@@ -309,7 +309,7 @@ SQLSTATE: 42803
   2023-05-10 09:15:10+00:00 | 500 |    500000.5 | false | c    | n    | NULL           | 测试测试               | deg4096测试1(  | \x7465735fe6b58be8af9531 | \xbbccbbbb
 (8 rows)
 > select time_bucket(k_timestamp, '5.5s') as tb, e2 from test_select_timebucket.tb group by tb,e2 order by tb,e2;
-ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
+ERROR: invalid input interval time.
 SQLSTATE: 22023
 > select time_bucket(k_timestamp, '-1s') as tb, e2 from test_select_timebucket.tb group by tb,e2 order by tb,e2;
 ERROR: second arg should be a positive interval.
@@ -2256,7 +2256,7 @@ SQLSTATE: 22007
   2024-05-10 23:23:23.78+00:00
 (2 rows)
 > select time_bucket(k_timestamp,'10μs') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
-ERROR: invalid input interval time for time_bucket or time_bucket_gapfill.
+ERROR: invalid input interval time.
 SQLSTATE: 22023
 > select time_bucket(k_timestamp,'10ns') as tb from test_select_timebucket.tb3 group by tb order by tb limit 5;
                tb

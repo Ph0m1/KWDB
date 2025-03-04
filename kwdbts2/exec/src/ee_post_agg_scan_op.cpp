@@ -36,10 +36,17 @@ EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
   }
 
   // construct the output column information for agg output.
-  agg_output_col_info.reserve(output_fields_.size());
-  for (auto field : output_fields_) {
-    agg_output_col_info.emplace_back(field->get_storage_length(), field->get_storage_type(),
-                                     field->get_return_type());
+  agg_output_col_num_ = output_fields_.size();
+  agg_output_col_info_ = KNEW ColumnInfo[agg_output_col_num_];
+  if (agg_output_col_info_ == nullptr) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+  for (k_uint32 i = 0; i < output_fields_.size(); ++i) {
+    agg_output_col_info_[i] =
+        ColumnInfo(output_fields_[i]->get_storage_length(),
+                   output_fields_[i]->get_storage_type(),
+                   output_fields_[i]->get_return_type());
   }
 
   col_types_.clear();
@@ -69,7 +76,7 @@ EEIteratorErrCode PostAggScanOperator::Init(kwdbContext_p ctx) {
 // create, init and populate temp file using received data.
 KStatus PostAggScanOperator::initDiskSink() {
   KStatus ret = SUCCESS;
-  disk_sink_ = std::make_unique<DiskDataContainer>(agg_output_col_info);
+  disk_sink_ = std::make_unique<DiskDataContainer>(agg_output_col_info_, agg_output_col_num_);
   ret = disk_sink_->Init();
   if (ret != KStatus::SUCCESS) {
     return ret;

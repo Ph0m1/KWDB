@@ -130,6 +130,10 @@ class Field {
 
   void set_clearup_diff(k_bool ret) { is_clear_ = ret; }
 
+  virtual void backup() {}
+  virtual void restore() {}
+  virtual void reset() {}
+
  protected:
   struct CKDecimal int_to_decimal();
   struct CKDecimal double_to_decimal();
@@ -152,17 +156,19 @@ class Field {
   KWDBTypeFamily return_type_{AnyFamily};               // return type
   Type type_{FIELD_UNKNOW};                  // FIELD type
   k_bool is_statistic_{false};               // use statistic count
-  bool nullable_{true};
+  bool allow_null_{true};
   k_bool is_clear_{false};               // check
 
  public:
-  [[nodiscard]] bool isNullable() const {
-    return nullable_;
+  [[nodiscard]] bool CheckNull() {
+    return allow_null_ && is_nullable();
   }
 
-  void setNullable(bool nullable) {
-    nullable_ = nullable;
+  void set_allow_null(bool nullable) {
+    allow_null_ = nullable;
   }
+
+  bool is_allow_null() { return allow_null_; }
 
   void setColIdxInRs(k_uint32 colIdxInRs) {
       col_idx_in_rs_ = colIdxInRs;
@@ -536,7 +542,8 @@ class FieldFunc : public FieldFuncBase {
     ANY_FUNC,
     ALL_FUNC,
     NOT_FUNC,
-    DIFF_FUNC
+    DIFF_FUNC,
+    WINDOW_GROUP_FUNC
   };
 
   k_int64 ValInt() override { return 0; }

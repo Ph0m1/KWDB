@@ -104,17 +104,26 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
     ResolveAggFuncs(ctx);
 
     // construct the output column information for agg functions.
-    agg_output_col_info_.reserve(agg_param_->aggs_size_);
+    agg_output_col_num_ = agg_param_->aggs_size_;
+    agg_output_col_info_ = KNEW ColumnInfo[agg_output_col_num_];
+    if (agg_output_col_info_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                    "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR);
+    }
     for (k_uint32 i = 0; i < agg_param_->aggs_size_; ++i) {
-      if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
-        agg_output_col_info_.emplace_back(agg_param_->aggs_[i]->get_storage_length() + sizeof(k_int64),
-                                      agg_param_->aggs_[i]->get_storage_type(),
-                                      agg_param_->aggs_[i]->get_return_type());
+      if (aggregations_[i].func() ==
+          TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
+        agg_output_col_info_[i] = ColumnInfo(
+            agg_param_->aggs_[i]->get_storage_length() + sizeof(k_int64),
+            agg_param_->aggs_[i]->get_storage_type(),
+            agg_param_->aggs_[i]->get_return_type());
         is_resolve_datachunk_ = true;
       } else {
-        agg_output_col_info_.emplace_back(agg_param_->aggs_[i]->get_storage_length(),
-                                       agg_param_->aggs_[i]->get_storage_type(),
-                                       agg_param_->aggs_[i]->get_return_type());
+        agg_output_col_info_[i] =
+            ColumnInfo(agg_param_->aggs_[i]->get_storage_length(),
+                       agg_param_->aggs_[i]->get_storage_type(),
+                       agg_param_->aggs_[i]->get_return_type());
       }
     }
 
@@ -135,14 +144,11 @@ EEIteratorErrCode AggTableScanOperator::Init(kwdbContext_p ctx) {
     if (!has_post_agg_) {
       std::swap(output_fields_, agg_output_fields_);
     }
-    output_col_info_.clear();
-    output_col_info_.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
-    }
     if (aggregation_post_.has_limit()) {
       agg_limit_ = aggregation_post_.limit();
     }
+    SafeDeleteArray(output_col_info_);
+    ret = InitOutputColInfo(output_fields_);
   } while (false);
   Return(ret)
 }
@@ -351,7 +357,7 @@ k_bool AggTableScanOperator::ProcessGroupCols(k_int32& target_row, RowBatch* row
     auto* source_ptr = field->get_ptr(row_batch);
 
     // handle the null value in input data.
-    if (field->isNullable() && field->is_nullable()) {
+    if (field->CheckNull()) {
       continue;
     }
 
@@ -789,7 +795,7 @@ KStatus AggTableScanOperator::ResolveAggFuncs(kwdbContext_p ctx) {
 
 KStatus AggTableScanOperator::getAggResult(kwdbContext_p ctx, DataChunkPtr& chunk) {
   if (chunk == nullptr) {
-    chunk = std::make_unique<DataChunk>(output_col_info_);
+    chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_);
     if (chunk->Initialize() != true) {
       chunk = nullptr;
       return KStatus::FAIL;

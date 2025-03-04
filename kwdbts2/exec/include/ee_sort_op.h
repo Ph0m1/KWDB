@@ -76,25 +76,21 @@ class SortOperator : public BaseOperator {
   bool is_done_{false};
   bool is_mem_container{true};   // sort type
 
+  ColumnInfo* input_col_info_{nullptr};
+  k_int32 input_col_num_{0};
+
  private:
   static const k_uint64 SORT_MAX_MEM_BUFFER_SIZE = BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE;
 
   KStatus initContainer(k_uint32 size, std::queue<DataChunkPtr> &buffer) {
     // create container
-    std::vector<ColumnInfo> col_info;
     KStatus ret = SUCCESS;
-    col_info.reserve(input_fields_.size());
-    for (auto field : input_fields_) {
-      col_info.emplace_back(field->get_storage_length(),
-                            field->get_storage_type(),
-                            field->get_return_type());
-    }
     if (is_mem_container) {
       container_ =
-          std::make_unique<MemRowContainer>(order_info_, col_info, size);
+          std::make_unique<MemRowContainer>(order_info_, input_col_info_, input_col_num_, size);
     } else {
       container_ =
-          std::make_unique<DiskDataContainer>(order_info_, col_info);
+          std::make_unique<DiskDataContainer>(order_info_, input_col_info_, input_col_num_);
     }
     ret = container_->Init();
     if (ret != SUCCESS) {

@@ -237,8 +237,9 @@ func checkAESupportType(id oid.Oid) bool {
 // CheckExprCanExecInTSEngine checks whether expr and it's children exprs can be pushed down
 // tupleCanExecInTSEngine is true when the tuple use in InExpr or NotInExpr, tuple expr only can exec in ts engine in this case,
 // such as col in (1,2,3) or col in (col1,col2); other case such as COUNT(DISTINCT (channel, companyid)) can not exec in ts engine.
+// add param onlyOnePTagValue: filters have one pTag only
 func CheckExprCanExecInTSEngine(
-	src opt.Expr, pos int8, f CheckFunc, tupleCanExecInTSEngine bool,
+	src opt.Expr, pos int8, f CheckFunc, tupleCanExecInTSEngine bool, onlyOnePTagValue bool,
 ) (bool, uint32) {
 	switch src.Op() {
 	case opt.VariableOp, opt.ConstOp, opt.FalseOp, opt.NullOp, opt.TrueOp, opt.SubqueryOp, opt.ExistsOp, opt.AnyOp:
@@ -252,7 +253,7 @@ func CheckExprCanExecInTSEngine(
 		}
 	case opt.InOp, opt.NotInOp:
 		for i := 0; i < src.ChildCount(); i++ {
-			can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, true)
+			can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, true, onlyOnePTagValue)
 			if !can { // can not push down
 				return false, 0
 			}
@@ -278,7 +279,7 @@ func CheckExprCanExecInTSEngine(
 	switch source := src.(type) {
 	case *ScalarListExpr:
 		for i := 0; i < len(*source); i++ {
-			can, _ := CheckExprCanExecInTSEngine((*source)[i], pos, f, false)
+			can, _ := CheckExprCanExecInTSEngine((*source)[i], pos, f, false, onlyOnePTagValue)
 			if !can { // can not push down
 				return false, 0
 			}
@@ -286,8 +287,11 @@ func CheckExprCanExecInTSEngine(
 		return true, 0
 	case *FunctionExpr:
 		if source.Properties.ForbiddenExecInTSEngine {
-			return false, 0
+			if _, ok := CheckGroupWindowExist(src); ok && !onlyOnePTagValue {
+				return false, 0
+			}
 		}
+
 	case *CastExpr:
 		if !checkAESupportType(source.Typ.Oid()) {
 			return false, 0
@@ -306,7 +310,7 @@ func CheckExprCanExecInTSEngine(
 
 	// check whether child exprs can exec in ts engine
 	for i := 0; i < src.ChildCount(); i++ {
-		if can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, false); !can { // can not push down
+		if can, _ := CheckExprCanExecInTSEngine(src.Child(i), pos, f, false, onlyOnePTagValue); !can { // can not push down
 			return false, hashCode
 		}
 	}
@@ -322,12 +326,14 @@ func CheckExprCanExecInTSEngine(
 //
 // return
 // - can execute on ts engine
-func CheckFilterExprCanExecInTSEngine(src opt.Expr, pos ExprPos, f CheckFunc) bool {
+func CheckFilterExprCanExecInTSEngine(
+	src opt.Expr, pos ExprPos, f CheckFunc, onlyOnePTagValue bool,
+) bool {
 	// operator and , or , range check is child can exec on ts engine
 	if src.Op() == opt.AndOp || src.Op() == opt.OrOp || src.Op() == opt.RangeOp {
 		var i int
 		for i = 0; i < src.ChildCount(); i++ {
-			if !CheckFilterExprCanExecInTSEngine(src.Child(i), pos, f) {
+			if !CheckFilterExprCanExecInTSEngine(src.Child(i), pos, f, onlyOnePTagValue) {
 				return false
 			}
 		}
@@ -336,7 +342,7 @@ func CheckFilterExprCanExecInTSEngine(src opt.Expr, pos ExprPos, f CheckFunc) bo
 	}
 
 	// check white list that can support by ts engine
-	if can, _ := CheckExprCanExecInTSEngine(src, int8(pos), f, false); !can {
+	if can, _ := CheckExprCanExecInTSEngine(src, int8(pos), f, false, onlyOnePTagValue); !can {
 		return false
 	}
 
@@ -535,7 +541,7 @@ func (m *Memo) SplitTagExpr(src opt.Expr, colMap TagColMap) (leave opt.Expr, tag
 		return source, nil
 	default:
 		// check white list that can push down
-		if push, _ := CheckExprCanExecInTSEngine(src, ExprPosSelect, m.GetWhiteList().CheckWhiteListParam, false); !push {
+		if push, _ := CheckExprCanExecInTSEngine(src, ExprPosSelect, m.GetWhiteList().CheckWhiteListParam, false, m.CheckOnlyOnePTagValue()); !push {
 			return source, nil
 		}
 

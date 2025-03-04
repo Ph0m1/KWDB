@@ -1273,6 +1273,10 @@ func (b *Builder) buildWhere(where *tree.Where, inScope *scope) {
 			memo.FiltersExpr{b.factory.ConstructFiltersItem(filter)},
 		)
 	}
+	// group window function can be only used in groupby
+	if name, ok := memo.CheckGroupWindowExist(filter); ok {
+		panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+	}
 }
 
 // buildFromTables builds a series of InnerJoin expressions that together

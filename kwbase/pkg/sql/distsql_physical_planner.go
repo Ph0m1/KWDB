@@ -50,6 +50,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/hashrouter/api"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/optbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
@@ -2748,6 +2749,25 @@ func (dsp *DistSQLPlanner) createTSDDL(planCtx *PlanningCtx, n *tsDDLNode) (Phys
 	return p, nil
 }
 
+// we should add noop in gateway node if renders contains group window function
+// in a distributed scenario, directly executing the aggregation operator will cause data hash redistribution. it will result in out-of-order data.
+// we need the data to be ordered when using the grouping window function. so it is necessary to add a Noop aggregation at the gateway node,
+// performing the aggregation only at the gateway node.
+func dealWithRenderForGroupWindow(
+	p *PhysicalPlan, n *renderNode, nodeID roachpb.NodeID, isDistribute bool,
+) {
+	for _, expr := range n.render {
+		if f, ok := expr.(*tree.FuncExpr); ok {
+			switch f.Func.FunctionName() {
+			case memo.StateWindow, memo.CountWindow, memo.TimeWindow, memo.EventWindow, memo.SessionWindow:
+				if isDistribute {
+					p.AddNoopToTsProcessors(nodeID, true, true)
+				}
+			}
+		}
+	}
+}
+
 // selectRenders takes a PhysicalPlan that produces the results corresponding to
 // the select data source (a n.source) and updates it to produce results
 // corresponding to the render node itself. An evaluator stage is added if the
@@ -2769,6 +2789,7 @@ func (dsp *DistSQLPlanner) selectRenders(
 		if p.ChildIsExecInTSEngine() {
 			p.AddTSTableReader()
 		}
+		dealWithRenderForGroupWindow(p, n, dsp.nodeDesc.NodeID, planCtx.ExtendedEvalCtx.StartDistributeMode)
 
 		// If this layer or its children can not be executed in ts engine,
 		// this layer can not be executed in ts engine.
@@ -3381,12 +3402,11 @@ func setupChildDistributionStrategy(
 func (dsp *DistSQLPlanner) addTwiceAggregators(
 	planCtx *PlanningCtx,
 	p *PhysicalPlan,
+	n *groupNode,
 	aggType execinfrapb.AggregatorSpec_Type,
-	groupColOrdering sqlbase.ColumnOrdering,
 	aggregations []execinfrapb.AggregatorSpec_Aggregation,
 	aggregationsColumnTypes [][]types.T,
 	groupCols []uint32,
-	oldGroupCols []int,
 	orderedGroupCols []uint32,
 	orderedGroupColSet util.FastIntSet,
 ) (execinfrapb.AggregatorSpec, execinfrapb.PostProcessSpec, error) {
@@ -3425,11 +3445,11 @@ func (dsp *DistSQLPlanner) addTwiceAggregators(
 	// final stage to know about them.
 	finalGroupCols := make([]uint32, len(groupCols))
 	finalOrderedGroupCols := make([]uint32, 0, len(orderedGroupCols))
-	getLocalAggAndTypeAndFinalGroupCols(p, groupCols, orderedGroupColSet, oldGroupCols,
+	getLocalAggAndTypeAndFinalGroupCols(p, groupCols, orderedGroupColSet, n.groupCols,
 		&localAggs, &intermediateTypes, &finalGroupCols, &finalOrderedGroupCols)
 
 	// Create the merge ordering for the local stage (this will be maintained for results going into the final stage).
-	ordCols, err := createMergeOrderingForLocalStage(groupColOrdering, oldGroupCols, finalGroupCols)
+	ordCols, err := createMergeOrderingForLocalStage(n.groupColOrdering, n.groupCols, finalGroupCols)
 	if err != nil {
 		return finalAggsSpec, finalAggsPost, err
 	}
@@ -3439,6 +3459,7 @@ func (dsp *DistSQLPlanner) addTwiceAggregators(
 		Aggregations:     finalAggs,
 		GroupCols:        finalGroupCols,
 		OrderedGroupCols: finalOrderedGroupCols,
+		GroupWindowId:    n.groupWindowID,
 	}
 
 	localAggsSpec := execinfrapb.AggregatorSpec{
@@ -3446,6 +3467,7 @@ func (dsp *DistSQLPlanner) addTwiceAggregators(
 		Aggregations:     localAggs,
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
+		GroupWindowId:    n.groupWindowID,
 	}
 
 	p.AddNoGroupingStage(
@@ -3586,6 +3608,7 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		Aggregations:     finalAggs,
 		GroupCols:        finalGroupCols,
 		OrderedGroupCols: finalOrderedGroupCols,
+		GroupWindowId:    n.groupWindowID,
 	}
 
 	localAggsSpec := execinfrapb.AggregatorSpec{
@@ -3594,6 +3617,7 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
 		AggPushDown:      n.optType.TimeBucketOpt(),
+		GroupWindowId:    n.groupWindowID,
 	}
 
 	addLocalAgg := !n.optType.UseStatisticOpt() && (addTSTwiceAgg || !n.optType.PruneLocalAggOpt())
@@ -3642,14 +3666,19 @@ func (dsp *DistSQLPlanner) addTwoStageAggForTS(
 					execinfrapb.Ordering{Columns: ordCols},
 				)
 			}
+			twiceAggSpec := tsFinalAggs
+			if n.groupWindowID >= 0 {
+				twiceAggSpec = finalAggs
+			}
 			// add ts final agg processor
 			if addTSTwiceAgg {
 				tsFinialAggsSpec := execinfrapb.AggregatorSpec{
 					Type:             aggType,
-					Aggregations:     tsFinalAggs,
+					Aggregations:     twiceAggSpec,
 					GroupCols:        finalGroupCols,        // group col from final col idx
 					OrderedGroupCols: finalOrderedGroupCols, // order cols from final col idx
 					AggPushDown:      false,                 // must false
+					GroupWindowId:    n.groupWindowID,
 				}
 
 				tsPostTwice := createTSPostSpec(&tsAggsTypes)
@@ -4229,8 +4258,8 @@ func (dsp *DistSQLPlanner) addAggregators(
 			OrderedGroupCols: orderedGroupCols,
 		}
 	} else {
-		finalAggsSpec, finalAggsPost, err = dsp.addTwiceAggregators(planCtx, p, aggType, n.groupColOrdering, aggregations, aggregationsColumnTypes,
-			groupCols, n.groupCols, orderedGroupCols, orderedGroupColSet)
+		finalAggsSpec, finalAggsPost, err = dsp.addTwiceAggregators(planCtx, p, n, aggType, aggregations, aggregationsColumnTypes,
+			groupCols, orderedGroupCols, orderedGroupColSet)
 		if err != nil {
 			return err
 		}
@@ -4251,6 +4280,13 @@ func (dsp *DistSQLPlanner) addAggregators(
 		prevStageNode = 0
 		finalAggsSpec.HasTimeBucketGapFill = true
 		finalAggsSpec.TimeBucketGapFillColId = n.gapFillColID
+	}
+	finalAggsSpec.GroupWindowId = n.groupWindowID
+	finalAggsSpec.Group_WindowTscolid = n.groupWindowTSColID
+
+	if n.groupWindowID >= 0 {
+		finalAggsSpec.GroupWindowId = n.groupWindowID
+		finalAggsSpec.Group_WindowTscolid = n.groupWindowTSColID
 	}
 	if n.optType.WithSumInt() {
 		// the flag is used to make the sum_int return 0.
@@ -4330,6 +4366,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 		GroupCols:        groupCols,
 		OrderedGroupCols: orderedGroupCols,
 		AggPushDown:      n.optType.TimeBucketOpt(),
+		GroupWindowId:    n.groupWindowID,
 	}}
 
 	// Set up the final stage.
@@ -4408,7 +4445,7 @@ func (dsp *DistSQLPlanner) addTSAggregators(
 				return false, err
 			}
 
-			if !pruneFinalAgg {
+			if !pruneFinalAgg && n.groupWindowID < 0 {
 				p.AddTSTableReader()
 
 				// get all data to gateway node compute agg

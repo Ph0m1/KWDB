@@ -49,22 +49,22 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
   DataChunkPtr chunk = nullptr;
 
   k_uint32 total_sample_rows{1};
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(1);
+  ColumnInfo col_info[5];
+  k_int32 col_num = 5;
 
   k_int64 v1 = 15600000000;
   k_double64 v2 = 10.55;
   string v3 = "host_0";
   bool v4 = true;
 
-  col_info.emplace_back(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-  col_info.emplace_back(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
+  col_info[0] = ColumnInfo(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
+  col_info[1] = ColumnInfo(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info[2] = ColumnInfo(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info[3] = ColumnInfo(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
+  col_info[4] = ColumnInfo(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
 
   // check insert
-  chunk = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
+  chunk = std::make_unique<kwdbts::DataChunk>(col_info, col_num, total_sample_rows);
   ASSERT_EQ(chunk->Initialize(), true);
   k_int32 row = chunk->NextLine();
   ASSERT_EQ(row, -1);
@@ -86,7 +86,7 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
   // test single chunk append
   {
     DataContainerPtr tempTable =
-      std::make_unique<kwdbts::DiskDataContainer>(col_info);
+      std::make_unique<kwdbts::DiskDataContainer>(col_info, col_num);
     tempTable->Init();
 
     tempTable->Append(chunk.get());
@@ -121,7 +121,7 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
   }
 
   DataChunkPtr chunk2;
-  chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
+  chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, col_num, total_sample_rows);
   ASSERT_EQ(chunk2->Initialize(), true);
   chunk2->InsertData(ctx, chunk.get(), nullptr);
   ASSERT_EQ(chunk2->Count(), 1);
@@ -137,7 +137,7 @@ TEST_F(TestDiskDataContainer, TestDiskDataContainer) {
   queue_data_chunk.push(std::move(chunk2));
 
   DataContainerPtr tempTable2 =
-    std::make_unique<kwdbts::DiskDataContainer>(col_info);
+    std::make_unique<kwdbts::DiskDataContainer>(col_info, col_num);
   tempTable2->Init();
 
   tempTable2->Append(queue_data_chunk);

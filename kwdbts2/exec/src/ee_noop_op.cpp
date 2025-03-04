@@ -80,6 +80,7 @@ EEIteratorErrCode NoopOperator::Init(kwdbContext_p ctx) {
         field_copy->is_chunk_ = true;
       }
     }
+    code = InitOutputColInfo(output_fields_);
   } while (0);
 
   Return(code);
@@ -206,20 +207,9 @@ void NoopOperator::make_noop_data_chunk(kwdbContext_p ctx, DataChunkPtr *chunk,
                                         k_uint32 capacity) {
   EnterFunc();
 
-  std::vector<Field *> &output_cols =
-      output_fields_.size() > 0 ? output_fields_ : input_->OutputFields();
-
   if (nullptr == *chunk) {
     // init resultset
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(output_cols.size());
-    for (auto field : output_cols) {
-      col_info.emplace_back(field->get_storage_length(),
-                            field->get_storage_type(),
-                            field->get_return_type());
-    }
-
-    *chunk = std::make_unique<DataChunk>(col_info, capacity);
+    *chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_, capacity);
     if ((*chunk)->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
                                     "Insufficient memory");

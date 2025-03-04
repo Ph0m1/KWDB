@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "ee_base_op.h"
+#include "ee_scan_helper.h"
 #include "ee_scan_row_batch.h"
 #include "ee_flow_param.h"
 #include "kwdb_consts.h"
@@ -43,6 +44,8 @@ class StorageHandler;
  */
 class TableScanOperator : public BaseOperator {
  public:
+  friend class ScanHelper;
+  friend class WindowHelper;
   TableScanOperator(TsFetcherCollection* collection, TSReaderSpec* spec, TSPostProcessSpec* post, TABLE* table,
                                         BaseOperator* input, int32_t processor_id);
 
@@ -74,6 +77,7 @@ class TableScanOperator : public BaseOperator {
   EEIteratorErrCode InitHandler(kwdbContext_p ctx);
   EEIteratorErrCode InitScanRowBatch(kwdbContext_p ctx, ScanRowBatch **row_batch);
   k_bool ResolveOffset();
+  EEIteratorErrCode InitHelper(kwdbContext_p ctx);
 
  protected:
   TSPostProcessSpec* post_{nullptr};
@@ -87,6 +91,8 @@ class TableScanOperator : public BaseOperator {
   StorageHandler *handler_{nullptr};
   BaseOperator* input_{nullptr};  // input iterator
   ScanRowBatch* row_batch_{nullptr};
+
+  ScanHelper *helper_{nullptr};
 
  protected:
   k_uint32 cur_offset_{0};

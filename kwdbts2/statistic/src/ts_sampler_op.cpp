@@ -483,6 +483,17 @@ EEIteratorErrCode TsSamplerOperator::Init(kwdbContext_p ctx) {
     outStorageTypes_.emplace_back(roachpb::DataType::BIGINT);
     outLens_.emplace_back(8);
 
+    output_col_num_ = outRetrunTypes_.size();
+    output_col_info_ = KNEW ColumnInfo[output_col_num_];
+    if (output_col_info_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                    "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR);
+    }
+    for (k_int32 i = 0; i < output_col_num_; i++) {
+      output_col_info_[i] = ColumnInfo(outLens_[i], outStorageTypes_[i], outRetrunTypes_[i]);
+    }
+
     KStatus res = KStatus::FAIL;
     auto *ts_engine = static_cast<TSEngine *>(ctx->ts_engine);
     if (ts_engine)
@@ -563,13 +574,7 @@ KStatus TsSamplerOperator::GetSampleResult(kwdbContext_p ctx, DataChunkPtr& chun
 
   if (chunk == nullptr) {
     // Initializes the column information
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(outRetrunTypes_.size());
-    for (int i = 0; i < outRetrunTypes_.size(); i++) {
-      col_info.emplace_back(outLens_[i], outStorageTypes_[i], outRetrunTypes_[i]);
-    }
-
-    chunk = std::make_unique<DataChunk>(col_info, total_sample_rows_);
+    chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_, total_sample_rows_);
     if (chunk->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       chunk = nullptr;

@@ -142,7 +142,7 @@ class StorageHandler {
   EEIteratorErrCode GetTagDataChunkWithPrimaryTags(kwdbContext_p ctx, TSTagReaderSpec* spec, Field* tag_filter,
           std::vector<void *>& primary_tags, std::vector<void *>& secondary_tags,
           const vector<k_uint32> tag_other_join_cols, Field ** renders,
-          std::vector<ColumnInfo> &col_info, DataChunkPtr &data_chunk);
+          ColumnInfo* col_info, k_int32 col_info_size, DataChunkPtr &data_chunk);
 
   // Read next data chunk for tag data with tag filter and ptag filter for multiple model processing
   EEIteratorErrCode NextTagDataChunk(kwdbContext_p ctx,
@@ -152,7 +152,8 @@ class StorageHandler {
                                             std::vector<void *> &secondary_tags,
                                             const vector<k_uint32> tag_other_join_cols,
                                             Field ** renders,
-                                            std::vector<ColumnInfo> &col_info,
+                                            ColumnInfo* col_info,
+                                            k_int32 col_info_size,
                                             DataChunkPtr &data_chunk);
 
   // genearate primary tags, which can also be used in HashTagScan for multiple model processing
@@ -169,6 +170,15 @@ class StorageHandler {
 
   bool IsHasTagFilter() { return tag_scan_->IsHasTagFilter(); }
   bool isDisorderedMetrics();
+  EEIteratorErrCode TsNextAndFilter(kwdbContext_p ctx, Field *filter,
+                                    k_uint32 *cur_offset, k_int32 limit,
+                                    ScanRowBatch *row_batch, k_uint32 *total_read_row,
+                                    k_uint32 *examined_rows);
+
+ private:
+  EEIteratorErrCode HandleTsItrAndGetTagData(kwdbContext_p ctx,
+                                             ScanRowBatch *row_batch,
+                                             bool init_itr);
 
  private:
   /**
@@ -182,7 +192,7 @@ class StorageHandler {
    * @return EEIteratorErrCode
    */
   EEIteratorErrCode NextTagDataChunk(kwdbContext_p ctx, Field *tag_filter, Field ** renders,
-                                    std::vector<ColumnInfo> &col_info, DataChunkPtr &data_chunk);
+                                     ColumnInfo* col_info, k_int32 col_info_size, DataChunkPtr &data_chunk);
 
   TABLE *table_{nullptr};
   std::shared_ptr<TsTable> ts_table_{nullptr};

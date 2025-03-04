@@ -51,33 +51,44 @@ inline void hash_combine(std::size_t& h, const T& v) {
    of the hash table in the aggregation operator implementation
 */
 class CombinedGroupKey {
-  using GroupKeyValue = std::variant<std::monostate, k_bool, k_int16, k_int32, k_int64, k_float32, k_double64, std::string>;
+  struct GroupKeyValue {
+    char* data{nullptr};
+    bool is_null{true};
+    roachpb::DataType typ;
+    k_int32 len{0};
+    bool allow_null{false};
+  };
 
  public:
   CombinedGroupKey() = default;
+  ~CombinedGroupKey() { SafeDeleteArray(group_key_values_); }
 
   CombinedGroupKey(const CombinedGroupKey& other) {
     group_key_values_ = other.group_key_values_;
-    group_key_types_ = other.group_key_types_;
     group_key_size_ = other.group_key_size_;
   }
 
-  void Reserve(k_uint32 sz) {
-    group_key_values_.reserve(sz);
-    group_key_types_.reserve(sz);
-    group_key_size_ = 0;
+  bool Init(ColumnInfo* col_info, const std::vector<k_uint32>& group_cols) {
+    k_int32 col_num = group_cols.size();
+    group_key_size_ = col_num;
+    group_key_values_ = KNEW GroupKeyValue[col_num];
+    if (!group_key_values_) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                    "Insufficient memory");
+      return false;
+    }
+    for (k_int32 i = 0; i < col_num; i++) {
+      group_key_values_[i].len = col_info[group_cols[i]].storage_len;
+      group_key_values_[i].typ = col_info[group_cols[i]].storage_type;
+      group_key_values_[i].allow_null = col_info[group_cols[i]].allow_null;
+    }
+    is_init_ = true;
+    return true;
   }
 
-  // add key for group by
-  void AddGroupKey(GroupKeyValue value, roachpb::DataType type) {
-    group_key_values_.push_back(value);
-    group_key_types_.push_back(type);
-    group_key_size_++;
-  }
+  void AddGroupKey(DatumPtr ptr, k_int32 index);
 
-  void AddGroupKey(DatumPtr ptr, roachpb::DataType type);
-
-  bool is_null(k_uint32 i) const { return group_key_values_[i].index() == 0; }
+  bool is_null(k_uint32 i) const { return group_key_values_[i].is_null == true; }
 
   // overload ==
   bool operator==(const CombinedGroupKey& other) const;
@@ -89,17 +100,16 @@ class CombinedGroupKey {
    * @param[in] chunk
    * @param[in] row
    * @param[in] group_cols index of group columns
-   * @param[in] col_types data type of all columns
    */
-  bool IsNewGroup(const DataChunkPtr& chunk, k_uint32 row,
-                  const std::vector<k_uint32>& group_cols,
-                  const std::vector<roachpb::DataType>& col_types);
+  bool IsNewGroup(DataChunk *chunk, k_uint32 row,
+                  const std::vector<k_uint32>& group_cols);
 
   // the real data，Otherwise, the data pointed to by the pointer may be
   // released
-  std::vector<GroupKeyValue> group_key_values_;
-  std::vector<roachpb::DataType> group_key_types_;
-  k_int32 group_key_size_{-1};
+  GroupKeyValue* group_key_values_{nullptr};
+  k_int32 group_key_size_{0};
+  DataChunkPtr chunk_{nullptr};
+  bool is_init_{false};
 };
 
 // calculat hash value
@@ -112,21 +122,24 @@ struct GroupKeyHasher {
       }
 
       // calculate the hash value of each column
-      switch (gkc.group_key_types_[i]) {
+      switch (gkc.group_key_values_[i].typ) {
         case roachpb::DataType::BOOL: {
-          if (const k_bool* pval = get_if<k_bool>(&gkc.group_key_values_[i])) {
+          if (const k_bool* pval = static_cast<k_bool*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data))) {
             hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::SMALLINT: {
-          if (const k_int16* pval = get_if<k_int16>(&gkc.group_key_values_[i])) {
+          if (const k_int16* pval = static_cast<k_int16*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data))) {
             hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::INT: {
-          if (const k_int32* pval = get_if<k_int32>(&gkc.group_key_values_[i])) {
+          if (const k_int32* pval = static_cast<k_int32*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data))) {
             hash_combine(h, *pval);
           }
           break;
@@ -138,19 +151,22 @@ struct GroupKeyHasher {
         case roachpb::DataType::TIMESTAMPTZ_NANO:
         case roachpb::DataType::DATE:
         case roachpb::DataType::BIGINT: {
-          if (const k_int64* pval = get_if<k_int64>(&gkc.group_key_values_[i])) {
+          if (const k_int64* pval = static_cast<k_int64*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data))) {
             hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::FLOAT: {
-          if (const k_float32* pval = get_if<k_float32>(&gkc.group_key_values_[i])) {
+          if (const k_float32* pval = static_cast<k_float32*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data))) {
             hash_combine(h, *pval);
           }
           break;
         }
         case roachpb::DataType::DOUBLE: {
-          if (const k_double64* pval = get_if<k_double64>(&gkc.group_key_values_[i])) {
+          if (const k_double64* pval = static_cast<k_double64*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data))) {
             hash_combine(h, *pval);
           }
           break;
@@ -161,9 +177,11 @@ struct GroupKeyHasher {
         case roachpb::DataType::NVARCHAR:
         case roachpb::DataType::BINARY:
         case roachpb::DataType::VARBINARY: {
-          if (const std::string* pval = get_if<std::string>(&gkc.group_key_values_[i])) {
-            hash_combine(h, *pval);
-          }
+          std::string pval = std::string(
+              gkc.group_key_values_[i].data + 2,
+              *static_cast<k_uint16*>(
+                  static_cast<void*>(gkc.group_key_values_[i].data)));
+          hash_combine(h, pval);
           break;
         }
         default:

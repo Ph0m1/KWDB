@@ -48,6 +48,7 @@ SortOperator::~SortOperator() {
   if (is_clone_) {
     delete input_;
   }
+  SafeDeleteArray(input_col_info_);
 }
 
 KStatus SortOperator::ResolveSortCols(kwdbContext_p ctx) {
@@ -111,6 +112,25 @@ EEIteratorErrCode SortOperator::Init(kwdbContext_p ctx) {
 
     // output Field
     code = param_.ResolveOutputFields(ctx, renders_, num_, output_fields_);
+    if (code != EEIteratorErrCode::EE_OK) {
+      break;
+    }
+    code = InitOutputColInfo(output_fields_);
+    if (code != EEIteratorErrCode::EE_OK) {
+      break;
+    }
+    input_col_num_ = input_fields_.size();
+    input_col_info_ = KNEW ColumnInfo[input_col_num_];
+    if (input_col_info_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                    "Insufficient memory");
+      Return(EEIteratorErrCode::EE_ERROR);
+    }
+    for (k_int32 i = 0; i < input_fields_.size(); i++) {
+      input_col_info_[i] = ColumnInfo(input_fields_[i]->get_storage_length(),
+                                       input_fields_[i]->get_storage_type(),
+                                       input_fields_[i]->get_return_type());
+    }
   } while (0);
 
   Return(code);
@@ -195,15 +215,7 @@ EEIteratorErrCode SortOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk) {
   }
   auto start = std::chrono::high_resolution_clock::now();
   if (nullptr == chunk) {
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      col_info.emplace_back(field->get_storage_length(),
-                            field->get_storage_type(),
-                            field->get_return_type());
-    }
-
-    chunk = std::make_unique<DataChunk>(col_info);
+    chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_);
     if (chunk->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       chunk = nullptr;

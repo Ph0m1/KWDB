@@ -164,7 +164,8 @@ class HashTagScanOperator : public TagScanBaseOperator {
   // Renders to convert tag row batch into data chunk.
   Field **tag_renders_{nullptr};
   // Column infos to convert tag row batch into data chunk.
-  std::vector<ColumnInfo> tag_col_info_;
+  ColumnInfo *tag_col_info_{nullptr};
+  k_int32 tag_col_size_{0};
   // The length of each join column.
   std::vector<k_uint32> join_column_lengths_;
   // The total length of join columns.

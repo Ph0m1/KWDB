@@ -3152,7 +3152,7 @@ func (c *CustomFuncs) checkProjectionApplicable(
 	for _, proj := range project.Projections {
 		// check if elements of ProjectionExpr can be pushed down
 		push, _ := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
-			c.e.f.TSWhiteListMap.CheckWhiteListParam, false)
+			c.e.f.TSWhiteListMap.CheckWhiteListParam, false, c.e.mem.CheckOnlyOnePTagValue())
 		if !push {
 			return false
 		}

@@ -773,6 +773,8 @@ message AggregatorSpec {
   // ScalarGroupBy with sum_Int agg in inside_out case must return 0 when the table is empty, because sum_int
   // is the twice agg of count.
   optional bool scalar_group_by_with_sum_int = 9 [(gogoproto.nullable) = false];
+  optional int32 group_window_id = 10 [(gogoproto.nullable) = false];
+  optional int32 group__window_tscolid = 11 [(gogoproto.nullable) = false];
 }
 
 // InterleavedReaderJoinerSpec is the specification for a processor that performs

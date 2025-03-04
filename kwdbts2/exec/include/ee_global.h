@@ -21,6 +21,14 @@
 
 namespace kwdbts {
 
+#define MILLISECOND_PER_SECOND 1000
+#define MILLISECOND_PER_MINUTE 60000
+#define MILLISECOND_PER_HOUR   3600000
+#define MILLISECOND_PER_DAY    86400000
+#define MILLISECOND_PER_WEEK   604800000
+
+#define TIME_WINDOW_MIN_DURATION_MS 10
+
 #define EE_TRACE_INFO(...) kwdbts::TRACER.Trace(ctx, __FILE__, __LINE__, 3, __VA_ARGS__)
 #define EE_TRACE_WARN(...) kwdbts::TRACER.Trace(ctx, __FILE__, __LINE__, 2, __VA_ARGS__)
 #define EE_TRACE_ERROR(...) kwdbts::TRACER.Trace(ctx, __FILE__, __LINE__, 1, __VA_ARGS__)
@@ -100,6 +108,37 @@ extern thread_local EEPgErrorInfo g_pg_error_info;
       Return(EEIteratorErrCode::EE_ERROR);                               \
     }                                                                    \
   }
+
+#define CALCULATE_TIME_BUCKET_VALUE(original_timestamp, time_diff, interval_seconds) \
+({ \
+    KTimestampTz bucket_start = (original_timestamp + time_diff) / interval_seconds * interval_seconds; \
+    if (original_timestamp + time_diff < 0 && (original_timestamp + time_diff) % interval_seconds!= 0) { \
+        bucket_start -= interval_seconds; \
+    } \
+    KTimestampTz last_time_bucket_value = bucket_start - time_diff; \
+    last_time_bucket_value; \
+})
+
+enum WindowGroupType {
+  EE_WGT_UNKNOWN,
+  EE_WGT_STATE,
+  EE_WGT_EVENT,
+  EE_WGT_SESSION,
+  EE_WGT_COUNT,
+  EE_WGT_COUNT_SLIDING,
+  EE_WGT_TIME,
+  EE_WGT_TIME_SLIDING
+};
+
+enum SlidingWindowStep {
+  SWS_NEXT_WINDOW,
+  SWS_READ_BATCH,
+  SWS_NEXT_BATCH,
+  SWS_RT_CHUNK,
+  SWS_NEXT_ENTITY,
+};
+
+#define IS_LEAP_YEAR(year) (((year) % 4 == 0 && (year) % 100!= 0) || (year) % 400 == 0)
 
 }  // namespace kwdbts
 

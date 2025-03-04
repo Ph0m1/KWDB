@@ -32,8 +32,10 @@ namespace kwdbts {
  */
 class MemRowContainer : public DataContainer, public std::enable_shared_from_this<MemRowContainer> {
  public:
-  explicit MemRowContainer(std::vector<ColumnOrderInfo> order_info, std::vector<ColumnInfo> col_info, k_uint32 capacity)
-      : data_chunk_(col_info, capacity) {
+  explicit MemRowContainer(std::vector<ColumnOrderInfo> order_info,
+                           ColumnInfo* col_info, k_int32 col_num,
+                           k_uint32 capacity)
+      : data_chunk_(col_info, col_num, capacity) {
     order_info_ = std::move(order_info);
   }
 
@@ -77,7 +79,7 @@ class MemRowContainer : public DataContainer, public std::enable_shared_from_thi
 
   k_int32 NextLine() override;
 
-  std::vector<ColumnInfo>& GetColumnInfo() override { return data_chunk_.GetColumnInfo(); }
+  ColumnInfo* GetColumnInfo() override { return data_chunk_.GetColumnInfo(); }
 
   void Sort() override;
 

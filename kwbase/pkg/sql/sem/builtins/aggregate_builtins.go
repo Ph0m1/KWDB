@@ -2999,7 +2999,7 @@ func (a *TimeBucketAggregate) Add(
 	if !ok {
 		return pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
 	}
-	dInterval, err := getTimeInterval(datum2[0])
+	dInterval, err := GetTimeInterval(datum2[0])
 	if err != nil {
 		return err
 	}
@@ -3055,7 +3055,7 @@ func (a *TimestamptzBucketAggregate) Add(
 	if !ok {
 		return pgerror.New(pgcode.InvalidParameterValue, "first arg is error")
 	}
-	dInterval, err := getTimeInterval(datum2[0])
+	dInterval, err := GetTimeInterval(datum2[0])
 	if err != nil {
 		return err
 	}
@@ -3091,10 +3091,10 @@ func getNewTime(oldTime time.Time, dInterval tree.DInterval, loc *time.Location)
 	return newTime
 }
 
-// getTimeInterval converts input string or int value to interval.
+// GetTimeInterval converts input string or int value to interval.
 // input:input datum for time_bucket or time_bucket_gapfill.
 // output:DInterval converted by string or int.
-func getTimeInterval(datum tree.Datum) (tree.DInterval, error) {
+func GetTimeInterval(datum tree.Datum) (tree.DInterval, error) {
 	var valueStr string
 	switch d := datum.(type) {
 	case *tree.DString:
@@ -3148,7 +3148,7 @@ func checkTimeUnit(str string) error {
 	}
 	// the input of time interval must contain num value and unit.
 	if len(newStr) < 2 {
-		return pgerror.New(pgcode.InvalidParameterValue, "invalid input interval time for time_bucket or time_bucket_gapfill")
+		return pgerror.New(pgcode.InvalidParameterValue, "invalid input interval time")
 	}
 	unit := newStr[len(newStr)-1]
 	if unit != 'y' && unit != 'n' && unit != 'w' && unit != 'd' && unit != 'h' && unit != 'm' && unit != 's' {
@@ -3163,10 +3163,63 @@ func checkTimeUnit(str string) error {
 	// unsupported composite time.
 	for _, s := range numVal {
 		if s > '9' || s < '0' {
-			return pgerror.New(pgcode.InvalidParameterValue, "invalid input interval time for time_bucket or time_bucket_gapfill")
+			return pgerror.New(pgcode.InvalidParameterValue, "invalid input interval time")
 		}
 	}
 	return nil
+}
+
+func parseIntervalForSessionWindow(str string) (time.Duration, error) {
+	replaceMap := map[string]string{
+		"second": "s", "secs": "s", "sec": "s", "seconds": "s",
+		"minute": "m", "mins": "m", "min": "m", "minutes": "m",
+		"hour": "h", "hrs": "h", "hr": "h", "hours": "h",
+		"day": "d", "days": "d",
+		"week": "w", "weeks": "w",
+	}
+	replaceSlice := []string{
+		"minutes", "seconds", "minute", "second",
+		"hours", "secs", "mins", "hour", "days",
+		"sec", "min", "hrs", "day", "hr",
+		"weeks", "week",
+	}
+	newStr := strings.ToLower(str)
+	for _, unitOld := range replaceSlice {
+		unitNew := replaceMap[unitOld]
+		newStr = strings.ReplaceAll(newStr, unitOld, unitNew)
+	}
+	// the input of time interval must contain num value and unit.
+	if len(newStr) < 2 {
+		return 0, pgerror.Newf(pgcode.InvalidParameterValue, "invalid input interval time (%s) for session_window", str)
+	}
+	var numVal string
+	if len(newStr) == 2 {
+		numVal = string(newStr[0])
+	} else {
+		numVal = newStr[:len(newStr)-1]
+	}
+	// unsupported composite time.
+	d, err := strconv.Atoi(numVal)
+	if err != nil || d < 0 {
+		return 0, pgerror.Newf(pgcode.InvalidParameterValue, "invalid input interval time (%s) for session_window.", str)
+	}
+	unit := newStr[len(newStr)-1]
+	var dur time.Duration
+	switch unit {
+	case 's':
+		dur = time.Duration(d) * time.Second
+	case 'm':
+		dur = time.Duration(d) * time.Minute
+	case 'h':
+		dur = time.Duration(d) * time.Hour
+	case 'd':
+		dur = time.Duration(d) * time.Hour * 24
+	case 'w':
+		dur = time.Duration(d) * time.Hour * 24 * 7
+	default:
+		return 0, pgerror.Newf(pgcode.InvalidParameterValue, "invalid input interval time (%s) for session_window.", str)
+	}
+	return dur, nil
 }
 
 // Result is for timebucket

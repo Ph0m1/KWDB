@@ -494,6 +494,59 @@ func Add(t time.Time, d Duration) time.Time {
 	return res.AddDate(0, 0, int(d.Days)).Add(time.Duration(d.nanos))
 }
 
+// Subtract returns the time t-d, using a configurable mode.
+func Subtract(t time.Time, d Duration) time.Time {
+	// We can fast-path if the duration is always a fixed amount of time,
+	// or if the day number that we're starting from can never result
+	// in normalization.
+	if d.Months == 0 || t.Day() <= 28 {
+		return t.AddDate(0, -int(d.Months), -int(d.Days)).Add(-time.Duration(d.nanos))
+	}
+
+	// Adjustments for 1-based math.
+	expectedMonth := time.Month((int(t.Month())-1-int(d.Months))%MonthsPerYear) + 1
+	// If we have a negative duration, we have a negative modulus.
+	// Push it back up to the positive expectedMonth.
+	if expectedMonth <= 0 {
+		expectedMonth += MonthsPerYear
+	}
+
+	// Use AddDate() to get a rough value. This might overshoot the
+	// end of the expected month by multiple days. We could iteratively
+	// subtract a day until we jump a month backwards, but that's
+	// at least twice as slow as computing the correct value ourselves.
+	res := t.AddDate(0 /* years */, -int(d.Months), 0 /* days */)
+
+	// Unpack fields as little as possible.
+	year, month, _ := res.Date()
+	hour, min, sec := res.Clock()
+
+	if month != expectedMonth {
+		// Handle the same logic for subtracting months and days.
+		var lastDayOfMonth int
+		switch expectedMonth {
+		case time.February:
+			// Leap year if divisible by 4, but not centuries unless also divisible by 400.
+			if year%4 == 0 && (year%100 != 0 || year%400 == 0) {
+				lastDayOfMonth = 29
+			} else {
+				lastDayOfMonth = 28
+			}
+		case time.January, time.March, time.May, time.July, time.August, time.October, time.December:
+			lastDayOfMonth = 31
+		default:
+			lastDayOfMonth = 30
+		}
+
+		res = time.Date(
+			year, expectedMonth, lastDayOfMonth,
+			hour, min, sec,
+			res.Nanosecond(), res.Location())
+	}
+
+	return res.AddDate(0, 0, -int(d.Days)).Add(-time.Duration(d.nanos))
+}
+
 // Add returns a Duration representing a time length of d+x.
 func (d Duration) Add(x Duration) Duration {
 	return MakeDuration(d.nanos+x.nanos, d.Days+x.Days, d.Months+x.Months)

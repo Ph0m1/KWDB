@@ -184,6 +184,9 @@ const (
 
 	// TwaUseOrderScan is set when twa Function exec in AE.
 	TwaUseOrderScan = 1 << 10
+
+	// GroupWindowUseOrderScan is set when grouping window function can exec in AE
+	GroupWindowUseOrderScan = 1 << 11
 )
 
 // OrderedTableType TSScanOrderedType

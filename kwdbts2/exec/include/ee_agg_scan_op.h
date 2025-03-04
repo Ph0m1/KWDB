@@ -47,6 +47,7 @@ class AggTableScanOperator : public TableScanOperator {
         agg_limit_{other.agg_limit_} {}
 
   ~AggTableScanOperator() override {
+    SafeDeleteArray(agg_output_col_info_);
     SafeDeletePointer(agg_param_);
     if (agg_num_ > 0 && agg_renders_) {
       free(agg_renders_);
@@ -104,7 +105,7 @@ class AggTableScanOperator : public TableScanOperator {
   // construct agg info
   inline void constructAggResults() {
     // initialize the agg output buffer.
-    current_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_);
+    current_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_, agg_output_col_num_);
     if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
@@ -183,7 +184,8 @@ class AggTableScanOperator : public TableScanOperator {
   k_uint32 agg_num_{0};           // the count of agg projection column
 
   std::vector<Field*> agg_output_fields_;  // the output field of agg operator
-  std::vector<ColumnInfo> agg_output_col_info_;  // construct agg output col
+  ColumnInfo* agg_output_col_info_{nullptr};        // construct agg output col
+  k_int32 agg_output_col_num_{0};
   bool is_resolve_datachunk_{false};
 
   // used to save if the current row is a new group based on the input groupby information.

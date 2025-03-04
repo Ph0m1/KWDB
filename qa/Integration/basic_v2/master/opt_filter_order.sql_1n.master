@@ -285,21 +285,22 @@ INSERT 1
   15
 (5 rows)
 > explain select e1 from d1.t1 where    ((case e1 when 11 then 0 else -1 end)=0 or (case e5 when 51 then 0 else -1 end)=0)     and    ((case tag3 when '301' then 'yes' else 'no' end)='yes')    order by e1;
-             tree             |    field    |                                                                     description
-------------------------------+-------------+-------------------------------------------------------------------------------------------------------------------------------------------------------
-                              | distributed | true
-                              | vectorized  | false
-  sort                        |             |
-   │                          | order       | +e1
-   └── render                 |             |
-        │                     | e1          | e1
-        └── filter            |             |
-             │                | filter      | ((CASE e1 WHEN 11 THEN 0 ELSE -1 END = 0) OR (CASE e5 WHEN 51.0 THEN 0 ELSE -1 END = 0)) AND (CASE tag3 WHEN '301' THEN 'yes' ELSE 'no' END = 'yes')
-             └── synchronizer |             |
-                  └── ts scan |             |
-                              | ts-table    | t1
-                              | access mode | tableTableMeta
-(12 rows)
+           tree          |     field     |                                      description
+-------------------------+---------------+-----------------------------------------------------------------------------------------
+                         | distributed   | true
+                         | vectorized    | false
+  sort                   |               |
+   │                     | order         | +e1
+   └── synchronizer      |               |
+        └── render       |               |
+             │           | engine type   | time series
+             │           | e1            | e1
+             └── ts scan |               |
+                         | ts-table      | t1
+                         | access mode   | tableTableMeta
+                         | filter        | (CASE e1 WHEN 11 THEN 0 ELSE -1 END = 0) OR (CASE e5 WHEN 51.0 THEN 0 ELSE -1 END = 0)
+                         | tag filter[0] | CASE tag3 WHEN '301' THEN 'yes' ELSE 'no' END = 'yes'
+(13 rows)
 > select e1 from d1.t1 where    ((case e1 when 11 then 0 else -1 end)=0 or (case e5 when 51 then 0 else -1 end)=0)     and    ((case tag3 when '301' then 'yes' else 'no' end)='yes')    order by e1;
   e1
 ------
@@ -590,8 +591,8 @@ INSERT 1
 ------
 (0 rows)
 > explain select e1 from d1.t1 where    (abs(e1) > 3 or length(e4) < 2 or trunc(e5) = 2)    and    (e4 is not null or e1+e2 > 0 )    and    (e1 between 0 and 100)    and    ((case e1 when 11 then 0 else -1 end)=0)    order by e1;
-             tree             |    field    |                                        description
-------------------------------+-------------+---------------------------------------------------------------------------------------------
+             tree             |    field    |                                                                description
+------------------------------+-------------+--------------------------------------------------------------------------------------------------------------------------------------------
                               | distributed | true
                               | vectorized  | false
   sort                        |             |
@@ -599,12 +600,12 @@ INSERT 1
    └── render                 |             |
         │                     | e1          | e1
         └── filter            |             |
-             │                | filter      | ((e4 IS NOT NULL) OR ((e1 + e2) > 0)) AND (CASE e1 WHEN 11 THEN 0 ELSE -1 END = 0)
+             │                | filter      | (e4 IS NOT NULL) OR ((e1 + e2) > 0)
              └── synchronizer |             |
                   └── ts scan |             |
                               | ts-table    | t1
                               | access mode | metaTable
-                              | filter      | ((e1 >= 0) AND (e1 <= 100)) AND (((abs(e1) > 3) OR (length(e4) < 2)) OR (trunc(e5) = 2.0))
+                              | filter      | (((e1 >= 0) AND (e1 <= 100)) AND (((abs(e1) > 3) OR (length(e4) < 2)) OR (trunc(e5) = 2.0))) AND (CASE e1 WHEN 11 THEN 0 ELSE -1 END = 0)
 (13 rows)
 > select e1 from d1.t1 where    (abs(e1) > 3 or length(e4) < 2 or trunc(e5) = 2)    and    (e4 is not null or e1+e2 > 0 )    and    (e1 between 0 and 100)    and    ((case e1 when 11 then 0 else -1 end)=0)    order by e1;
   e1

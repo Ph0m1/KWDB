@@ -310,7 +310,18 @@ func (b *Builder) analyzeSelectList(
 func (b *Builder) buildProjectionList(inScope *scope, projectionsScope *scope) {
 	for i := range projectionsScope.cols {
 		col := &projectionsScope.cols[i]
-		b.buildScalar(col.getExpr(), inScope, projectionsScope, col, nil)
+		if scalar := b.buildScalar(col.getExpr(), inScope, projectionsScope, col, nil); scalar != nil {
+			// group window function can be only used in groupby
+			if name, ok := memo.CheckGroupWindowExist(scalar); ok {
+				panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+			}
+		} else if inScope.groupby != nil && len(inScope.groupby.groupStrs) > 0 {
+			if groupCol, ok := inScope.groupby.groupStrs[symbolicExprStr(col.getExpr())]; ok {
+				if name, ok := memo.CheckGroupWindowExist(groupCol.scalar); ok {
+					panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+				}
+			}
+		}
 	}
 }
 

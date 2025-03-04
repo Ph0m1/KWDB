@@ -75,6 +75,10 @@ EEIteratorErrCode SortScanOperator::Init(kwdbContext_p ctx) {
     table_->limit_ = limit_;
 
     order_field_ = param_.GetOutputField(ctx, idx);
+    code = InitOutputColInfo(output_fields_);
+    if (code == EE_ERROR) {
+      break;
+    }
     if (is_offset_opt_) {
       code = mallocTempField(ctx);
     } else {
@@ -251,15 +255,11 @@ EEIteratorErrCode SortScanOperator::mallocTempField(kwdbContext_p ctx) {
 EEIteratorErrCode SortScanOperator::initContainer(kwdbContext_p ctx, DataChunkPtr&chunk,
                                                         const std::vector<Field*> &cols, k_uint32 line) {
   // init col
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(cols.size());
-  k_int32 row_size = 0;
-  for (auto field : cols) {
-    col_info.emplace_back(field->get_storage_length(),
-                          field->get_storage_type(), field->get_return_type());
-    row_size += field->get_storage_length();
+  k_uint64 lines = limit_ + offset_;
+  k_uint32 row_size = DataChunk::ComputeRowSize(output_col_info_, output_col_num_);
+  if (lines * row_size < BaseOperator::DEFAULT_MAX_MEM_BUFFER_SIZE) {
+    chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_, lines);
   }
-  chunk = std::make_unique<DataChunk>(col_info, line);
   if (!chunk || chunk->Initialize() != true) {
     chunk = nullptr;
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");

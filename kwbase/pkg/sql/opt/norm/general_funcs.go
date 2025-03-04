@@ -197,7 +197,7 @@ func (c *CustomFuncs) ColsAreEmpty(cols opt.ColSet) bool {
 // from (select time_bucket_gapfill(time,86400) as tt,interpolate(first(device_id),linear) as b from t1 group by tt order by tt limit 1)
 // group by c order by c;
 func (c *CustomFuncs) CanReduceGroupingCols(groupingPrivate *memo.GroupingPrivate) bool {
-	return !(groupingPrivate.TimeBucketGapFillColId > 0)
+	return !(groupingPrivate.GroupWindowId > 0 || groupingPrivate.TimeBucketGapFillColId > 0)
 }
 
 // ColsAreSubset returns true if the left columns are a subset of the right

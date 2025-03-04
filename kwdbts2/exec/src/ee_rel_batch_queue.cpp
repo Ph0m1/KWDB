@@ -15,17 +15,20 @@ namespace kwdbts {
 
 RelBatchQueue::RelBatchQueue() {}
 
-RelBatchQueue::~RelBatchQueue() {}
+RelBatchQueue::~RelBatchQueue() { SafeDeleteArray(output_col_info_); }
 
 
 KStatus RelBatchQueue::Init(std::vector<Field*> &output_fields) {
-  output_col_info_.reserve(output_fields.size());
-
-  for (auto field : output_fields) {
-    if (field->get_storage_length() == 0) {
-      return KStatus::FAIL;
-    }
-    output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+  output_col_num_ = output_fields.size();
+  output_col_info_ = KNEW ColumnInfo[output_col_num_];
+  if (output_col_info_ == nullptr) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    return KStatus::FAIL;
+  }
+  for (k_int32 i = 0; i < output_fields.size(); i++) {
+    output_col_info_[i] = ColumnInfo(output_fields[i]->get_storage_length(),
+                                       output_fields[i]->get_storage_type(),
+                                       output_fields[i]->get_return_type());
   }
   return KStatus::SUCCESS;
 }
@@ -40,7 +43,7 @@ KStatus RelBatchQueue::Add(kwdbContext_p ctx, char *batchData, k_uint32 count) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NULL_VALUE_NOT_ALLOWED, "Relational batch data pointer should not be null");
     Return(KStatus::FAIL);
   }
-  DataChunkPtr data_chunk = std::make_unique<kwdbts::DataChunk>(output_col_info_, count);
+  DataChunkPtr data_chunk = std::make_unique<kwdbts::DataChunk>(output_col_info_, output_col_num_, count);
   if (data_chunk->Initialize() < 0) {
       data_chunk = nullptr;
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");

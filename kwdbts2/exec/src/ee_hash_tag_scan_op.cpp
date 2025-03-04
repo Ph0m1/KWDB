@@ -64,7 +64,7 @@ KStatus HashTagScanOperator::Close(kwdbContext_p ctx) {
   if (tag_renders_) {
     free(tag_renders_);
   }
-
+  SafeDeleteArray(tag_col_info_);
   Return(KStatus::SUCCESS);
 }
 
@@ -194,7 +194,13 @@ EEIteratorErrCode HashTagScanOperator::Start(kwdbContext_p ctx) {
     Return(EEIteratorErrCode::EE_ERROR);
   }
   memset(tag_renders_, 0, tag_col_size * sizeof(Field *));
-
+  tag_col_size_ = tag_col_size;
+  tag_col_info_ = KNEW ColumnInfo[tag_col_size];
+  if (nullptr == tag_col_info_) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    LOG_ERROR("tag_col_info_ malloc failed\n");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
   for (k_int32 i = 0; i < tag_col_size; ++i) {
     k_uint32 tab = table_->scan_tags_[i];
     Field *field = table_->GetFieldWithColNum(tab + table_->GetMinTagId());
@@ -202,7 +208,7 @@ EEIteratorErrCode HashTagScanOperator::Start(kwdbContext_p ctx) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INTERNAL_ERROR, "field is null");
       Return(EEIteratorErrCode::EE_ERROR);
     }
-    tag_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    tag_col_info_[i] = ColumnInfo(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
     tag_renders_[i] = field;
   }
 
@@ -356,7 +362,7 @@ EEIteratorErrCode HashTagScanOperator::BuildTagIndex(kwdbContext_p ctx) {
   // Scan all tag data with filter
   while ((code = handler_->NextTagDataChunk(ctx, spec_, filter_,
                               primary_tags_, other_join_columns_values, tag_other_join_cols_,
-                              tag_renders_, tag_col_info_, tag_data_chunk))
+                              tag_renders_, tag_col_info_, tag_col_size_, tag_data_chunk))
             != EEIteratorErrCode::EE_END_OF_RECORD) {
     // Check for cancellation within the loop
     if (CheckCancel(ctx) != SUCCESS) {
@@ -472,7 +478,7 @@ EEIteratorErrCode HashTagScanOperator::Next(kwdbContext_p ctx) {
     // Scan all tag data with filter
     while ((code = handler_->NextTagDataChunk(ctx, spec_, filter_,
                               primary_tags_, other_join_columns_values, tag_other_join_cols_,
-                              tag_renders_, tag_col_info_, tag_data_chunk))
+                              tag_renders_, tag_col_info_, tag_col_size_, tag_data_chunk))
               != EEIteratorErrCode::EE_END_OF_RECORD) {
       // Check for cancellation within the loop
       if (CheckCancel(ctx) != SUCCESS) {
@@ -568,7 +574,7 @@ EEIteratorErrCode HashTagScanOperator::Next(kwdbContext_p ctx) {
           // Call GetTagDataChunkWithPrimaryTags to search hash index, tagFilter & join match.
           code = handler_->GetTagDataChunkWithPrimaryTags(ctx, spec_, filter_,
                               intersect_primary_tags, other_join_columns_values, tag_other_join_cols_,
-                              tag_renders_, tag_col_info_, tag_data_chunk);
+                              tag_renders_, tag_col_info_, tag_col_size_, tag_data_chunk);
 
           if (code != EE_OK && code != EE_END_OF_RECORD) {
             Return(code);

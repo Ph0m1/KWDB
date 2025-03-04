@@ -196,7 +196,7 @@ class OrderedAggregateOperator : public BaseAggregator {
   // construct agg info
   inline void constructAggResults() {
     // initialize the agg output buffer.
-    agg_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_);
+    agg_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_, agg_output_col_num_);
     if (agg_data_chunk_->Initialize() != true) {
       agg_data_chunk_ = nullptr;
       return;
@@ -207,7 +207,7 @@ class OrderedAggregateOperator : public BaseAggregator {
   inline void handleEmptyResults(kwdbContext_p ctx) {
     // Queries like `SELECT MAX(n) FROM t` expect a row of NULLs if nothing was aggregated.
     if (!has_agg_result && group_type_ == TSAggregatorSpec_Type::TSAggregatorSpec_Type_SCALAR) {
-      temporary_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_, 1);
+      temporary_data_chunk_ = std::make_unique<DataChunk>(agg_output_col_info_, agg_output_col_num_, 1);
       if (temporary_data_chunk_->Initialize() != true) {
         temporary_data_chunk_ = nullptr;
         return;
@@ -232,7 +232,8 @@ class OrderedAggregateOperator : public BaseAggregator {
   }
 
   DataChunkPtr agg_data_chunk_;
-  std::vector<ColumnInfo> agg_output_col_info_;  // construct agg output col
+  ColumnInfo* agg_output_col_info_{nullptr};  // construct agg output col
+  k_int32     agg_output_col_num_{0};
 
   // used to save if the current row is a new group based on the input groupby information.
   GroupByMetadata group_by_metadata_;

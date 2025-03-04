@@ -563,11 +563,10 @@ EEIteratorErrCode BaseAggregator::Init(kwdbContext_p ctx) {
     }
 
     // init column info used by data chunk.
-    output_col_info_.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    code = InitOutputColInfo(output_fields_);
+    if (code != EEIteratorErrCode::EE_OK) {
+      Return(EEIteratorErrCode::EE_ERROR);
     }
-
     constructDataChunk();
     if (current_data_chunk_ == nullptr) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
@@ -752,14 +751,7 @@ EEIteratorErrCode HashAggregateOperator::Next(kwdbContext_p ctx,
   auto start = std::chrono::high_resolution_clock::now();
   if (nullptr == chunk) {
     // init data chunk
-    std::vector<ColumnInfo> col_info;
-    col_info.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      col_info.emplace_back(field->get_storage_length(),
-                            field->get_storage_type(),
-                            field->get_return_type());
-    }
-    chunk = std::make_unique<DataChunk>(col_info);
+    chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_);
     if (chunk->Initialize() != true) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       chunk = nullptr;
@@ -965,6 +957,7 @@ OrderedAggregateOperator::OrderedAggregateOperator(const OrderedAggregateOperato
 }
 
 OrderedAggregateOperator::~OrderedAggregateOperator() {
+  SafeDeleteArray(agg_output_col_info_);
   //  delete input
   if (is_clone_) {
     delete input_;
@@ -980,15 +973,23 @@ EEIteratorErrCode OrderedAggregateOperator::Init(kwdbContext_p ctx) {
   }
 
   // construct the output column information for agg functions.
-  for (int i = 0; i < param_.aggs_size_; i++) {
+  agg_output_col_num_ = param_.aggs_size_;
+  agg_output_col_info_ = KNEW ColumnInfo[agg_output_col_num_];
+  if (agg_output_col_info_ == nullptr) {
+    EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
+    Return(EEIteratorErrCode::EE_ERROR);
+  }
+  for (int i = 0; i < agg_output_col_num_; i++) {
     if (aggregations_[i].func() == TSAggregatorSpec_Func::TSAggregatorSpec_Func_AVG) {
-      agg_output_col_info_.emplace_back(param_.aggs_[i]->get_storage_length() + sizeof(k_int64),
-                                      param_.aggs_[i]->get_storage_type(),
-                                      param_.aggs_[i]->get_return_type());
+      agg_output_col_info_[i] =
+          ColumnInfo(param_.aggs_[i]->get_storage_length() + sizeof(k_int64),
+                     param_.aggs_[i]->get_storage_type(),
+                     param_.aggs_[i]->get_return_type());
     } else {
-      agg_output_col_info_.emplace_back(param_.aggs_[i]->get_storage_length(),
-                                      param_.aggs_[i]->get_storage_type(),
-                                      param_.aggs_[i]->get_return_type());
+      agg_output_col_info_[i] =
+          ColumnInfo(param_.aggs_[i]->get_storage_length(),
+                     param_.aggs_[i]->get_storage_type(),
+                     param_.aggs_[i]->get_return_type());
     }
   }
 
@@ -1122,8 +1123,10 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
   if (chunk == nullptr) {
     Return(KStatus::FAIL)
   }
+  DataChunk *chunk_ptr = chunk.get();
   std::queue<DataChunkPtr> agg_output_queue;
   k_int32 count_of_current_chunk = 0;
+
   if (agg_data_chunk_ != nullptr) {
     count_of_current_chunk = (k_int32)agg_data_chunk_->Count();
   } else {
@@ -1131,8 +1134,8 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
   }
 
   k_int32 target_row = count_of_current_chunk - 1;
-  k_uint32 row_batch_count = chunk->Count();
-
+  k_uint32 row_batch_count = chunk_ptr->Count();
+  bool has_new_group = false;
   if (group_by_metadata_.reset(row_batch_count) != true) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     Return(KStatus::FAIL);
@@ -1140,13 +1143,21 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
 
   std::vector<DataChunk*> chunks;
   chunks.push_back(agg_data_chunk_.get());
+
   if (!group_cols_.empty()) {
+    if (!last_group_key_.is_init_) {
+      bool ret = last_group_key_.Init(chunk_ptr->GetColumnInfo(), group_cols_);
+      if (!ret) {
+        Return(KStatus::FAIL);
+      }
+    }
     for (k_uint32 row = 0; row < row_batch_count; ++row) {
-      bool is_new_group = last_group_key_.IsNewGroup(chunk, row, group_cols_, col_types_);
+      bool is_new_group = last_group_key_.IsNewGroup(chunk_ptr, row, group_cols_);
 
       // new group or end of rowbatch
       if (is_new_group) {
         has_agg_result = true;
+        has_new_group = true;
         group_by_metadata_.setNewGroup(row);
 
         if (agg_data_chunk_->isFull()) {
@@ -1164,14 +1175,10 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
         ++target_row;
         agg_data_chunk_->AddCount();
 
-        CombinedGroupKey group_keys;
-        AggregateFunc::ConstructGroupKeys(chunk.get(), group_cols_, col_types_, row, group_keys);
-
-        // update new group key
-        last_group_key_ = group_keys;
+        AggregateFunc::ConstructGroupKeys(chunk_ptr, group_cols_, row, last_group_key_);
       }
 
-      chunk->NextLine();
+      chunk_ptr->NextLine();
     }
   } else {
     // if the group by column(s) is empty, it needs at least one row to hold the response.
@@ -1183,14 +1190,16 @@ KStatus OrderedAggregateOperator::ProcessData(kwdbContext_p ctx, DataChunkPtr& c
   k_int32 start_line_in_begin_chunk = group_cols_.empty() ? 0 : count_of_current_chunk - 1;
   // need reset to the first line of row_batch before processing agg columns.
   for (int i = 0; i < funcs_.size(); i++) {
-    chunk->ResetLine();
-    chunk->NextLine();
+    chunk_ptr->ResetLine();
+    chunk_ptr->NextLine();
     DistinctOpt opt{aggregations_[i].distinct(), col_types_, col_lens_, group_cols_};
-    if (funcs_[i]->addOrUpdate(chunks, start_line_in_begin_chunk, chunk.get(), group_by_metadata_, opt) < 0) {
+    if (funcs_[i]->addOrUpdate(chunks, start_line_in_begin_chunk, chunk_ptr, group_by_metadata_, opt) < 0) {
       Return(KStatus::FAIL);
     }
   }
-
+  if (has_new_group) {
+    last_group_key_.chunk_ = std::move(chunk);
+  }
   while (!agg_output_queue.empty()) {
     temporary_data_chunk_ = std::move(agg_output_queue.front());
     agg_output_queue.pop();

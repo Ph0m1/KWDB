@@ -397,12 +397,17 @@ func (b *Builder) buildWindowArgs(
 	for j, a := range argExprs {
 		col := outScope.findExistingCol(a, false /* allowSideEffects */)
 		if col == nil {
+			res := b.buildScalar(a, inScope, nil, nil, nil)
+			// group window function can be only used in groupby
+			if name, ok := memo.CheckGroupWindowExist(res); ok {
+				panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+			}
 			col = b.synthesizeColumn(
 				outScope,
 				fmt.Sprintf("%s_%d_arg%d", funcName, windowIndex+1, j+1),
 				a.ResolvedType(),
 				a,
-				b.buildScalar(a, inScope, nil, nil, nil),
+				res,
 			)
 		}
 		argList[j] = b.factory.ConstructVariable(col.id)
@@ -425,12 +430,17 @@ func (b *Builder) buildWindowPartition(
 	for j, e := range cols {
 		col := outScope.findExistingCol(e, false /* allowSideEffects */)
 		if col == nil {
+			res := b.buildScalar(e, inScope, nil, nil, nil)
+			// group window function can be only used in groupby
+			if name, ok := memo.CheckGroupWindowExist(res); ok {
+				panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+			}
 			col = b.synthesizeColumn(
 				outScope,
 				fmt.Sprintf("%s_%d_partition_%d", funcName, windowIndex+1, j+1),
 				e.ResolvedType(),
 				e,
-				b.buildScalar(e, inScope, nil, nil, nil),
+				res,
 			)
 		}
 		windowPartition.Add(col.id)
@@ -451,12 +461,17 @@ func (b *Builder) buildWindowOrdering(
 		for _, e := range cols {
 			col := outScope.findExistingCol(e, false /* allowSideEffects */)
 			if col == nil {
+				res := b.buildScalar(e, inScope, nil, nil, nil)
+				// group window function can be only used in groupby
+				if name, ok := memo.CheckGroupWindowExist(res); ok {
+					panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+				}
 				col = b.synthesizeColumn(
 					outScope,
 					fmt.Sprintf("%s_%d_orderby_%d", funcName, windowIndex+1, j+1),
 					te.ResolvedType(),
 					te,
-					b.buildScalar(e, inScope, nil, nil, nil),
+					res,
 				)
 			}
 			ord = append(ord, opt.MakeOrderingColumn(col.id, t.Direction == tree.Descending))
@@ -476,12 +491,17 @@ func (b *Builder) buildFilterCol(
 
 	col := outScope.findExistingCol(te, false /* allowSideEffects */)
 	if col == nil {
+		res := b.buildScalar(te, inScope, nil, nil, nil)
+		// group window function can be only used in groupby
+		if name, ok := memo.CheckGroupWindowExist(res); ok {
+			panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+		}
 		col = b.synthesizeColumn(
 			outScope,
 			fmt.Sprintf("%s_%d_filter", funcName, windowIndex+1),
 			te.ResolvedType(),
 			te,
-			b.buildScalar(te, inScope, nil, nil, nil),
+			res,
 		)
 	}
 

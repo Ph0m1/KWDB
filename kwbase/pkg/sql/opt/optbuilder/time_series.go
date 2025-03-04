@@ -21,14 +21,14 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 )
 
-// Interpolate symbol
-const Interpolate = "interpolate"
-
-// Gapfill symbol
-const Gapfill = "time_bucket_gapfill"
-
-// Gapfillinternal symbol
-const Gapfillinternal = "time_bucket_gapfill_internal"
+const (
+	// Interpolate symbol
+	Interpolate = "interpolate"
+	// Gapfill symbol
+	Gapfill = "time_bucket_gapfill"
+	// Gapfillinternal symbol
+	Gapfillinternal = "time_bucket_gapfill_internal"
+)
 
 // buildTimeSeriesScan builds a memo group for a TSScanOp expression on the
 // given table.

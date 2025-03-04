@@ -238,7 +238,7 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
     KString unit = "";
     KString interval = replaceTimeUnit({args_[1]->ValStr().getptr(),
                             args_[1]->ValStr().length_});
-    interval_seconds_ = getIntervalSeconds(var_interval_, year_bucket_, &unit, interval, error_info_);
+    interval_seconds_ = getIntervalSeconds(interval, var_interval_, year_bucket_, &unit, error_info_, false);
     k_int64 time_diff = time_zone_;
     sql_type_ = getTimeFieldType(args_[0]->get_storage_type(), unit, &time_diff, &type_scale_, &type_scale_multi_or_divde_);
     storage_type_ = sql_type_;
@@ -256,7 +256,7 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
       time_diff_mo_ = (time_diff % interval_seconds_ + mo) % interval_seconds_;
     }
 
-    nullable_ = false;
+    allow_null_ = false;
   }
   enum Functype functype() override { return TIME_BUCKET_FUNC; }
 
@@ -266,7 +266,8 @@ class  FieldFuncTimeBucket : public FieldFuncOp {
 
   Field *field_to_copy() override;
 
-  // void getIntervalSeconds(k_bool& var_interval, k_bool& year_bucket, std::string& error_info_);
+  // Replace keywords in the timestring
+  // std::string replaceKeywords(const std::string& timestring);
 
   KTimestampTz getOriginalTimestamp() {
     auto val_ptr = args_[0]->get_ptr();
@@ -582,7 +583,13 @@ class FieldFuncCase : public FieldFunc {
     type_ = FIELD_CMP;
     sql_type_ = fields.front()->get_sql_type();
     storage_type_ = fields.front()->get_storage_type();
-    storage_len_ = fields.front()->get_storage_length();
+    storage_len_ = 0;
+    for (auto &elem : fields) {
+      k_int32 len = elem->get_storage_length();
+      if (len > storage_len_) {
+        storage_len_ = len;
+      }
+    }
   }
   enum Functype functype() override { return CASE_FUNC; }
 

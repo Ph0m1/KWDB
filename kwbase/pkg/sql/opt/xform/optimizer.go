@@ -1627,7 +1627,7 @@ func processGroupByOrScalarGroupByExpr(expr memo.RelExpr, mem *memo.Memo) {
 		for _, proj := range projectExpr.Projections {
 			if element, ok := proj.Element.(opt.Expr); ok {
 				if execInTSEngine, _ := memo.CheckExprCanExecInTSEngine(element, memo.ExprPosProjList,
-					mem.GetWhiteList().CheckWhiteListParam, false); !execInTSEngine {
+					mem.GetWhiteList().CheckWhiteListParam, false, mem.CheckOnlyOnePTagValue()); !execInTSEngine {
 					// this path used to fallback because of memo.UnsupportedAggFuncOrExpr in outside-in plan,
 					// but now outside-in supports this path and leave unsupported agg/expr to relational side
 					colIDs := getColIDsOfExpr(element, 0, -1)

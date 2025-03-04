@@ -165,9 +165,9 @@ EEIteratorErrCode TableStatisticScanOperator::Init(kwdbContext_p ctx) {
     tag_count_read_index_ = param_.ResolveChecktTagCount();
 
     // init column info used by data chunk.
-    output_col_info_.reserve(output_fields_.size());
-    for (auto field : output_fields_) {
-      output_col_info_.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
+    ret = InitOutputColInfo(output_fields_);
+    if (ret != EEIteratorErrCode::EE_OK) {
+      break;
     }
 
     constructDataChunk();
@@ -246,7 +246,7 @@ EEIteratorErrCode TableStatisticScanOperator::Next(kwdbContext_p ctx, DataChunkP
           if (current_data_chunk_->Count() > 0) {
             output_queue_.push(std::move(current_data_chunk_));
           }
-          k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_);
+          k_uint32 capacity = DataChunk::EstimateCapacity(output_col_info_, output_col_num_);
           if (capacity >= row_batch_->Count()) {
             constructDataChunk();
           } else {
@@ -306,7 +306,7 @@ k_int64 TableStatisticScanOperator::ProcessPTagSpanFilter(RowBatch* row_batch) {
 
 void TableStatisticScanOperator::ProcessScalar() {
   k_uint32 count_ = current_data_chunk_->Count();
-  k_uint32 col_num_ = output_col_info_.size();
+  k_uint32 col_num_ = output_col_num_;
   for (k_uint32 col = 0; col < col_num_; ++col) {
     if (renders_[col]->get_field_statistic()) {
       k_int64 val = 0;

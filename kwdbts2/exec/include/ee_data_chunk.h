@@ -63,9 +63,9 @@ namespace kwdbts {
 class DataChunk : public IChunk {
  public:
   /* Constructor & Deconstructor */
-  explicit DataChunk(vector<ColumnInfo>& column_info, k_uint32 capacity = 0);
+  explicit DataChunk(ColumnInfo *col_info, k_int32 col_num, k_uint32 capacity = 0);
 
-  explicit DataChunk(vector<ColumnInfo>& column_info, const char* buf,
+  explicit DataChunk(ColumnInfo *col_info, k_int32 col_num, const char* buf,
                      k_uint32 count, k_uint32 capacity);
 
   virtual ~DataChunk();
@@ -81,7 +81,7 @@ class DataChunk : public IChunk {
 
   [[nodiscard]] inline char* GetData() const { return data_; }
 
-  std::vector<ColumnInfo>& GetColumnInfo() override { return col_info_; }
+  ColumnInfo* GetColumnInfo() override { return col_info_; }
 
   [[nodiscard]] inline k_uint32 Capacity() const { return capacity_; }
 
@@ -173,7 +173,8 @@ class DataChunk : public IChunk {
    * @param[in] value data pointer to insert
    * @param[in] len data length
    */
-  KStatus InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len);
+  KStatus InsertData(k_uint32 row, k_uint32 col, DatumPtr value, k_uint16 len,
+                     bool set_not_null = true);
 
   /**
    * @brief Put data into the data chunk, and the existing data will be overwritten.
@@ -407,9 +408,9 @@ class DataChunk : public IChunk {
   static const int SIZE_LIMIT = ROW_BUFFER_SIZE;
   static const int MIN_CAPACITY = 1;
 
-  static k_uint32 EstimateCapacity(vector<ColumnInfo>& column_info);
+  static k_uint32 EstimateCapacity(ColumnInfo *column_info, k_int32 col_num);
 
-  static k_uint32 ComputeRowSize(vector<ColumnInfo>& column_info);
+  static k_uint32 ComputeRowSize(ColumnInfo *column_info, k_int32 col_num);
 
   // convert one row to tag data format
   KStatus ConvertToTagData(kwdbContext_p ctx, k_uint32 row, k_uint32 col, TagRawData& tag_raw_data, DatumPtr &rel_data_ptr);
@@ -437,9 +438,9 @@ class DataChunk : public IChunk {
  protected:
   bool is_data_owner_{true};
   char* data_{nullptr};  // Multiple rows of column data（not tag）
-  std::vector<ColumnInfo> col_info_;  // column info
-  std::vector<k_uint32> col_offset_;  // column offset
-  std::vector<k_uint32> bitmap_offset_;  // bitmap offset
+  ColumnInfo *col_info_;  // column info
+  k_uint32 *col_offset_;  // column offset
+  k_uint32 *bitmap_offset_;  // bitmap offset
 
   k_uint32 capacity_{0};     // data capacity
   k_uint32 count_{0};        // total number

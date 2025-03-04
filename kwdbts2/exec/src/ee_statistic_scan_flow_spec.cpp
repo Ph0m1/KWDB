@@ -414,7 +414,7 @@ EEIteratorErrCode StatisticSpecResolve::NewAggBaseField(kwdbContext_p ctx,
       *field = org_field->field_to_copy();
       if (nullptr != *field) {
         (*field)->set_num(num);
-        (*field)->setNullable(true);
+        (*field)->set_allow_null(true);
       }
       break;
     }

@@ -93,7 +93,8 @@ class WindowOperator : public BaseOperator {
   std::vector<GroupByColumnInfo> group_by_cols_;
   // if copy the data source using column mode.
   std::vector<Field*>& input_fields_;
-  std::vector<ColumnInfo> output_filter_col_info_;
+  ColumnInfo* output_filter_col_info_{nullptr};
+  k_int32 output_filter_col_num_{0};
   std::vector<Field*> filter_fields_;
   std::vector<k_uint32> filter_fields_num_;
   std::vector<Field*> win_func_fields_;

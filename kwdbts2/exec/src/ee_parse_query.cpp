@@ -463,6 +463,9 @@ k_bool ParseQuery::ParseSingleExpr() {
       ++this->pos_;
       // bareWords
       ++this->pos_;
+      if (this->pos_->type == TokenType::ClosingRoundBracket) {
+        --this->pos_;
+      }
       if (this->pos_->type == TokenType::OpeningRoundBracket) {
         // (
         ++this->pos_;
@@ -726,7 +729,7 @@ KStatus ParseQuery::ConstructTree(std::size_t *i, ExprPtr *head_node) {
         current_node->operator_type = node_list_[*i]->operators;
         (*i)++;
         ExprPtr cond_node = nullptr;
-        if (node_list_[*i]->operators != WHEN) {
+        while (node_list_[*i]->operators != WHEN) {
           ret = ConstructTree(i, &cond_node);
           if (ret != SUCCESS) {
             return ret;
@@ -736,11 +739,12 @@ KStatus ParseQuery::ConstructTree(std::size_t *i, ExprPtr *head_node) {
           if (node_list_[*i]->operators == WHEN) {
             expr_ptr = std::make_shared<BinaryExpr>(false);
             expr_ptr->operator_type = THEN;
-            ret = ConstructTree(i, &cond_node);  // WHEN
+            ExprPtr temp_node = cond_node;
+            ret = ConstructTree(i, &temp_node);  // WHEN
             if (ret != SUCCESS) {
               return ret;
             }
-            expr_ptr->left = cond_node;
+            expr_ptr->left = temp_node;
             if (node_list_[*i]->operators != THEN) {
               return FAIL;
             }

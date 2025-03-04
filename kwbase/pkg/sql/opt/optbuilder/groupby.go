@@ -307,6 +307,7 @@ func (b *Builder) constructGroupBy(
 	aggCols []scopeColumn,
 	ordering opt.Ordering,
 	timeBucketGapFillColID opt.ColumnID,
+	groupWindowID opt.ColumnID,
 ) memo.RelExpr {
 	aggs := make(memo.AggregationsExpr, 0, len(aggCols))
 
@@ -349,6 +350,7 @@ func (b *Builder) constructGroupBy(
 		private.Ordering.FromOrdering(ord)
 		private.TimeBucketGapFillColId = timeBucketGapFillColID
 	}
+	private.GroupWindowId = groupWindowID
 	return b.factory.ConstructGroupBy(input, aggs, &private)
 }
 
@@ -368,8 +370,51 @@ func (b *Builder) buildGroupingColumns(sel *tree.SelectClause, projectionsScope,
 	g.aggOutScope.appendColumns(g.groupingCols())
 }
 
+// check whether group window function is valid
+func (b *Builder) checkGroupWindow(expr *memo.FunctionExpr, scope *scope) (isGroupWiondow bool) {
+	if _, ok := memo.CheckGroupWindowExist(expr); ok && b.factory.Memo().CheckFlag(opt.GroupWindowUseOrderScan) {
+		panic(pgerror.Newf(pgcode.Syntax, "%s(): multiple group window functions are not supported.", expr.Name))
+	} else if ok {
+		if scope.TableType == nil || scope.TableType.HasRtable() || len(b.factory.Metadata().AllTables()) > 1 {
+			panic(pgerror.Newf(pgcode.Syntax, "%s(): group window function is only supported for use in single time series table query.", expr.Name))
+		}
+		b.factory.Memo().SetFlag(opt.GroupWindowUseOrderScan)
+		isGroupWiondow = true
+	}
+	var countValue int64
+	for i, arg := range expr.Args {
+		switch expr.Name {
+		case memo.StateWindow:
+			switch arg.(type) {
+			case *memo.VariableExpr, *memo.CaseExpr:
+			default:
+				panic(pgerror.Newf(pgcode.Syntax, "parameter of %s() should be column of data or case...when...", expr.Name))
+			}
+		case memo.CountWindow:
+			if e, ok := arg.(*memo.ConstExpr); !ok {
+				panic(pgerror.Newf(pgcode.Syntax, "parameter of %s() should be const", expr.Name))
+			} else if ee, ok1 := e.Value.(*tree.DInt); ok1 {
+				if i == 0 {
+					if int64(*ee) <= 0 {
+						panic(pgerror.Newf(pgcode.Syntax, "%s(): invalid count value", expr.Name))
+					}
+					countValue = int64(*ee)
+				} else if int64(*ee) <= 0 || int64(*ee) > countValue {
+					panic(pgerror.Newf(pgcode.Syntax, "%s(): invalid sliding value", expr.Name))
+				}
+			}
+		}
+	}
+	return isGroupWiondow
+}
+
 // buildAggregation builds the aggregation operators and constructs the
 // GroupBy expression. Returns the output scope for the aggregation operation.
+// if group cols contain group window function, we need to add the following restrictions:
+// 1. we check whether group cols contain only one grouping window function.
+// 2. if there is more than one grouping column and tableID is null, we should return error
+// 3. if there is more than one grouping column and inconsistent number of primary tag, we should return error
+// 4. we check the functional limitations of the grouping window function.
 func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (outScope *scope) {
 	g := fromScope.groupby
 
@@ -379,11 +424,50 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 	var groupingColSet opt.ColSet
 	// Representing the column ID of timebucketGapFill in the group.
 	var timeBucketGapFillColID opt.ColumnID
+	var pTagNum int
+	// columns other than group window function and pTag
+	hasOhterCol := false
+	tableID := opt.TableID(0)
+	var groupWindowID opt.ColumnID = -1
+	groupWindowIdx := -1
 	for i := range groupingCols {
 		groupingColSet.Add(groupingCols[i].id)
-		if v, ok := groupingCols[i].expr.(*tree.FuncExpr); ok {
-			if v.Func.FunctionName() == "time_bucket_gapfill" {
+		colMeta := b.factory.Metadata().ColumnMeta(groupingCols[i].id)
+		if colMeta.IsPrimaryTag() {
+			tableID = colMeta.Table
+			pTagNum++
+			continue
+		}
+		if f, ok := groupingCols[i].scalar.(*memo.FunctionExpr); ok {
+			if f.Name == "time_bucket_gapfill" {
 				timeBucketGapFillColID = groupingCols[i].id
+			}
+			// if function is group windows, we should add groupWindowID and Idx to logical plan
+			if b.checkGroupWindow(f, fromScope) {
+				f.FunctionPrivate.Properties.ForbiddenExecInTSEngine = false
+				groupWindowID = groupingCols[i].id
+				groupWindowIdx = i
+			} else {
+				hasOhterCol = true
+			}
+		} else {
+			hasOhterCol = true
+		}
+	}
+
+	if b.factory.Memo().CheckFlag(opt.GroupWindowUseOrderScan) {
+		fromScope.expr.ChildCount()
+		if len(groupingCols) > 1 {
+			// if there is more than one grouping column and tableID is null, we should return error
+			// if there is more than one grouping column and inconsistent number of primary tag, we should return error
+			if tableID == 0 || (pTagNum != b.factory.Metadata().TableMeta(tableID).PrimaryTagCount) ||
+				(hasOhterCol && pTagNum == b.factory.Metadata().TableMeta(tableID).PrimaryTagCount) {
+				panic(pgerror.Newf(pgcode.Syntax, "groupby cols are all ptags or without groupby cols for using group window function."))
+			}
+		} else if groupWindowIdx >= 0 {
+			// function not push to AE if there are no other groupby cols except for the group window function
+			if f, ok := groupingCols[groupWindowIdx].scalar.(*memo.FunctionExpr); ok {
+				f.Properties.ForbiddenExecInTSEngine = true
 			}
 		}
 	}
@@ -490,7 +574,7 @@ func (b *Builder) buildAggregation(having opt.ScalarExpr, fromScope *scope) (out
 	b.constructProjectForScope(fromScope, g.aggInScope)
 
 	g.aggOutScope.expr = b.constructGroupBy(g.aggInScope.expr, groupingColSet, aggCols,
-		g.aggInScope.ordering, timeBucketGapFillColID)
+		g.aggInScope.ordering, timeBucketGapFillColID, groupWindowID)
 	if len(aggFuncs) != 0 {
 		if g, ok := g.aggOutScope.expr.(*memo.ScalarGroupByExpr); ok {
 			g.GroupingPrivate.Func = aggFuncs
@@ -537,7 +621,13 @@ func (b *Builder) buildHaving(having tree.TypedExpr, fromScope *scope) opt.Scala
 		return nil
 	}
 
-	return b.buildScalar(having, fromScope, nil, nil, nil)
+	res := b.buildScalar(having, fromScope, nil, nil, nil)
+	// group window function can be only used in groupby
+	if name, ok := memo.CheckGroupWindowExist(res); ok {
+		panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+	}
+
+	return res
 }
 
 // buildGroupingList builds a set of memo groups that represent a list of

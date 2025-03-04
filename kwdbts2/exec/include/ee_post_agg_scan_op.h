@@ -33,7 +33,9 @@ class PostAggScanOperator : public HashAggregateOperator {
 
   PostAggScanOperator(const PostAggScanOperator&, BaseOperator* input, int32_t processor_id);
 
-  ~PostAggScanOperator() override = default;
+  ~PostAggScanOperator() override {
+    SafeDeleteArray(agg_output_col_info_);
+  }
 
   EEIteratorErrCode Init(kwdbContext_p ctx) override;
 
@@ -54,7 +56,7 @@ class PostAggScanOperator : public HashAggregateOperator {
 
   inline DataChunkPtr constructAggResults(k_uint32 capacity) {
     // Initialize the agg output buffer.
-    auto agg_results_ = std::make_unique<DataChunk>(agg_output_col_info, capacity);
+    auto agg_results_ = std::make_unique<DataChunk>(agg_output_col_info_, agg_output_col_num_, capacity);
     if (agg_results_->Initialize() != true) {
       agg_results_ = nullptr;
     }
@@ -70,7 +72,8 @@ class PostAggScanOperator : public HashAggregateOperator {
   k_uint64 agg_result_counter_{0};
 
   std::map<k_uint32, k_uint32> agg_source_target_col_map_;
-  std::vector<ColumnInfo> agg_output_col_info;
+  ColumnInfo* agg_output_col_info_{nullptr};
+  k_int32 agg_output_col_num_{0};
   DataContainerPtr disk_sink_;
 };
 

@@ -51,8 +51,8 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   DataChunkPtr chunk = nullptr;
 
   k_uint32 capacity{1};
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(1);
+  ColumnInfo col_info[5];
+  k_int32 col_num = 5;
 
   k_int64 v1 = 15600000000;
   k_double64 v2 = 10.55;
@@ -63,11 +63,11 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   string d3 = "kwbase";
   bool d4 = false;
 
-  col_info.emplace_back(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(8, roachpb::DataType::DECIMAL, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-  col_info.emplace_back(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
+  col_info[0] = ColumnInfo(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
+  col_info[1] = ColumnInfo(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info[2] = ColumnInfo(8, roachpb::DataType::DECIMAL, KWDBTypeFamily::DecimalFamily);
+  col_info[3] = ColumnInfo(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
+  col_info[4] = ColumnInfo(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
 
   std::vector<Field*> output_fields;
   output_fields.push_back(new FieldLonglong(0, col_info[0].storage_type, col_info[0].storage_len));
@@ -76,7 +76,7 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   output_fields.push_back(new FieldChar(3, col_info[3].storage_type, col_info[3].storage_len));
   output_fields.push_back(new FieldBool(4, col_info[4].storage_type, col_info[4].storage_len));
 
-  chunk = std::make_unique<kwdbts::DataChunk>(col_info, capacity);
+  chunk = std::make_unique<kwdbts::DataChunk>(col_info, col_num, capacity);
   ASSERT_EQ(chunk->Initialize(), true);
   k_int32 row = chunk->NextLine();
   ASSERT_EQ(row, -1);
@@ -132,7 +132,7 @@ TEST_F(TestRelBatchQueue, TestPutAndGetBatch) {
   ASSERT_EQ(check_bool, v4);
 
   DataChunkPtr chunk2;
-  chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, capacity);
+  chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, col_num, capacity);
   ASSERT_EQ(chunk2->Initialize(), true);
   chunk2->AddCount();
   chunk2->InsertData(0, 0, reinterpret_cast<char*>(&d1), sizeof(k_int64));

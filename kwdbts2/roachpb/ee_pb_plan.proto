@@ -388,6 +388,14 @@ message TSAggregatorSpec {
   repeated uint32 ordered_group_cols = 4 [packed = true];
 
   optional bool agg_push_down = 6;
+    // HasTimeBucketGapFill is true if aggregations have function time_bucket_gapFill.
+  optional bool has_time_bucket_gapFill = 7;
+  optional int32 time_bucket_gapFill_colId = 8;
+  // ScalarGroupBy with sum_Int agg in inside_out case must return 0 when the table is empty, because sum_int
+  // is the twice agg of count.
+  optional bool scalar_group_by_with_sum_int = 9;
+  optional int32 group_window_id = 10;
+  optional int32 group__window_tscolid = 11;
 }
 
 message TSNoopSpec{

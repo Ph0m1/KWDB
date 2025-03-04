@@ -56,21 +56,96 @@ void StorageHandler::SetSpans(std::vector<KwTsSpan> *ts_spans) {
   ts_spans_ = ts_spans;
 }
 
-EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
-  EnterFunc();
+EEIteratorErrCode StorageHandler::HandleTsItrAndGetTagData(
+    kwdbContext_p ctx, ScanRowBatch *row_batch, bool init_itr) {
   EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
+  if (init_itr) {
+    code = NewTsIterator(ctx);
+    if (code != EEIteratorErrCode::EE_OK) {
+      return code;
+    }
+  }
+  return GetNextTagData(ctx, row_batch);
+}
 
+EEIteratorErrCode StorageHandler::TsNextAndFilter(
+    kwdbContext_p ctx, Field *filter, k_uint32 *cur_offset, k_int32 limit,
+    ScanRowBatch *row_batch, k_uint32 *total_read_row, k_uint32 *examined_rows) {
+  EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
+  KWThdContext *thd = current_thd;
+  bool null_filter = (thd->wtyp_ == WindowGroupType::EE_WGT_EVENT) ||
+                     (thd->wtyp_ == WindowGroupType::EE_WGT_STATE);
   while (true) {
-    ScanRowBatch* row_batch =
-        static_cast<ScanRowBatch *>(current_thd->GetRowBatch());
-    if (nullptr == ts_iterator) {
-      code = NewTsIterator(ctx);
-      if (code != EEIteratorErrCode::EE_OK) {
+    code = this->TsNext(ctx);
+    if (EEIteratorErrCode::EE_OK != code) {
+      break;
+    }
+
+    if (row_batch->count_ < 1) continue;
+
+    if (!null_filter && filter == NULL && *cur_offset == 0 && limit == 0) {
+      *total_read_row += row_batch->count_;
+      *examined_rows += row_batch->count_;
+      break;
+    }
+    if (null_filter) {
+      thd->window_field_->backup();
+    }
+    // filter || offset || limit
+    for (int i = 0; i < row_batch->count_; ++i) {
+      if (filter != NULL) {
+        k_int64 ret = filter->ValInt();
+        if (0 == ret) {
+          row_batch->NextLine();
+          ++(*total_read_row);
+          continue;
+        }
+      }
+      if (null_filter) {
+        if (thd->window_field_->is_nullable()) {
+          row_batch->NextLine();
+          ++(*total_read_row);
+          continue;
+        }
+        thd->window_field_->ValInt();
+      }
+      if (*cur_offset > 0) {
+        --(*cur_offset);
+        row_batch->NextLine();
+        ++(*total_read_row);
+        continue;
+      }
+
+      if (limit && *examined_rows >= limit) {
         break;
       }
-      code = GetNextTagData(ctx, row_batch);
+
+      row_batch->AddSelection();
+      row_batch->NextLine();
+      ++(*examined_rows);
+      ++(*total_read_row);
+    }
+    if (null_filter) {
+      thd->window_field_->restore();
+    }
+    if (0 != row_batch->GetSelection()->size()) {
+      break;
+    }
+  }
+  return code;
+}
+
+EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
+  EEIteratorErrCode code = EEIteratorErrCode::EE_OK;
+  KWThdContext *thd = current_thd;
+  bool need_reset = (thd->wtyp_ == WindowGroupType::EE_WGT_EVENT);
+  while (true) {
+    ScanRowBatch* row_batch =
+        static_cast<ScanRowBatch *>(thd->GetRowBatch());
+    if (nullptr == ts_iterator) {
+      code = HandleTsItrAndGetTagData(ctx, row_batch, true);
       if (code != EEIteratorErrCode::EE_OK) {
-        Return(code);
+        return code;
       }
     }
 
@@ -86,34 +161,26 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
     total_read_rows_ += row_batch->count_;
 
     if (0 == row_batch->count_) {
-      // ret = row_batch->tag_rowbatch_->NextLine(&(current_tag_index_));
-      // if (KStatus::FAIL == ret) {
       current_line_++;
-      if (current_line_ >= entities_.size()) {
-        code = NewTsIterator(ctx);
-        if (code != EEIteratorErrCode::EE_OK) {
-          Return(code);
-        }
-      }
-      code = GetNextTagData(ctx, row_batch);
+      code = HandleTsItrAndGetTagData(ctx, row_batch,
+                                      current_line_ >= entities_.size());
       if (code != EEIteratorErrCode::EE_OK) {
-        Return(code);
+        return code;
+      }
+      if (need_reset) {
+        thd->window_field_->reset();
       }
     } else {
       while (!entities_[current_line_].equalsWithoutMem(
              row_batch->res_.entity_index)) {
-        // ret = data_handle->tag_rowbatch_->NextLine(&(current_tag_index_));
-        // if (KStatus::FAIL == ret) {
         current_line_++;
-        if (current_line_ >= entities_.size()) {
-          code = NewTsIterator(ctx);
-          if (code != EEIteratorErrCode::EE_OK) {
-            Return(code);
-          }
-        }
-        code = GetNextTagData(ctx, row_batch);
+        code = HandleTsItrAndGetTagData(ctx, row_batch,
+                                        current_line_ >= entities_.size());
         if (code != EEIteratorErrCode::EE_OK) {
-          Return(code);
+          return code;
+        }
+        if (need_reset) {
+          thd->window_field_->reset();
         }
       }
       row_batch->ResetLine();
@@ -121,7 +188,7 @@ EEIteratorErrCode StorageHandler::TsNext(kwdbContext_p ctx) {
     }
   }
 
-  Return(code);
+  return code;
 }
 
 EEIteratorErrCode StorageHandler::TsOffsetNext(kwdbContext_p ctx) {
@@ -209,7 +276,8 @@ EEIteratorErrCode StorageHandler::NextTagDataChunk(kwdbContext_p ctx,
   std::vector<void *> &secondary_tags,
   const vector<k_uint32> tag_other_join_cols,
   Field ** renders,
-  std::vector<ColumnInfo> &col_info,
+  ColumnInfo* col_info,
+  k_int32 col_info_size,
   DataChunkPtr &data_chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
@@ -217,18 +285,19 @@ EEIteratorErrCode StorageHandler::NextTagDataChunk(kwdbContext_p ctx,
     if (tag_iterator) {
       tag_iterator = nullptr;
       code = GetTagDataChunkWithPrimaryTags(ctx, spec, tag_filter, primary_tags, secondary_tags,
-                                            tag_other_join_cols, renders, col_info, data_chunk);
+                                            tag_other_join_cols, renders, col_info, col_info_size, data_chunk);
     } else {
       code = EEIteratorErrCode::EE_END_OF_RECORD;
     }
   } else {
-    code = NextTagDataChunk(ctx, tag_filter, renders, col_info, data_chunk);
+    code = NextTagDataChunk(ctx, tag_filter, renders, col_info, col_info_size, data_chunk);
   }
   Return(code);
 }
 
 EEIteratorErrCode StorageHandler::NextTagDataChunk(kwdbContext_p ctx, Field *tag_filter, Field ** renders,
-                                                  std::vector<ColumnInfo> &col_info, DataChunkPtr &data_chunk) {
+                                                   ColumnInfo* col_info,
+                                                   k_int32 col_info_size, DataChunkPtr &data_chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
 
@@ -267,7 +336,7 @@ EEIteratorErrCode StorageHandler::NextTagDataChunk(kwdbContext_p ctx, Field *tag
   tag_rowbatch_->SetPipeEntityNum(ctx, 1);
 
   // Init a data chunk
-  data_chunk = std::make_unique<DataChunk>(col_info, tag_rowbatch_->Count());
+  data_chunk = std::make_unique<DataChunk>(col_info, col_info_size, tag_rowbatch_->Count());
   if (data_chunk->Initialize() != true) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     data_chunk = nullptr;
@@ -521,7 +590,8 @@ EEIteratorErrCode StorageHandler::GetTagDataChunkWithPrimaryTags(kwdbContext_p c
                                             std::vector<void *> &secondary_tags,
                                             const vector<k_uint32> tag_other_join_cols,
                                             Field ** renders,
-                                            std::vector<ColumnInfo> &col_info,
+                                            ColumnInfo *col_info,
+                                            k_int32 col_info_size,
                                             DataChunkPtr &data_chunk) {
   EnterFunc();
   EEIteratorErrCode code = EEIteratorErrCode::EE_ERROR;
@@ -560,7 +630,7 @@ EEIteratorErrCode StorageHandler::GetTagDataChunkWithPrimaryTags(kwdbContext_p c
   tag_rowbatch_->SetPipeEntityNum(ctx, 1);
 
   // Init a data chunk
-  data_chunk = std::make_unique<DataChunk>(col_info, tag_rowbatch_->Count());
+  data_chunk = std::make_unique<DataChunk>(col_info, col_info_size, tag_rowbatch_->Count());
   if (data_chunk->Initialize() != true) {
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
     data_chunk = nullptr;

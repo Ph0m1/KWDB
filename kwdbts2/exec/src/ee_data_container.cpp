@@ -27,7 +27,7 @@ namespace kwdbts {
 // respectively
 bool OrderColumnCompare::operator()(k_uint32 a, k_uint32 b) {
   // ColunnInfo
-  std::vector<ColumnInfo>& col_info = container_->GetColumnInfo();
+  ColumnInfo *col_info = container_->GetColumnInfo();
 
   // compare
   for (int i = 0; i < order_info_.size(); i++) {

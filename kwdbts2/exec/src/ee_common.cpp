@@ -158,4 +158,31 @@ void FieldsToChunk(Field **fields, k_uint32 field_num, k_uint32 row, DataChunkPt
   }
 }
 
+KTimestampTz TimeAddDuration(KTimestampTz ts, k_int64 duration,
+                             k_bool var_interval, k_bool year_bucket) {
+  if (duration == 0) {
+    return ts;
+  }
+
+  if (!var_interval) {
+    return ts + duration;
+  }
+  k_int64 numOfMonth = year_bucket ? duration * 12 : duration;
+
+  struct tm tm;
+  time_t tt = (time_t)(ts / MILLISECOND_PER_SECOND);
+  localtime_r(&tt, &tm);
+  int32_t mon = tm.tm_year * 12 + tm.tm_mon + (int32_t)numOfMonth;
+  tm.tm_year = mon / 12;
+  tm.tm_mon = mon % 12;
+  int daysOfMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (IS_LEAP_YEAR(1900 + tm.tm_year)) {
+    daysOfMonth[1] = 29;
+  }
+  if (tm.tm_mday > daysOfMonth[tm.tm_mon]) {
+    tm.tm_mday = daysOfMonth[tm.tm_mon];
+  }
+  return (k_int64)(mktime(&tm) * MILLISECOND_PER_SECOND);
+}
+
 }  // namespace kwdbts

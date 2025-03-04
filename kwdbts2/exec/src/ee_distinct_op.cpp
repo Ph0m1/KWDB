@@ -94,6 +94,7 @@ EEIteratorErrCode DistinctOperator::Init(kwdbContext_p ctx) {
       EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
       Return(EEIteratorErrCode::EE_ERROR);
     }
+    code = InitOutputColInfo(output_fields_);
   } while (0);
   Return(code);
 }
@@ -142,13 +143,7 @@ EEIteratorErrCode DistinctOperator::Next(kwdbContext_p ctx, DataChunkPtr& chunk)
     read_row_num += data_chunk->Count();
     // result set
     if (nullptr == chunk) {
-      std::vector<ColumnInfo> col_info;
-      col_info.reserve(output_fields_.size());
-      for (auto field : output_fields_) {
-        col_info.emplace_back(field->get_storage_length(), field->get_storage_type(), field->get_return_type());
-      }
-
-      chunk = std::make_unique<DataChunk>(col_info, data_chunk->Count());
+      chunk = std::make_unique<DataChunk>(output_col_info_, output_col_num_, data_chunk->Count());
       if (chunk->Initialize() != true) {
         EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY, "Insufficient memory");
         chunk = nullptr;
@@ -249,22 +244,6 @@ KStatus DistinctOperator::ResolveDistinctCols(kwdbContext_p ctx) {
   }
 
   Return(KStatus::SUCCESS);
-}
-
-void DistinctOperator::encodeDistinctCols(DataChunkPtr& chunk, k_uint32 line, CombinedGroupKey& distinct_keys) {
-  distinct_keys.Reserve(distinct_cols_.size());
-  for (const auto& col : distinct_cols_) {
-    roachpb::DataType col_type = input_fields_[col]->get_storage_type();
-
-    bool is_null = chunk->IsNull(line, col);
-    if (is_null) {
-      distinct_keys.AddGroupKey(nullptr, col_type);
-      continue;
-    }
-
-    DatumPtr ptr = chunk->GetData(line, col);
-    distinct_keys.AddGroupKey(ptr, col_type);
-  }
 }
 
 }  // namespace kwdbts

@@ -69,7 +69,7 @@ class BaseOperator {
     for (auto field : output_fields_) {
       SafeDeletePointer(field);
     }
-
+    SafeDeleteArray(output_col_info_);
     num_ = 0;
     renders_ = nullptr;
   }
@@ -129,20 +129,36 @@ class BaseOperator {
 
  protected:
   inline void constructDataChunk(k_uint32 capacity = 0) {
-    current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_, capacity);
+    current_data_chunk_ = std::make_unique<DataChunk>(output_col_info_, output_col_num_, capacity);
     if (current_data_chunk_->Initialize() != true) {
       current_data_chunk_ = nullptr;
       return;
     }
   }
-  inline void constructFilterDataChunk(std::vector<ColumnInfo>& column_info,
+  inline void constructFilterDataChunk(ColumnInfo* column_info, k_int32 num,
                                        k_uint32 capacity = 0) {
-    current_filter_data_chunk_ =
-        std::make_unique<DataChunk>(column_info, capacity);
+    current_filter_data_chunk_ = std::make_unique<DataChunk>(column_info, num, capacity);
     if (current_filter_data_chunk_->Initialize() != true) {
       current_filter_data_chunk_ = nullptr;
       return;
     }
+  }
+
+  inline EEIteratorErrCode InitOutputColInfo(std::vector<Field*>& output_fields) {
+    output_col_num_ = output_fields.size();
+    output_col_info_ = KNEW ColumnInfo[output_col_num_];
+    if (output_col_info_ == nullptr) {
+      EEPgErrorInfo::SetPgErrorInfo(ERRCODE_OUT_OF_MEMORY,
+                                    "Insufficient memory");
+      return EEIteratorErrCode::EE_ERROR;
+    }
+    for (k_int32 i = 0; i < output_fields.size(); i++) {
+      output_col_info_[i] = ColumnInfo(output_fields[i]->get_storage_length(),
+                                       output_fields[i]->get_storage_type(),
+                                       output_fields[i]->get_return_type());
+      output_col_info_[i].allow_null = output_fields[i]->is_allow_null();
+    }
+    return EEIteratorErrCode::EE_OK;
   }
 
   Field** renders_{nullptr};  // the operator projection column of this layer
@@ -152,7 +168,8 @@ class BaseOperator {
   // output columns of the current layer，input columns of Parent
   // operator(FieldNum)
   std::vector<Field*> output_fields_;
-  std::vector<ColumnInfo> output_col_info_;
+  ColumnInfo* output_col_info_{nullptr};
+  k_int32 output_col_num_{0};
 
   DataChunkPtr current_data_chunk_;
   DataChunkPtr current_filter_data_chunk_;

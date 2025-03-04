@@ -47,21 +47,21 @@ TEST_F(TestDataChunk, TestChunk) {
   DataChunkPtr chunk = nullptr;
 
   k_uint32 total_sample_rows{1};
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(1);
+  ColumnInfo col_info[5];
+  k_int32 col_num = 5;
 
   k_int64 v1 = 15600000000;
   k_double64 v2 = 10.55;
   string v3 = "host_0";
   bool v4 = true;
 
-  col_info.emplace_back(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-  col_info.emplace_back(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
+  col_info[0] = ColumnInfo(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
+  col_info[1] = ColumnInfo(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info[2] = ColumnInfo(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info[3] = ColumnInfo(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
+  col_info[4] = ColumnInfo(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
 
-  Field** renders = static_cast<Field **>(malloc(col_info.size() * sizeof(Field *)));
+  Field** renders = static_cast<Field **>(malloc(col_num * sizeof(Field *)));
   renders[0] = new FieldLonglong(0, col_info[0].storage_type, col_info[0].storage_len);
   renders[1] = new FieldDouble(1, col_info[1].storage_type, col_info[1].storage_len);
   renders[2] = new FieldDouble(2, col_info[2].storage_type, col_info[2].storage_len);
@@ -87,13 +87,13 @@ TEST_F(TestDataChunk, TestChunk) {
   current_thd = KNEW KWThdContext();
   current_thd->SetRowBatch(tag_data_handle.get());
 
-  for (int i = 0; i < col_info.size(); i++) {
+  for (int i = 0; i < col_num; i++) {
     renders[i]->table_ = &table;
     renders[i]->is_chunk_ = true;
   }
 
   // check insert
-  chunk = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
+  chunk = std::make_unique<kwdbts::DataChunk>(col_info, col_num, total_sample_rows);
   ASSERT_EQ(chunk->Initialize(), true);
   k_int32 row = chunk->NextLine();
   ASSERT_EQ(row, -1);
@@ -139,7 +139,7 @@ TEST_F(TestDataChunk, TestChunk) {
   ASSERT_EQ(check_bool, v4);
 
   DataChunkPtr chunk2;
-  chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
+  chunk2 = std::make_unique<kwdbts::DataChunk>(col_info, col_num, total_sample_rows);
   ASSERT_EQ(chunk2->Initialize(), true);
   chunk2->InsertData(ctx, chunk.get(), nullptr);
   // current_thd->SetDataChunk(chunk.get());
@@ -153,13 +153,13 @@ TEST_F(TestDataChunk, TestChunk) {
 
   // check append
   DataChunkPtr chunk3, chunk4;
-  chunk3 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
+  chunk3 = std::make_unique<kwdbts::DataChunk>(col_info, col_num, total_sample_rows);
   ASSERT_EQ(chunk3->Initialize(), true);
   queue_data_chunk.push(std::move(chunk));
 
   chunk3->Append(queue_data_chunk);
   ASSERT_EQ(chunk3->Count(), 1);
-  ASSERT_EQ(chunk3->EstimateCapacity(col_info), 1099);
+  ASSERT_EQ(chunk3->EstimateCapacity(col_info, col_num), 1099);
 
   check_ts = 0;
   auto ptr31 = chunk2->GetData(0, 0);
@@ -208,7 +208,7 @@ TEST_F(TestDataChunk, TestChunk) {
   delete info_pg;
 
   // check copy
-  chunk4 = std::make_unique<kwdbts::DataChunk>(col_info, total_sample_rows);
+  chunk4 = std::make_unique<kwdbts::DataChunk>(col_info, col_num, total_sample_rows);
   ASSERT_EQ(chunk4->Initialize(), true);
   chunk4->CopyFrom(chunk2, 0, 0);
 
@@ -221,7 +221,7 @@ TEST_F(TestDataChunk, TestChunk) {
   ASSERT_EQ(chunk4->Count(), 1);
 
 
-  for (int i = 0; i < col_info.size(); i++) {
+  for (int i = 0; i < col_num; i++) {
    delete renders[i];
   }
 

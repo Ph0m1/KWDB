@@ -934,6 +934,9 @@ func (expr *FuncExpr) TypeCheck(ctx *SemaContext, desired *types.T) (TypedExpr, 
 		}
 		sig := fmt.Sprintf("%s(%s)%s", &expr.Func, strings.Join(typeNames, ", "), desStr)
 		if len(fns) == 0 {
+			if expr.Func.FunctionName() == "state_window" {
+				return nil, pgerror.Newf(pgcode.Syntax, "%s(): if arg is column, type should be int/bool/char/varchar.", expr.Func.FunctionName())
+			}
 			return nil, pgerror.Newf(pgcode.UndefinedFunction, "unknown signature: %s", sig)
 		}
 		fnsStr := formatCandidates(expr.Func.String(), fns)

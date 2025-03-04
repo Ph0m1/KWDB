@@ -49,19 +49,19 @@ TEST_F(TestDataChunkContainer, TestAddAndGetData) {
   InitServerKWDBContext(ctx);
 
   k_uint32 capacity{1024};
-  std::vector<ColumnInfo> col_info;
-  col_info.reserve(1);
+  k_int32 col_num = 5;
+  ColumnInfo col_info[5];
 
   k_int64 v1 = 15600000000;
   k_double64 v2 = 10.55;
   string v3 = "host_0";
   bool v4 = true;
 
-  col_info.emplace_back(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
-  col_info.emplace_back(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(8, roachpb::DataType::DECIMAL, KWDBTypeFamily::DecimalFamily);
-  col_info.emplace_back(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
-  col_info.emplace_back(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
+  col_info[0] = ColumnInfo(8, roachpb::DataType::TIMESTAMPTZ, KWDBTypeFamily::TimestampTZFamily);
+  col_info[1] = ColumnInfo(8, roachpb::DataType::DOUBLE, KWDBTypeFamily::DecimalFamily);
+  col_info[2] = ColumnInfo(8, roachpb::DataType::DECIMAL, KWDBTypeFamily::DecimalFamily);
+  col_info[3] = ColumnInfo(31, roachpb::DataType::CHAR, KWDBTypeFamily::StringFamily);
+  col_info[4] = ColumnInfo(1, roachpb::DataType::BOOL, KWDBTypeFamily::BoolFamily);
 
   std::vector<Field*> output_fields;
   output_fields.push_back(new FieldLonglong(0, col_info[0].storage_type, col_info[0].storage_len));
@@ -77,7 +77,7 @@ TEST_F(TestDataChunkContainer, TestAddAndGetData) {
   for (int case_num = 0; case_num < 2; ++case_num) {
     DataChunkContainer* data_chunk_container = new DataChunkContainer(data_size_threshold[case_num]);
     for (int i = 0; i < 10; ++i) {
-      DataChunkPtr chunk = std::make_unique<kwdbts::DataChunk>(col_info, capacity);
+      DataChunkPtr chunk = std::make_unique<kwdbts::DataChunk>(col_info, col_num, capacity);
       ASSERT_EQ(chunk->Initialize(), true);
       k_int32 row = chunk->NextLine();
       ASSERT_EQ(row, -1);

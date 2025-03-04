@@ -33,14 +33,17 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfra"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/rowcontainer"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/builtins"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
+	"gitee.com/kwbasedb/kwbase/pkg/util/duration"
 	"gitee.com/kwbasedb/kwbase/pkg/util/humanizeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/mon"
 	"gitee.com/kwbasedb/kwbase/pkg/util/stringarena"
+	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"github.com/cockroachdb/errors"
 	"github.com/opentracing/opentracing-go"
@@ -90,10 +93,11 @@ type aggregatorBase struct {
 	aggregations     []execinfrapb.AggregatorSpec_Aggregation
 	interpolated     bool
 
-	lastOrdGroupCols sqlbase.EncDatumRow
-	arena            stringarena.Arena
-	row              sqlbase.EncDatumRow
-	scratch          []byte
+	lastOrdGroupCols  sqlbase.EncDatumRow
+	eventOrdGroupCols sqlbase.EncDatumRow
+	arena             stringarena.Arena
+	row               sqlbase.EncDatumRow
+	scratch           []byte
 
 	cancelChecker *sqlbase.CancelChecker
 
@@ -106,6 +110,625 @@ type aggregatorBase struct {
 	// ScalarGroupBy with sum_Int agg in inside_out case must return 0 when the table is empty, because sum_int
 	// is the twice agg of count.
 	scalarGroupByWithSumInt bool
+
+	groupWindow groupWindow
+}
+
+type groupWindow struct {
+	rows               rowcontainer.MemRowContainer
+	iter               rowcontainer.RowIterator
+	memMonitor         *mon.BytesMonitor
+	groupWindowValue   int
+	groupWindowColID   int32
+	groupWindowTsColID int32
+
+	stateWindowHelper   StateWindowHelper
+	countWindowHelper   CountWindowHelper
+	timeWindowHelper    TimeWindowHelper
+	sessionWindowHelper SessionWindowHelper
+	startFlag           bool
+}
+
+// StateWindowHelper implement state_window.
+type StateWindowHelper struct {
+	lastDatum  sqlbase.EncDatum
+	datumAlloc sqlbase.DatumAlloc
+	IgnoreFlag bool
+}
+
+// SessionWindowHelper implement session_window.
+type SessionWindowHelper struct {
+	tsTimeStamp   tree.DTimestamp
+	tsTimeStampTZ tree.DTimestampTZ
+	dur           time.Duration
+}
+
+// CountWindowHelper implement count_window.
+type CountWindowHelper struct {
+	// countValue represents the number of current group.
+	countValue        int
+	windowNum         int
+	slidingWindowSize int
+}
+
+// TimeWindowHelper implement time_window.
+type TimeWindowHelper struct {
+	tsTimeStampStart   tree.DTimestamp
+	tsTimeStampEnd     tree.DTimestamp
+	WindowEnd          tree.DTimestamp
+	WindowBuckt        tree.DTimestamp
+	tsTimeStampStartTZ tree.DTimestampTZ
+	tsTimeStampEndTZ   tree.DTimestampTZ
+	WindowEndTZ        tree.DTimestampTZ
+	WindowBucktTZ      tree.DTimestampTZ
+	noNeedReCompute    bool
+	//read for read rows,delete later
+	noMatch  bool
+	reading  bool
+	hasFirst bool
+}
+
+func (gw *groupWindow) Close(ctx context.Context) {
+	gw.rows.Close(ctx)
+	gw.memMonitor.Stop(ctx)
+}
+
+func (gw *groupWindow) CheckAndGetWindowDatum(
+	typ []types.T, flowCtx *execinfra.FlowCtx, row *sqlbase.EncDatumRow,
+) error {
+	switch flowCtx.EvalCtx.GroupWindow.GroupWindowFunc {
+	case tree.StateWindow:
+		if *row == nil {
+			return nil
+		}
+		return gw.handleStateWindow(typ, flowCtx.EvalCtx, *row)
+	case tree.EventWindow:
+		if *row == nil {
+			return nil
+		}
+		return gw.handleEventWindow(typ, flowCtx.EvalCtx, *row)
+	case tree.CountWindow:
+		// optimize count_window when count_val == sliding_value.
+		if !flowCtx.EvalCtx.GroupWindow.CountWindowHelper.IsSlide {
+			return gw.handelSimpleCountWindow(*row, flowCtx.EvalCtx.GroupWindow.CountWindowHelper.WindowNum)
+		}
+		if *row == nil {
+			return gw.handleCountWindowForRemainingValue(row)
+		}
+		return gw.handleCountWindow(typ, flowCtx, *row)
+	case tree.TimeWindow:
+		if flowCtx.EvalCtx.GroupWindow.TimeWindowHelper.IsSlide {
+			if *row != nil {
+				return gw.handleTimeWindowForRemainingValue(typ, flowCtx, *row)
+			}
+			gw.timeWindowHelper.reading = false
+			if flowCtx.EvalCtx.GroupWindow.TimeWindowHelper.IfTZ {
+				return gw.handleTimeTZWindowWithSlide(typ, flowCtx.EvalCtx, row)
+			}
+			return gw.handleTimeWindowWithSlide(typ, flowCtx.EvalCtx, row)
+		}
+		if *row == nil {
+			return nil
+		}
+		return gw.handleTimeWindowWithNoSlide(typ, flowCtx.EvalCtx, *row)
+
+	case tree.SessionWindow:
+		if *row == nil {
+			return nil
+		}
+		return gw.handleSessionWindow(typ, flowCtx.EvalCtx, *row)
+	}
+	return nil
+}
+
+func (gw *groupWindow) handleSessionWindow(
+	typ []types.T, evalCtx *tree.EvalContext, row sqlbase.EncDatumRow,
+) (err error) {
+	switch v := row[gw.groupWindowColID].Datum.(type) {
+	case *tree.DTimestampTZ:
+		if gw.groupWindowValue == 0 {
+			gw.sessionWindowHelper.tsTimeStampTZ = *v
+			gw.sessionWindowHelper.dur = evalCtx.GroupWindow.SessionWindowHelper.Dur
+			typ[gw.groupWindowColID] = *types.Any
+			gw.groupWindowValue++
+			row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+			return nil
+		}
+
+		boundary := &tree.DTimestampTZ{Time: gw.sessionWindowHelper.tsTimeStampTZ.Time.Add(gw.sessionWindowHelper.dur)}
+		if v.Compare(evalCtx, boundary) > 0 {
+			gw.groupWindowValue++
+		}
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		gw.sessionWindowHelper.tsTimeStampTZ = *v
+		return nil
+	case *tree.DTimestamp:
+		if gw.groupWindowValue == 0 {
+			gw.sessionWindowHelper.tsTimeStamp = *v
+			gw.sessionWindowHelper.dur = evalCtx.GroupWindow.SessionWindowHelper.Dur
+			typ[gw.groupWindowColID] = *types.Any
+			gw.groupWindowValue++
+			row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+			return nil
+		}
+		boundary := &tree.DTimestamp{Time: gw.sessionWindowHelper.tsTimeStampTZ.Time.Add(gw.sessionWindowHelper.dur)}
+		if v.Compare(evalCtx, boundary) > 0 {
+			gw.groupWindowValue++
+		}
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		gw.sessionWindowHelper.tsTimeStamp = *v
+		return nil
+	default:
+		return errors.New("first arg should be timestamp or timestamptz")
+	}
+}
+
+func (gw *groupWindow) handelSimpleCountWindow(row sqlbase.EncDatumRow, target int) (err error) {
+	if row == nil {
+		return nil
+	}
+	if gw.countWindowHelper.countValue%target == 0 {
+		gw.groupWindowValue++
+	}
+	gw.countWindowHelper.countValue++
+	row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	return nil
+}
+
+// handleCountWindow handle count_window when row == nil.
+func (gw *groupWindow) handleCountWindowForRemainingValue(row *sqlbase.EncDatumRow) (err error) {
+	if gw.rows.Len() > 0 {
+		ok, err := gw.iter.Valid()
+		if err != nil {
+			return err
+		}
+		// when iter traverse completed or Meet the quantity requirements,
+		// delete the first slidingWindowSize elements in gw.rows.
+		if !ok || gw.countWindowHelper.countValue == gw.countWindowHelper.windowNum {
+			// pop
+			for i := 0; gw.rows.Len() > 0 && i < gw.countWindowHelper.slidingWindowSize; i++ {
+				gw.rows.PopFirst()
+			}
+			if gw.rows.Len() == 0 {
+				return nil
+			}
+			gw.iter.Rewind()
+			gw.countWindowHelper.countValue = 0
+			gw.groupWindowValue++
+		}
+		row1, err := gw.iter.Row()
+		if err != nil {
+			return err
+		}
+		gw.iter.Next()
+		row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		*row = make(sqlbase.EncDatumRow, len(row1))
+		copy(*row, row1)
+		gw.countWindowHelper.countValue++
+		return nil
+	}
+	return nil
+}
+
+// handleCountWindow handle count_window when row != nil
+func (gw *groupWindow) handleCountWindow(
+	typ []types.T, flowCtx *execinfra.FlowCtx, row sqlbase.EncDatumRow,
+) (err error) {
+	if gw.memMonitor == nil {
+		gw.memMonitor = execinfra.NewLimitedMonitor(flowCtx.EvalCtx.Ctx(), flowCtx.EvalCtx.Mon, flowCtx.Cfg, "group-window-func")
+		gw.rows.InitWithMon(
+			nil /* ordering */, typ, flowCtx.EvalCtx, gw.memMonitor, 0, /* rowCapacity */
+		)
+		gw.countWindowHelper = CountWindowHelper{
+			countValue:        0,
+			windowNum:         flowCtx.EvalCtx.GroupWindow.CountWindowHelper.WindowNum,
+			slidingWindowSize: flowCtx.EvalCtx.GroupWindow.CountWindowHelper.SlidingWindowSize,
+		}
+		gw.groupWindowValue++
+		gw.iter = gw.rows.NewIterator(flowCtx.EvalCtx.Ctx())
+		gw.iter.Rewind()
+	}
+
+	if err = gw.rows.AddRow(flowCtx.EvalCtx.Ctx(), row); err != nil {
+		return err
+	}
+
+	if gw.countWindowHelper.countValue == gw.countWindowHelper.windowNum {
+		gw.groupWindowValue++
+		gw.countWindowHelper.countValue = 0
+		// Handling useless rows
+		for i := 0; i < gw.countWindowHelper.slidingWindowSize; i++ {
+			gw.rows.PopFirst()
+		}
+		gw.iter.Rewind()
+	}
+
+	row1, err := gw.iter.Row()
+	if err != nil {
+		return err
+	}
+	gw.iter.Next()
+	row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	copy(row, row1)
+	gw.countWindowHelper.countValue++
+	return nil
+}
+
+func (gw *groupWindow) handleTimeWindowWithNoSlide(
+	typ []types.T, evalCtx *tree.EvalContext, row sqlbase.EncDatumRow,
+) (err error) {
+	switch v := row[gw.groupWindowColID].Datum.(type) {
+	case *tree.DTimestampTZ:
+		typ[gw.groupWindowColID] = *types.Any
+		var newTimeDur *tree.DTimestampTZ
+		if evalCtx.GroupWindow.TimeWindowHelper.Duration.Days != 0 {
+			oldTimeUnix := v.Time.Unix() * 1000
+			oldTimeInterval := ((evalCtx.GroupWindow.TimeWindowHelper.Duration.Days) * int64(time.Hour) * 24) / 1000000
+			oldTimeTrun := oldTimeUnix / oldTimeInterval
+			oldTimeMul := (evalCtx.GroupWindow.TimeWindowHelper.Duration.Days) * int64(time.Hour) * 24
+			result := oldTimeTrun * oldTimeMul
+			sts := timeutil.Unix(0, result)
+			newTimeDur = tree.MakeDTimestampTZ(sts, 0)
+		} else {
+			newTimeDur = tree.MakeDTimestampTZ(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+		}
+
+		if !newTimeDur.Time.Equal(gw.timeWindowHelper.tsTimeStampStartTZ.Time) {
+			gw.timeWindowHelper.tsTimeStampStartTZ = *newTimeDur
+			gw.groupWindowValue++
+			row[gw.groupWindowTsColID].Datum = newTimeDur
+		} else {
+			durTime := duration.Add(newTimeDur.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration)
+			newTime := &tree.DTimestampTZ{Time: durTime}
+			row[gw.groupWindowTsColID].Datum = newTime
+		}
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	case *tree.DTimestamp:
+		typ[gw.groupWindowColID] = *types.Any
+		var newTimeDur *tree.DTimestamp
+		if evalCtx.GroupWindow.TimeWindowHelper.Duration.Days != 0 {
+			oldTimeUnix := v.Time.Unix() * 1000
+			oldTimeInterval := ((evalCtx.GroupWindow.TimeWindowHelper.Duration.Days) * int64(time.Hour) * 24) / 1000000
+			oldTimeTrun := oldTimeUnix / oldTimeInterval
+			oldTimeMul := (evalCtx.GroupWindow.TimeWindowHelper.Duration.Days) * int64(time.Hour) * 24
+			result := oldTimeTrun * oldTimeMul
+			sts := timeutil.Unix(0, result)
+			newTimeDur = tree.MakeDTimestamp(sts, 0)
+		} else {
+			newTimeDur = tree.MakeDTimestamp(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+		}
+
+		if !newTimeDur.Time.Equal(gw.timeWindowHelper.tsTimeStampStart.Time) {
+			gw.timeWindowHelper.tsTimeStampStart = *newTimeDur
+			gw.groupWindowValue++
+			row[gw.groupWindowTsColID].Datum = newTimeDur
+		} else {
+			durTime := duration.Add(newTimeDur.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration)
+			newTime := &tree.DTimestamp{Time: durTime}
+			row[gw.groupWindowTsColID].Datum = newTime
+		}
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	default:
+		return errors.New("first arg should be timestamp or timestamptz")
+	}
+	return nil
+}
+
+func (gw *groupWindow) handleTimeTZWindowWithSlide(
+	typ []types.T, evalCtx *tree.EvalContext, row *sqlbase.EncDatumRow,
+) (err error) {
+	var row1 sqlbase.EncDatumRow
+	ok, err := gw.iter.Valid()
+	if err != nil {
+		return err
+	}
+	gw.timeWindowHelper.noMatch = false
+	if !ok {
+		newStart := duration.Add(gw.timeWindowHelper.tsTimeStampStartTZ.Time, evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Duration)
+		if tree.MakeDTimestampTZ(newStart, 0).Compare(evalCtx, &gw.timeWindowHelper.WindowEndTZ) < 1 {
+			gw.groupWindowValue++
+			gw.timeWindowHelper.tsTimeStampStartTZ = *tree.MakeDTimestampTZ(newStart, 0)
+			gw.timeWindowHelper.tsTimeStampEndTZ = *tree.MakeDTimestampTZ(duration.Add(gw.timeWindowHelper.tsTimeStampStartTZ.Time,
+				evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+			gw.timeWindowHelper.noNeedReCompute = true
+			gw.timeWindowHelper.hasFirst = true
+		} else {
+			gw.timeWindowHelper.noNeedReCompute = false
+		}
+		gw.iter.Rewind()
+		ok, err = gw.iter.Valid()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+
+	row1, err = gw.iter.Row()
+	if err != nil {
+		return err
+	}
+
+	v, _ := row1[gw.groupWindowColID].Datum.(*tree.DTimestampTZ)
+	typ[gw.groupWindowColID] = *types.Any
+	var startTimeDur, endTimeDur, newTimeDur *tree.DTimestampTZ
+
+	newTimeDur = tree.MakeDTimestampTZ(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+
+	for !gw.timeWindowHelper.noNeedReCompute {
+		if !newTimeDur.Time.After(gw.timeWindowHelper.WindowBucktTZ.Time) {
+			gw.rows.PopFirst()
+			ok, err = gw.iter.Valid()
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+			gw.iter.Rewind()
+			row1, err = gw.iter.Row()
+			if err != nil {
+				return err
+			}
+			v, _ = row1[gw.groupWindowColID].Datum.(*tree.DTimestampTZ)
+			newTimeDur = tree.MakeDTimestampTZ(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+		} else {
+			if evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Days != 0 || evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Nanos() != 0 {
+				startTimeDur = tree.MakeDTimestampTZ(getNewTimeForWin(v.Time, evalCtx.GroupWindow.TimeWindowHelper.SlidingTime, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+			} else {
+				startTimeDur = tree.MakeDTimestampTZ(duration.Subtract(duration.Add(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.SlidingTime,
+					time.UTC), evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Duration), evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+			}
+			if startTimeDur.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampStartTZ) != 1 {
+				gw.rows.PopFirst()
+				ok, err = gw.iter.Valid()
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+				gw.iter.Rewind()
+				row1, err = gw.iter.Row()
+				if err != nil {
+					return err
+				}
+				v, _ = row1[gw.groupWindowColID].Datum.(*tree.DTimestampTZ)
+				newTimeDur = tree.MakeDTimestampTZ(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+				continue
+			}
+			gw.timeWindowHelper.WindowBucktTZ = *newTimeDur
+			endTimeDur = tree.MakeDTimestampTZ(duration.Add(startTimeDur.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+
+			gw.timeWindowHelper.noNeedReCompute = true
+			gw.timeWindowHelper.tsTimeStampStartTZ = *startTimeDur
+			gw.timeWindowHelper.tsTimeStampEndTZ = *endTimeDur
+			gw.timeWindowHelper.WindowEndTZ = *endTimeDur
+			gw.groupWindowValue++
+			gw.timeWindowHelper.hasFirst = true
+		}
+	}
+
+	gw.iter.Next()
+	if v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampStartTZ) > -1 && v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampEndTZ) == -1 {
+		row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	} else {
+		gw.timeWindowHelper.noMatch = true
+		return nil
+	}
+
+	endTimeDur = tree.MakeDTimestampTZ(duration.Add(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+	gw.timeWindowHelper.WindowEndTZ = *endTimeDur
+
+	if !gw.timeWindowHelper.hasFirst {
+		newTimeEnd := tree.MakeDTimestampTZ(gw.timeWindowHelper.tsTimeStampEndTZ.Time, 0)
+		row1[gw.groupWindowTsColID].Datum = newTimeEnd
+	} else {
+		newTimeStart := tree.MakeDTimestampTZ(gw.timeWindowHelper.tsTimeStampStartTZ.Time, 0)
+		row1[gw.groupWindowTsColID].Datum = newTimeStart
+	}
+	gw.timeWindowHelper.hasFirst = false
+
+	for i := 0; i < len(row1); i++ {
+		*row = append(*row, row1[i])
+	}
+	return nil
+}
+
+func (gw *groupWindow) handleTimeWindowWithSlide(
+	typ []types.T, evalCtx *tree.EvalContext, row *sqlbase.EncDatumRow,
+) (err error) {
+	var row1 sqlbase.EncDatumRow
+	ok, err := gw.iter.Valid()
+	if err != nil {
+		return err
+	}
+	gw.timeWindowHelper.noMatch = false
+	if !ok {
+		newStart := duration.Add(gw.timeWindowHelper.tsTimeStampStart.Time, evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Duration)
+		if tree.MakeDTimestamp(newStart, 0).Compare(evalCtx, &gw.timeWindowHelper.WindowEnd) < 1 {
+			gw.groupWindowValue++
+			gw.timeWindowHelper.tsTimeStampStart = *tree.MakeDTimestamp(newStart, 0)
+			gw.timeWindowHelper.tsTimeStampEnd = *tree.MakeDTimestamp(duration.Add(gw.timeWindowHelper.tsTimeStampStart.Time,
+				evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+			gw.timeWindowHelper.noNeedReCompute = true
+			gw.timeWindowHelper.hasFirst = true
+		} else {
+			gw.timeWindowHelper.noNeedReCompute = false
+		}
+		gw.iter.Rewind()
+		ok, err = gw.iter.Valid()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+
+	row1, err = gw.iter.Row()
+	if err != nil {
+		return err
+	}
+
+	v, _ := row1[gw.groupWindowColID].Datum.(*tree.DTimestamp)
+	typ[gw.groupWindowColID] = *types.Any
+	var startTimeDur, endTimeDur, newTimeDur *tree.DTimestamp
+
+	newTimeDur = tree.MakeDTimestamp(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+
+	for !gw.timeWindowHelper.noNeedReCompute {
+		if !newTimeDur.Time.After(gw.timeWindowHelper.WindowBuckt.Time) {
+			gw.rows.PopFirst()
+			ok, err = gw.iter.Valid()
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+			gw.iter.Rewind()
+			row1, err = gw.iter.Row()
+			if err != nil {
+				return err
+			}
+			v, _ = row1[gw.groupWindowColID].Datum.(*tree.DTimestamp)
+			newTimeDur = tree.MakeDTimestamp(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+		} else {
+			if evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Days != 0 || evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Nanos() != 0 {
+				startTimeDur = tree.MakeDTimestamp(getNewTimeForWin(v.Time, evalCtx.GroupWindow.TimeWindowHelper.SlidingTime, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+			} else {
+				startTimeDur = tree.MakeDTimestamp(duration.Subtract(duration.Add(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.SlidingTime,
+					time.UTC), evalCtx.GroupWindow.TimeWindowHelper.SlidingTime.Duration), evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+			}
+			if startTimeDur.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampStart) != 1 {
+				gw.rows.PopFirst()
+				ok, err = gw.iter.Valid()
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+				gw.iter.Rewind()
+				row1, err = gw.iter.Row()
+				if err != nil {
+					return err
+				}
+				v, _ = row1[gw.groupWindowColID].Datum.(*tree.DTimestamp)
+				newTimeDur = tree.MakeDTimestamp(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
+				continue
+			}
+			gw.timeWindowHelper.WindowBuckt = *newTimeDur
+			endTimeDur = tree.MakeDTimestamp(duration.Add(startTimeDur.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+
+			gw.timeWindowHelper.noNeedReCompute = true
+			gw.timeWindowHelper.tsTimeStampStart = *startTimeDur
+			gw.timeWindowHelper.tsTimeStampEnd = *endTimeDur
+			gw.timeWindowHelper.WindowEnd = *endTimeDur
+			gw.groupWindowValue++
+			gw.timeWindowHelper.hasFirst = true
+		}
+	}
+
+	gw.iter.Next()
+	if v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampStart) > -1 && v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampEnd) == -1 {
+		row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	} else {
+		gw.timeWindowHelper.noMatch = true
+		return nil
+	}
+
+	endTimeDur = tree.MakeDTimestamp(duration.Add(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration.Duration), 0)
+	gw.timeWindowHelper.WindowEnd = *endTimeDur
+
+	if !gw.timeWindowHelper.hasFirst {
+		newTimeEnd := tree.MakeDTimestamp(gw.timeWindowHelper.tsTimeStampEnd.Time, 0)
+		row1[gw.groupWindowTsColID].Datum = newTimeEnd
+	} else {
+		newTimeStart := tree.MakeDTimestamp(gw.timeWindowHelper.tsTimeStampStart.Time, 0)
+		row1[gw.groupWindowTsColID].Datum = newTimeStart
+	}
+	gw.timeWindowHelper.hasFirst = false
+
+	for i := 0; i < len(row1); i++ {
+		*row = append(*row, row1[i])
+	}
+	return nil
+}
+
+func (gw *groupWindow) handleTimeWindowForRemainingValue(
+	typ []types.T, flowCtx *execinfra.FlowCtx, row sqlbase.EncDatumRow,
+) (err error) {
+	if gw.memMonitor == nil {
+		gw.memMonitor = execinfra.NewLimitedMonitor(flowCtx.EvalCtx.Ctx(), flowCtx.EvalCtx.Mon, flowCtx.Cfg, "group-window-func")
+		gw.rows.InitWithMon(
+			nil /* ordering */, typ, flowCtx.EvalCtx, gw.memMonitor, 0, /* rowCapacity */
+		)
+		gw.iter = gw.rows.NewIterator(context.Background())
+		gw.iter.Rewind()
+		gw.timeWindowHelper.reading = true
+	}
+
+	if err = gw.rows.AddRow(context.Background(), row); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (gw *groupWindow) handleStateWindow(
+	typ []types.T, evalCtx *tree.EvalContext, row sqlbase.EncDatumRow,
+) error {
+	if _, ok := row[gw.groupWindowColID].Datum.(tree.DNullExtern); ok {
+		gw.stateWindowHelper.IgnoreFlag = true
+		return nil
+	}
+	if gw.groupWindowValue == 0 {
+		typ[gw.groupWindowColID] = *types.Any
+		gw.groupWindowValue = gw.groupWindowValue + 1
+		gw.stateWindowHelper.lastDatum = row[gw.groupWindowColID]
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		return nil
+	}
+	res, err := gw.stateWindowHelper.lastDatum.Compare(&typ[gw.groupWindowColID], &gw.stateWindowHelper.datumAlloc, evalCtx, &row[gw.groupWindowColID])
+	if err != nil {
+		return err
+	}
+	if res != 0 {
+		gw.groupWindowValue = gw.groupWindowValue + 1
+		gw.stateWindowHelper.lastDatum = row[gw.groupWindowColID]
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		return nil
+	}
+	row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	return nil
+}
+
+func (gw *groupWindow) handleEventWindow(
+	typ []types.T, evalCtx *tree.EvalContext, row sqlbase.EncDatumRow,
+) error {
+	if gw.startFlag {
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		if evalCtx.GroupWindow.EventWindowHelper.EndFlag {
+			gw.startFlag = false
+		}
+		return nil
+	}
+
+	if evalCtx.GroupWindow.EventWindowHelper.StartFlag {
+		gw.startFlag = true
+		gw.groupWindowValue = gw.groupWindowValue + 1
+		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		if evalCtx.GroupWindow.EventWindowHelper.EndFlag {
+			gw.startFlag = false
+		}
+		return nil
+	}
+	evalCtx.GroupWindow.EventWindowHelper.IgnoreFlag = true
+	//row[gw.groupWindowColId] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(-1))}
+
+	return nil
 }
 
 // aggGapFillState represents gapfill's state.
@@ -243,6 +866,11 @@ func (ag *aggregatorBase) init(
 	ag.bucketsAcc = memMonitor.MakeBoundAccount()
 	ag.arena = stringarena.Make(&ag.bucketsAcc)
 	ag.aggFuncsAcc = memMonitor.MakeBoundAccount()
+	ag.groupWindow = groupWindow{
+		groupWindowValue:   0,
+		groupWindowColID:   spec.GroupWindowId,
+		groupWindowTsColID: spec.Group_WindowTscolid,
+	}
 	ag.gapfill = gapfilltype{
 		groupTimeIndex:   groupTimeIndex,
 		anyNotNUllNum:    anyNotNUllNum,
@@ -615,6 +1243,17 @@ func (ag *orderedAggregator) close() {
 		ag.bucketsAcc.Close(ag.PbCtx())
 		ag.aggFuncsAcc.Close(ag.PbCtx())
 		ag.MemMonitor.Stop(ag.PbCtx())
+		ag.gwClose()
+	}
+}
+
+func (ag *orderedAggregator) gwClose() {
+	if ag.EvalCtx == nil || ag.EvalCtx.GroupWindow == nil || ag.groupWindow.memMonitor == nil {
+		return
+	}
+	if ag.EvalCtx.GroupWindow.GroupWindowFunc == tree.CountWindow && ag.EvalCtx.GroupWindow.CountWindowHelper.IsSlide ||
+		(ag.EvalCtx.GroupWindow.GroupWindowFunc == tree.TimeWindow && ag.EvalCtx.GroupWindow.TimeWindowHelper.IsSlide) {
+		ag.groupWindow.Close(ag.PbCtx())
 	}
 }
 
@@ -624,6 +1263,26 @@ func (ag *orderedAggregator) close() {
 func (ag *aggregatorBase) matchLastOrdGroupCols(row sqlbase.EncDatumRow) (bool, error) {
 	for _, colIdx := range ag.orderedGroupCols {
 		res, err := ag.lastOrdGroupCols[colIdx].Compare(
+			&ag.inputTypes[colIdx], &ag.datumAlloc, ag.EvalCtx, &row[colIdx],
+		)
+		if res != 0 || err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// matchLastOrdGroupColsForEvent takes a row and matches it with the row stored by
+// lastOrdGroupCols. It returns true if the two rows are equal on the grouping
+// columns, and false otherwise.
+func (ag *aggregatorBase) matchLastOrdGroupColsForEvent(
+	row sqlbase.EncDatumRow, groupWindowColID int32,
+) (bool, error) {
+	for _, colIdx := range ag.orderedGroupCols {
+		if colIdx == uint32(groupWindowColID) {
+			continue
+		}
+		res, err := ag.eventOrdGroupCols[colIdx].Compare(
 			&ag.inputTypes[colIdx], &ag.datumAlloc, ag.EvalCtx, &row[colIdx],
 		)
 		if res != 0 || err != nil {
@@ -720,6 +1379,41 @@ func (ag *orderedAggregator) accumulateRows() (
 			}
 			return aggAccumulating, nil, meta
 		}
+
+		if haveGroupWindow(ag.EvalCtx) {
+			if ag.FlowCtx.EvalCtx.GroupWindow.GroupWindowFunc == tree.EventWindow {
+				if ag.eventOrdGroupCols == nil {
+					ag.eventOrdGroupCols = ag.rowAlloc.CopyRow(row)
+				} else {
+					if row != nil {
+						matched, err := ag.matchLastOrdGroupColsForEvent(row, ag.groupWindow.groupWindowColID)
+						if err != nil {
+							ag.MoveToDraining(err)
+							return aggStateUnknown, nil, nil
+						}
+						if !matched {
+							ag.groupWindow.startFlag = false
+						}
+					}
+				}
+			}
+			if err := ag.groupWindow.CheckAndGetWindowDatum(ag.inputTypes, ag.FlowCtx, &row); err != nil {
+				ag.MoveToDraining(err)
+				return aggStateUnknown, nil, nil
+			}
+			if ag.groupWindow.stateWindowHelper.IgnoreFlag {
+				ag.groupWindow.stateWindowHelper.IgnoreFlag = false
+				continue
+			}
+			if ag.EvalCtx.GroupWindow.EventWindowHelper.IgnoreFlag {
+				ag.EvalCtx.GroupWindow.EventWindowHelper.IgnoreFlag = false
+				continue
+			}
+			if (ag.groupWindow.timeWindowHelper.reading || ag.groupWindow.timeWindowHelper.noMatch) &&
+				ag.EvalCtx.GroupWindow.TimeWindowHelper.IsSlide {
+				continue
+			}
+		}
 		if row == nil {
 			log.VEvent(ag.PbCtx(), 1, "accumulation complete")
 			ag.inputDone = true
@@ -758,6 +1452,10 @@ func (ag *orderedAggregator) accumulateRows() (
 
 	// Transition to aggEmittingRows, and let it generate the next row/meta.
 	return aggEmittingRows, nil, nil
+}
+
+func haveGroupWindow(evalCtx *tree.EvalContext) bool {
+	return evalCtx != nil && evalCtx.GroupWindow != nil && evalCtx.GroupWindow.GroupWindowFunc > 0
 }
 
 // getAggResults returns the new aggregatorState and the results from the
@@ -1537,4 +2235,102 @@ func (ag *aggregatorBase) createAggregateFuncs() (aggregateFuncs, error) {
 		}
 	}
 	return bucket, nil
+}
+
+// getNewTime returns the result of rounding oldTime down to a multiple of dInterval.
+func getNewTime(oldTime time.Time, dInterval tree.DInterval, loc *time.Location) time.Time {
+	newTime := time.Date(1, 1, 1, 0, 0, 0, 0, loc)
+	if dInterval.Months != 0 {
+		timeMonth := (oldTime.Year()-1)*12 + (int(oldTime.Month() - 1))
+		newMonth := (int64(timeMonth) / dInterval.Months) * dInterval.Months
+		newTime = newTime.AddDate(0, int(newMonth), 0)
+		return newTime
+	}
+	var offSet int
+	if loc != nil && loc != time.UTC {
+		timeInLocation := oldTime.In(loc)
+		_, offSet = timeInLocation.Zone()
+		oldTime = oldTime.Add(time.Duration(offSet) * time.Second)
+	}
+	if dInterval.Days != 0 {
+		newTime = oldTime.Truncate(time.Duration(dInterval.Days) * time.Hour * 24)
+	}
+	if dInterval.Nanos() != 0 {
+		newTime = oldTime.Truncate(time.Duration(dInterval.Nanos()))
+	}
+	if loc != nil && loc != time.UTC {
+		newTime = newTime.Add(-time.Duration(offSet) * time.Second)
+	}
+	return newTime
+}
+
+// getNewTimeForWin returns the result of rounding oldTime down to a multiple of dInterval.
+func getNewTimeForWin(
+	oldTime time.Time, dInterval tree.DInterval, duration1 tree.DInterval, loc *time.Location,
+) time.Time {
+	newTime := time.Date(1, 1, 1, 0, 0, 0, 0, loc)
+	if dInterval.Months != 0 {
+		timeMonth := (oldTime.Year()-1)*12 + (int(oldTime.Month() - 1))
+		newMonth := (int64(timeMonth) / dInterval.Months) * dInterval.Months
+		newTime = newTime.AddDate(0, int(newMonth), 0)
+		return newTime
+	}
+	var offSet int
+	if loc != nil && loc != time.UTC {
+		timeInLocation := oldTime.In(loc)
+		_, offSet = timeInLocation.Zone()
+		oldTime = oldTime.Add(time.Duration(offSet) * time.Second)
+	}
+	if dInterval.Days != 0 {
+		var firstTs time.Time
+		oldTimeUnix := oldTime.Unix() * 1000
+		oldTimeInterval := ((dInterval.Days) * int64(time.Hour) * 24) / 1000000
+		oldTimeTrun := oldTimeUnix / oldTimeInterval
+		oldTimeMul := (dInterval.Days) * int64(time.Hour) * 24
+		result := oldTimeTrun * oldTimeMul
+		sts := timeutil.Unix(0, result)
+		ets := duration.Add(sts, duration1.Duration)
+		if ets.Before(oldTime) {
+			for ets.Before(oldTime) && sts.Before(oldTime) {
+				sts = duration.Add(sts, dInterval.Duration)
+				ets = duration.Add(sts, duration1.Duration)
+			}
+			firstTs = sts
+		} else {
+			for ets.After(oldTime) || ets.Equal(oldTime) {
+				firstTs = sts
+				sts = duration.Subtract(sts, dInterval.Duration)
+				ets = duration.Add(sts, duration1.Duration)
+			}
+		}
+		newTime = firstTs
+	}
+	if dInterval.Nanos() != 0 {
+		var firstTs time.Time
+		oldTimeUnix := oldTime.Unix() * 1000
+		oldTimeInterval := dInterval.Nanos() / 1000000
+		oldTimeTrun := oldTimeUnix / oldTimeInterval
+		oldTimeMul := dInterval.Nanos()
+		result := oldTimeTrun * oldTimeMul
+		sts := timeutil.Unix(0, result)
+		ets := duration.Add(sts, duration1.Duration)
+		if ets.Before(oldTime) {
+			for ets.Before(oldTime) && sts.Before(oldTime) {
+				sts = duration.Add(sts, dInterval.Duration)
+				ets = duration.Add(sts, duration1.Duration)
+			}
+			firstTs = sts
+		} else {
+			for ets.After(oldTime) || ets.Equal(oldTime) {
+				firstTs = sts
+				sts = duration.Subtract(sts, dInterval.Duration)
+				ets = duration.Add(sts, duration1.Duration)
+			}
+		}
+		newTime = firstTs
+	}
+	if loc != nil && loc != time.UTC {
+		newTime = newTime.Add(-time.Duration(offSet) * time.Second)
+	}
+	return newTime
 }

@@ -171,11 +171,9 @@ DatumPtr DiskDataContainer::GetData(k_uint32 col) {
 
 k_uint32 DiskDataContainer::ComputeCapacity() {
   // Cautiousness: OptimalDiskDataSize * 8 < 7 * col_num
-  auto col_num = static_cast<int>(col_info_.size());
-
   // (capacity_ + 7)/8 * col_num + capacity_ * row_size_ <= OptimalDiskDataSize
   int capacity =
-    (OptimalDiskDataSize * 8 - 7 * col_num) / (col_num + 8 * static_cast<int>(row_size_));
+    (OptimalDiskDataSize * 8 - 7 * col_num_) / (col_num_ + 8 * static_cast<int>(row_size_));
   if (capacity < 2) {
     return 1;
   } else {
@@ -184,7 +182,7 @@ k_uint32 DiskDataContainer::ComputeCapacity() {
 }
 
 size_t DiskDataContainer::ComputeBlockSize() {
-  return (capacity_ + 7) / 8 * col_info_.size() + capacity_ * row_size_;
+  return (capacity_ + 7) / 8 * col_num_ + capacity_ * row_size_;
 }
 
 k_uint32 DiskDataContainer::UpdateReadCacheChunk(k_uint32 row) {
@@ -212,7 +210,7 @@ k_uint32 DiskDataContainer::UpdateReadCacheChunk(k_uint32 row) {
     read_cache_chunk_ptr_->ResetDataPtr(ptr + 2, chunk_count);
   } else {
     read_cache_chunk_ptr_ =
-      new(read_cache_chunk_obj_)DataChunk(col_info_, ptr + 2, chunk_count, capacity_);
+      new(read_cache_chunk_obj_)DataChunk(col_info_, col_num_, ptr + 2, chunk_count, capacity_);
     read_cache_chunk_ptr_->Initialize();
   }
 
@@ -236,7 +234,8 @@ KStatus DiskDataContainer::UpdateWriteCacheChunk(bool& isUpdated) {
     if (write_cache_chunk_ptr_ != nullptr) {
       write_cache_chunk_ptr_->ResetDataPtr(write_data_ptr_ + 2, 0);
     } else {
-      write_cache_chunk_ptr_ = new(write_cache_chunk_obj_)DataChunk(col_info_, write_data_ptr_ + 2, 0, capacity_);
+      write_cache_chunk_ptr_ = new (write_cache_chunk_obj_)
+          DataChunk(col_info_, col_num_, write_data_ptr_ + 2, 0, capacity_);
       write_cache_chunk_ptr_->Initialize();
     }
     isUpdated = true;

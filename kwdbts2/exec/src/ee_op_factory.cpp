@@ -130,7 +130,8 @@ KStatus OpFactory::NewAgg(kwdbContext_p ctx, TsFetcherCollection* collection, co
       input->SetHasPostAgg(true);
     }
   } else {
-    if (aggSpec.group_cols_size() == aggSpec.ordered_group_cols_size()) {
+    if (aggSpec.group_cols_size() == aggSpec.ordered_group_cols_size() ||
+        aggSpec.group_window_id() >= 0) {
       *iterator = NewIterator<OrderedAggregateOperator>(collection,
           childIterator, const_cast<TSAggregatorSpec*>(&aggSpec),
           const_cast<TSPostProcessSpec*>(&post), *table, processor_id);

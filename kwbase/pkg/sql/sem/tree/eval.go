@@ -3143,7 +3143,62 @@ type EvalContext struct {
 	HintReoptimize      bool
 	StartSinglenode     bool
 	StartDistributeMode bool
+	GroupWindow         *GroupWindow
 }
+
+// GroupWindow record group_window information.
+type GroupWindow struct {
+	GroupWindowFunc     GroupWindowFunc
+	CountWindowHelper   CountWindowHelper
+	EventWindowHelper   EventWindowHelper
+	SessionWindowHelper SessionWindowHelper
+	TimeWindowHelper    TimeWindowHelper
+}
+
+// SessionWindowHelper record session_window information.
+type SessionWindowHelper struct {
+	Dur time.Duration
+}
+
+// TimeWindowHelper record time_window information.
+type TimeWindowHelper struct {
+	Duration    DInterval
+	SlidingTime DInterval
+	IsSlide     bool
+	IfTZ        bool
+}
+
+// CountWindowHelper record count_window information.
+type CountWindowHelper struct {
+	WindowNum         int
+	SlidingWindowSize int
+	IsSlide           bool
+}
+
+// EventWindowHelper record event_window information.
+type EventWindowHelper struct {
+	StartFlag  bool
+	EndFlag    bool
+	IgnoreFlag bool
+}
+
+// GroupWindowFunc represent group_window type.
+type GroupWindowFunc int
+
+const (
+	// GroupWindowUnknown represent init.
+	GroupWindowUnknown GroupWindowFunc = iota
+	// StateWindow represent state_window.
+	StateWindow
+	// EventWindow represent event_window.
+	EventWindow
+	// SessionWindow represent session_window.
+	SessionWindow
+	// CountWindow represent count_window.
+	CountWindow
+	// TimeWindow represent time_window.
+	TimeWindow
+)
 
 // MakeTestingEvalContext returns an EvalContext that includes a MemoryMonitor.
 func MakeTestingEvalContext(st *cluster.Settings) EvalContext {
