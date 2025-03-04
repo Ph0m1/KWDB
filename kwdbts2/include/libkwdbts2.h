@@ -306,6 +306,9 @@ TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* paylo
                             RangeGroup range_group, uint64_t mtr_id, uint16_t* inc_entity_cnt,
                             uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL);
 
+TSStatus TsTestGetAndAddSchemaVersion(TSEngine* engine, TSTableID table_id, uint64_t version);
+
+char* __attribute__((weak)) getTableMetaByVersion(TSTableID table_id, uint64_t ver, size_t* data_len, char** error);
 /**
  * @brief delete data in range, used after snapshot finished. 
  * it maybe delete tstable in storage engine. in this case, before next input data, we should create table first.

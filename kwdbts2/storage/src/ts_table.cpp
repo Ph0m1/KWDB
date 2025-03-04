@@ -29,6 +29,7 @@
 #include "ee_global.h"
 
 extern DedupRule g_dedup_rule;
+extern bool g_go_start_service;
 namespace kwdbts {
 
 TsEntityGroup::TsEntityGroup(kwdbContext_p ctx, MMapRootTableManager*& root_table_manager, const string& db_path,
@@ -1406,6 +1407,36 @@ KStatus TsTable::Create(kwdbContext_p ctx, vector<AttributeInfo>& metric_schema,
     return KStatus::FAIL;
   }
 
+  return KStatus::SUCCESS;
+}
+
+KStatus TsTable::CheckAndAddSchemaVersion(kwdbContext_p ctx, const KTableKey& table_id, uint64_t version) {
+  if (!g_go_start_service) return KStatus::SUCCESS;
+  if (version == entity_bt_manager_->GetCurrentTableVersion()) {
+    return KStatus::SUCCESS;
+  }
+
+  if (entity_bt_manager_->GetRootTable(version, true) != nullptr) {
+    return KStatus::SUCCESS;
+  }
+
+  char* error;
+  size_t data_len = 0;
+  char* data = getTableMetaByVersion(table_id, version, &data_len, &error);
+  if (error != nullptr) {
+    LOG_ERROR(error);
+    return KStatus::FAIL;
+  }
+  roachpb::CreateTsTable meta;
+  if (!meta.ParseFromString({data, data_len})) {
+    LOG_ERROR("Parse schema From String failed.");
+    return KStatus::FAIL;
+  }
+  MMapMetricsTable* version_schema;
+  if (AddSchemaVersion(ctx, &meta, &version_schema) != KStatus::SUCCESS) {
+    LOG_ERROR("failed during upper version.");
+    return KStatus::FAIL;
+  }
   return KStatus::SUCCESS;
 }
 
@@ -2857,7 +2888,7 @@ KStatus TsTable::AlterTableCol(kwdbContext_p ctx, AlterType alter_type, const At
   KStatus s = entity_bt_manager_->GetSchemaInfoIncludeDropped(&schema, cur_version);
   if (s != KStatus::SUCCESS) {
     msg = "schema version " + to_string(cur_version) + " does not exists";
-    return s;
+    return KStatus::FAIL;
   }
   switch (alter_type) {
     case ADD_COLUMN:
@@ -2908,14 +2939,14 @@ KStatus TsTable::AddSchemaVersion(kwdbContext_p ctx, roachpb::CreateTsTable* met
   auto latest_version = entity_bt_manager_->GetCurrentTableVersion();
   auto upper_version = meta->ts_table().ts_version();
   // skip in case current table has that schema version
-  LOG_DEBUG("uppper version[%u], latest schema version [%u]", upper_version, latest_version);
+  LOG_DEBUG("upper version[%u], latest schema version [%u]", upper_version, latest_version);
   if (upper_version <= latest_version) {
     auto root_table = entity_bt_manager_->GetRootTable(upper_version, true);
     if (root_table != nullptr) {
       *version_schema = root_table;
       return KStatus::SUCCESS;
     }
-    LOG_DEBUG("uppper version[%u] no exists, need create.", upper_version);
+    LOG_DEBUG("upper version[%u] no exists, need create.", upper_version);
   }
 
   std::vector<TagInfo> tag_schema;

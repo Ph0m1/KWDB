@@ -50,7 +50,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
-	"gitee.com/kwbasedb/kwbase/pkg/tscoord"
 	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/growstack"
@@ -372,7 +371,7 @@ func (n *Node) start(
 	localityAddress []roachpb.LocalityAddress,
 	nodeDescriptorCallback func(descriptor roachpb.NodeDescriptor),
 	startMode string,
-	setTse func() (*tse.TsEngine, *tscoord.DB, error),
+	setTse func() (*tse.TsEngine, error),
 ) error {
 	if err := clusterversion.Initialize(ctx, cv.Version, &n.storeCfg.Settings.SV); err != nil {
 		return err
@@ -615,7 +614,7 @@ func (n *Node) bootstrapStores(
 	ctx context.Context,
 	emptyEngines []storage.Engine,
 	stopper *stop.Stopper,
-	setTse func() (*tse.TsEngine, *tscoord.DB, error),
+	setTse func() (*tse.TsEngine, error),
 ) error {
 	if n.clusterID.Get() == uuid.Nil {
 		return errors.New("ClusterID missing during store bootstrap of auxiliary store")

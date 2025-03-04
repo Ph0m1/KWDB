@@ -240,71 +240,73 @@ KStatus TSEngineImpl::CompressTsTable(kwdbContext_p ctx, const KTableKey& table_
   return s;
 }
 
-KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& tags_table,
-                                 ErrorInfo& err_info) {
-  tags_table = nullptr;
+KStatus TSEngineImpl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& ts_table,
+                                 ErrorInfo& err_info, uint32_t version) {
+  ts_table = nullptr;
   // 0. First, query the cache based on table_id and pt_time
   std::shared_ptr<TsTable> table = tables_cache_->Get(table_id);
   if (table && !table->IsDropped()) {
-    tags_table = table;
-    return SUCCESS;
+    ts_table = table;
   } else if (table && table->IsDropped()) {
     err_info.setError(KWENOOBJ);
     return FAIL;
-  }
+  } else {
+    MUTEX_LOCK(tables_lock_);
+    Defer defer([&]() {
+      MUTEX_UNLOCK(tables_lock_);
+    });
+    table = tables_cache_->Get(table_id);
+    if (table && !table->IsDropped()) {
+      ts_table = table;
+    } else if (table && table->IsDropped()) {
+      return FAIL;
+    } else {
+      UpdateSetting(ctx);
+      switch (options_.wal_level) {
+        case WALMode::OFF:
+          table = std::make_shared<TsTable>(ctx, options_.db_path, table_id);
+          break;
+        case WALMode::ON:
+        case WALMode::SYNC:
+          table = std::make_shared<LoggedTsTable>(ctx, options_.db_path, table_id, &options_);
+          break;
+        case WALMode::BYRL:
+          table = std::make_shared<RaftLoggedTsTable>(ctx, options_.db_path, table_id);
+          break;
+        default:
+        LOG_WARN("invalid wal level %d", options_.wal_level);
+          break;
+      }
 
-  MUTEX_LOCK(tables_lock_);
-  Defer defer([&]() {
-    MUTEX_UNLOCK(tables_lock_);
-  });
-  table = tables_cache_->Get(table_id);
-  if (table && !table->IsDropped()) {
-    tags_table = table;
-    return SUCCESS;
-  } else if (table && table->IsDropped()) {
-    return FAIL;
-  }
+      std::unordered_map<k_uint64, int8_t> range_groups;
+      auto it = tables_range_groups_.find(table_id);
+      if (it != tables_range_groups_.end()) {
+        range_groups = it->second;
+      }
+      KStatus s = table->Init(ctx, range_groups, err_info);
+      if (s == KStatus::FAIL) {
+        LOG_ERROR("can not found table [%lu].", table_id)
+        return FAIL;
+      }
 
-  UpdateSetting(ctx);
-  switch (options_.wal_level) {
-  case WALMode::OFF:
-    table = std::make_shared<TsTable>(ctx, options_.db_path, table_id);
-    break;
-  case WALMode::ON:
-  case WALMode::SYNC:
-    table = std::make_shared<LoggedTsTable>(ctx, options_.db_path, table_id, &options_);
-    break;
-  case WALMode::BYRL:
-    table = std::make_shared<RaftLoggedTsTable>(ctx, options_.db_path, table_id);
-    break;
-  default:
-    LOG_WARN("invalid wal level %d", options_.wal_level);
-    break;
-  }
-
-  std::unordered_map<k_uint64, int8_t> range_groups;
-  auto it = tables_range_groups_.find(table_id);
-  if (it != tables_range_groups_.end()) {
-    range_groups = it->second;
-  }
-  KStatus s = table->Init(ctx, range_groups, err_info);
-  if (s == KStatus::FAIL) {
-    LOG_ERROR("can not found table [%lu].", table_id)
-    return FAIL;
-  }
-
-  if (!table->IsDropped()) {
+      if (table->IsDropped()) {
+        LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
+        return FAIL;
+      }
 #ifndef KWBASE_OSS
-    TsConfigAutonomy::UpdateTableStatisticInfo(ctx, table, true);
+      TsConfigAutonomy::UpdateTableStatisticInfo(ctx, table, true);
 #endif
-    tables_cache_->Put(table_id, table);
-    // Load into cache
-    tags_table = table;
-    return SUCCESS;
+      tables_cache_->Put(table_id, table);
+      // Load into cache
+      ts_table = table;
+    }
   }
 
-  LOG_ERROR("GetTsTable failed: table [%lu] is dropped", table_id)
-  return FAIL;
+  if (version != 0 && ts_table->CheckAndAddSchemaVersion(ctx, table_id, version) != KStatus::SUCCESS) {
+    LOG_ERROR("table[%lu] CheckAndAddSchemaVersion failed", table_id);
+    return KStatus::FAIL;
+  }
+  return SUCCESS;
 }
 
 KStatus TSEngineImpl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id,  RangeGroup range,
@@ -362,10 +364,8 @@ KStatus TSEngineImpl::PutEntity(kwdbContext_p ctx, const KTableKey& table_id, ui
   std::shared_ptr<TsEntityGroup> table_range;
   for (size_t i = 0; i < payload_num; i++) {
     auto pl_schema_version = Payload::GetTsVsersionFromPayload(&(payload[i]));
-    auto cur_schema_version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
-    if (cur_schema_version < pl_schema_version) {
-      LOG_ERROR("table[%lu] current version[%u] less than payload version[%u].",
-                table_id, cur_schema_version, pl_schema_version);
+    if (table->CheckAndAddSchemaVersion(ctx, table_id, pl_schema_version) != KStatus::SUCCESS) {
+      LOG_ERROR("table[%lu] CheckAndAddSchemaVersion failed.", table_id);
       return KStatus::FAIL;
     }
     if (nullptr == table->GetMetricsTableMgr()->GetRootTable(pl_schema_version, true)) {
@@ -403,10 +403,8 @@ KStatus TSEngineImpl::PutData(kwdbContext_p ctx, const KTableKey& table_id, uint
   std::shared_ptr<TsEntityGroup> table_range;
   for (size_t i = 0; i < payload_num; i++) {
     auto pl_schema_version = Payload::GetTsVsersionFromPayload(&(payload[i]));
-    auto cur_schema_version = table->GetMetricsTableMgr()->GetCurrentTableVersion();
-    if (cur_schema_version < pl_schema_version) {
-      LOG_ERROR("table[%lu] current version[%u] less than payload version[%u].",
-                table_id, cur_schema_version, pl_schema_version);
+    if (table->CheckAndAddSchemaVersion(ctx, table_id, pl_schema_version) != KStatus::SUCCESS) {
+      LOG_ERROR("table[%lu] CheckAndAddSchemaVersion failed.", table_id);
       return KStatus::FAIL;
     }
     if (nullptr == table->GetMetricsTableMgr()->GetRootTable(pl_schema_version, true)) {
@@ -1193,8 +1191,9 @@ void TSEngineImpl::AlterTableCacheCapacity(int capacity) {
 
 KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
                                 TSSlice column, uint32_t cur_version, uint32_t new_version, string& err_msg) {
+  ErrorInfo err_info;
   std::shared_ptr<TsTable> table;
-  KStatus s = GetTsTable(ctx, table_id, table);
+  KStatus s = GetTsTable(ctx, table_id, table, err_info, cur_version);
   if (s == KStatus::FAIL) {
     err_msg = "Table does not exist";
     return s;
@@ -1227,8 +1226,9 @@ KStatus TSEngineImpl::AddColumn(kwdbContext_p ctx, const KTableKey& table_id, ch
 
 KStatus TSEngineImpl::DropColumn(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
                                  TSSlice column, uint32_t cur_version, uint32_t new_version, string& err_msg) {
+  ErrorInfo err_info;
   std::shared_ptr<TsTable> table;
-  KStatus s = GetTsTable(ctx, table_id, table);
+  KStatus s = GetTsTable(ctx, table_id, table, err_info, cur_version);
   if (s == KStatus::FAIL) {
     return s;
   }
@@ -1288,8 +1288,9 @@ KStatus TSEngineImpl::GetTsWaitThreadNum(kwdbContext_p ctx, void *resp) {
 KStatus TSEngineImpl::AlterColumnType(kwdbContext_p ctx, const KTableKey& table_id, char* transaction_id,
                                       TSSlice new_column, TSSlice origin_column,
                                       uint32_t cur_version, uint32_t new_version, string& err_msg) {
+  ErrorInfo err_info;
   std::shared_ptr<TsTable> table;
-  KStatus s = GetTsTable(ctx, table_id, table);
+  KStatus s = GetTsTable(ctx, table_id, table, err_info, cur_version);
   if (s == KStatus::FAIL) {
     return s;
   }

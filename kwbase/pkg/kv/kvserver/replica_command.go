@@ -1859,82 +1859,6 @@ func execChangeReplicasTxn(
 		}
 		log.Infof(ctx, "change replicas (add %v remove %v): existing descriptor %s", crt.Added(), crt.Removed(), desc)
 
-		if desc.GetRangeType() == roachpb.TS_RANGE && desc.TableId > keys.MinNonPredefinedUserDescID {
-			nodeIDs := getNewReplNodeIDs(ctx, desc, crt.Desc)
-			if len(nodeIDs) != 0 {
-				// get table descriptor and check state
-				table, _, err := sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(desc.TableId))
-				if err != nil {
-					return err
-				}
-				if len(table.Mutations) > 0 {
-					log.Warningf(ctx, "table %v is being altered", table.ID)
-					return kwdberrors.Newf("waiting for table %d to be altered", table.ID)
-				}
-
-				// check version between system metadata and remote node
-				for _, nodeID := range nodeIDs {
-					version, err := store.cfg.TseDB.AdminGetTsTableVersion(ctx, uint64(desc.TableId), nodeID)
-					if err != nil {
-						return err
-					}
-					if version < uint32(table.TsTable.TsVersion) {
-						log.Warningf(ctx, "table version not same between metadata[%d] and"+
-							" remote storage[%d] node %v", table.TsTable.TsVersion, version, nodeID)
-						return kwdberrors.Newf("wait for table %d to update version", desc.TableId)
-					}
-				}
-			}
-		}
-
-		// t1: last range(relational od time-series) has LEARNER replica to FULL/INCOMING
-		// eg: (n1-FULL, n2-FULL, n3-LEARNER)
-		// t2: create a new time-series table , GetTableNodeIDs will miss LEARNER
-		// eg: get (n1, n2)
-		// t3: snapshot finished. eg.(n1-FULL, n2-FULL, n3-FULL)
-		// t4: alter table get eg.(n1-FULL, n2-FULL, n3-FULL)
-		// but n3 don't have table.
-		// Solution: we break the process LEARNER replica to INCOMING/FULL replica by check
-		// whether there is new time-series table between the StartKey to the EndKey("/Max").
-		if desc.EndKey.String() == "/Max" && len(getNewReplNodeIDs(ctx, desc, crt.Desc)) > 0 {
-			// check whether the time-series table exists the last range between StartKey and EndKey.
-			maxID := sqlbase.CheckMaxTableIDIsTimeSeries(ctx, txn)
-			_, tableID, err := keys.DecodeTablePrefix(desc.StartKey.AsRawKey())
-			if err == nil && maxID > uint32(tableID) {
-				return kwdberrors.Newf("waiting for range %d to split", desc.RangeID)
-			}
-		}
-
-		for attempts, i := 10, 0; i < attempts; i++ {
-			if knobs := store.TestingKnobs(); knobs != nil && knobs.DisableSafeReplicationChanges {
-				break
-			}
-			// Run an integrity check to ensure that the configuration
-			// resulting from this change meets the quorum requirements.
-			replicas := crt.Desc.Replicas()
-			liveVoterReplicas, _ := store.allocator.storePool.liveAndDeadReplicas(replicas.All())
-			unavailable := !crt.Desc.Replicas().CanMakeProgress(func(rDesc roachpb.ReplicaDescriptor) bool {
-				for _, inner := range liveVoterReplicas {
-					if inner.ReplicaID == rDesc.ReplicaID {
-						return true
-					}
-				}
-				return false
-			})
-			if unavailable {
-				err := newQuorumError(
-					"range %s requires a replication change add=%v del=%v, "+
-						"but live replicas %v don't constitute a quorum for %v:",
-					crt.Desc, crt.Added(), crt.Removed(), liveVoterReplicas, desc.Replicas().All(),
-				)
-				if i == attempts-1 {
-					return err
-				}
-				log.Infof(ctx, "%s; retrying", err)
-				time.Sleep(time.Second)
-			}
-		}
-
 		{
 			b := txn.NewBatch()
 
@@ -2001,29 +1925,6 @@ func execChangeReplicasTxn(
 	}
 	log.Event(ctx, "txn complete")
 	return returnDesc, nil
-}
-
-// getNewReplNodeIDs return nodeID list where snapshot will add INCOMING/FULL replica.
-func getNewReplNodeIDs(ctx context.Context, src, dst *roachpb.RangeDescriptor) []roachpb.NodeID {
-	// todo(qzy): test has empty context, try not use context later
-	buffer := logtags.FromContext(ctx)
-	if buffer == nil {
-		return nil
-	}
-	if tags := buffer.Get(); len(tags) > 1 && tags[1].Key() == "split" {
-		return nil
-	}
-	var nodeIDs []roachpb.NodeID
-	for _, oldR := range src.InternalReplicas {
-		if oldR.GetType() == roachpb.LEARNER {
-			for _, newR := range dst.InternalReplicas {
-				if newR.NodeID == oldR.NodeID && (newR.GetType() == roachpb.VOTER_INCOMING || newR.GetType() == roachpb.VOTER_FULL) {
-					nodeIDs = append(nodeIDs, oldR.NodeID)
-				}
-			}
-		}
-	}
-	return nodeIDs
 }
 
 // sendTSSnapshot sends a snapshot of the replica state to the specified replica.

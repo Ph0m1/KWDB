@@ -38,7 +38,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/retry"
-	"github.com/pkg/errors"
 )
 
 // GenerateUniqueEntityRangeGroupID ...
@@ -417,12 +416,7 @@ func GetTableNodeIDs(ctx context.Context, db *kv.DB, tableID uint32) ([]roachpb.
 					return err
 				}
 				for _, replica := range desc.InternalReplicas {
-					if replica.GetType() == roachpb.VOTER_INCOMING {
-						return errors.Errorf("replica %+v is not ready", replica)
-					}
-					if replica.GetType() == roachpb.VOTER_FULL {
-						nodeIDList[replica.NodeID] = struct{}{}
-					}
+					nodeIDList[replica.NodeID] = struct{}{}
 				}
 			}
 			return nil

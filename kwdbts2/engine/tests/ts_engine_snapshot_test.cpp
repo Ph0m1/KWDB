@@ -21,6 +21,8 @@ const string TestBigTableInstance::kw_home_ = db_path;  // NOLINT
 const string TestBigTableInstance::db_name_ = "tsdb";  // NOLINT
 const uint64_t TestBigTableInstance::iot_interval_ = 86400;
 
+extern bool g_go_start_service;
+
 RangeGroup test_range{default_entitygroup_id_in_dist_v2, 0};
 
 class TestEngineSnapshotConvert : public TestBigTableInstance, public ::testing::WithParamInterface<int> {
@@ -41,6 +43,7 @@ class TestEngineSnapshotConvert : public TestBigTableInstance, public ::testing:
     system(("rm -rf " + db_path + "/*").c_str());
     // clear path files.
     EXPECT_EQ(TSEngineImpl::OpenTSEngine(ctx_, db_path, opts_, &ts_engine_), KStatus::SUCCESS);
+    g_go_start_service = false;
   }
 
   ~TestEngineSnapshotConvert() {

@@ -577,6 +577,7 @@ message ScanRequest {
   // keys returned by the request, not a single range lock over the entire span
   // scanned by the request.
   kv.kvserver.concurrency.lock.Strength key_locking = 5;
+  bool isScanAllMvccVerForOneTable = 6;
 }
 
 // A ScanResponse is the return value from the Scan() method.

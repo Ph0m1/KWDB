@@ -767,6 +767,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		if retErr != nil {
 			return retErr
 		}
+		log.Infof(ctx, "alter table on nodes list: %v", nodeList)
 		sw.healthyNodes = nodeList
 		if _, err := sw.p.ExecCfg().LeaseManager.WaitForOneVersion(ctx, sw.tableID, base.DefaultRetryOptions()); err != nil {
 			return err
@@ -814,6 +815,7 @@ func (sw *TSSchemaChangeWorker) makeAndRunDistPlan(
 		if retErr != nil {
 			return retErr
 		}
+		log.Infof(ctx, "create table on nodes list: %v", nodeList)
 		newPlanNode = &tsDDLNode{d: d, nodeID: nodeList}
 	//case dropKwdbInsTable:
 	//	log.Infof(ctx, "%s job start, name: %s, id: %d, jobID: %d",

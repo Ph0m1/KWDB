@@ -31,11 +31,18 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/batcheval/result"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/concurrency/lock"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 )
 
 func init() {
 	RegisterReadOnlyCommand(roachpb.Scan, DefaultDeclareIsolatedKeys, Scan)
+}
+
+func getTableDesc(v roachpb.Value) (*sqlbase.Descriptor, error) {
+	desc := sqlbase.Descriptor{}
+	err := v.GetProto(&desc)
+	return &desc, err
 }
 
 // Scan scans the key range specified by start key through end key
@@ -72,12 +79,26 @@ func Scan(
 		}
 		reply.BatchResponses = scanRes.KVData
 	case roachpb.KEY_VALUES:
-		scanRes, err = storage.MVCCScan(
-			ctx, reader, args.Key, args.EndKey, h.Timestamp, opts)
-		if err != nil {
-			return result.Result{}, err
+		if args.IsScanAllMvccVerForOneTable {
+			if err := reader.Iterate(args.Key, args.EndKey, func(kv storage.MVCCKeyValue) (bool, error) {
+				v := roachpb.Value{RawBytes: kv.Value}
+				if len(v.RawBytes) != 0 {
+					scanRes.KVs = append(scanRes.KVs, roachpb.KeyValue{Key: kv.Key.Key, Value: roachpb.Value{RawBytes: kv.Value, Timestamp: kv.Key.Timestamp}})
+					return false, nil
+				}
+				return true, nil
+			}); err != nil {
+				return result.Result{}, err
+			}
+			reply.Rows = scanRes.KVs
+		} else {
+			scanRes, err = storage.MVCCScan(
+				ctx, reader, args.Key, args.EndKey, h.Timestamp, opts)
+			if err != nil {
+				return result.Result{}, err
+			}
+			reply.Rows = scanRes.KVs
 		}
-		reply.Rows = scanRes.KVs
 	default:
 		panic(fmt.Sprintf("Unknown scanFormat %d", args.ScanFormat))
 	}

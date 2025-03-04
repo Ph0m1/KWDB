@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/clusterversion"
-	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/apply"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
@@ -612,9 +611,7 @@ func (b *replicaAppBatch) stageWriteBatch(ctx context.Context, cmd *replicatedCm
 			}
 			if b.tableID, b.rangeGroupID, b.TSTxnID, err = b.r.stageTsBatchRequest(
 				ctx, &reqs, responses, isLocal, &b.state); err != nil {
-				if !handleTsPutVersion(ctx, b.r.store, b.r, err) {
-					return err
-				}
+				return err
 			}
 		}
 	}
@@ -630,49 +627,6 @@ func (b *replicaAppBatch) stageWriteBatch(ctx context.Context, cmd *replicatedCm
 		return wrapWithNonDeterministicFailure(err, "unable to apply WriteBatch")
 	}
 	return nil
-}
-
-// Todo(qzy): when the snapshot occurs earlier than the alter tag, the table version of the
-// snapshot is lower. When the replica is not published, a raft log with a newer table version
-// maybe apply to the learner replica. The snapshot will definitely be checked and rolled back
-// version validation in this situation, so the error can be ignored.
-// For example:
-// t1->t1'->t2->t3->t4
-// t1  add N replica learner, then do snapshot
-// t1' alter table and insert(etc..) without N
-// t2  finish snapshot and add N replica voter_incoming
-// t3  add voter_incoming but roll back because alter table(not t1')
-// t3  apply raft log on N but table version is old, so error happen
-// t4  remove learner success wait new snapshot to migrate new version
-func handleTsPutVersion(ctx context.Context, s *Store, r *Replica, err error) bool {
-	log.Infof(ctx, "maybe ignore error: %s", err.Error())
-	repl, errGetReplica := r.GetReplicaDescriptor()
-	if errGetReplica == nil {
-		replTyp := repl.GetType()
-		if replTyp != roachpb.VOTER_FULL {
-			var table *sqlbase.TableDescriptor
-			if errGetTable := s.DB().Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
-				var errGet error
-				table, _, errGet = sqlbase.GetTsTableDescFromID(ctx, txn, sqlbase.ID(r.Desc().TableId))
-				return errGet
-			}); errGetTable == nil {
-				storeVer, _ := s.cfg.TsEngine.GetTsVersion(uint64(r.Desc().TableId))
-				log.Infof(ctx, "table[%d] replica type[%v], storage version[%d] metadata version[%d]",
-					r.Desc().TableId, replTyp, storeVer, table.TsTable.TsVersion)
-				if uint32(table.TsTable.TsVersion) > storeVer {
-					log.Warning(ctx, "ignore the err because the snapshot will definitely "+
-						"be rolled back by version validation in this situation")
-					return true
-				}
-			} else {
-				log.Error(ctx, errGetTable)
-				return true
-			}
-		}
-	} else {
-		log.Error(ctx, errGetReplica)
-	}
-	return false
 }
 
 // stageTsBatchRequest handles TsBatchRequest, write or delete data.

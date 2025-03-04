@@ -2825,15 +2825,4 @@ func (s *adminServer) createTSTable(ctx context.Context, tableID uint64, meta []
 	return nil
 }
 
-// GetTsTableVersion get ts table version from storage.
-func (s *adminServer) GetTsTableVersion(
-	ctx context.Context, req *serverpb.GetTsTableVersionRequest,
-) (*serverpb.GetTsTableVersionResponse, error) {
-	version, err := s.server.tsEngine.GetTsVersion(req.TableId)
-	if err != nil {
-		log.Error(ctx, errors.Wrap(err, "get ts table version failed"))
-	}
-	return &serverpb.GetTsTableVersionResponse{Version: version}, err
-}
-
 var errInsufficientPrivilege = status.Error(codes.PermissionDenied, "this operation requires admin privilege")

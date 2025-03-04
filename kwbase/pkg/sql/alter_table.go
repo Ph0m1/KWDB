@@ -100,6 +100,7 @@ func (p *planner) AlterTable(ctx context.Context, n *tree.AlterTable) (planNode,
 	if tableDesc == nil {
 		return newZeroNode(nil /* columns */), nil
 	}
+
 	if !p.extendedEvalCtx.TxnImplicit && tableDesc.IsTSTable() {
 		return nil, sqlbase.UnsupportedTSExplicitTxnError()
 	}

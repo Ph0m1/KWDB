@@ -93,7 +93,7 @@ struct TSEngine {
    * @return KStatus
    */
   virtual KStatus GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& ts_table,
-                             ErrorInfo& err_info = getDummyErrorInfo()) = 0;
+                             ErrorInfo& err_info = getDummyErrorInfo(), uint32_t version = 0) = 0;
 
   /**
   * @brief get meta info of ts table
@@ -530,7 +530,7 @@ class TSEngineImpl : public TSEngine {
   KStatus CompressTsTable(kwdbContext_p ctx, const KTableKey& table_id, KTimestamp ts) override;
 
   KStatus GetTsTable(kwdbContext_p ctx, const KTableKey& table_id, std::shared_ptr<TsTable>& ts_table,
-                     ErrorInfo& err_info = getDummyErrorInfo()) override;
+                     ErrorInfo& err_info = getDummyErrorInfo(), uint32_t version = 0) override;
 
   KStatus
   GetMetaData(kwdbContext_p ctx, const KTableKey& table_id,  RangeGroup range, roachpb::CreateTsTable* meta) override;

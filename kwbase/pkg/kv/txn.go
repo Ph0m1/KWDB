@@ -504,6 +504,18 @@ func (txn *Txn) scan(
 	return r.Rows, err
 }
 
+func (txn *Txn) scanAllMvccVerForOneTable(
+	ctx context.Context, begin, end interface{}, maxRows int64, isReverse, forUpdate bool,
+) ([]KeyValue, error) {
+	b := txn.NewBatch()
+	if maxRows > 0 {
+		b.Header.MaxSpanRequestKeys = maxRows
+	}
+	b.scanAllMvccVerForOneTable(begin, end, isReverse, forUpdate)
+	r, err := getOneResult(txn.Run(ctx, b), b)
+	return r.Rows, err
+}
+
 // scanWithUnConsistency with un consistency
 func (txn *Txn) scanWithUnConsistency(
 	ctx context.Context, begin, end interface{}, maxRows int64, isReverse, forUpdate bool,
@@ -536,6 +548,13 @@ func (txn *Txn) ScanWithUnReadConsistency(
 	ctx context.Context, begin, end interface{}, maxRows int64,
 ) ([]KeyValue, error) {
 	return txn.scanWithUnConsistency(ctx, begin, end, maxRows, false /* isReverse */, false /* forUpdate */)
+}
+
+// ScanAllMvccVerForOneTable scan all mvcc table version.
+func (txn *Txn) ScanAllMvccVerForOneTable(
+	ctx context.Context, begin, end interface{}, maxRows int64,
+) ([]KeyValue, error) {
+	return txn.scanAllMvccVerForOneTable(ctx, begin, end, maxRows, false /* isReverse */, false /* forUpdate */)
 }
 
 // ScanForUpdate retrieves the rows between begin (inclusive) and end

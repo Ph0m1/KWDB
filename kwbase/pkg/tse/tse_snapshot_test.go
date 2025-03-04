@@ -31,13 +31,17 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/base"
+	"gitee.com/kwbasedb/kwbase/pkg/kv"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
 	"gitee.com/kwbasedb/kwbase/pkg/server"
 	"gitee.com/kwbasedb/kwbase/pkg/sql"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/parser"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/tests"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils"
+	"gitee.com/kwbasedb/kwbase/pkg/testutils/serverutils"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils/sqlutils"
 	"gitee.com/kwbasedb/kwbase/pkg/testutils/testcluster"
 	"gitee.com/kwbasedb/kwbase/pkg/util/leaktest"
@@ -254,4 +258,101 @@ func TestCreateTsTableFailed(t *testing.T) {
 	require.Equal(t, []tree.Datums([]tree.Datums(nil)), rows)
 	require.Equal(t, nil, err)
 
+}
+
+func TestGetTableMetaByVersion(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	ctx := context.Background()
+	baseDir, dirCleanupFn := testutils.TempDir(t)
+	defer dirCleanupFn()
+	params, _ := tests.CreateTestServerParams()
+	params.StoreSpecs = []base.StoreSpec{{Path: baseDir}}
+	params.CatchCoreDump = true
+	s, sqlDB, kvDB := serverutils.StartServer(t, params)
+
+	defer s.Stopper().Stop(context.TODO())
+
+	if _, err := sqlDB.Exec("create ts database tsdb"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec("create table tsdb.t(ts timestamp not null, a int) tags(ptag int not null) primary tags(ptag)"); err != nil {
+		t.Fatal(err)
+	}
+	// When create ts table is submitted in the first phase, its first range will be created.
+	// This step will wait for the second phase to succeed or fail before proceeding.
+	// After the second phase fails, the first range query tableDesc fails.And change
+	// splitType to DEFAULT and then split the first range.
+	// Sleep for a while to wait for the first range to split.
+	time.Sleep(time.Second * 3)
+
+	tableDesc := sqlbase.GetTableDescriptor(kvDB, "tsdb", "t")
+	desc := sqlbase.NewMutableExistingTableDescriptor(*tableDesc)
+	alterStmt := "alter table tsdb.t add column b int"
+	stmt, err := parser.ParseOne(alterStmt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alterTable, ok := stmt.AST.(*tree.AlterTable)
+	if !ok {
+		t.Fatalf("expected tree.AlterTABLE, but got %T", stmt)
+	}
+
+	for _, cmd := range alterTable.Cmds {
+		switch c := cmd.(type) {
+		case *tree.AlterTableAddColumn:
+			d := c.ColumnDef
+			TSColumn, _, err := sqlbase.MakeTSColumnDefDescs(string(d.Name), d.Type, true, false, sqlbase.ColumnType_TYPE_DATA, d.DefaultExpr.Expr, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			desc.AddColumn(TSColumn)
+			if err := desc.AllocateIDs(); err != nil {
+				t.Fatal(err)
+			}
+			desc.Version++
+			desc.TsTable.TsVersion++
+			desc.TsTable.NextTsVersion++
+			err1 := kvDB.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+				if err := txn.SetSystemConfigTrigger(); err != nil {
+					return err
+				}
+				desc.ModificationTime, err = txn.CommitTimestamp()
+				if err := desc.ValidateTable(); err != nil {
+					t.Fatal(err)
+				}
+				batch := txn.NewBatch()
+				descKey := sqlbase.MakeDescMetadataKey(desc.ID)
+				descDesc := sqlbase.WrapDescriptor(desc)
+				batch.Put(descKey, descDesc)
+				return txn.CommitInBatch(ctx, batch)
+			})
+			require.NoError(t, err1)
+		}
+	}
+
+	tsEngine := s.(*server.TestServer).TSEngine()
+	resErr := tsEngine.GetTableMetaByVersion(uint64(desc.ID), 2)
+	if resErr != nil {
+		t.Fatal(resErr)
+	}
+	res, err := tsEngine.GetTsVersion(uint64(desc.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	require.Equal(t, 2, int(res))
+
+	//_, err2 := sqlDB.Exec("insert into tsdb.t values (now(),1,2,3)")
+	//if err2 != nil {
+	//	t.Fatal(err2)
+	//}
+	//rows := sqlDB.QueryRow("select * from tsdb.t")
+	//var ts string
+	//var a, b, ptag int
+	//// Valid row.
+	//require.NoError(t, rows.Scan(&ts, &a, &b, &ptag))
+	//if a != 1 || b != 2 || ptag != 3 {
+	//	t.Fatalf("expect: [1,2,3] got [%d,%d,%d]", a, b, ptag)
+	//}
+	//require.NoError(t, err2)
 }

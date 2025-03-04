@@ -787,12 +787,8 @@ message ChartCatalogResponse {
   repeated kwbase.ts.catalog.ChartSection catalog = 1 [(gogoproto.nullable) = false];
 }
 
-message GetTsTableVersionRequest {
-  uint64 tableId = 1;
-}
-
-message GetTsTableVersionResponse {
-  uint32  version = 1;
+message GetTsTableMetaResponse {
+  bytes  ts_meta = 1;
 }
 
 // AlertRequest requests alert threshold.
@@ -1074,8 +1070,4 @@ service Admin {
 
   // CreateTSTable create ts table
   rpc CreateTSTable(CreateTSTableRequest) returns (CreateTSTableResponse) {}
-
-
-  // GetTsTableVersion get the table version from storage on other node.
-  rpc GetTsTableVersion(GetTsTableVersionRequest) returns (GetTsTableVersionResponse) {}
 }

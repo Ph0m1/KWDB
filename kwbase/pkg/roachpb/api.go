@@ -1191,6 +1191,20 @@ func NewScan(key, endKey Key, forUpdate bool) Request {
 	}
 }
 
+// NewScanAllMvcc returns a Request initialized to scan from start to end keys.
+// If forUpdate is true, unreplicated, exclusive locks are acquired on
+// each of the resulting keys.
+func NewScanAllMvcc(key, endKey Key, forUpdate bool) Request {
+	return &ScanRequest{
+		RequestHeader: RequestHeader{
+			Key:    key,
+			EndKey: endKey,
+		},
+		KeyLocking:                  scanLockStrength(forUpdate),
+		IsScanAllMvccVerForOneTable: true,
+	}
+}
+
 // NewReverseScan returns a Request initialized to reverse scan from end.
 // If forUpdate is true, unreplicated, exclusive locks are acquired on
 // each of the resulting keys.

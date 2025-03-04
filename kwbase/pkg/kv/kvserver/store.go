@@ -67,7 +67,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/cloud"
 	"gitee.com/kwbasedb/kwbase/pkg/storage/enginepb"
-	"gitee.com/kwbasedb/kwbase/pkg/tscoord"
+	// "gitee.com/kwbasedb/kwbase/pkg/tscoord"
 	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/contextutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/envutil"
@@ -652,7 +652,6 @@ type StoreConfig struct {
 	Settings                *cluster.Settings
 	Clock                   *hlc.Clock
 	DB                      *kv.DB
-	TseDB                   *tscoord.DB
 	TsEngine                *tse.TsEngine
 	Gossip                  *gossip.Gossip
 	NodeLiveness            *NodeLiveness
@@ -1385,7 +1384,7 @@ func ReadStoreIdent(ctx context.Context, eng storage.Engine) (roachpb.StoreIdent
 
 // Start the engine, set the GC and read the StoreIdent.
 func (s *Store) Start(
-	ctx context.Context, stopper *stop.Stopper, setTse func() (*tse.TsEngine, *tscoord.DB, error),
+	ctx context.Context, stopper *stop.Stopper, setTse func() (*tse.TsEngine, error),
 ) error {
 	s.stopper = stopper
 
@@ -1524,12 +1523,11 @@ func (s *Store) Start(
 	}
 
 	if setTse != nil {
-		tsEngine, tseDB, err := setTse()
+		tsEngine, err := setTse()
 		if err != nil {
 			return err
 		}
 		s.TsEngine = tsEngine
-		s.cfg.TseDB = tseDB
 		s.cfg.TsEngine = tsEngine
 	}
 

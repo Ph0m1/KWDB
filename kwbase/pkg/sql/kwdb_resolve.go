@@ -11,14 +11,43 @@
 
 package sql
 
+// #cgo CPPFLAGS: -I../../../kwdbts2/include
+// #cgo LDFLAGS: -lkwdbts2 -lcommon  -lstdc++
+// #cgo LDFLAGS: -lprotobuf
+// #cgo linux LDFLAGS: -lrt -lpthread
+//
+// #include <stdlib.h>
+// #include <libkwdbts2.h>
+import "C"
 import (
 	"context"
 	"strings"
 
+	"gitee.com/kwbasedb/kwbase/pkg/jobs/jobspb"
 	"gitee.com/kwbasedb/kwbase/pkg/kv"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/tse"
+	"gitee.com/kwbasedb/kwbase/pkg/util/log"
+	"gitee.com/kwbasedb/kwbase/pkg/util/protoutil"
+	"github.com/cockroachdb/errors"
 )
+
+var handler = getTableHandler{}
+
+// getTableHandler is used to get desc from storage.
+type getTableHandler struct {
+	db  *kv.DB
+	tse *tse.TsEngine
+}
+
+// Init initialize the handler and init the db.
+func Init(db *kv.DB, tse *tse.TsEngine) {
+	handler.db = db
+	handler.tse = tse
+}
 
 // GetNameSpaceByParentID gets NameSpace by dbID and schemaID.
 func GetNameSpaceByParentID(
@@ -55,4 +84,64 @@ func IsObjectCannotFoundError(err error) bool {
 		return true
 	}
 	return false
+}
+
+//export getTableMetaByVersion
+func getTableMetaByVersion(
+	id C.TSTableID, tsVer C.uint64_t, outputLen *C.size_t, errMsg **C.char,
+) *C.char {
+	ctx := context.Background()
+	var res []byte
+	tableID := uint64(id)
+	tsVersion := uint32(tsVer)
+	err := handler.db.Txn(ctx, func(ctx context.Context, txn *kv.Txn) error {
+		// get tableDesc with specific tsVersion
+		descKey := sqlbase.MakeDescMetadataKey(sqlbase.ID(tableID))
+		endKey := descKey.PrefixEnd()
+		kvs, err := txn.ScanAllMvccVerForOneTable(ctx, descKey, endKey, 0)
+		if err != nil {
+			return err
+		}
+		var targetDesc *sqlbase.TableDescriptor
+		var biggerDescVersion uint32
+		for _, kv := range kvs {
+			desc := &sqlbase.Descriptor{}
+			if err := kv.ValueProto(desc); err != nil {
+				return err
+			}
+			switch t := desc.Union.(type) {
+			case *sqlbase.Descriptor_Table:
+				table := desc.GetTable()
+
+				// when we get multiple tableDesc with the same tsVersion, use the one with bigger tableDesc.Version
+				if uint32(table.TsTable.TsVersion) == tsVersion && uint32(table.Version) > biggerDescVersion {
+					targetDesc = table
+				}
+			default:
+				return errors.AssertionFailedf("Descriptor.Union has unexpected type %T", t)
+			}
+		}
+		if targetDesc == nil {
+			return pgerror.Newf(pgcode.UndefinedTable, "can not find table %d with tsVersion %d", tableID, tsVersion)
+		}
+
+		d := jobspb.SyncMetaCacheDetails{SNTable: *targetDesc}
+		createKObjectTable := makeKObjectTableForTs(d)
+		meta, err := protoutil.Marshal(&createKObjectTable)
+		if err != nil {
+			panic(err.Error())
+		}
+		res = meta
+		return nil
+	})
+	if err != nil {
+		log.Error(ctx, err)
+		*errMsg = C.CString(err.Error())
+		*outputLen = 0
+		return nil
+	}
+	cResult := C.CBytes(res)
+	*outputLen = C.size_t(len(res))
+	*errMsg = nil
+	return (*C.char)(cResult)
 }

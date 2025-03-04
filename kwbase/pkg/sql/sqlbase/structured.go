@@ -422,31 +422,6 @@ func GetTsTableDescFromID(
 	return tableDesc, tree.InstanceTable, nil
 }
 
-// CheckMaxTableIDIsTimeSeries gets max table id from namespace, return tableID
-// when the table is time-series table, else return 0.
-func CheckMaxTableIDIsTimeSeries(ctx context.Context, txn *kv.Txn) uint32 {
-	var maxID uint32
-	NameKey, _ := MakeKWDBMetadataKeyInt(NamespaceTable, nil)
-	rows, err := GetKWDBMetadataRows(ctx, txn, NameKey, NamespaceTable)
-	if err != nil {
-		return 0
-	}
-	for i := range rows {
-		parentID := uint32(tree.MustBeDInt(rows[i][0]))
-		id := uint32(tree.MustBeDInt(rows[i][3]))
-		// parentID > 1 means rows[i] is a user table
-		if parentID > 1 && id > maxID {
-			maxID = id
-		}
-	}
-
-	desc, _ := GetTableDescFromID(ctx, txn, ID(maxID))
-	if desc != nil && desc.IsTSTable() {
-		return maxID
-	}
-	return 0
-}
-
 // CheckWhetherHasTsTable check whether the cluster has time-series table.
 func CheckWhetherHasTsTable(ctx context.Context, txn *kv.Txn) bool {
 	NameKey, _ := MakeKWDBMetadataKeyInt(NamespaceTable, nil)

@@ -21,6 +21,8 @@ const string TestBigTableInstance::kw_home_ = kDbPath;  // NOLINT big table dir
 const string TestBigTableInstance::db_name_ = "tsdb";  // NOLINT database name
 const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 
+extern bool g_go_start_service;
+
 RangeGroup kTestRange{default_entitygroup_id_in_dist_v2, 0};
 
 class TestEngineWAL : public TestBigTableInstance {
@@ -40,7 +42,7 @@ class TestEngineWAL : public TestBigTableInstance {
     setenv("KW_HOME", kDbPath.c_str(), 1);
     // clear data dir
     system(("rm -rf " + kDbPath + "/*").c_str());
-
+    g_go_start_service = false;
   }
 
   ~TestEngineWAL() {

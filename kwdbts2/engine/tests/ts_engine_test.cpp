@@ -23,6 +23,7 @@ const string TestBigTableInstance::db_name_ = "tsdb";  // NOLINT database name
 const uint64_t TestBigTableInstance::iot_interval_ = 3600;
 
 extern bool g_engine_initialized;
+extern bool g_go_start_service;
 
 RangeGroup kTestRange{1, 0};
 
@@ -44,6 +45,7 @@ class TestEngine : public TestBigTableInstance {
     // Clean up file directory
     KStatus s = TSEngineImpl::OpenTSEngine(ctx_, kDbPath, opts_, &ts_engine_);
     g_engine_initialized = true;
+    g_go_start_service = false;
     EXPECT_EQ(s, KStatus::SUCCESS);
   }
 

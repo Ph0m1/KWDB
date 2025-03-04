@@ -1872,7 +1872,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// than the timestamp used to create the bootstrap schema.
 	timeThreshold := s.clock.Now().WallTime
 
-	setTse := func() (*tse.TsEngine, *tscoord.DB, error) {
+	setTse := func() (*tse.TsEngine, error) {
 		if s.cfg.Stores.Specs != nil && s.cfg.Stores.Specs[0].Path != "" && !s.cfg.ForbidCatchCoreDump {
 			tse.TsRaftLogCombineWAL.SetOnChange(&s.st.SV, func() {
 				if !tse.TsRaftLogCombineWAL.Get(&s.st.SV) {
@@ -1883,7 +1883,7 @@ func (s *Server) Start(ctx context.Context) error {
 			})
 			s.tsEngine, err = s.cfg.CreateTsEngine(ctx, s.stopper)
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "failed to create ts engine")
+				return nil, errors.Wrap(err, "failed to create ts engine")
 			}
 			s.stopper.AddCloser(s.tsEngine)
 			s.node.tsEngine = s.tsEngine
@@ -1904,9 +1904,8 @@ func (s *Server) Start(ctx context.Context) error {
 			s.tseDB = tscoord.NewDB(tsDBCfg)
 			// s.node.storeCfg.TseDB = s.tseDB
 			s.distSQLServer.ServerConfig.TseDB = s.tseDB
-			s.node.storeCfg.TseDB = s.tseDB
 		}
-		return s.tsEngine, s.tseDB, nil
+		return s.tsEngine, nil
 	}
 	// Now that we have a monotonic HLC wrt previous incarnations of the process,
 	// init all the replicas. At this point *some* store has been bootstrapped or
@@ -2198,6 +2197,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	})
 
+	sql.Init(s.db, s.tsEngine)
 	// Start serving SQL clients.
 	if err := s.startServeSQL(ctx, workersCtx, connManager, pgL); err != nil {
 		return err

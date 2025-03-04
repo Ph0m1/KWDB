@@ -67,6 +67,8 @@ class TsTable {
     return this->entity_bt_manager_ != nullptr;
   }
 
+  KStatus CheckAndAddSchemaVersion(kwdbContext_p ctx, const KTableKey& table_id, uint64_t version);
+
   /**
    * @brief Query Table Column Definition
    *

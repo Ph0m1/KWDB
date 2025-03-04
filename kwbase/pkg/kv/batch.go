@@ -366,8 +366,8 @@ func (b *Batch) AddRawRequest(reqs ...roachpb.Request) {
 // Get retrieves the value for a key. A new result will be appended to the
 // batch which will contain a single row.
 //
-//   r, err := db.Get("a")
-//   // string(r.Rows[0].Key) == "a"
+//	r, err := db.Get("a")
+//	// string(r.Rows[0].Key) == "a"
 //
 // key can be either a byte slice or a string.
 func (b *Batch) Get(key interface{}) {
@@ -556,6 +556,25 @@ func (b *Batch) scan(s, e interface{}, isReverse, forUpdate bool) {
 	}
 	if !isReverse {
 		b.AppendReqs(roachpb.NewScan(begin, end, forUpdate))
+	} else {
+		b.AppendReqs(roachpb.NewReverseScan(begin, end, forUpdate))
+	}
+	b.InitResult(1, 0, notRaw, nil)
+}
+
+func (b *Batch) scanAllMvccVerForOneTable(s, e interface{}, isReverse, forUpdate bool) {
+	begin, err := marshalKey(s)
+	if err != nil {
+		b.InitResult(0, 0, notRaw, err)
+		return
+	}
+	end, err := marshalKey(e)
+	if err != nil {
+		b.InitResult(0, 0, notRaw, err)
+		return
+	}
+	if !isReverse {
+		b.AppendReqs(roachpb.NewScanAllMvcc(begin, end, forUpdate))
 	} else {
 		b.AppendReqs(roachpb.NewReverseScan(begin, end, forUpdate))
 	}

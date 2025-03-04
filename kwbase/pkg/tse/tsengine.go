@@ -1506,3 +1506,14 @@ func (r *TsEngine) GetWalLevel() (int, error) {
 	}
 	return int(walLevel), nil
 }
+
+// GetTableMetaByVersion is used for unit test, try to get the tableMeta with specific tsVersion
+func (r *TsEngine) GetTableMetaByVersion(tableID uint64, tsVer uint64) error {
+	var tsVersion C.uint64_t
+	tsVersion = C.uint64_t(tsVer)
+	status := C.TsTestGetAndAddSchemaVersion(r.tdb, C.TSTableID(tableID), tsVersion)
+	if err := statusToError(status); err != nil {
+		return errors.Wrap(err, "failed to create ts table by specific tsVersion")
+	}
+	return nil
+}

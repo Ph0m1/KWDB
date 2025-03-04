@@ -36,8 +36,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/tse"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/stop"
-	"github.com/pkg/errors"
-	"google.golang.org/grpc"
 )
 
 // TsSender is a Sender to send TS requests to TS DB
@@ -253,32 +251,4 @@ func (db *DB) CreateTSTable(
 		return err
 	}
 	return nil
-}
-
-// AdminGetTsTableVersion get ts table version from remote node by grpc.
-func (db *DB) AdminGetTsTableVersion(
-	ctx context.Context, tableID uint64, nodeID roachpb.NodeID,
-) (uint32, error) {
-	addr, err := db.tss.gossip.GetNodeIDAddress(nodeID)
-	if err != nil {
-		return 0, err
-	}
-	var conn *grpc.ClientConn
-	conn, err = db.tss.rpcContext.GRPCDialNode(
-		addr.String(), nodeID, rpc.DefaultClass).Connect(ctx)
-	if err != nil {
-		return 0, err
-	}
-	client := serverpb.NewAdminClient(conn)
-	req := &serverpb.GetTsTableVersionRequest{
-		TableId: tableID,
-	}
-	resp, err := client.GetTsTableVersion(ctx, req)
-	if err != nil {
-		return 0, err
-	}
-	if resp == nil {
-		return 0, errors.New("get empty response")
-	}
-	return resp.Version, err
 }

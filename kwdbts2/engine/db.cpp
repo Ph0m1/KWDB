@@ -32,6 +32,7 @@ std::map<std::string, std::string> g_cluster_settings;
 DedupRule g_dedup_rule = kwdbts::DedupRule::OVERRIDE;
 std::shared_mutex g_settings_mutex;
 bool g_engine_initialized = false;
+bool g_go_start_service = true;
 TSEngine* g_engine_ = nullptr;
 
 std::atomic<bool> g_is_vacuuming{false};
@@ -340,13 +341,14 @@ TSStatus TSVacuumTsTable(TSEngine* engine, TSTableID table_id, uint32_t ts_versi
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("InitServerKWDBContext Error!");
   }
+  ErrorInfo err_info;
   std::shared_ptr<TsTable> table;
-  s = engine->GetTsTable(ctx_p, table_id, table);
+  s = engine->GetTsTable(ctx_p, table_id, table, err_info, ts_version);
   if (s != KStatus::SUCCESS) {
     LOG_INFO("The current node does not have the table[%lu], skip vacuum", table_id);
     return kTsSuccess;
   }
-  ErrorInfo err_info;
+  err_info.clear();
   s = table->Vacuum(ctx_p, ts_version, err_info);
   if (s != KStatus::SUCCESS) {
     return ToTsStatus("VacuumTsTable Error");
@@ -960,11 +962,11 @@ TSStatus TSGetDataVolumeHalfTS(TSEngine* engine, TSTableID table_id, uint64_t be
   return kTsSuccess;
 }
 
-// Input data in Payload format based on line storage mode
+// Input data in Payload format based online storage mode
 TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* payload_row, size_t payload_num,
-                           RangeGroup range_group, uint64_t mtr_id, uint16_t* inc_entity_cnt,
+                            RangeGroup range_group, uint64_t mtr_id, uint16_t* inc_entity_cnt,
                             uint32_t* inc_unordered_cnt, DedupResult* dedup_result, bool writeWAL) {
-    kwdbContext_t context;
+  kwdbContext_t context;
   kwdbContext_p ctx_p = &context;
   KStatus s = InitServerKWDBContext(ctx_p);
   if (s != KStatus::SUCCESS) {
@@ -985,8 +987,15 @@ TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* paylo
   for (size_t i = 0; i < payload_num; i++) {
     s = ts_tb->ConvertRowTypePayload(ctx_p, payload_row[i], &payload);
     if (s != KStatus::SUCCESS) {
-      LOG_ERROR("table[%lu] ConvertRowTypePayload failed", tmp_table_id);
-      return ToTsStatus("ConvertRowTypePayload Error!");
+      uint32_t pl_version = Payload::GetTsVsersionFromPayload(&payload_row[i]);
+      if (ts_tb->CheckAndAddSchemaVersion(ctx_p, tmp_table_id, pl_version) != KStatus::SUCCESS) {
+        LOG_ERROR("table[%lu] CheckAndAddSchemaVersion failed", tmp_table_id);
+        return ToTsStatus("CheckAndAddSchemaVersion Error!");
+      }
+      if (ts_tb->ConvertRowTypePayload(ctx_p, payload_row[i], &payload) != KStatus::SUCCESS) {
+        LOG_ERROR("table[%lu] ConvertRowTypePayload failed", tmp_table_id);
+        return ToTsStatus("ConvertRowTypePayload Error!");
+      }
     }
     // todo(liangbo01) current interface dedup result no support multi-payload insert.
     s = engine->PutData(ctx_p, tmp_table_id, tmp_range_group_id, &payload, payload_num, mtr_id,
@@ -999,6 +1008,28 @@ TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* paylo
     }
     free(payload.data);
   }
+  return kTsSuccess;
+}
+
+TSStatus TsTestGetAndAddSchemaVersion(TSEngine* engine, TSTableID table_id, uint64_t version) {
+  kwdbContext_t context;
+  kwdbContext_p ctx_p = &context;
+  KStatus s = InitServerKWDBContext(ctx_p);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("InitServerKWDBContext Error!");
+  }
+
+  std::shared_ptr<TsTable> ts_tb;
+  s = engine->GetTsTable(ctx_p, table_id, ts_tb);
+  if (s != KStatus::SUCCESS) {
+    return ToTsStatus("GetTsTable Error!");
+  }
+
+  if (ts_tb->CheckAndAddSchemaVersion(ctx_p, table_id, version) != KStatus::SUCCESS) {
+    LOG_ERROR("table[%lu] CheckAndAddSchemaVersion failed", table_id);
+    return ToTsStatus("CheckAndAddSchemaVersion Error!");
+  }
+
   return kTsSuccess;
 }
 
