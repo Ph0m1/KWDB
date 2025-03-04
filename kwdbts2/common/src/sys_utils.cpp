@@ -39,6 +39,7 @@ bool Remove(const string& path, ErrorInfo& error_info) {
     LOG_ERROR("%s remove failed: errno message[%s]", path.c_str(), e.what());
     return false;
   }
+  LOG_INFO("Remove path [%s] succeeded", path.c_str());
   return true;
 }
 
@@ -96,6 +97,7 @@ bool MakeDirectory(const string& dir_path, ErrorInfo& error_info) {
       break;
     e_pos++;
   }
+  LOG_INFO("Make directory [%s] succeeded", dir_path.c_str());
   return true;
 }
 
@@ -108,15 +110,18 @@ std::time_t ModifyTime(const std::string& filePath) {
 }
 
 bool System(const string& cmd, ErrorInfo& error_info) {
+  LOG_INFO("System() begin, cmd: [%s]", cmd.c_str());
   int status = system(cmd.c_str());
   if (WIFEXITED(status)) {
     auto exit_code = WEXITSTATUS(status);
     if (exit_code == 0) {
+      LOG_INFO("System() success, cmd: [%s]", cmd.c_str());
       return true;
     }
     if (exit_code == 1) {
       LOG_WARN("system(%s) exit code is not 0: status[%d], exit_code[%d], errno[%d], strerror[%s]",
                cmd.c_str(), status, exit_code, errno, strerror(errno));
+      LOG_INFO("System() success, cmd: [%s]", cmd.c_str());
       return true;
     }
     LOG_ERROR("system(%s) failed: status[%d], exit_code[%d], errno[%d], strerror[%s]",

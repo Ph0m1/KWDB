@@ -690,6 +690,79 @@ TEST_F(TestEngine, CompressTsTable) {
   ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
 }
 
+TEST_F(TestEngine, VacuumTsTable) {
+  CLUSTER_SETTING_MAX_ROWS_PER_BLOCK = 10;
+  roachpb::CreateTsTable meta;
+
+  KTableKey cur_table_id = 1002;
+  ConstructRoachpbTable(&meta, "vacuum_table", cur_table_id);
+
+  vector<AttributeInfo> schema;
+  vector<uint32_t> actual_cols;
+  for (int i = 0; i < meta.k_column_size(); i++) {
+    const auto& col = meta.k_column(i);
+    struct AttributeInfo col_var;
+    TsEntityGroup::GetColAttributeInfo(ctx_, col, col_var, i==0);
+    if (!col_var.isAttrType(COL_GENERAL_TAG) && !col_var.isAttrType(COL_PRIMARY_TAG)) {
+      actual_cols.push_back(schema.size());
+      schema.push_back(std::move(col_var));
+    }
+  }
+
+  std::vector<RangeGroup> ranges{kTestRange};
+  ASSERT_EQ(ts_engine_->CreateTsTable(ctx_, cur_table_id, &meta, ranges), KStatus::SUCCESS);
+
+  std::shared_ptr<TsTable> ts_table;
+  ASSERT_EQ(ts_engine_->GetTsTable(ctx_, cur_table_id, ts_table), KStatus::SUCCESS);
+  std::shared_ptr<TsEntityGroup> tbl_range;
+  ASSERT_EQ(ts_table->GetEntityGroup(ctx_, kTestRange.range_group_id, &tbl_range), KStatus::SUCCESS);
+
+  // 1. insert disorder, full block
+  k_uint32 p_len = 0;
+  KTimestamp start_ts = 1000;
+  char* data_value = GenSomePayloadData(ctx_, 8, p_len, start_ts, &meta, 1);
+  TSSlice payload{data_value, p_len};
+  ASSERT_EQ(tbl_range->PutData(ctx_, payload), KStatus::SUCCESS);  // ts: 1000~1007
+  delete[] data_value;
+
+  start_ts += 8;
+  start_ts += 1;
+  data_value = GenSomePayloadData(ctx_, 1, p_len, start_ts, &meta, 1);
+  TSSlice payload2{data_value, p_len};
+  ASSERT_EQ(tbl_range->PutData(ctx_, payload2), KStatus::SUCCESS);  // ts: 1009
+  delete[] data_value;
+
+  start_ts -= 1;  // disorder
+  data_value = GenSomePayloadData(ctx_, 1, p_len, start_ts, &meta, 1);
+  TSSlice payload3{data_value, p_len};
+  ASSERT_EQ(tbl_range->PutData(ctx_, payload3), KStatus::SUCCESS);  // ts: 1008
+  delete[] data_value;
+
+  // 2. compress
+  ErrorInfo err_info;
+  uint32_t compressed_num = 0;
+  ASSERT_EQ(ts_table->Compress(ctx_, INT64_MAX, compressed_num, err_info), KStatus::SUCCESS);
+
+  // 3. vacuum. block is full, block_item's min/max ts should be set correctly
+  ASSERT_EQ(ts_table->Vacuum(ctx_, 1, err_info), KStatus::SUCCESS);
+
+  // 4. query data using ts_span{1000, 10008}
+  auto ts_type = ts_table->GetRootTableManager()->GetTsColDataType();
+  start_ts = 1000;
+  KwTsSpan ts_span = {convertMSToPrecisionTS(start_ts, ts_type), convertMSToPrecisionTS(start_ts + 8, ts_type)};
+  std::vector<k_uint32> scan_cols = {0, 1, 2};
+  std::vector<Sumfunctype> scan_agg_types;
+  TsStorageIterator* iter;
+  SubGroupID group_id = 1;
+  uint32_t entity_id = 1;
+  ASSERT_EQ(tbl_range->GetIterator(ctx_, group_id, {entity_id}, {ts_span}, ts_type, scan_cols, scan_cols, scan_agg_types, 1, &iter, tbl_range, {}, false, false),
+            KStatus::SUCCESS);
+  EXPECT_TRUE(CheckIterRows(iter, 9, scan_cols.size()));
+  delete iter;
+
+  ASSERT_EQ(ts_table->DropAll(ctx_), KStatus::SUCCESS);
+}
+
 TEST_F(TestEngine, DropColumn) {
   roachpb::CreateTsTable meta;
   KTableKey cur_table_id = 123456;

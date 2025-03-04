@@ -611,7 +611,18 @@ void MMapSegmentTable::updateAggregateResult(const BlockSpan& span, bool include
     columnAggCalculate(span, start_row, segment_col_idx, addresses, span.block_item->publish_row_count, true);
     if (segment_col_idx == 0) {
       span.block_item->non_null_row_count = *reinterpret_cast<uint16_t*>(addresses.count);
+      span.block_item->max_ts_in_block = KTimestamp(addresses.max);
+      span.block_item->min_ts_in_block = KTimestamp(addresses.min);
+      // Update the maximum and minimum timestamp information of the current segment,
+      // which will be used for subsequent compression and other operations
+      if (KTimestamp(addresses.max) > maxTimestamp() || maxTimestamp() == INVALID_TS) {
+        maxTimestamp() = KTimestamp(addresses.max);
+      }
+      if (KTimestamp(addresses.min) > minTimestamp() || minTimestamp() == INVALID_TS) {
+        minTimestamp() = KTimestamp(addresses.min);
+      }
     }
+    
   }
   span.block_item->is_agg_res_available = true;
 }

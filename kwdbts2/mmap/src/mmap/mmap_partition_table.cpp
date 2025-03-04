@@ -940,13 +940,16 @@ KStatus TsTimePartition::Vacuum(uint32_t ts_version, VacuumStatus &vacuum_result
   std::vector<KwTsSpan> ts_spans;
   ts_spans.push_back({INT64_MIN, INT64_MAX});
   uint32_t max_block_num = 0;
+  uint64_t total_count{0};
   for (uint32_t entity_id : entities) {
     std::deque<BlockSpan> block_spans;
     uint32_t count = GetAllBlockSpans(entity_id, ts_spans, block_spans, max_block_id);
     // Calculate how many blocks are needed for a temporary partition
     max_block_num += (count + CLUSTER_SETTING_MAX_ROWS_PER_BLOCK - 1) / CLUSTER_SETTING_MAX_ROWS_PER_BLOCK;
     src_spans[entity_id] = block_spans;
+    total_count += count;
   }
+  LOG_INFO("Total record count is [%lu] in partition [%s]", total_count, GetPath().c_str());
 
   // drop all the segments if all entities have been deleted
   if (max_block_num == 0) {

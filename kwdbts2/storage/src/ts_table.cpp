@@ -1761,7 +1761,7 @@ KStatus TsTable::Compress(kwdbContext_p ctx, const KTimestamp& ts, uint32_t& com
   } else {
     while (true) {
       // check client ctrl+C first
-      if (isCanceledCtx(ctx->relation_ctx)) {
+      if (ctx->relation_ctx != 0 && isCanceledCtx(ctx->relation_ctx)) {
         LOG_INFO("Interrupted, skip compression");
         err_info.setError(KWEOTHER, "interrupted");
         return KStatus::FAIL;

@@ -517,6 +517,7 @@ TsTimePartition* TsSubEntityGroup::CreatePartitionTable(timestamp64 ts, ErrorInf
 
 TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path, timestamp64 p_time, timestamp64 max_ts,
                                                         ErrorInfo& err_info) {
+  LOG_INFO("Create partition [%s] begin", (db_path_ + pt_tbl_sub_path).c_str());
   // Create partition directory
   int p_level = 0;
   calcPartitionTierLevel(max_ts, &p_level);
@@ -536,6 +537,7 @@ TsTimePartition* TsSubEntityGroup::createPartitionTable(string& pt_tbl_sub_path,
   // min and max timsstamp precision is second.
   mt_table->minTimestamp() = p_time;
   mt_table->maxTimestamp() = max_ts;
+  LOG_INFO("Create partition [%s] succeeded", (db_path_ + pt_tbl_sub_path).c_str());
   return mt_table;
 }
 
