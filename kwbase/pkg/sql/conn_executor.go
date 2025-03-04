@@ -501,7 +501,7 @@ func (h ConnectionHandler) SendDTI(
 		ctx, h.ex.server.cfg.AmbientCtx.Tracer,
 		// We print the type of command, not the String() which includes long
 		// statements.
-		"prepare stmt")
+		"insert stmt")
 	defer sp.Finish()
 	useDeepRule, dedupRule, dedupRows = h.ex.SendDirectTsInsert(ctx, evalCtx, r, di.PayloadNodeMap)
 	endtime := timeutil.Now()

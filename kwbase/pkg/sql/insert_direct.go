@@ -134,10 +134,10 @@ func getSingleRecord(
 			continue
 		}
 
-		var err error
 		switch column.Type.Oid() {
 		case oid.T_timestamptz:
 			var dVal *tree.DInt
+			var err error
 			if valueType == parser.STRINGTYPE {
 				dVal, err = tree.ParseTimestampTZForTS(ptCtx, rawValue, &column.Type, column.Name)
 				if err != nil {
@@ -171,6 +171,7 @@ func getSingleRecord(
 			continue
 		case oid.T_timestamp:
 			var dVal *tree.DInt
+			var err error
 			if valueType == parser.STRINGTYPE {
 				dVal, err = tree.ParseTimestampForTS(nil, rawValue, &column.Type, column.Name)
 				if err != nil {
@@ -303,6 +304,7 @@ func getSingleRecord(
 			}
 			inputValues[row][col] = tree.NewDFloat(tree.DFloat(in))
 		case oid.T_bool:
+			var err error
 			if valueType == parser.NORMALTYPE {
 				return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 			}
@@ -328,9 +330,6 @@ func getSingleRecord(
 			return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 
 		}
-		if err != nil {
-			return err
-		}
 		continue
 	}
 	return nil
@@ -340,7 +339,7 @@ func parserString2Int(
 	rawValue string, err error, column sqlbase.ColumnDescriptor,
 ) (tree.Datum, error) {
 	if strings.Contains(err.Error(), "out of range") {
-		return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "numeric constant \"%s\" out of int64 range (column %s)", rawValue, column.Name)
+		return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "numeric constant out of int64 range")
 	}
 
 	switch rawValue {
@@ -349,7 +348,7 @@ func parserString2Int(
 	case "false":
 		return tree.NewDInt(0), nil
 	default:
-		return nil, tree.NewDatatypeMismatchError(rawValue, column.Type.SQLString(), column.Name)
+		return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 	}
 }
 
@@ -1170,6 +1169,7 @@ func GetColsInfo(
 					cleanInsertValues = append(cleanInsertValues, stmt.Insertdirectstmt.InsertValues[i:i+insertColLength]...)
 				}
 				(*stmt).Insertdirectstmt.InsertValues = cleanInsertValues
+				valueLength = valueLength - insertColLength
 			}
 		}
 
@@ -1632,7 +1632,11 @@ func GetSingleDatum(
 				if datum, err = tree.ParseDTimestampTZ(ptCtx, rawValue, precision); err != nil {
 					return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 				}
-				dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestampTZ).UnixMilli()))
+				var dVal *tree.DInt
+				dVal, err = GetTsTimestampWidth(column, datum, dVal, rawValue)
+				if err != nil {
+					return nil, err
+				}
 
 				err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name)
 				if err != nil {
@@ -1644,7 +1648,11 @@ func GetSingleDatum(
 			if datum, err = tree.ParseDTimestamp(nil, rawValue, precision); err != nil {
 				return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
-			dVal := tree.NewDInt(tree.DInt(datum.(*tree.DTimestamp).UnixMilli()))
+			var dVal *tree.DInt
+			dVal, err = GetTsTimestampWidth(column, datum, dVal, rawValue)
+			if err != nil {
+				return nil, err
+			}
 			err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name)
 			if err != nil {
 				return nil, err
@@ -1723,6 +1731,9 @@ func GetSingleDatum(
 		}
 
 		if oidType == oid.T_bytea || oidType == oid.T_varbytea {
+			if valueType == parser.BYTETYPE {
+				rawValue = strings.Trim(tree.NewDBytes(tree.DBytes(rawValue)).String(), "'")
+			}
 			v, err := tree.ParseDByte(rawValue)
 			if err != nil {
 				return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
@@ -1775,6 +1786,58 @@ func GetSingleDatum(
 	default:
 		return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
 	}
+}
+
+// GetTsTimestampWidth checks that the width (for Timestamp/TimestampTZ) of the value fits the
+// specified column type.
+func GetTsTimestampWidth(
+	column sqlbase.ColumnDescriptor, datum tree.Datum, dVal *tree.DInt, rawValue string,
+) (*tree.DInt, error) {
+	var datumNa int
+	var datumunix, datumunixnao int64
+
+	switch t := datum.(type) {
+	case *tree.DTimestampTZ:
+		datumNa = t.Nanosecond()
+		datumunix = t.Unix()
+		datumunixnao = t.UnixNano()
+	case *tree.DTimestamp:
+		datumNa = t.Nanosecond()
+		datumunix = t.Unix()
+		datumunixnao = t.UnixNano()
+	}
+
+	switch column.Type.InternalType.Precision {
+	case tree.MilliTimestampWidth, tree.DefaultTimestampWidth:
+		if datumunix < tree.TsMinSecondTimestamp || datumunix > tree.TsMaxSecondTimestamp {
+			return nil, tree.NewValueOutOfRangeError(&column.Type, rawValue, column.Name)
+		}
+		roundSec := int64(datumNa / 1e6)
+		next := datumNa/1e5 - int(roundSec*10)
+		if next > 4 {
+			// Round up
+			roundSec++
+		}
+		dVal = tree.NewDInt(tree.DInt(datumunix*1e3 + roundSec))
+	case tree.MicroTimestampWidth:
+		if datumunix < tree.TsMinSecondTimestamp || datumunix > tree.TsMaxSecondTimestamp {
+			return nil, tree.NewValueOutOfRangeError(&column.Type, rawValue, column.Name)
+		}
+		roundSec := int64(datumNa / 1e3)
+		next := datumNa/1e2 - int(roundSec*10)
+		if next > 4 {
+			roundSec++
+		}
+		dVal = tree.NewDInt(tree.DInt(datumunix*1e6 + roundSec))
+	case tree.NanoTimestampWidth:
+		if datumunix < 0 || datumunix > tree.TsMaxNanoTimestamp/1e9 {
+			return nil, tree.NewValueOutOfRangeError(&column.Type, rawValue, column.Name)
+		}
+		dVal = tree.NewDInt(tree.DInt(datumunixnao))
+	default:
+		return nil, tree.NewUnexpectedWidthError(&column.Type, column.Name)
+	}
+	return dVal, nil
 }
 
 // GetPayloadMapForMuiltNode builds payloads for distributed insertion

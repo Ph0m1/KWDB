@@ -1329,7 +1329,7 @@ Reparse:
 	}
 	// len(stmts) == 0 results in a nil (empty) statement.
 	stmt.Insertdirectstmt.InsertFast = c.parser.GetIsTsTable()
-	if stmt.Insertdirectstmt.InsertFast && stmt.NumPlaceholders == 0 {
+	if stmt.Insertdirectstmt.InsertFast && (stmt.NumPlaceholders == 0 || len(stmt.Insertdirectstmt.InsertValues) > 0) {
 		c.parser.IsShortcircuit = false
 		goto Reparse
 	}

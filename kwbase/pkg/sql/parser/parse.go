@@ -253,6 +253,11 @@ func (p *Parser) scanOneStmt() (sql string, tokens []sqlSymType, done bool) {
 				p.scanner.shortinsert.RowCount = 0
 				p.scanner.shortinsert.isValues = true
 			}
+			if lval.id == SELECT {
+				tokens = append(tokens, lval)
+				p.IsShortcircuit = false
+				continue
+			}
 
 			if p.scanner.shortinsert.isValues && p.scanner.shortinsert.isTsTable {
 				continue
