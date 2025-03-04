@@ -1163,3 +1163,11 @@ func (b *Builder) handleElapsedAgg(f *tree.FuncExpr) {
 		panic(pgerror.New(pgcode.UndefinedFunction, fmt.Sprintf("invalid parameter number in %s function", "elapsed")))
 	}
 }
+
+// checkUnsupportedWindowFunctions checks if certain aggregate functions are used as window functions.
+func checkUnsupportedWindowFunctions(funcName string) {
+	if checkLastOrFirstAgg(funcName) || funcName == tree.FuncMatching || funcName == tree.FuncBucketFill || funcName == tree.FuncInterpolate ||
+		checkTwaOrElapsedAgg(funcName) {
+		panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() is not supported as a window function", funcName))
+	}
+}

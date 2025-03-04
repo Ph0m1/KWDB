@@ -1086,6 +1086,12 @@ INSERT 1
   2011-08-20 01:20:00+00:00
   2015-08-20 20:40:00+00:00
 (4 rows)
+> SELECT twa(ts, temperature) over (partition by ptagid) from sensors.sensor_data;
+ERROR: twa() is not supported as a window function
+SQLSTATE: 0A000
+> SELECT elapsed(ts) over (partition by ptagid) from sensors.sensor_data;
+ERROR: elapsed() is not supported as a window function
+SQLSTATE: 0A000
 > drop database sensors cascade;
 DROP DATABASE
 > drop database sensors_r cascade;

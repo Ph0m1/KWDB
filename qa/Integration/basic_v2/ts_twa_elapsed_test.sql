@@ -347,6 +347,10 @@ explain select time_bucket_gapfill(e1,'5000mins') as tb from (select twa(k_times
 select time_bucket(e1,'5000mins') as tb from (select twa(k_timestamp,ln(t5)+ln(t6))*elapsed(k_timestamp,1ms) as val,e1 from test_twa_elapsed.tb2 group by e1 order by val) group by tb order by tb;
 select time_bucket(e23,'5000mins') as tb from (select twa(k_timestamp,log(e5)+log(e6))*elapsed(k_timestamp,'1') as val,e23 from test_twa_elapsed.tb2 group by e23 order by val,e23) group by tb order by tb;
 
+-- ZDP-45571
+SELECT twa(ts, temperature) over (partition by ptagid) from sensors.sensor_data;
+SELECT elapsed(ts) over (partition by ptagid) from sensors.sensor_data;
+
 drop database sensors cascade;
 drop database sensors_r cascade;
 drop database test_twa_elapsed cascade;

@@ -1314,9 +1314,7 @@ func (s *scope) replaceWindowFn(f *tree.FuncExpr, def *tree.FunctionDefinition) 
 	// Special processing for first/last query
 	funcName := f.Func.FunctionName()
 	// limit the use of some agg functions as window function
-	if checkLastOrFirstAgg(funcName) || funcName == tree.FuncMatching || funcName == tree.FuncBucketFill || funcName == tree.FuncInterpolate {
-		panic(pgerror.Newf(pgcode.FeatureNotSupported, "%v() is not supported as a window function", funcName))
-	}
+	checkUnsupportedWindowFunctions(funcName)
 
 	typedFunc, err := tree.TypeCheck(expr, s.builder.semaCtx, types.Any)
 	if err != nil {
