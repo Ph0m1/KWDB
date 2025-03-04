@@ -275,7 +275,15 @@ func (f *Factory) AssignPlaceholders(from *memo.Memo) (err error) {
 			}
 			return f.ConstructConstVal(d, placeholder.DataType())
 		}
-		return f.CopyAndReplaceDefault(e, replaceFn)
+
+		// we should deal with IsConstForLogicPlan in prepare scenario
+		dstExpr := f.CopyAndReplaceDefault(e, replaceFn)
+		if scalar, ok := e.(opt.ScalarExpr); ok {
+			if dstScalar, ok := dstExpr.(opt.ScalarExpr); ok {
+				dstScalar.SetConstDeductionEnabled(scalar.CheckConstDeductionEnabled())
+			}
+		}
+		return dstExpr
 	}
 	f.CopyAndReplace(from.RootExpr().(memo.RelExpr), from.RootProps(), replaceFn)
 

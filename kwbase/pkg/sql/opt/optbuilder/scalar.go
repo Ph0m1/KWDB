@@ -443,7 +443,6 @@ func (b *Builder) buildScalar(
 				panic(err)
 			}
 			out = b.factory.ConstructConstVal(d, t.ResolvedType())
-			out = b.setConstDeductionEnabled(out, true)
 		} else {
 			out = b.factory.ConstructPlaceholder(t)
 		}
