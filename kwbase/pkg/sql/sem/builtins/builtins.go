@@ -4665,7 +4665,7 @@ may increase either contention or retry errors, or both.`,
 					return &tree.DTimestamp{}, err
 				}
 				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
-					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "duration time must exceed 10ms.")
 				}
 				sliding, err := GetTimeInterval(args[2])
 				if err != nil {
@@ -4705,7 +4705,7 @@ may increase either contention or retry errors, or both.`,
 					return &tree.DTimestampTZ{}, err
 				}
 				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
-					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "duration time must exceed 10ms.")
 				}
 				sliding, err := GetTimeInterval(args[2])
 				if err != nil {
@@ -4744,7 +4744,7 @@ may increase either contention or retry errors, or both.`,
 					return &tree.DTimestamp{}, err
 				}
 				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
-					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "duration time must exceed 10ms.")
 				}
 				evalCtx.GroupWindow.TimeWindowHelper = tree.TimeWindowHelper{
 					Duration: dur,
@@ -4773,7 +4773,7 @@ may increase either contention or retry errors, or both.`,
 					return &tree.DTimestampTZ{}, err
 				}
 				if dur.Duration.Sub(areaTime.Duration).AsFloat64() < 0 {
-					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "duration time cannot exceed 10ms.")
+					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "duration time must exceed 10ms.")
 				}
 				evalCtx.GroupWindow.TimeWindowHelper = tree.TimeWindowHelper{
 					Duration: dur,

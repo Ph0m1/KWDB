@@ -172,8 +172,8 @@ void FieldFuncTimeWindow::ResolveParams() {
              storage_type == roachpb::DataType::TIMESTAMPTZ_MICRO) {
     type_scale_ = 1000;
   }
-  if (interval_seconds_ < TIME_WINDOW_MIN_DURATION_MS) {
-    error_info_ = "duration time cannot exceed 10ms.";
+  if (!var_interval_ && !year_bucket_ && interval_seconds_ < TIME_WINDOW_MIN_DURATION_MS) {
+    error_info_ = "duration time must exceed 10ms.";
     EEPgErrorInfo::SetPgErrorInfo(ERRCODE_INVALID_PARAMETER_VALUE,
                                   error_info_.c_str());
     return;
