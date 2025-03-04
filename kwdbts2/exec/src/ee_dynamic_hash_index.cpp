@@ -12,7 +12,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <limits>
 #include <thread>
 #include <stdexcept>
@@ -22,6 +21,14 @@
 #include "ee_dynamic_hash_index.h"
 #include "mmap/mmap_file.h"
 #include "ee_global.h"
+
+#if defined(__GNUC__) && (__GNUC__ < 8)
+  #include <experimental/filesystem>
+  namespace fs = std::experimental::filesystem;
+#else
+  #include <filesystem>
+  namespace fs = std::filesystem;
+#endif
 
 // construct a hash bucket with at least 8 buckets, init the mem for buckets
 DynamicHashBucket::DynamicHashBucket() {
