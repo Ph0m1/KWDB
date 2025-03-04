@@ -756,9 +756,86 @@ where cast(null as inet) IS DISTINCT FROM pg_catalog.inet_server_addr()) as subq
 where subq_1.c0::timestamptz = pg_catalog.session_window(now(), '60s');
 ERROR: session_window() can be only used in groupby
 SQLSTATE: 42601
+> create database test_tpcc;
+CREATE DATABASE
+> use test_tpcc;
+SET
+> CREATE TABLE bmsql_customer (
+    c_id INT4 NOT NULL,
+    c_d_id INT4 NOT NULL,
+    c_w_id INT4 NOT NULL,
+    c_discount DECIMAL(4,4) NULL,
+    c_credit CHAR(2) NULL,
+    c_last VARCHAR(16) NULL,
+    c_first VARCHAR(16) NULL,
+    c_credit_lim DECIMAL(12,2) NULL,
+    c_balance DECIMAL(12,2) NULL,
+    c_ytd_payment DECIMAL(12,2) NULL,
+    c_payment_cnt INT4 NULL,
+    c_delivery_cnt INT4 NULL,
+    c_street_1 VARCHAR(20) NULL,
+    c_street_2 VARCHAR(20) NULL,
+    c_city VARCHAR(20) NULL,
+    c_state CHAR(2) NULL,
+    c_zip CHAR(9) NULL,
+    c_phone CHAR(16) NULL,
+    c_since TIMESTAMP NULL,
+    c_middle CHAR(2) NULL,
+    c_data VARCHAR(500) NULL,
+    CONSTRAINT "primary" PRIMARY KEY (c_w_id ASC, c_d_id ASC, c_id ASC),
+    INDEX bmsql_customer_idx1 (c_w_id ASC, c_d_id ASC, c_last ASC, c_first ASC),
+    FAMILY "primary" (c_id, c_d_id, c_w_id, c_discount, c_credit, c_last, c_first, c_credit_lim, c_balance, c_ytd_payment, c_payment_cnt, c_delivery_cnt, c_street_1, c_street_2, c_city, c_state, c_zip, c_phone, c_since, c_middle, c_data)
+);
+CREATE TABLE
+> CREATE TABLE bmsql_order_line (
+    ol_w_id INT4 NOT NULL,
+    ol_d_id INT4 NOT NULL,
+    ol_o_id INT4 NOT NULL,
+    ol_number INT4 NOT NULL,
+    ol_i_id INT4 NOT NULL,
+    ol_delivery_d TIMESTAMP NULL,
+    ol_amount DECIMAL(6,2) NULL,
+    ol_supply_w_id INT4 NULL,
+    ol_quantity INT4 NULL,
+    ol_dist_info CHAR(24) NULL,
+    CONSTRAINT "primary" PRIMARY KEY (ol_w_id ASC, ol_d_id ASC, ol_o_id ASC, ol_number ASC),
+    INDEX bmsql_order_line_idx1 (ol_supply_w_id ASC, ol_i_id ASC),
+    FAMILY "primary" (ol_w_id, ol_d_id, ol_o_id, ol_number, ol_i_id, ol_delivery_d, ol_amount, ol_supply_w_id, ol_quantity, ol_dist_info)
+);
+CREATE TABLE
+> insert into public.bmsql_customer values (
+    45,
+    62,
+    65,
+    cast(null as "numeric"),
+    cast(null as bpchar),
+    cast(null as "varchar"),
+    case when false then cast(null as "varchar") else cast(null as "varchar") end,
+    default,
+    pg_catalog.cluster_logical_timestamp(),
+    pg_catalog.sqrt(
+        cast(pg_catalog.round(
+            cast(pg_catalog.cluster_logical_timestamp() as "numeric")) as "numeric")),
+    61,
+    80,
+    cast(null as "varchar"),
+    pg_catalog.state_window(
+        cast(cast(null as "varchar") as "varchar")),
+    default,
+    (select c_credit from public.bmsql_customer limit 1 offset 3),
+    cast(null as bpchar),
+    cast(null as bpchar),
+    cast(null as "timestamp"),
+(select ol_dist_info from public.bmsql_order_line limit 1 offset 2),
+    pg_catalog.state_window(
+            cast(cast(null as "varchar") as "varchar")));
+ERROR: state_window(): group window function can be only used in single time series table query.
+SQLSTATE: 42601
 > set cluster setting ts.parallel_degree=default;
 SET CLUSTER SETTING
 > use defaultdb;
 SET
 > drop database test_vacuum cascade;
+DROP DATABASE
+> drop database test_tpcc cascade;
 DROP DATABASE

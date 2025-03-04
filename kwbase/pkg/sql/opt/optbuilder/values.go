@@ -98,6 +98,9 @@ func (b *Builder) buildValuesClause(
 				}
 			}
 			elems[elemPos] = b.buildScalar(texpr, inScope, nil, nil, nil)
+			if name, ok := memo.CheckGroupWindowExist(elems[elemPos]); ok {
+				panic(pgerror.Newf(pgcode.Syntax, "%s(): group window function can be only used in single time series table query.", name))
+			}
 			elemPos += numCols
 		}
 

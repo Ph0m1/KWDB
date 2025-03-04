@@ -245,8 +245,12 @@ func (mb *mutationBuilder) addUpdateCols(exprs tree.UpdateExprs) {
 		texpr := inScope.resolveType(expr, desiredType)
 		scopeCol := mb.b.addColumn(projectionsScope, "" /* alias */, texpr, false)
 		scopeColOrd := scopeOrdinal(len(projectionsScope.cols) - 1)
-		mb.b.buildScalar(texpr, inScope, projectionsScope, scopeCol, nil)
-
+		if scalar := mb.b.buildScalar(texpr, inScope, projectionsScope, scopeCol, nil); scalar != nil {
+			// group window function can be only used in groupby
+			if name, ok := memo.CheckGroupWindowExist(scalar); ok {
+				panic(pgerror.Newf(pgcode.Syntax, "%s(): group window function can be only used in single time series table query.", name))
+			}
+		}
 		checkCol(scopeCol, scopeColOrd, targetColID)
 	}
 
