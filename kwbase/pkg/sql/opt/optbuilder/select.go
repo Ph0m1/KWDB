@@ -1267,15 +1267,15 @@ func (b *Builder) buildWhere(where *tree.Where, inScope *scope) {
 	)
 
 	if filter != nil {
+		// group window function can be only used in groupby
+		if name, ok := memo.CheckGroupWindowExist(filter); ok {
+			panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
+		}
 		// Wrap the filter in a FiltersOp.
 		inScope.expr = b.factory.ConstructSelect(
 			inScope.expr.(memo.RelExpr),
 			memo.FiltersExpr{b.factory.ConstructFiltersItem(filter)},
 		)
-	}
-	// group window function can be only used in groupby
-	if name, ok := memo.CheckGroupWindowExist(filter); ok {
-		panic(pgerror.Newf(pgcode.Syntax, "%s() can be only used in groupby", name))
 	}
 }
 

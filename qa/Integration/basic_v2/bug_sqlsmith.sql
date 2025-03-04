@@ -719,6 +719,30 @@ from
                   on (now() > case when (true) or true then time_window(now(), cast(cast(null as text) as text)) else now() end);
 ---------- fix ZDP-45670 end ----------
 
+---------- fix ZDP-45700 start ----------
+select
+    subq_1.c0 as c0,
+    34 as c1,
+    subq_1.c0 as c2,
+    subq_1.c0 as c3
+from
+    (select
+         ref_1.e3 as c0
+     from
+         public.t1 as ref_0
+             inner join public.t1 as ref_1
+                        on (ref_0.k_timestamp = ref_1.k_timestamp ),
+         lateral (select
+                      (select id from public.t1 limit 1 offset 6)
+             as c2
+         from
+              public.t1 as ref_4
+     where true
+         limit 118) as subq_0
+where cast(null as inet) IS DISTINCT FROM pg_catalog.inet_server_addr()) as subq_1
+where subq_1.c0::timestamptz = pg_catalog.session_window(now(), '60s');
+---------- fix ZDP-45700 end ----------
+
 -- delete data
 set cluster setting ts.parallel_degree=default;
 use defaultdb;
