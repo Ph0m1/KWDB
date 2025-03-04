@@ -177,7 +177,7 @@ EEIteratorErrCode SortScanOperator::Next(kwdbContext_p ctx,
     if (code != EEIteratorErrCode::EE_OK) {
       return code;
     }
-    if (data_chunk_->Count() > 0) {
+    if (data_chunk_->Count() > cur_offset_) {
       chunk->CopyFrom(data_chunk_, cur_offset_, data_chunk_->Count() - 1, table_->is_reverse_);
     }
   }

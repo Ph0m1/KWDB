@@ -1,0 +1,83 @@
+> create ts database test;
+CREATE TS DATABASE
+> create table test.t1(ts timestamptz NOT NULL, a int, b int) ATTRIBUTES(x int not null, y int not null, z int) primary tags(x, y);
+CREATE TABLE
+> insert into test.t1 values('2025-02-18 03:11:59.688', 1, 1, 1, 1, 1);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:12:59.688', 2, 2, 1, 1, 1);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:13:59.688', 3, 3, 1, 1, 1);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:14:59.688', 4, 4, 2, 2, 2);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:15:59.688', 5, 5, 2, 2, 2);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:16:59.688', 6, 6, 3, 3, 3);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:17:59.688', 7, 7, 4, 4, 4);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:18:59.688', 8, 8, 4, 4, 4);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:19:59.688', 9, 9, 4, 4, 4);
+INSERT 1
+> insert into test.t1 values('2025-02-18 03:20:59.688', 10, 10, 5, 5, 5);
+INSERT 1
+> select * from test.t1 order by ts offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:13:59.688+00:00 | 3 | 3 | 1 | 1 | 1
+  2025-02-18 03:14:59.688+00:00 | 4 | 4 | 2 | 2 | 2
+  2025-02-18 03:15:59.688+00:00 | 5 | 5 | 2 | 2 | 2
+(3 rows)
+> select a, b from test.t1 order by ts offset 2 limit 3;
+  a | b
+----+----
+  3 | 3
+  4 | 4
+  5 | 5
+(3 rows)
+> select x, y from test.t1 order by ts offset 2 limit 3;
+  x | y
+----+----
+  1 | 1
+  2 | 2
+  2 | 2
+(3 rows)
+> select * from test.t1 where x = 4 order by ts offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:19:59.688+00:00 | 9 | 9 | 4 | 4 | 4
+(1 row)
+> select * from test.t1 where x = 5 order by ts offset 2 limit 3;
+  ts | a | b | x | y | z
+-----+---+---+---+---+----
+(0 rows)
+> select * from test.t1 where x = 6 order by ts offset 2 limit 3;
+  ts | a | b | x | y | z
+-----+---+---+---+---+----
+(0 rows)
+> select * from test.t1 where x > 2 and x < 5 order by ts offset 2 limit 3;
+               ts               | a | b | x | y | z
+--------------------------------+---+---+---+---+----
+  2025-02-18 03:18:59.688+00:00 | 8 | 8 | 4 | 4 | 4
+  2025-02-18 03:19:59.688+00:00 | 9 | 9 | 4 | 4 | 4
+(2 rows)
+> select * from test.t1 where y = 3 order by ts offset 2 limit 3;
+  ts | a | b | x | y | z
+-----+---+---+---+---+----
+(0 rows)
+> select a,b from test.t1 where y = 4 order by ts offset 2 limit 3;
+  a | b
+----+----
+  9 | 9
+(1 row)
+> select * from test.t1 where x = 4, y = 4 order by ts offset 2 limit 3;
+ERROR: at or near ",": syntax error
+SQLSTATE: 42601
+DETAIL: source SQL:
+select * from test.t1 where x = 4, y = 4 order by ts offset 2 limit 3
+                                 ^
+> use defaultdb;
+SET
+> drop database test cascade;
+DROP DATABASE
