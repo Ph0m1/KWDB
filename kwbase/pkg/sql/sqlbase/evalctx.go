@@ -126,6 +126,11 @@ func (ep *DummyEvalPlanner) MakeNewPlanAndRunForTsInsert(
 	return 0, nil
 }
 
+// GetStmt return stmt
+func (ep *DummyEvalPlanner) GetStmt() string {
+	return ""
+}
+
 // EvalSubquery is part of the tree.EvalPlanner interface.
 func (ep *DummyEvalPlanner) EvalSubquery(expr *tree.Subquery) (tree.Datum, error) {
 	return nil, errors.WithStack(errEvalPlanner)

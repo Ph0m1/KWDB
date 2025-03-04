@@ -336,18 +336,16 @@ func runPlanInsidePlan(
 	defer recv.Release()
 
 	if len(plan.subqueryPlans) > 0 {
-		// curPlan.subqueryPlans are the subqueries from the outer plan.
-		// curPlan must refer to the inner subqueries If the inner plan refer to the subqueries(plan.subqueryPlan).
-		// we should replace the subqueries on the curPlan and restore the original state before exiting.
-		oldSubqueries := params.p.curPlan.subqueryPlans
-		params.p.curPlan.subqueryPlans = plan.subqueryPlans
-		defer func() {
-			params.p.curPlan.subqueryPlans = oldSubqueries
-		}()
+		// curPlan is the outer plan, but *plan is the recompiled inner plan.
+		// we must change curPlan to the inner plan If the inner plan refer to the subqueries(plan.subqueryPlan).
+		// we must replace the curPlan and restore the original state before exiting.
+		newPlan := *params.p
+		newPlan.curPlan = *plan
+		newPlan.extendedEvalCtx.Planner = &newPlan
 		if !params.p.extendedEvalCtx.ExecCfg.DistSQLPlanner.PlanAndRunSubqueries(
 			params.ctx,
-			params.p,
-			params.extendedEvalCtx.copy,
+			&newPlan,
+			newPlan.extendedEvalCtx.copy,
 			plan.subqueryPlans,
 			recv,
 			true,

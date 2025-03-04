@@ -2891,6 +2891,9 @@ type EvalPlanner interface {
 
 	// MakeNewPlanAndRunForTsInsert create an internal planner as the planner and run
 	MakeNewPlanAndRunForTsInsert(ctx context.Context, evalCtx *EvalContext, param TSInsertSelectParam) (int, error)
+
+	// GetStmt return stmt
+	GetStmt() string
 }
 
 // EvalSessionAccessor is a limited interface to access session variables.
