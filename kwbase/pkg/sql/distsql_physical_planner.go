@@ -266,7 +266,7 @@ func NewDistSQLPlanner(
 		nodeDialer:  nodeDialer,
 		nodeHealth: distSQLNodeHealth{
 			gossip:     gossip,
-			connHealth: nodeDialer.ConnHealth,
+			connHealth: nodeDialer.ConnHealthTryDial,
 		},
 		distSender:            distSender,
 		rpcCtx:                rpcCtx,
