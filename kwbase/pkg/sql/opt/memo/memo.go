@@ -250,6 +250,9 @@ type TSCheckHelper struct {
 
 	// only have one primary tag value
 	onlyOnePTagValue bool
+
+	// OptHelper is used for opt inside-out
+	OptHelper *InsideOutOptHelper
 }
 
 // init inits the TSCheckHelper
@@ -2454,6 +2457,9 @@ type InsideOutOptHelper struct {
 
 	Projections ProjectionsExpr
 	Passthrough opt.ColSet
+
+	// ColsOfProjectAndAgg is used to record the ids of non single columm, such as projections and aggs.
+	ColsOfProjectAndAgg map[opt.ColumnID]struct{}
 }
 
 // AggArgHelper records agg function operator and its argument's column ID

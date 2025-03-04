@@ -103,6 +103,7 @@ func (b *Builder) buildDataSource(
 			inCols := make(opt.ColList, len(cte.cols))
 			outCols := make(opt.ColList, len(cte.cols))
 			outScope.cols = nil
+			b.factory.Metadata().SetTblType(tree.RelationalTable)
 			for i, col := range cte.cols {
 				id := col.ID
 				c := b.factory.Metadata().ColumnMeta(id)

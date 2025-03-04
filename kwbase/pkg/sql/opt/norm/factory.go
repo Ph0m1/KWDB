@@ -472,7 +472,7 @@ func (f *Factory) checkGroupByExpr(
 			for i := 0; i < len(*aggs); i++ {
 				srcExpr := (*aggs)[i].Agg
 				hashCode := memo.GetExprHash(srcExpr)
-
+				f.mem.CheckHelper.OptHelper.ColsOfProjectAndAgg[(*aggs)[i].Col] = struct{}{}
 				// check if child of agg can push.
 				push := f.Memo().CheckChildExecInTS(srcExpr, hashCode)
 
@@ -495,6 +495,10 @@ func (f *Factory) checkGroupByExpr(
 		return allPush, canMerge, isDistinct
 	}
 
+	for i := 0; i < len(*aggs); i++ {
+		f.mem.CheckHelper.OptHelper.ColsOfProjectAndAgg[(*aggs)[i].Col] = struct{}{}
+	}
+
 	return false, false, isDistinct
 }
 
@@ -504,6 +508,9 @@ func (f *Factory) checkProjectExpr(source *memo.ProjectExpr) bool {
 	allPush := f.CheckWhiteListAndSetEngine(&source.Input)
 	if allPush {
 		for _, proj := range source.Projections {
+			if proj.Element.Op() != opt.VariableOp {
+				f.mem.CheckHelper.OptHelper.ColsOfProjectAndAgg[proj.Col] = struct{}{}
+			}
 			// projection list every one is all leave or all delete
 			push, hashcode := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
 				f.TSWhiteListMap.CheckWhiteListParam, false, f.mem.CheckOnlyOnePTagValue())
@@ -515,6 +522,12 @@ func (f *Factory) checkProjectExpr(source *memo.ProjectExpr) bool {
 
 		source.SetEngineTS()
 		return true
+	}
+
+	for _, proj := range source.Projections {
+		if proj.Element.Op() != opt.VariableOp {
+			f.mem.CheckHelper.OptHelper.ColsOfProjectAndAgg[proj.Col] = struct{}{}
+		}
 	}
 
 	return false
@@ -655,6 +668,5 @@ func (f *Factory) CheckWhiteListAndSetEngine(src *memo.RelExpr) bool {
 
 	default:
 		panic(pgerror.New(pgcode.Warning, "push down is not support "+e.Op().String()))
-		return false
 	}
 }

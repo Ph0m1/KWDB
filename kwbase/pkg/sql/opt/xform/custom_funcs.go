@@ -2549,12 +2549,11 @@ func (c *CustomFuncs) TryPushAgg(
 	input memo.RelExpr, aggs memo.AggregationsExpr, private *memo.GroupingPrivate,
 ) memo.RelExpr {
 	var optHelper = &memo.InsideOutOptHelper{}
-	canOpt, join := c.precheckInsideOutOptApplicable(input, aggs, private, optHelper)
+	optHelper.ColsOfProjectAndAgg = make(map[opt.ColumnID]struct{})
+	canOpt, join := c.precheckInsideOutOptApplicable(&input, aggs, private, optHelper)
 	if !canOpt {
 		return nil
 	}
-
-	c.e.f.CheckWhiteListAndSetEngine(&input)
 
 	finishOpt, newInnerJoin, newAggItems, projectItems, passCols := PushAggIntoJoinTSEngineNode(c.e.f, join, aggs, private, private.GroupingCols, optHelper)
 	if finishOpt {
@@ -3068,7 +3067,7 @@ func (c *CustomFuncs) GenerateBatchLookUpJoin(
 //
 // output params: is true when GroupByExpr can be optimized
 func (c *CustomFuncs) precheckInsideOutOptApplicable(
-	input memo.RelExpr,
+	input *memo.RelExpr,
 	aggs memo.AggregationsExpr,
 	private *memo.GroupingPrivate,
 	optHelper *memo.InsideOutOptHelper,
@@ -3091,9 +3090,9 @@ func (c *CustomFuncs) precheckInsideOutOptApplicable(
 	}
 
 	// could opt inside-out when the child of GroupByExpr isn't InnerJoinExpr
-	join, isJoin := input.(*memo.InnerJoinExpr)
+	join, isJoin := (*input).(*memo.InnerJoinExpr)
 	if !isJoin {
-		j := c.getInnerJoin(input, optHelper)
+		j := c.getInnerJoin(*input, optHelper)
 		if j != nil {
 			join = j
 		} else {
@@ -3101,15 +3100,21 @@ func (c *CustomFuncs) precheckInsideOutOptApplicable(
 		}
 	}
 
+	c.e.mem.CheckHelper.OptHelper = optHelper
+	c.e.f.CheckWhiteListAndSetEngine(input)
+
 	// check grouping is single col and tag col
 	if !private.GroupingCols.Empty() {
 		groupCols := private.GroupingCols
 		isApplicable := true
 		groupCols.ForEach(func(colID opt.ColumnID) {
 			colMeta := c.e.mem.Metadata().ColumnMeta(colID)
-			isRelSingleCol := colMeta.Table != 0 && colMeta.TSType == opt.ColNormal
-			isTag := colMeta.IsTag()
-			isApplicable = isTag || isRelSingleCol
+			if _, ok := optHelper.ColsOfProjectAndAgg[colID]; ok && colMeta.TSType == opt.ColNormal {
+				isApplicable = false
+			}
+			if colMeta.TSType != opt.ColNormal && !colMeta.IsTag() {
+				isApplicable = false
+			}
 			if optTimeBucket {
 				isTimeBucket := false
 				if tb, ok := c.e.mem.CheckHelper.PushHelper.Find(colID); ok {
@@ -3150,12 +3155,6 @@ func (c *CustomFuncs) checkProjectionApplicable(
 	project *memo.ProjectExpr, optHelper *memo.InsideOutOptHelper,
 ) bool {
 	for _, proj := range project.Projections {
-		// check if elements of ProjectionExpr can be pushed down
-		push, _ := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
-			c.e.f.TSWhiteListMap.CheckWhiteListParam, false, c.e.mem.CheckOnlyOnePTagValue())
-		if !push {
-			return false
-		}
 		// check if elements of ProjectionExpr do not cross modules
 		m := modeHelper{modes: 0}
 		c.getEngineMode(proj.Element, &m)
@@ -3164,6 +3163,12 @@ func (c *CustomFuncs) checkProjectionApplicable(
 		}
 		optHelper.Projections = append(optHelper.Projections, proj)
 		if m.checkMode(tsMode) {
+			// check if elements of ProjectionExpr can be pushed down
+			push, _ := memo.CheckExprCanExecInTSEngine(proj.Element.(opt.Expr), memo.ExprPosProjList,
+				c.e.f.TSWhiteListMap.CheckWhiteListParam, false, c.e.mem.CheckOnlyOnePTagValue())
+			if !push {
+				return false
+			}
 			optHelper.ProEngine = append(optHelper.ProEngine, tree.EngineTypeTimeseries)
 		} else {
 			optHelper.ProEngine = append(optHelper.ProEngine, tree.EngineTypeRelational)
@@ -3459,6 +3464,13 @@ func constructNewAgg(
 				minTwo := f.ConstructMin(f.ConstructVariable(newMinID))
 				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(minTwo, agg.Col))
 				passthroughCols.Add(agg.Col)
+			case *memo.ConstAggExpr:
+				min := f.ConstructConstAgg(agg.Agg.Child(0).(opt.ScalarExpr))
+				newConstID := addAggColumnAndGetNewID(f, min, "const"+"("+f.Metadata().ColumnMeta(colID).Alias+")", colID, agg.Typ, &aggMap, aggHelper)
+
+				constTwo := f.ConstructConstAgg(f.ConstructVariable(newConstID))
+				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(constTwo, agg.Col))
+				passthroughCols.Add(agg.Col)
 			default:
 				panic(pgerror.Newf(pgcode.Warning, "could not optimize aggregation function: %s", aggs[i].Agg.Op()))
 			}
@@ -3475,7 +3487,7 @@ func constructNewAgg(
 				sumIntTwo := f.ConstructSumInt(f.ConstructVariable(newAggID))
 				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumIntTwo, agg.Col))
 				passthroughCols.Add(agg.Col)
-			case *memo.MaxExpr, *memo.MinExpr:
+			case *memo.MaxExpr, *memo.MinExpr, *memo.ConstAggExpr:
 				*NewAggregations = append(*NewAggregations, agg)
 				passthroughCols.Add(agg.Col)
 			default:
@@ -3601,6 +3613,8 @@ func (c *CustomFuncs) checkAggOptApplicable(
 			c.checkArgsOptApplicable(t.Input, optHelper, opt.MinOp)
 		case *memo.MaxExpr:
 			c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
+		case *memo.ConstAggExpr:
+			c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
 		default:
 			return false
 		}
@@ -3700,7 +3714,10 @@ func checkCondition(condition *memo.EqExpr, f *norm.Factory) bool {
 func checkConditionColumn(column opt.ScalarExpr, f *norm.Factory) bool {
 	if c, ok := column.(*memo.VariableExpr); ok {
 		colMeta := f.Metadata().ColumnMeta(c.Col)
-		if colMeta.IsTag() || (colMeta.Table != 0 && colMeta.TSType == opt.ColNormal) {
+		if colMeta.TSType == opt.ColNormal {
+			return true
+		}
+		if colMeta.TSType != opt.ColNormal && colMeta.IsTag() {
 			return true
 		}
 	}

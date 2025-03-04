@@ -1564,27 +1564,36 @@ SET CLUSTER SETTING
   NULL
 (1 row)
 > explain select max(ts.e1) from tsdb.ts1 ts, redb.re1 r where ts.tag1=r.e1+r.e2-10;
-             tree             |    field    |     description
-------------------------------+-------------+----------------------
-                              | distributed | true
-                              | vectorized  | false
-  group                       |             |
-   │                          | aggregate 0 | max(e1)
-   │                          | scalar      |
-   └── render                 |             |
-        │                     | e1          | e1
-        └── hash-join         |             |
-             │                | type        | inner
-             │                | equality    | (tag1) = (column12)
-             ├── synchronizer |             |
-             │    └── ts scan |             |
-             │                | ts-table    | ts1
-             │                | access mode | tableTableMeta
-             └── render       |             |
-                  └── scan    |             |
-                              | table       | re1@primary
-                              | spans       | FULL SCAN
-(18 rows)
+             tree             |        field        |     description
+------------------------------+---------------------+----------------------
+                              | distributed         | true
+                              | vectorized          | false
+  group                       |                     |
+   │                          | aggregate 0         | max(max)
+   │                          | scalar              |
+   └── render                 |                     |
+        │                     | max                 | max
+        └── hash-join         |                     |
+             │                | type                | inner
+             │                | equality            | (column12) = (tag1)
+             │                | right cols are key  |
+             ├── render       |                     |
+             │    └── scan    |                     |
+             │                | table               | re1@primary
+             │                | spans               | FULL SCAN
+             └── group        |                     |
+                  │           | engine type         | time series
+                  │           | aggregate 0         | tag1
+                  │           | aggregate 1         | max(e1)
+                  │           | group by            | tag1
+                  │           | pushLocalAggToScan  | true
+                  │           | addSynchronizer     | true
+                  │           | pruneFinalAgg       | true
+                  └── ts scan |                     |
+                              | ts-table            | ts1
+                              | access mode         | tableTableMeta
+                              | use statistic       | true
+(27 rows)
 > select max(ts2.e1) from tsdb.ts1 ts2 join tsdb.ts1 ts3 on ts2.tag1=10 join redb.re1 r on ts2.tag1=r.e1;
   max
 -------

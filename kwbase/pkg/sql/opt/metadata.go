@@ -164,6 +164,11 @@ func (n *MDDepName) equals(other *MDDepName) bool {
 	return n.byID == other.byID && n.byName.Equals(&other.byName)
 }
 
+// SetTblType is used to set the table type.
+func (md *Metadata) SetTblType(t tree.TableType) {
+	md.tableType = int32(t)
+}
+
 // Init prepares the metadata for use (or reuse).
 func (md *Metadata) Init() {
 	// Clear the metadata objects to release memory (this clearing pattern is
