@@ -3322,18 +3322,19 @@ func PushAggIntoJoinTSEngineNode(
 	projectItems []memo.ProjectionsItem,
 	passCols opt.ColSet,
 ) {
+	newColSet := colSet.Copy()
 	canOpt, tsEngineInLeft, tsEngineTable := checkInsideOutOptApplicable(f, source)
 	if !canOpt {
 		return false, newInnerJoin, newAggItems, projectItems, passCols
 	}
 
 	for _, filter := range source.On {
-		getAllCols(filter.Condition, &colSet)
+		getAllCols(filter.Condition, &newColSet)
 	}
 
 	// case: handle nested inner-join
 	if !tsEngineTable.IsTSEngine() {
-		return dealWithTsTable(f, tsEngineTable, aggs, &colSet, private, source, tsEngineInLeft, optHelper)
+		return dealWithTsTable(f, tsEngineTable, aggs, &newColSet, private, source, tsEngineInLeft, optHelper)
 	}
 
 	// case: child of GroupByExpr is ProjectExpr, and the ProjectExpr can push down, construct new ProjectExpr.
@@ -3355,7 +3356,7 @@ func PushAggIntoJoinTSEngineNode(
 	constructNewAgg(f, tsEngineTable, aggs, &newAggItems, &projectItems, optHelper, &passCols)
 
 	tsEngineTable.Relational().OutputCols.ForEach(func(col opt.ColumnID) {
-		if colSet.Contains(col) {
+		if newColSet.Contains(col) {
 			optHelper.Grouping.Add(col)
 		}
 	})
