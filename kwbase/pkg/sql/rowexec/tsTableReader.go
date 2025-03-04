@@ -284,6 +284,9 @@ func tsGetNameValue(this *execinfrapb.TSProcessorCoreUnion) int8 {
 
 // WaitForBLJ wait for all the BLJ operators to complete pushing before draining
 func (ttr *TsTableReader) WaitForBLJ() {
+	if ttr.FlowCtx.PushingBLJCount == 0 {
+		return
+	}
 	timeout := time.After(10 * time.Second)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -291,7 +294,6 @@ func (ttr *TsTableReader) WaitForBLJ() {
 		select {
 		case <-ticker.C:
 			if ttr.FlowCtx.PushingBLJCount == 0 {
-				log.Infof(context.TODO(), "No more pushing BLJ operator.")
 				return
 			}
 		case <-timeout:
