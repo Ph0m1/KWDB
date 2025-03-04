@@ -699,8 +699,14 @@ KStatus WALBufferMgr::readInsertLog(std::vector<LogEntry*>& log_entries, TS_LSN 
       }
 
       if (txn_id == 0 || txn_id == x_id) {
-        auto* insert_tags = KNEW InsertLogTagsEntry(current_lsn, WALLogType::INSERT, x_id, tbl_typ, time_partition,
-                                                    offset, length, read_buf);
+        InsertLogTagsEntry* insert_tags = nullptr;
+        try {
+          insert_tags = KNEW InsertLogTagsEntry(current_lsn, WALLogType::INSERT, x_id, tbl_typ, time_partition,
+                                                      offset, length, read_buf);
+        } catch (exception &e) {
+          LOG_ERROR("Failed to malloc memory for construct Entry.")
+          return FAIL;
+        }
         if (insert_tags == nullptr) {
           delete[] read_buf;
           read_buf = nullptr;
@@ -829,8 +835,14 @@ KStatus WALBufferMgr::readUpdateLog(std::vector<LogEntry*>& log_entries, TS_LSN 
       }
 
       if (txn_id == 0 || txn_id == x_id) {
-        auto* update_tags = KNEW UpdateLogTagsEntry(current_lsn, WALLogType::UPDATE, x_id, tbl_typ, time_partition,
-                                                    offset, length, old_len, read_buf);
+        UpdateLogTagsEntry* update_tags = nullptr;
+        try {
+          update_tags = KNEW UpdateLogTagsEntry(current_lsn, WALLogType::UPDATE, x_id, tbl_typ, time_partition,
+                                                      offset, length, old_len, read_buf);
+        } catch (exception &e) {
+          LOG_ERROR("Failed to malloc memory for construct Entry.")
+          return FAIL;
+        }
         if (update_tags == nullptr) {
           delete[] read_buf;
           read_buf = nullptr;
@@ -918,8 +930,14 @@ KStatus WALBufferMgr::readDeleteLog(vector<LogEntry*>& log_entries, TS_LSN curre
       }
 
       if (txn_id == 0 || txn_id == x_id) {
-        auto* d_tags_entry = KNEW DeleteLogTagsEntry(current_lsn, WALLogType::DELETE, x_id, table_type, group_id,
-                                                     entity_id, p_tag_len, tag_len, res);
+        DeleteLogTagsEntry* d_tags_entry = nullptr;
+        try {
+          d_tags_entry = KNEW DeleteLogTagsEntry(current_lsn, WALLogType::DELETE, x_id, table_type, group_id,
+                                                       entity_id, p_tag_len, tag_len, res);
+        } catch (exception &e) {
+          LOG_ERROR("Failed to malloc memory for construct Entry.")
+          return FAIL;
+        }
         if (d_tags_entry == nullptr) {
           delete[] res;
           res = nullptr;
@@ -1001,7 +1019,13 @@ KStatus WALBufferMgr::readCheckpointLog(vector<LogEntry*>& log_entries, TS_LSN c
     return FAIL;
   }
 
-  auto* checkpoint = KNEW CheckpointEntry(current_lsn, WALLogType::CHECKPOINT, read_buf);
+  CheckpointEntry* checkpoint = nullptr;
+  try {
+    checkpoint = KNEW CheckpointEntry(current_lsn, WALLogType::CHECKPOINT, read_buf);
+  } catch (exception &e) {
+    LOG_ERROR("Failed to malloc memory for construct Entry.")
+    return FAIL;
+  }
 
   delete[] read_buf;
   read_buf = nullptr;
@@ -1049,7 +1073,13 @@ KStatus WALBufferMgr::readDDLCreateLog(vector<LogEntry*>& log_entries, TS_LSN cu
     return FAIL;
   }
 
-  auto* entry = KNEW DDLCreateEntry(current_lsn, WALLogType::DDL_CREATE, read_buf);
+  DDLCreateEntry* entry = nullptr;
+  try {
+    entry = KNEW DDLCreateEntry(current_lsn, WALLogType::DDL_CREATE, read_buf);
+  } catch (exception &e) {
+    LOG_ERROR("Failed to malloc memory for construct Entry.")
+    return FAIL;
+  }
 
   delete[] read_buf;
   read_buf = nullptr;
@@ -1110,7 +1140,13 @@ KStatus WALBufferMgr::readDDLAlterLog(vector<LogEntry*>& log_entries, TS_LSN cur
     return FAIL;
   }
 
-  auto* entry = KNEW DDLAlterEntry(current_lsn, WALLogType::DDL_ALTER_COLUMN, read_buf);
+  DDLAlterEntry* entry = nullptr;
+  try {
+    entry = KNEW DDLAlterEntry(current_lsn, WALLogType::DDL_ALTER_COLUMN, read_buf);
+  } catch (exception &e) {
+    LOG_ERROR("Failed to malloc memory for construct Entry.")
+    return FAIL;
+  }
 
   delete[] read_buf;
   read_buf = nullptr;

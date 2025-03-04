@@ -523,7 +523,7 @@ void WALMgr::CleanUp(kwdbContext_p ctx) {
 }
 
 KStatus WALMgr::ResetWAL(kwdbContext_p ctx) {
-  LOG_INFO("Cleaning wal meta file tableid: lu.", table_id_)
+  LOG_INFO("Cleaning wal meta file tableId: %lu.", table_id_)
   if (!IsExists(wal_path_)) {
     if (!MakeDirectory(wal_path_)) {
       LOG_ERROR("Failed to create the WAL log directory '%s'", wal_path_.c_str())
