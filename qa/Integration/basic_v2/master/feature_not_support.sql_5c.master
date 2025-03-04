@@ -148,3 +148,14 @@ SQLSTATE: 42809
 DROP TABLE
 > DROP DATABASE db1 cascade;
 DROP DATABASE
+> drop database if exists tsdb cascade;
+DROP DATABASE
+> create ts database tsdb;
+CREATE TS DATABASE
+> create table tsdb.t1(a timestamptz not null,e1 nchar)tags(c int not null)primary tags(c);
+CREATE TABLE
+> insert into tsdb.t1 values(now(),s,1);
+ERROR: unsupported input type relation "s" (column e1)
+SQLSTATE: 42601
+> drop database if exists tsdb cascade;
+DROP DATABASE

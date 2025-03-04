@@ -108,3 +108,10 @@ ALTER TABLE db1.t1 ALTER COLUMN column1 DROP STORED;
 select * from  t1;
 DROP TABLE t1;
 DROP DATABASE db1 cascade;
+
+--ZDP-45589
+drop database if exists tsdb cascade;
+create ts database tsdb;
+create table tsdb.t1(a timestamptz not null,e1 nchar)tags(c int not null)primary tags(c);
+insert into tsdb.t1 values(now(),s,1);
+drop database if exists tsdb cascade;

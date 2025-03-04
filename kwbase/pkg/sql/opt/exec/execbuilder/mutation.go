@@ -2011,7 +2011,7 @@ func ComputeColumnSize(cols []*sqlbase.ColumnDescriptor) (int, int, error) {
 				colSize += VarColumnSize
 			}
 		default:
-			return 0, 0, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported input type oid %d", col.Type.Oid())
+			return 0, 0, pgerror.Newf(pgcode.DatatypeMismatch, "unsupported input type oid %d (column %s)", col.Type.Oid(), col.Name)
 		}
 	}
 	return colSize, preAllocSize, nil
@@ -2283,7 +2283,7 @@ func TSTypeCheckForInput(
 		return nil, tree.NewDatatypeMismatchError(column.Name, sqlbase.DatumToString(v), colType.SQLString())
 
 	case *tree.UnresolvedName:
-		return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", v.String())
+		return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\" (column %s)", v.String(), column.Name)
 	case *tree.BinaryExpr:
 		return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type BinaryOperator")
 

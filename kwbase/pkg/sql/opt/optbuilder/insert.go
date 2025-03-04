@@ -1510,7 +1510,7 @@ func checkInputForTSInsert(
 			case *tree.NumVal, *tree.StrVal, tree.DNullExtern:
 				// do nothing
 			case *tree.UnresolvedName:
-				return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\"", v.String())
+				return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type relation \"%s\" (column %s)", v.String(), column.Name)
 			case *tree.BinaryExpr:
 				return nil, pgerror.Newf(pgcode.Syntax, "unsupported input type BinaryOperator")
 			default:
