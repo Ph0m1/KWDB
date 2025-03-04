@@ -854,6 +854,9 @@ func (c *conn) handleSimpleQuery(
 			*dbName = unqis.GetTsSessionData().Database
 		}
 
+		if *dbName == "defaultdb" {
+			return false
+		}
 		var err error
 		var isTsTable bool
 		isTsTable, dit, err = server.GetCFG().InternalExecutor.IsTsTable(ctx, *dbName, tableName, c.sessionArgs.User)

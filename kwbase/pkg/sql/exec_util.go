@@ -243,7 +243,7 @@ var insertFastPathClusterMode = settings.RegisterBoolSetting(
 var insertShortCircuitClusterMode = settings.RegisterBoolSetting(
 	"server.tsinsert_direct.enabled",
 	"value for tsinsert_direct session setting; enables time series table short circuit insert",
-	false,
+	true,
 )
 
 // VectorizeClusterSettingName is the name for the cluster setting that controls

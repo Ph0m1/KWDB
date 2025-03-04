@@ -139,9 +139,14 @@ func getSingleRecord(
 			var dVal *tree.DInt
 			var err error
 			if valueType == parser.STRINGTYPE {
-				dVal, err = tree.ParseTimestampTZForTS(ptCtx, rawValue, &column.Type, column.Name)
-				if err != nil {
+				precision := tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision())
+				var datum tree.Datum
+				var val *tree.DInt
+				if datum, err = tree.ParseDTimestampTZ(ptCtx, rawValue, precision); err != nil {
 					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
+				}
+				if dVal, err = GetTsTimestampWidth(*column, datum, val, rawValue); err != nil {
+					return err
 				}
 				if err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name); err != nil {
 					return err
@@ -173,9 +178,14 @@ func getSingleRecord(
 			var dVal *tree.DInt
 			var err error
 			if valueType == parser.STRINGTYPE {
-				dVal, err = tree.ParseTimestampForTS(nil, rawValue, &column.Type, column.Name)
-				if err != nil {
+				precision := tree.TimeFamilyPrecisionToRoundDuration(column.Type.Precision())
+				var datum tree.Datum
+				var val *tree.DInt
+				if datum, err = tree.ParseDTimestamp(nil, rawValue, precision); err != nil {
 					return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
+				}
+				if dVal, err = GetTsTimestampWidth(*column, datum, val, rawValue); err != nil {
+					return err
 				}
 				if err = tree.CheckTsTimestampWidth(&column.Type, *dVal, rawValue, column.Name); err != nil {
 					return err
