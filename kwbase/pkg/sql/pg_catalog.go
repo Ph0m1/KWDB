@@ -407,9 +407,7 @@ CREATE TABLE pg_catalog.pg_attrdef (
 		h := makeOidHasher()
 		return forEachTableDesc(ctx, p, dbContext, virtualMany,
 			func(db *sqlbase.DatabaseDescriptor, scName string, table *sqlbase.TableDescriptor) error {
-				colNum := 0
 				return forEachColumnInTable(table, func(column *sqlbase.ColumnDescriptor) error {
-					colNum++
 					if column.DefaultExpr == nil {
 						// pg_attrdef only expects rows for columns with default values.
 						return nil
@@ -430,11 +428,11 @@ CREATE TABLE pg_catalog.pg_attrdef (
 						defSrc = tree.NewDString(defaultStr)
 					}
 					return addRow(
-						h.ColumnOid(table.ID, column.ID), // oid
-						defaultOid(table.ID),             // adrelid
-						tree.NewDInt(tree.DInt(colNum)),  // adnum
-						defSrc,                           // adbin
-						defSrc,                           // adsrc
+						h.ColumnOid(table.ID, column.ID),   // oid
+						defaultOid(table.ID),               // adrelid
+						tree.NewDInt(tree.DInt(column.ID)), // adnum
+						defSrc,                             // adbin
+						defSrc,                             // adsrc
 					)
 				})
 			})
