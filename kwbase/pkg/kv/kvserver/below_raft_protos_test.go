@@ -113,7 +113,7 @@ var belowRaftGoldenProtos = map[reflect.Type]fixture{
 			return roachpb.NewPopulatedRangeDescriptor(r, false)
 		},
 		emptySum:     13702164248888144445,
-		populatedSum: 1755682133601872458,
+		populatedSum: 7137426465386429008,
 	},
 	reflect.TypeOf(&storagepb.Liveness{}): {
 		populatedConstructor: func(r *rand.Rand) protoutil.Message {

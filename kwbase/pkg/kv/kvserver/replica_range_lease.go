@@ -207,7 +207,7 @@ func (p *pendingLeaseRequest) InitOrJoinRequest(
 	startKey roachpb.Key,
 	transfer bool,
 ) *leaseRequestHandle {
-	if nextLeaseHolder.GetTag() == roachpb.TS_REPLICA {
+	if p.repl.isTsLocked() {
 		log.VEventf(ctx, 3, "request lease for %+v:\n %s", nextLeaseHolder, debug.Stack())
 	}
 
@@ -1069,7 +1069,7 @@ func (r *Replica) redirectOnOrAcquireLease(
 				//		newLeaseHolderExpiredError(&status.Lease, (*roachpb.LeaseState)(&status.State), r.store.StoreID(), r.mu.state.Desc))
 				//}
 				tsLeaseholderMode := leaseholderModeSettings.Get(&r.ClusterSettings().SV)
-				if tsLeaseholderMode == 2 && status.Lease.Replica.GetTag() == roachpb.TS_REPLICA {
+				if tsLeaseholderMode == 2 && r.isTsLocked() {
 					// Special for TS ranges.
 					if !status.Lease.OwnedBy(r.store.StoreID()) {
 						if r.mu.leaderID == status.Lease.Replica.ReplicaID {

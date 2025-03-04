@@ -117,12 +117,6 @@ enum StoreType {
   TS_STORE = 1;       // temporal databaseStoreStore
 }
 
-enum ReplicaTag {
-  option (gogoproto.goproto_enum_prefix) = false;
-  DEFAULT_REPLICA = 0;  // relation database Range Replica
-  TS_REPLICA = 1;       // temporal database Store Range Replica
-}
-
 // ReplicaDescriptor describes a replica location by node ID
 // (corresponds to a host:port via lookup on gossip network) and store
 // ID (identifies the device).
@@ -147,7 +141,8 @@ message ReplicaDescriptor {
   // Type indicates which raft activities a replica participates in. A nil type
   // is equivalent to VOTER.
   optional ReplicaType type = 4;
-  optional ReplicaTag  tag = 5;
+  // remove tag, but for compatibility, the ID 5 cannot be used again.
+  // optional ReplicaTag  tag = 5;
 }
 
 // ReplicaIdent uniquely identifies a specific replica.

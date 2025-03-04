@@ -203,15 +203,9 @@ func prepareSplitDescs(
 	if splitType == roachpb.TS_SPLIT {
 		leftDesc.LastSplitTime = &splitTime
 		rightDesc.LastSplitTime = &splitTime
-		for _, r := range rightDesc.InternalReplicas {
-			rightDesc.SetReplicaTag(r.NodeID, r.StoreID, roachpb.TS_RANGE)
-		}
 		rightDesc.SetRangeType(roachpb.TS_RANGE)
 		rightDesc.TableId = tableID
 	} else {
-		for _, r := range rightDesc.InternalReplicas {
-			rightDesc.SetReplicaTag(r.NodeID, r.StoreID, roachpb.DEFAULT_RANGE)
-		}
 		rightDesc.SetRangeType(roachpb.DEFAULT_RANGE)
 		rightDesc.TableId = 0
 	}
@@ -391,7 +385,6 @@ func splitTxnStickyUpdateAttempt(
 	if args.SplitType == roachpb.TS_SPLIT {
 		// Todo: splitRequest of split_queue send to ts table.
 		newDesc.SetRangeType(roachpb.TS_RANGE)
-		newDesc.SetAllReplicaTag(roachpb.TS_REPLICA)
 		newDesc.TableId = args.TableId
 	}
 
@@ -629,7 +622,6 @@ func (r *Replica) adminUnsplitWithDescriptor(
 		if desc.GetRangeType() == roachpb.TS_RANGE {
 			changeToDefaultRange = true
 			newDesc.SetRangeType(roachpb.DEFAULT_RANGE)
-			newDesc.SetAllReplicaTag(roachpb.DEFAULT_REPLICA)
 			newDesc.StickyBit = &hlc.MaxTimestamp
 			stickyBit = hlc.MaxTimestamp
 		}
@@ -1666,7 +1658,6 @@ func prepareChangeReplicasTrigger(
 			case internalChangeTypeAddLearner:
 				added = append(added,
 					updatedDesc.AddReplica(chg.target.NodeID, chg.target.StoreID, roachpb.LEARNER))
-				updatedDesc.SetReplicaTag(chg.target.NodeID, chg.target.StoreID, rangetyp)
 			case internalChangeTypePromoteLearner:
 				typ := roachpb.VOTER_FULL
 				if useJoint {
@@ -1676,7 +1667,6 @@ func prepareChangeReplicasTrigger(
 				if !ok || prevTyp != roachpb.LEARNER {
 					return nil, errors.Errorf("cannot promote target %v which is missing as Learner", chg.target)
 				}
-				updatedDesc.SetReplicaTag(chg.target.NodeID, chg.target.StoreID, rangetyp)
 				added = append(added, rDesc)
 			case internalChangeTypeRemove:
 				rDesc, ok := updatedDesc.GetReplicaDescriptor(chg.target.StoreID)
@@ -1693,7 +1683,6 @@ func prepareChangeReplicasTrigger(
 					return nil, errors.Errorf("cannot transition from %s to VOTER_OUTGOING", prevTyp)
 				} else {
 					rDesc, _, _ = updatedDesc.SetReplicaType(chg.target.NodeID, chg.target.StoreID, roachpb.VOTER_OUTGOING)
-					updatedDesc.SetReplicaTag(chg.target.NodeID, chg.target.StoreID, rangetyp)
 				}
 				removed = append(removed, rDesc)
 			case internalChangeTypeDemote:
@@ -1713,7 +1702,6 @@ func prepareChangeReplicasTrigger(
 					return nil, errors.Errorf("cannot transition from %s to VOTER_DEMOTING", prevTyp)
 				}
 				rDesc, _, _ = updatedDesc.SetReplicaType(chg.target.NodeID, chg.target.StoreID, roachpb.VOTER_DEMOTING)
-				updatedDesc.SetReplicaTag(chg.target.NodeID, chg.target.StoreID, rangetyp)
 				removed = append(removed, rDesc)
 			default:
 				return nil, errors.Errorf("unsupported internal change type %d", chg.typ)
@@ -1729,14 +1717,12 @@ func prepareChangeReplicasTrigger(
 			switch rDesc.GetType() {
 			case roachpb.VOTER_INCOMING:
 				updatedDesc.SetReplicaType(rDesc.NodeID, rDesc.StoreID, roachpb.VOTER_FULL)
-				updatedDesc.SetReplicaTag(rDesc.NodeID, rDesc.StoreID, rangetyp)
 				isJoint = true
 			case roachpb.VOTER_OUTGOING:
 				updatedDesc.RemoveReplica(rDesc.NodeID, rDesc.StoreID)
 				isJoint = true
 			case roachpb.VOTER_DEMOTING:
 				updatedDesc.SetReplicaType(rDesc.NodeID, rDesc.StoreID, roachpb.LEARNER)
-				updatedDesc.SetReplicaTag(rDesc.NodeID, rDesc.StoreID, rangetyp)
 				isJoint = true
 			default:
 			}

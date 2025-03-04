@@ -1762,7 +1762,6 @@ func (l Lease) Equivalent(newL Lease) bool {
 	// Change this line to the following when ReplicaType becomes non-nullable:
 	//  l.Replica.Type, newL.Replica.Type = 0, 0
 	l.Replica.Type, newL.Replica.Type = nil, nil
-	l.Replica.Tag, newL.Replica.Tag = nil, nil
 	// If both leases are epoch-based, we must dereference the epochs
 	// and then set to nil.
 	switch l.Type() {

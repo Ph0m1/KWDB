@@ -233,10 +233,10 @@ SELECT * FROM kwdb_internal.ranges WHERE range_id < 0
 ----
 range_id  start_key  start_pretty  end_key  end_pretty  database_name  table_name  index_name  replicas  replica_localities learner_replicas  split_enforced_until  lease_holder range_size
 
-query ITTTTTTTITTTTTT colnames
+query ITTTTTTTITTTTT colnames
 SELECT * FROM kwdb_internal.ranges_no_leases WHERE range_id < 0
 ----
-range_id  range_type  start_key  start_pretty  end_key  end_pretty  database_name  table_name  table_id  index_name  replicas  replicas_tag  replica_localities  learner_replicas  split_enforced_until
+range_id  range_type  start_key  start_pretty  end_key  end_pretty  database_name  table_name  table_id  index_name  replicas  replica_localities  learner_replicas  split_enforced_until
 
 statement ok
 INSERT INTO system.zones (id, config) VALUES

@@ -609,17 +609,13 @@ func (r *Replica) ReplicaID() roachpb.ReplicaID {
 }
 
 func (r *Replica) isTs() bool {
-	if Desc, err := r.GetReplicaDescriptor(); err == nil {
-		return Desc.GetTag() == roachpb.TS_REPLICA
-	}
-	return false
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.isTsLocked()
 }
 
 func (r *Replica) isTsLocked() bool {
-	if Desc, err := r.getReplicaDescriptorRLocked(); err == nil {
-		return Desc.GetTag() == roachpb.TS_REPLICA
-	}
-	return false
+	return r.mu.state.Desc.GetRangeType() == roachpb.TS_RANGE
 }
 
 // cleanupFailedProposal cleans up after a proposal that has failed. It

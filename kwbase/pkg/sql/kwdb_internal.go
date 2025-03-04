@@ -2217,7 +2217,6 @@ CREATE TABLE kwdb_internal.ranges_no_leases (
   table_id             INT8 NOT NULL,
   index_name           STRING NOT NULL,
   replicas             INT8[] NOT NULL,
-  replicas_tag        STRING[] NOT NULL,
   replica_localities   STRING[] NOT NULL,
 	learner_replicas     INT8[] NOT NULL,
 	split_enforced_until TIMESTAMP
@@ -2300,14 +2299,6 @@ CREATE TABLE kwdb_internal.ranges_no_leases (
 				}
 			}
 
-			replicaTagArr := tree.NewDArray(types.String)
-			for _, replica := range voterReplicas {
-				replicaTag := replica.GetTag().String()
-				if err := replicaTagArr.Append(tree.NewDString(replicaTag)); err != nil {
-					return nil, err
-				}
-			}
-
 			learnersArr := tree.NewDArray(types.Int)
 			for _, replica := range learnerReplicaStoreIDs {
 				if err := learnersArr.Append(tree.NewDInt(tree.DInt(replica))); err != nil {
@@ -2354,7 +2345,6 @@ CREATE TABLE kwdb_internal.ranges_no_leases (
 				tree.NewDInt(tree.DInt(desc.TableId)),
 				tree.NewDString(indexName),
 				votersArr,
-				replicaTagArr,
 				replicaLocalityArr,
 				learnersArr,
 				splitEnforcedUntil,

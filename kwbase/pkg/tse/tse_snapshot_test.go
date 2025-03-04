@@ -242,17 +242,9 @@ func TestCreateTsTableFailed(t *testing.T) {
 	rows, err := c.Servers[0].InternalExecutor().(*sql.InternalExecutor).Query(ctx, "", nil, "select start_pretty, end_pretty from kwdb_internal.ranges where end_pretty = '/Max';")
 	require.Equal(t, "/Table/78", string(*(rows[0][0].(*tree.DString))))
 	require.Equal(t, "/Max", string(*(rows[0][1].(*tree.DString))))
-	rows, err = c.Servers[0].InternalExecutor().(*sql.InternalExecutor).Query(ctx, "", nil, "select range_type,replicas_tag from kwdb_internal.ranges_no_leases where end_pretty = '/Max';")
+	rows, err = c.Servers[0].InternalExecutor().(*sql.InternalExecutor).Query(ctx, "", nil, "select range_type from kwdb_internal.ranges_no_leases where end_pretty = '/Max';")
 	require.Equal(t, "", "")
 	require.Equal(t, "DEFAULT_RANGE", string(*(rows[0][0].(*tree.DString))))
-	tags := rows[0][1].(*tree.DArray)
-	for _, tag := range tags.Array {
-		tt := string(*tag.(*tree.DString))
-		require.Equal(t, "DEFAULT_REPLICA", tt)
-		//if tt != "DEFAULT_REPLICA" {
-		//	t.Fatal("get wrong range type")
-		//}
-	}
 
 	rows, err = c.Servers[0].InternalExecutor().(*sql.InternalExecutor).Query(ctx, "", nil, "select * from system.namespace where name = 'tab1';")
 	require.Equal(t, []tree.Datums([]tree.Datums(nil)), rows)

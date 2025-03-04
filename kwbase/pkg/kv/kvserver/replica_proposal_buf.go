@@ -487,33 +487,23 @@ func (b *propBuf) FlushLockedWithRaftGroup(raftGroup *raft.RawNode) (int, error)
 			// disk, the corresponding processing interface is called according to
 			// the request type.
 			var needPropose bool
-			if p.Request.Replica.GetTag() == roachpb.TS_REPLICA {
-				for _, ru := range p.Request.Requests {
-					req := ru.GetInner()
-					switch r := req.(type) {
-					// add ClearRangeRequest case, sometimes RangeDescriptorCache is old
-					case *roachpb.ClearRangeRequest:
-						needPropose = r.TableId != 0
-					case *roachpb.TsPutTagRequest,
-						*roachpb.TsRowPutRequest,
-						*roachpb.TsDeleteRequest,
-						*roachpb.TsDeleteEntityRequest,
-						*roachpb.TsTagUpdateRequest,
-						*roachpb.TsDeleteMultiEntitiesDataRequest:
-						needPropose = true
-					default:
-						continue
-					}
-					break
+			for _, ru := range p.Request.Requests {
+				req := ru.GetInner()
+				switch r := req.(type) {
+				// add ClearRangeRequest case, sometimes RangeDescriptorCache is old
+				case *roachpb.ClearRangeRequest:
+					needPropose = r.TableId != 0
+				case *roachpb.TsPutTagRequest,
+					*roachpb.TsRowPutRequest,
+					*roachpb.TsDeleteRequest,
+					*roachpb.TsDeleteEntityRequest,
+					*roachpb.TsTagUpdateRequest,
+					*roachpb.TsDeleteMultiEntitiesDataRequest:
+					needPropose = true
+				default:
+					continue
 				}
-			} else {
-				for _, ru := range p.Request.Requests {
-					req := ru.GetInner()
-					if r, isClearReq := req.(*roachpb.ClearRangeRequest); isClearReq && r.TableId != 0 {
-						needPropose = true
-						break
-					}
-				}
+				break
 			}
 			if needPropose {
 				request, _ := protoutil.Marshal(p.Request)

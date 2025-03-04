@@ -775,7 +775,6 @@ func RunCommitTrigger(
 		}
 		if sbt.ChangeToDefaultRange {
 			newDesc.SetRangeType(roachpb.DEFAULT_RANGE)
-			newDesc.SetAllReplicaTag(roachpb.DEFAULT_REPLICA)
 		}
 		var res result.Result
 		res.Replicated.State = &storagepb.ReplicaState{

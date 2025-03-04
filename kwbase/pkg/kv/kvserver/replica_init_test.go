@@ -94,10 +94,11 @@ func TestReplicaUpdateLastReplicaAdded(t *testing.T) {
 func TestLoadRaftMuLockedReplicaMuLocked(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
-	tsTag := roachpb.TS_REPLICA
+	tsRange := roachpb.TS_RANGE
 	desc := &roachpb.RangeDescriptor{
+		RangeType:        &tsRange,
 		StartKey:         roachpb.RKey("a"),
-		InternalReplicas: []roachpb.ReplicaDescriptor{{NodeID: 1, StoreID: 1, ReplicaID: 1, Tag: &tsTag}},
+		InternalReplicas: []roachpb.ReplicaDescriptor{{NodeID: 1, StoreID: 1, ReplicaID: 1}},
 	}
 	state := storagepb.ReplicaState{
 		RaftAppliedIndex: 17,

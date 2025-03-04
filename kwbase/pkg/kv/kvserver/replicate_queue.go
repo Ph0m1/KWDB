@@ -1008,7 +1008,7 @@ func (rq *replicateQueue) canTransferLeseTo(
 ) error {
 	sv := rq.store.ClusterSettings()
 	tsLeaseholderMode := leaseholderModeSettings.Get(&sv.SV)
-	if tsLeaseholderMode > 0 && target.GetTag() == roachpb.TS_REPLICA {
+	if tsLeaseholderMode > 0 && repl.isTs() {
 		// For TS ranges, only allow transfer lease to the replica with almost all raft logs.
 		var replStatus CollectReplicaStatusResponse
 		var err error

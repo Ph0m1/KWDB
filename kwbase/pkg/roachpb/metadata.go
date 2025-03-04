@@ -202,34 +202,6 @@ func (r *RangeDescriptor) SetReplicaType(
 	return ReplicaDescriptor{}, 0, false
 }
 
-// SetReplicaTag set replica tag
-func (r *RangeDescriptor) SetReplicaTag(
-	nodeID NodeID, storeID StoreID, typ RangeType,
-) (ReplicaDescriptor, bool) {
-	tsTag := TS_REPLICA
-	for i := range r.InternalReplicas {
-		desc := &r.InternalReplicas[i]
-		if desc.StoreID == storeID && desc.NodeID == nodeID {
-			if typ == TS_RANGE {
-				desc.Tag = &tsTag
-			} else {
-				desc.Tag = nil
-			}
-			return *desc, true
-		}
-	}
-	return ReplicaDescriptor{}, false
-}
-
-// SetAllReplicaTag set replica tag
-func (r *RangeDescriptor) SetAllReplicaTag(typ ReplicaTag) (ReplicaDescriptor, bool) {
-	for i := range r.InternalReplicas {
-		desc := &r.InternalReplicas[i]
-		desc.Tag = &typ
-	}
-	return ReplicaDescriptor{}, false
-}
-
 // AddReplica adds a replica on the given node and store with the supplied type.
 // It auto-assigns a ReplicaID and returns the inserted ReplicaDescriptor.
 func (r *RangeDescriptor) AddReplica(
@@ -240,16 +212,11 @@ func (r *RangeDescriptor) AddReplica(
 	if typ != VOTER_FULL {
 		typPtr = &typ
 	}
-	tag := DEFAULT_REPLICA
-	if r.GetRangeType() == TS_RANGE {
-		tag = TS_REPLICA
-	}
 	toAdd := ReplicaDescriptor{
 		NodeID:    nodeID,
 		StoreID:   storeID,
 		ReplicaID: r.NextReplicaID,
 		Type:      typPtr,
-		Tag:       &tag,
 	}
 	rs := r.Replicas()
 	rs.AddReplica(toAdd)
@@ -409,11 +376,6 @@ func (r ReplicaDescriptor) String() string {
 	if typ := r.GetType(); typ != VOTER_FULL {
 		buf.WriteString(typ.String())
 	}
-
-	if r.GetTag() == TS_REPLICA {
-		buf.WriteString("-TS_REPLICA")
-	}
-
 	return buf.String()
 }
 
@@ -429,14 +391,6 @@ func (r ReplicaDescriptor) Validate() error {
 		return errors.Errorf("ReplicaID must not be zero")
 	}
 	return nil
-}
-
-// GetTag get replica tag
-func (r ReplicaDescriptor) GetTag() ReplicaTag {
-	if r.Tag == nil {
-		return DEFAULT_REPLICA
-	}
-	return *r.Tag
 }
 
 // GetType returns the type of this ReplicaDescriptor.

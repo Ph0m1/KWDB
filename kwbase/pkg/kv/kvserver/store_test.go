@@ -3323,7 +3323,7 @@ func TestUpdateNodeReplicas(t *testing.T) {
 		{add: false, rangeID: 3, isTs: true, combineEnabled: true, hasTsFlushedIndex: true, replicaChange: -1},
 	}
 
-	tsTag := roachpb.TS_REPLICA
+	tsRange := roachpb.TS_RANGE
 	s.Ident = &roachpb.StoreIdent{StoreID: 1}
 	for i, c := range testCases {
 		var r Replica
@@ -3334,7 +3334,7 @@ func TestUpdateNodeReplicas(t *testing.T) {
 			InternalReplicas: []roachpb.ReplicaDescriptor{{StoreID: s.StoreID()}},
 		}
 		if c.isTs {
-			r.mu.state.Desc.InternalReplicas[0].Tag = &tsTag
+			r.mu.state.Desc.RangeType = &tsRange
 		}
 		if c.combineEnabled {
 			tse.TsRaftLogCombineWAL.Override(&s.ClusterSettings().SV, true)
