@@ -34,7 +34,7 @@ SortScanOperator::SortScanOperator(const SortScanOperator& other,
 
 SortScanOperator::~SortScanOperator() {
   if (is_offset_opt_) {
-    SafeDeletePointer(tmp_renders_);
+    SafeFreePointer(tmp_renders_);
     SafeDeletePointer(new_field_);
     SafeDeleteArray(tmp_output_col_info_)
   }
@@ -245,7 +245,7 @@ EEIteratorErrCode SortScanOperator::mallocTempField(kwdbContext_p ctx) {
 
   new_field_ = table_->GetFieldWithColNum(0)->field_to_copy();
   if (nullptr == new_field_) {
-    SafeDeletePointer(tmp_renders_);
+    SafeFreePointer(tmp_renders_);
     Return(EEIteratorErrCode::EE_ERROR);
   }
   new_field_->set_num(output_fields_.size());
@@ -255,7 +255,7 @@ EEIteratorErrCode SortScanOperator::mallocTempField(kwdbContext_p ctx) {
 
   EEIteratorErrCode code = InitTmpOutputColInfo(ctx);
   if (EEIteratorErrCode::EE_ERROR == code) {
-    SafeDeletePointer(tmp_renders_);
+    SafeFreePointer(tmp_renders_);
     SafeDeletePointer(new_field_);
   }
 

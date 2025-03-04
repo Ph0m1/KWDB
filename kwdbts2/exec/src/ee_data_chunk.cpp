@@ -856,7 +856,7 @@ KStatus DataChunk::PgResultData(kwdbContext_p ctx, k_uint32 row, const EE_String
       } break;
       case KWDBTypeFamily::TimestampFamily:
       case KWDBTypeFamily::TimestampTZFamily: {
-        char ts_format_buf[32] = {0};
+        char ts_format_buf[64] = {0};
         // format timestamps as strings
         k_int64 val;
         DatumPtr raw = GetData(row, col);
