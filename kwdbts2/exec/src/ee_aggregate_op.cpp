@@ -428,7 +428,13 @@ KStatus BaseAggregator::ResolveAggFuncs(kwdbContext_p ctx) {
         } else if (agg.col_idx_size() > 0) {
           TSAggregatorSpec_Expression a = agg.arguments(0);
           string s = *a.mutable_expr();
-          const_val = atof(s.substr(0, s.find_first_of(":::")).c_str());
+          if (s.find_first_of("(") == string::npos) {
+            const_val = atof(s.substr(0, s.find_first_of(":::")).c_str());
+          } else {
+            size_t begin = s.find_first_of("(");
+            size_t end = s.find_first_of(")");
+            const_val = atof(s.substr(begin + 1, end - 1).c_str());
+          }
           storage_type = roachpb::DataType::DOUBLE;
         }
 
