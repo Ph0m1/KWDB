@@ -355,7 +355,7 @@ bool TsTimePartition::JoinOtherPartitionTable(TsTimePartition* other) {
     std::string  new_segment_path = this->GetPath() + intToString(this_p_header->cur_block_id + other_segment_ids[i]);
     std::string cmd = "mv " + other_segment_path + " " + new_segment_path;
     ErrorInfo err_info;
-    if (!System(cmd, err_info)) {
+    if (!System(cmd, true, err_info)) {
       LOG_ERROR("exec [%s] failed.", cmd.c_str());
       return false;
     }

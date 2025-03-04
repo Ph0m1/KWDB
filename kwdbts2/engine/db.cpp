@@ -102,21 +102,14 @@ TSStatus TSOpen(TSEngine** engine, TSSlice dir, TSOptions options,
 
   // check mksquashfs & unsquashfs
   std::string cmd = "which mksquashfs > /dev/null 2>&1";
-  int try_times = 5;
-  while (!System(cmd)) {
-    if (try_times-- < 0) {
-      cerr << "mksquashfs is not installed, please install squashfs-tools\n";
-      return ToTsStatus("mksquashfs is not installed, please install squashfs-tools");
-    }
-    sleep(1);
+  if (!System(cmd, false)) {
+    cerr << "mksquashfs is not installed, please install squashfs-tools\n";
+    return ToTsStatus("mksquashfs is not installed, please install squashfs-tools");
   }
   cmd = "which unsquashfs > /dev/null 2>&1";
-  while (!System(cmd)) {
-    if (try_times-- < 0) {
-      cerr << "unsquashfs is not installed, please install squashfs-tools\n";
-      return ToTsStatus("unsquashfs is not installed, please install squashfs-tools");
-    }
-    sleep(1);
+  if (!System(cmd, false)) {
+    cerr << "unsquashfs is not installed, please install squashfs-tools\n";
+    return ToTsStatus("unsquashfs is not installed, please install squashfs-tools");
   }
 
   InitCompressInfo(opts.db_path);

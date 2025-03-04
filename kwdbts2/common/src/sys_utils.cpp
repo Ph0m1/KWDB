@@ -109,22 +109,22 @@ std::time_t ModifyTime(const std::string& filePath) {
   return fileInfo.st_mtime;
 }
 
-bool System(const string& cmd, ErrorInfo& error_info) {
-  LOG_INFO("System() begin, cmd: [%s]", cmd.c_str());
+bool System(const string& cmd, bool print_log, ErrorInfo& error_info) {
   int status = system(cmd.c_str());
   if (WIFEXITED(status)) {
     auto exit_code = WEXITSTATUS(status);
     if (exit_code == 0) {
-      LOG_INFO("System() success, cmd: [%s]", cmd.c_str());
+      if (print_log) {
+        LOG_INFO("system() success, cmd: [%s]", cmd.c_str());
+      }
       return true;
     }
     if (exit_code == 1) {
-      LOG_WARN("system(%s) exit code is not 0: status[%d], exit_code[%d], errno[%d], strerror[%s]",
+      LOG_WARN("system() success, cmd[%s], status[%d], exit_code[%d], errno[%d], strerror[%s]",
                cmd.c_str(), status, exit_code, errno, strerror(errno));
-      LOG_INFO("System() success, cmd: [%s]", cmd.c_str());
       return true;
     }
-    LOG_ERROR("system(%s) failed: status[%d], exit_code[%d], errno[%d], strerror[%s]",
+    LOG_ERROR("system() failed: cmd[%s], status[%d], exit_code[%d], errno[%d], strerror[%s]",
               cmd.c_str(), status, exit_code, errno, strerror(errno));
     return false;
   }
@@ -140,7 +140,7 @@ bool System(const string& cmd, ErrorInfo& error_info) {
   cerr << msg << std::endl;
   error_info.errcode = errnumToErrorCode(errno);
   error_info.errmsg = strerror(errno);
-  LOG_ERROR("system(%s) failed: errno[%d], strerror[%s]", cmd.c_str(), errno, error_info.errmsg.c_str());
+  LOG_ERROR("system() failed: cmd[%s], errno[%d], strerror[%s]", cmd.c_str(), errno, error_info.errmsg.c_str());
   return false;
 }
 
@@ -152,7 +152,7 @@ bool CopyDirectory(std::vector<string>& src_path, const string& dst_path, ErrorI
       mv_cmd += " -r ";
     }
     mv_cmd = mv_cmd + src_path[i] + " " + dst_path;
-    if (!System(mv_cmd, error_info)) {
+    if (!System(mv_cmd, true, error_info)) {
       return false;
     }
   }
@@ -167,11 +167,11 @@ bool ChangeDirLink(string link_path, string new_path, ErrorInfo& error_info) {
     new_path = new_path.substr(0, new_path.length() - 1);
   }
   std::string link_rm_cmd = "mv " + link_path + " " + link_path + "_tmp";
-  if (System(link_rm_cmd, error_info)) {
+  if (System(link_rm_cmd, true, error_info)) {
     std::string link_cmd = "ln -s " + new_path + " " + link_path;
-    if (System(link_cmd, error_info)) {
+    if (System(link_cmd, true, error_info)) {
       std::string link_rm_cmd = "rm " + link_path + "_tmp";
-      System(link_rm_cmd, error_info);
+      System(link_rm_cmd, true, error_info);
       return true;
     } else {
       System("mv " + link_path + "_tmp " + link_path);

@@ -181,7 +181,7 @@ class SubEntityGroupManager : public TSObject {
   // Referenced from the root table manager under the directory of the time series table
   MMapRootTableManager*& root_table_manager_;
 
-  SubGroupID max_subgroup_id_ = 1;
+  SubGroupID max_subgroup_id_ = 0;
   // Record the maximum addable device subgroup id
   SubGroupID max_active_subgroup_id_ = 1;
   map<SubGroupID , TsSubEntityGroup*> subgroups_;

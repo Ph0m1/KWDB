@@ -2428,7 +2428,6 @@ KStatus TsTable::GetOffsetIterator(kwdbContext_p ctx, const std::vector<EntityRe
   }
 
   DATATYPE ts_col_type = GetRootTableManager()->GetTsColDataType();
-  k_uint32 max_subgroup_id = entity_groups_.begin()->second->GetSubGroupNum();
   KStatus s = entity_groups_.begin()->second->GetOffsetIterator(ctx, subgroup_ids, ts_spans, ts_col_type,
                                                                 scan_cols, ts_scan_cols, table_version,
                                                                 iter, entity_groups_.begin()->second,
