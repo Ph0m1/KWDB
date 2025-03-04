@@ -438,9 +438,9 @@ class DataChunk : public IChunk {
  protected:
   bool is_data_owner_{true};
   char* data_{nullptr};  // Multiple rows of column data（not tag）
-  ColumnInfo *col_info_;  // column info
-  k_uint32 *col_offset_;  // column offset
-  k_uint32 *bitmap_offset_;  // bitmap offset
+  ColumnInfo *col_info_{nullptr};  // column info
+  k_uint32 *col_offset_{nullptr};  // column offset
+  k_uint32 *bitmap_offset_{nullptr};  // bitmap offset
 
   k_uint32 capacity_{0};     // data capacity
   k_uint32 count_{0};        // total number
