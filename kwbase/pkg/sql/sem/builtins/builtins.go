@@ -4671,6 +4671,9 @@ may increase either contention or retry errors, or both.`,
 				if err != nil {
 					return &tree.DTimestamp{}, err
 				}
+				if sliding.Months != 0 {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "sliding time does not support month/year")
+				}
 				if dur.Duration.Sub(sliding.Duration).AsFloat64() < 0 {
 					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "sliding time value no larger than the duration value.")
 				}
@@ -4710,6 +4713,9 @@ may increase either contention or retry errors, or both.`,
 				sliding, err := GetTimeInterval(args[2])
 				if err != nil {
 					return &tree.DTimestampTZ{}, err
+				}
+				if sliding.Months != 0 {
+					return &tree.DTimestamp{}, pgerror.New(pgcode.InvalidParameterValue, "sliding time does not support month/year")
 				}
 				if dur.Duration.Sub(sliding.Duration).AsFloat64() < 0 {
 					return &tree.DTimestampTZ{}, pgerror.New(pgcode.InvalidParameterValue, "sliding time value no larger than the duration value.")
