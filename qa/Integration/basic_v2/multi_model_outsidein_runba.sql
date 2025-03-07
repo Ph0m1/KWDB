@@ -1908,7 +1908,7 @@ ORDER BY
 -- Q22
 explain SELECT
     COUNT(*),
-    AVG(opcdata."value"),
+    ROUND(AVG(opcdata."value"),2),
     last(opcdata."value")
 FROM
     runba.opcdata449600 opcdata,
@@ -1922,7 +1922,7 @@ WHERE
 
 SELECT
     COUNT(*),
-    AVG(opcdata."value"),
+    ROUND(AVG(opcdata."value"),2),
     last(opcdata."value")
 FROM
     runba.opcdata449600 opcdata,

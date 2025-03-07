@@ -2144,7 +2144,7 @@ ORDER BY
 (2 rows)
 > explain SELECT
     COUNT(*),
-    AVG(opcdata."value"),
+    ROUND(AVG(opcdata."value"),2),
     last(opcdata."value")
 FROM
     runba.opcdata449600 opcdata,
@@ -2155,37 +2155,38 @@ WHERE
     AND opcdata."time" > '2023-05-29 10:10:10'
     AND opcdata."time" <= '2024-05-29 16:10:10'
     AND pzm.contract_email = 'ningmeng0823@hotmail.com';
-           tree          |      field       |                 description
--------------------------+------------------+----------------------------------------------
-                         | distributed      | false
-                         | vectorized       | false
-  batch-lookup-join      |                  |
-   │                     | type             | inner
-   │                     | equality         | ("tag", company_id) = ("tag", companyid)
-   ├── scan              |                  |
-   │                     | table            | plat_zone_member@primary
-   │                     | spans            | FULL SCAN
-   │                     | filter           | contract_email = 'ningmeng0823@hotmail.com'
-   └── group             |                  |
-        │                | engine type      | time series
-        │                | aggregate 0      | count_rows()
-        │                | aggregate 1      | avg(value)
-        │                | aggregate 2      | last(value, time)
-        │                | scalar           |
-        │                | addSynchronizer  | true
-        └── render       |                  |
-             │           | engine type      | time series
-             │           | time             | "time"
-             │           | value            | value
-             └── ts scan |                  |
-                         | ts-table         | opcdata449600
-                         | access mode      | hashRelScan
-                         | spans:fromTime   | 2023-05-29 10:10:10.001 +0000 UTC
-                         | spans:toTime     | 2024-05-29 16:10:10 +0000 UTC
-(25 rows)
+             tree             |      field       |                 description
+------------------------------+------------------+----------------------------------------------
+                              | distributed      | false
+                              | vectorized       | false
+  render                      |                  |
+   └── batch-lookup-join      |                  |
+        │                     | type             | inner
+        │                     | equality         | ("tag", company_id) = ("tag", companyid)
+        ├── scan              |                  |
+        │                     | table            | plat_zone_member@primary
+        │                     | spans            | FULL SCAN
+        │                     | filter           | contract_email = 'ningmeng0823@hotmail.com'
+        └── group             |                  |
+             │                | engine type      | time series
+             │                | aggregate 0      | count_rows()
+             │                | aggregate 1      | avg(value)
+             │                | aggregate 2      | last(value, time)
+             │                | scalar           |
+             │                | addSynchronizer  | true
+             └── render       |                  |
+                  │           | engine type      | time series
+                  │           | time             | "time"
+                  │           | value            | value
+                  └── ts scan |                  |
+                              | ts-table         | opcdata449600
+                              | access mode      | hashRelScan
+                              | spans:fromTime   | 2023-05-29 10:10:10.001 +0000 UTC
+                              | spans:toTime     | 2024-05-29 16:10:10 +0000 UTC
+(26 rows)
 > SELECT
     COUNT(*),
-    AVG(opcdata."value"),
+    ROUND(AVG(opcdata."value"),2),
     last(opcdata."value")
 FROM
     runba.opcdata449600 opcdata,
@@ -2196,9 +2197,9 @@ WHERE
     AND opcdata."time" > '2023-05-29 10:10:10'
     AND opcdata."time" <= '2024-05-29 16:10:10'
     AND pzm.contract_email = 'ningmeng0823@hotmail.com';
-  count |        avg         |   last
---------+--------------------+-----------
-     10 | 1714.9774000000002 | 1716.345
+  count |  round  |   last
+--------+---------+-----------
+     10 | 1714.98 | 1716.345
 (1 row)
 > explain select * from (
    SELECT
