@@ -46,6 +46,7 @@ class TestEngine : public TestBigTableInstance {
     KStatus s = TSEngineImpl::OpenTSEngine(ctx_, kDbPath, opts_, &ts_engine_);
     g_engine_initialized = true;
     g_go_start_service = false;
+    g_compression.compression_type = kwdbts::CompressionType::GZIP;
     EXPECT_EQ(s, KStatus::SUCCESS);
   }
 
@@ -669,7 +670,7 @@ TEST_F(TestEngine, CompressTsTable) {
   }
 
   // Compress 360000 and 720000 partitions
-  g_compression.compression_type = kwdbts::CompressionType::ZSTD;
+  g_compression.compression_type = kwdbts::CompressionType::GZIP;
   g_compression.compression_level = kwdbts::CompressionLevel::LOW;
   ASSERT_EQ(ts_table->Compress(ctx_, 3 * kwdbts::EngineOptions::iot_interval, compressed_num, err_info), KStatus::SUCCESS);
   // Data check
