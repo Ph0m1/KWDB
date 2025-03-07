@@ -43,6 +43,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sessiondata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/stats"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"github.com/cockroachdb/errors"
 	"github.com/shirou/gopsutil/mem"
@@ -2089,49 +2090,13 @@ func (m *Memo) checkGroupBy(
 		}
 	}
 
-	aggExecParallel := false
-
 	m.checkOptTimeBucketFlag(input, &ret.commonRet.canTimeBucketOptimize)
 
 	if ret.commonRet.execInTSEngine {
-		// check if group cols can execute in ts engine
-		ret.commonRet.execInTSEngine = m.checkGrouping(gp.GroupingCols, &ret.commonRet.canTimeBucketOptimize)
-		if ret.commonRet.execInTSEngine {
-			// case: child of memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr and group cols can execute in ts engine
-			// then check if the aggs can execute in ts engine
-			for i := 0; i < len(*aggs); i++ {
-				srcExpr := (*aggs)[i].Agg
-				hashCode := GetExprHash(srcExpr)
-
-				// In distributed mode, pushing down twa and elapsed is not supported.
-				if m.checkTwaAndElapsedOps(gp.GroupingCols, srcExpr, &ret) {
-					return ret
-				}
-
-				// first: check if child of agg can execute in ts engine.
-				// second: check if agg itself can execute in ts engine.
-				if !m.CheckChildExecInTS(srcExpr, hashCode) ||
-					!m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList) {
-					if !ret.commonRet.hasAddSynchronizer {
-						m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
-					}
-
-					ret.commonRet = ret.commonRet.disableExecInTSEngine()
-					return ret
-				}
-				m.AddColumn((*aggs)[i].Col, "", ExprTypeAggOp, ExprPosGroupBy, hashCode, false)
-				var aggWithDistinct bool
-				aggExecParallel, aggWithDistinct = checkParallelAgg((*aggs)[i].Agg)
-				if aggWithDistinct {
-					ret.hasDistinct = true
-					ret.commonRet.canTimeBucketOptimize = false
-					aggExecParallel = false
-				}
-				ret.isParallel = ret.isParallel && aggExecParallel
-			}
-		}
-
-		return ret
+		return m.checkGroupingAndAgg(ret, input, aggs, gp)
+	}
+	if opt.CheckOptMode(m.tsQueryOptMode, opt.OutsideInUseCBO) && !ret.commonRet.execInTSEngine {
+		m.checkApplyOutsideIn(input, gp, aggs)
 	}
 
 	ret.commonRet.execInTSEngine = false
@@ -2386,6 +2351,10 @@ func (m *Memo) checkDiffCanExecInAE(source *WindowExpr) bool {
 // pTagCount is the PTagCount of memo.TSScanExpr.
 // allColsWidth is width of all columns.
 func (m *Memo) CalculateDop(rowCount float64, pTagCount float64, allColsWidth uint32) {
+	if m.tsDop > 0 {
+		// already setted by cluster setting.
+		return
+	}
 	var parallelNum uint32
 
 	// Gets the number of cores for the cpu
@@ -2623,4 +2592,149 @@ func CheckGroupWindowExist(expr opt.Expr) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// checkApplyOutsideIn checks if agg can apply outside-in.
+// 1. child of GroupByExpr is ProjectionExpr and it can not execute in AE, agg can not apply outside-in.
+// 2. the datType and dataLength of cols of grouping can not meet the conditions, agg can not apply outside-in.
+// 3. the datType of child of agg function can not meet the conditions or agg function can not execute in AE, agg can not apply outside-in.
+func (m *Memo) checkApplyOutsideIn(input RelExpr, gp *GroupingPrivate, aggs *AggregationsExpr) {
+	if projectExpr, ok := input.(*ProjectExpr); ok {
+		for _, proj := range projectExpr.Projections {
+			if element, ok := proj.Element.(opt.Expr); ok {
+				if execInTSEngine, _ := CheckExprCanExecInTSEngine(element, ExprPosProjList,
+					m.GetWhiteList().CheckWhiteListParam, false, false); !execInTSEngine {
+					gp.CanApplyOutsideIn = false
+					return
+				}
+			}
+		}
+	}
+
+	// check data types of grouping cols
+	gp.GroupingCols.ForEach(func(col opt.ColumnID) {
+		if !CheckDataType(m.metadata.ColumnMeta(col).Type) ||
+			!CheckDataLength(m.metadata.ColumnMeta(col).Type) {
+			gp.CanApplyOutsideIn = false
+			return
+		}
+	})
+
+	for i := 0; i < len(*aggs); i++ {
+		srcExpr := (*aggs)[i].Agg
+		hashCode := GetExprHash(srcExpr)
+
+		// first: check type of child of agg can execute in ts engine.
+		// second: check if agg itself can execute in ts engine.
+		for i := 0; i < srcExpr.ChildCount(); i++ {
+			if scalarExpr, ok := srcExpr.Child(i).(opt.ScalarExpr); ok {
+				if !CheckDataType(scalarExpr.DataType()) {
+					gp.CanApplyOutsideIn = false
+					return
+				}
+			}
+		}
+		if !m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList) {
+			gp.CanApplyOutsideIn = false
+			return
+		}
+	}
+	gp.CanApplyOutsideIn = true
+	return
+}
+
+// CheckDataType determines if a given data type (typ) is supported by the time-series engine.
+// for multiple model processing
+func CheckDataType(typ *types.T) bool {
+	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
+		return false
+	}
+	switch typ.Name() {
+	case "timestamp", "int2", "int4", "int", "float4", "float", "bool", "char", "nchar", "varchar", "nvarchar", "varbytes", "timestamptz":
+		return true
+	default:
+		return false
+	}
+}
+
+// CheckDataLength determines if the length of a given column is supported by the time-series engine.
+// for multiple model processing
+func CheckDataLength(typ *types.T) bool {
+	storageType := sqlbase.GetTSDataType(typ)
+	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
+		return false
+	}
+	typeWidth := typ.Width()
+	if storageType == sqlbase.DataType_CHAR || storageType == sqlbase.DataType_NVARCHAR {
+		typeWidth = typ.Width() * 4
+	}
+	switch storageType {
+	case sqlbase.DataType_CHAR, sqlbase.DataType_NCHAR:
+		if typeWidth >= sqlbase.TSMaxFixedLen {
+			return false
+		}
+	case sqlbase.DataType_BYTES:
+		if typeWidth >= sqlbase.TSMaxFixedLen {
+			return false
+		}
+	case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR:
+		if typeWidth > sqlbase.TSMaxVariableLen {
+			return false
+		}
+	case sqlbase.DataType_VARBYTES:
+		if typeWidth > sqlbase.TSMaxVariableLen {
+			return false
+		}
+	}
+	return true
+}
+
+// checkGroupingAndAgg checks if grouping and aggs can execute in ts engine.
+// ret: result of check of child of GroupByExpr.
+// input is the child of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr) of memo tree.
+// aggs is the AggregationsExpr of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
+// gp is the GroupingPrivate of (memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr).
+func (m *Memo) checkGroupingAndAgg(
+	ret aggCrossEngCheckResults, input RelExpr, aggs *AggregationsExpr, gp *GroupingPrivate,
+) aggCrossEngCheckResults {
+	aggExecParallel := false
+
+	// check if group cols can execute in ts engine
+	ret.commonRet.execInTSEngine = m.checkGrouping(gp.GroupingCols, &ret.commonRet.canTimeBucketOptimize)
+	if ret.commonRet.execInTSEngine {
+		// case: child of memo.GroupByExpr or memo.ScalarGroupByExpr or memo.DistinctOnExpr and group cols can execute in ts engine
+		// then check if the aggs can execute in ts engine
+		for i := 0; i < len(*aggs); i++ {
+			srcExpr := (*aggs)[i].Agg
+			hashCode := GetExprHash(srcExpr)
+
+			// In distributed mode, pushing down twa and elapsed is not supported.
+			if m.checkTwaAndElapsedOps(gp.GroupingCols, srcExpr, &ret) {
+				return ret
+			}
+
+			// first: check if child of agg can execute in ts engine.
+			// second: check if agg itself can execute in ts engine.
+			if !m.CheckChildExecInTS(srcExpr, hashCode) ||
+				!m.CheckHelper.whiteList.CheckWhiteListParam(hashCode, ExprPosProjList) {
+				if !ret.commonRet.hasAddSynchronizer {
+					m.setSynchronizerForChild(input, &ret.commonRet.hasAddSynchronizer)
+				}
+
+				ret.commonRet = ret.commonRet.disableExecInTSEngine()
+				return ret
+			}
+			m.AddColumn((*aggs)[i].Col, "", ExprTypeAggOp, ExprPosGroupBy, hashCode, false)
+			var aggWithDistinct bool
+			aggExecParallel, aggWithDistinct = checkParallelAgg((*aggs)[i].Agg)
+			if aggWithDistinct {
+				ret.hasDistinct = true
+				ret.commonRet.canTimeBucketOptimize = false
+				aggExecParallel = false
+			}
+			ret.isParallel = ret.isParallel && aggExecParallel
+		}
+	}
+
+	return ret
 }

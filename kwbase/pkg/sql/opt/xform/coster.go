@@ -591,7 +591,7 @@ func (c *coster) computeBatchLoopUpJoinCost(join memo.RelExpr) memo.Cost {
 		relationalRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
 		tsRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
 	}
-	if tsRowCount/relationalRowCount < 100 {
+	if tsRowCount/relationalRowCount < 10 {
 		return hugeCost
 	}
 
@@ -614,7 +614,13 @@ func (c *coster) computeBatchLoopUpJoinCost(join memo.RelExpr) memo.Cost {
 		// of rows.
 		rowsProcessed = join.Relational().Stats.RowCount
 	}
-	cost += memo.Cost(rowsProcessed)*cpuCostFactor + memo.Cost(1.25*rowsProcessed*cpuCostFactor)
+
+	// By default, use outside-in, the input of join for inside-out will be reduced
+	// by 10 times, and similarly, the input for outside-in will also be reduced by 10 times
+	// todu: due to inaccurate statistical information, the number of rows pulled by BLJ is
+	// temporarily not included in the cost
+	rowsProcessed /= 10
+	cost += memo.Cost(rowsProcessed) * cpuCostFactor
 
 	return cost
 }
@@ -806,13 +812,22 @@ func (c *coster) computeGroupingCost(grouping memo.RelExpr, required *physical.R
 
 	var insideoutCostFactor memo.Cost = 1.0
 	if private.IsInsideOut {
-		// need to adjust cost of GroupBy or ScalarGroupBy in order to choose inside-out.
-		factor := grouping.Relational().Stats.RowCount / inputRowCount
-		insideoutCostFactor = memo.Cost(factor)
-		if log.V(3) {
-			log.Infof(context.Background(),
-				"computeGroupingCost during inside-out, output rows of group is %v, input rows of group is %v, cost of group is %v",
-				grouping.Relational().Stats.RowCount, inputRowCount, cost*insideoutCostFactor)
+		if grouping.Relational().Stats.Available {
+			tsDop := c.mem.GetTsDop()
+			if tsDop > 0 && tsDop < 8 {
+				insideoutCostFactor = memo.Cost(1.0 / c.mem.GetTsDop())
+			} else {
+				insideoutCostFactor = memo.Cost(1.0 / 8)
+			}
+		} else {
+			// need to adjust cost of GroupBy or ScalarGroupBy in order to choose inside-out.
+			factor := grouping.Relational().Stats.RowCount / inputRowCount
+			insideoutCostFactor = memo.Cost(factor)
+			if log.V(3) {
+				log.Infof(context.Background(),
+					"computeGroupingCost during inside-out, output rows of group is %v, input rows of group is %v, cost of group is %v",
+					grouping.Relational().Stats.RowCount, inputRowCount, cost*insideoutCostFactor)
+			}
 		}
 	}
 

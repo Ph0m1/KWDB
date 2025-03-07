@@ -2361,7 +2361,6 @@ func (c *CustomFuncs) NoJoinManipulation(left, right memo.RelExpr) bool {
 	// Check if the left or right expression is a relational table, when multiple model
 	// query processing is enabled and the current query is a multi-model query.
 	if c.e.evalCtx.SessionData.MultiModelEnabled &&
-		!opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.e.evalCtx.Settings.SV), opt.OutsideInUseCBO) &&
 		(left.Memo().QueryType == memo.MultiModel ||
 			right.Memo().QueryType == memo.MultiModel) {
 		switch lchild := left.FirstExpr().(type) {
@@ -2461,6 +2460,95 @@ func (c *CustomFuncs) NoLookupJoinManipulation(left memo.RelExpr) bool {
 				}
 			}
 		}
+	}
+	if opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.e.evalCtx.Settings.SV), opt.OutsideInUseCBO) {
+		if checkChildCanApplyOutsideIn(left) {
+			return false
+		}
+
+	}
+	return true
+}
+
+// NoMergeManipulation returns whether the join has alternatives.
+// In multiple model query processing, when the join happens between a
+// relational table group and a timeseries table, set the plan mode based on the analysis result
+// and do not proceed with further join manipulations.
+func (c *CustomFuncs) NoMergeManipulation(left, right memo.RelExpr) bool {
+	// Check if the left or right expression is a relational table, when multiple model
+	// query processing is enabled and the current query is a multi-model query.
+	if c.e.evalCtx.SessionData.MultiModelEnabled &&
+		(left.Memo().QueryType == memo.MultiModel ||
+			right.Memo().QueryType == memo.MultiModel) {
+		switch lchild := left.FirstExpr().(type) {
+		case *memo.TSScanExpr:
+			if ret := c.SetPlanMode(left, right, lchild, nil); !ret {
+				break
+			}
+			return false
+		case *memo.SelectExpr:
+			switch lgchild := lchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, right, lgchild, lchild); !ret {
+					break
+				}
+				return false
+			}
+		case *memo.ProjectExpr:
+			switch lgchild := lchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, right, lgchild, nil); !ret {
+					break
+				}
+				return false
+			case *memo.SelectExpr:
+				switch lggchild := lgchild.Child(0).(type) {
+				case *memo.TSScanExpr:
+					if ret := c.SetPlanMode(left, right, lggchild, lgchild); !ret {
+						break
+					}
+					return false
+				}
+			}
+		}
+		switch rchild := right.FirstExpr().(type) {
+		case *memo.TSScanExpr:
+			if ret := c.SetPlanMode(left, left, rchild, nil); !ret {
+				break
+			}
+			return false
+		case *memo.SelectExpr:
+			switch rgchild := rchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, left, rgchild, rchild); !ret {
+					break
+				}
+				return false
+			}
+		case *memo.ProjectExpr:
+			switch rgchild := rchild.Child(0).(type) {
+			case *memo.TSScanExpr:
+				if ret := c.SetPlanMode(left, left, rgchild, nil); !ret {
+					break
+				}
+				return false
+			case *memo.SelectExpr:
+				switch rggchild := rgchild.Child(0).(type) {
+				case *memo.TSScanExpr:
+					if ret := c.SetPlanMode(left, left, rggchild, rgchild); !ret {
+						break
+					}
+					return false
+				}
+			}
+		}
+	}
+
+	if opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.e.evalCtx.Settings.SV), opt.OutsideInUseCBO) {
+		if checkChildCanApplyOutsideIn(left) || checkChildCanApplyOutsideIn(right) {
+			return false
+		}
+
 	}
 	return true
 }
@@ -3007,12 +3095,36 @@ func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.Filter
 		return false
 	}
 
+	lRowCount := left.Relational().Stats.RowCount
+	rRowCount := right.Relational().Stats.RowCount
+	if lok {
+		if rRowCount > lRowCount {
+			c.e.mem.QueryType = memo.Unset
+			return false
+		}
+		if left.FirstExpr().Relational().Stats.Selectivity*ffCompFactor < right.FirstExpr().Relational().Stats.Selectivity {
+			c.e.mem.QueryType = memo.Unset
+			return false
+		}
+	} else {
+		if rRowCount < lRowCount {
+			c.e.mem.QueryType = memo.Unset
+			return false
+		}
+		if right.FirstExpr().Relational().Stats.Selectivity*ffCompFactor < left.FirstExpr().Relational().Stats.Selectivity {
+			c.e.mem.QueryType = memo.Unset
+			return false
+		}
+	}
+
 	// on filter can not be orExpr, and operator can only be =,<,<=,>,>=,
 	// and child of operator must be relational column and tag column
 	for _, jp := range on {
 		if _, ok := jp.Condition.(*memo.OrExpr); ok {
+			c.e.mem.QueryType = memo.Unset
 			return false
 		} else if c.e.mem.IsTsColsJoinPredicate(jp) {
+			c.e.mem.QueryType = memo.Unset
 			return false
 		}
 	}
@@ -3074,6 +3186,9 @@ func (c *CustomFuncs) precheckInsideOutOptApplicable(
 ) (bool, *memo.InnerJoinExpr) {
 	// could not opt inside-out when sql.inside_out.enabled is false
 	if !opt.CheckOptMode(opt.TSQueryOptMode.Get(c.GetSettingValues()), opt.JoinPushAgg) {
+		return false, nil
+	}
+	if c.e.mem.QueryType == memo.MultiModel {
 		return false, nil
 	}
 

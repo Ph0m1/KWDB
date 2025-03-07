@@ -434,7 +434,7 @@ func (opc *optPlanningCtx) InitTS(ctx context.Context) {
 	}
 
 	// init degree of parallelism
-	m.SetTsDop(0)
+	m.SetTsDop(uint32(opt.TSParallelDegree.Get(sv)))
 
 	// init CheckHelper
 	m.InitCheckHelper(opc.p.ExecCfg().TSWhiteListMap)

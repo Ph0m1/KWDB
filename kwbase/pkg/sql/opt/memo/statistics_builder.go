@@ -1827,10 +1827,10 @@ func (sb *statisticsBuilder) buildGroupBy(
 					if gp.IsInsideOut {
 						rowRatio := sb.evalCtx.SessionData.InsideOutRowRatio
 						if relProps.Stats.Available {
-							if sb.evalCtx.SessionData.NeedControlIndideOut {
-								// has statistic case, and statistical information is inaccurate.
-								s.RowCount = inputStats.RowCount * (1 - rowRatio)
-							}
+							//if sb.evalCtx.SessionData.NeedControlIndideOut {
+							// has statistic case, and statistical information is inaccurate.
+							s.RowCount = inputStats.RowCount * (1 - rowRatio)
+							//}
 						} else {
 							// default statistic case.
 							s.RowCount = inputStats.RowCount * (1 - rowRatio)
@@ -2833,6 +2833,8 @@ func (sb *statisticsBuilder) rowsProcessed(e RelExpr) float64 {
 				e = e.Memo().MemoizeRightJoin(t.Left, t.Right, on, &t.JoinPrivate)
 			case *FullJoinExpr:
 				e = e.Memo().MemoizeFullJoin(t.Left, t.Right, on, &t.JoinPrivate)
+			case *BatchLookUpJoinExpr:
+				e = e.Memo().MemoizeBatchLookUpJoin(t.Left, t.Right, on, &t.JoinPrivate)
 			default:
 				panic(errors.AssertionFailedf("join type %v not handled", log.Safe(e.Op())))
 			}

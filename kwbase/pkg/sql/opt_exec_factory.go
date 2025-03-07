@@ -42,7 +42,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec/execbuilder"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/xform"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/row"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/rowexec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/builtins"
@@ -3094,7 +3093,7 @@ func (ef *execFactory) ProcessBljLeftColumns(
 	varPos := 0
 	for _, col := range columns {
 		colType := col.Typ
-		if !xform.CheckDataType(colType) {
+		if !memo.CheckDataType(colType) {
 			if colType.Name() == "text" || colType.Name() == "string" {
 			} else {
 				fb = true

@@ -2098,7 +2098,7 @@ func (h *joinPropsHelper) setFuncDeps(rel *props.Relational) {
 		notNullInputCols := h.leftProps.NotNullCols.Union(h.rightProps.NotNullCols)
 
 		switch h.joinType {
-		case opt.InnerJoinOp, opt.InnerJoinApplyOp:
+		case opt.InnerJoinOp, opt.InnerJoinApplyOp, opt.BatchLookUpJoinOp:
 			// Add FDs from the ON predicate, which include equivalent columns and
 			// constant columns.
 			rel.FuncDeps.AddFrom(&h.filtersFD)

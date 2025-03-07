@@ -38,8 +38,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
-	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/errorutil"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
@@ -1680,8 +1678,8 @@ func processGroupByOrScalarGroupByExpr(expr memo.RelExpr, mem *memo.Memo) {
 	// check data types of grouping cols
 	groupingCols := expr.Private().(*memo.GroupingPrivate).GroupingCols
 	groupingCols.ForEach(func(col opt.ColumnID) {
-		if !CheckDataType(metaData.ColumnMeta(col).Type) ||
-			!checkDataLength(metaData.ColumnMeta(col).Type) {
+		if !memo.CheckDataType(metaData.ColumnMeta(col).Type) ||
+			!memo.CheckDataLength(metaData.ColumnMeta(col).Type) {
 			tableID := metaData.ColumnMeta(col).Table
 			if tableID == 0 {
 				if projectExpr, ok := expr.Child(0).(*memo.ProjectExpr); ok {
@@ -1779,7 +1777,7 @@ func processGroupByOrScalarGroupByExpr(expr memo.RelExpr, mem *memo.Memo) {
 
 		for i := 0; i < agg.Child(0).ChildCount(); i++ {
 			if scalarExpr, ok := agg.Child(0).Child(i).(opt.ScalarExpr); ok {
-				if !CheckDataType(scalarExpr.DataType()) {
+				if !memo.CheckDataType(scalarExpr.DataType()) {
 					if groupIndex >= 0 && !mem.MultimodelHelper.AggNotPushDown[groupIndex] {
 						if mem.MultimodelHelper.PlanMode[groupIndex] == memo.OutsideIn {
 							mem.QueryType = memo.Unset
@@ -1926,52 +1924,6 @@ func processGroupByOrScalarGroupByExpr(expr memo.RelExpr, mem *memo.Memo) {
 	}
 }
 
-// CheckDataType determines if a given data type (typ) is supported by the time-series engine.
-// for multiple model processing
-func CheckDataType(typ *types.T) bool {
-	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
-		return false
-	}
-	switch typ.Name() {
-	case "timestamp", "int2", "int4", "int", "float4", "float", "bool", "char", "nchar", "varchar", "nvarchar", "varbytes", "timestamptz":
-		return true
-	default:
-		return false
-	}
-}
-
-// checkDataLength determines if the length of a given column is supported by the time-series engine.
-// for multiple model processing
-func checkDataLength(typ *types.T) bool {
-	storageType := sqlbase.GetTSDataType(typ)
-	if typ.InternalType.TypeEngine != 0 && !typ.IsTypeEngineSet(types.TIMESERIES) {
-		return false
-	}
-	typeWidth := typ.Width()
-	if storageType == sqlbase.DataType_CHAR || storageType == sqlbase.DataType_NVARCHAR {
-		typeWidth = typ.Width() * 4
-	}
-	switch storageType {
-	case sqlbase.DataType_CHAR, sqlbase.DataType_NCHAR:
-		if typeWidth >= sqlbase.TSMaxFixedLen {
-			return false
-		}
-	case sqlbase.DataType_BYTES:
-		if typeWidth >= sqlbase.TSMaxFixedLen {
-			return false
-		}
-	case sqlbase.DataType_VARCHAR, sqlbase.DataType_NVARCHAR:
-		if typeWidth > sqlbase.TSMaxVariableLen {
-			return false
-		}
-	case sqlbase.DataType_VARBYTES:
-		if typeWidth > sqlbase.TSMaxVariableLen {
-			return false
-		}
-	}
-	return true
-}
-
 // processJoinRelations constructs TableGroup, a two-dimensional array that
 // organizes time-series and relational tables based on their join relationships.
 //
@@ -2088,8 +2040,8 @@ func processJoinRelations(
 				}
 
 				if leftIsTimeSeries {
-					if rightColID != -1 && (!CheckDataType(mem.Metadata().ColumnMeta(rightColID).Type) ||
-						!checkDataLength(mem.Metadata().ColumnMeta(rightColID).Type)) {
+					if rightColID != -1 && (!memo.CheckDataType(mem.Metadata().ColumnMeta(rightColID).Type) ||
+						!memo.CheckDataLength(mem.Metadata().ColumnMeta(rightColID).Type)) {
 						if mem.MultimodelHelper.PlanMode[index] == memo.OutsideIn {
 							mem.QueryType = memo.Unset
 							mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}
@@ -2098,8 +2050,8 @@ func processJoinRelations(
 						}
 					}
 				} else {
-					if leftColID != -1 && (!CheckDataType(mem.Metadata().ColumnMeta(leftColID).Type) ||
-						!checkDataLength(mem.Metadata().ColumnMeta(leftColID).Type)) {
+					if leftColID != -1 && (!memo.CheckDataType(mem.Metadata().ColumnMeta(leftColID).Type) ||
+						!memo.CheckDataLength(mem.Metadata().ColumnMeta(leftColID).Type)) {
 						if mem.MultimodelHelper.PlanMode[index] == memo.OutsideIn {
 							mem.QueryType = memo.Unset
 							mem.MultimodelHelper.ResetReasons[memo.UnsupportedDataType] = struct{}{}

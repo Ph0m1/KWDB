@@ -97,7 +97,7 @@
 # GenerateMergeJoins creates MergeJoin operators for the join, using the
 # interesting orderings property.
 [GenerateMergeJoins, Explore]
-(JoinNonApply $left:* $right:* & (NoJoinManipulation $left $right) $on:* $private:*)
+(JoinNonApply $left:* $right:* & (NoMergeManipulation $left $right) $on:* $private:*)
 =>
 (GenerateMergeJoins (OpName) $left $right $on $private)
 

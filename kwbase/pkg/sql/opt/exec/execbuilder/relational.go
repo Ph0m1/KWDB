@@ -2104,6 +2104,12 @@ func (b *Builder) buildGroupBy(groupBy memo.RelExpr) (execPlan, error) {
 
 	var ep execPlan
 	private := groupBy.Private().(*memo.GroupingPrivate)
+
+	// case: outside-in use cbo ande agg can execute in ts engine.
+	if opt.CheckOptMode(opt.TSQueryOptMode.Get(&b.evalCtx.Settings.SV), opt.OutsideInUseCBO) && private.CanApplyOutsideIn {
+		blj = b.factory.UpdateGroupInput(&input.root)
+	}
+
 	groupingCols := private.GroupingCols
 	funcs := private.Func
 	groupingColIdx := make([]exec.ColumnOrdinal, 0, groupingCols.Len())
