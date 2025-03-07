@@ -129,6 +129,14 @@ func (c *replicatedCmd) IsLocal() bool {
 	return c.proposal != nil
 }
 
+// IsTsWriteCmd implements the apply.Command interface.
+func (c *replicatedCmd) IsTsWriteCmd() bool {
+	if c.proposal.Request == nil {
+		return false
+	}
+	return c.proposal.Request.IsTsWrite()
+}
+
 // AckErrAndFinish implements the apply.Command interface.
 func (c *replicatedCmd) AckErrAndFinish(ctx context.Context, err error) error {
 	if c.IsLocal() {
@@ -154,20 +162,7 @@ func (c *replicatedCmd) CanAckBeforeApplication() bool {
 	// We don't try to ack async consensus writes before application because we
 	// know that there isn't a client waiting for the result.
 	req := c.proposal.Request
-	var isTS bool
-	for _, union := range req.Requests {
-		switch union.GetInner().(type) {
-		case *roachpb.TsPutTagRequest,
-			*roachpb.TsRowPutRequest,
-			*roachpb.TsDeleteRequest,
-			*roachpb.TsDeleteEntityRequest,
-			*roachpb.TsTagUpdateRequest,
-			*roachpb.TsDeleteMultiEntitiesDataRequest:
-			isTS = true
-			break
-		}
-	}
-	return req.IsIntentWrite() && !req.AsyncConsensus && !isTS
+	return req.IsIntentWrite() && !req.AsyncConsensus
 }
 
 // AckSuccess implements the apply.CheckedCommand interface.

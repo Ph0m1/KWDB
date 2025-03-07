@@ -1234,31 +1234,31 @@ func (*PutRequest) flags() int {
 }
 
 func (*TsPutRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure
 }
 
 func (*TsRowPutRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsPutTagRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsDeleteRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsDeleteMultiEntitiesDataRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsDeleteEntityRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure | isRange
 }
 
 func (*TsTagUpdateRequest) flags() int {
-	return isWrite | isTxn | isLocking | isIntentWrite | consultsTSCache | canBackpressure | isRange
+	return isWrite | isTxn | isLocking | consultsTSCache | canBackpressure | isRange
 }
 
 // ConditionalPut effectively reads without writing if it hits a

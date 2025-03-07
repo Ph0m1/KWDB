@@ -244,6 +244,47 @@ func (t *Task) AckCommittedEntriesBeforeApplication(ctx context.Context, maxInde
 	})
 }
 
+// TsAckCommittedEntriesBeforeApplication almost like AckCommittedEntriesBeforeApplication,
+// only different in whether ack success right now.
+func (t *Task) TsAckCommittedEntriesBeforeApplication(
+	ctx context.Context, maxIndex uint64, tsWriteCanAckBeforeApplication bool,
+) error {
+	t.assertDecoded()
+	if !t.anyLocal {
+		return nil // fast-path
+	}
+
+	batch := t.sm.NewBatch(true /* ephemeral */)
+	defer batch.Close()
+
+	iter := t.dec.NewCommandIter()
+	defer iter.Close()
+
+	batchIter := takeWhileCmdIter(iter, func(cmd Command) bool {
+		if cmd.Index() > maxIndex {
+			return false
+		}
+		return cmd.IsTrivial()
+	})
+
+	stagedIter, err := mapCmdIter(batchIter, batch.Stage)
+	if err != nil {
+		return err
+	}
+
+	if !tsWriteCanAckBeforeApplication {
+		stagedIter.Close()
+		return nil
+	}
+	// check and(or not) ack success right now
+	return forEachCheckedCmdIter(ctx, stagedIter, func(cmd CheckedCommand, ctx context.Context) error {
+		if !cmd.Rejected() && cmd.IsLocal() && cmd.IsTsWriteCmd() {
+			return cmd.AckSuccess(ctx)
+		}
+		return nil
+	})
+}
+
 // SetMaxBatchSize sets the maximum application batch size. If 0, no limit
 // will be placed on the number of commands that can be applied in a batch.
 func (t *Task) SetMaxBatchSize(size int) {

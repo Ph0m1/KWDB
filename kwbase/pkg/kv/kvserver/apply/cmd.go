@@ -37,6 +37,8 @@ type Command interface {
 	// that were locally proposed typically have a client waiting on a
 	// response, so there is additional urgency to apply them quickly.
 	IsLocal() bool
+	// IsTsWriteCmd returns whether the command has any ts write request.
+	IsTsWriteCmd() bool
 	// AckErrAndFinish signals that the application of the command has been
 	// rejected due to the provided error. It also relays this rejection of
 	// the command to its client if it was proposed locally. An error will

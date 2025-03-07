@@ -106,6 +106,22 @@ func (ba *BatchRequest) IsWrite() bool {
 	return ba.hasFlag(isWrite)
 }
 
+// IsTsWrite returns true iff the BatchRequest contains a write.
+func (ba *BatchRequest) IsTsWrite() bool {
+	for _, union := range ba.Requests {
+		switch union.GetInner().(type) {
+		case *TsPutTagRequest,
+			*TsRowPutRequest,
+			*TsDeleteRequest,
+			*TsDeleteEntityRequest,
+			*TsTagUpdateRequest,
+			*TsDeleteMultiEntitiesDataRequest:
+			return true
+		}
+	}
+	return false
+}
+
 // IsReadOnly returns true if all requests within are read-only.
 func (ba *BatchRequest) IsReadOnly() bool {
 	return len(ba.Requests) > 0 && !ba.hasFlag(isWrite|isAdmin)

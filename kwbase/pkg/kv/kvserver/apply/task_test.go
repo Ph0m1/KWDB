@@ -66,9 +66,10 @@ type appliedCmd struct {
 	*checkedCmd
 }
 
-func (c *cmd) Index() uint64   { return c.index }
-func (c *cmd) IsTrivial() bool { return !c.nonTrivial }
-func (c *cmd) IsLocal() bool   { return !c.nonLocal }
+func (c *cmd) Index() uint64      { return c.index }
+func (c *cmd) IsTrivial() bool    { return !c.nonTrivial }
+func (c *cmd) IsLocal() bool      { return !c.nonLocal }
+func (c *cmd) IsTsWriteCmd() bool { return false }
 func (c *cmd) AckErrAndFinish(_ context.Context, err error) error {
 	c.acked = true
 	c.finished = true

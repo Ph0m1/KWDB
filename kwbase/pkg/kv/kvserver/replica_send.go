@@ -45,18 +45,7 @@ import (
 
 // isTsRequest return true if meet TsRequest
 func (r *Replica) isTsRequest(ctx context.Context, ba *roachpb.BatchRequest) bool {
-	for _, union := range ba.Requests {
-		switch union.GetInner().(type) {
-		case *roachpb.TsPutTagRequest,
-			*roachpb.TsRowPutRequest,
-			*roachpb.TsDeleteRequest,
-			*roachpb.TsDeleteEntityRequest,
-			*roachpb.TsTagUpdateRequest,
-			*roachpb.TsDeleteMultiEntitiesDataRequest:
-			return true
-		}
-	}
-	return false
+	return ba.IsTsWrite()
 }
 
 // Send executes a command on this range, dispatching it to the

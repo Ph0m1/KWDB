@@ -38,6 +38,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagebase"
 	"gitee.com/kwbasedb/kwbase/pkg/kv/kvserver/storagepb"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/settings"
 	"gitee.com/kwbasedb/kwbase/pkg/storage"
 	"gitee.com/kwbasedb/kwbase/pkg/util"
 	"gitee.com/kwbasedb/kwbase/pkg/util/encoding"
@@ -52,6 +53,13 @@ import (
 	"go.etcd.io/etcd/raft"
 	"go.etcd.io/etcd/raft/raftpb"
 	"go.etcd.io/etcd/raft/tracker"
+)
+
+// TsCanAckBeforeApplication indicates whether ts write ack before application
+var TsCanAckBeforeApplication = settings.RegisterPublicBoolSetting(
+	"ts.ack_before_application.enabled",
+	"allow ts insert and update requests to ack before applied to storage",
+	false,
 )
 
 func makeIDKey() storagebase.CmdIDKey {
@@ -1289,7 +1297,8 @@ func (r *Replica) handleRaftTSReadyRaftMuLocked(
 	if err := appTask.Decode(ctx, rd.CommittedEntries); err != nil {
 		return stats, err.(*nonDeterministicFailure).safeExpl, err
 	}
-	if err := appTask.AckCommittedEntriesBeforeApplication(ctx, lastIndex); err != nil {
+	tsWriteCanAckBeforeApplication := TsCanAckBeforeApplication.Get(&r.store.ClusterSettings().SV)
+	if err := appTask.TsAckCommittedEntriesBeforeApplication(ctx, lastIndex, tsWriteCanAckBeforeApplication); err != nil {
 		return stats, err.(*nonDeterministicFailure).safeExpl, err
 	}
 
