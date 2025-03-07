@@ -14,6 +14,7 @@
 #include "sys_utils.h"
 #include "st_tier_manager.h"
 
+extern DedupRule g_dedup_rule;
 namespace kwdbts {
 
 LoggedTsTable::LoggedTsTable(kwdbContext_p ctx, const string& db_path, const KTableKey& table_id, EngineOptions* opt)
@@ -910,6 +911,7 @@ KStatus LoggedTsEntityGroup::redoPut(kwdbContext_p ctx, string& primary_tag, kwd
   }
 
   Payload pd(root_bt_manager_, payload);
+  pd.dedup_rule_ = g_dedup_rule;
   ErrorInfo err_info;
   auto sub_manager = GetSubEntityGroupManager();
   TsSubEntityGroup* sub_group = sub_manager->GetSubGroup(group_id, err_info, false);
