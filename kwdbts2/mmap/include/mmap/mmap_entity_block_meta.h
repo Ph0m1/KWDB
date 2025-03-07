@@ -35,7 +35,7 @@ const size_t BLOCK_ROWS_MAX = 1000;                 // max rows number in each b
 const size_t BLOCK_ROWS_MIN = 10;                   // min rows number in each block
 const int64_t INVALID_TS = INT64_MAX;
 
-#define BLOCK_ITEM_BITMAP_SIZE 128
+#define BLOCK_ITEM_BITMAP_SIZE (1000 + 7) / 8
 
 typedef uint32_t BLOCK_ID;
 

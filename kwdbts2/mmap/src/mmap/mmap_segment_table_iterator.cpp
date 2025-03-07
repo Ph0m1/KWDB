@@ -190,7 +190,7 @@ KStatus convertValueType2Newblk(std::shared_ptr<MMapSegmentTable> segment_tbl, B
         // vartype cloumn to fixed-len column type
         for (k_uint32 i = 0; i < cur_block_item->publish_row_count; ++i) {
           std::shared_ptr<void> old_mem = segment_tbl->varColumnAddrByBlk(cur_block_item->block_id, i, col_id);
-          std::string v_value((char*) old_mem.get() + MMapStringColumn::kStringLenLen);
+          std::string v_value((char*) old_mem.get() + MMapStringColumn::kStringLenLen, KUint16(old_mem.get()));
           convertStrToFixed(v_value, (DATATYPE)new_type.type, value + i * new_type.size, KUint16(old_mem.get()), err_info);
         }
       }
@@ -237,8 +237,8 @@ KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* v
       } else {
         if (convertFixedToNum(old_type, new_type, (char*) old_mem, value + i * new_len, err_info) < 0) {
           if (!is_bitmap_new) {
-            void* new_bitmap = malloc((segment_tbl->getBlockMaxRows() + 7)/8);
-            memcpy(new_bitmap, *bitmap, (segment_tbl->getBlockMaxRows() + 7)/8);
+            void* new_bitmap = malloc(BLOCK_ITEM_BITMAP_SIZE);
+            memcpy(new_bitmap, *bitmap, BLOCK_ITEM_BITMAP_SIZE);
             *bitmap = new_bitmap;
             is_bitmap_new = true;
             need_free_bitmap = true;
@@ -254,12 +254,17 @@ KStatus ConvertToFixedLen(std::shared_ptr<MMapSegmentTable> segment_tbl, char* v
         continue;
       }
       std::shared_ptr<void> old_mem = segment_tbl->varColumnAddrByBlk(block_id, start_row + i - 1, col_idx);
-      std::string v_value((char*) old_mem.get() + MMapStringColumn::kStringLenLen);
+      std::string v_value;
+      if (old_type == DATATYPE::VARBINARY) {
+        v_value = std::string((char*) old_mem.get() + MMapStringColumn::kStringLenLen, KUint16(old_mem.get()));
+      } else {
+        v_value = std::string((char*) old_mem.get() + MMapStringColumn::kStringLenLen, KUint16(old_mem.get()) - 1);
+      }
       ErrorInfo err_info;
       if (convertStrToFixed(v_value, new_type, value + i * new_len, KUint16(old_mem.get()), err_info) < 0) {
         if (!is_bitmap_new) {
-          void* new_bitmap = malloc((segment_tbl->getBlockMaxRows() + 7)/8);
-          memcpy(new_bitmap, *bitmap, (segment_tbl->getBlockMaxRows() + 7)/8);
+          void* new_bitmap = malloc(BLOCK_ITEM_BITMAP_SIZE);
+          memcpy(new_bitmap, *bitmap, BLOCK_ITEM_BITMAP_SIZE);
           *bitmap = new_bitmap;
           is_bitmap_new = true;
           need_free_bitmap = true;
