@@ -34,6 +34,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -165,7 +166,14 @@ func RandDatumWithNullChance(rng *rand.Rand, typ *types.T, nullChance int) tree.
 		case 64:
 			return tree.NewDFloat(tree.DFloat(rng.NormFloat64()))
 		case 32:
-			return tree.NewDFloat(tree.DFloat(float32(rng.NormFloat64())))
+			// Reduce output accuracy.
+			data := rng.NormFloat64()
+			str := strconv.FormatFloat(data, 'f', -1, 32)
+			e1, err := tree.ParseDFloat(str)
+			if err != nil {
+				return nil
+			}
+			return tree.NewDFloat(*e1)
 		default:
 			panic(fmt.Sprintf("float with an unexpected width %d", typ.Width()))
 		}
@@ -693,7 +701,14 @@ func randInterestingDatum(rng *rand.Rand, typ *types.T) tree.Datum {
 		case 64:
 			return special
 		case 32:
-			return tree.NewDFloat(tree.DFloat(float32(*special.(*tree.DFloat))))
+			// Reduce output accuracy.
+			data := float64(*special.(*tree.DFloat))
+			str := strconv.FormatFloat(data, 'f', -1, 32)
+			e1, err := tree.ParseDFloat(str)
+			if err != nil {
+				return nil
+			}
+			return tree.NewDFloat(*e1)
 		default:
 			panic(fmt.Sprintf("float with an unexpected width %d", typ.Width()))
 		}

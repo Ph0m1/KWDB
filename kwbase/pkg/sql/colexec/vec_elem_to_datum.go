@@ -27,6 +27,7 @@ package colexec
 import (
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"gitee.com/kwbasedb/kwbase/pkg/col/coldata"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/colexec/execerror"
@@ -68,6 +69,16 @@ func PhysicalTypeColElemToDatum(
 			return da.NewDInt(tree.DInt(col.Int64()[rowIdx]))
 		}
 	case types.FloatFamily:
+		if ct.Oid() == oid.T_float4 {
+			// Reduce output accuracy.
+			data := col.Float64()[rowIdx]
+			str := strconv.FormatFloat(data, 'f', -1, 32)
+			e1, err := tree.ParseDFloat(str)
+			if err != nil {
+				return nil
+			}
+			return da.NewDFloat(*e1)
+		}
 		return da.NewDFloat(tree.DFloat(col.Float64()[rowIdx]))
 	case types.DecimalFamily:
 		d := da.NewDDecimal(tree.DDecimal{Decimal: col.Decimal()[rowIdx]})
