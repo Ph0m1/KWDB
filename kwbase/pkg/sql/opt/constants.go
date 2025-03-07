@@ -98,14 +98,14 @@ var TSParallelDegree = settings.RegisterPublicIntSetting(
 // such as:
 // "set cluster setting ts.sql.query_opt_mode = 1010"
 //
-// default value: 1110
+// default value: 11110
 // turn on the first three optimizations.
 var TSQueryOptMode = settings.RegisterPublicIntSetting(
 	"ts.sql.query_opt_mode", "ts query optimize mode", DefaultQueryOptMode,
 )
 
 // DefaultQueryOptMode is the default value of TSQueryOptMode
-const DefaultQueryOptMode = 1110
+const DefaultQueryOptMode = 11110
 
 // CheckOptMode checks whether the query opt mode is enabled.
 //
@@ -137,11 +137,8 @@ const (
 	// FilterOptOrder indicates that the order of filtering conditions will be optimized
 	FilterOptOrder = 1 << 3
 
-	// ReduceCrossJoinExplore use for avoid exploring invalid cross join.
-	ReduceCrossJoinExplore = 1 << 4
-
-	// OutsideInUseCBO is setted when need CBO opt in outside-in case.
-	OutsideInUseCBO = 1 << 5
+	// OutsideInUseCBO indicates that use CBO in the outside-in case.
+	OutsideInUseCBO = 1 << 4
 )
 
 // TSOrderedTable ts get ordered table data

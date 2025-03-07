@@ -264,6 +264,7 @@ type OnAddJoinFunc func(left, right, all, refs []memo.RelExpr, op opt.Operator)
 //
 // Citations: [8]
 type JoinOrderBuilder struct {
+	c       *CustomFuncs
 	f       *norm.Factory
 	evalCtx *tree.EvalContext
 
@@ -322,12 +323,13 @@ type JoinOrderBuilder struct {
 // Init initializes a new JoinOrderBuilder with the given factory. The join
 // graph is reset, so a JoinOrderBuilder can be reused. Callback functions are
 // not reset.
-func (jb *JoinOrderBuilder) Init(f *norm.Factory, evalCtx *tree.EvalContext) {
+func (jb *JoinOrderBuilder) Init(c *CustomFuncs) {
 	// This initialization pattern ensures that fields are not unwittingly
 	// reused. Field reuse must be explicit.
 	*jb = JoinOrderBuilder{
-		f:             f,
-		evalCtx:       evalCtx,
+		c:             c,
+		f:             c.e.f,
+		evalCtx:       c.e.evalCtx,
 		plans:         make(map[vertexSet]memo.RelExpr),
 		onReorderFunc: jb.onReorderFunc,
 		onAddJoinFunc: jb.onAddJoinFunc,
@@ -362,6 +364,9 @@ func (jb *JoinOrderBuilder) Reorder(join memo.RelExpr) {
 		// Execute the DPSube algorithm. Enumerate all join orderings and add any
 		// valid ones to the memo.
 		jb.dpSube()
+
+		// add cross join path when multi mode.
+		jb.handleCrossJoinInOutsideIn()
 
 	default:
 		panic(errors.AssertionFailedf("%v cannot be reordered", t.Op()))
@@ -1836,4 +1841,123 @@ func (s bitSet) next(startVal uint64) (elem uint64, ok bool) {
 // len returns the number of elements in the set.
 func (s bitSet) len() int {
 	return bits.OnesCount64(uint64(s))
+}
+
+// handleCrossJoinInOutsideIn will add the path that all relationship tables join
+// with ts table, even though there are cross joins between relationship tables.
+// ex:  t1 join t2 join ts, vertexes: t1 is 1, ts is 2, ts is 4
+// plan of JoinOrderBuilder: [1]=t1, [2]=t2, [4]=ts, [6]=t2 join ts, [7]= t1 join t2 join ts
+// allRelationalTbl = 7-4 = 3 = t1 join t2, need to construct plan of 1 join 2 and add it to plan of JoinOrderBuilder.
+// last construct 3 join 4 and add it to plan of JoinOrderBuilder.
+func (jb *JoinOrderBuilder) handleCrossJoinInOutsideIn() {
+	allVertexes := jb.allVertexes()
+
+	// check if multi mode, if not, do nothing.
+	tstbl, ok := jb.checkMultiMode()
+	if !ok {
+		return
+	}
+	if len(jb.vertexes) < 3 {
+		return
+	}
+	allRelationalTbl := allVertexes - tstbl
+
+	// join already exist for all relationship tables, do nothing
+	if jb.plans[allRelationalTbl] != nil {
+		return
+	}
+
+	// get all filters.
+	var filters memo.FiltersExpr
+	for _, v := range jb.edges {
+		filters = append(filters, v.filters...)
+	}
+
+	for s1 := vertexSet(1); s1 <= allRelationalTbl/2; s1++ {
+		if s1 == tstbl {
+			continue
+		}
+		s2 := allRelationalTbl.difference(s1)
+		if s2 == allRelationalTbl {
+			continue
+		}
+
+		if jb.plans[s1] == nil || jb.plans[s2] == nil {
+			continue
+		}
+
+		// get filter of s1 and s2 base on functional dependency.
+		var filter memo.FiltersExpr
+		outputCols1 := jb.plans[s1].Relational().OutputCols
+		outputCols2 := jb.plans[s2].Relational().OutputCols
+		allOutputCols := outputCols1.Union(outputCols2)
+		newFilters := jb.c.MapJoinOpEqualities(filters, jb.plans[tstbl].Relational().OutputCols, allOutputCols)
+		for _, v := range newFilters {
+			if v.ScalarProps().OuterCols.SubsetOf(outputCols1) {
+				continue
+			}
+			if v.ScalarProps().OuterCols.SubsetOf(outputCols2) {
+				continue
+			}
+			if v.ScalarProps().OuterCols.SubsetOf(allOutputCols) {
+				filter = append(filter, v)
+			}
+		}
+
+		if jb.plans[allRelationalTbl] != nil {
+			jb.addToGroup(opt.InnerJoinOp, jb.plans[s1], jb.plans[s2], filter, nil, jb.plans[allRelationalTbl])
+			jb.addToGroup(opt.InnerJoinOp, jb.plans[s2], jb.plans[s1], filter, nil, jb.plans[allRelationalTbl])
+		} else {
+			jb.plans[allRelationalTbl] = jb.memoize(opt.InnerJoinOp, jb.plans[s1], jb.plans[s2], filter, nil)
+			jb.addToGroup(opt.InnerJoinOp, jb.plans[s2], jb.plans[s1], filter, nil, jb.plans[allRelationalTbl])
+		}
+	}
+	// last join with tstable
+	jb.addJoins(tstbl, allRelationalTbl)
+}
+
+// checkMultiMode check if there is a multi mode query.
+// And return the vertexSet of ts table
+func (jb *JoinOrderBuilder) checkMultiMode() (vertexSet, bool) {
+	res := 0
+	var ver vertexSet
+	isMulti := false
+	for k, v := range jb.vertexes {
+		checkScan(v, &res)
+		if res == 0 {
+			return 0, false
+		}
+		if res&1 == 1 && ver == 0 {
+			ver = vertexSet(1 << k)
+		}
+		if res&3 == 3 {
+			isMulti = true
+		}
+	}
+	return ver, isMulti
+}
+
+// checkScan check if the vertexe is Scan or TSScan.
+func checkScan(e memo.RelExpr, res *int) {
+	switch t := e.(type) {
+	case *memo.TSScanExpr:
+		// only deal with one tsscan in cross join.
+		if *res&1 == 1 {
+			*res &= 0
+		} else {
+			*res |= 1
+		}
+	case *memo.ScanExpr:
+		*res |= 2
+	case *memo.SelectExpr:
+		checkScan(t.Input, res)
+	case *memo.ProjectExpr:
+		checkScan(t.Input, res)
+	case *memo.GroupByExpr:
+		checkScan(t.Input, res)
+	case *memo.DistinctOnExpr:
+		checkScan(t.Input, res)
+	default:
+		*res &= 0
+	}
 }

@@ -2348,7 +2348,7 @@ func (c *CustomFuncs) NewShouldReorderJoins(root memo.RelExpr) bool {
 // first expression of the memo group is used for construction of the join
 // graph. For more information, see the comment in join_order_builder.go.
 func (c *CustomFuncs) ReorderJoins(grp memo.RelExpr) memo.RelExpr {
-	c.e.o.JoinOrderBuilder().Init(c.e.f, c.e.evalCtx)
+	c.e.o.JoinOrderBuilder().Init(c)
 	c.e.o.JoinOrderBuilder().Reorder(grp.FirstExpr())
 	return grp
 }
@@ -3048,44 +3048,11 @@ func (c *CustomFuncs) GenerateTagTSScans(
 	}
 }
 
-// AvoidAssociateCrossJoin avoids exploring invalid cross join in the AssociateJoin rule.
-// AssociateJoin rule is reorder the join such as
-//
-//								join(on)       --->      join
-//		    		    /   		\								 /   \
-//				join(innerOn)  scanC					scanA	 join(newOn)
-//		    /  \																	/  \
-//
-//	 scanA  scanB													  scanB  scanC
-//
-// scanC is the right, scanA is the innerL
-// if innerOnLen and newOnLen both are nil, it means that there is a cross join before and after exploration,
-// only the rows of scanA more than scanC can use the AssociateJoin rule.
-// if innerOn is not nil, but newOn is nil, it means that after exploration, it changed from inner join to cross join,
-// avoid this case.
-func (c *CustomFuncs) AvoidAssociateCrossJoin(
-	right, innerL memo.RelExpr, innerOn, newOn memo.FiltersExpr,
-) bool {
-	if !opt.CheckOptMode(opt.TSQueryOptMode.Get(c.GetValues()), opt.ReduceCrossJoinExplore) {
-		return true
-	}
-
-	innerOnLen := len(innerOn)
-	newOnLen := len(newOn)
-	if innerOnLen == 0 && newOnLen == 0 {
-		if innerL.Relational().Stats.RowCount <= right.Relational().Stats.RowCount {
-			return false
-		}
-	}
-	if innerOnLen != 0 && newOnLen == 0 {
-		return false
-	}
-
-	return true
-}
-
 // CanApplyOutsideIn checks if join expr can apply the GenerateBatchLookUpJoin exploration rule.
 func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.FiltersExpr) bool {
+	if !c.e.evalCtx.StartSinglenode {
+		return false
+	}
 	if !opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.e.evalCtx.Settings.SV), opt.OutsideInUseCBO) {
 		return false
 	}
