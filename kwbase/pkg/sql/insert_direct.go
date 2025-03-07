@@ -307,11 +307,7 @@ func getSingleRecord(
 			if valueType == parser.STRINGTYPE {
 				return tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 			}
-			bitSize := 32
-			if column.Type.Oid() == oid.T_float8 {
-				bitSize = 64
-			}
-			in, err := strconv.ParseFloat(rawValue, bitSize)
+			in, err := strconv.ParseFloat(rawValue, 64)
 			if err != nil {
 				if strings.Contains(err.Error(), "out of range") {
 					return pgerror.Newf(pgcode.NumericValueOutOfRange,
@@ -1989,13 +1985,7 @@ func GetSingleDatum(
 		if valueType == parser.STRINGTYPE {
 			return nil, tree.NewDatatypeMismatchError(column.Name, rawValue, column.Type.SQLString())
 		}
-
-		bitSize := 32
-		if oidType == oid.T_float8 {
-			bitSize = 64
-		}
-
-		in, err := strconv.ParseFloat(rawValue, bitSize)
+		in, err := strconv.ParseFloat(rawValue, 64)
 		if err != nil {
 			if strings.Contains(err.Error(), "out of range") {
 				return nil, pgerror.Newf(pgcode.NumericValueOutOfRange, "float \"%s\" out of range for type %s (column %s)", rawValue, column.Type.SQLString(), column.Name)
