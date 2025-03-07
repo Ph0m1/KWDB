@@ -582,7 +582,9 @@ func (sb *statisticsBuilder) makeTableStatistics(tabID opt.TableID) *props.Stati
 						adjustedCols.Add(opt.ColumnID(colID))
 					}
 					if adjustedCols.Equals(primaryTagCols) {
-						stats.PTagCount = float64(stat.RowCount())
+						// Make sure the primary tag count is at least 1. The stats may be stale, and we
+						// can end up with weird and inefficient plans if we estimate 0 rows.
+						stats.PTagCount = max(float64(stat.RowCount()), 1)
 						if len(stat.SortedHistogram()) > 0 && opt.TSOrderedTable.Get(&sb.evalCtx.Settings.SV) {
 							stats.SortDistribution = &props.SortDistributionStats{}
 							stats.SortDistribution.SortedHistogram = &props.SortedHistogram{}

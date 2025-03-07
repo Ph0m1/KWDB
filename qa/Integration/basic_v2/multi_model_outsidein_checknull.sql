@@ -1,4 +1,5 @@
 set cluster setting ts.sql.query_opt_mode = 1100;
+set cluster setting sql.stats.tag_automatic_collection.enabled = false;
 -- create and insert data into time-series table
 CREATE TS DATABASE my_timeseries_db;
 
@@ -1557,3 +1558,4 @@ DROP DATABASE my_timeseries_db;
 DROP DATABASE my_relation_db;
 
 set cluster setting ts.sql.query_opt_mode = 1110;
+set cluster setting sql.stats.tag_automatic_collection.enabled = true;

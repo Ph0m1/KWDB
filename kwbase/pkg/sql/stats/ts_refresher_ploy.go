@@ -64,10 +64,15 @@ import (
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgcode"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/pgwire/pgerror"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/types"
 	"gitee.com/kwbasedb/kwbase/pkg/util/log"
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeutil"
 	"github.com/cockroachdb/errors"
+	"github.com/shirou/gopsutil/cpu"
 )
 
 // maybeRefreshTsStats implements the core logic described in the comment for
@@ -79,6 +84,18 @@ func (r *Refresher) maybeRefreshTsStats(
 	affected Affected,
 	asOf time.Duration,
 ) {
+	// Get system cpu usage
+	cpuPercent, err := cpu.Percent(time.Second, false)
+	if err != nil {
+		log.Errorf(ctx, "failed to get cpu usage when refreshing statistics")
+		return
+	}
+
+	// If cpu usage exceeds 30%, update is skipped
+	if len(cpuPercent) > 0 && cpuPercent[0] > 30.0 {
+		log.Warningf(ctx, "cpu usage is too high (%f%%), skipping table statistics update", cpuPercent[0])
+		return
+	}
 	enableMetricAutomaticCollection := AutomaticTsStatisticsClusterMode.Get(&r.st.SV)
 	enableTagAutomaticCollection := AutomaticTagStatisticsClusterMode.Get(&r.st.SV)
 	enableTSOrderedTable := opt.TSOrderedTable.Get(&r.st.SV)
@@ -98,9 +115,9 @@ func (r *Refresher) maybeRefreshTsStats(
 			}
 		}
 
-		// Only sample tag table
+		// Sample tag table statistics and metric table statistics of row count
 		if !enableMetricAutomaticCollection && (enableTagAutomaticCollection || enableTSOrderedTable) {
-			err := r.firstRefreshTagStats(ctx, tableID, colsNewDesc, enableTSOrderedTable)
+			err := r.firstRefreshTagStats(ctx, tableID, colsNewDesc, enableTSOrderedTable, tabDesc)
 			if err != nil {
 				log.Warningf(ctx, "failed to create statistics on table (ID: %d): %v when refreshing tag statistic for the first time", tableID, err)
 			}
@@ -136,8 +153,8 @@ func (r *Refresher) maybeRefreshTsStats(
 	}
 
 	// Statistics refresh ploy for metric columns
-	if len(tsMetricStats) > 0 && enableMetricAutomaticCollection {
-		r.HandleTsMetricStats(ctx, tsMetricStats, tableID, affected, colsNewDesc)
+	if len(tsMetricStats) >= 0 && (enableMetricAutomaticCollection || enableTagAutomaticCollection) {
+		r.HandleTsMetricStats(ctx, tsMetricStats, tableID, affected, colsNewDesc, tabDesc, enableTagAutomaticCollection)
 	}
 
 	// Statistics refresh ploy for Tag columns
@@ -193,30 +210,42 @@ func (r *Refresher) refreshTagStats(
 
 // refreshMetricStats is used to refresh metric table statistic
 func (r *Refresher) refreshMetricStats(
-	ctx context.Context, tableID sqlbase.ID, colsNewDesc []sqlbase.ColumnDescriptor,
+	ctx context.Context,
+	tableID sqlbase.ID,
+	colsNewDesc []sqlbase.ColumnDescriptor,
+	tabDesc *sqlbase.TableDescriptor,
+	enableTagAutomaticCollection bool,
 ) error {
-	var columnIDList strings.Builder
+	var err error
 
-	for _, colDesc := range colsNewDesc {
-		if colDesc.TsCol.ColumnType == sqlbase.ColumnType_TYPE_DATA {
-			if columnIDList.Len() > 0 {
-				columnIDList.WriteString(",")
+	if enableTagAutomaticCollection {
+		// Collect metric statistics for specify the id of the columns on the given table.
+		err = r.updateTableStatistics(ctx, tableID, colsNewDesc, tabDesc)
+	} else {
+		var columnIDList strings.Builder
+
+		for _, colDesc := range colsNewDesc {
+			if colDesc.TsCol.ColumnType == sqlbase.ColumnType_TYPE_DATA {
+				if columnIDList.Len() > 0 {
+					columnIDList.WriteString(",")
+				}
+				columnIDList.WriteString(strconv.Itoa(int(colDesc.ColID())))
 			}
-			columnIDList.WriteString(strconv.Itoa(int(colDesc.ColID())))
 		}
+		// Create statistics for specify the id of the columns on the given table.
+		_ /* rows */, err = r.ex.Exec(
+			ctx,
+			"create-stats",
+			nil, /* txn */
+			fmt.Sprintf(
+				"CREATE STATISTICS %s ON [%s] FROM [%d]",
+				AutoStatsName,
+				columnIDList.String(),
+				tableID,
+			),
+		)
 	}
-	// Create statistics for specify the id of the columns on the given table.
-	_ /* rows */, err := r.ex.Exec(
-		ctx,
-		"create-stats",
-		nil, /* txn */
-		fmt.Sprintf(
-			"CREATE STATISTICS %s ON [%s] FROM [%d]",
-			AutoStatsName,
-			columnIDList.String(),
-			tableID,
-		),
-	)
+
 	return err
 }
 
@@ -228,6 +257,8 @@ func (r *Refresher) HandleTsMetricStats(
 	tableID sqlbase.ID,
 	affected Affected,
 	colsNewDesc []sqlbase.ColumnDescriptor,
+	tabDesc *sqlbase.TableDescriptor,
+	enableTagAutomaticCollection bool,
 ) {
 	var rowCount float64
 	mustRefresh := false
@@ -266,7 +297,7 @@ func (r *Refresher) HandleTsMetricStats(
 		return
 	}
 
-	if err := r.refreshMetricStats(ctx, tableID, colsNewDesc); err != nil {
+	if err := r.refreshMetricStats(ctx, tableID, colsNewDesc, tabDesc, enableTagAutomaticCollection); err != nil {
 		if errors.Is(err, ConcurrentCreateStatsError) {
 			// Another stats job was already running. Attempt to reschedule this
 			// refresh.
@@ -330,7 +361,7 @@ func (r *Refresher) HandleTsTagStats(
 
 	targetEntitiesRows := int64(rowCount*AutomaticTsStatisticsFractionStaleRows.Get(&r.st.SV)) +
 		AutomaticTsStatisticsMinStaleRows.Get(&r.st.SV)
-	if !mustRefresh && affected.entitiesAffected < math.MaxInt32 && (targetEntitiesRows > affected.entitiesAffected && collectSortHistogram) {
+	if !mustRefresh && affected.entitiesAffected < math.MaxInt32 && (targetEntitiesRows > affected.entitiesAffected && !collectSortHistogram) {
 		// No refresh is happening this time.
 		return
 	}
@@ -441,6 +472,7 @@ func (r *Refresher) firstRefreshTagStats(
 	tableID sqlbase.ID,
 	colsDesc []sqlbase.ColumnDescriptor,
 	enableTSOrderedTable bool,
+	tabDesc *sqlbase.TableDescriptor,
 ) error {
 	var columnIDList strings.Builder
 
@@ -463,7 +495,7 @@ func (r *Refresher) firstRefreshTagStats(
 			tableID,
 		)
 	} else {
-		fmt.Sprintf(
+		autoCollectionSQL = fmt.Sprintf(
 			"CREATE STATISTICS %s ON [%s] FROM [%d]",
 			AutoStatsName,
 			columnIDList.String(),
@@ -478,6 +510,9 @@ func (r *Refresher) firstRefreshTagStats(
 		nil, /* txn */
 		autoCollectionSQL,
 	)
+
+	// Collect metric statistics for specify the id of the columns on the given table.
+	err = r.updateTableStatistics(ctx, tableID, colsDesc, tabDesc)
 
 	if err != nil {
 		if errors.Is(err, ConcurrentCreateStatsError) {
@@ -510,5 +545,114 @@ func (r *Refresher) firstRefreshStats(
 		}
 		return err
 	}
+	return nil
+}
+
+// updateTableStatistics updates the statistics for the given table and columns.
+func (r *Refresher) updateTableStatistics(
+	ctx context.Context,
+	tableID sqlbase.ID,
+	colsDesc []sqlbase.ColumnDescriptor,
+	tabDesc *sqlbase.TableDescriptor,
+) error {
+	// Get database description.
+	dbDesc, dbErr := sqlbase.GetDatabaseDescFromID(ctx, r.cache.ClientDB, tabDesc.ParentID)
+	if dbErr != nil {
+		return dbErr
+	}
+
+	// Query to get the total row count of the table.
+	rows, err := r.ex.QueryRow(
+		ctx,
+		"select-rowCount",
+		nil, /* txn */
+		fmt.Sprintf(
+			`select count(1) from %s.%s`,
+			dbDesc.Name,
+			tabDesc.Name,
+		),
+	)
+	if err != nil {
+		return err
+	}
+
+	var tsRowCount, distinctCount, nullCount uint64
+	if len(rows) > 0 {
+		tsRowCount = uint64(*rows[0].(*tree.DInt))
+	} else {
+		return pgerror.Newf(pgcode.Warning, "failed to get the total row count by internal query")
+	}
+	if tsRowCount > 0 {
+		// Assuming 10% distinct count.
+		distinctCount = uint64(math.Max(float64(tsRowCount)*0.1, 1))
+		// Assuming 1% null count.
+		nullCount = uint64(math.Max(float64(tsRowCount)*0.01, 1))
+	}
+
+	for _, colDesc := range colsDesc {
+		if colDesc.IsTagCol() {
+			// Skip tag columns.
+			continue
+		}
+
+		columnIDsVal := tree.NewDArray(types.Int)
+		if err = columnIDsVal.Append(tree.NewDInt(tree.DInt(colDesc.ID))); err != nil {
+			return err
+		}
+
+		// This will delete all old statistics for the given table and columns,
+		// including stats created manually (except for a few automatic statistics,
+		// which are identified by the name AutoStatsName).
+		_, err = r.ex.Exec(
+			ctx, "delete-statistics", nil,
+			`DELETE FROM system.table_statistics
+               WHERE "tableID" = $1
+               AND "columnIDs" = $3
+               AND "statisticID" NOT IN (
+                   SELECT "statisticID" FROM system.table_statistics
+                   WHERE "tableID" = $1
+                   AND "name" = $2
+                   AND "columnIDs" = $3
+                   ORDER BY "createdAt" DESC
+                   LIMIT $4
+               )`,
+			tableID,
+			AutoStatsName,
+			columnIDsVal,
+			keepCount,
+		)
+		if err != nil {
+			return err
+		}
+
+		// Insert new statistics for the column.
+		_, err = r.ex.Exec(
+			ctx, "insert-statistic", nil,
+			`INSERT INTO system.table_statistics (
+					"tableID",
+					"name",
+					"columnIDs",
+					"rowCount",
+					"distinctCount",
+					"nullCount",
+					histogram
+				) VALUES ($1, $2, $3, $4, $5, $6, NULL)`,
+			tableID,
+			AutoStatsName,
+			columnIDsVal,
+			tsRowCount,
+			distinctCount,
+			nullCount,
+		)
+		if err != nil {
+			return err
+		}
+		// update cache
+		err = GossipTableStatAdded(r.cache.Gossip, tableID)
+		if err != nil {
+			log.Errorf(ctx, "Gossip Table Stat err: %v", err)
+		}
+	}
+
 	return nil
 }

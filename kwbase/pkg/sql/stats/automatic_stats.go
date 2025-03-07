@@ -88,7 +88,7 @@ var AutomaticTsStatisticsClusterMode = settings.RegisterPublicBoolSetting(
 var AutomaticTagStatisticsClusterMode = settings.RegisterPublicBoolSetting(
 	AutoTagStatsClusterSettingName,
 	"automatic tag statistics of timing series collection mode",
-	false,
+	true,
 )
 
 // AutomaticStatisticsMaxIdleTime controls the maximum fraction of time that

@@ -1,3 +1,4 @@
+set cluster setting sql.stats.tag_automatic_collection.enabled = false;
 create ts database test;
 use test;
 Create table t1(k_timestamp timestamp not null,c1 int2,c2 int4,c3 float4,c4 float8,c5 char,c6 varchar(10),c7 int8,c8 nchar(10),c9 nvarchar(10),c10 varbytes,c11 timestamptz,c12 bool) tags (size int not null) primary tags (size) ;
@@ -477,3 +478,4 @@ set timezone = 0;
 use default;
 drop database test cascade;
 drop database test_select cascade;
+set cluster setting sql.stats.tag_automatic_collection.enabled = true;

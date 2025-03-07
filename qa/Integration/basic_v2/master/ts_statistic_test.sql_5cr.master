@@ -1,3 +1,5 @@
+> set cluster setting sql.stats.tag_automatic_collection.enabled = false;
+SET CLUSTER SETTING
 > create ts database test;
 CREATE TS DATABASE
 > use test;
@@ -1122,3 +1124,5 @@ SET
 DROP DATABASE
 > drop database test_select cascade;
 DROP DATABASE
+> set cluster setting sql.stats.tag_automatic_collection.enabled = true;
+SET CLUSTER SETTING

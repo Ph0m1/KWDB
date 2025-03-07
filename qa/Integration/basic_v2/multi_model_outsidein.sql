@@ -1,5 +1,5 @@
 set cluster setting ts.sql.query_opt_mode = 1100;
-
+set cluster setting sql.stats.tag_automatic_collection.enabled = false;
 CREATE TS DATABASE db_pipec;
 -- TS table
 CREATE TABLE db_pipec.t_point (
@@ -1344,3 +1344,4 @@ drop database db_pipec cascade;
 DROP DATABASE IF EXISTS test_SELECT_join cascade;
 DROP DATABASE IF EXISTS test_SELECT_join_rel cascade;
 set cluster setting ts.sql.query_opt_mode = 1110;
+set cluster setting sql.stats.tag_automatic_collection.enabled = true;
