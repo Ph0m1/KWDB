@@ -7,7 +7,7 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step sc2: COMMIT;  finished.
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
 a_id
@@ -33,7 +33,7 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
 a_id
 ----
@@ -59,7 +59,7 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
 a_id
 ----
@@ -85,7 +85,7 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;  finished.
 a_id
 ----
@@ -127,7 +127,7 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step sc2: COMMIT;  finished.
 
 starting permutation: rx1 wx rx3 s1 at1 c2 sc1 s2 at2 sc2
@@ -153,7 +153,7 @@ step c2: COMMIT;  finished.
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step sc2: COMMIT;  finished.
 
 starting permutation: rx1 wx rx3 s1 c2 at1 sc1 s2 at2 sc2
@@ -179,7 +179,7 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step sc2: COMMIT;  finished.
 
 starting permutation: rx1 wx rx3 c2 s1 at1 sc1 s2 at2 sc2
@@ -205,5 +205,5 @@ ERROR:  can not use multi-statement transactions involving a schema change under
 step sc1: COMMIT;  finished.
 step s2: BEGIN;  finished.
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;  finished.
-ERROR:  constraint "bfk" does not exist
+ERROR:  constraint "bfk" does not exist on table b
 step sc2: COMMIT;  finished.
