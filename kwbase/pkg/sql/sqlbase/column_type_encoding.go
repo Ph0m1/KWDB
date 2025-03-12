@@ -500,7 +500,7 @@ func decodeUntaggedDatumWithType(
 		}
 		if t.Oid() == oid.T_float4 {
 			// Reduce output accuracy.
-			str := strconv.FormatFloat(data, 'f', -1, 32)
+			str := strconv.FormatFloat(data, 'f', 6, 32)
 			e1, err := tree.ParseDFloat(str)
 			if err != nil {
 				return nil, nil, err

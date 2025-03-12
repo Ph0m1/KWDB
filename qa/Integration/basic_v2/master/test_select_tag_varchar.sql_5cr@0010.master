@@ -116,8 +116,8 @@ SQLSTATE: 22023
          ?column?
 --------------------------
   NULL
-  1.9807040549421056e+28
-  1.9807040540197684e+28
+  1.9807040628566084e+28
+  1.9807040619342712e+28
                    20222
   NULL
                  -1012.3
@@ -152,15 +152,15 @@ SQLSTATE: 22023
 ERROR: unsupported binary operator: <int> + <bool>
 SQLSTATE: 22023
 > select t3-t5 from test_select_tag9.tb order by k_timestamp;
-      ?column?
----------------------
-          6929.2923
-  -3.6854775808e+10
-  3.6854775808e+10
-           3949.445
-          5939.3934
-           1010.123
-           2010.123
+   ?column?
+---------------
+  6929.292297
+            0
+            0
+     3949.445
+  5939.393398
+     1010.123
+     2010.123
 (7 rows)
 > select t3*t6 from test_select_tag9.tb order by k_timestamp;
          ?column?
@@ -188,15 +188,15 @@ SQLSTATE: 22023
          1
 (7 rows)
 > select t5-t6 from test_select_tag9.tb order by k_timestamp;
-       ?column?
-----------------------
-        -629.8598675
-  -9.223372e+18
-  9.223372e+18
-         -450.023578
-  -539.5168550000001
-         -110.234111
-         -510.701578
+         ?column?
+--------------------------
+            -629.8598645
+  -9.223372036854776e+18
+  9.223372036854776e+18
+             -450.023578
+      -539.5168530000001
+             -110.234111
+             -510.701578
 (7 rows)
 > select t5*t10 from test_select_tag9.tb order by k_timestamp;
 ERROR: unsupported binary operator: <float4> * <nchar>
@@ -290,25 +290,25 @@ SQLSTATE: 22023
 ERROR: unsupported binary operator: <bool> + <int4>
 SQLSTATE: 22023
 > select t5-e4 from test_select_tag9.tb order by k_timestamp;
-        ?column?
--------------------------
-            -69929.2923
-  -9.22337200000004e+18
-  9.22337199999994e+18
-             -49949.445
-            -59939.3934
-             -40010.123
-             -60010.123
+         ?column?
+--------------------------
+           -69929.292297
+  -9.223372036854817e+18
+  9.223372036854715e+18
+              -49949.445
+           -59939.393398
+              -40010.123
+              -60010.123
 (7 rows)
 > select t6*e5 from test_select_tag9.tb order by k_timestamp;
-        ?column?
--------------------------
-  4.903977876472972e+08
-  6.00667266666666e+07
+         ?column?
+--------------------------
+  4.9039777889020264e+08
+  6.0066729169444375e+07
   2.50289539289289e+08
   -2.50289539289289e+08
-  3.600744930864185e+08
-  6.00667266666666e+07
+  3.6007448558487535e+08
+  6.0066729169444375e+07
   2.50289539289289e+08
 (7 rows)
 > select t9/e6 from test_select_tag9.tb order by k_timestamp;

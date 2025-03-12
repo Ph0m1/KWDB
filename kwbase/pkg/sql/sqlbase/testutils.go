@@ -168,7 +168,7 @@ func RandDatumWithNullChance(rng *rand.Rand, typ *types.T, nullChance int) tree.
 		case 32:
 			// Reduce output accuracy.
 			data := rng.NormFloat64()
-			str := strconv.FormatFloat(data, 'f', -1, 32)
+			str := strconv.FormatFloat(data, 'f', 6, 32)
 			e1, err := tree.ParseDFloat(str)
 			if err != nil {
 				return nil
@@ -703,7 +703,7 @@ func randInterestingDatum(rng *rand.Rand, typ *types.T) tree.Datum {
 		case 32:
 			// Reduce output accuracy.
 			data := float64(*special.(*tree.DFloat))
-			str := strconv.FormatFloat(data, 'f', -1, 32)
+			str := strconv.FormatFloat(data, 'f', 6, 32)
 			e1, err := tree.ParseDFloat(str)
 			if err != nil {
 				return nil
