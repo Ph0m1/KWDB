@@ -17,6 +17,7 @@
 #include "utils/compress_utils.h"
 #include "ts_common.h"
 #include "st_config.h"
+#include "sys_utils.h"
 
 size_t META_BLOCK_ITEM_MAX = 1000;  // max blockitem in one meta file
 
@@ -75,6 +76,7 @@ int MMapEntityBlockMeta::init(const string &file_path, const std::string &db_pat
 
     err_code = mremap(getPageOffset(new_len));
     if (err_code < 0) {
+      Remove(db_path + tbl_sub_path + file_path);
       return err_code;
     }
     size() = block_item_offset_;  // skip size & first element.

@@ -124,4 +124,6 @@ class MMapFile {
   bool readOnly() const { return !(flags_ & O_RDWR); }
 
   void copyMember(MMapFile& other);
+
+  void checkError();
 };

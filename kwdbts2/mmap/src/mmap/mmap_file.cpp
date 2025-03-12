@@ -34,7 +34,7 @@ int MMapFile::reportError() {
 }
 
 void MMapFile::LogMMapFileError(const std::string &op) {
-  LOG_ERROR("%lx [KWFTL] %s failed: os system err_no %d, \"%s\", len: %lu\n", pthread_self(),
+  LOG_ERROR("%lx [KWFTL] %s failed: os system err_no %d, \"%s\", len: %lu", pthread_self(),
             op.c_str(), errno, absolute_file_path_.c_str(), file_length_);
 }
 
@@ -81,6 +81,7 @@ int MMapFile::open() {
   if (mem_ == MAP_FAILED) {
     mem_ = nullptr;
     LogMMapFileError("mmap");
+    checkError();
     return reportError();
   }
   new_length_ = file_length_;
@@ -210,6 +211,7 @@ int MMapFile::resize(size_t length) {
   if (mem_tmp == MAP_FAILED) {
     // mem_ = 0;
     LogMMapFileError("remap");
+    checkError();
     return reportError();
   }
   if (flags_ & O_ANONYMOUS) {
@@ -256,4 +258,33 @@ void MMapFile::copyMember(MMapFile& other) {
   new_length_ = other.new_length_;
   file_path_ = other.file_path_;
   flags_ = other.flags_;
+}
+
+void MMapFile::checkError() {
+  FILE* maps_file = fopen("/proc/self/maps", "r");
+  if (maps_file) {
+    int map_count = 0;
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), maps_file)) {
+      map_count++;
+    }
+    fclose(maps_file);
+
+    int max_map_count = 0;
+    FILE* sysctl_file = fopen("/proc/sys/vm/max_map_count", "r");
+    if (sysctl_file) {
+      memset(buffer, 0, sizeof(buffer));
+      if (fgets(buffer, sizeof(buffer), sysctl_file)) {
+        std::string line = buffer;
+        std::istringstream iss(line);
+        iss >> max_map_count;
+      }
+      fclose(sysctl_file);
+      if (map_count >= max_map_count * 0.9) {
+        LOG_WARN("Likely vm.max_map_count limit: %d/%d maps used", map_count, max_map_count);
+      } else {
+        LOG_WARN("Likely out of memory: %d/%d maps used", map_count, max_map_count);
+      }
+    }
+  }
 }
