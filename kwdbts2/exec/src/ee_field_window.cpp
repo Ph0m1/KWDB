@@ -39,11 +39,18 @@ k_int64 FieldFuncStateWindow::ValInt() {
   } else {
     if (group_id_ == 0) {
       str_val_ = args_[0]->ValStr();
+      String val(str_val_.length_);
+      memcpy(val.ptr_, str_val_.ptr_, str_val_.length_);
+      val.length_ = str_val_.length_;
+      str_val_ = val;
       group_id_++;
     } else {
       String new_val = args_[0]->ValStr();
       if (new_val.compare(str_val_) != 0) {
-        str_val_ = new_val;
+        String val(new_val.length_);
+        memcpy(val.ptr_, new_val.ptr_, new_val.length_);
+        val.length_ = new_val.length_;
+        str_val_ = val;
         group_id_++;
       }
     }

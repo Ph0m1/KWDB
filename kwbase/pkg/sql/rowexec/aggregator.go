@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 	"unsafe"
 
@@ -190,10 +191,10 @@ func (gw *groupWindow) CheckAndGetWindowDatum(
 	case tree.CountWindow:
 		// optimize count_window when count_val == sliding_value.
 		if !flowCtx.EvalCtx.GroupWindow.CountWindowHelper.IsSlide {
-			return gw.handelSimpleCountWindow(*row, flowCtx.EvalCtx.GroupWindow.CountWindowHelper.WindowNum)
+			return gw.handelSimpleCountWindow(typ, *row, flowCtx.EvalCtx.GroupWindow.CountWindowHelper.WindowNum)
 		}
 		if *row == nil {
-			return gw.handleCountWindowForRemainingValue(row)
+			return gw.handleCountWindowForRemainingValue(typ, row)
 		}
 		return gw.handleCountWindow(typ, flowCtx, *row)
 	case tree.TimeWindow:
@@ -229,9 +230,8 @@ func (gw *groupWindow) handleSessionWindow(
 		if gw.groupWindowValue == 0 {
 			gw.sessionWindowHelper.tsTimeStampTZ = *v
 			gw.sessionWindowHelper.dur = evalCtx.GroupWindow.SessionWindowHelper.Dur
-			typ[gw.groupWindowColID] = *types.Any
 			gw.groupWindowValue++
-			row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+			row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 			return nil
 		}
 
@@ -239,23 +239,22 @@ func (gw *groupWindow) handleSessionWindow(
 		if v.Compare(evalCtx, boundary) > 0 {
 			gw.groupWindowValue++
 		}
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		gw.sessionWindowHelper.tsTimeStampTZ = *v
 		return nil
 	case *tree.DTimestamp:
 		if gw.groupWindowValue == 0 {
 			gw.sessionWindowHelper.tsTimeStamp = *v
 			gw.sessionWindowHelper.dur = evalCtx.GroupWindow.SessionWindowHelper.Dur
-			typ[gw.groupWindowColID] = *types.Any
 			gw.groupWindowValue++
-			row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+			row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 			return nil
 		}
 		boundary := &tree.DTimestamp{Time: gw.sessionWindowHelper.tsTimeStampTZ.Time.Add(gw.sessionWindowHelper.dur)}
 		if v.Compare(evalCtx, boundary) > 0 {
 			gw.groupWindowValue++
 		}
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		gw.sessionWindowHelper.tsTimeStamp = *v
 		return nil
 	default:
@@ -263,7 +262,9 @@ func (gw *groupWindow) handleSessionWindow(
 	}
 }
 
-func (gw *groupWindow) handelSimpleCountWindow(row sqlbase.EncDatumRow, target int) (err error) {
+func (gw *groupWindow) handelSimpleCountWindow(
+	typ []types.T, row sqlbase.EncDatumRow, target int,
+) (err error) {
 	if row == nil {
 		return nil
 	}
@@ -271,12 +272,14 @@ func (gw *groupWindow) handelSimpleCountWindow(row sqlbase.EncDatumRow, target i
 		gw.groupWindowValue++
 	}
 	gw.countWindowHelper.countValue++
-	row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	return nil
 }
 
 // handleCountWindow handle count_window when row == nil.
-func (gw *groupWindow) handleCountWindowForRemainingValue(row *sqlbase.EncDatumRow) (err error) {
+func (gw *groupWindow) handleCountWindowForRemainingValue(
+	typ []types.T, row *sqlbase.EncDatumRow,
+) (err error) {
 	if gw.rows.Len() > 0 {
 		ok, err := gw.iter.Valid()
 		if err != nil {
@@ -301,7 +304,7 @@ func (gw *groupWindow) handleCountWindowForRemainingValue(row *sqlbase.EncDatumR
 			return err
 		}
 		gw.iter.Next()
-		row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row1[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		*row = make(sqlbase.EncDatumRow, len(row1))
 		copy(*row, row1)
 		gw.countWindowHelper.countValue++
@@ -348,7 +351,7 @@ func (gw *groupWindow) handleCountWindow(
 		return err
 	}
 	gw.iter.Next()
-	row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	row1[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	copy(row, row1)
 	gw.countWindowHelper.countValue++
 	return nil
@@ -359,7 +362,6 @@ func (gw *groupWindow) handleTimeWindowWithNoSlide(
 ) (err error) {
 	switch v := row[gw.groupWindowColID].Datum.(type) {
 	case *tree.DTimestampTZ:
-		typ[gw.groupWindowColID] = *types.Any
 		var newTimeDur *tree.DTimestampTZ
 		if evalCtx.GroupWindow.TimeWindowHelper.Duration.Days != 0 {
 			oldTimeUnix := v.Time.Unix() * 1000
@@ -382,9 +384,8 @@ func (gw *groupWindow) handleTimeWindowWithNoSlide(
 			newTime := &tree.DTimestampTZ{Time: durTime}
 			row[gw.groupWindowTsColID].Datum = newTime
 		}
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	case *tree.DTimestamp:
-		typ[gw.groupWindowColID] = *types.Any
 		var newTimeDur *tree.DTimestamp
 		if evalCtx.GroupWindow.TimeWindowHelper.Duration.Days != 0 {
 			oldTimeUnix := v.Time.Unix() * 1000
@@ -407,7 +408,7 @@ func (gw *groupWindow) handleTimeWindowWithNoSlide(
 			newTime := &tree.DTimestamp{Time: durTime}
 			row[gw.groupWindowTsColID].Datum = newTime
 		}
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	default:
 		return errors.New("first arg should be timestamp or timestamptz")
 	}
@@ -451,7 +452,6 @@ func (gw *groupWindow) handleTimeTZWindowWithSlide(
 	}
 
 	v, _ := row1[gw.groupWindowColID].Datum.(*tree.DTimestampTZ)
-	typ[gw.groupWindowColID] = *types.Any
 	var startTimeDur, endTimeDur, newTimeDur *tree.DTimestampTZ
 
 	newTimeDur = tree.MakeDTimestampTZ(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
@@ -512,7 +512,7 @@ func (gw *groupWindow) handleTimeTZWindowWithSlide(
 
 	gw.iter.Next()
 	if v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampStartTZ) > -1 && v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampEndTZ) == -1 {
-		row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row1[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	} else {
 		gw.timeWindowHelper.noMatch = true
 		return nil
@@ -573,7 +573,6 @@ func (gw *groupWindow) handleTimeWindowWithSlide(
 	}
 
 	v, _ := row1[gw.groupWindowColID].Datum.(*tree.DTimestamp)
-	typ[gw.groupWindowColID] = *types.Any
 	var startTimeDur, endTimeDur, newTimeDur *tree.DTimestamp
 
 	newTimeDur = tree.MakeDTimestamp(getNewTime(v.Time, evalCtx.GroupWindow.TimeWindowHelper.Duration, time.UTC), 0)
@@ -634,7 +633,7 @@ func (gw *groupWindow) handleTimeWindowWithSlide(
 
 	gw.iter.Next()
 	if v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampStart) > -1 && v.Compare(evalCtx, &gw.timeWindowHelper.tsTimeStampEnd) == -1 {
-		row1[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row1[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	} else {
 		gw.timeWindowHelper.noMatch = true
 		return nil
@@ -685,10 +684,9 @@ func (gw *groupWindow) handleStateWindow(
 		return nil
 	}
 	if gw.groupWindowValue == 0 {
-		typ[gw.groupWindowColID] = *types.Any
 		gw.groupWindowValue = gw.groupWindowValue + 1
 		gw.stateWindowHelper.lastDatum = row[gw.groupWindowColID]
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		return nil
 	}
 	res, err := gw.stateWindowHelper.lastDatum.Compare(&typ[gw.groupWindowColID], &gw.stateWindowHelper.datumAlloc, evalCtx, &row[gw.groupWindowColID])
@@ -698,10 +696,10 @@ func (gw *groupWindow) handleStateWindow(
 	if res != 0 {
 		gw.groupWindowValue = gw.groupWindowValue + 1
 		gw.stateWindowHelper.lastDatum = row[gw.groupWindowColID]
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		return nil
 	}
-	row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+	row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 	return nil
 }
 
@@ -709,7 +707,7 @@ func (gw *groupWindow) handleEventWindow(
 	typ []types.T, evalCtx *tree.EvalContext, row sqlbase.EncDatumRow,
 ) error {
 	if gw.startFlag {
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		if evalCtx.GroupWindow.EventWindowHelper.EndFlag {
 			gw.startFlag = false
 		}
@@ -719,7 +717,7 @@ func (gw *groupWindow) handleEventWindow(
 	if evalCtx.GroupWindow.EventWindowHelper.StartFlag {
 		gw.startFlag = true
 		gw.groupWindowValue = gw.groupWindowValue + 1
-		row[gw.groupWindowColID] = sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(gw.groupWindowValue))}
+		row[gw.groupWindowColID] = encodeDatum(gw.groupWindowValue, typ[gw.groupWindowColID])
 		if evalCtx.GroupWindow.EventWindowHelper.EndFlag {
 			gw.startFlag = false
 		}
@@ -2333,4 +2331,24 @@ func getNewTimeForWin(
 		newTime = newTime.Add(-time.Duration(offSet) * time.Second)
 	}
 	return newTime
+}
+
+func encodeDatum(i int, t types.T) sqlbase.EncDatum {
+	switch t.Family() {
+	case types.IntFamily:
+		return sqlbase.EncDatum{Datum: tree.NewDInt(tree.DInt(i))}
+	case types.BoolFamily:
+		return sqlbase.EncDatum{Datum: tree.MakeDBool(i%2 == 0)}
+	case types.StringFamily:
+		return sqlbase.EncDatum{Datum: tree.NewDString(strconv.Itoa(i))}
+	case types.BytesFamily:
+		return sqlbase.EncDatum{Datum: tree.NewDBytes(tree.DBytes(strconv.Itoa(i)))}
+	case types.TimestampTZFamily:
+		return sqlbase.EncDatum{Datum: tree.MakeDTimestampTZ(timeutil.Unix(int64(i), 0), 0)}
+	case types.TimestampFamily:
+		return sqlbase.EncDatum{Datum: tree.MakeDTimestamp(timeutil.Unix(int64(i), 0), 0)}
+	default:
+		// never hit.
+		return sqlbase.EncDatum{}
+	}
 }
