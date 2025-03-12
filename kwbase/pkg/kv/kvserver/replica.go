@@ -200,6 +200,9 @@ type Replica struct {
 	// TODO(tschottdorf): Duplicates r.mu.state.desc.RangeID; revisit that.
 	RangeID roachpb.RangeID // Only set by the constructor
 
+	// nextCmdID is ID for next locally propose raft command.
+	nextCmdID uint64
+
 	store     *Store
 	abortSpan *abortspan.AbortSpan // Avoids anomalous reads after abort
 

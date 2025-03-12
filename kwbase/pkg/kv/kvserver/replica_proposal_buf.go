@@ -669,7 +669,7 @@ func (rp *replicaProposer) registerProposalLocked(p *ProposalData) {
 	// decide if/when to re-propose it.
 	p.proposedAtTicks = rp.mu.ticks
 	if _p, ok := rp.mu.proposals[p.idKey]; ok && _p != p {
-		log.Warningf(p.ctx, "meet different proposal with same idKey %s, (%p-%p)", p.idKey, _p, p)
+		log.Warningf(p.ctx, "meet different proposal with same idKey %x, (%p-%p)", p.idKey, _p, p)
 	}
 	rp.mu.proposals[p.idKey] = p
 }

@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -65,6 +66,13 @@ var TsCanAckBeforeApplication = settings.RegisterPublicBoolSetting(
 func makeIDKey() storagebase.CmdIDKey {
 	idKeyBuf := make([]byte, 0, raftCommandIDLen)
 	idKeyBuf = encoding.EncodeUint64Ascending(idKeyBuf, uint64(rand.Int63()))
+	return storagebase.CmdIDKey(idKeyBuf)
+}
+
+func (r *Replica) makeLocalIDKey() storagebase.CmdIDKey {
+	idKeyBuf := make([]byte, 0, raftCommandIDLen)
+	id := atomic.AddUint64(&r.nextCmdID, 1)
+	idKeyBuf = encoding.EncodeUint64Ascending(idKeyBuf, id)
 	return storagebase.CmdIDKey(idKeyBuf)
 }
 
@@ -242,7 +250,7 @@ func (r *Replica) evalAndPropose(
 func (r *Replica) evalAndProposeTS(
 	ctx context.Context, ba *roachpb.BatchRequest, g *concurrency.Guard, lease *roachpb.Lease,
 ) (chan proposalResult, func(), int64, *roachpb.Error) {
-	idKey := makeIDKey()
+	idKey := r.makeLocalIDKey()
 	// generate proposal structure
 	proposal, pErr := r.requestToProposalTS(ctx, idKey, ba, g.LatchSpans())
 	log.Event(proposal.ctx, "evaluated request")
