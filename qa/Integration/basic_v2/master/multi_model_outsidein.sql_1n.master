@@ -2728,6 +2728,8 @@ FROM
 ---------
      47
 (1 row)
+> delete from system.table_statistics where name = '_stats_';
+DELETE 35
 > set enable_multimodel=false;
 SET
 > drop database mtagdb cascade;

@@ -1,5 +1,7 @@
 > set enable_multimodel=off;
 SET
+> set cluster setting ts.sql.query_opt_mode = 1110;
+SET CLUSTER SETTING
 > create ts database tpch;
 CREATE TS DATABASE
 > use tpch;
@@ -1923,6 +1925,107 @@ CREATE STATISTICS
 CREATE STATISTICS
 > create statistics st_lineitem from lineitem;
 CREATE STATISTICS
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_nation';
+    name    | columnIDs | rowCount | distinctCount | nullCount
+------------+-----------+----------+---------------+------------
+  st_nation | {1}       |        8 |             8 |         0
+  st_nation | {2}       |        8 |             8 |         0
+  st_nation | {3}       |        8 |             8 |         0
+  st_nation | {4}       |        8 |             4 |         0
+  st_nation | {5}       |        8 |             8 |         0
+  st_nation | {6}       |        8 |             1 |         8
+  st_nation | {7}       |        8 |             8 |         0
+(7 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_region';
+    name    | columnIDs | rowCount | distinctCount | nullCount
+------------+-----------+----------+---------------+------------
+  st_region | {1}       |        5 |             5 |         0
+  st_region | {2}       |        5 |             5 |         0
+  st_region | {3}       |        5 |             5 |         0
+  st_region | {4}       |        5 |             5 |         0
+  st_region | {5}       |        5 |             1 |         5
+  st_region | {6}       |        5 |             5 |         0
+(6 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_supplier';
+     name     | columnIDs | rowCount | distinctCount | nullCount
+--------------+-----------+----------+---------------+------------
+  st_supplier | {1}       |        3 |             3 |         0
+  st_supplier | {2}       |        3 |             3 |         0
+  st_supplier | {3}       |        3 |             3 |         0
+  st_supplier | {4}       |        3 |             3 |         0
+  st_supplier | {5}       |        3 |             3 |         0
+  st_supplier | {6}       |        3 |             3 |         0
+  st_supplier | {7}       |        3 |             3 |         0
+  st_supplier | {8}       |        3 |             3 |         0
+  st_supplier | {9}       |        3 |             1 |         3
+  st_supplier | {10}      |        3 |             3 |         0
+(10 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_partsupp';
+     name     | columnIDs | rowCount | distinctCount | nullCount
+--------------+-----------+----------+---------------+------------
+  st_partsupp | {1}       |        8 |             8 |         0
+  st_partsupp | {2}       |        8 |             2 |         0
+  st_partsupp | {3}       |        8 |             8 |         0
+  st_partsupp | {4}       |        8 |             8 |         0
+  st_partsupp | {5}       |        8 |             8 |         0
+  st_partsupp | {6}       |        8 |             8 |         0
+  st_partsupp | {7}       |        8 |             1 |         8
+  st_partsupp | {8}       |        8 |             8 |         0
+(8 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_customer';
+     name     | columnIDs | rowCount | distinctCount | nullCount
+--------------+-----------+----------+---------------+------------
+  st_customer | {1}       |        5 |             5 |         0
+  st_customer | {2}       |        5 |             5 |         0
+  st_customer | {3}       |        5 |             5 |         0
+  st_customer | {4}       |        5 |             5 |         0
+  st_customer | {5}       |        5 |             5 |         0
+  st_customer | {6}       |        5 |             5 |         0
+  st_customer | {7}       |        5 |             5 |         0
+  st_customer | {8}       |        5 |             4 |         0
+  st_customer | {9}       |        5 |             5 |         0
+  st_customer | {10}      |        5 |             1 |         5
+  st_customer | {11}      |        5 |             5 |         0
+(11 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_orders';
+    name    | columnIDs | rowCount | distinctCount | nullCount
+------------+-----------+----------+---------------+------------
+  st_orders | {1}       |       15 |            15 |         0
+  st_orders | {2}       |       15 |            15 |         0
+  st_orders | {3}       |       15 |            15 |         0
+  st_orders | {4}       |       15 |             2 |         0
+  st_orders | {5}       |       15 |            15 |         0
+  st_orders | {6}       |       15 |            15 |         0
+  st_orders | {7}       |       15 |             5 |         0
+  st_orders | {8}       |       15 |            15 |         0
+  st_orders | {9}       |       15 |             1 |         0
+  st_orders | {10}      |       15 |            15 |         0
+  st_orders | {11}      |       15 |             1 |        15
+  st_orders | {12}      |       15 |            15 |         0
+(12 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_lineitem';
+     name     | columnIDs | rowCount | distinctCount | nullCount
+--------------+-----------+----------+---------------+------------
+  st_lineitem | {1}       |       60 |            60 |         0
+  st_lineitem | {2}       |       60 |            18 |         0
+  st_lineitem | {3}       |       60 |            52 |         0
+  st_lineitem | {4}       |       60 |            10 |         0
+  st_lineitem | {5}       |       60 |             7 |         0
+  st_lineitem | {6}       |       60 |            36 |         0
+  st_lineitem | {7}       |       60 |            60 |         0
+  st_lineitem | {8}       |       60 |            11 |         0
+  st_lineitem | {9}       |       60 |             9 |         0
+  st_lineitem | {10}      |       60 |             3 |         0
+  st_lineitem | {11}      |       60 |             2 |         0
+  st_lineitem | {12}      |       60 |            56 |         0
+  st_lineitem | {13}      |       60 |            57 |         0
+  st_lineitem | {14}      |       60 |            56 |         0
+  st_lineitem | {15}      |       60 |             4 |         0
+  st_lineitem | {16}      |       60 |             7 |         0
+  st_lineitem | {17}      |       60 |            60 |         0
+  st_lineitem | {18}      |       60 |             1 |        60
+  st_lineitem | {19}      |       60 |            60 |         0
+(19 rows)
 > explain explain select
                                                                             l_returnflag,
                                                                             l_linestatus,
@@ -3593,11 +3696,13 @@ CREATE STATISTICS
                                                   | access mode  | metaTable
                                                   | filter       | c_acctbal > 0.0
 (46 rows)
-> set cluster setting sql.stats.ts_automatic_collection.enabled = true;
-SET CLUSTER SETTING
 > use default;
 SET
 > drop database tpch cascade;
 DROP DATABASE
+> delete  from system.table_statistics where name = 'st_nation' or name = 'st_region' or name = 'st_supplier' or name = 'st_partsupp' or name = 'st_customer' or name = 'st_orders' or name = 'st_lineitem';
+DELETE 73
 > set enable_multimodel=on;
 SET
+> set cluster setting ts.sql.query_opt_mode = default;
+SET CLUSTER SETTING

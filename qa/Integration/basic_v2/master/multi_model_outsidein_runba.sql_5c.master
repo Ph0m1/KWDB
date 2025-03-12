@@ -2855,6 +2855,8 @@ DROP TABLE
 DROP DATABASE
 > DROP DATABASE runba;
 DROP DATABASE
+> delete from system.table_statistics where name = '_stats_';
+DELETE 599
 > set cluster setting ts.sql.query_opt_mode = 1110;
 SET CLUSTER SETTING
 > set cluster setting sql.stats.tag_automatic_collection.enabled = true;

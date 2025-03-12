@@ -1337,6 +1337,7 @@ FROM
     JOIN test_select_join_rel.t1 t11
     ON t1.code9 = t11.code9;
 
+delete from system.table_statistics where name = '_stats_';
 set enable_multimodel=false;
 drop database mtagdb cascade;
 drop database pipec_r cascade;

@@ -534,10 +534,21 @@ INSERT 1
 CREATE TABLE
 > create statistics st from test_last.t1;
 CREATE STATISTICS
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st';
+  name | columnIDs | rowCount | distinctCount | nullCount
+-------+-----------+----------+---------------+------------
+  st   | {1}       |        0 |             0 |         0
+  st   | {2}       |        0 |             0 |         0
+  st   | {3}       |        0 |             0 |         0
+  st   | {5}       |        0 |             0 |         0
+  st   | {4}       |        0 |             0 |         0
+(5 rows)
 > select last(*) from test_last.t1;
   last(ts) | last(a) | last(b) | last(tag1) | last(tag2)
 -----------+---------+---------+------------+-------------
   NULL     | NULL    | NULL    | NULL       | NULL
 (1 row)
+> delete from system.table_statistics where name = 'st';
+DELETE 5
 > drop database test_last cascade;
 DROP DATABASE

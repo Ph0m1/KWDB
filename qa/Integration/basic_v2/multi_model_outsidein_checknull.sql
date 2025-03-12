@@ -40,8 +40,10 @@ INSERT INTO my_relation_db.station_info VALUES
   ('sn6', 'Station Six', NULL, NULL, NULL);
 
 -- create stats
-CREATE STATISTICS _stats_ FROM my_timeseries_db.firegases;
-CREATE STATISTICS _stats_ FROM my_relation_db.station_info;
+CREATE STATISTICS _stats_firegases FROM my_timeseries_db.firegases;
+CREATE STATISTICS _stats_station_info FROM my_relation_db.station_info;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = '_stats_firegases';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = '_stats_station_info';
 
 set enable_multimodel=true;
 
@@ -1556,6 +1558,7 @@ DROP TABLE my_timeseries_db.firegases;
 DROP TABLE my_relation_db.station_info;
 DROP DATABASE my_timeseries_db;
 DROP DATABASE my_relation_db;
+delete  from system.table_statistics where name = '_stats_firegases' or name = '_stats_station_info' or name = '_stats_';
 
 set cluster setting ts.sql.query_opt_mode = 1110;
 set cluster setting sql.stats.tag_automatic_collection.enabled = true;

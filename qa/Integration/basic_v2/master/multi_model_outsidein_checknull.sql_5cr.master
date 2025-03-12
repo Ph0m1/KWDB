@@ -39,10 +39,28 @@ CREATE TABLE
   ('sn5', 'Station Five', 'adr5', NULL, 15.5),
   ('sn6', 'Station Six', NULL, NULL, NULL);
 INSERT 6
-> CREATE STATISTICS _stats_ FROM my_timeseries_db.firegases;
+> CREATE STATISTICS _stats_firegases FROM my_timeseries_db.firegases;
 CREATE STATISTICS
-> CREATE STATISTICS _stats_ FROM my_relation_db.station_info;
+> CREATE STATISTICS _stats_station_info FROM my_relation_db.station_info;
 CREATE STATISTICS
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = '_stats_firegases';
+        name       | columnIDs | rowCount | distinctCount | nullCount
+-------------------+-----------+----------+---------------+------------
+  _stats_firegases | {1}       |        4 |             4 |         0
+  _stats_firegases | {2}       |        4 |             4 |         1
+  _stats_firegases | {4}       |        4 |             4 |         1
+  _stats_firegases | {5}       |        4 |             4 |         1
+  _stats_firegases | {3}       |        4 |             4 |         0
+(5 rows)
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = '_stats_station_info';
+         name         | columnIDs | rowCount | distinctCount | nullCount
+----------------------+-----------+----------+---------------+------------
+  _stats_station_info | {1}       |        6 |             6 |         0
+  _stats_station_info | {2}       |        6 |             6 |         0
+  _stats_station_info | {3}       |        6 |             4 |         3
+  _stats_station_info | {4}       |        6 |             4 |         2
+  _stats_station_info | {5}       |        6 |             5 |         2
+(5 rows)
 > set enable_multimodel=true;
 SET
 > set hash_scan_mode = 0;
@@ -4732,6 +4750,8 @@ DROP TABLE
 DROP DATABASE
 > DROP DATABASE my_relation_db;
 DROP DATABASE
+> delete  from system.table_statistics where name = '_stats_firegases' or name = '_stats_station_info' or name = '_stats_';
+DELETE 29
 > set cluster setting ts.sql.query_opt_mode = 1110;
 SET CLUSTER SETTING
 > set cluster setting sql.stats.tag_automatic_collection.enabled = true;

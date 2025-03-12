@@ -27,6 +27,15 @@ INSERT 1
 INSERT 1
 > CREATE STATISTICS _stats_ FROM pipec_r.pipeline_info;
 CREATE STATISTICS
+> select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = '_stats_';
+   name   | columnIDs | rowCount | distinctCount | nullCount
+----------+-----------+----------+---------------+------------
+  _stats_ | {1}       |        6 |             6 |         0
+  _stats_ | {2}       |        6 |             6 |         0
+  _stats_ | {3}       |        6 |             1 |         0
+  _stats_ | {4}       |        6 |             1 |         0
+  _stats_ | {5}       |        6 |             1 |         0
+(5 rows)
 > set enable_multimodel=true;
 SET
 > CREATE TS DATABASE mtagdb;
@@ -426,5 +435,7 @@ SET
 DROP DATABASE
 > drop database mtagdb cascade;
 DROP DATABASE
+> delete from system.table_statistics where name = '_stats_';
+DELETE 5
 > set cluster setting ts.sql.query_opt_mode = 1110;
 SET CLUSTER SETTING

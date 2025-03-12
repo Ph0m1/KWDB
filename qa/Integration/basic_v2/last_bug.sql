@@ -281,6 +281,8 @@ select last_row(*) from test_last.stb group by e7 order by e7 desc;
 
 create table test_last.t1(ts timestamp not null,a int, b int) tags(tag1 int not null, tag2 int) primary tags(tag1);
 create statistics st from test_last.t1;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st';
 select last(*) from test_last.t1;
 
+delete from system.table_statistics where name = 'st';
 drop database test_last cascade;

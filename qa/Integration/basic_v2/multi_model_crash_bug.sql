@@ -21,6 +21,7 @@ insert into pipec_r.pipeline_info values('e5','pipeline_5','a','aa','b');
 
 -- create stats
 CREATE STATISTICS _stats_ FROM pipec_r.pipeline_info;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = '_stats_';
 
 set enable_multimodel=true;
 
@@ -348,4 +349,5 @@ GROUP BY li.pipeline_name, li.pipe_start, li.pipe_end;
 set enable_multimodel=false;
 drop database pipec_r cascade;
 drop database mtagdb cascade;
+delete from system.table_statistics where name = '_stats_';
 set cluster setting ts.sql.query_opt_mode = 1110;

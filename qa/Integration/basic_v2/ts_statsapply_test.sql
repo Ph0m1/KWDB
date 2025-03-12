@@ -1,4 +1,5 @@
 set enable_multimodel=off;
+set cluster setting ts.sql.query_opt_mode = 1110;
 create ts database tpch;
 use tpch;
 set cluster setting sql.stats.ts_automatic_collection.enabled = false;
@@ -866,6 +867,13 @@ create statistics st_partsupp from partsupp;
 create statistics st_customer from customer;
 create statistics st_orders from orders;
 create statistics st_lineitem from lineitem;
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_nation';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_region';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_supplier';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_partsupp';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_customer';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_orders';
+select "name","columnIDs","rowCount","distinctCount","nullCount" from system.table_statistics  where name = 'st_lineitem';
 
 -- Q1 - price statistics report
 explain explain select
@@ -1482,7 +1490,8 @@ explain select
             cntrycode
         order by
             cntrycode limit 1;
-set cluster setting sql.stats.ts_automatic_collection.enabled = true;
 use default;
 drop database tpch cascade;
+delete  from system.table_statistics where name = 'st_nation' or name = 'st_region' or name = 'st_supplier' or name = 'st_partsupp' or name = 'st_customer' or name = 'st_orders' or name = 'st_lineitem';
 set enable_multimodel=on;
+set cluster setting ts.sql.query_opt_mode = default;
