@@ -3050,7 +3050,7 @@ func (c *CustomFuncs) GenerateTagTSScans(
 
 // CanApplyOutsideIn checks if join expr can apply the GenerateBatchLookUpJoin exploration rule.
 func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.FiltersExpr) bool {
-	if !c.e.evalCtx.StartSinglenode {
+	if c.e.evalCtx.StartDistributeMode {
 		return false
 	}
 	if !opt.CheckOptMode(opt.TSQueryOptMode.Get(&c.e.evalCtx.Settings.SV), opt.OutsideInUseCBO) {
@@ -3066,20 +3066,20 @@ func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.Filter
 	rRowCount := right.Relational().Stats.RowCount
 	if lok {
 		if rRowCount > lRowCount {
-			c.e.mem.QueryType = memo.Unset
+			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		}
 		if left.FirstExpr().Relational().Stats.Selectivity*ffCompFactor < right.FirstExpr().Relational().Stats.Selectivity {
-			c.e.mem.QueryType = memo.Unset
+			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		}
 	} else {
 		if rRowCount < lRowCount {
-			c.e.mem.QueryType = memo.Unset
+			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		}
 		if right.FirstExpr().Relational().Stats.Selectivity*ffCompFactor < left.FirstExpr().Relational().Stats.Selectivity {
-			c.e.mem.QueryType = memo.Unset
+			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		}
 	}
@@ -3088,14 +3088,14 @@ func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.Filter
 	// and child of operator must be relational column and tag column
 	for _, jp := range on {
 		if _, ok := jp.Condition.(*memo.OrExpr); ok {
-			c.e.mem.QueryType = memo.Unset
+			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		} else if c.e.mem.IsTsColsJoinPredicate(jp) {
-			c.e.mem.QueryType = memo.Unset
+			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		}
 	}
-	c.e.mem.QueryType = memo.MultiModel
+	c.e.mem.SetFlag(opt.CanApplyOutsideIn)
 	return true
 }
 
@@ -3155,7 +3155,7 @@ func (c *CustomFuncs) precheckInsideOutOptApplicable(
 	if !opt.CheckOptMode(opt.TSQueryOptMode.Get(c.GetSettingValues()), opt.JoinPushAgg) {
 		return false, nil
 	}
-	if c.e.mem.QueryType == memo.MultiModel {
+	if c.e.mem.CheckFlag(opt.CanApplyOutsideIn) {
 		return false, nil
 	}
 
@@ -3167,8 +3167,10 @@ func (c *CustomFuncs) precheckInsideOutOptApplicable(
 	}
 
 	// can only opt when the agg is (Sum, Count, CountRows, Avg, Min, Max)
-	if !c.checkAggOptApplicable(aggs, optHelper) {
-		return false, nil
+	for i := range aggs {
+		if !c.checkAggOptApplicable(aggs[i].Agg, optHelper) {
+			return false, nil
+		}
 	}
 
 	// could opt inside-out when the child of GroupByExpr isn't InnerJoinExpr
@@ -3569,7 +3571,7 @@ func constructNewAgg(
 				sumIntTwo := f.ConstructSumInt(f.ConstructVariable(newAggID))
 				*NewAggregations = append(*NewAggregations, f.ConstructAggregationsItem(sumIntTwo, agg.Col))
 				passthroughCols.Add(agg.Col)
-			case *memo.MaxExpr, *memo.MinExpr, *memo.ConstAggExpr:
+			case *memo.MaxExpr, *memo.MinExpr, *memo.ConstAggExpr, *memo.AggDistinctExpr:
 				*NewAggregations = append(*NewAggregations, agg)
 				passthroughCols.Add(agg.Col)
 			default:
@@ -3671,37 +3673,57 @@ func dealWithTsTable(
 	return false, newInnerJoin, nil, nil, opt.ColSet{}
 }
 
-// checkAggOptApplicable checks if the agg can be optimized
-func (c *CustomFuncs) checkAggOptApplicable(
-	aggs []memo.AggregationsItem, optHelper *memo.InsideOutOptHelper,
-) bool {
-	for i := range aggs {
-		switch t := aggs[i].Agg.(type) {
-		case *memo.SumExpr:
-			if !c.checkArgsOptApplicable(t.Input, optHelper, opt.SumOp) {
-				return false
+func (c *CustomFuncs) getAggTableID(agg opt.Expr) opt.TableID {
+	switch agg.ChildCount() {
+	case 0:
+		if v, ok := agg.(*memo.VariableExpr); ok {
+			return c.e.mem.Metadata().ColumnMeta(v.Col).Table
+		}
+	default:
+		for i := 0; i < agg.ChildCount(); i++ {
+			tableID := c.getAggTableID(agg.Child(i))
+			if tableID > 0 {
+				return tableID
 			}
-		case *memo.AvgExpr:
-			if !c.checkArgsOptApplicable(t.Input, optHelper, opt.AvgOp) {
-				return false
-			}
-		case *memo.CountExpr:
-			if !c.checkArgsOptApplicable(t.Input, optHelper, opt.CountOp) {
-				return false
-			}
-		case *memo.CountRowsExpr:
-			c.checkArgsOptApplicable(nil, optHelper, opt.CountRowsOp)
-		case *memo.MinExpr:
-			c.checkArgsOptApplicable(t.Input, optHelper, opt.MinOp)
-		case *memo.MaxExpr:
-			c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
-		case *memo.ConstAggExpr:
-			c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
-		default:
-			return false
 		}
 	}
+	return 0
+}
 
+// checkAggOptApplicable checks if the agg can be optimized
+func (c *CustomFuncs) checkAggOptApplicable(
+	agg opt.ScalarExpr, optHelper *memo.InsideOutOptHelper,
+) bool {
+	switch t := agg.(type) {
+	case *memo.SumExpr:
+		if !c.checkArgsOptApplicable(t.Input, optHelper, opt.SumOp) {
+			return false
+		}
+	case *memo.AvgExpr:
+		if !c.checkArgsOptApplicable(t.Input, optHelper, opt.AvgOp) {
+			return false
+		}
+	case *memo.CountExpr:
+		if !c.checkArgsOptApplicable(t.Input, optHelper, opt.CountOp) {
+			return false
+		}
+	case *memo.CountRowsExpr:
+		c.checkArgsOptApplicable(nil, optHelper, opt.CountRowsOp)
+	case *memo.MinExpr:
+		c.checkArgsOptApplicable(t.Input, optHelper, opt.MinOp)
+	case *memo.MaxExpr:
+		c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
+	case *memo.ConstAggExpr:
+		c.checkArgsOptApplicable(t.Input, optHelper, opt.MaxOp)
+	case *memo.AggDistinctExpr:
+		c.checkAggOptApplicable(t.Input, optHelper)
+		tableID := c.getAggTableID(t.Input)
+		if tableID <= 0 || c.e.mem.Metadata().Table(tableID).GetTableType() == tree.TimeseriesTable {
+			return false
+		}
+	default:
+		return false
+	}
 	return true
 }
 

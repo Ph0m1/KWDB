@@ -184,6 +184,8 @@ const (
 
 	// GroupWindowUseOrderScan is set when grouping window function can exec in AE
 	GroupWindowUseOrderScan = 1 << 11
+
+	CanApplyOutsideIn = 1 << 12
 )
 
 // OrderedTableType TSScanOrderedType

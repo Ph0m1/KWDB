@@ -583,16 +583,11 @@ func (c *coster) computeBatchLoopUpJoinCost(join memo.RelExpr) memo.Cost {
 		return hugeCost
 	}
 
-	var relationalRowCount, tsRowCount float64
+	var relationalRowCount float64
 	if walk(join.Child(0)) {
-		tsRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
 		relationalRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
 	} else {
 		relationalRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
-		tsRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
-	}
-	if tsRowCount/relationalRowCount < 10 {
-		return hugeCost
 	}
 
 	// A hash join must process every row from both tables once.
