@@ -29,6 +29,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -4425,7 +4426,21 @@ func twaGetArea(sKey, eKey int64, sVal, eVal float64) float64 {
 		return (sVal + eVal) * float64(deltaT)
 	}
 
-	x := (float64(sKey)*eVal - float64(eKey)*sVal) / (eVal - sVal)
+	// Using big.Float for high precision calculation
+	sKeyBig, eKeyBig := new(big.Float).SetFloat64(float64(sKey)), new(big.Float).SetFloat64(float64(eKey))
+	sValBig, eValBig := new(big.Float).SetFloat64(sVal), new(big.Float).SetFloat64(eVal)
 
-	return sVal*(x-float64(sKey)) + eVal*(float64(eKey)-x)
+	// Calculate x
+	numerator := new(big.Float).Sub(new(big.Float).Mul(sKeyBig, eValBig), new(big.Float).Mul(eKeyBig, sValBig))
+	denominator := new(big.Float).Sub(eValBig, sValBig)
+	x := new(big.Float).Quo(numerator, denominator)
+
+	// Calculate the final result
+	part1 := new(big.Float).Mul(sValBig, new(big.Float).Sub(x, sKeyBig))
+	part2 := new(big.Float).Mul(eValBig, new(big.Float).Sub(eKeyBig, x))
+	result := new(big.Float).Add(part1, part2)
+
+	// Convert result to float64
+	res, _ := result.Float64()
+	return res
 }

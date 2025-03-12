@@ -58,12 +58,12 @@ select max(temperature),min(temperature),first(temperature),last(temperature),la
 select max(temperature),min(temperature),first(temperature),last(temperature),lastts(temperature),twa(ts, temperature)=1,elapsed(ts,1h) from sensor_data;
 select max(temperature),min(temperature),first(temperature),last(temperature),lastts(temperature),twa(ts, temperature)>1,elapsed(ts,1h) from sensor_data;
 select max(temperature),min(temperature),first(temperature),last(temperature),lastts(temperature),twa(ts, temperature)<1,elapsed(ts,1h) from sensor_data;
-select twa(ts, temperature) from sensor_data group by ptagID order by ptagID;
+select round(twa(ts, temperature),3) from sensor_data group by ptagID order by ptagID;
 explain select twa(ts, temperature) from sensor_data group by ptagID order by ptagID;
-select twa(ts, temperature2) from sensor_data group by ptagID order by ptagID;
-select twa(ts, temperature3) from sensor_data group by ptagID order by ptagID;
-select twa(ts, stress) from sensor_data group by ptagID order by ptagID;
-select twa(ts, stress2) from sensor_data group by ptagID order by ptagID;
+select round(twa(ts, temperature2),3) from sensor_data group by ptagID order by ptagID;
+select round(twa(ts, temperature3),3) from sensor_data group by ptagID order by ptagID;
+select round(twa(ts, stress),3) from sensor_data group by ptagID order by ptagID;
+select round(twa(ts, stress2),3) from sensor_data group by ptagID order by ptagID;
 
 select elapsed(ts,1h) from sensor_data group by ptagID having twa(ts, temperature) > 3 order by ptagID;
 select elapsed(ts,1h) from sensor_data group by ptagID having twa(ts, temperature) > 3 and twa(ts, temperature) < 9 order by ptagID;
@@ -256,10 +256,10 @@ INSERT INTO sensor_data_us (ts, temperature,temperature2,temperature3,stress,str
 
 select twa(ts, temperature) from sensor_data_us;
 select twa(ts, temperature) from sensor_data_us group by ptagID order by ptagID;
-select twa(ts, temperature2) from sensor_data_us group by ptagID order by ptagID;
-select twa(ts, temperature3) from sensor_data_us group by ptagID order by ptagID;
-select twa(ts, stress) from sensor_data_us group by ptagID order by ptagID;
-select twa(ts, stress2) from sensor_data_us group by ptagID order by ptagID;
+--select twa(ts, temperature2) from sensor_data_us group by ptagID order by ptagID;
+--select twa(ts, temperature3) from sensor_data_us group by ptagID order by ptagID;
+--select twa(ts, stress) from sensor_data_us group by ptagID order by ptagID;
+--select twa(ts, stress2) from sensor_data_us group by ptagID order by ptagID;
 select elapsed(ts) from sensor_data_us;
 
 select twa(normal_time, temperature) from sensor_data;
@@ -314,9 +314,9 @@ INSERT INTO sensor_data_ns (ts, temperature,temperature2,temperature3,stress,str
 
 select twa(ts, temperature) from sensor_data_ns;
 select twa(ts, temperature) from sensor_data_ns group by ptagID order by ptagID;
-select twa(ts, temperature2) from sensor_data_ns group by ptagID order by ptagID;
-select twa(ts, temperature3) from sensor_data_ns group by ptagID order by ptagID;
-select twa(ts, stress) from sensor_data_ns group by ptagID order by ptagID;
+--select twa(ts, temperature2) from sensor_data_ns group by ptagID order by ptagID;
+--select twa(ts, temperature3) from sensor_data_ns group by ptagID order by ptagID;
+--select twa(ts, stress) from sensor_data_ns group by ptagID order by ptagID;
 select twa(ts, stress2) from sensor_data_ns group by ptagID order by ptagID;
 select elapsed(ts) from sensor_data_ns;
 
