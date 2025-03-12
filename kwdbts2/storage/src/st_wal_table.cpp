@@ -590,7 +590,7 @@ KStatus LoggedTsEntityGroup::applyWal(kwdbContext_p ctx, LogEntry* wal_log,
         auto log = reinterpret_cast<DeleteLogTagsEntry*>(del_log);
         auto p_tag_slice = log->getPrimaryTag();
         auto slice = log->getTags();
-        return redoDeleteTag(ctx, p_tag_slice, log->getLSN(), log->entity_id_, log->group_id_, slice);
+        return redoDeleteTag(ctx, p_tag_slice, log->getLSN(), log->group_id_, log->entity_id_, slice);
       }
     }
     case WALLogType::UPDATE: {
@@ -1206,7 +1206,7 @@ KStatus LoggedTsEntityGroup::undoDeleteTag(kwdbContext_p ctx, TSSlice& primary_t
 KStatus LoggedTsEntityGroup::redoDeleteTag(kwdbContext_p ctx, TSSlice& primary_tag, kwdbts::TS_LSN log_lsn,
                                            uint32_t group_id, uint32_t entity_id, TSSlice& payload) {
   ErrorInfo err_info;
-  int res = new_tag_bt_->DeleteForRedo(group_id, entity_id, payload);
+  int res = new_tag_bt_->DeleteForRedo(group_id, entity_id, primary_tag);
   if (res) {
     return KStatus::FAIL;
   }
