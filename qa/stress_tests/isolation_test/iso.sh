@@ -1,56 +1,115 @@
 #!/bin/bash
+# Copyright (c) 2022-present, Shanghai Yunxi Technology Co, Ltd. All rights reserved.
+#
+# This software (KWDB) is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
 
-# 切换到KaiwuDB安装目录
-cd ../../../install/bin
+set -e
 
-# 启动KaiwuDB
-./kwbase start --insecure --listen-addr=127.0.0.1:26257 --http-addr=127.0.0.1:8081 --store=./kwbase-data1 --max-offset=0ms --join=127.0.0.1:26257 --background &
+CUR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QA_DIR="$(dirname "$(dirname "${CUR}")")"
+BIN_DIR="$QA_DIR/../install/bin/"
+KWBIN="$BIN_DIR/kwbase"
+mkdir $BIN_DIR/iso_test
+DEPLOY_DIR="$BIN_DIR/iso_test"
+INSTALL_DIR=$BIN_DIR
+QA_TEST_DIR=$QA_DIR/stress_tests/isolation_test
 
-./kwbase start --insecure --listen-addr=127.0.0.1:26258 --http-addr=127.0.0.1:8082 --store=./kwbase-data2 --max-offset=0ms --join=127.0.0.1:26257 --background &
+LISTEN_PORTS=(26257 26258 26259 26260 26261)
+HTTP_PORTS=(8081 8082 8083 8084 8085)
+STORE_DIRS=("$DEPLOY_DIR/kwbase-data1" "$DEPLOY_DIR/kwbase-data2" "$DEPLOY_DIR/kwbase-data3" "$DEPLOY_DIR/kwbase-data4" "$DEPLOY_DIR/kwbase-data5")
+JOIN_ADDR="127.0.0.1:26257"
+MAX_OFFSET="0ms"
 
-./kwbase start --insecure --listen-addr=127.0.0.1:26259 --http-addr=127.0.0.1:8083 --store=./kwbase-data3 --max-offset=0ms --join=127.0.0.1:26257 --background &
+SLEEP_START=10
 
-./kwbase start --insecure --listen-addr=127.0.0.1:26260 --http-addr=127.0.0.1:8084 --store=./kwbase-data4 --max-offset=0ms --join=127.0.0.1:26257 --background &
+start_node() {
+    local index=$1
+    local listen_port=${LISTEN_PORTS[$index]}
+    local http_port=${HTTP_PORTS[$index]}
+    local store=${STORE_DIRS[$index]}
+    echo "Starting KaiwuDB node ${store}"
+    ${KWBIN} \
+        start --insecure \
+        --listen-addr=127.0.0.1:"${listen_port}" \
+        --http-addr=127.0.0.1:"${http_port}" \
+        --store=${store} \
+        --max-offset="${MAX_OFFSET}" \
+        --join="${JOIN_ADDR}" \
+        --background
+}
 
-./kwbase start --insecure --listen-addr=127.0.0.1:26261 --http-addr=127.0.0.1:8085 --store=./kwbase-data5 --max-offset=0ms --join=127.0.0.1:26257 --background &
+cleanup() {
+  echo "Stopping KaiwuDB..."
+  for port in {26257..26261}; do
+    ${KWBIN} quit --insecure --host=127.0.0.1:$port --drain-wait -8s || true
+  done
 
-./kwbase init --insecure --host=127.0.0.1:26257 &
+  echo "Waiting for KaiwuDB to stop..."
 
-# 等待KaiwuDB启动完成
+  echo "Removing data directories..."
+  rm -rf $DEPLOY_DIR
+}
+
+start_single_node() {
+    ${KWBIN} \
+            start-single-node --insecure \
+            --listen-addr=127.0.0.1:26257 \
+            --http-addr=127.0.0.1:8080 \
+            --store=$DEPLOY_DIR/kwbase-data \
+            --background
+}
+
+cleanup_single_node() {
+  echo "Stopping KaiwuDB..."
+  ${KWBIN} quit --insecure --host=127.0.0.1:26257 --drain-wait -8s || true
+
+  echo "Waiting for KaiwuDB to stop..."
+
+  echo "Removing data directories..."
+  rm -rf $DEPLOY_DIR
+}
+
+trap cleanup_single_node EXIT
+
+cd "${INSTALL_DIR}"
+echo "Starting KaiwuDB nodes..."
+start_single_node &
+
 echo "Waiting for KaiwuDB to start..."
-sleep 10  # 根据实际情况调整等待时间
+sleep "${SLEEP_START}"
 
-# 切换回测试目录
-cd ../../qa/stress_tests/isolation_test
-
-# 执行测试命令
+cd "${QA_TEST_DIR}"
 echo "Running tests..."
 make test
 
-# 等待测试完成
 wait
 
-# 关闭KaiwuDB实例
-# pkill -9 kwbase
-cd ../../../install/bin
-./kwbase quit --insecure --host=127.0.0.1:26257 &
-./kwbase quit --insecure --host=127.0.0.1:26258 &
-./kwbase quit --insecure --host=127.0.0.1:26259 &
-./kwbase quit --insecure --host=127.0.0.1:26260 &
-./kwbase quit --insecure --host=127.0.0.1:26261 &
+trap cleanup EXIT
 
-# 等待KaiwuDB stop
-echo "Waiting for KaiwuDB to stop..."
-sleep 15  # 根据实际情况调整等待时间
+cd "${INSTALL_DIR}"
+echo "Starting KaiwuDB nodes..."
+for i in "${!LISTEN_PORTS[@]}"; do
+    start_node "$i" &
+done
 
-rm -rf kwbase-data1
-rm -rf kwbase-data2
-rm -rf kwbase-data3
-rm -rf kwbase-data4
-rm -rf kwbase-data5
+echo "Initializing KaiwuDB cluster on host ${JOIN_ADDR}"
+${KWBIN} init --insecure --host="${JOIN_ADDR}" &
 
+echo "Waiting for KaiwuDB to start..."
+sleep "${SLEEP_START}"
 
-# 切换回测试目录
-cd ../../qa/stress_tests/isolation_test
+cd "${QA_TEST_DIR}"
+echo "Running tests..."
+make test
 
+wait
+
+cd "${QA_TEST_DIR}"
 echo "Script completed."
