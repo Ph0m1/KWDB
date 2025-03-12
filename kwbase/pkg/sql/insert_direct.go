@@ -784,6 +784,7 @@ func TsprepareTypeCheck(
 							if err != nil {
 								return nil, nil, err
 							}
+							Args[idx] = make([]byte, 8)
 							binary.LittleEndian.PutUint64(Args[idx], uint64(i))
 						case oid.T_timestamptz, oid.T_timestamp:
 							tum := binary.BigEndian.Uint64(Args[idx])
@@ -822,6 +823,7 @@ func TsprepareTypeCheck(
 							if err != nil {
 								return nil, nil, err
 							}
+							Args[idx] = make([]byte, 2)
 							binary.LittleEndian.PutUint16(Args[idx], uint16(i))
 						case oid.T_int4, oid.T_int8:
 							i, err := strconv.ParseInt(string(Args[idx]), 10, 64)
@@ -871,6 +873,7 @@ func TsprepareTypeCheck(
 						Args[idx] = make([]byte, 4)
 						binary.LittleEndian.PutUint32(Args[idx], uint32(int32(math.Float32bits(float32((f))))))
 					case oid.T_float8:
+						Args[idx] = make([]byte, 8)
 						binary.LittleEndian.PutUint64(Args[idx], uint64(int64(math.Float64bits(float64(f)))))
 					}
 				case oid.T_float4:
@@ -889,7 +892,7 @@ func TsprepareTypeCheck(
 						Args[idx] = make([]byte, 8)
 						binary.LittleEndian.PutUint64(Args[idx], uint64(int64(math.Float64bits(float64(f)))))
 					}
-				case oid.T_varchar, oid.T_bpchar, oid.T_varbytea:
+				case oid.T_varchar, oid.T_bpchar, oid.T_varbytea, types.T_nchar, types.T_nvarchar:
 					switch column.Type.Family() {
 					case types.StringFamily, types.BytesFamily, types.TimestampFamily, types.TimestampTZFamily, types.BoolFamily:
 						switch column.Type.Oid() {
@@ -1072,28 +1075,20 @@ func TsprepareTypeCheck(
 					case types.IntFamily, types.TimestampTZFamily, types.TimestampFamily, types.BoolFamily:
 						switch column.Type.Oid() {
 						case oid.T_int2:
-							if ArgFormatCodes[idx] == pgwirebase.FormatText {
-								i, err := strconv.ParseInt(string(Args[idx]), 10, 64)
-								if err != nil {
-									return nil, nil, err
-								}
-								binary.LittleEndian.PutUint16(Args[idx], uint16(i))
-							} else {
-								var intValue int32
-								for _, b := range Args[idx] {
-									// Determine whether the specific positioning is 1 based on bit and operation
-									high := int32(b >> 4)
-									low := int32(b & 0x0F)
-									intValue = (intValue << 8) | (high << 4) | low
-								}
-								if intValue < math.MinInt16 || intValue > math.MaxInt16 {
-									return nil, nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
-										"integer out of range for type %s (column %q)",
-										column.Type.SQLString(), column.Name)
-								}
-								Args[idx] = make([]uint8, len(Args[idx]))
-								binary.LittleEndian.PutUint16(Args[idx], uint16(intValue))
+							var intValue int32
+							for _, b := range Args[idx] {
+								// Determine whether the specific positioning is 1 based on bit and operation
+								high := int32(b >> 4)
+								low := int32(b & 0x0F)
+								intValue = (intValue << 8) | (high << 4) | low
 							}
+							if intValue < math.MinInt16 || intValue > math.MaxInt16 {
+								return nil, nil, pgerror.Newf(pgcode.NumericValueOutOfRange,
+									"integer out of range for type %s (column %q)",
+									column.Type.SQLString(), column.Name)
+							}
+							Args[idx] = make([]uint8, len(Args[idx]))
+							binary.LittleEndian.PutUint16(Args[idx], uint16(intValue))
 						case oid.T_int4:
 							if len(Args[idx]) > 4 {
 								var intValue int64
@@ -1178,7 +1173,7 @@ func TsprepareTypeCheck(
 						Args[idx] = make([]byte, 8)
 						binary.LittleEndian.PutUint64(Args[idx], uint64(int64(math.Float64bits(float64(f64)))))
 					}
-				case oid.T_varchar, oid.T_bpchar, oid.T_varbytea:
+				case oid.T_varchar, oid.T_bpchar, oid.T_varbytea, types.T_nchar, types.T_nvarchar:
 					switch column.Type.Family() {
 					case types.StringFamily, types.BytesFamily, types.TimestampFamily, types.TimestampTZFamily, types.BoolFamily:
 						switch column.Type.Oid() {
@@ -1284,16 +1279,10 @@ func TsprepareTypeCheck(
 						return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
 					}
 				case oid.T_bool:
-					davl, err := tree.ParseDBool(string(Args[idx]))
-					if err != nil {
-						return nil, nil, tree.NewDatatypeMismatchError(column.Name, string(Args[idx]), column.Type.SQLString())
+					if len(Args[idx]) > 0 && (Args[idx][0] == 0 || Args[idx][0] == 1) {
+						continue
 					}
-					Args[idx] = make([]byte, 1)
-					if *davl {
-						Args[idx][0] = 1
-					} else {
-						Args[idx][0] = 0
-					}
+					return nil, nil, pgerror.Newf(pgcode.Syntax, "unsupported binary bool: %x", Args[idx])
 				}
 			}
 

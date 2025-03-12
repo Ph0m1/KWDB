@@ -87,18 +87,44 @@ func (ex *connExecutor) execPrepare(
 	if ps.Insertdirectstmt.InsertFast {
 		ps.PrepareInsertDirect = parseCmd.PrepareInsertDirect
 		types = ps.TypeHints
+
+		if int64(ps.PrepareMetadata.Statement.NumPlaceholders)/
+			ps.PrepareMetadata.Insertdirectstmt.RowsAffected != int64(ps.PrepareInsertDirect.Inscolsnum) {
+			ex.deletePreparedStmt(ctx, parseCmd.Name)
+			return retErr(pgerror.Newf(
+				pgcode.Syntax,
+				"insert (row %d) has more expressions than target columns, %d expressions for %d targets",
+				parseCmd.Insertdirectstmt.RowsAffected, ps.PrepareMetadata.Statement.NumPlaceholders, ps.PrepareInsertDirect.Inscolsnum))
+		}
 	} else {
 		types = ps.Types
 	}
 	inferredTypes := make([]oid.Oid, len(types))
 	copy(inferredTypes, parseCmd.RawTypeHints)
+
+	colDescMap := make(map[string]oid.Oid)
+	if len(parseCmd.PrepareInsertDirect.Dit.Desc) != 0 {
+		for _, colDesc := range parseCmd.PrepareInsertDirect.Dit.ColsDesc {
+			colDescMap[colDesc.Name] = colDesc.Type.InternalType.Oid
+		}
+	}
+
 	for i := range types {
 		// OID to Datum is not a 1-1 mapping (for example, int4 and int8
 		// both map to TypeInt), so we need to maintain the types sent by
 		// the client.
-		if ps.Insertdirectstmt.InsertFast && ps.TypeHints[i] == nil {
-			inferredTypes[i] = parseCmd.PrepareInsertDirect.Dit.ColsDesc[i%parseCmd.PrepareInsertDirect.Inscolsnum].Type.InternalType.Oid
-			continue
+		if ps.Insertdirectstmt.InsertFast && ps.TypeHints[i] == nil && i < ps.PrepareInsertDirect.Inscolsnum {
+			if len(parseCmd.PrepareInsertDirect.Dit.Desc) != 0 {
+				colName := string(parseCmd.PrepareInsertDirect.Dit.Desc[i])
+				if Oid, ok := colDescMap[colName]; ok {
+					for j := i; j < len(inferredTypes); j += ps.PrepareInsertDirect.Inscolsnum {
+						inferredTypes[j] = Oid
+					}
+				}
+			} else {
+				inferredTypes[i] = parseCmd.PrepareInsertDirect.Dit.ColsDesc[i%parseCmd.PrepareInsertDirect.Inscolsnum].Type.InternalType.Oid
+				continue
+			}
 		}
 		if inferredTypes[i] == 0 {
 			t, _ := ps.ValueType(tree.PlaceholderIdx(i))
