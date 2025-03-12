@@ -661,10 +661,6 @@ func (pb *ProcessorBase) MoveToDraining(err error) {
 	}
 
 	if err != nil {
-		// when we are get a pb is draining, set TsHandleBreak for running me ops
-		if pb.FlowCtx != nil {
-			pb.FlowCtx.TsHandleBreak = true
-		}
 		pb.trailingMeta = append(pb.trailingMeta, execinfrapb.ProducerMetadata{Err: err})
 	}
 	if len(pb.inputsToDrain) > 0 {

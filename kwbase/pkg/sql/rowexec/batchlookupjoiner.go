@@ -49,7 +49,6 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/tracing"
 	"github.com/lib/pq/oid"
 	"github.com/opentracing/opentracing-go"
-	"github.com/pkg/errors"
 )
 
 // batchLookupJoinerInitialBufferSize controls the size of the initial buffering phase
@@ -336,6 +335,11 @@ func (h *batchLookupJoiner) buildAndConsumeStoredSide() (
 		// thus we need to send one more push end message to tse
 		var tsQueryInfo tse.TsQueryInfo
 		for {
+			if h.FlowCtx.TsHandleBreak {
+				log.Warning(h.PbCtx(), "tse returned an error, please check the error code")
+				h.MoveToDraining(nil)
+				return bljStateUnknown, nil, nil
+			}
 			if handle, ok := h.FlowCtx.TsHandleMap[h.tsTableReaderID]; ok {
 				tsQueryInfo.Handle = handle
 				break
@@ -648,14 +652,14 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 
 		var tsQueryInfo tse.TsQueryInfo
 		for {
+			if h.FlowCtx.TsHandleBreak {
+				log.Warning(h.PbCtx(), "tse returned an error, please check the error code")
+				h.MoveToDraining(nil)
+				return bljStateUnknown, nil, nil
+			}
 			if handle, ok := h.FlowCtx.TsHandleMap[h.tsTableReaderID]; ok {
 				tsQueryInfo.Handle = handle
 				break
-			}
-			if h.FlowCtx.TsHandleBreak {
-				err := errors.New("tse returned an error, please check the error code")
-				h.MoveToDraining(err)
-				return bljStateUnknown, nil, h.DrainHelper()
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -686,6 +690,11 @@ func (h *batchLookupJoiner) pushToProbeSide() (
 	// thus we need to send one more push end message to tse
 	var tsQueryInfo tse.TsQueryInfo
 	for {
+		if h.FlowCtx.TsHandleBreak {
+			log.Warning(h.PbCtx(), "tse returned an error, please check the error code")
+			h.MoveToDraining(nil)
+			return bljStateUnknown, nil, nil
+		}
 		if handle, ok := h.FlowCtx.TsHandleMap[h.tsTableReaderID]; ok {
 			tsQueryInfo.Handle = handle
 			break

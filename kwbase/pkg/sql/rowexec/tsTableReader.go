@@ -204,10 +204,11 @@ func (ttr *TsTableReader) Start(ctx context.Context) context.Context {
 		}
 		respInfo, setupErr := ttr.FlowCtx.Cfg.TsEngine.SetupTsFlow(&(ttr.Ctx), tsQueryInfo)
 		if setupErr != nil {
-			var tsCloseInfo tse.TsQueryInfo
-			tsCloseInfo.Handle = respInfo.Handle
-			tsCloseInfo.Buf = []byte("close tsflow")
-			closeErr := ttr.FlowCtx.Cfg.TsEngine.CloseTsFlow(&(ttr.Ctx), tsCloseInfo)
+			if ttr.FlowCtx != nil {
+				ttr.FlowCtx.TsHandleBreak = true
+			}
+			respInfo.Buf = []byte("close tsflow")
+			closeErr := ttr.FlowCtx.Cfg.TsEngine.CloseTsFlow(&(ttr.Ctx), respInfo)
 			if closeErr != nil {
 				log.Warning(ctx, closeErr)
 			}
@@ -350,6 +351,9 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 				ttr.WaitForBLJ()
 				ttr.MoveToDraining(err)
 				log.Errorf(context.Background(), err.Error())
+				if ttr.FlowCtx != nil {
+					ttr.FlowCtx.TsHandleBreak = true
+				}
 				ttr.cleanup(ttr.PbCtx())
 				return nil, &execinfrapb.ProducerMetadata{Err: err}
 			}
@@ -369,6 +373,9 @@ func (ttr *TsTableReader) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMeta
 			var err error
 			row[i], ttr.Rev, err = sqlbase.EncDatumFromBuffer(nil, sqlbase.DatumEncoding_VALUE, ttr.Rev)
 			if err != nil {
+				if ttr.FlowCtx != nil {
+					ttr.FlowCtx.TsHandleBreak = true
+				}
 				log.Errorf(context.Background(), err.Error())
 				ttr.cleanup(ttr.PbCtx())
 				return nil, &execinfrapb.ProducerMetadata{Err: err}
@@ -442,6 +449,9 @@ func (ttr *TsTableReader) NextPgWire() (val []byte, code int, err error) {
 			}
 			return nil, respInfo.Code, nil
 		} else if respInfo.Code != 1 {
+			if err != nil && ttr.FlowCtx != nil {
+				ttr.FlowCtx.TsHandleBreak = true
+			}
 			log.Errorf(context.Background(), err.Error())
 			ttr.cleanup(context.Background())
 			return nil, respInfo.Code, err
