@@ -340,7 +340,10 @@ func (sw *TSSchemaChangeWorker) handleResult(
 		if updateErr == nil {
 			break
 		} else {
-			log.Infof(ctx, "handle metadata failed: ", updateErr)
+			log.Infof(ctx, "handle metadata failed: %s", updateErr.Error())
+			if strings.Contains(updateErr.Error(), context.Canceled.Error()) {
+				ctx = context.Background()
+			}
 		}
 	}
 	if sw.tableID != 0 {
