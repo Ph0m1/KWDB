@@ -165,9 +165,13 @@ func (sq *splitQueue) shouldQueue(
 		// and will not enter the shouldQueue
 		startKey := desc.StartKey
 		endKey := desc.EndKey
-		_, startHashPoint, _, err := sqlbase.DecodeTsRangeKey(startKey, true)
+		tableID, startHashPoint, _, err := sqlbase.DecodeTsRangeKey(startKey, true)
 		if err != nil {
 			return false, priority
+		}
+		// If the tableID of the range is 0, reset
+		if desc.TableId == 0 {
+			desc.TableId = uint32(tableID)
 		}
 		_, endHashPoint, _, err := sqlbase.DecodeTsRangeKey(endKey, false)
 		if err != nil {
