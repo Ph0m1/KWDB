@@ -4421,6 +4421,11 @@ func (a *TwaAggregate) AggHandling() {
 // twaGetArea calculates the time-weighted value area based on the start and end timestamps
 // and corresponding values
 func twaGetArea(sKey, eKey int64, sVal, eVal float64) float64 {
+	// If sVal/eVal is not a number value, return NaN
+	if math.IsNaN(sVal) || math.IsNaN(eVal) {
+		return math.NaN()
+	}
+
 	if (sVal >= 0 && eVal >= 0) || (sVal <= 0 && eVal <= 0) {
 		deltaT := eKey - sKey
 		return (sVal + eVal) * float64(deltaT)
