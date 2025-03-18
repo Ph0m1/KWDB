@@ -645,9 +645,10 @@ func (r *Replica) stageTsBatchRequest(
 			*roachpb.TsDeleteRequest,
 			*roachpb.TsDeleteMultiEntitiesDataRequest,
 			*roachpb.TsDeleteEntityRequest,
-			*roachpb.ClearRangeRequest,
 			*roachpb.TsTagUpdateRequest:
 			tableID = uint64(r.Desc().TableId)
+			isTsRequest = true
+		case *roachpb.ClearRangeRequest:
 			isTsRequest = true
 		default:
 			continue
@@ -666,7 +667,7 @@ func (r *Replica) stageTsBatchRequest(
 	if tableID != 0 {
 		if tsTxnID, err = r.store.TsEngine.MtrBegin(tableID, rangeGroupID, uint64(r.RangeID), raftAppliedIndex); err != nil {
 			var exist bool
-			if exist, err = r.store.TsEngine.TSIsTsTableExist(tableID); !exist {
+			if exist, _ = r.store.TsEngine.TSIsTsTableExist(tableID); !exist {
 				return tableID, rangeGroupID, tsTxnID, nil
 			}
 			return tableID, rangeGroupID, tsTxnID, wrapWithNonDeterministicFailure(err, "unable to begin mini-transaction")
