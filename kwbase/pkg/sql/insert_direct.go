@@ -162,6 +162,9 @@ func getSingleRecord(
 				}
 				in, err2 := strconv.ParseInt(rawValue, 10, 64)
 				if err2 != nil {
+					if valueType == parser.NORMALTYPE {
+						return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
+					}
 					if strings.Contains(err2.Error(), "out of range") {
 						return err2
 					}
@@ -201,6 +204,9 @@ func getSingleRecord(
 				}
 				in, err2 := strconv.ParseInt(rawValue, 10, 64)
 				if err2 != nil {
+					if valueType == parser.NORMALTYPE {
+						return pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
+					}
 					if strings.Contains(err2.Error(), "out of range") {
 						return err2
 					}
@@ -1893,6 +1899,9 @@ func GetSingleDatum(
 
 		in, err := strconv.ParseInt(rawValue, 10, 64)
 		if err != nil {
+			if valueType == parser.NORMALTYPE {
+				return nil, pgerror.Newf(pgcode.Syntax, errUnsupportedType, rawValue, column.Name)
+			}
 			if strings.Contains(err.Error(), "out of range") {
 				return nil, err
 			}
