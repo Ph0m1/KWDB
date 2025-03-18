@@ -817,8 +817,60 @@ insert into public.bmsql_customer values (
             cast(cast(null as "varchar") as "varchar")));
 ---------- fix ZDP-45756 end ----------
 
+---------- fix ZDP-45756 start ----------
+CREATE TS DATABASE db_shig;
+use db_shig;
+
+CREATE TABLE t_cnc (
+                       k_timestamp TIMESTAMPTZ NOT NULL,
+                       mach_pos VARCHAR(200) NULL,
+                       feed_set_speed VARCHAR(30) NULL
+) TAGS (
+	machine_code VARCHAR(64) NOT NULL) PRIMARY TAGS(machine_code);
+
+CREATE TABLE t_electmeter (
+                              k_timestamp TIMESTAMPTZ NOT NULL,
+                              allrenergy2 FLOAT8 NOT NULL
+) TAGS (
+	machine_code VARCHAR(64) NOT NULL) PRIMARY TAGS(machine_code);
+
+CREATE TABLE up_exg_msg_real_location (
+                                          gtime TIMESTAMPTZ NOT NULL,
+                                          direction INT4 NULL,
+                                          vec2 INT4 NULL,
+                                          oil_error INT4 NULL
+) TAGS (
+	vehicle_color INT4,
+	vehicle_no VARCHAR(32) NOT NULL) PRIMARY TAGS(vehicle_no);
+
+select
+    1 as c0
+from
+    public.t_cnc as ref_0,
+    lateral (select
+        1 as c0
+     from public.up_exg_msg_real_location as subq_0,
+      lateral (select
+        1 as c0
+       from
+        public.t_cnc as ref_5
+        right join public.t_cnc as ref_6
+        on subq_0.vec2 is NULL
+       where EXISTS (
+        select
+            ref_7.oil_error as c0
+        from
+            public.up_exg_msg_real_location as ref_7,
+            lateral (select
+                    1 as c0
+                from public.up_exg_msg_real_location as ref_8
+                where subq_0.vec2 is not NULL limit 84) as subq_1
+where ref_0.k_timestamp is not NULL)) as subq_2 limit 85) as subq_3;
+---------- fix ZDP-45756 end ----------
+
 -- delete data
 set cluster setting ts.parallel_degree=default;
 use defaultdb;
 drop database test_vacuum cascade;
 drop database test_tpcc cascade;
+drop database db_shig cascade;
