@@ -61,6 +61,9 @@ type noopProcessor struct {
 	firstErr     string
 
 	TsOperatorType execinfrapb.OperatorType
+	// emitCount is used to track the number of rows that have been
+	// emitted from Next().
+	emitCount int64
 }
 
 var _ execinfra.Processor = &noopProcessor{}
@@ -144,6 +147,14 @@ func (n *noopProcessor) Next() (sqlbase.EncDatumRow, *execinfrapb.ProducerMetada
 
 		if outRow := n.ProcessRowHelper(row); outRow != nil {
 			return outRow, nil
+		}
+		const cancelCheckCount = 1024
+		n.emitCount++
+		if n.emitCount%cancelCheckCount == 0 {
+			if err := n.PbCtx().Err(); err != nil {
+				n.MoveToDraining(err)
+				return nil, n.DrainHelper()
+			}
 		}
 	}
 	return nil, n.DrainHelper()

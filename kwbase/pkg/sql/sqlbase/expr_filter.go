@@ -27,7 +27,16 @@ package sqlbase
 import "gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 
 // RunFilter runs a filter expression and returns whether the filter passes.
-func RunFilter(filter tree.TypedExpr, evalCtx *tree.EvalContext) (bool, error) {
+func RunFilter(filter tree.TypedExpr, evalCtx *tree.EvalContext) (b bool, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			if evalCtx.Ctx().Err() != nil {
+				err = evalCtx.Ctx().Err()
+				return
+			}
+			panic(p)
+		}
+	}()
 	if filter == nil {
 		return true, nil
 	}

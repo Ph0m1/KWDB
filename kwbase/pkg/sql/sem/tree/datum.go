@@ -3617,6 +3617,13 @@ func (d *DArray) Compare(ctx *EvalContext, other Datum) int {
 	if n > v.Len() {
 		n = v.Len()
 	}
+	// fix(ZDP-45903), when n is large and called multiple times, it is possible that ctx has already been canceled.
+	// First, check ctx.
+	if n > 1024 {
+		if err := ctx.Ctx().Err(); err != nil {
+			panic(err)
+		}
+	}
 	for i := 0; i < n; i++ {
 		c := d.Array[i].Compare(ctx, v.Array[i])
 		if c != 0 {
