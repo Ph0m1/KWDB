@@ -174,7 +174,7 @@ DESTDIR :=
 DUPLFLAGS    := -t 100
 # -gcflags=all="-N -l"  go attach need add this param
 GOFLAGS      :=
-TAGS         := open_source
+TAGS         :=
 ARCHIVE      := kwbase.src.tgz
 STARTFLAGS   := -s type=mem,size=1GiB --logtostderr
 BUILDTARGET  := ./pkg/cmd/kwbase
