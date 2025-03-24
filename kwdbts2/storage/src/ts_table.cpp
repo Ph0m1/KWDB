@@ -519,7 +519,7 @@ KStatus TsEntityGroup::DeleteData(kwdbContext_p ctx, const string& primary_tag, 
   // Get subgroup id and entity id based on the primary tag.
   if (false == new_tag_bt_->hasPrimaryKey(const_cast<char*>(primary_tag.c_str()),
                                         primary_tag.size(), entity_id, subgroup_id)) {
-    LOG_WARN("entity not exists, primary_tag: %s", primary_tag.c_str());
+    LOG_INFO("primary_tag[%s] does not exist, no need to delete", primary_tag.c_str());
     return KStatus::SUCCESS;
   }
   timestamp64 min_ts = INT64_MAX, max_ts = INT64_MIN;
@@ -614,6 +614,11 @@ KStatus TsEntityGroup::DeleteEntities(kwdbContext_p ctx, const std::vector<std::
   Defer defer{[&]() { RW_LATCH_UNLOCK(drop_mutex_); }};
   *count = 0;
   for (const auto& p_tags : primary_tags) {
+    uint32_t sub_group_id, entity_id;
+    if (!new_tag_bt_->hasPrimaryKey(p_tags.data(), p_tags.size(), entity_id, sub_group_id)) {
+      LOG_INFO("primary key[%s] dose not exist, no need to delete", p_tags.c_str())
+      continue;
+    }
     uint64_t num = 0;
     KStatus status = DeleteEntity(ctx, p_tags, &num, mtr_id);
     if (status == KStatus::FAIL) {

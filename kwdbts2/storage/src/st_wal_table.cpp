@@ -357,7 +357,8 @@ KStatus LoggedTsEntityGroup::DeleteEntities(kwdbContext_p ctx, const std::vector
     // TODO(liuwei) should lock the current PRIMARY TAG before the DELETE action is DONE.
     uint32_t sub_group_id, entity_id;
     if (!new_tag_bt_->hasPrimaryKey(p_tags.data(), p_tags.size(), entity_id, sub_group_id)) {
-      Return(KStatus::FAIL)
+      LOG_INFO("primary key[%s] dose not exist, no need to delete", p_tags.c_str())
+      continue;
     }
 
     TagTuplePack* tag_pack = new_tag_bt_->GenTagPack(p_tags.data(), p_tags.size());
