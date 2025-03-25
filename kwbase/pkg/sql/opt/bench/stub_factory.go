@@ -32,6 +32,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/constraint"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/exec"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/props/physical"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sem/tree"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/sqlbase"
 )
@@ -69,7 +70,9 @@ func (f *stubFactory) ConstructSynchronizer(input exec.Node, degree int64) (exec
 
 // ConstructTSScan is part of the exec.Factory interface.
 func (f *stubFactory) ConstructTSScan(
-	table cat.Table, private *memo.TSScanPrivate, tagFilter, primaryFilter []tree.TypedExpr,
+	table cat.Table,
+	private *memo.TSScanPrivate,
+	tagFilter, primaryFilter, tagIndexFilter []tree.TypedExpr,
 ) (exec.Node, error) {
 	return struct{}{}, nil
 }
@@ -130,10 +133,12 @@ func (f *stubFactory) ConstructBatchLookUpJoin(
 func (f *stubFactory) ConstructApplyJoin(
 	joinType sqlbase.JoinType,
 	left exec.Node,
-	rightColumns sqlbase.ResultColumns,
-	onCond tree.TypedExpr,
+	leftBoundColMap opt.ColMap,
+	memo *memo.Memo,
+	rightProps *physical.Required,
+	fakeRight exec.Node,
 	right memo.RelExpr,
-	planRightSideFn exec.ApplyJoinPlanRightSideFn,
+	onCond tree.TypedExpr,
 ) (exec.Node, error) {
 	return struct{}{}, nil
 }

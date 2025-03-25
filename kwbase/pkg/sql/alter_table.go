@@ -550,6 +550,7 @@ func (n *alterTableNode) startExec(params runParams) error {
 					return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 						"column %q in the middle of being added, try again later", t.Column)
 				}
+
 				// n.tableDesc.State = sqlbase.TableDescriptor_ALTER
 				n.tableDesc.AddColumnMutation(colToDrop, sqlbase.DescriptorMutation_DROP)
 				mutationID := n.tableDesc.ClusterVersion.NextMutationID
@@ -919,6 +920,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 				return pgerror.Newf(pgcode.ObjectNotInPrerequisiteState,
 					"column %q in the middle of being dropped", t.Tag)
 			}
+			if err = checkIndexOnTag(n, tagColumn); err != nil {
+				return err
+			}
 
 			if !tagColumn.IsTagCol() {
 				return pgerror.Newf(pgcode.WrongObjectType, "%s is not a tag", tagColumn.Name)
@@ -1208,6 +1212,9 @@ func (n *alterTableNode) startExec(params runParams) error {
 			}
 			if dropped {
 				continue
+			}
+			if err = checkIndexOnTag(n, tagColumn); err != nil {
+				return err
 			}
 			var tagCount int
 			found := false
@@ -2232,4 +2239,27 @@ func prepareAlterType(t *types.T) *types.T {
 	default:
 	}
 	return t
+}
+
+// checkIndexOnTag checks whether the index exists on the tag.
+func checkIndexOnTag(n *alterTableNode, colToDrop *sqlbase.ColumnDescriptor) error {
+	for _, idx := range n.tableDesc.AllNonDropIndexes() {
+
+		// containsThisColumn becomes true if the index is defined
+		// over the column being dropped.
+		containsThisColumn := false
+
+		// Analyze the index.
+		for _, id := range idx.ColumnIDs {
+			if id == colToDrop.ID {
+				containsThisColumn = true
+			}
+		}
+
+		if containsThisColumn {
+			return pgerror.Newf(pgcode.DependentObjectsStillExist,
+				"column %q is referenced by existing index %q", colToDrop.Name, idx.Name)
+		}
+	}
+	return nil
 }

@@ -31,6 +31,7 @@ import (
 
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
 	"gitee.com/kwbasedb/kwbase/pkg/roachpb"
+	"gitee.com/kwbasedb/kwbase/pkg/sql/execinfrapb"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/cat"
 	"gitee.com/kwbasedb/kwbase/pkg/sql/opt/memo"
@@ -380,7 +381,11 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	table := c.mem.Metadata().Table(tsScan.Table)
 
 	// Calculate the width of the columns to be scanned
-	var pTagColsWith, tagColsWith, colsWith uint64
+	var pTagColsWith, tagColsWith, tagIndexColsWith, colsWith uint64
+	var tagIndexCols opt.ColSet
+	for k := range tsScan.TagIndex.TagIndexValues {
+		tagIndexCols.Add(opt.ColumnID(k))
+	}
 	tsScan.Cols.ForEach(func(id opt.ColumnID) {
 		// get column metadata through logical id.
 		column := table.Column(int(id) - int(tsScan.Table.ColumnID(0)))
@@ -390,6 +395,9 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 				pTagColCount++
 				pTagColsWith += col.TsCol.StorageLen
 			} else if col.IsTagCol() {
+				if tagIndexCols.Contains(id) {
+					tagIndexColsWith += col.TsCol.StorageLen
+				}
 				tagColsWith += col.TsCol.StorageLen
 			} else {
 				colsWith += col.TsCol.StorageLen
@@ -445,7 +453,7 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 	// Calculate parallel num in timing scenarios
 	tsScan.Memo().CalculateDop(rowCount, stats.PTagCount, uint32(allColsWidth))
 	var cost memo.Cost
-	if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter == nil {
+	if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter == nil && tsScan.TagIndexFilter == nil {
 		// case: TagIndex
 		if len(tsScan.PrimaryTagValues) > 0 {
 			needPtagRow = float64(len(tsScan.PrimaryTagValues[0]))
@@ -453,7 +461,7 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 		talbeCountFactor = math.Min(needPtagRow/pTagRowCount, 1) * cpuCostFactor
 		cost = memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount +
 			talbeCountFactor*fullScanTblCost)
-	} else if tsScan.PrimaryTagFilter != nil && tsScan.TagFilter != nil {
+	} else if tsScan.PrimaryTagFilter != nil && (tsScan.TagFilter != nil || tsScan.TagIndexFilter != nil) {
 		// case: TagIndexTable
 		if len(tsScan.PrimaryTagValues) > 0 {
 			needPtagRow = float64(len(tsScan.PrimaryTagValues[0]))
@@ -462,6 +470,21 @@ func (c *coster) computeTsScanCost(tsScan *memo.TSScanExpr) memo.Cost {
 		cost = memo.Cost(float64(pTagColCount)*float64(pTagColsWith)*colHashCostUnit*pTagRowCount*tableScanCostUnit +
 			talbeCountFactor*fullScanTagTblCost +
 			talbeCountFactor*fullScanTblCost)
+	} else if tsScan.PrimaryTagFilter == nil && (tsScan.TagFilter != nil || tsScan.TagIndexFilter != nil) {
+		if tsScan.AccessMode == int(execinfrapb.TSTableReadMode_tagHashIndex) {
+			// case: tagHashIndex
+			// The cost of hash calculation and the cost of table scan.
+			// The cost of hash calculation include hash computation and hash search.
+			// The cost of table scan same as tagTable model.
+			indexCount := len(tsScan.TagIndex.TagIndexValues)
+			cost = memo.Cost(float64(indexCount)*(float64(tagIndexColsWith)*colHashCostUnit+tableScanCostUnit) +
+				0.5*fullScanTblCost)
+		} else {
+			// case: tagTable
+			// TagFilter cannot affect talbeCountFactor, default to 0.5
+			// The cost should be smaller than a full table scan
+			cost = memo.Cost(fullScanTagTblCost + 0.5*fullScanTblCost)
+		}
 	} else if tsScan.PrimaryTagFilter == nil && tsScan.TagFilter != nil {
 		// case: tagTable
 		// TagFilter cannot affect talbeCountFactor, default to 0.5
@@ -583,13 +606,11 @@ func (c *coster) computeBatchLoopUpJoinCost(join memo.RelExpr) memo.Cost {
 		return hugeCost
 	}
 
-	var relationalRowCount, tsRowCount float64
+	var relationalRowCount float64
 	if walk(join.Child(0)) {
-		tsRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
 		relationalRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
 	} else {
 		relationalRowCount = join.Child(0).(memo.RelExpr).Relational().Stats.RowCount
-		tsRowCount = join.Child(1).(memo.RelExpr).Relational().Stats.RowCount
 	}
 
 	// A hash join must process every row from both tables once.
@@ -602,12 +623,7 @@ func (c *coster) computeBatchLoopUpJoinCost(join memo.RelExpr) memo.Cost {
 	// TODO(rytaft): This is the cost of an in-memory hash join. When a certain
 	// amount of memory is used, distsql switches to a disk-based hash join with
 	// a temp RocksDB store.
-	var cost memo.Cost
-	if relationalRowCount < tsRowCount {
-		cost = memo.Cost(1.75*relationalRowCount) * cpuCostFactor
-	} else {
-		cost = memo.Cost(1.25*relationalRowCount) * cpuCostFactor
-	}
+	cost := memo.Cost(1.25*0+1.75*relationalRowCount) * cpuCostFactor
 
 	// Add the CPU cost of emitting the rows.
 	rowsProcessed, ok := c.mem.RowsProcessed(join)

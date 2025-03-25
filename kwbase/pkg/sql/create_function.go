@@ -45,9 +45,6 @@ type createFunctionNode struct {
 
 // CreateFunction creates a function.
 func (p *planner) CreateFunction(ctx context.Context, n *tree.CreateFunction) (planNode, error) {
-	if !p.extendedEvalCtx.TxnImplicit {
-		return nil, pgerror.New(pgcode.FeatureNotSupported, "Create Function statement is not supported in explicit transaction")
-	}
 	return &createFunctionNode{
 		n: n,
 		p: p,
