@@ -766,8 +766,8 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
         case roachpb::DataType::SMALLINT: {
           k_int32 val = std::stoi(str);
           if (!CHECK_VALID_SMALLINT(val)) {
-            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-                                  "out of range");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_WRONG_OBJECT_TYPE,
+              ("integer \"" +std::to_string(val) + "\" out of range for type INT2").c_str());
             return FAIL;
           }
           memcpy(ptr, &val, len);
@@ -775,8 +775,8 @@ KStatus StorageHandler::GeneratePrimaryTags(TSTagReaderSpec *spec, TABLE *table,
         case roachpb::DataType::INT: {
           k_int64 val = std::stoll(str);
           if (!CHECK_VALID_INT(val)) {
-            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE,
-                                  "out of range");
+            EEPgErrorInfo::SetPgErrorInfo(ERRCODE_WRONG_OBJECT_TYPE,
+              ("integer \"" +std::to_string(val) + "\" out of range for type INT4").c_str());
             return FAIL;
           }
           memcpy(ptr, &val, sizeof(k_int32));
