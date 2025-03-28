@@ -3068,22 +3068,12 @@ func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.Filter
 		return false
 	}
 
-	lRowCount := left.Relational().Stats.RowCount
-	rRowCount := right.Relational().Stats.RowCount
 	if lok {
-		if rRowCount > lRowCount {
-			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
-			return false
-		}
 		if left.FirstExpr().Relational().Stats.Selectivity*ffCompFactor < right.FirstExpr().Relational().Stats.Selectivity {
 			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
 		}
 	} else {
-		if rRowCount < lRowCount {
-			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
-			return false
-		}
 		if right.FirstExpr().Relational().Stats.Selectivity*ffCompFactor < left.FirstExpr().Relational().Stats.Selectivity {
 			c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
 			return false
@@ -3101,6 +3091,27 @@ func (c *CustomFuncs) CanApplyOutsideIn(left, right memo.RelExpr, on memo.Filter
 			return false
 		}
 	}
+
+	// limit of data length of columns in on filter.
+	// can not use outside-in when the length is not equ.
+	leftEq, rightEq := memo.ExtractJoinEqualityColumns(
+		left.Relational().OutputCols,
+		right.Relational().OutputCols,
+		on,
+	)
+	for i := range leftEq {
+		md := c.e.mem.Metadata()
+		if md.ColumnMeta(leftEq[i]).Type.Family() == types.IntFamily ||
+			md.ColumnMeta(leftEq[i]).Type.Family() == types.FloatFamily {
+			leftLength := md.ColumnMeta(leftEq[i]).Type.InternalType.Width
+			rightLength := md.ColumnMeta(rightEq[i]).Type.InternalType.Width
+			if leftLength != rightLength {
+				c.e.mem.ClearFlag(opt.CanApplyOutsideIn)
+				return false
+			}
+		}
+	}
+
 	c.e.mem.SetFlag(opt.CanApplyOutsideIn)
 	return true
 }
