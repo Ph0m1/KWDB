@@ -36,6 +36,7 @@ bool g_go_start_service = true;
 TSEngine* g_engine_ = nullptr;
 
 std::atomic<bool> g_is_vacuuming{false};
+uint64_t g_vacuum_sleep_time = 1000;
 std::atomic<bool> g_is_migrating{false};
 uint64_t g_duration_level0{30 * 24 * 60 * 60};
 uint64_t g_duration_level1{90 * 24 * 60 * 60};
@@ -771,6 +772,8 @@ void TriggerSettingCallback(const std::string& key, const std::string& value) {
     }
   } else if ("ts.tier.duration" == key) {
     parseDurations(value);
+  } else if ("ts.auto_vacuum.sleep" == key) {
+    g_vacuum_sleep_time = atoll(value.c_str());
   }
 #ifndef KWBASE_OSS
   else if ("ts.storage.autonomy.mode" == key) {  // NOLINT

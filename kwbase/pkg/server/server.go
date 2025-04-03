@@ -210,6 +210,17 @@ var (
 		"ts.table_cache.capacity",
 		"maximum limit of ts table cache",
 		1000)
+
+	tsAutoVacuumSleep = settings.RegisterPublicValidatedIntSetting(
+		"ts.auto_vacuum.sleep",
+		"vacuum thread sleep duration, unit millisecond",
+		1000,
+		func(v int64) error {
+			if v < 0 {
+				return errors.Errorf("sleep duration must be nonnegative number")
+			}
+			return nil
+		})
 )
 
 // TODO(peter): Until go1.11, ServeMux.ServeHTTP was not safe to call
