@@ -935,13 +935,6 @@ func NewServer(cfg Config, stopper *stop.Stopper) (*Server, error) {
 			internalExecutor,
 		),
 
-		UDFCache: sql.NewUDFCache(
-			s.cfg.SQLTableStatCacheSize,
-			s.gossip,
-			s.db,
-			internalExecutor,
-		),
-
 		// Note: don't forget to add the secondary loggers as closers
 		// on the Stopper, below.
 
@@ -1936,6 +1929,14 @@ func (s *Server) Start(ctx context.Context) error {
 	); err != nil {
 		return err
 	}
+
+	// NewUDFCache creates a new udf cache.
+	s.execCfg.UDFCache = sql.NewUDFCache(
+		s.cfg.SQLTableStatCacheSize,
+		s.gossip,
+		s.db,
+		s.internalExecutor,
+	)
 
 	s.hashRouterManager, err = hashrouter.NewHashRouterManager(ctx, s.ClusterSettings(), s.db, s.tseDB, s.execCfg, s.gossip, s.leaseMgr, s.nodeLiveness, s.storePool)
 
