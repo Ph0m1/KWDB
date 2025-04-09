@@ -190,6 +190,8 @@ TSStatus TSCreateRangeGroup(TSEngine* engine, TSTableID table_id, TSSlice schema
 
 TSStatus TSDropTsTable(TSEngine* engine, TSTableID tableId);
 
+TSStatus TSDropResidualTsTable(TSEngine* engine);
+
 TSStatus TSCreateNormalTagIndex(TSEngine* engine, TSTableID table_id, uint64_t index_id,
                                 char* transaction_id, uint32_t cur_version, uint32_t new_version,
                                 IndexColumns index_columns);
@@ -321,6 +323,7 @@ TSStatus TSPutDataByRowType(TSEngine* engine, TSTableID table_id, TSSlice* paylo
 TSStatus TsTestGetAndAddSchemaVersion(TSEngine* engine, TSTableID table_id, uint64_t version);
 
 char* __attribute__((weak)) getTableMetaByVersion(TSTableID table_id, uint64_t ver, size_t* data_len, char** error);
+bool __attribute__((weak)) checkTableMetaExist(TSTableID table_id);
 /**
  * @brief delete data in range, used after snapshot finished. 
  * it maybe delete tstable in storage engine. in this case, before next input data, we should create table first.
