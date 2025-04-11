@@ -1121,6 +1121,14 @@ func (r *TsEngine) CloseTsFlow(ctx *context.Context, tsQueryInfo TsQueryInfo) (e
 	return err
 }
 
+// InitTsHandle corresponding to init ts handle
+func (r *TsEngine) InitTsHandle(
+	ctx *context.Context, tsQueryInfo TsQueryInfo,
+) (tsRespInfo TsQueryInfo, err error) {
+	r.checkOrWaitForOpen()
+	return r.tsExecute(ctx, C.MQ_TYPE_DML_INIT, tsQueryInfo)
+}
+
 // FlushBuffer flush WALs of all ts tables to files in the node
 func (r *TsEngine) FlushBuffer() error {
 	r.checkOrWaitForOpen()

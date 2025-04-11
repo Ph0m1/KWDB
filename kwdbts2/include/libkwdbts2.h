@@ -131,6 +131,7 @@ typedef enum _EnMqType {
   MQ_TYPE_DML_NEXT,
   MQ_TYPE_DML_CLOSE,
   MQ_TYPE_DML_PG_RESULT,
+  MQ_TYPE_DML_INIT,
   MQ_TYPE_MAX
 } EnMqType;
 
