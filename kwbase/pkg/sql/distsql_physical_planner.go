@@ -6491,9 +6491,13 @@ func (dsp *DistSQLPlanner) createPlanForExport(
 	if value, ok := n.source.(*renderNode); ok {
 		colsNum = int64(len(value.columns))
 	}
+	NamePattern := exportFilePatternDefault
+	if n.expOpts.fileFormat == "SQL" {
+		NamePattern = exportFilePatternSQL
+	}
 	core := execinfrapb.ProcessorCoreUnion{CSVWriter: &execinfrapb.CSVWriterSpec{
 		Destination: n.fileName,
-		NamePattern: exportFilePatternDefault,
+		NamePattern: NamePattern,
 		Options:     n.expOpts.csvOpts,
 		ChunkRows:   int64(n.expOpts.chunkSize),
 		QueryName:   n.queryName,
@@ -6501,6 +6505,8 @@ func (dsp *DistSQLPlanner) createPlanForExport(
 		OnlyData:    n.expOpts.onlyData,
 		IsTS:        n.isTS,
 		ColsNum:     colsNum,
+		FileFormat:  n.expOpts.fileFormat,
+		TablePrefix: n.expOpts.tablePrefix,
 	}}
 	var resTypes []types.T
 	if n.isTS {
@@ -6520,27 +6526,56 @@ func (dsp *DistSQLPlanner) createPlanForExport(
 	maybeScan := n.source
 	switch sc := maybeScan.(type) {
 	case *scanNode:
-		if n.expOpts.colName {
+		if n.expOpts.fileFormat == "SQL" {
+			for _, col := range sc.resultColumns {
+				if col.Typ.Family() == types.BytesFamily {
+					return PhysicalPlan{}, errors.Errorf("Exporting SQL cannot supports BytesFamily")
+				}
+			}
+		}
+		if n.expOpts.colName || n.expOpts.fileFormat == "SQL" {
 			colNames := make([]string, len(sc.resultColumns))
+			colTypes := make([]types.Family, len(sc.resultColumns))
 			for id, col := range sc.resultColumns {
 				colNames[id] = col.Name
+				colTypes[id] = col.Typ.Family()
 			}
 			core.CSVWriter.ColNames = colNames
+			core.CSVWriter.ColumnTypes = colTypes
 		}
 	case *synchronizerNode:
-		if n.expOpts.colName {
+		if n.expOpts.fileFormat == "SQL" {
+			for _, col := range sc.columns {
+				if col.Typ.Family() == types.BytesFamily {
+					return PhysicalPlan{}, errors.Errorf("Exporting SQL cannot supports BytesFamily")
+				}
+			}
+		}
+		if n.expOpts.colName || n.expOpts.fileFormat == "SQL" {
 			colNames := make([]string, len(sc.columns))
+			colTypes := make([]types.Family, len(sc.columns))
 			for id, col := range sc.columns {
 				colNames[id] = col.Name
+				colTypes[id] = col.Typ.Family()
 			}
 			core.CSVWriter.ColNames = colNames
+			core.CSVWriter.ColumnTypes = colTypes
 		}
 	case *renderNode:
-
-		if n.expOpts.colName {
+		if n.expOpts.fileFormat == "SQL" {
+			for _, col := range sc.columns {
+				if col.Typ.Family() == types.BytesFamily {
+					return PhysicalPlan{}, errors.Errorf("Exporting SQL cannot supports BytesFamily")
+				}
+			}
+		}
+		if n.expOpts.colName || n.expOpts.fileFormat == "SQL" {
 			colNames := make([]string, len(sc.columns))
+			colTypes := make([]types.Family, len(sc.columns))
 			for id, col := range sc.columns {
 				colNames[id] = col.Name
+				colTypes[id] = col.Typ.Family()
+				core.CSVWriter.ColumnTypes = colTypes
 			}
 			core.CSVWriter.ColNames = colNames
 		}
