@@ -64,6 +64,18 @@ func (ex *connExecutor) execPrepare(
 		ex.deletePreparedStmt(ctx, "")
 	}
 
+	// build SelectInto statement when subquery as value in setting user defined variables
+	if astSetVar, ok := parseCmd.Statement.AST.(*tree.SetVar); ok && len(astSetVar.Name) > 0 && astSetVar.Name[0] == '@' && len(astSetVar.Values) == 1 {
+		if sub, ok := astSetVar.Values[0].(*tree.Subquery); ok {
+			sel := tree.Select{Select: sub.Select}
+			selInto := tree.SelectInto{
+				Names:  tree.UserDefinedVars{tree.UserDefinedVar{VarName: astSetVar.Name}},
+				Values: &sel,
+			}
+			parseCmd.Statement.AST = &selInto
+		}
+	}
+
 	ps, err := ex.addPreparedStmt(
 		ctx,
 		parseCmd.Name,

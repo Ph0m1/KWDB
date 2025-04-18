@@ -449,6 +449,10 @@ func (f *stubFactory) ConstructAlterTableSplit(
 	return struct{}{}, nil
 }
 
+func (f *stubFactory) ConstructSelectInto(input exec.Node, vars opt.VarNames) (exec.Node, error) {
+	return struct{}{}, nil
+}
+
 func (f *stubFactory) ConstructAlterTableUnsplit(
 	index cat.Index, input exec.Node,
 ) (exec.Node, error) {

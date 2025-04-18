@@ -890,7 +890,7 @@ func (c *conn) handleSimpleQuery(
 
 			var di sql.DirectInsert
 			// Check whether the inserted value and the number of columns match.
-			if matchCnt := sql.NumofInsertDirect(ins, &dit.ColsDesc, stmts, &di); matchCnt != di.RowNum*di.ColNum {
+			if matchCnt := sql.NumofInsertDirect(ins, &dit.ColsDesc, stmts, &di); matchCnt != di.RowNum*di.ColNum || c.parser.Customize {
 				c.parser.IsShortcircuit = false
 				if stmts, err = c.parser.ParseWithInt(query, unqualifiedIntSize, c.sv); err != nil {
 					return c.stmtBuf.Push(ctx, sql.SendError{Err: err})

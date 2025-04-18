@@ -381,6 +381,9 @@ func (b *Builder) buildRelational(e memo.RelExpr) (execPlan, error) {
 	case *memo.AlterTableUnsplitAllExpr:
 		ep, err = b.buildAlterTableUnsplitAll(t)
 
+	case *memo.SelectIntoExpr:
+		ep, err = b.buildSelectInto(t)
+
 	case *memo.AlterTableRelocateExpr:
 		ep, err = b.buildAlterTableRelocate(t)
 

@@ -1341,6 +1341,17 @@ func (p *planner) GetSessionVar(
 	return true, v.Get(&p.extendedEvalCtx), nil
 }
 
+// GetUserDefinedVar implements the EvalSessionAccessor interface.
+func (p *planner) GetUserDefinedVar(
+	_ context.Context, varName string, missingOk bool,
+) (bool, interface{}, error) {
+	name := strings.ToLower(varName)
+	if p.extendedEvalCtx.SessionData.UserDefinedVars[varName] == nil {
+		return false, nil, nil
+	}
+	return true, p.extendedEvalCtx.SessionData.UserDefinedVars[name], nil
+}
+
 // SetSessionVar implements the EvalSessionAccessor interface.
 func (p *planner) SetSessionVar(ctx context.Context, varName, newVal string) error {
 	name := strings.ToLower(varName)

@@ -576,6 +576,9 @@ type Factory interface {
 	// SPLIT AT.
 	ConstructAlterTableSplit(index cat.Index, input Node, expiration tree.TypedExpr) (Node, error)
 
+	// ConstructSelectInto creates a node that implements SELECT INTO.
+	ConstructSelectInto(input Node, vars opt.VarNames) (Node, error)
+
 	// ConstructAlterTableUnsplit creates a node that implements ALTER TABLE/INDEX
 	// UNSPLIT AT.
 	ConstructAlterTableUnsplit(index cat.Index, input Node) (Node, error)

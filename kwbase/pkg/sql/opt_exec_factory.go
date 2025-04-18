@@ -2237,6 +2237,15 @@ func (ef *execFactory) ConstructAlterTableSplit(
 	}, nil
 }
 
+// ConstructSelectInto is part of the exec.Factory interface.
+func (ef *execFactory) ConstructSelectInto(input exec.Node, vars opt.VarNames) (exec.Node, error) {
+
+	return &selectIntoNode{
+		rows: input.(planNode),
+		vars: vars,
+	}, nil
+}
+
 // ConstructAlterTableUnsplit is part of the exec.Factory interface.
 func (ef *execFactory) ConstructAlterTableUnsplit(
 	index cat.Index, input exec.Node,
