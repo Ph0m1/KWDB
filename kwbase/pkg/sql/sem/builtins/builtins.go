@@ -2190,6 +2190,41 @@ may increase either contention or retry errors, or both.`,
 		},
 	),
 
+	"time": makeBuiltin(
+		tree.FunctionProperties{Category: categoryDateAndTime},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"input", types.Timestamp}},
+			ReturnType: tree.FixedReturnType(types.String),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				ts := args[0].(*tree.DTimestamp)
+				return tree.NewDString(ts.Time.Format("15:04:05")), nil
+			},
+			Info: "Returns the time part of the timestamp as a string in format 'HH:MM:SS'.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"input", types.TimestampTZ}},
+			ReturnType: tree.FixedReturnType(types.String),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				ts := args[0].(*tree.DTimestampTZ)
+				return tree.NewDString(ts.Time.Format("15:04:05")), nil
+			},
+			Info: "Returns the time part of the timestamptz as a string in format 'HH:MM:SS'.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"input", types.String}},
+			ReturnType: tree.FixedReturnType(types.String),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				s := string(tree.MustBeDString(args[0]))
+				t, err := tree.ParseDTimestamp(ctx, s, time.Millisecond)
+				if err != nil {
+					return nil, err
+				}
+				return tree.NewDString(t.Time.Format("15:04:05")), nil
+			},
+			Info: "Returns the time part of the string timestamp as a string in format 'HH:MM:SS'.",
+		},
+	),
+
 	"timeofday": makeBuiltin(
 		tree.FunctionProperties{Category: categoryDateAndTime, Impure: true},
 		tree.Overload{
