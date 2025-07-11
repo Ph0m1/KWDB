@@ -2874,8 +2874,37 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				return timeFn(ctx, args[0])
 			},
+			Info: "Parse an expression and return its time part, which is a time interval.",
 		},
 	),
+
+	// time_to_sec(time(expr))
+	"time_to_sec": makeBuiltin(defProps(),
+		tree.Overload{
+			Types: tree.ArgTypes{
+				{"val", types.Any},
+			},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				internalDatum, err := timeFn(ctx, args[0])
+				if err != nil {
+					return nil, err
+				}
+				if internalDatum == tree.DNull {
+					return tree.DNull, nil
+				}
+				dInternal, ok := internalDatum.(*tree.DInterval)
+				if !ok {
+					return nil, pgerror.Newf(pgcode.Internal, "recived unexpected type: %T", internalDatum)
+				}
+				totalNanos := dInternal.Duration.Nanos()
+				totalSeconds := totalNanos / 1_000_000_000
+				return tree.NewDInt(tree.DInt(totalSeconds)), nil
+			},
+			Info: "Parses an expression through timeFn and returns the seconds of its time component.",
+		},
+	),
+
 	// https://www.postgresql.org/docs/9.6/functions-datetime.html
 	"timezone": makeBuiltin(defProps(),
 		// NOTE(otan): this should be deleted and replaced with the correct
