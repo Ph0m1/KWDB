@@ -916,6 +916,7 @@ func (u *sqlSymUnion) triggerBody() tree.TriggerBody {
 %type <tree.Statement> create_stream_stmt
 %type <tree.Statement> create_table_stmt
 %type <tree.Statement> create_table_as_stmt
+%type <tree.Statement> create_table_like_stmt
 //%type <tree.Statement> create_super_table_stmt
 //%type <tree.Statement> create_child_table_stmt
 %type <tree.Statement> create_ts_table_stmt
@@ -2742,6 +2743,7 @@ create_ddl_stmt:
 | create_table_stmt    // EXTEND WITH HELP: CREATE TABLE
 | create_table_as_stmt // EXTEND WITH HELP: CREATE TABLE
 | create_ts_table_stmt // EXTEND WITH HELP: CREATE TABLE
+| create_table_like_stmt // EXTEND WITH HELP: CREATE TABLE
 // Error case for both CREATE TABLE and CREATE TABLE ... AS in one
 | CREATE opt_temp_create_table TABLE error   // SHOW HELP: CREATE TABLE
 | create_type_stmt     { /* SKIP DOC */ }
@@ -5782,6 +5784,37 @@ create_table_as_stmt:
       Temporary: $2.persistenceType(),
       TableType: tree.RelationalTable,
       Comment: $14,
+    }
+  }
+
+create_table_like_stmt:
+  CREATE opt_temp_create_table TABLE table_name LIKE table_name opt_create_table_on_commit opt_comment_clause
+  {
+    new_name := $4.unresolvedObjectName().ToTableName()
+    origin_name := $6.unresolvedObjectName().ToTableName()
+    $$.val = &tree.CreateTable{
+      Table:       new_name,
+      IfNotExists: false,
+      Temporary:   $2.persistenceType(),
+      OnCommit:    $7.createTableOnCommitSetting(),
+      Comment:     $8,
+      // The key change: Populate the new LikeTable field instead of Defs
+      LikeTable:   origin_name,
+      Defs: nil,
+    }
+  }
+| CREATE opt_temp_create_table TABLE IF NOT EXISTS table_name LIKE table_name opt_create_table_on_commit opt_comment_clause
+  {
+    new_name := $7.unresolvedObjectName().ToTableName()
+    origin_name := $9.unresolvedObjectName().ToTableName()
+    $$.val = &tree.CreateTable{
+      Table: new_name,
+      IfNotExists: true,
+      Temporary: $2.persistenceType(),
+      OnCommit: $10.createTableOnCommitSetting(),
+      // The key change: Populate the new LikeTable field instead of Defs
+      LikeTable: origin_name,
+      Defs: nil,
     }
   }
 

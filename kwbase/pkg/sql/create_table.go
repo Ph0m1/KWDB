@@ -359,6 +359,13 @@ func checkEngineType(n *createTableNode) error {
 
 // startExec exec create table node including make table desc, write table desc and exec create table job
 func (n *createTableNode) startExec(params runParams) error {
+	// --- NEW LOGIC FOR 'CREATE TABLE LIKE' ---
+	// Check if the LikeTable field was populated by the parser.
+	if n.n.LikeTable.TableName != "" {
+		// It is a 'LIKE' statement. Delegate to our new helper function.
+		return createTableLike(params, n)
+	}
+	// --- END NEW LOGIC ---
 	if err := checkEngineType(n); err != nil {
 		return err
 	}
@@ -737,6 +744,131 @@ func (n *createTableNode) startExec(params runParams) error {
 			return updateErr
 		}
 	}
+
+	return nil
+}
+
+// createTableLike handles the logic for CREATE TABLE ... LIKE ...
+func createTableLike(params runParams, n *createTableNode) error {
+	ctx := params.ctx
+	telemetry.Inc(sqltelemetry.SchemaChangeCreateCounter("table_like"))
+
+	if len(n.n.Defs) > 0 {
+		return pgerror.Newf(pgcode.Syntax, "cannot use column definitions with CREATE TABLE ... LIKE")
+	}
+
+	tKey, schemaID, err := getTableCreateParams(params, n.dbDesc.ID, n.n.Temporary, n.n.Table)
+	if err != nil {
+		if sqlbase.IsRelationAlreadyExistsError(err) && n.n.IfNotExists {
+			return nil // No-op, successfully.
+		}
+		return err
+	}
+
+	var originDesc *sqlbase.TableDescriptor
+	params.p.runWithOptions(resolveFlags{skipCache: true}, func() {
+		var mutableOrigin *sqlbase.MutableTableDescriptor
+		mutableOrigin, err = ResolveMutableExistingObject(ctx, params.p, &n.n.LikeTable, true /*required*/, ResolveRequireTableDesc)
+		if mutableOrigin != nil {
+			originDesc = &mutableOrigin.TableDescriptor
+		}
+	})
+	if err != nil {
+		return errors.Wrapf(err, "origin table %q does not exist", n.n.LikeTable.FQString())
+	}
+	if err := params.p.CheckPrivilege(ctx, originDesc, privilege.SELECT); err != nil {
+		return err
+	}
+
+	var newPersistenceTypeStr, originPersistenceTypeStr string
+	if n.n.Temporary {
+		newPersistenceTypeStr = "temporary"
+	} else {
+		newPersistenceTypeStr = "permanent"
+	}
+	if originDesc.Temporary {
+		originPersistenceTypeStr = "temporary"
+	} else {
+		originPersistenceTypeStr = "permanent"
+	}
+	if originDesc.Temporary != n.n.Temporary {
+		return pgerror.Newf(pgcode.InvalidTableDefinition, "cannot create a %s table like a %s table",
+			newPersistenceTypeStr, originPersistenceTypeStr)
+	}
+
+	newID, err := GenerateUniqueDescID(params.ctx, params.extendedEvalCtx.ExecCfg.DB)
+	if err != nil {
+		return err
+	}
+
+	creationTime, err := params.creationTimeForNewTableDescriptor()
+	if err != nil {
+		return err
+	}
+	privs := n.dbDesc.GetPrivileges()
+	if n.dbDesc.ID == keys.SystemDatabaseID {
+		privs = sqlbase.NewDefaultPrivilegeDescriptor()
+	}
+	desc := InitTableDescriptor(newID, n.dbDesc.ID, schemaID, n.n.Table.Table(), creationTime, privs, n.n.Temporary, originDesc.TableType, params.SessionData().User)
+
+	// 1. Manually build new columns from the origin descriptor, but WITHOUT their IDs.
+	for _, originCol := range originDesc.Columns {
+		newCol := originCol
+		newCol.ID = 0
+		desc.AddColumn(&newCol) // AddColumn requires a pointer.
+	}
+
+	// 2. Manually build new indexes, using column names instead of old IDs.
+	for _, originIdx := range originDesc.AllNonDropIndexes() {
+		newIdx := sqlbase.IndexDescriptor{
+			Name:             originIdx.Name,
+			Unique:           originIdx.Unique,
+			StoreColumnNames: originIdx.StoreColumnNames,
+			Version:          originIdx.Version,
+			Type:             originIdx.Type,
+			Partitioning:     originIdx.Partitioning,
+			ColumnNames:      originIdx.ColumnNames,
+			ColumnDirections: originIdx.ColumnDirections,
+		}
+		isPK := originIdx.ID == originDesc.PrimaryIndex.ID
+		// FIX: Pass newIdx by value (no &), as required by AddIndex's signature.
+		if err := desc.AddIndex(newIdx, isPK); err != nil {
+			return err
+		}
+	}
+
+	// 3. Manually copy families and check constraints.
+	desc.Families = make([]sqlbase.ColumnFamilyDescriptor, len(originDesc.Families))
+	copy(desc.Families, originDesc.Families)
+	desc.Checks = make([]*sqlbase.TableDescriptor_CheckConstraint, len(originDesc.Checks))
+	copy(desc.Checks, originDesc.Checks)
+
+	// 4. Allocate fresh IDs for all the new sub-components (columns, indexes).
+	if err := desc.AllocateIDs(); err != nil {
+		return err
+	}
+
+	// 5. Write the new descriptor to the store using the ID we generated.
+	if err := params.p.createDescriptorWithID(
+		ctx, tKey.Key(), newID, &desc, params.EvalContext().Settings,
+		tree.AsStringWithFQNames(n.n, params.Ann()),
+	); err != nil {
+		return err
+	}
+
+	// 6. Handle table comment.
+	if n.n.Comment != "" {
+		if _, err := params.p.extendedEvalCtx.ExecCfg.InternalExecutor.ExecEx(
+			ctx, "set-table-comment", params.p.Txn(),
+			sqlbase.InternalExecutorSessionDataOverride{User: security.RootUser},
+			"UPSERT INTO system.comments VALUES ($1, $2, 0, $3)",
+			keys.TableCommentType, newID, n.n.Comment,
+		); err != nil {
+			return err
+		}
+	}
+
+	params.p.SetAuditTarget(uint32(desc.GetID()), desc.GetName(), nil)
 
 	return nil
 }
