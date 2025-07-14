@@ -718,7 +718,7 @@ func (u *sqlSymUnion) triggerBody() tree.TriggerBody {
 %token <str> CURRENT_USER CYCLE COLLECT_SORTED_HISTOGRAM
 
 %token <str> D DATA DATABASE DATABASES DATAS DATE DAY DDLREPLAY DEC DECLARE DECIMAL DEFAULT DELIMITER_EOF
-%token <str> DEALLOCATE DEFERRABLE DEFERRED DELETE DESC DEVICE
+%token <str> DEALLOCATE DEFERRABLE DEFERRED DELETE DESC DESCRIBE DEVICE
 %token <str> DICT DISCARD DISTINCT DO DOMAIN DOUBLE DROP DISABLE
 
 %token <str> EACH ELSIF ENDIF ENDWHILE ENDCASE ENDLOOP ENDHANDLER
@@ -934,6 +934,7 @@ func (u *sqlSymUnion) triggerBody() tree.TriggerBody {
 
 %type <tree.Statement> create_type_stmt
 %type <tree.Statement> delete_stmt
+%type <tree.Statement> describe_stmt
 %type <tree.Statement> discard_stmt
 %type <tree.Statement> drop_stmt
 %type <tree.Statement> drop_ddl_stmt
@@ -3482,6 +3483,7 @@ preparable_stmt:
 | cancel_stmt       // help texts in sub-rule
 | create_stmt       // help texts in sub-rule
 | delete_stmt       // EXTEND WITH HELP: DELETE
+| describe_stmt     // EXTEND WITH HELP: DESCRIBE
 | drop_stmt         // help texts in sub-rule
 | explain_stmt      // EXTEND WITH HELP: EXPLAIN
 | import_stmt       // EXTEND WITH HELP: IMPORT
@@ -3512,6 +3514,7 @@ preparable_stmt:
 // syntax with brackets. These are a subset of preparable_stmt.
 row_source_extension_stmt:
   delete_stmt       // EXTEND WITH HELP: DELETE
+| describe_stmt     // EXTEND WITH HELP: DESCRIBE
 | explain_stmt      // EXTEND WITH HELP: EXPLAIN
 | insert_stmt       // EXTEND WITH HELP: INSERT
 | select_stmt       // help texts in sub-rule
@@ -4105,6 +4108,16 @@ zone_value:
 | LOCAL
   {
     $$.val = tree.NewStrVal($1)
+  }
+
+// %Help: DESCRIBE - list columns in relation
+// %Category: DDL
+// %Text: DESCRIBE <tablename>
+// %SeeAlso: SHOW COLUMNS
+describe_stmt:
+  DESCRIBE table_name
+  {
+    $$.val = &tree.ShowColumns{Table: $2.unresolvedObjectName(), WithComment: false}
   }
 
 // %Help: SHOW
@@ -13154,6 +13167,7 @@ unreserved_keyword:
 | DEALLOCATE
 | DECLARE
 | DELETE
+| DESCRIBE
 | DEVICE
 | DEFERRED
 | DICT
