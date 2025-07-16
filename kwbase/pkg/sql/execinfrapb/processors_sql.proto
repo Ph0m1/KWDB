@@ -720,6 +720,7 @@ message AggregatorSpec {
     TWA = 37;
     MIN_EXTEND = 38;
     MAX_EXTEND = 39;
+    VAR_POP = 40;
   }
 
   enum Type {

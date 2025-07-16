@@ -893,6 +893,11 @@ define Variance {
 }
 
 [Scalar, Aggregate]
+define VarPop {
+    Input ScalarExpr
+}
+
+[Scalar, Aggregate]
 define StdDev {
     Input ScalarExpr
 }

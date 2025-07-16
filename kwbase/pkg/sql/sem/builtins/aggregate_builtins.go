@@ -595,6 +595,24 @@ var aggregates = map[string]builtinDefinition{
 			"Calculates the variance of the selected values."),
 	),
 
+	"var_pop": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Int}, types.Decimal, newIntPopVarianceAggregate,
+			"Calculates the population variance of the selected values"),
+		makeAggOverload([]*types.T{types.Decimal}, types.Decimal, newDecimalPopVarianceAggregate,
+			"Calculates the population variance of the selected values"),
+		makeAggOverload([]*types.T{types.Float}, types.Float, newFloatPopVarianceAggregate,
+			"Calculates the population variance of the selected values"),
+	),
+
+	"var_samp": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Int}, types.Decimal, newIntVarianceAggregate,
+			"Calculates the sample variance of the selected values"),
+		makeAggOverload([]*types.T{types.Decimal}, types.Decimal, newDecimalVarianceAggregate,
+			"Calculates the sample variance of the selected values"),
+		makeAggOverload([]*types.T{types.Float}, types.Float, newFloatVarianceAggregate,
+			"Calculates the sample variance of the selected values"),
+	),
+
 	// stddev is a historical alias for stddev_samp.
 	"stddev":      makeStdDevBuiltin(),
 	"stddev_samp": makeStdDevBuiltin(),
@@ -774,6 +792,8 @@ var _ tree.AggregateFunc = &floatSumSqrDiffsAggregate{}
 var _ tree.AggregateFunc = &decimalSumSqrDiffsAggregate{}
 var _ tree.AggregateFunc = &floatVarianceAggregate{}
 var _ tree.AggregateFunc = &decimalVarianceAggregate{}
+var _ tree.AggregateFunc = &floatPopVarianceAggregate{}
+var _ tree.AggregateFunc = &decimalPopVarianceAggregate{}
 var _ tree.AggregateFunc = &floatStdDevAggregate{}
 var _ tree.AggregateFunc = &decimalStdDevAggregate{}
 var _ tree.AggregateFunc = &anyNotNullAggregate{}
@@ -817,6 +837,8 @@ const sizeOfFloatSumSqrDiffsAggregate = int64(unsafe.Sizeof(floatSumSqrDiffsAggr
 const sizeOfDecimalSumSqrDiffsAggregate = int64(unsafe.Sizeof(decimalSumSqrDiffsAggregate{}))
 const sizeOfFloatVarianceAggregate = int64(unsafe.Sizeof(floatVarianceAggregate{}))
 const sizeOfDecimalVarianceAggregate = int64(unsafe.Sizeof(decimalVarianceAggregate{}))
+const sizeOfFloatPopVarianceAggregate = int64(unsafe.Sizeof(floatPopVarianceAggregate{}))
+const sizeOfDecimalPopVarianceAggregate = int64(unsafe.Sizeof(decimalPopVarianceAggregate{}))
 const sizeOfFloatStdDevAggregate = int64(unsafe.Sizeof(floatStdDevAggregate{}))
 const sizeOfDecimalStdDevAggregate = int64(unsafe.Sizeof(decimalStdDevAggregate{}))
 const sizeOfAnyNotNullAggregate = int64(unsafe.Sizeof(anyNotNullAggregate{}))
@@ -3776,6 +3798,14 @@ type decimalVarianceAggregate struct {
 	agg decimalSqrDiff
 }
 
+type floatPopVarianceAggregate struct {
+	agg floatSqrDiff
+}
+
+type decimalPopVarianceAggregate struct {
+	agg decimalSqrDiff
+}
+
 // Both Variance and FinalVariance aggregators have the same codepath for
 // their tree.AggregateFunc interface.
 // The key difference is that Variance employs SqrDiffAggregate which
@@ -3812,6 +3842,24 @@ func newDecimalFinalVarianceAggregate(
 	return &decimalVarianceAggregate{agg: newDecimalSumSqrDiffs(evalCtx)}
 }
 
+func newIntPopVarianceAggregate(
+	params []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
+) tree.AggregateFunc {
+	return &decimalPopVarianceAggregate{agg: newIntSqrDiff(evalCtx)}
+}
+
+func newFloatPopVarianceAggregate(
+	_ []*types.T, _ *tree.EvalContext, _ tree.Datums,
+) tree.AggregateFunc {
+	return &floatPopVarianceAggregate{agg: newFloatSqrDiff()}
+}
+
+func newDecimalPopVarianceAggregate(
+	_ []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
+) tree.AggregateFunc {
+	return &decimalPopVarianceAggregate{agg: newDecimalSqrDiff(evalCtx)}
+}
+
 // Add is part of the tree.AggregateFunc interface.
 //
 //	Variance: VALUE(float)
@@ -3827,6 +3875,20 @@ func (a *floatVarianceAggregate) Add(
 //	Variance: VALUE(int|decimal)
 //	FinalVariance: SQRDIFF(decimal), SUM(decimal), COUNT(int)
 func (a *decimalVarianceAggregate) Add(
+	ctx context.Context, firstArg tree.Datum, otherArgs ...tree.Datum,
+) error {
+	return a.agg.Add(ctx, firstArg, otherArgs...)
+}
+
+// Add is part of the tree.AggregateFunc interface.
+func (a *floatPopVarianceAggregate) Add(
+	ctx context.Context, firstArg tree.Datum, otherArgs ...tree.Datum,
+) error {
+	return a.agg.Add(ctx, firstArg, otherArgs...)
+}
+
+// Add is part of the tree.AggregateFunc interface.
+func (a *decimalPopVarianceAggregate) Add(
 	ctx context.Context, firstArg tree.Datum, otherArgs ...tree.Datum,
 ) error {
 	return a.agg.Add(ctx, firstArg, otherArgs...)
@@ -3864,6 +3926,50 @@ func (a *decimalVarianceAggregate) Result() (tree.Datum, error) {
 	// processed, some number of trailing zeros could be added to the
 	// output. Remove them so that the results are the same regardless of
 	// order.
+	dd.Decimal.Reduce(&dd.Decimal)
+	return dd, nil
+}
+
+// Result calculates the population variance.
+func (a *floatPopVarianceAggregate) Result() (tree.Datum, error) {
+	// Population variance requires at least 1 data point.
+	if a.agg.Count() < 1 {
+		return tree.DNull, nil
+	}
+	sqrDiff, err := a.agg.Result()
+	if err != nil || sqrDiff == tree.DNull {
+		return sqrDiff, err
+	}
+
+	// Divisor is N for population variance.
+	divisor := float64(a.agg.Count())
+	if divisor == 0 {
+		return tree.DNull, nil
+	}
+	return tree.NewDFloat(tree.DFloat(float64(*sqrDiff.(*tree.DFloat)) / divisor)), nil
+}
+
+// Result calculates the population variance.
+func (a *decimalPopVarianceAggregate) Result() (tree.Datum, error) {
+	// Population variance requires at least 1 data point.
+	if a.agg.Count().Cmp(decimalOne) < 0 {
+		return tree.DNull, nil
+	}
+	sqrDiff, err := a.agg.Result()
+	if err != nil || sqrDiff == tree.DNull {
+		return sqrDiff, err
+	}
+
+	// Divisor is N for population variance.
+	divisor := a.agg.Count()
+	if divisor.IsZero() {
+		return tree.DNull, nil
+	}
+
+	dd := &tree.DDecimal{}
+	if _, err = tree.DecimalCtx.Quo(&dd.Decimal, &sqrDiff.(*tree.DDecimal).Decimal, divisor); err != nil {
+		return nil, err
+	}
 	dd.Decimal.Reduce(&dd.Decimal)
 	return dd, nil
 }
@@ -3907,6 +4013,26 @@ func (a *decimalVarianceAggregate) Size() int64 {
 func (a *decimalVarianceAggregate) AggHandling() {
 	// do nothing
 }
+
+// Reset implements tree.AggregateFunc.
+func (a *floatPopVarianceAggregate) Reset(ctx context.Context)   { a.agg.Reset(ctx) }
+func (a *decimalPopVarianceAggregate) Reset(ctx context.Context) { a.agg.Reset(ctx) }
+
+// Close implements tree.AggregateFunc.
+func (a *floatPopVarianceAggregate) Close(ctx context.Context)   { a.agg.Close(ctx) }
+func (a *decimalPopVarianceAggregate) Close(ctx context.Context) { a.agg.Close(ctx) }
+
+// Size implements tree.AggregateFunc.
+func (a *floatPopVarianceAggregate) Size() int64 {
+	return sizeOfFloatPopVarianceAggregate + a.agg.Size()
+}
+func (a *decimalPopVarianceAggregate) Size() int64 {
+	return sizeOfDecimalPopVarianceAggregate + a.agg.Size()
+}
+
+// AggHandling implements tree.AggregateFunc.
+func (a *floatPopVarianceAggregate) AggHandling()   {}
+func (a *decimalPopVarianceAggregate) AggHandling() {}
 
 type floatStdDevAggregate struct {
 	agg tree.AggregateFunc
