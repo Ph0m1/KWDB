@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -637,6 +638,17 @@ var aggregates = map[string]builtinDefinition{
 	"json_object_agg":  makeBuiltin(tree.FunctionProperties{UnsupportedWithIssue: 33285, Class: tree.AggregateClass, Impure: true}),
 	"jsonb_object_agg": makeBuiltin(tree.FunctionProperties{UnsupportedWithIssue: 33285, Class: tree.AggregateClass, Impure: true}),
 
+	"quantile": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Int, types.Float}, types.Float, newQuantileAggregate,
+			"Calculates the specified quantile over a set of values."),
+		makeAggOverload([]*types.T{types.Float, types.Float}, types.Float, newQuantileAggregate,
+			"Calculates the specified quantile over a set of values.",
+		),
+		makeAggOverload([]*types.T{types.Decimal, types.Float}, types.Float, newQuantileAggregate,
+			"Calculates the specified quantile over a set of values.",
+		),
+	),
+
 	AnyNotNull: makePrivate(makeBuiltin(aggProps(),
 		makeAggOverloadWithReturnType(
 			[]*types.T{types.Any},
@@ -808,6 +820,7 @@ var _ tree.AggregateFunc = &bitOrAggregate{}
 var _ tree.AggregateFunc = &TimeBucketAggregate{}
 var _ tree.AggregateFunc = &ImputationAggregate{}
 var _ tree.AggregateFunc = &TimestamptzBucketAggregate{}
+var _ tree.AggregateFunc = &quantileAggregate{}
 
 const sizeOfArrayAggregate = int64(unsafe.Sizeof(arrayAggregate{}))
 const sizeOfAvgAggregate = int64(unsafe.Sizeof(avgAggregate{}))
@@ -857,6 +870,7 @@ const sizeOfElapsedAggregate = int64(unsafe.Sizeof(ElapsedAggregate{}))
 const sizeOfTwaAggregate = int64(unsafe.Sizeof(TwaAggregate{}))
 const sizeOfMaxExtendAggregate = int64(unsafe.Sizeof(MaxExtendAggregate{}))
 const sizeOfMinExtendAggregate = int64(unsafe.Sizeof(MinExtendAggregate{}))
+const sizeOfQuantileAggregate = int64(unsafe.Sizeof(quantileAggregate{}))
 
 // singleDatumAggregateBase is a utility struct that helps aggregate builtins
 // that store a single datum internally track their memory usage related to
@@ -4870,3 +4884,138 @@ func newResult(others []tree.Datum) tree.Datum {
 	}
 	return result
 }
+
+// quantileAggregate stores all values in memory, sorts them, and calculates
+// the requested quantile.
+type quantileAggregate struct {
+	evalCtx     *tree.EvalContext
+	quantile    float64
+	quantileSet bool
+	values      []float64
+	acc         mon.BoundAccount
+}
+
+// newQuantileAggregate is the constructor for the quantile aggregate function.
+func newQuantileAggregate(
+	params []*types.T, evalCtx *tree.EvalContext, arguments tree.Datums,
+) tree.AggregateFunc {
+	return &quantileAggregate{
+		evalCtx: evalCtx,
+		values:  make([]float64, 0),
+		acc:     evalCtx.Mon.MakeBoundAccount(),
+	}
+}
+
+// Add gathers all non-null values.
+func (a *quantileAggregate) Add(ctx context.Context, datum tree.Datum, otherArgs ...tree.Datum) error {
+	// The quantile value is constant for all rows, so we only need to parse
+	// and validate it once, on the first call to Add.
+	if !a.quantileSet {
+		if len(otherArgs) == 0 {
+			return pgerror.New(pgcode.InvalidParameterValue, "quantile() requires a second argument for the quantile value")
+		}
+		quantileDatum := otherArgs[0]
+		if quantileDatum == tree.DNull {
+			return pgerror.New(pgcode.InvalidParameterValue, "quantile value cannot be NULL")
+		}
+
+		var qFloat float64
+		switch v := tree.UnwrapDatum(a.evalCtx, quantileDatum).(type) {
+		case *tree.DFloat:
+			qFloat = float64(*v)
+		case *tree.DInt:
+			qFloat = float64(*v)
+		case *tree.DDecimal:
+			f, err := v.Float64()
+			if err != nil {
+				return pgerror.Newf(pgcode.InvalidParameterValue, "could not convert quantile to float: %v", err)
+			}
+			qFloat = f
+		default:
+			return pgerror.Newf(pgcode.DatatypeMismatch, "quantile argument must be a numeric type, not %s", quantileDatum.ResolvedType())
+		}
+
+		if qFloat < 0 || qFloat > 1 {
+			return pgerror.Newf(pgcode.InvalidParameterValue, "quantile value %f is out of range [0, 1]", qFloat)
+		}
+		a.quantile = qFloat
+		a.quantileSet = true
+	}
+
+	// Process the main value for aggregation.
+	if datum == tree.DNull {
+		return nil
+	}
+
+	var val float64
+	switch t := tree.UnwrapDatum(a.evalCtx, datum).(type) {
+	case *tree.DInt:
+		val = float64(*t)
+	case *tree.DFloat:
+		val = float64(*t)
+	case *tree.DDecimal:
+		f, err := t.Float64()
+		if err != nil {
+			return err
+		}
+		val = f
+	default:
+		return pgerror.Newf(pgcode.DatatypeMismatch,
+			"quantile() requires a numeric input for the first argument, got %s", datum.ResolvedType())
+	}
+
+	if err := a.acc.Grow(ctx, int64(unsafe.Sizeof(val))); err != nil {
+		return err
+	}
+	a.values = append(a.values, val)
+	return nil
+}
+
+// Result sorts the collected values and computes the quantile.
+func (a *quantileAggregate) Result() (tree.Datum, error) {
+	if len(a.values) == 0 {
+		return tree.DNull, nil
+	}
+
+	sort.Float64s(a.values)
+
+	n := float64(len(a.values))
+	// Using linear interpolation method (R-7 in R's documentation).
+	// h = (N-1) * q
+	h := (n - 1) * a.quantile
+
+	idx := int(h)
+	frac := h - float64(idx)
+
+	// If the index is the last element or the fractional part is zero,
+	// no interpolation is needed.
+	if idx >= len(a.values)-1 || frac == 0 {
+		return tree.NewDFloat(tree.DFloat(a.values[idx])), nil
+	}
+
+	// Linear interpolation: v_i + (v_{i+1} - v_i) * h_frac
+	lower := a.values[idx]
+	upper := a.values[idx+1]
+	result := lower + (upper-lower)*frac
+
+	return tree.NewDFloat(tree.DFloat(result)), nil
+}
+
+// Reset implements the tree.AggregateFunc interface.
+func (a *quantileAggregate) Reset(ctx context.Context) {
+	a.values = a.values[:0]
+	a.acc.Clear(ctx)
+}
+
+// Close implements the tree.AggregateFunc interface.
+func (a *quantileAggregate) Close(ctx context.Context) {
+	a.acc.Close(ctx)
+}
+
+// Size implements the tree.AggregateFunc interface.
+func (a *quantileAggregate) Size() int64 {
+	return sizeOfQuantileAggregate
+}
+
+// AggHandling implements the tree.AggregateFunc interface.
+func (a *quantileAggregate) AggHandling() {}

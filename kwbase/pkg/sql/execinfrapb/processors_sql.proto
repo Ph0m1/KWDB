@@ -721,6 +721,7 @@ message AggregatorSpec {
     MIN_EXTEND = 38;
     MAX_EXTEND = 39;
     VAR_POP = 40;
+    QUANTILE = 41;
   }
 
   enum Type {

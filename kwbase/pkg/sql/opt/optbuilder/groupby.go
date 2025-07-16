@@ -1126,6 +1126,8 @@ func (b *Builder) constructAggregate(name string, args []opt.ScalarExpr) opt.Sca
 		return b.factory.ConstructElapsed(args[0], args[1])
 	case "twa":
 		return b.factory.ConstructTwa(args[0], args[1])
+	case "quantile":
+		return b.factory.ConstructQuantile(args[0], args[1])
 	}
 	panic(errors.AssertionFailedf("unhandled aggregate: %s", name))
 }

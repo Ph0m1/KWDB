@@ -898,6 +898,12 @@ define VarPop {
 }
 
 [Scalar, Aggregate]
+define Quantile {
+    Input    ScalarExpr
+    Quantile ScalarExpr
+}
+
+[Scalar, Aggregate]
 define StdDev {
     Input ScalarExpr
 }
