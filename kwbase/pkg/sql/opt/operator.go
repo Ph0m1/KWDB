@@ -275,6 +275,7 @@ var WindowOpReverseMap = map[Operator]string{
 	RowNumberOp:   "row_number",
 	DenseRankOp:   "dense_rank",
 	PercentRankOp: "percent_rank",
+	GroupRankOp:   "group_rank",
 	CumeDistOp:    "cume_dist",
 	NtileOp:       "ntile",
 	LagOp:         "lag",

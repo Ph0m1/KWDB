@@ -909,6 +909,7 @@ message WindowerSpec {
     LAST_VALUE = 9;
     NTH_VALUE = 10;
     DIFF = 11;
+    GROUP_RANK = 12;
   }
 
   // Func specifies which function to compute. It can either be built-in

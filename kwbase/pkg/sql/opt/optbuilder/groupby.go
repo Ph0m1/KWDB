@@ -1033,6 +1033,8 @@ func (b *Builder) constructWindowFn(name string, args []opt.ScalarExpr) opt.Scal
 		return b.factory.ConstructDenseRank()
 	case "percent_rank":
 		return b.factory.ConstructPercentRank()
+	case "group_rank":
+		return b.factory.ConstructGroupRank()
 	case "cume_dist":
 		return b.factory.ConstructCumeDist()
 	case "ntile":

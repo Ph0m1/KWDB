@@ -87,6 +87,10 @@ var windows = map[string]builtinDefinition{
 		makeWindowOverload(tree.ArgTypes{}, types.Float, newPercentRankWindow,
 			"Calculates the relative rank of the current row: (rank - 1) / (total rows - 1)."),
 	),
+	"group_rank": makeBuiltin(winProps(),
+		makeWindowOverload(tree.ArgTypes{}, types.Int, newRankWindow,
+			"Computes the rank of a row in its window partition, without gaps in rank values. Alias for RANK."),
+	),
 	"cume_dist": makeBuiltin(winProps(),
 		makeWindowOverload(tree.ArgTypes{}, types.Float, newCumulativeDistWindow,
 			"Calculates the relative rank of the current row: "+

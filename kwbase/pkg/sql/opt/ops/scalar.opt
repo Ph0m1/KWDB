@@ -1085,6 +1085,11 @@ define RowNumber {
 define DenseRank {
 }
 
+# GroupRank alias by Rank.
+[Scalar, Int, Window]
+define GroupRank {
+}
+
 # PercentRank is (rank - 1) / (total rows - 1).
 [Scalar, Float, Window]
 define PercentRank {
