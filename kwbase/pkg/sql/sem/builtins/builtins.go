@@ -2867,41 +2867,172 @@ may increase either contention or retry errors, or both.`,
 
 	"time": makeBuiltin(defProps(),
 		tree.Overload{
-			Types: tree.ArgTypes{
-				{"val", types.Any},
-			},
+			Types:      tree.ArgTypes{{"integer", types.Int}},
 			ReturnType: tree.FixedReturnType(types.Interval),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				return timeFn(ctx, args[0])
+				val := int64(tree.MustBeDInt(args[0]))
+				d, err := parseTimeFromInteger(val)
+				if err != nil || d == nil {
+					return tree.DNull, err
+				}
+				finalDuration := clampToMySQLTimeRange(*d)
+				return tree.NewDInterval(finalDuration, types.DefaultIntervalTypeMetadata), nil
 			},
-			Info: "Parse an expression and return its time part, which is a time interval.",
+			Info: "Converts an integer (in HHMMSS format) to a TIME interval.",
 		},
-	),
-
-	// time_to_sec(time(expr))
-	"time_to_sec": makeBuiltin(defProps(),
 		tree.Overload{
-			Types: tree.ArgTypes{
-				{"val", types.Any},
-			},
-			ReturnType: tree.FixedReturnType(types.Int),
+			Types:      tree.ArgTypes{{"timestamp", types.String}},
+			ReturnType: tree.FixedReturnType(types.Interval),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				internalDatum, err := timeFn(ctx, args[0])
+				ds := tree.MustBeDString(args[0])
+				parsedDuration, err := parseStringAsMySqlTime(ctx, string(ds))
 				if err != nil {
 					return nil, err
 				}
-				if internalDatum == tree.DNull {
+				if parsedDuration == nil {
 					return tree.DNull, nil
 				}
-				dInternal, ok := internalDatum.(*tree.DInterval)
+
+				finalDuration := clampToMySQLTimeRange(*parsedDuration)
+				return tree.NewDInterval(finalDuration, types.DefaultIntervalTypeMetadata), nil
+			},
+			Info: "Parses a string as a TIME interval, preferring timestamp formats but falling back to duration formats.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}},
+			ReturnType: tree.FixedReturnType(types.Interval),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				t := tree.MustBeDTimestamp(args[0])
+				seconds := t.Time.Hour()*3600 + t.Time.Minute()*60 + t.Time.Second()
+				nanos := t.Time.Nanosecond()
+				var d duration.Duration
+				d.SetNanos(int64(seconds)*1_000_000_000 + int64(nanos))
+				return tree.NewDInterval(d, types.DefaultIntervalTypeMetadata), nil
+			},
+			Info: "Extracts the time-of-day part from a timestamp.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamptz", types.TimestampTZ}},
+			ReturnType: tree.FixedReturnType(types.Interval),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				t := tree.MustBeDTimestampTZ(args[0])
+				seconds := t.Time.Hour()*3600 + t.Time.Minute()*60 + t.Time.Second()
+				nanos := t.Time.Nanosecond()
+				var d duration.Duration
+				d.SetNanos(int64(seconds)*1_000_000_000 + int64(nanos))
+				return tree.NewDInterval(d, types.DefaultIntervalTypeMetadata), nil
+			},
+			Info: "Extracts the time-of-day part from a timestamp with time zone.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"time", types.Time}},
+			ReturnType: tree.FixedReturnType(types.Interval),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				t, ok := args[0].(*tree.DTime)
 				if !ok {
-					return nil, pgerror.Newf(pgcode.Internal, "recived unexpected type: %T", internalDatum)
+					return nil, pgerror.Newf(pgcode.Internal, "expected DTime but got %T", args[0])
 				}
-				totalNanos := dInternal.Duration.Nanos()
+				if t == nil {
+					return tree.DNull, nil
+				}
+				var d duration.Duration
+				d.SetNanos(int64(*t) * 1_000)
+				return tree.NewDInterval(d, types.DefaultIntervalTypeMetadata), nil
+			},
+			Info: "Converts a TIME value to a TIME interval.",
+		},
+	),
+
+	"time_to_sec": makeBuiltin(defProps(),
+		tree.Overload{
+			Types:      tree.ArgTypes{{"int", types.Interval}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				val := args[0]
+				if val == tree.DNull {
+					return tree.DNull, nil
+				}
+				dInterval, ok := val.(*tree.DInterval)
+				if !ok {
+					return nil, pgerror.Newf(pgcode.Internal, "intervalToSeconds expected DInterval but got %T", val)
+				}
+				// Use the duration's built-in method to get total nanoseconds, then convert to seconds.
+				totalNanos := dInterval.Duration.Nanos()
+				if totalNanos > maxTimeNanos {
+					totalNanos = maxTimeNanos
+				}
+				if totalNanos < minTimeNanos {
+					totalNanos = minTimeNanos
+				}
 				totalSeconds := totalNanos / 1_000_000_000
 				return tree.NewDInt(tree.DInt(totalSeconds)), nil
 			},
-			Info: "Parses an expression through timeFn and returns the seconds of its time component.",
+			Info: "Converts a TIME interval to the total number of seconds.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"time", types.Time}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				t, ok := args[0].(*tree.DTime)
+				if !ok {
+					return nil, pgerror.Newf(pgcode.Internal, "expected DTime but got %T", args[0])
+				}
+				totalSeconds := int64(*t) / 1_000_000
+				return tree.NewDInt(tree.DInt(totalSeconds)), nil
+			},
+			Info: "Converts a TIME (time-of-day) value to the number of seconds from midnight.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"string", types.String}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				ds := tree.MustBeDString(args[0])
+				parsedDuration, err := parseStringAsMySqlTime(ctx, string(ds))
+				if err != nil {
+					return nil, err
+				}
+				totalSeconds := parsedDuration.Nanos() / 1_000_000_000
+				return tree.NewDInt(tree.DInt(totalSeconds)), nil
+			},
+			Info: "Parses a string as a TIME/TIMESTAMP/TIMESTAMPTZ interval.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamp", types.Timestamp}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				ts := tree.MustBeDTimestamp(args[0])
+				seconds := ts.Time.Hour()*3600 + ts.Time.Minute()*60 + ts.Time.Second()
+				nanos := ts.Time.Nanosecond()
+				seconds += nanos / 1_000_000_000
+				return tree.NewDInt(tree.DInt(seconds)), nil
+			},
+			Info: "Parses timestamp.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"timestamptz", types.TimestampTZ}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				ts := tree.MustBeDTimestampTZ(args[0])
+				seconds := ts.Time.Hour()*3600 + ts.Time.Minute()*60 + ts.Time.Second()
+				nanos := ts.Time.Nanosecond()
+				seconds += nanos / 1_000_000_000
+				return tree.NewDInt(tree.DInt(seconds)), nil
+			},
+			Info: "Parses timestampTZ.",
+		},
+		tree.Overload{
+			Types:      tree.ArgTypes{{"integer", types.Int}},
+			ReturnType: tree.FixedReturnType(types.Int),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				val := int64(tree.MustBeDInt(args[0]))
+				d, err := parseTimeFromInteger(val)
+				if err != nil || d == nil {
+					return tree.DNull, err
+				}
+				finalDuration := clampToMySQLTimeRange(*d)
+				return tree.NewDInt(tree.DInt(finalDuration.Nanos() / 1_000_000_000)), nil
+			},
+			Info: "Converts an integer (in HHMMSS format) to seconds.",
 		},
 	),
 
@@ -6899,94 +7030,15 @@ func recentTimestamp(ctx *tree.EvalContext) (time.Time, error) {
 	return ctx.StmtTimestamp.Add(offset), nil
 }
 
-func timeFn(ctx *tree.EvalContext, val tree.Datum) (tree.Datum, error) {
-	if val == tree.DNull {
-		return tree.DNull, nil
-	}
-	var d duration.Duration
-	switch t := val.(type) {
-	case *tree.DInt:
-		parsedDuration, err := parseTimeFromInteger(int64(*t))
-		if err != nil {
-			return tree.DNull, err
-		}
-		if parsedDuration == nil {
-			return tree.DNull, nil
-		}
-		d.SetNanos(parsedDuration.Nanos())
-	case *tree.DString:
-		s := string(*t)
-		isNumeric := true
-		for _, c := range s {
-			if c < '0' || c > '9' {
-				isNumeric = false
-				break
-			}
-		}
-		if isNumeric {
-			originalLen := len(s)
-			if originalLen == 13 {
-				s = s[:12]
-			} else if originalLen > 14 {
-				s = s[:14]
-			}
-			if len(s) == 14 || len(s) == 12 {
-				layout := "20060102150405"
-				if len(s) == 12 {
-					layout = "060102150405"
-				}
-				parsedTime, err := time.Parse(layout, s)
-
-				if err != nil {
-					return tree.DNull, nil
-				}
-				d.SetNanos(int64(parsedTime.Hour()*3600+parsedTime.Minute()*60+parsedTime.Second())*1_000_000_000 + int64(parsedTime.Nanosecond()))
-			} else {
-				if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
-					parsedDuration, err := parseTimeFromInteger(intVal)
-					if err != nil {
-						return nil, err
-					}
-					if parsedDuration == nil {
-						return tree.DNull, nil
-					}
-					d.SetNanos(parsedDuration.Nanos())
-				}
-			}
-		} else {
-			if parsedTime, err := tree.ParseDTime(ctx, s, time.Microsecond); err == nil {
-				d.SetNanos(int64(*parsedTime) * 1000)
-			} else if parsedInterval, err := tree.ParseDInterval(s); err == nil {
-				d.SetNanos(parsedInterval.Nanos())
-			} else {
-				return tree.DNull, nil
-			}
-		}
-	case *tree.DInterval:
-		d.SetNanos(t.Duration.Nanos())
-	case *tree.DTimestamp:
-		tod := timeofday.FromTime(t.Time)
-		d.SetNanos(int64(tod.Microsecond()) * 1000)
-	case *tree.DTimestampTZ:
-		tod := timeofday.FromTime(t.Time.In(ctx.GetLocation()))
-		d.SetNanos(int64(tod.Microsecond()) * 1000)
-	case *tree.DDate:
-		d.SetNanos(0)
-	case *tree.DTime:
-		d.SetNanos(int64(*t) * 1000)
-	default:
-		return nil, pgerror.Newf(pgcode.InvalidParameterValue, "unsupported for type: %s", val.ResolvedType())
-	}
-	finalDuration := clampIntervalToTimeRange(d)
-	return tree.NewDInterval(finalDuration, types.DefaultIntervalTypeMetadata), nil
-}
-
+// parseTimeFromInteger parsed integer by HHMMSS form.
 func parseTimeFromInteger(val int64) (*duration.Duration, error) {
 	isNegative := val < 0
 	if isNegative {
 		val = -val
 	}
-
+	if val >= 1_000_000_0 {
+		return nil, nil
+	}
 	ss := val % 100
 	mm := (val / 100) % 100
 	hh := val / 10000
@@ -6994,7 +7046,6 @@ func parseTimeFromInteger(val int64) (*duration.Duration, error) {
 	if mm >= 60 || ss >= 60 {
 		return nil, nil
 	}
-
 	totalNanos := (hh*3600 + mm*60 + ss) * 1_000_000_000
 	if isNegative {
 		totalNanos = -totalNanos
@@ -7005,7 +7056,7 @@ func parseTimeFromInteger(val int64) (*duration.Duration, error) {
 	return &d, nil
 }
 
-func clampIntervalToTimeRange(d duration.Duration) duration.Duration {
+func clampToMySQLTimeRange(d duration.Duration) duration.Duration {
 	totalNanos := d.Nanos()
 	if totalNanos > maxTimeNanos {
 		var clampedDuration duration.Duration
@@ -7018,4 +7069,77 @@ func clampIntervalToTimeRange(d duration.Duration) duration.Duration {
 		return clampedDuration
 	}
 	return d
+}
+
+func parseStringAsMySqlTime(ctx *tree.EvalContext, s string) (*duration.Duration, error) {
+	isNumeric := true
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			isNumeric = false
+			break
+		}
+	}
+
+	if isNumeric {
+		originalLen := len(s)
+		if originalLen == 13 {
+			s = s[:12]
+		} else if originalLen > 14 {
+			s = s[:14]
+		}
+		if len(s) == 14 || len(s) == 12 {
+			layout := "20060102150405" // YYYYMMDDHHMMSS
+			if len(s) == 12 {
+				layout = "060102150405" // YYMMDDHHMMSS
+			}
+			if parsedTime, err := time.Parse(layout, s); err != nil {
+				return nil, nil
+			} else {
+				var d duration.Duration
+				nanos := int64(parsedTime.Hour()*3600+parsedTime.Minute()*60+parsedTime.Second())*1_000_000_000 + int64(parsedTime.Nanosecond())
+				d.SetNanos(nanos)
+				return &d, nil
+			}
+		}
+
+		if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return parseTimeFromInteger(intVal)
+		}
+	} else {
+		var d duration.Duration
+		if parsedTimestamp, err := tree.ParseDTimestamp(ctx, s, types.DefaultTimePrecision); err == nil {
+			seconds := parsedTimestamp.Time.Hour()*3600 + parsedTimestamp.Time.Minute()*60 + parsedTimestamp.Time.Second()
+			nanos := parsedTimestamp.Time.Nanosecond()
+			d.SetNanos(int64(seconds)*1_000_000_000 + int64(nanos))
+			d = clampToMySQLTimeRange(d)
+			return &d, nil
+		}
+		if parsedInterval, err := tree.ParseDInterval(s); err == nil {
+			d = clampToMySQLTimeRange(parsedInterval.Duration)
+			// Processing of data overflow int64
+			if d.Nanos() < 0 && s[0] != '-' {
+				d.SetNanos(maxTimeNanos)
+			}
+			return &d, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func intervalToSeconds(val tree.Datum) (tree.Datum, error) {
+	if val == tree.DNull {
+		return tree.DNull, nil
+	}
+
+	dInterval, ok := val.(*tree.DInterval)
+	if !ok {
+		return nil, pgerror.Newf(pgcode.Internal, "intervalToSeconds expected DInterval but got %T", val)
+	}
+
+	// Use the duration's built-in method to get total nanoseconds, then convert to seconds.
+	totalNanos := dInterval.Duration.Nanos()
+	totalSeconds := totalNanos / 1_000_000_000
+
+	return tree.NewDInt(tree.DInt(totalSeconds)), nil
 }
