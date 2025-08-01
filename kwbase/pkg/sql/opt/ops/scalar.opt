@@ -909,6 +909,11 @@ define StdDev {
 }
 
 [Scalar, Aggregate]
+define Norm {
+    Input ScalarExpr
+}
+
+[Scalar, Aggregate]
 define TimeBucketGapfill {
     Input ScalarExpr
     Time  ScalarExpr

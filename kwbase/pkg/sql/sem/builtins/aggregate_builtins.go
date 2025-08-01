@@ -443,6 +443,15 @@ var aggregates = map[string]builtinDefinition{
 		),
 	),
 
+	"norm": makeBuiltin(aggProps(),
+		makeAggOverload([]*types.T{types.Int}, types.Decimal, newNormAggregate,
+			"Calculates the L2 norm (Euclidean norm) of the selected values."),
+		makeAggOverload([]*types.T{types.Float}, types.Decimal, newNormAggregate,
+			"Calculates the L2 norm (Euclidean norm) of the selected values."),
+		makeAggOverload([]*types.T{types.Decimal}, types.Decimal, newNormAggregate,
+			"Calculates the L2 norm (Euclidean norm) of the selected values."),
+	),
+
 	"string_agg": makeBuiltin(aggPropsNullableArgs(),
 		makeAggOverload([]*types.T{types.String, types.String}, types.String, newStringConcatAggregate,
 			"Concatenates all selected values using the provided delimiter."),
@@ -821,6 +830,7 @@ var _ tree.AggregateFunc = &TimeBucketAggregate{}
 var _ tree.AggregateFunc = &ImputationAggregate{}
 var _ tree.AggregateFunc = &TimestamptzBucketAggregate{}
 var _ tree.AggregateFunc = &quantileAggregate{}
+var _ tree.AggregateFunc = &normAggregate{}
 
 const sizeOfArrayAggregate = int64(unsafe.Sizeof(arrayAggregate{}))
 const sizeOfAvgAggregate = int64(unsafe.Sizeof(avgAggregate{}))
@@ -871,6 +881,7 @@ const sizeOfTwaAggregate = int64(unsafe.Sizeof(TwaAggregate{}))
 const sizeOfMaxExtendAggregate = int64(unsafe.Sizeof(MaxExtendAggregate{}))
 const sizeOfMinExtendAggregate = int64(unsafe.Sizeof(MinExtendAggregate{}))
 const sizeOfQuantileAggregate = int64(unsafe.Sizeof(quantileAggregate{}))
+const sizeOfNormAggregate = int64(unsafe.Sizeof(normAggregate{}))
 
 // singleDatumAggregateBase is a utility struct that helps aggregate builtins
 // that store a single datum internally track their memory usage related to
@@ -5019,3 +5030,96 @@ func (a *quantileAggregate) Size() int64 {
 
 // AggHandling implements the tree.AggregateFunc interface.
 func (a *quantileAggregate) AggHandling() {}
+
+type normAggregate struct {
+	evalCtx      *tree.EvalContext
+	sumOfSquares apd.Decimal
+	sawNonNull   bool
+	acc          mon.BoundAccount
+}
+
+func newNormAggregate(
+	params []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
+) tree.AggregateFunc {
+	return &normAggregate{
+		evalCtx: evalCtx,
+		acc:     evalCtx.Mon.MakeBoundAccount(),
+	}
+}
+
+// Add accumulates the square of the datum into the sum.
+func (a *normAggregate) Add(ctx context.Context, datum tree.Datum, _ ...tree.Datum) error {
+	if datum == tree.DNull {
+		return nil
+	}
+	a.sawNonNull = true
+
+	var val apd.Decimal
+	// Convert input datum to apd.Decimal for precise calculation.
+	switch t := tree.UnwrapDatum(a.evalCtx, datum).(type) {
+	case *tree.DInt:
+		val.SetInt64(int64(*t))
+	case *tree.DFloat:
+		if _, err := val.SetFloat64(float64(*t)); err != nil {
+			return err
+		}
+	case *tree.DDecimal:
+		val.Set(&t.Decimal)
+	default:
+		return errors.Newf("unexpected type %s for norm()", datum.ResolvedType())
+	}
+
+	// Square the value: val * val
+	squared := apd.Decimal{}
+	if _, err := tree.DecimalCtx.Mul(&squared, &val, &val); err != nil {
+		return err
+	}
+
+	// Add the squared value to the running sum.
+	if _, err := tree.DecimalCtx.Add(&a.sumOfSquares, &a.sumOfSquares, &squared); err != nil {
+		return err
+	}
+
+	// Account for memory usage.
+	if err := a.acc.Grow(ctx, int64(tree.SizeOfDecimal(a.sumOfSquares))); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Result computes the square root of the sum of squares.
+func (a *normAggregate) Result() (tree.Datum, error) {
+	if !a.sawNonNull {
+		return tree.DNull, nil
+	}
+
+	resultDecimal := &tree.DDecimal{}
+	_, err := tree.DecimalCtx.Sqrt(&resultDecimal.Decimal, &a.sumOfSquares)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return a DECIMAL to maintain precision.
+	return resultDecimal, nil
+}
+
+// Reset implements the tree.AggregateFunc interface.
+func (a *normAggregate) Reset(ctx context.Context) {
+	a.sawNonNull = false
+	a.sumOfSquares.Coeff.SetInt64(0)
+	a.acc.Clear(ctx)
+}
+
+// Close implements the tree.AggregateFunc interface.
+func (a *normAggregate) Close(ctx context.Context) {
+	a.acc.Close(ctx)
+}
+
+// Size implements the tree.AggregateFunc interface.
+func (a *normAggregate) Size() int64 {
+	return sizeOfNormAggregate
+}
+
+// AggHandling implements the tree.AggregateFunc interface.
+func (a *normAggregate) AggHandling() {}
