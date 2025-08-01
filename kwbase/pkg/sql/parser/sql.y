@@ -777,6 +777,7 @@ func (u *sqlSymUnion) triggerBody() tree.TriggerBody {
 %token <str> SERIAL SERIAL2 SERIAL4 SERIAL8
 %token <str> SERIALIZABLE SERVER SERVICE SESSION SESSIONS SESSION_USER SET SETTING SETTINGS
 %token <str> SHARE SHOW SIMILAR SIMPLE SKIP SLIDING SMALLINT SMALLSERIAL SNAPSHOT SOME SPLIT SQL
+%token <str> STR_TO_DATE
 
 %token <str> START STARTTIME STATISTICS STATUS STDIN STREAM STREAMS STRICT STRING STORE STORED STORING SUBSTRING SUCCESS
 %token <str> SYMMETRIC SYNTAX SYSTEM SUBSCRIPTION
@@ -11960,6 +11961,10 @@ special_function:
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr()}}
   }
 | FIRST_ROW_TS '(' error { return helpWithFunctionByName(sqllex, $1) }
+| STR_TO_DATE '(' a_expr ',' a_expr ')'
+  {
+    $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr(), $5.expr()}}
+  }
 
 last_column:
 column_path_with_star

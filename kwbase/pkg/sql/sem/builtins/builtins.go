@@ -112,11 +112,6 @@ const (
 	categoryGEO           = "Geometry"
 )
 
-const (
-	maxTimeNanos = int64(3020399 * 1_000_000_000)
-	minTimeNanos = -maxTimeNanos
-)
-
 func categorizeType(t *types.T) string {
 	switch t.Family() {
 	case types.DateFamily, types.IntervalFamily, types.TimestampFamily, types.TimestampTZFamily:
@@ -3301,6 +3296,35 @@ may increase either contention or retry errors, or both.`,
 			Info: "return the bucket number to which operand would be assigned given an array listing the " +
 				"lower bounds of the buckets; returns 0 for an input less than the first lower bound; the " +
 				"thresholds array must be sorted, smallest first, or unexpected results will be obtained",
+		},
+	),
+
+	"str_to_date": makeBuiltin(defProps(),
+		tree.Overload{
+			Types: tree.ArgTypes{{"val", types.String},{"format", types.String}},
+			ReturnType: tree.FixedReturnType(types.TimestampTZ),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				if args[0] == tree.DNull || args[1] == tree.DNull {
+					return tree.DNull, nil
+				}
+				dateStr := string(tree.MustBeDString(args[0]))
+				formatStr := string(tree.MustBeDString(args[1]))
+
+				parsedTime, err := strtime.Strptime(dateStr, formatStr)
+				if err != nil {
+					return tree.DNull, err
+				}
+
+				sessionLoc := ctx.GetLocation()
+				finalTime := time.Date(
+					parsedTime.Year(), parsedTime.Month(), parsedTime.Day(),
+					parsedTime.Hour(), parsedTime.Minute(), parsedTime.Second(), parsedTime.Nanosecond(),
+					sessionLoc,
+				)
+
+				return tree.MakeDTimestampTZ(finalTime, time.Microsecond), err
+			},
+			Info: "Parses a string into a timestamp according to a format string from github.com/knz/strtime.",
 		},
 	),
 
