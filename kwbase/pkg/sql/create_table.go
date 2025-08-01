@@ -359,13 +359,12 @@ func checkEngineType(n *createTableNode) error {
 
 // startExec exec create table node including make table desc, write table desc and exec create table job
 func (n *createTableNode) startExec(params runParams) error {
-	// --- NEW LOGIC FOR 'CREATE TABLE LIKE' ---
 	// Check if the LikeTable field was populated by the parser.
 	if n.n.LikeTable.TableName != "" {
 		// It is a 'LIKE' statement. Delegate to our new helper function.
 		return createTableLike(params, n)
 	}
-	// --- END NEW LOGIC ---
+
 	if err := checkEngineType(n); err != nil {
 		return err
 	}
@@ -776,6 +775,15 @@ func createTableLike(params runParams, n *createTableNode) error {
 	if err != nil {
 		return errors.Wrapf(err, "origin table %q does not exist", n.n.LikeTable.FQString())
 	}
+
+		if originDesc.GetTableType() != tree.RelationalTable {
+		return pgerror.Newf(
+			pgcode.FeatureNotSupported,
+			"CREATE TABLE ... LIKE ... only supports relational tables as the source, but table %q is not a relational table",
+			n.n.LikeTable.TableName,
+		)
+	}
+
 	if err := params.p.CheckPrivilege(ctx, originDesc, privilege.SELECT); err != nil {
 		return err
 	}
