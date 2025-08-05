@@ -274,6 +274,7 @@ var AggregateOpReverseMap = map[Operator]string{
 var WindowOpReverseMap = map[Operator]string{
 	RankOp:        "rank",
 	RowNumberOp:   "row_number",
+	GroupRowNumberOp:"group_row_number",
 	DenseRankOp:   "dense_rank",
 	PercentRankOp: "percent_rank",
 	GroupRankOp:   "group_rank",

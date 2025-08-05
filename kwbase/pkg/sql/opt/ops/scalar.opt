@@ -1085,6 +1085,10 @@ define Rank {
 define RowNumber {
 }
 
+[Scalar, Int, Window]
+define GroupRowNumber {
+}
+
 # DenseRank is like Rank, but without gaps. Instead of 1, 1, 3, it gives 1, 1, 2.
 [Scalar, Int, Window]
 define DenseRank {

@@ -1029,6 +1029,8 @@ func (b *Builder) constructWindowFn(name string, args []opt.ScalarExpr) opt.Scal
 		return b.factory.ConstructRank()
 	case "row_number":
 		return b.factory.ConstructRowNumber()
+	case "group_row_number":
+		return b.factory.ConstructGroupRowNumber()
 	case "dense_rank":
 		return b.factory.ConstructDenseRank()
 	case "percent_rank":
