@@ -2866,34 +2866,22 @@ may increase either contention or retry errors, or both.`,
 			ReturnType: tree.FixedReturnType(types.Time),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				val := int64(tree.MustBeDInt(args[0]))
-				t := tree.MakeDTimestamp(timeutil.Unix(val, 0), time.Nanosecond)
-				hour, min, sec := t.Clock()
-				
-				return tree.MakeDTime(timeofday.New(hour, min, sec, 0)), nil
-			},
-			Info: "Converts an integer as seconds to a TIME interval.",
-		},
-		tree.Overload{
-			Types:	tree.ArgTypes{{"val", types.Float}},
-			ReturnType: tree.FixedReturnType(types.Time),
-			Fn:	func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				val := tree.MustBeDFloat(args[0])
-				sec := int64(val)
-				nsec := int64(val * 1_000_000_000) % 1_000_000_000
+				// Interpret INT as milliseconds since Unix epoch.
+				sec := val / 1000
+				nsec := (val % 1000) * int64(time.Millisecond)
 				t := tree.MakeDTimestamp(timeutil.Unix(sec, nsec), time.Nanosecond)
-				hour, min, secs := t.Clock()
-				msec := t.Nanosecond() / 1_000
-				return tree.MakeDTime(timeofday.New(hour, min, secs, msec)), nil
+				hour, min, secOfDay := t.Clock()
+				return tree.MakeDTime(timeofday.New(hour, min, secOfDay, 0)), nil
 			},
-			Info: "Converts a floater as seconds to a TIME interval.",
+			Info: "Converts an integer as milliseconds to a TIME interval.",
 		},
 		tree.Overload{
 			Types:      tree.ArgTypes{{"val", types.String}},
 			ReturnType: tree.FixedReturnType(types.Time),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				s :=string(tree.MustBeDString(args[0]))
+				s := string(tree.MustBeDString(args[0]))
 				parsedTime, err := tree.ParseDTime(ctx, s, types.DefaultTimePrecision)
-				if err == nil{ 
+				if err == nil {
 					return parsedTime, err
 				}
 				parsedTimestamp, err := tree.ParseDTimestamp(ctx, s, types.DefaultTimePrecision)
@@ -2935,7 +2923,7 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				t, ok := args[0].(*tree.DTime)
 				if !ok {
-					return nil, nil
+					return nil, pgerror.Newf(pgcode.Internal, "expected DTime but got %T", args[0])
 				}
 				return t, nil
 			},
@@ -2950,7 +2938,7 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				t, ok := args[0].(*tree.DTime)
 				if !ok {
-					return nil, nil
+					return nil, pgerror.Newf(pgcode.Internal, "expected DTime but got %T", args[0])
 				}
 				totalSeconds := int64(*t) / 1_000_000
 				return tree.NewDInt(tree.DInt(totalSeconds)), nil
@@ -2961,16 +2949,16 @@ may increase either contention or retry errors, or both.`,
 			Types:      tree.ArgTypes{{"val", types.String}},
 			ReturnType: tree.FixedReturnType(types.Int),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				s :=string(tree.MustBeDString(args[0]))
+				s := string(tree.MustBeDString(args[0]))
 				parsedTime, err := tree.ParseDTime(ctx, s, types.DefaultTimePrecision)
-				if err == nil{ 
+				if err == nil {
 					return tree.NewDInt(tree.DInt(*parsedTime) / 1_000_000), nil
 				}
 				parsedTimestamp, err := tree.ParseDTimestamp(ctx, s, types.DefaultTimePrecision)
 				if err != nil {
 					return tree.DNull, err
 				}
-				totalSeconds := parsedTimestamp.Time.Hour() * 3600 + parsedTimestamp.Time.Minute()*60 + parsedTimestamp.Time.Second()
+				totalSeconds := parsedTimestamp.Time.Hour()*3600 + parsedTimestamp.Time.Minute()*60 + parsedTimestamp.Time.Second()
 				return tree.NewDInt(tree.DInt(totalSeconds)), nil
 			},
 			Info: "Parses a string as TIME/TIMESTAMP/TIMESTAMPTZ and return it seconds.",
@@ -2981,8 +2969,6 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				ts := tree.MustBeDTimestamp(args[0])
 				seconds := ts.Time.Hour()*3600 + ts.Time.Minute()*60 + ts.Time.Second()
-				nanos := ts.Time.Nanosecond()
-				seconds += nanos / 1_000_000_000
 				return tree.NewDInt(tree.DInt(seconds)), nil
 			},
 			Info: "Parses timestamp to seconds.",
@@ -2998,15 +2984,6 @@ may increase either contention or retry errors, or both.`,
 				return tree.NewDInt(tree.DInt(seconds)), nil
 			},
 			Info: "Parses timestampTZ to seconds.",
-		},
-		tree.Overload{
-			Types:      tree.ArgTypes{{"val", types.Int}},
-			ReturnType: tree.FixedReturnType(types.Int),
-			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				val := int64(tree.MustBeDInt(args[0]))
-				return tree.NewDInt(tree.DInt(val)), nil
-			},
-			Info: "Converts an integer to seconds.",
 		},
 	),
 
