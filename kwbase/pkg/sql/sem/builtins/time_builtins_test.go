@@ -10,10 +10,10 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/timeofday"
 )
 
+
 func TestTimeBuiltinIntOverload(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
-	// Find the time builtin with INT overload
 	timeBuiltin, exists := builtins["time"]
 	if !exists {
 		t.Fatal("time builtin not found")
@@ -116,7 +116,7 @@ func TestTimeToSecBuiltins(t *testing.T) {
 			t.Fatalf("expected INT result, got %s", result.ResolvedType())
 		}
 
-		expectedSeconds := int64(1*3600 + 2*60 + 3)
+		expectedSeconds := int64(1*3600 + 2*60 + 3) // 1:02:03 = 3723 seconds
 		actualSeconds := int64(tree.MustBeDInt(result))
 
 		if actualSeconds != expectedSeconds {
@@ -151,7 +151,7 @@ func TestTimeToSecBuiltins(t *testing.T) {
 			t.Fatalf("expected INT result, got %s", result.ResolvedType())
 		}
 
-		expectedSeconds := int64(1*3600 + 2*60 + 3)
+		expectedSeconds := int64(1*3600 + 2*60 + 3) // 1:02:03 = 3723 seconds
 		actualSeconds := int64(tree.MustBeDInt(result))
 
 		if actualSeconds != expectedSeconds {
@@ -160,4 +160,234 @@ func TestTimeToSecBuiltins(t *testing.T) {
 
 		t.Logf("✓ time_to_sec(%s) = %d seconds", timestampInput, actualSeconds)
 	})
+}
+
+func TestStrToDateBuiltin(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	strToDateBuiltin, exists := builtins["str_to_date"]
+	if !exists {
+		t.Fatal("str_to_date builtin not found")
+	}
+
+	evalCtx := tree.NewTestingEvalContext(nil)
+
+	testCases := []struct {
+		dateStr     string
+		formatStr   string
+		expected    string
+		description string
+		expectError bool
+	}{
+		{
+			dateStr:     "2023-12-25 14:30:45",
+			formatStr:   "%Y-%m-%d %H:%M:%S",
+			expected:    "2023-12-25 14:30:45",
+			description: "Standard datetime format",
+			expectError: false,
+		},
+		{
+			dateStr:     "25/12/2023",
+			formatStr:   "%d/%m/%Y",
+			expected:    "2023-12-25 00:00:00",
+			description: "Date only format",
+			expectError: false,
+		},
+		{
+			dateStr:     "20231225",
+			formatStr:   "%Y%m%d",
+			expected:    "2023-12-25 00:00:00",
+			description: "Compact date format",
+			expectError: false,
+		},
+		{
+			dateStr:     "14:30:45",
+			formatStr:   "%H:%M:%S",
+			expected:    "1970-01-01 14:30:45",
+			description: "Time only format",
+			expectError: false,
+		},
+		{
+			dateStr:     "Wed Dec 25 2023",
+			formatStr:   "%a %b %d %Y",
+			expected:    "2023-12-25 00:00:00",
+			description: "Weekday and month abbreviation format",
+			expectError: false,
+		},
+		{
+			dateStr:     "Wednesday December 25 2023",
+			formatStr:   "%A %B %d %Y",
+			expected:    "2023-12-25 00:00:00",
+			description: "Full weekday and month format",
+			expectError: false,
+		},
+		{
+			dateStr:     "Wed Dec 25 14:30:45 2023",
+			formatStr:   "%c",
+			expected:    "2023-12-25 14:30:45",
+			description: "Standard date and time format",
+			expectError: false,
+		},
+		{
+			dateStr:     "10/25/23",
+			formatStr:   "%D",
+			expected:    "2023-10-25 00:00:00",
+			description: "MM/DD/YY format",
+			expectError: false,
+		},
+		{
+			dateStr:     "2023-10-25",
+			formatStr:   "%F",
+			expected:    "2023-10-25 00:00:00",
+			description: "ISO date format",
+			expectError: false,
+		},
+		{
+			dateStr:     "2023 286",
+			formatStr:   "%Y %j",
+			expected:    "2023-10-13 00:00:00",
+			description: "Year and day of year format",
+			expectError: false,
+		},
+		{
+			dateStr:     "2023 10 4",
+			formatStr:   "%Y %U %u",
+			expected:    "2023-03-15 00:00:00",
+			description: "Year, week number and weekday format",
+			expectError: false,
+		},
+		{
+			dateStr:     "2023-12-25 14:30:45.123",
+			formatStr:   "%Y-%m-%d %H:%M:%S.%f",
+			expected:    "2023-12-25 14:30:45",
+			description: "Datetime with microseconds",
+			expectError: false,
+		},
+		{
+			dateStr:     "2023-12-25 14:30:45 +0800",
+			formatStr:   "%Y-%m-%d %H:%M:%S %z",
+			expected:    "2023-12-25 06:30:45",
+			description: "Datetime with timezone",
+			expectError: false,
+		},
+		{
+			dateStr:     "invalid-date",
+			formatStr:   "%Y-%m-%d",
+			expected:    "",
+			description: "Invalid date string",
+			expectError: true,
+		},
+		{
+			dateStr:     "2023-13-01",
+			formatStr:   "%Y-%m-%d",
+			expected:    "",
+			description: "Invalid month",
+			expectError: true,
+		},
+		{
+			dateStr:     "2023-12-32",
+			formatStr:   "%Y-%m-%d",
+			expected:    "",
+			description: "Invalid day",
+			expectError: true,
+		},
+		{
+			dateStr:     "25:61:45",
+			formatStr:   "%H:%M:%S",
+			expected:    "",
+			description: "Invalid time",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			args := tree.Datums{
+				tree.NewDString(tc.dateStr),
+				tree.NewDString(tc.formatStr),
+			}
+
+			result, err := strToDateBuiltin.overloads[0].Fn(evalCtx, args)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("expected error for invalid input, but got none")
+				}
+				if result != tree.DNull {
+					t.Errorf("expected DNull for invalid input, but got %v", result)
+				}
+				t.Logf("✓ str_to_date('%s', '%s') = NULL (expected error)", tc.dateStr, tc.formatStr)
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("str_to_date('%s', '%s') failed: %v", tc.dateStr, tc.formatStr, err)
+			}
+
+			if result.ResolvedType().Family() != types.TimestampTZFamily {
+				t.Fatalf("expected TIMESTAMPTZ result, got %s", result.ResolvedType())
+			}
+
+			timestampResult := result.(*tree.DTimestampTZ)
+			actualTime := timestampResult.Time
+
+			actualStr := actualTime.Format("2006-01-02 15:04:05")
+
+			if actualStr != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, actualStr)
+			}
+
+			t.Logf("✓ str_to_date('%s', '%s') = %s", tc.dateStr, tc.formatStr, actualStr)
+		})
+	}
+}
+
+func TestStrToDateNullHandling(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	strToDateBuiltin, exists := builtins["str_to_date"]
+	if !exists {
+		t.Fatal("str_to_date builtin not found")
+	}
+
+	evalCtx := tree.NewTestingEvalContext(nil)
+
+	testCases := []struct {
+		dateStr     tree.Datum
+		formatStr   tree.Datum
+		description string
+	}{
+		{
+			dateStr:     tree.DNull,
+			formatStr:   tree.NewDString("%Y-%m-%d"),
+			description: "Null date string",
+		},
+		{
+			dateStr:     tree.NewDString("2023-12-25"),
+			formatStr:   tree.DNull,
+			description: "Null format string",
+		},
+		{
+			dateStr:     tree.DNull,
+			formatStr:   tree.DNull,
+			description: "Both arguments null",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			args := tree.Datums{tc.dateStr, tc.formatStr}
+
+			result, err := strToDateBuiltin.overloads[0].Fn(evalCtx, args)
+			if err != nil {
+				t.Fatalf("str_to_date failed: %v", err)
+			}
+
+			if result != tree.DNull {
+				t.Errorf("expected DNull for null input, but got %v", result)
+			}
+
+			t.Logf("✓ str_to_date(null, null) = NULL")
+		})
+	}
 }
