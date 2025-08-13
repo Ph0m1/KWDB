@@ -710,3 +710,531 @@ func BenchmarkGapfillAggregateDecimal(b *testing.B) {
 		})
 	}
 }
+
+
+func TestNormAggregate(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	testCases := []struct {
+		name     string
+		values   []tree.Datum
+		expected string
+	}{
+		{
+			name: "integer values",
+			values: []tree.Datum{
+				tree.NewDInt(3),
+				tree.NewDInt(4),
+				tree.NewDInt(0),
+			},
+			expected: "5",
+		},
+		{
+			name: "float values",
+			values: []tree.Datum{
+				tree.NewDFloat(3.0),
+				tree.NewDFloat(4.0),
+				tree.NewDFloat(0.0),
+			},
+			expected: "5",
+		},
+		{
+			name: "decimal values",
+			values: func() []tree.Datum {
+				vals := make([]tree.Datum, 3)
+				dd1 := &tree.DDecimal{}
+				dd1.SetInt64(3)
+				vals[0] = dd1
+				dd2 := &tree.DDecimal{}
+				dd2.SetInt64(4)
+				vals[1] = dd2
+				dd3 := &tree.DDecimal{}
+				dd3.SetInt64(0)
+				vals[2] = dd3
+				return vals
+			}(),
+			expected: "5",
+		},
+		{
+			name: "single value",
+			values: []tree.Datum{
+				tree.NewDInt(5),
+			},
+			expected: "5",
+		},
+		{
+			name: "zero values",
+			values: []tree.Datum{
+				tree.NewDInt(0),
+				tree.NewDInt(0),
+				tree.NewDInt(0),
+			},
+			expected: "0",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			evalCtx := tree.NewTestingEvalContext(cluster.MakeTestingClusterSettings())
+			defer evalCtx.Stop(context.Background())
+
+			aggImpl := newNormAggregate([]*types.T{tc.values[0].ResolvedType()}, evalCtx, nil)
+			defer aggImpl.Close(context.Background())
+
+			for _, val := range tc.values {
+				if err := aggImpl.Add(context.Background(), val); err != nil {
+					t.Fatalf("failed to add value %v: %v", val, err)
+				}
+			}
+
+			result, err := aggImpl.Result()
+			if err != nil {
+				t.Fatalf("failed to get result: %v", err)
+			}
+
+			if result == tree.DNull {
+				t.Fatal("expected non-null result")
+			}
+
+			resultStr := result.String()
+			if resultStr != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, resultStr)
+			}
+
+			testAggregateResultDeepCopy(t, newNormAggregate, tc.values)
+		})
+	}
+}
+
+func TestQuantileAggregate(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	testCases := []struct {
+		name     string
+		values   []tree.Datum
+		quantile tree.Datum
+		expected string
+	}{
+		{
+			name: "median of integers",
+			values: []tree.Datum{
+				tree.NewDInt(1),
+				tree.NewDInt(2),
+				tree.NewDInt(3),
+				tree.NewDInt(4),
+				tree.NewDInt(5),
+			},
+			quantile: tree.NewDFloat(0.5),
+			expected: "3",
+		},
+		{
+			name: "first quartile of integers",
+			values: []tree.Datum{
+				tree.NewDInt(1),
+				tree.NewDInt(2),
+				tree.NewDInt(3),
+				tree.NewDInt(4),
+				tree.NewDInt(5),
+			},
+			quantile: tree.NewDFloat(0.25),
+			expected: "2",
+		},
+		{
+			name: "third quartile of integers",
+			values: []tree.Datum{
+				tree.NewDInt(1),
+				tree.NewDInt(2),
+				tree.NewDInt(3),
+				tree.NewDInt(4),
+				tree.NewDInt(5),
+			},
+			quantile: tree.NewDFloat(0.75),
+			expected: "4",
+		},
+		{
+			name: "float values",
+			values: []tree.Datum{
+				tree.NewDFloat(1.0),
+				tree.NewDFloat(2.0),
+				tree.NewDFloat(3.0),
+				tree.NewDFloat(4.0),
+				tree.NewDFloat(5.0),
+			},
+			quantile: tree.NewDFloat(0.5),
+			expected: "3",
+		},
+		{
+			name: "decimal values",
+			values: func() []tree.Datum {
+				vals := make([]tree.Datum, 5)
+				for i := 1; i <= 5; i++ {
+					dd := &tree.DDecimal{}
+					dd.SetInt64(int64(i))
+					vals[i-1] = dd
+				}
+				return vals
+			}(),
+			quantile: tree.NewDFloat(0.5),
+			expected: "3",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			evalCtx := tree.NewTestingEvalContext(cluster.MakeTestingClusterSettings())
+			defer evalCtx.Stop(context.Background())
+
+			aggImpl := newQuantileAggregate([]*types.T{tc.values[0].ResolvedType()}, evalCtx, nil)
+			defer aggImpl.Close(context.Background())
+
+			for _, val := range tc.values {
+				if err := aggImpl.Add(context.Background(), val, tc.quantile); err != nil {
+					t.Fatalf("failed to add value %v: %v", val, err)
+				}
+			}
+
+			result, err := aggImpl.Result()
+			if err != nil {
+				t.Fatalf("failed to get result: %v", err)
+			}
+
+			if result == tree.DNull {
+				t.Fatal("expected non-null result")
+			}
+
+			resultStr := result.String()
+			if resultStr != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, resultStr)
+			}
+		})
+	}
+}
+
+func TestVarSampAggregate(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	testCases := []struct {
+		name     string
+		values   []tree.Datum
+		expected string
+	}{
+		{
+			name: "integer values",
+			values: []tree.Datum{
+				tree.NewDInt(1),
+				tree.NewDInt(2),
+				tree.NewDInt(3),
+				tree.NewDInt(4),
+				tree.NewDInt(5),
+			},
+			expected: "2.5",
+		},
+		{
+			name: "float values",
+			values: []tree.Datum{
+				tree.NewDFloat(1.0),
+				tree.NewDFloat(2.0),
+				tree.NewDFloat(3.0),
+				tree.NewDFloat(4.0),
+				tree.NewDFloat(5.0),
+			},
+			expected: "2.5",
+		},
+		{
+			name: "decimal values",
+			values: func() []tree.Datum {
+				vals := make([]tree.Datum, 5)
+				for i := 1; i <= 5; i++ {
+					dd := &tree.DDecimal{}
+					dd.SetInt64(int64(i))
+					vals[i-1] = dd
+				}
+				return vals
+			}(),
+			expected: "2.5",
+		},
+		{
+			name: "single value",
+			values: []tree.Datum{
+				tree.NewDInt(5),
+			},
+			expected: "0",
+		},
+		{
+			name: "identical values",
+			values: []tree.Datum{
+				tree.NewDInt(3),
+				tree.NewDInt(3),
+				tree.NewDInt(3),
+			},
+			expected: "0",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			evalCtx := tree.NewTestingEvalContext(cluster.MakeTestingClusterSettings())
+			defer evalCtx.Stop(context.Background())
+
+			var aggImpl tree.AggregateFunc
+			switch tc.values[0].ResolvedType().Family() {
+			case types.IntFamily:
+				aggImpl = newIntVarianceAggregate([]*types.T{types.Int}, evalCtx, nil)
+			case types.FloatFamily:
+				aggImpl = newFloatVarianceAggregate([]*types.T{types.Float}, evalCtx, nil)
+			case types.DecimalFamily:
+				aggImpl = newDecimalVarianceAggregate([]*types.T{types.Decimal}, evalCtx, nil)
+			default:
+				t.Fatalf("unsupported type: %v", tc.values[0].ResolvedType())
+			}
+			defer aggImpl.Close(context.Background())
+
+			for _, val := range tc.values {
+				if err := aggImpl.Add(context.Background(), val); err != nil {
+					t.Fatalf("failed to add value %v: %v", val, err)
+				}
+			}
+
+			result, err := aggImpl.Result()
+			if err != nil {
+				t.Fatalf("failed to get result: %v", err)
+			}
+
+			if result == tree.DNull {
+				t.Fatal("expected non-null result")
+			}
+
+			resultStr := result.String()
+			if resultStr != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, resultStr)
+			}
+
+			testAggregateResultDeepCopy(t, func(params []*types.T, evalCtx *tree.EvalContext, arguments tree.Datums) tree.AggregateFunc {
+				switch params[0].Family() {
+				case types.IntFamily:
+					return newIntVarianceAggregate(params, evalCtx, arguments)
+				case types.FloatFamily:
+					return newFloatVarianceAggregate(params, evalCtx, arguments)
+				case types.DecimalFamily:
+					return newDecimalVarianceAggregate(params, evalCtx, arguments)
+				default:
+					t.Fatalf("unsupported type: %v", params[0])
+					return nil
+				}
+			}, tc.values)
+		})
+	}
+}
+
+func TestVarPopAggregate(t *testing.T) {
+	defer leaktest.AfterTest(t)()
+
+	testCases := []struct {
+		name     string
+		values   []tree.Datum
+		expected string
+	}{
+		{
+			name: "integer values",
+			values: []tree.Datum{
+				tree.NewDInt(1),
+				tree.NewDInt(2),
+				tree.NewDInt(3),
+				tree.NewDInt(4),
+				tree.NewDInt(5),
+			},
+			expected: "2",
+		},
+		{
+			name: "float values",
+			values: []tree.Datum{
+				tree.NewDFloat(1.0),
+				tree.NewDFloat(2.0),
+				tree.NewDFloat(3.0),
+				tree.NewDFloat(4.0),
+				tree.NewDFloat(5.0),
+			},
+			expected: "2",
+		},
+		{
+			name: "decimal values",
+			values: func() []tree.Datum {
+				vals := make([]tree.Datum, 5)
+				for i := 1; i <= 5; i++ {
+					dd := &tree.DDecimal{}
+					dd.SetInt64(int64(i))
+					vals[i-1] = dd
+				}
+				return vals
+			}(),
+			expected: "2",
+		},
+		{
+			name: "single value",
+			values: []tree.Datum{
+				tree.NewDInt(5),
+			},
+			expected: "0",
+		},
+		{
+			name: "identical values",
+			values: []tree.Datum{
+				tree.NewDInt(3),
+				tree.NewDInt(3),
+				tree.NewDInt(3),
+			},
+			expected: "0",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			evalCtx := tree.NewTestingEvalContext(cluster.MakeTestingClusterSettings())
+			defer evalCtx.Stop(context.Background())
+
+			var aggImpl tree.AggregateFunc
+			switch tc.values[0].ResolvedType().Family() {
+			case types.IntFamily:
+				aggImpl = newIntPopVarianceAggregate([]*types.T{types.Int}, evalCtx, nil)
+			case types.FloatFamily:
+				aggImpl = newFloatPopVarianceAggregate([]*types.T{types.Float}, evalCtx, nil)
+			case types.DecimalFamily:
+				aggImpl = newDecimalPopVarianceAggregate([]*types.T{types.Decimal}, evalCtx, nil)
+			default:
+				t.Fatalf("unsupported type: %v", tc.values[0].ResolvedType())
+			}
+			defer aggImpl.Close(context.Background())
+
+			for _, val := range tc.values {
+				if err := aggImpl.Add(context.Background(), val); err != nil {
+					t.Fatalf("failed to add value %v: %v", val, err)
+				}
+			}
+
+			result, err := aggImpl.Result()
+			if err != nil {
+				t.Fatalf("failed to get result: %v", err)
+			}
+
+			if result == tree.DNull {
+				t.Fatal("expected non-null result")
+			}
+
+			resultStr := result.String()
+			if resultStr != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, resultStr)
+			}
+
+			// Test deep copy
+			testAggregateResultDeepCopy(t, func(params []*types.T, evalCtx *tree.EvalContext, arguments tree.Datums) tree.AggregateFunc {
+				switch params[0].Family() {
+				case types.IntFamily:
+					return newIntPopVarianceAggregate(params, evalCtx, arguments)
+				case types.FloatFamily:
+					return newFloatPopVarianceAggregate(params, evalCtx, arguments)
+				case types.DecimalFamily:
+					return newDecimalPopVarianceAggregate(params, evalCtx, arguments)
+				default:
+					t.Fatalf("unsupported type: %v", params[0])
+					return nil
+				}
+			}, tc.values)
+		})
+	}
+}
+
+func BenchmarkNormAggregateInt(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newNormAggregate, makeIntTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkNormAggregateFloat(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newNormAggregate, makeFloatTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkNormAggregateDecimal(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newNormAggregate, makeDecimalTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkQuantileAggregateInt(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregateGapfill(b, newQuantileAggregate, makeIntTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkQuantileAggregateFloat(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregateGapfill(b, newQuantileAggregate, makeFloatTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkQuantileAggregateDecimal(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregateGapfill(b, newQuantileAggregate, makeDecimalTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkVarSampAggregateInt(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newIntVarianceAggregate, makeIntTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkVarSampAggregateFloat(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newFloatVarianceAggregate, makeFloatTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkVarSampAggregateDecimal(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newDecimalVarianceAggregate, makeDecimalTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkVarPopAggregateInt(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newIntPopVarianceAggregate, makeIntTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkVarPopAggregateFloat(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newFloatPopVarianceAggregate, makeFloatTestDatum(count))
+		})
+	}
+}
+
+func BenchmarkVarPopAggregateDecimal(b *testing.B) {
+	for _, count := range []int{1000} {
+		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
+			runBenchmarkAggregate(b, newDecimalPopVarianceAggregate, makeDecimalTestDatum(count))
+		})
+	}
+}
