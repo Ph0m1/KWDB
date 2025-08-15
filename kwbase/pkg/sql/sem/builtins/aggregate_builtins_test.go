@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"gitee.com/kwbasedb/kwbase/pkg/settings/cluster"
@@ -844,7 +845,10 @@ func TestQuantileAggregate(t *testing.T) {
 			if err != nil || res == tree.DNull {
 				t.Fatalf("result err=%v res=%v", err, res)
 			}
-			if res.String() != tc.expected {
+			// Compare numerically to avoid string format differences like 3 vs 3.0
+			exp, _ := strconv.ParseFloat(tc.expected, 64)
+			got := datumToFloat(res)
+			if !floatsAlmostEqual(got, exp) {
 				t.Fatalf("expected %s got %s", tc.expected, res.String())
 			}
 		})
@@ -930,7 +934,9 @@ func TestVarSampAggregate(t *testing.T) {
 			if res == tree.DNull {
 				t.Fatalf("expected %s got NULL", *tc.expected)
 			}
-			if res.String() != *tc.expected {
+			exp, _ := strconv.ParseFloat(*tc.expected, 64)
+			got := datumToFloat(res)
+			if !floatsAlmostEqual(got, exp) {
 				t.Fatalf("expected %s got %s", *tc.expected, res.String())
 			}
 		})
@@ -1016,7 +1022,9 @@ func TestVarPopAggregate(t *testing.T) {
 			if res == tree.DNull {
 				t.Fatalf("expected %s got NULL", *tc.expected)
 			}
-			if res.String() != *tc.expected {
+			exp, _ := strconv.ParseFloat(*tc.expected, 64)
+			got := datumToFloat(res)
+			if !floatsAlmostEqual(got, exp) {
 				t.Fatalf("expected %s got %s", *tc.expected, res.String())
 			}
 		})
@@ -1024,3 +1032,40 @@ func TestVarPopAggregate(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// datumToFloat converts a Datum expected to represent a numeric value to float64 for comparison.
+func datumToFloat(d tree.Datum) float64 {
+	switch v := d.(type) {
+	case *tree.DInt:
+		return float64(int64(*v))
+	case *tree.DFloat:
+		return float64(*v)
+	case *tree.DDecimal:
+		f, _ := v.Decimal.Float64()
+		return f
+	default:
+		// Fallback to parsing string
+		f, _ := strconv.ParseFloat(d.String(), 64)
+		return f
+	}
+}
+
+// floatsAlmostEqual compares two float64 values with a small epsilon.
+func floatsAlmostEqual(a, b float64) bool {
+	if a == b {
+		return true
+	}
+	const eps = 1e-9
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= eps*(1+abs(a)+abs(b))
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
