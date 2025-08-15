@@ -498,3 +498,65 @@ query I
 SELECT a.public.c.d FROM a.public.c
 ----
 1
+
+statement ok
+SET DATABASE = test
+
+# source table to copy from
+statement ok
+CREATE TABLE like_src (
+  id INT PRIMARY KEY,
+  a  INT NOT NULL DEFAULT 1,
+  b  STRING,
+  INDEX like_src_a_idx (a),
+  UNIQUE (b)
+)
+
+# error: LIKE cannot be combined with column definitions
+statement error cannot use column definitions with CREATE TABLE ... LIKE
+CREATE TABLE like_err (x INT) LIKE like_src
+
+# create a table by copying schema from like_src
+statement ok
+CREATE TABLE like_dst LIKE like_src
+
+# structure check: columns and types are copied
+query TT colnames
+select column_name, data_type from [SHOW COLUMNS FROM like_dst] order by column_name
+----
+ a  INT4
+ b  STRING
+ id INT4
+
+# structure check: default on column a is copied (insert without a)
+statement ok
+INSERT INTO like_dst (id, b) VALUES (100, 'x')
+
+query I
+SELECT a FROM like_dst WHERE id = 100
+----
+1
+
+# structure check: non-unique index on a exists (count rows for column a with non_unique = true)
+query I
+SELECT count(*) FROM [SHOW INDEXES FROM like_dst] WHERE column_name = 'a' AND non_unique = true
+----
+1
+
+# structure check: unique index on b exists
+query I
+SELECT count(*) FROM [SHOW INDEXES FROM like_dst] WHERE column_name = 'b' AND non_unique = false
+----
+1
+
+# DESCRIBE should work and be equivalent to SHOW COLUMNS
+statement ok
+DESCRIBE like_dst
+
+# sanity: DESCRIBE returns expected columns and order (validate via SHOW as reference)
+query TT colnames
+select column_name, data_type from [SHOW COLUMNS FROM like_dst]
+----
+ id INT4
+ a  INT4
+ b  STRING

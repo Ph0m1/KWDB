@@ -1,0 +1,79 @@
+# TIME() builtin
+statement ok
+SET DATABASE = test
+
+query T colnames
+SELECT time(1000)::STRING
+----
+ 00:00:01
+
+query T colnames
+SELECT time(3723000)::STRING
+----
+ 01:02:03
+
+query T colnames
+SELECT time(86400000)::STRING
+----
+ 00:00:00
+
+query N
+SELECT time(CASE WHEN false THEN 1 END)
+----
+NULL
+
+# TIME_TO_SEC()
+query I
+SELECT time_to_sec(time '01:02:03')
+----
+3723
+
+query I
+SELECT time_to_sec(timestamp '2023-01-01 01:02:03')
+----
+3723
+
+query N
+SELECT time_to_sec(NULL)
+----
+NULL
+
+# STR_TO_DATE()
+query TTT colnames
+SELECT extract(year  FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S')),
+       extract(month FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S')),
+       extract(day   FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S'))
+----
+ 2023 12 25
+
+query TTT colnames
+SELECT extract(year FROM str_to_date('25/12/2023', '%d/%m/%Y')),
+       extract(month FROM str_to_date('25/12/2023', '%d/%m/%Y')),
+       extract(day FROM str_to_date('25/12/2023', '%d/%m/%Y'))
+----
+ 2023 12 25
+
+# Time only defaults date to epoch
+query TTT colnames
+SELECT extract(hour FROM str_to_date('14:30:45', '%H:%M:%S')),
+       extract(minute FROM str_to_date('14:30:45', '%H:%M:%S')),
+       extract(second FROM str_to_date('14:30:45', '%H:%M:%S'))
+----
+ 14 30 45
+
+# NULL handling
+query N
+SELECT str_to_date(NULL, '%Y-%m-%d')
+----
+NULL
+
+query N
+SELECT str_to_date('2023-12-25', NULL)
+----
+NULL
+
+# Invalid input yields NULL (instead of raising hard error in SQL surface)
+query N
+SELECT str_to_date('invalid-date', '%Y-%m-%d')
+----
+NULL 
