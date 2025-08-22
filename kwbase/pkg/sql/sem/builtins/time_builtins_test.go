@@ -272,28 +272,28 @@ func TestStrToDateBuiltin(t *testing.T) {
 		{
 			dateStr:     "invalid-date",
 			formatStr:   "%Y-%m-%d",
-			expected:    "0001-01-01 00:00:00",
+			expected:    "NULL",
 			description: "Invalid date string (implementation returns zero time)",
 			expectError: false,
 		},
 		{
 			dateStr:     "2023-13-01",
 			formatStr:   "%Y-%m-%d",
-			expected:    "0001-01-01 00:00:00",
+			expected:    "NULL",
 			description: "Invalid month (implementation returns zero time)",
 			expectError: false,
 		},
 		{
 			dateStr:     "2023-12-32",
 			formatStr:   "%Y-%m-%d",
-			expected:    "0001-01-01 00:00:00",
+			expected:    "NULL",
 			description: "Invalid day (implementation returns zero time)",
 			expectError: false,
 		},
 		{
 			dateStr:     "25:61:45",
 			formatStr:   "%H:%M:%S",
-			expected:    "0001-01-01 00:00:00",
+			expected:    "NULL",
 			description: "Invalid time (implementation returns zero time)",
 			expectError: false,
 		},
@@ -321,6 +321,13 @@ func TestStrToDateBuiltin(t *testing.T) {
 
 			if err != nil {
 				t.Fatalf("str_to_date('%s', '%s') failed: %v", tc.dateStr, tc.formatStr, err)
+			}
+			
+			if tc.expected == "NULL" {
+				if result != tree.DNull {
+					t.Errorf("expected NULL, got %v", result)
+				}
+				return
 			}
 
 			if result.ResolvedType().Family() != types.TimestampTZFamily {

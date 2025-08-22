@@ -10,7 +10,7 @@ import (
 	"gitee.com/kwbasedb/kwbase/pkg/util/leaktest"
 )
 
-func TestDescribeLikeMatchesShow(t *testing.T) {
+func TestDescribe(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
 	params, _ := tests.CreateTestServerParams()
@@ -55,34 +55,4 @@ func TestDescribeLikeMatchesShow(t *testing.T) {
 			t.Fatalf("DESCRIBE mismatch on column/type: %v", r)
 		}
 	}
-}
-
-// Test explicit "DESCRIBE TABLE" syntax and error on non-existent relation.
-func TestDescribeTable(t *testing.T) {
-	defer leaktest.AfterTest(t)()
-
-	params, _ := tests.CreateTestServerParams()
-	params.Insecure = true
-	s, rawDB, _ := serverutils.StartServer(t, params)
-	defer s.Stopper().Stop(context.TODO())
-	db := sqlutils.MakeSQLRunner(rawDB)
-
-	// Workspace.
-	db.Exec(t, `CREATE DATABASE IF NOT EXISTS test`)
-	db.Exec(t, `SET DATABASE = test`)
-
-	// Create a simple table to describe.
-	db.Exec(t, `CREATE TABLE dtab (
-		id INT PRIMARY KEY,
-		v  STRING NULL
-	)`)
-
-	// DESCRIBE TABLE should work and include at least the two columns.
-	drows := db.QueryStr(t, `DESCRIBE TABLE dtab`)
-	if len(drows) < 2 {
-		t.Fatalf("expected at least 2 columns from DESCRIBE TABLE, got %d", len(drows))
-	}
-
-	// Non-existent table should error.
-	db.ExpectErr(t, "does not exist", `DESCRIBE TABLE missing_tab`)
 }

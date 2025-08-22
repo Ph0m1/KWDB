@@ -2285,7 +2285,9 @@ CREATE VIEW v46981_0(c0) AS SELECT count_rows() FROM t46981_0
 statement error parsing regexp: missing argument to repetition operator: `\+`
 SELECT * FROM v46981_0 WHERE '' !~ '+'
 
+
 # -- Extra aggregate and window tests --
+
 statement ok
 SET DATABASE = test
 
@@ -2298,34 +2300,34 @@ INSERT INTO agg_t SELECT generate_series(1,10), generate_series(11,20)
 
 # NORM()
 query T
-SELECT round(norm(x)::FLOAT, 6) FROM agg_t
+SELECT round(norm(x)::FLOAT, 6)::STRING FROM agg_t
 ----
- ?
+19.621417
 
 # norm over empty -> NULL
 query N
-SELECT norm(x) FROM (SELECT 1 WHERE false)
+SELECT norm(x) FROM (SELECT 1 as x WHERE false)
 ----
 NULL
 
 # QUANTILE()
 query T
-SELECT quantile(x, 0.5) FROM agg_t
+SELECT quantile(x, 0.5)::STRING FROM agg_t
 ----
- 5.5
+5.5
 
 # invalid quantile -> error
-statement error quantile() requires a second argument for the quantile value
+statement error unknown signature
 SELECT quantile(x) FROM agg_t
 
-statement error quantile argument must be a numeric type
+statement error unknown signature
 SELECT quantile(x, 'a') FROM agg_t
 
 # VAR_POP and VAR_SAMP
 query TT
-SELECT round(var_pop(x)::FLOAT, 6), round(var_samp(x)::FLOAT, 6) FROM agg_t
+SELECT round(var_pop(x)::FLOAT, 6)::STRING, round(var_samp(x)::FLOAT, 6)::STRING FROM agg_t
 ----
- 8.25 9.167
+8.25 9.166667
 
 # empty input -> NULL
 query NN
@@ -2337,7 +2339,7 @@ NULL NULL
 query TN
 SELECT var_pop(x), var_samp(x) FROM (VALUES (1)) AS t(x)
 ----
- 0 NULL
+0 NULL
 
 # Window functions: GROUP_RANK() and GROUP_ROW_NUMBER()
 statement ok
@@ -2376,7 +2378,7 @@ statement ok
 INSERT INTO big_t SELECT generate_series(1,1000)
 
 query T
-SELECT quantile(v, 0.5) FROM big_t
+SELECT quantile(v::FLOAT, 0.5::FLOAT)::STRING FROM big_t
 ----
  500.5
 

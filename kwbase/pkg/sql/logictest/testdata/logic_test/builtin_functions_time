@@ -2,17 +2,17 @@
 statement ok
 SET DATABASE = test
 
-query T colnames
+query T
 SELECT time(1000)::STRING
 ----
  00:00:01
 
-query T colnames
+query T
 SELECT time(3723000)::STRING
 ----
  01:02:03
 
-query T colnames
+query T
 SELECT time(86400000)::STRING
 ----
  00:00:00
@@ -39,25 +39,25 @@ SELECT time_to_sec(NULL)
 NULL
 
 # STR_TO_DATE()
-query TTT colnames
-SELECT extract(year  FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S')),
-       extract(month FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S')),
-       extract(day   FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S'))
+query III
+SELECT (extract(year  FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S'))::INT),
+       (extract(month FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S'))::INT),
+       (extract(day   FROM str_to_date('2023-12-25 14:30:45', '%Y-%m-%d %H:%M:%S'))::INT)
 ----
  2023 12 25
 
-query TTT colnames
-SELECT extract(year FROM str_to_date('25/12/2023', '%d/%m/%Y')),
-       extract(month FROM str_to_date('25/12/2023', '%d/%m/%Y')),
-       extract(day FROM str_to_date('25/12/2023', '%d/%m/%Y'))
+query III
+SELECT (extract(year FROM str_to_date('25/12/2023', '%d/%m/%Y'))::INT),
+       (extract(month FROM str_to_date('25/12/2023', '%d/%m/%Y'))::INT),
+       (extract(day FROM str_to_date('25/12/2023', '%d/%m/%Y'))::INT)
 ----
  2023 12 25
 
 # Time only defaults date to epoch
-query TTT colnames
-SELECT extract(hour FROM str_to_date('14:30:45', '%H:%M:%S')),
-       extract(minute FROM str_to_date('14:30:45', '%H:%M:%S')),
-       extract(second FROM str_to_date('14:30:45', '%H:%M:%S'))
+query III
+SELECT (extract(hour FROM str_to_date('14:30:45', '%H:%M:%S'))::INT),
+       (extract(minute FROM str_to_date('14:30:45', '%H:%M:%S'))::INT),
+       (extract(second FROM str_to_date('14:30:45', '%H:%M:%S'))::INT)
 ----
  14 30 45
 
