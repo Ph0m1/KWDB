@@ -5831,6 +5831,34 @@ create_table_like_stmt:
       Defs: nil,
     }
   }
+| CREATE opt_temp_create_table TABLE table_name '(' opt_table_elem_list ')' LIKE table_name opt_create_table_on_commit opt_comment_clause
+  {
+    newName := $4.unresolvedObjectName().ToTableName()
+    likeName := $9.unresolvedObjectName().ToTableName()
+    $$.val = &tree.CreateTable{
+      Table:       newName,
+      IfNotExists: false,
+      Temporary:   $2.persistenceType(),
+      OnCommit:    $10.createTableOnCommitSetting(),
+      Comment:     $11,
+      Defs:        $6.tblDefs(),
+      LikeTable:   likeName,
+    }
+  }
+| CREATE opt_temp_create_table TABLE IF NOT EXISTS table_name '(' opt_table_elem_list ')' LIKE table_name opt_create_table_on_commit opt_comment_clause
+  {
+    newName := $7.unresolvedObjectName().ToTableName()
+    likeName := $12.unresolvedObjectName().ToTableName()
+    $$.val = &tree.CreateTable{
+      Table:       newName,
+      IfNotExists: true,
+      Temporary:   $2.persistenceType(),
+      OnCommit:    $13.createTableOnCommitSetting(),
+      Comment:     $14,
+      Defs:        $9.tblDefs(),
+      LikeTable:   likeName,
+    }
+  }
 
 opt_create_as_data:
   /* EMPTY */  { /* no error */ }
@@ -11937,10 +11965,12 @@ special_function:
   {
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction("time"), Exprs: tree.Exprs{$3.expr()}}
   }
+| TIME_FUNC '(' error { return helpWithFunctionByName(sqllex, "time")}
 | TIME_TO_SEC '(' a_expr ')'
   {
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr()}}
   }
+| TIME_TO_SEC '(' error { return helpWithFunctionByName(sqllex, $1)}
 | FIRST '(' last_column ')'
   {
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr()}}
@@ -11965,6 +11995,7 @@ special_function:
   {
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr(), $5.expr()}}
   }
+| STR_TO_DATE '(' error { return helpWithFunctionByName(sqllex, $1)}
 
 last_column:
 column_path_with_star

@@ -3292,6 +3292,10 @@ may increase either contention or retry errors, or both.`,
 					return tree.DNull, err
 				}
 
+				if parsedTime.IsZero {
+					return tree.DNull, nil
+				}
+
 				sessionLoc := ctx.GetLocation()
 				finalTime := time.Date(
 					parsedTime.Year(), parsedTime.Month(), parsedTime.Day(),
@@ -3299,7 +3303,7 @@ may increase either contention or retry errors, or both.`,
 					sessionLoc,
 				)
 
-				return tree.MakeDTimestampTZ(finalTime, time.Microsecond), err
+				return tree.MakeDTimestampTZ(finalTime, time.Microsecond), nil
 			},
 			Info: "Parses a string into a timestamp according to a format string from github.com/knz/strtime.",
 		},

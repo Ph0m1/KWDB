@@ -726,15 +726,27 @@ func (s *scanner) scanIdent(lval *sqlSymType) {
 	}
 	if lval.id == lex.TIME {
 		originalPos := s.pos
-		// if TIME is followed by '(' and then a non-digit, treat it as a function call.
-		//  If it's TIME(<digit>...), keep as type.
 		s.skipWhitespace(lval, false)
 		if s.peek() == '(' {
+			// consume '('
 			s.pos++
+			// skip spaces after '('
 			s.skipWhitespace(lval, false)
 			next := s.peek()
 			if !lex.IsDigit(next) {
 				lval.id = lex.TIME_FUNC
+			} else {
+				start := s.pos
+				for lex.IsDigit(s.peek()) {
+					s.pos++
+				}
+				precStr := s.in[start:s.pos]
+				if p, err := strconv.Atoi(precStr); err == nil {
+					// prevent confusion with type TIME(int)
+					if p >= 1000 {
+						lval.id = lex.TIME_FUNC
+					}
+				}
 			}
 		}
 		s.pos = originalPos

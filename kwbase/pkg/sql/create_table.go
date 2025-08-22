@@ -819,14 +819,14 @@ func createTableLike(params runParams, n *createTableNode) error {
 	}
 	desc := InitTableDescriptor(newID, n.dbDesc.ID, schemaID, n.n.Table.Table(), creationTime, privs, n.n.Temporary, originDesc.TableType, params.SessionData().User)
 
-	// 1. Manually build new columns from the origin descriptor, but WITHOUT their IDs.
+	// Manually build new columns from the origin descriptor, but WITHOUT their IDs.
 	for _, originCol := range originDesc.Columns {
 		newCol := originCol
 		newCol.ID = 0
 		desc.AddColumn(&newCol) // AddColumn requires a pointer.
 	}
 
-	// 2. Manually build new indexes, using column names instead of old IDs.
+	// Manually build new indexes, using column names instead of old IDs.
 	for _, originIdx := range originDesc.AllNonDropIndexes() {
 		newIdx := sqlbase.IndexDescriptor{
 			Name:             originIdx.Name,
@@ -845,18 +845,19 @@ func createTableLike(params runParams, n *createTableNode) error {
 		}
 	}
 
-	// 3. Manually copy families and check constraints.
-	desc.Families = make([]sqlbase.ColumnFamilyDescriptor, len(originDesc.Families))
-	copy(desc.Families, originDesc.Families)
+	// Manually copy families and check constraints.
+	for i := range desc.Families {
+		desc.Families[i].ID = 0
+	}
 	desc.Checks = make([]*sqlbase.TableDescriptor_CheckConstraint, len(originDesc.Checks))
 	copy(desc.Checks, originDesc.Checks)
 
-	// 4. Allocate fresh IDs for all the new sub-components (columns, indexes).
+	// Allocate fresh IDs for all the new sub-components (columns, indexes, families).
 	if err := desc.AllocateIDs(); err != nil {
 		return err
 	}
 
-	// 5. Write the new descriptor to the store using the ID we generated.
+	// Write the new descriptor to the store using the ID we generated.
 	if err := params.p.createDescriptorWithID(
 		ctx, tKey.Key(), newID, &desc, params.EvalContext().Settings,
 		tree.AsStringWithFQNames(n.n, params.Ann()),
@@ -864,7 +865,7 @@ func createTableLike(params runParams, n *createTableNode) error {
 		return err
 	}
 
-	// 6. Handle table comment.
+	// Handle table comment.
 	if n.n.Comment != "" {
 		if _, err := params.p.extendedEvalCtx.ExecCfg.InternalExecutor.ExecEx(
 			ctx, "set-table-comment", params.p.Txn(),
