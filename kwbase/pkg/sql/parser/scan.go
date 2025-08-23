@@ -724,17 +724,38 @@ func (s *scanner) scanIdent(lval *sqlSymType) {
 		// experimental_/testing_ prefix.
 		lval.id = lex.GetKeywordID(lval.str)
 	}
-	if lval.id == lex.TIME {
+		if lval.id == lex.TIME {
 		originalPos := s.pos
 		s.skipWhitespace(lval, false)
 		if s.peek() == '(' {
-			// consume '('
 			s.pos++
-			// skip spaces after '('
 			s.skipWhitespace(lval, false)
 			next := s.peek()
 			if !lex.IsDigit(next) {
-				lval.id = lex.TIME_FUNC
+				lookback := originalPos - 1
+				for lookback >= 0 && (s.in[lookback] == ' ' || s.in[lookback] == '\t' || s.in[lookback] == '\n' || s.in[lookback] == '\r') {
+					lookback--
+				}
+				if lookback >= 5 {
+					found := false
+					for i := lookback; i >= 5; i-- {
+						if string(s.in[i-5:i+1]) == "SYSTEM" {
+							found = true
+							break
+						}
+					}
+					if found {
+						lval.id = lex.TIME
+					} else {
+						lval.id = lex.TIME_FUNC
+						start := lookback - 5
+						if start < 0 {
+							start = 0
+						}
+					}
+				} else {
+					lval.id = lex.TIME_FUNC
+				}
 			} else {
 				start := s.pos
 				for lex.IsDigit(s.peek()) {
