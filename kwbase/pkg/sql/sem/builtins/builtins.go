@@ -3292,7 +3292,7 @@ may increase either contention or retry errors, or both.`,
 					return tree.DNull, err
 				}
 
-				if parsedTime.IsZero {
+				if parsedTime.IsZero() {
 					return tree.DNull, nil
 				}
 
