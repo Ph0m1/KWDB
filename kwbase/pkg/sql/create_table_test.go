@@ -127,9 +127,6 @@ func TestCreateTableLike(t *testing.T) {
 		UNIQUE (b)
 	)`)
 
-	// Illegal: LIKE with column defs.
-	db.ExpectErr(t, "cannot use column definitions with CREATE TABLE ... LIKE", `CREATE TABLE like_err (x INT) LIKE like_src`)
-
 	// Create destination from LIKE.
 	db.Exec(t, `CREATE TABLE like_dst LIKE like_src`)
 

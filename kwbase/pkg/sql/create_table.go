@@ -752,10 +752,6 @@ func createTableLike(params runParams, n *createTableNode) error {
 	ctx := params.ctx
 	telemetry.Inc(sqltelemetry.SchemaChangeCreateCounter("table_like"))
 
-	if len(n.n.Defs) > 0 {
-		return pgerror.Newf(pgcode.Syntax, "cannot use column definitions with CREATE TABLE ... LIKE")
-	}
-
 	tKey, schemaID, err := getTableCreateParams(params, n.dbDesc.ID, n.n.Temporary, n.n.Table)
 	if err != nil {
 		if sqlbase.IsRelationAlreadyExistsError(err) && n.n.IfNotExists {

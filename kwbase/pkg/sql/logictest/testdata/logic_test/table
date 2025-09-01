@@ -511,9 +511,6 @@ CREATE TABLE like_src (
   UNIQUE (b)
 )
 
-statement error cannot use column definitions with CREATE TABLE ... LIKE
-CREATE TABLE like_err (x INT) LIKE like_src
-
 statement ok
 CREATE TABLE like_dst LIKE like_src
 
