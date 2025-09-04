@@ -4922,7 +4922,9 @@ func newQuantileAggregate(
 }
 
 // Add gathers all non-null values.
-func (a *quantileAggregate) Add(ctx context.Context, datum tree.Datum, otherArgs ...tree.Datum) error {
+func (a *quantileAggregate) Add(
+	ctx context.Context, datum tree.Datum, otherArgs ...tree.Datum,
+) error {
 	// The quantile value is constant for all rows, so we only need to parse
 	// and validate it once, on the first call to Add.
 	if !a.quantileSet {
