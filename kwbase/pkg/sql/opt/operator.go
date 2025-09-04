@@ -266,26 +266,26 @@ var AggregateOpReverseMap = map[Operator]string{
 	MinExtendOp:         "min_extend",
 	MaxExtendOp:         "max_extend",
 	QuantileOp:          "quantile",
-	NormOp: 						 "norm",
+	NormOp:              "norm",
 }
 
 // WindowOpReverseMap maps from an optimizer operator type to the name of a
 // window function.
 var WindowOpReverseMap = map[Operator]string{
-	RankOp:        "rank",
-	RowNumberOp:   "row_number",
-	GroupRowNumberOp:"group_row_number",
-	DenseRankOp:   "dense_rank",
-	PercentRankOp: "percent_rank",
-	GroupRankOp:   "group_rank",
-	CumeDistOp:    "cume_dist",
-	NtileOp:       "ntile",
-	LagOp:         "lag",
-	LeadOp:        "lead",
-	FirstValueOp:  "first_value",
-	LastValueOp:   "last_value",
-	NthValueOp:    "nth_value",
-	DiffOp:        "diff",
+	RankOp:           "rank",
+	RowNumberOp:      "row_number",
+	GroupRowNumberOp: "group_row_number",
+	DenseRankOp:      "dense_rank",
+	PercentRankOp:    "percent_rank",
+	GroupRankOp:      "group_rank",
+	CumeDistOp:       "cume_dist",
+	NtileOp:          "ntile",
+	LagOp:            "lag",
+	LeadOp:           "lead",
+	FirstValueOp:     "first_value",
+	LastValueOp:      "last_value",
+	NthValueOp:       "nth_value",
+	DiffOp:           "diff",
 }
 
 // NegateOpMap maps from a comparison operator type to its negated operator

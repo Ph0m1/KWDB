@@ -346,7 +346,7 @@ func TestStrToDateBuiltin(t *testing.T) {
 			if err != nil {
 				t.Fatalf("str_to_date('%s', '%s') failed: %v", tc.dateStr, tc.formatStr, err)
 			}
-			
+
 			if tc.expected == "NULL" {
 				if result != tree.DNull {
 					t.Errorf("expected NULL, got %v", result)

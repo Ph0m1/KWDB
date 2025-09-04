@@ -772,7 +772,7 @@ func createTableLike(params runParams, n *createTableNode) error {
 		return errors.Wrapf(err, "origin table %q does not exist", n.n.LikeTable.FQString())
 	}
 
-		if originDesc.GetTableType() != tree.RelationalTable {
+	if originDesc.GetTableType() != tree.RelationalTable {
 		return pgerror.Newf(
 			pgcode.FeatureNotSupported,
 			"CREATE TABLE ... LIKE ... only supports relational tables as the source, but table %q is not a relational table",

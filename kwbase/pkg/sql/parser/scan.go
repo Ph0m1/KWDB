@@ -724,7 +724,7 @@ func (s *scanner) scanIdent(lval *sqlSymType) {
 		// experimental_/testing_ prefix.
 		lval.id = lex.GetKeywordID(lval.str)
 	}
-		if lval.id == lex.TIME {
+	if lval.id == lex.TIME {
 		originalPos := s.pos
 		s.skipWhitespace(lval, false)
 		if s.peek() == '(' {

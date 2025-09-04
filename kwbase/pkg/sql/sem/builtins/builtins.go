@@ -3278,7 +3278,7 @@ may increase either contention or retry errors, or both.`,
 
 	"str_to_date": makeBuiltin(defProps(),
 		tree.Overload{
-			Types: tree.ArgTypes{{"val", types.String},{"format", types.String}},
+			Types:      tree.ArgTypes{{"val", types.String}, {"format", types.String}},
 			ReturnType: tree.FixedReturnType(types.TimestampTZ),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				if args[0] == tree.DNull || args[1] == tree.DNull {
