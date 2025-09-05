@@ -2860,7 +2860,7 @@ may increase either contention or retry errors, or both.`,
 		}, "Calculates the tangent of `val`."),
 	),
 
-	"time": makeBuiltin(defProps(),
+	"to_time": makeBuiltin(defProps(),
 		tree.Overload{
 			Types:      tree.ArgTypes{{"val", types.Int}},
 			ReturnType: tree.FixedReturnType(types.Time),

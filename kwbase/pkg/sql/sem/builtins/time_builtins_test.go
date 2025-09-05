@@ -37,9 +37,9 @@ import (
 func TestTimeBuiltinIntOverload(t *testing.T) {
 	defer leaktest.AfterTest(t)()
 
-	timeBuiltin, exists := builtins["time"]
+	timeBuiltin, exists := builtins["to_time"]
 	if !exists {
-		t.Fatal("time builtin not found")
+		t.Fatal("to_time builtin not found")
 	}
 
 	var intOverload tree.Overload
@@ -51,7 +51,7 @@ func TestTimeBuiltinIntOverload(t *testing.T) {
 	}
 
 	if intOverload.Fn == nil {
-		t.Fatal("time(INT) overload not found")
+		t.Fatal("to_time(INT) overload not found")
 	}
 
 	testCases := []struct {
@@ -78,7 +78,7 @@ func TestTimeBuiltinIntOverload(t *testing.T) {
 
 			result, err := intOverload.Fn(evalCtx, args)
 			if err != nil {
-				t.Fatalf("time(%d) failed: %v", tc.milliseconds, err)
+				t.Fatalf("to_time(%d) failed: %v", tc.milliseconds, err)
 			}
 
 			if result.ResolvedType().Family() != types.TimeFamily {
@@ -99,7 +99,7 @@ func TestTimeBuiltinIntOverload(t *testing.T) {
 				t.Errorf("second mismatch: expected %d, got %d", tc.expectedSec, sec)
 			}
 
-			t.Logf("✓ time(%d) = %02d:%02d:%02d", tc.milliseconds, hour, min, sec)
+			t.Logf("✓ to_time(%d) = %02d:%02d:%02d", tc.milliseconds, hour, min, sec)
 		})
 	}
 }

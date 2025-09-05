@@ -3,22 +3,22 @@ statement ok
 SET DATABASE = test
 
 query T
-SELECT time(1000)::STRING
+SELECT to_time(1000)::STRING
 ----
  00:00:01
 
 query T
-SELECT time(3723000)::STRING
+SELECT to_time(3723000)::STRING
 ----
  01:02:03
 
 query T
-SELECT time(86400000)::STRING
+SELECT to_time(86400000)::STRING
 ----
  00:00:00
 
 query N
-SELECT time(CASE WHEN false THEN 1 END)
+SELECT to_time(CASE WHEN false THEN 1 END)
 ----
 NULL
 
