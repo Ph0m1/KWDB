@@ -17,6 +17,11 @@ SELECT to_time(86400000)::STRING
 ----
  00:00:00
 
+query T
+SELECT to_time(86401000)::STRING
+----
+ 00:00:01
+
 query N
 SELECT to_time(CASE WHEN false THEN 1 END)
 ----
