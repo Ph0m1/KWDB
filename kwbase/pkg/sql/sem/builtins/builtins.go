@@ -112,6 +112,11 @@ const (
 	categoryGEO           = "Geometry"
 )
 
+const (
+	maxTimeNanos = int64(3020399 * 1_000_000_000)
+	minTimeNanos = -maxTimeNanos
+)
+
 func categorizeType(t *types.T) string {
 	switch t.Family() {
 	case types.DateFamily, types.IntervalFamily, types.TimestampFamily, types.TimestampTZFamily:
@@ -2860,6 +2865,17 @@ may increase either contention or retry errors, or both.`,
 		}, "Calculates the tangent of `val`."),
 	),
 
+	"time": makeBuiltin(defProps(),
+		tree.Overload{
+			Types: tree.ArgTypes{
+				{"val", types.Any},
+			},
+			ReturnType: tree.FixedReturnType(types.Interval),
+			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
+				return timeFn(ctx, args[0])
+			},
+		},
+	),
 	// https://www.postgresql.org/docs/9.6/functions-datetime.html
 	"timezone": makeBuiltin(defProps(),
 		// NOTE(otan): this should be deleted and replaced with the correct
@@ -6852,4 +6868,125 @@ func recentTimestamp(ctx *tree.EvalContext) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return ctx.StmtTimestamp.Add(offset), nil
+}
+
+func timeFn(ctx *tree.EvalContext, val tree.Datum) (tree.Datum, error) {
+	if val == tree.DNull {
+		return tree.DNull, nil
+	}
+	var d duration.Duration
+	switch t := val.(type) {
+	case *tree.DInt:
+		parsedDuration, err := parseTimeFromInteger(int64(*t))
+		if err != nil {
+			return tree.DNull, err
+		}
+		if parsedDuration == nil {
+			return tree.DNull, nil
+		}
+		d.SetNanos(parsedDuration.Nanos())
+	case *tree.DString:
+		s := string(*t)
+		isNumeric := true
+		for _, c := range s {
+			if c < '0' || c > '9' {
+				isNumeric = false
+				break
+			}
+		}
+		if isNumeric {
+			originalLen := len(s)
+			if originalLen == 13 {
+				s = s[:12]
+			} else if originalLen > 14 {
+				s = s[:14]
+			}
+			if len(s) == 14 || len(s) == 12 {
+				layout := "20060102150405"
+				if len(s) == 12 {
+					layout = "060102150405"
+				}
+				parsedTime, err := time.Parse(layout, s)
+
+				if err != nil {
+					return tree.DNull, nil
+				}
+				d.SetNanos(int64(parsedTime.Hour()*3600+parsedTime.Minute()*60+parsedTime.Second())*1_000_000_000 + int64(parsedTime.Nanosecond()))
+			} else {
+				if intVal, err := strconv.ParseInt(s, 10, 64); err == nil {
+					parsedDuration, err := parseTimeFromInteger(intVal)
+					if err != nil {
+						return nil, err
+					}
+					if parsedDuration == nil {
+						return tree.DNull, nil
+					}
+					d.SetNanos(parsedDuration.Nanos())
+				}
+			}
+		} else {
+			if parsedTime, err := tree.ParseDTime(ctx, s, time.Microsecond); err == nil {
+				d.SetNanos(int64(*parsedTime) * 1000)
+			} else if parsedInterval, err := tree.ParseDInterval(s); err == nil {
+				d.SetNanos(parsedInterval.Nanos())
+			} else {
+				return tree.DNull, nil
+			}
+		}
+	case *tree.DInterval:
+		d.SetNanos(t.Duration.Nanos())
+	case *tree.DTimestamp:
+		tod := timeofday.FromTime(t.Time)
+		d.SetNanos(int64(tod.Microsecond()) * 1000)
+	case *tree.DTimestampTZ:
+		tod := timeofday.FromTime(t.Time.In(ctx.GetLocation()))
+		d.SetNanos(int64(tod.Microsecond()) * 1000)
+	case *tree.DDate:
+		d.SetNanos(0)
+	case *tree.DTime:
+		d.SetNanos(int64(*t) * 1000)
+	default:
+		return nil, pgerror.Newf(pgcode.InvalidParameterValue, "unsupported for type: %s", val.ResolvedType())
+	}
+	finalDuration := clampIntervalToTimeRange(d)
+	return tree.NewDInterval(finalDuration, types.DefaultIntervalTypeMetadata), nil
+}
+
+func parseTimeFromInteger(val int64) (*duration.Duration, error) {
+	isNegative := val < 0
+	if isNegative {
+		val = -val
+	}
+
+	ss := val % 100
+	mm := (val / 100) % 100
+	hh := val / 10000
+
+	if mm >= 60 || ss >= 60 {
+		return nil, nil
+	}
+
+	totalNanos := (hh*3600 + mm*60 + ss) * 1_000_000_000
+	if isNegative {
+		totalNanos = -totalNanos
+	}
+
+	var d duration.Duration
+	d.SetNanos(totalNanos)
+	return &d, nil
+}
+
+func clampIntervalToTimeRange(d duration.Duration) duration.Duration {
+	totalNanos := d.Nanos()
+	if totalNanos > maxTimeNanos {
+		var clampedDuration duration.Duration
+		clampedDuration.SetNanos(maxTimeNanos)
+		return clampedDuration
+	}
+	if totalNanos < minTimeNanos {
+		var clampedDuration duration.Duration
+		clampedDuration.SetNanos(minTimeNanos)
+		return clampedDuration
+	}
+	return d
 }

@@ -782,7 +782,7 @@ func (u *sqlSymUnion) triggerBody() tree.TriggerBody {
 %token <str> SYMMETRIC SYNTAX SYSTEM SUBSCRIPTION
 
 %token <str> TABLE TABLES TAG TAGS TAG_TABLE TAG_ONLY TEMP TEMPLATE TEMPORARY TESTING_RELOCATE EXPERIMENTAL_RELOCATE TEXT THEN
-%token <str> TIES TIME TIMETZ TIMESTAMP TIMESTAMPTZ TINYINT TO THROTTLING TRAILING TRACE TRANSACTION TREAT TRIGGER TRIGGERS TRIM TRUE
+%token <str> TIES TIME TIMETZ TIMESTAMP TIMESTAMPTZ TIME_FUNC TINYINT TO THROTTLING TRAILING TRACE TRANSACTION TREAT TRIGGER TRIGGERS TRIM TRUE
 %token <str> TRUNCATE TRUSTED TYPE
 %token <str> TRACING TS
 
@@ -11886,6 +11886,10 @@ special_function:
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr()}}
   }
 | LAST_ROW_TS '(' error { return helpWithFunctionByName(sqllex, $1) }
+| TIME_FUNC '(' a_expr ')'
+  {
+    $$.val = &tree.FuncExpr{Func: tree.WrapFunction("time"), Exprs: tree.Exprs{$3.expr()}}
+  }
 | FIRST '(' last_column ')'
   {
     $$.val = &tree.FuncExpr{Func: tree.WrapFunction($1), Exprs: tree.Exprs{$3.expr()}}

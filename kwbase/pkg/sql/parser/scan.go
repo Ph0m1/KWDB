@@ -724,6 +724,16 @@ func (s *scanner) scanIdent(lval *sqlSymType) {
 		// experimental_/testing_ prefix.
 		lval.id = lex.GetKeywordID(lval.str)
 	}
+	if lval.id == lex.TIME {
+		originalPos := s.pos
+
+		s.skipWhitespace(lval, false)
+		if s.peek() == '(' {
+			lval.id = lex.TIME_FUNC
+		}
+
+		s.pos = originalPos
+	}
 	if len(s.shortinsert.bracket.elements) != 0 {
 		s.shortinsert.Columnsname = append(s.shortinsert.Columnsname, tree.Name(strings.ToLower(s.in[start:s.pos])))
 	}
