@@ -42,10 +42,10 @@ struct TsEntitySegmentBlockItem {
   uint32_t n_rows = 0;
   timestamp64 min_ts = INT64_MAX;
   timestamp64 max_ts = INT64_MIN;
-  TS_LSN min_lsn = UINT64_MAX;
-  TS_LSN max_lsn = 0;
-  TS_LSN first_lsn = 0;
-  TS_LSN last_lsn = 0;
+  uint64_t min_osn = UINT64_MAX;
+  uint64_t max_osn = 0;
+  uint64_t first_osn = 0;
+  uint64_t last_osn = 0;
   uint64_t agg_offset = 0;
   uint32_t agg_len = 0;
   char reserved[20] = {0};            // reserved for user-defined information.
@@ -242,10 +242,10 @@ class TsEntityBlock : public TsBlock {
 
   timestamp64 first_ts_ = 0;
   timestamp64 last_ts_ = 0;
-  TS_LSN first_lsn_ = 0;
-  TS_LSN last_lsn_ = 0;
-  TS_LSN min_lsn_ = 0;
-  TS_LSN max_lsn_ = 0;
+  uint64_t first_osn_ = 0;
+  uint64_t last_osn_ = 0;
+  uint64_t min_osn_ = 0;
+  uint64_t max_osn_ = 0;
 
   std::shared_ptr<TsEntitySegment> entity_segment_ = nullptr;
   uint64_t block_offset_ = 0;
@@ -255,6 +255,9 @@ class TsEntityBlock : public TsBlock {
 
   KRWLatch rw_latch_;
 
+  // total memory size of all column blocks loaded.
+  uint32_t memory_size_{0};
+
  public:
   TsEntityBlock() = delete;
   TsEntityBlock(uint32_t table_id, TsEntitySegmentBlockItem* block_item,
@@ -263,6 +266,12 @@ class TsEntityBlock : public TsBlock {
   ~TsEntityBlock() {}
 
   size_t GetRowNum() override { return n_rows_; }
+
+  uint32_t GetMemorySize() { return memory_size_; }
+
+  void AddMemory(uint32_t new_memory_size) {
+    memory_size_ += new_memory_size;
+  }
 
   uint32_t GetNCols() { return n_cols_; }
 
@@ -328,11 +337,13 @@ class TsEntityBlock : public TsBlock {
 
   timestamp64 GetLastTS() override;
 
-  TS_LSN GetFirstLSN() override;
+  void GetMinAndMaxOSN(uint64_t& min_osn, uint64_t& max_osn) override;
 
-  TS_LSN GetLastLSN() override;
+  uint64_t GetFirstOSN() override;
 
-  const uint64_t* GetLSNAddr(int row_num) override;
+  uint64_t GetLastOSN() override;
+
+  const uint64_t* GetOSNAddr(int row_num) override;
 
   KStatus GetCompressDataFromFile(uint32_t table_version, int32_t nrow, std::string& data) override;
 

@@ -193,7 +193,7 @@ var (
 	blockMinRows = settings.RegisterPublicIntSetting(
 		"ts.rows_per_block.min_limit",
 		"the minimum number of rows that can be held in a block",
-		1024)
+		512)
 
 	maxCompactLastSegNum = settings.RegisterPublicIntSetting(
 		"ts.compact.max_limit",
@@ -203,17 +203,17 @@ var (
 	maxReservedLastSegNum = settings.RegisterPublicIntSetting(
 		"ts.reserved_last_segment.max_limit",
 		"the maximum number of last segments reserved in the latest partition",
-		2)
+		3)
 
 	maxMemSegmentMaxSize = settings.RegisterPublicIntSetting(
 		"ts.mem_segment_size.max_limit",
 		"the maximum size of mem segment in vgroup",
-		67108864)
+		536870912)
 
 	maxBlockLRUCacheMaxSize = settings.RegisterPublicIntSetting(
 		"ts.block.lru_cache.max_limit",
-		"the maximum size of lru caches in the block",
-		1024)
+		"the maximum memory size of block lru cache",
+		1024*1024*1024)
 
 	tsLastRowOptimization = settings.RegisterPublicBoolSetting(
 		"ts.last_row_optimization.enabled",
@@ -1892,10 +1892,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// instance of the node can use. We do not use startTime because it is lower
 	// than the timestamp used to create the bootstrap schema.
 	timeThreshold := s.clock.Now().WallTime
+	s.execCfg.TsIDGen = &sqlbase.TSIDGenerator{}
 
 	setTse := func() (*tse.TsEngine, error) {
 		if s.cfg.Stores.Specs != nil && s.cfg.Stores.Specs[0].Path != "" && !s.cfg.ForbidCatchCoreDump {
-			s.tsEngine, err = s.cfg.CreateTsEngine(ctx, s.stopper, s.ClusterID().String())
+			s.tsEngine, err = s.cfg.CreateTsEngine(ctx, s.stopper, s.ClusterID().String(), s.execCfg.TsIDGen)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to create ts engine")
 			}
@@ -1905,6 +1906,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 			s.node.storeCfg.TsEngine = s.tsEngine
 			s.distSQLServer.ServerConfig.TsEngine = s.tsEngine
+			s.distSQLServer.ServerConfig.TsIDGen = s.execCfg.TsIDGen
 
 			if !GetSingleNodeModeFlag(s.cfg.ModeFlag) {
 				tse.TsRaftLogCombineWAL.SetOnChange(&s.st.SV, func() {

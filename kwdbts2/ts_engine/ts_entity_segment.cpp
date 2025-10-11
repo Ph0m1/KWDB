@@ -182,7 +182,7 @@ KStatus TsEntitySegmentMetaManager::GetBlockSpans(const TsBlockItemFilterParams&
     }
 
     if (IsTsLsnSpanInSpans(filter.spans_, {cur_blk_item->min_ts, cur_blk_item->max_ts},
-                          {cur_blk_item->min_lsn, cur_blk_item->max_lsn})) {
+                          {cur_blk_item->min_osn, cur_blk_item->max_osn})) {
       std::shared_ptr<TsEntityBlock> block = nullptr;
       if (EngineOptions::block_cache_max_size > 0) {
          block = entity_segment->GetEntityBlock(cur_blk_item->block_id);
@@ -206,7 +206,7 @@ KStatus TsEntitySegmentMetaManager::GetBlockSpans(const TsBlockItemFilterParams&
       template_blk_span = cur_blk_span.get();
       block_spans.push_front(std::move(cur_blk_span));
     } else if (IsTsLsnSpanCrossSpans(filter.spans_, {cur_blk_item->min_ts, cur_blk_item->max_ts},
-                              {cur_blk_item->min_lsn, cur_blk_item->max_lsn})) {
+                              {cur_blk_item->min_osn, cur_blk_item->max_osn})) {
       std::shared_ptr<TsEntityBlock> block = nullptr;
       if (EngineOptions::block_cache_max_size > 0) {
         block = entity_segment->GetEntityBlock(cur_blk_item->block_id);
@@ -258,17 +258,17 @@ TsEntityBlock::TsEntityBlock(uint32_t table_id, TsEntitySegmentBlockItem* block_
   n_cols_ = block_item->n_cols;
   first_ts_ = block_item->min_ts;
   last_ts_ = block_item->max_ts;
-  first_lsn_ = block_item->first_lsn;
-  last_lsn_ = block_item->last_lsn;
-  min_lsn_ = block_item->min_lsn;
-  max_lsn_ = block_item->max_lsn;
+  first_osn_ = block_item->first_osn;
+  last_osn_ = block_item->last_osn;
+  min_osn_ = block_item->min_osn;
+  max_osn_ = block_item->max_osn;
   block_offset_ = block_item->block_offset;
   block_length_ = block_item->block_len;
   agg_offset_ = block_item->agg_offset;
   agg_length_ = block_item->agg_len;
   block_id_ = block_item->block_id;
   entity_segment_ = block_segment;
-  // reserve two columns for timestamp and LSN
+  // reserve two columns for timestamp and OSN
   column_blocks_.resize(n_cols_);
 }
 
@@ -315,7 +315,7 @@ KStatus TsEntityBlock::LoadColData(int32_t col_idx, const std::vector<AttributeI
   }
 #ifdef WITH_TESTS
   if (col_idx == -1 && TsLRUBlockCache::GetInstance().unit_test_enabled) {
-    // Initializing lsn column block, timestamp column block has been initialized at this point.
+    // Initializing osn column block, timestamp column block has been initialized at this point.
     if (TsLRUBlockCache::GetInstance().unit_test_phase == TsLRUBlockCache::UNIT_TEST_PHASE::PHASE_NONE) {
       TsLRUBlockCache::GetInstance().unit_test_phase = TsLRUBlockCache::UNIT_TEST_PHASE::PHASE_FIRST_INITIALIZING;
       while (TsLRUBlockCache::GetInstance().unit_test_phase != TsLRUBlockCache::UNIT_TEST_PHASE::PHASE_SECOND_ACCESS_DONE
@@ -356,7 +356,21 @@ KStatus TsEntityBlock::LoadColData(int32_t col_idx, const std::vector<AttributeI
       return KStatus::FAIL;
     }
     assert(var_offsets.size() == n_rows_ * sizeof(uint32_t));
-    column_blocks_[col_idx + 1]->buffer.append(var_offsets.AsStringView());
+    std::string var_buffer(var_offsets.AsStringView());
+#ifdef WITH_TESTS
+  if (TsLRUBlockCache::GetInstance().unit_test_enabled &&
+      TsLRUBlockCache::GetInstance().unit_test_phase ==
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_NONE) {
+    TsLRUBlockCache::GetInstance().unit_test_phase =
+      TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_FIRST_APPEND_ONE_DONE;
+    while (TsLRUBlockCache::GetInstance().unit_test_phase !=
+            TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_SECOND_GET_VAR_COL_ADDR_DONE
+          && TsLRUBlockCache::GetInstance().unit_test_phase !=
+            TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_SECOND_TRY_GETTING_VAR_COLUMN_BLOCK) {
+      usleep(1000);
+    }
+  }
+#endif
     RemovePrefix(&data, var_offsets_len);
     TsSliceGuard var_data;
     ok = mgr.DecompressVarchar(data, &var_data);
@@ -364,9 +378,28 @@ KStatus TsEntityBlock::LoadColData(int32_t col_idx, const std::vector<AttributeI
       LOG_ERROR("Decompress varchar failed");
       return KStatus::FAIL;
     }
-    column_blocks_[col_idx + 1]->buffer.append(var_data.AsStringView());
+    var_buffer.append(var_data.AsStringView());
+    column_blocks_[col_idx + 1]->buffer.swap(var_buffer);
+#ifdef WITH_TESTS
+  if (TsLRUBlockCache::GetInstance().unit_test_enabled) {
+    if (TsLRUBlockCache::GetInstance().unit_test_phase ==
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_SECOND_GET_VAR_COL_ADDR_DONE) {
+      TsLRUBlockCache::GetInstance().unit_test_phase =
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_FIRST_APPEND_TWO_DONE;
+      while (TsLRUBlockCache::GetInstance().unit_test_phase !=
+              TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_SECOND_ACCESS_DONE) {
+        usleep(1000);
+      }
+    } else if (TsLRUBlockCache::GetInstance().unit_test_phase ==
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_SECOND_TRY_GETTING_VAR_COLUMN_BLOCK) {
+      TsLRUBlockCache::GetInstance().unit_test_phase =
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_FIRST_APPEND_TWO_DONE;
+    }
+  }
+#endif
     assert(*reinterpret_cast<uint32_t*>(var_offsets.data() + var_offsets.size() - sizeof(uint32_t)) == var_data.size());
   }
+  TsLRUBlockCache::GetInstance().AddMemory(this, bitmap_len + column_blocks_[col_idx + 1]->buffer.length());
 #ifdef WITH_TESTS
   if (TsLRUBlockCache::GetInstance().unit_test_enabled &&
       TsLRUBlockCache::GetInstance().unit_test_phase == TsLRUBlockCache::UNIT_TEST_PHASE::COLUMN_BLOCK_CRASH_PHASE_NONE) {
@@ -387,6 +420,7 @@ KStatus TsEntityBlock::LoadAggData(int32_t col_idx, TSSlice buffer) {
   }
   if (buffer.len > 0) {
     column_blocks_[col_idx + 1]->agg.assign(buffer.data, buffer.len);
+    TsLRUBlockCache::GetInstance().AddMemory(this, buffer.len);
   }
   return KStatus::SUCCESS;
 }
@@ -430,29 +464,29 @@ KStatus TsEntityBlock::GetRowSpans(const std::vector<STScanRange>& spans,
 #endif
     KStatus s = entity_segment_->GetColumnBlock(-1, {}, this);
     if (s != KStatus::SUCCESS) {
-      LOG_ERROR("block segment column[lsn] data load failed");
+      LOG_ERROR("block segment column[osn] data load failed");
       return s;
     }
   }
   timestamp64* ts_col = reinterpret_cast<timestamp64*>(column_blocks_[1]->buffer.data());
-  TS_LSN* lsn_col = reinterpret_cast<TS_LSN*>(column_blocks_[0]->buffer.data());
+  TS_LSN* osn_col = reinterpret_cast<TS_LSN*>(column_blocks_[0]->buffer.data());
   assert(n_rows_ * 8 == column_blocks_[1]->buffer.length());
   assert(n_rows_ * 8 == column_blocks_[0]->buffer.length());
 
   for (const auto& span : spans) {
-    if (!IsTsLsnSpanCrossSpans({span}, {first_ts_, last_ts_}, {min_lsn_, max_lsn_})) {
+    if (!IsTsLsnSpanCrossSpans({span}, {first_ts_, last_ts_}, {min_osn_, max_osn_})) {
       continue;
     }
     // binary search to find the start and end index of the time range
     auto ts_start = std::lower_bound(ts_col, ts_col + n_rows_, span.ts_span.begin);
     auto ts_end = std::upper_bound(ts_col, ts_col + n_rows_, span.ts_span.end);
-    // lsn_span filter
+    // osn_span filter
     int start_idx = ts_start - ts_col;
     int end_idx = ts_end - ts_col;
     bool match_found = false;
     int span_start = 0;
     for (int i = start_idx; i < end_idx; i++) {
-      if (lsn_col[i] >= span.lsn_span.begin && lsn_col[i] <= span.lsn_span.end) {
+      if (osn_col[i] >= span.lsn_span.begin && osn_col[i] <= span.lsn_span.end) {
         if (!match_found) {
           span_start = i;
           match_found = true;
@@ -550,19 +584,24 @@ inline timestamp64 TsEntityBlock::GetLastTS() {
   return last_ts_;
 }
 
-inline TS_LSN TsEntityBlock::GetFirstLSN() {
-  return first_lsn_;
+inline void TsEntityBlock::GetMinAndMaxOSN(uint64_t& min_osn, uint64_t& max_osn) {
+  min_osn = min_osn_;
+  max_osn = max_osn_;
 }
 
-inline TS_LSN TsEntityBlock::GetLastLSN() {
-  return last_lsn_;
+inline uint64_t TsEntityBlock::GetFirstOSN() {
+  return first_osn_;
 }
 
-inline const uint64_t* TsEntityBlock::GetLSNAddr(int row_num) {
+inline uint64_t TsEntityBlock::GetLastOSN() {
+  return last_osn_;
+}
+
+inline const uint64_t* TsEntityBlock::GetOSNAddr(int row_num) {
   if (!HasDataCached(-1)) {
     KStatus s = entity_segment_->GetColumnBlock(-1, {}, this);
     if (s != KStatus::SUCCESS) {
-      LOG_ERROR("block segment column[lsn] data load failed");
+      LOG_ERROR("block segment column[osn] data load failed");
       return nullptr;
     }
   }
@@ -764,6 +803,15 @@ inline KStatus TsEntitySegment::GetBlockData(TsEntityBlock* block, std::string& 
 
 KStatus TsEntitySegment::GetColumnBlock(int32_t col_idx, const std::vector<AttributeInfo>* metric_schema,
                                        TsEntityBlock* block) {
+#ifdef WITH_TESTS
+  if (TsLRUBlockCache::GetInstance().unit_test_enabled) {
+    if (TsLRUBlockCache::GetInstance().unit_test_phase ==
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_FIRST_APPEND_ONE_DONE) {
+      TsLRUBlockCache::GetInstance().unit_test_phase =
+        TsLRUBlockCache::UNIT_TEST_PHASE::VAR_COLUMN_BLOCK_CRASH_PHASE_SECOND_TRY_GETTING_VAR_COLUMN_BLOCK;
+    }
+  }
+#endif
   block->WrLock();
   Defer defer([&]() { block->Unlock(); });
   // init block info

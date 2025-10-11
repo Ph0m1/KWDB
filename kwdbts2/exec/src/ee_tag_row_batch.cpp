@@ -372,6 +372,28 @@ KStatus TagRowBatch::GetEntities(std::vector<EntityResultIndex> *entities) {
   }
 }
 
+KStatus TagRowBatch::GetALLEntities(std::vector<EntityResultIndex> *entities) {
+  // Get all entities in the batch when muilt nodes mode
+  if (EngineOptions::isSingleNode()) {
+    LOG_ERROR("TagRowBatch::GetALLEntities only used in muilt nodes mode! Use TagRowBatch::GetEntities when single node!");
+    return FAIL;
+  } else if (isFilter_) {
+    entities->reserve(selection_.size());
+    for (const auto &selection : selection_) {
+      entity_indexs_[selection.entity_].index = selection.entity_;
+      entities->push_back(entity_indexs_[selection.entity_]);
+    }
+    return SUCCESS;
+  } else {
+    entities->reserve(entity_indexs_.size());
+    for (size_t i = 0; i < entity_indexs_.size(); ++i) {
+      entity_indexs_[i].index = i;
+      entities->push_back(entity_indexs_[i]);
+    }
+    return SUCCESS;
+  }
+}
+
 bool TagRowBatch::isAllDistributed() {
   if (EngineOptions::isSingleNode()) {
     return current_pipe_no_ >= valid_pipe_no_;
@@ -416,36 +438,6 @@ void TagRowBatch::SetPipeEntityNum(kwdbContext_p ctx, k_uint32 pipe_degree) {
       }
     }
   }
-}
-
-KStatus TagRowBatch::SortByEntityIndex() {
-  ResetLine();
-  if (!isFilter_) {
-    selection_.reserve(count_);
-    for (k_uint32 i = 0; i < count_; ++i) {
-      AddSelection();
-      NextLine();
-    }
-    ResetLine();
-  }
-
-  // Use a lambda expression and directly access the entity_indexs_
-  // to avoid indirect access through function calls
-  const auto &entities = entity_indexs_;
-
-  std::sort(selection_.begin(), selection_.end(), [&entities](const TagSelection &a, const TagSelection &b) -> bool {
-    const auto &x = entities[a.entity_];
-    const auto &y = entities[b.entity_];
-    if (x.entityGroupId != y.entityGroupId) {
-      return x.entityGroupId < y.entityGroupId;
-    }
-    if (x.subGroupId != y.subGroupId) {
-      return x.subGroupId < y.subGroupId;
-    }
-    return x.entityId < y.entityId;
-  });
-
-  return SUCCESS;
 }
 
 }  // namespace kwdbts

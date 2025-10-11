@@ -36,10 +36,9 @@ TsMemSegmentManager::TsMemSegmentManager(TsVGroup* vgroup, TsVersionManager* ver
     : vgroup_(vgroup),
       version_manager_(version_manager),
       cur_mem_seg_(TsMemSegment::Create(EngineOptions::mem_segment_max_height)) {
-  segment_.push_back(cur_mem_seg_);
 }
 
-bool TsMemSegmentManager::SwitchMemSegment(TsMemSegment* expected_old_mem_seg) {
+bool TsMemSegmentManager::SwitchMemSegment(TsMemSegment* expected_old_mem_seg, bool flush) {
   {
     std::shared_lock lock(segment_lock_);
     if (cur_mem_seg_.get() != expected_old_mem_seg) {
@@ -52,23 +51,19 @@ bool TsMemSegmentManager::SwitchMemSegment(TsMemSegment* expected_old_mem_seg) {
   }
 
   auto row_num = cur_mem_seg_->GetRowNum();
+  if (flush) {
+    TsFlushJobPool::GetInstance().AddFlushJob(vgroup_, std::move(cur_mem_seg_));
+  }
   cur_mem_seg_ = TsMemSegment::Create(EngineOptions::mem_segment_max_height);
 
   TsVersionUpdate update;
   update.AddMemSegment(cur_mem_seg_);
-  segment_.push_back(cur_mem_seg_);
   uint32_t new_heigh = log2(row_num);
   if (EngineOptions::mem_segment_max_height < new_heigh) {
     EngineOptions::mem_segment_max_height = new_heigh;
   }
-
   version_manager_->ApplyUpdate(&update);
   return true;
-}
-
-void TsMemSegmentManager::RemoveMemSegment(const std::shared_ptr<TsMemSegment>& mem_seg) {
-  std::unique_lock lock{segment_lock_};
-  segment_.remove(mem_seg);
 }
 
 bool TsMemSegmentManager::GetMetricSchemaAndMeta(TSTableID table_id, uint32_t version,
@@ -90,13 +85,12 @@ bool TsMemSegmentManager::GetMetricSchemaAndMeta(TSTableID table_id, uint32_t ve
   return true;
 }
 
-KStatus TsMemSegmentManager::PutData(const TSSlice& payload, TSEntityID entity_id, TS_LSN lsn) {
+KStatus TsMemSegmentManager::PutData(const TSSlice& payload, TSEntityID entity_id) {
   // first of all, check BG flush job status
   auto bg_status = TsFlushJobPool::GetInstance().GetBackGroundStatus();
   if (bg_status == FAIL) {
     return FAIL;
   }
-
 
   auto table_id = TsRawPayload::GetTableIDFromSlice(payload);
   auto table_version = TsRawPayload::GetTableVersionFromSlice(payload);
@@ -119,10 +113,12 @@ KStatus TsMemSegmentManager::PutData(const TSSlice& payload, TSEntityID entity_i
   // TSMemSegRowData row_data(db_id, table_id, table_version, entity_id);
   TsRawPayload pd(payload, schema);
   uint32_t row_num = pd.GetRowCount();
-
+  // no use lsn anymore, using osn from payload instead.
+  auto osn = pd.GetOSN();
   auto cur_mem_seg = CurrentMemSegmentAndAllocateRow(row_num);
   size_t max_row_idx = 0;
   timestamp64 max_ts = INT64_MIN;
+  timestamp64 last_p_time = INVALID_TS;
   for (size_t i = 0; i < row_num; i++) {
     auto row_ts = pd.GetTS(i);
     if (row_ts < acceptable_ts) {
@@ -131,13 +127,16 @@ KStatus TsMemSegmentManager::PutData(const TSSlice& payload, TSEntityID entity_i
       continue;
     }
     auto p_time = convertTsToPTime(row_ts, ts_type);
-    KStatus s = version_manager_->AddPartition(db_id, p_time);
-    if (s != KStatus::SUCCESS) {
-      return s;
+    if (last_p_time != p_time || last_p_time == INVALID_TS) {
+      auto s = version_manager_->AddPartition(db_id, p_time);
+      if (s != KStatus::SUCCESS) {
+        return s;
+      }
+      last_p_time = p_time;
     }
 
     TSMemSegRowData* row_data = cur_mem_seg->AllocOneRow(db_id, table_id, table_version, entity_id, pd.GetRowData(i));
-    row_data->SetData(row_ts, lsn);
+    row_data->SetData(row_ts, osn);
     cur_mem_seg->AppendOneRow(row_data);
 
     if (row_ts > max_ts) {
@@ -149,9 +148,7 @@ KStatus TsMemSegmentManager::PutData(const TSSlice& payload, TSEntityID entity_i
   vgroup_->UpdateEntityAndMaxTs(table_id, max_ts, entity_id);
 
   if (cur_mem_seg->GetPayloadMemUsage() > EngineOptions::mem_segment_max_size) {
-    if (this->SwitchMemSegment(cur_mem_seg.get())) {
-      TsFlushJobPool::GetInstance().AddFlushJob(vgroup_, cur_mem_seg);
-    }
+    this->SwitchMemSegment(cur_mem_seg.get(), true);
   }
   return KStatus::SUCCESS;
 }
@@ -301,8 +298,8 @@ bool TsMemSegment::GetEntityRows(const TsBlockItemFilterParams& filter, std::lis
       if (row_data->GetTS() > span.ts_span.end) {
         break;
       }
-      auto lsn = row_data->GetLSN();
-      if (lsn <= span.lsn_span.end && lsn >= span.lsn_span.begin) {
+      auto osn = row_data->GetOSN();
+      if (osn <= span.lsn_span.end && osn >= span.lsn_span.begin) {
         rows->push_back(row_data);
       }
       iter.Next();

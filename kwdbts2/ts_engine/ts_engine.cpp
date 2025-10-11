@@ -32,14 +32,15 @@
 // V2
 int EngineOptions::vgroup_max_num = 4;
 DedupRule EngineOptions::g_dedup_rule = DedupRule::OVERRIDE;
-size_t EngineOptions::mem_segment_max_size = 64 << 20;
+size_t EngineOptions::mem_segment_max_size = 128 << 20;
 int32_t EngineOptions::mem_segment_max_height = 12;
-uint32_t EngineOptions::max_last_segment_num = 2;
+uint32_t EngineOptions::max_last_segment_num = 3;
 uint32_t EngineOptions::max_compact_num = 10;
 size_t EngineOptions::max_rows_per_block = 4096;
-size_t EngineOptions::min_rows_per_block = 1024;
+size_t EngineOptions::min_rows_per_block = 512;
 int64_t EngineOptions::partition_interval = 3600 * 24 * 10;
-int32_t EngineOptions::block_cache_max_size = 1024;
+// default block cache max size is set to 1 * 1024 * 1024 * 1024
+int64_t EngineOptions::block_cache_max_size = 1073741824;
 
 extern std::map<std::string, std::string> g_cluster_settings;
 extern DedupRule g_dedup_rule;
@@ -250,6 +251,10 @@ KStatus TSEngineV2Impl::Init(kwdbContext_p ctx) {
 }
 
 TsVGroup* TSEngineV2Impl::GetVGroupByID(kwdbContext_p ctx, uint32_t vgroup_id) {
+  if (EngineOptions::vgroup_max_num < vgroup_id || vgroup_id <= 0) {
+    LOG_ERROR("vgroup_id is wrong! vgroup_max_num is [%d], vgroup_id is [%u], vgroups_ size is [%zu]",
+              EngineOptions::vgroup_max_num, vgroup_id, vgroups_.size())
+  }
   assert(EngineOptions::vgroup_max_num >= vgroup_id);
   return vgroups_[vgroup_id - 1].get();
 }
@@ -335,8 +340,10 @@ KStatus TSEngineV2Impl::GetTsTable(kwdbContext_p ctx, const KTableKey& table_id,
     char* error;
     size_t data_len = 0;
     char* data = getTableMetaByVersion(table_id, version, &data_len, &error);
+    Defer defer{[&]() { free(data); }};
     if (error != nullptr) {
       LOG_ERROR("getTableMetaByVersion error: %s.", error);
+      free(error);
       return KStatus::FAIL;
     }
     roachpb::CreateTsTable meta;
@@ -473,7 +480,7 @@ KStatus TSEngineV2Impl::putTagData(kwdbContext_p ctx, TSTableID table_id, uint32
       LOG_ERROR("Failed get table id[%ld] version id[%d] tag schema.", table_id, tbl_version);
       return s;
     }
-    err_info.errcode = tag_table->InsertTagRecord(payload, groupid, entity_id);
+    err_info.errcode = tag_table->InsertTagRecord(payload, groupid, entity_id, payload.GetOSN(), OperateType::Insert, 0);
   }
   if (err_info.errcode < 0) {
     return KStatus::FAIL;
@@ -623,7 +630,7 @@ KStatus TSEngineV2Impl::PutEntity(kwdbContext_p ctx, const KTableKey& table_id, 
       }
     }
 
-    err_info.errcode = tag_table->UpdateTagRecord(p, vgroup_id, entity_id, err_info);
+    err_info.errcode = tag_table->UpdateTagRecord(p, vgroup_id, entity_id, err_info, p.GetOSN());
     if (err_info.errcode < 0) {
       return KStatus::FAIL;
     }
@@ -1101,9 +1108,6 @@ KStatus TSEngineV2Impl::CreateCheckpoint(kwdbContext_p ctx) {
     for (const auto &vgrp : vgroups_) {
       vgrp->GetWALManager()->Lock();
       auto cur_lsn = vgrp->GetWALManager()->FetchCurrentLSN();
-      if (cur_lsn < vgrp->GetMaxLSN()) {
-        cur_lsn = vgrp->GetMaxLSN();
-      }
       vgrp_lsn.emplace_back(cur_lsn);
       s = vgrp->GetWALManager()->SwitchNextFile(cur_lsn);
       if (s == KStatus::FAIL) {
@@ -1328,7 +1332,7 @@ KStatus TSEngineV2Impl::GetMetaData(kwdbContext_p ctx, const KTableKey& table_id
 
 KStatus TSEngineV2Impl::DeleteRangeData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                         HashIdSpan& hash_span, const std::vector<KwTsSpan>& ts_spans, uint64_t* count,
-                        uint64_t mtr_id) {
+                        uint64_t mtr_id, uint64_t osn) {
   ErrorInfo err_info;
   std::shared_ptr<kwdbts::TsTable> ts_table;
   auto s = GetTsTable(ctx, table_id, ts_table, true, err_info, 0);
@@ -1337,12 +1341,12 @@ KStatus TSEngineV2Impl::DeleteRangeData(kwdbContext_p ctx, const KTableKey& tabl
     return s;
   }
   ctx->ts_engine = this;
-  return ts_table->DeleteRangeData(ctx, range_group_id, hash_span, ts_spans, count, mtr_id);
+  return ts_table->DeleteRangeData(ctx, range_group_id, hash_span, ts_spans, count, mtr_id, osn);
 }
 
 KStatus TSEngineV2Impl::DeleteData(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
                     std::string& primary_tag, const std::vector<KwTsSpan>& ts_spans, uint64_t* count,
-                    uint64_t mtr_id) {
+                    uint64_t mtr_id, uint64_t osn) {
   ErrorInfo err_info;
   std::shared_ptr<kwdbts::TsTable> ts_table;
   auto s = GetTsTable(ctx, table_id, ts_table, true, err_info, 0);
@@ -1351,11 +1355,11 @@ KStatus TSEngineV2Impl::DeleteData(kwdbContext_p ctx, const KTableKey& table_id,
     return s;
   }
   ctx->ts_engine = this;
-  return ts_table->DeleteData(ctx, range_group_id, primary_tag, ts_spans, count, mtr_id);
+  return ts_table->DeleteData(ctx, range_group_id, primary_tag, ts_spans, count, mtr_id, osn);
 }
 
 KStatus TSEngineV2Impl::DeleteEntities(kwdbContext_p ctx, const KTableKey& table_id, uint64_t range_group_id,
-                        std::vector<std::string> primary_tags, uint64_t* count, uint64_t mtr_id) {
+                        std::vector<std::string> primary_tags, uint64_t* count, uint64_t mtr_id, uint64_t osn) {
   ErrorInfo err_info;
   std::shared_ptr<kwdbts::TsTable> ts_table;
   auto s = GetTsTable(ctx, table_id, ts_table, true, err_info, 0);
@@ -1364,11 +1368,11 @@ KStatus TSEngineV2Impl::DeleteEntities(kwdbContext_p ctx, const KTableKey& table
     return s;
   }
   ctx->ts_engine = this;
-  return (dynamic_pointer_cast<TsTableV2Impl>(ts_table))->DeleteEntities(ctx, primary_tags, count, mtr_id);
+  return (dynamic_pointer_cast<TsTableV2Impl>(ts_table))->DeleteEntities(ctx, primary_tags, count, mtr_id, osn, true);
 }
 
 KStatus TSEngineV2Impl::DeleteRangeEntities(kwdbContext_p ctx, const KTableKey& table_id, const uint64_t& range_grp_id,
-                            const HashIdSpan& hash_span, uint64_t* count, uint64_t& mtr_id) {
+                            const HashIdSpan& hash_span, uint64_t* count, uint64_t& mtr_id, uint64_t osn) {
   ErrorInfo err_info;
   std::shared_ptr<kwdbts::TsTable> ts_table;
   auto s = GetTsTable(ctx, table_id, ts_table, true, err_info, 0);
@@ -1377,7 +1381,7 @@ KStatus TSEngineV2Impl::DeleteRangeEntities(kwdbContext_p ctx, const KTableKey& 
     return s;
   }
   ctx->ts_engine = this;
-  return ts_table->DeleteRangeEntities(ctx, range_grp_id, hash_span, count, mtr_id);
+  return ts_table->DeleteRangeEntities(ctx, range_grp_id, hash_span, count, mtr_id, osn, true);
 }
 
 KStatus TSEngineV2Impl::ReadBatchData(kwdbContext_p ctx, TSTableID table_id, uint64_t table_version, uint64_t begin_hash,
@@ -1471,7 +1475,7 @@ KStatus TSEngineV2Impl::WriteBatchData(kwdbContext_p ctx, TSTableID table_id, ui
   return worker->Write(ctx, table_id, table_version, data, row_num);
 }
 
-KStatus TSEngineV2Impl::CancelBatchJob(kwdbContext_p ctx, uint64_t job_id) {
+KStatus TSEngineV2Impl::CancelBatchJob(kwdbContext_p ctx, uint64_t job_id, uint64_t osn) {
   // handle write worker
   {
     RW_LATCH_X_LOCK(&write_batch_workers_lock_);
@@ -1921,7 +1925,7 @@ KStatus TSEngineV2Impl::GetClusterSetting(kwdbContext_p ctx, const std::string& 
 
 KStatus TSEngineV2Impl::UpdateAtomicLSN() {
   for (auto vgrp : vgroups_) {
-    vgrp->UpdateAtomicLSN();
+    vgrp->UpdateAtomicOSN();
   }
   return KStatus::SUCCESS;
 }
@@ -2000,7 +2004,7 @@ uint64_t begin_hash, uint64_t end_hash, const KwTsSpan& ts_span, uint64_t* snaps
   return KStatus::SUCCESS;
 }
 KStatus TSEngineV2Impl::CreateSnapshotForWrite(kwdbContext_p ctx, const KTableKey& table_id,
-uint64_t begin_hash, uint64_t end_hash, const KwTsSpan& ts_span, uint64_t* snapshot_id) {
+uint64_t begin_hash, uint64_t end_hash, const KwTsSpan& ts_span, uint64_t* snapshot_id, uint64_t osn) {
   std::shared_ptr<TsTable> table;
   KStatus s = GetTsTable(ctx, table_id, table, true);
   if (s == KStatus::FAIL) {
@@ -2028,7 +2032,7 @@ uint64_t begin_hash, uint64_t end_hash, const KwTsSpan& ts_span, uint64_t* snaps
   if (count > 0) {
     LOG_WARN("range hash[%lu ~ %lu], ts[%ld ~ %ld] has row [%lu], we clear them now.",
       begin_hash, end_hash, ts_span.begin, ts_span.end, count);
-    s = table->DeleteTotalRange(ctx, begin_hash, end_hash, ts_span, 1);
+    s = table->DeleteTotalRange(ctx, begin_hash, end_hash, ts_span, 1, osn);
     if (s == KStatus::FAIL) {
       LOG_ERROR("DeleteTotalRange [%lu] failed.", table_id);
       return s;
@@ -2095,7 +2099,7 @@ KStatus TSEngineV2Impl::GetSnapshotNextBatchData(kwdbContext_p ctx, uint64_t sna
       return s;
     }
   }
-  LOG_INFO("GetSnapshotNextBatchData succeeded, snapshot[%lu] row_num[%u]", snapshot_id, row_num);
+  LOG_DEBUG("GetSnapshotNextBatchData succeeded, snapshot[%lu] row_num[%u]", snapshot_id, row_num);
   return KStatus::SUCCESS;
 }
 
@@ -2148,7 +2152,7 @@ KStatus TSEngineV2Impl::WriteSnapshotBatchData(kwdbContext_p ctx, uint64_t snaps
     snapshots_[snapshot_id].package_id = package_id;
     snapshots_[snapshot_id].imgrated_rows += row_num;
   }
-  LOG_INFO("WriteSnapshotBatchData succeeded, snapshot[%lu] row_num[%u]", snapshot_id, row_num);
+  LOG_DEBUG("WriteSnapshotBatchData succeeded, snapshot[%lu] row_num[%u]", snapshot_id, row_num);
   return KStatus::SUCCESS;
 }
 KStatus TSEngineV2Impl::WriteSnapshotSuccess(kwdbContext_p ctx, uint64_t snapshot_id) {
@@ -2169,17 +2173,16 @@ KStatus TSEngineV2Impl::WriteSnapshotSuccess(kwdbContext_p ctx, uint64_t snapsho
   if (s != KStatus::SUCCESS) {
       LOG_ERROR("BatchJobFinish failed.");
   }
-  {
-    snapshot_mutex_.lock();
-    snapshots_.erase(snapshot_id);
-    snapshot_mutex_.unlock();
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("DeleteSnapshot failed.");
+    return s;
   }
-  LOG_INFO("WriteSnapshotSuccess range hash[%lu ~ %lu], ts[%ld ~ %ld] row count[%lu].",
-      ts_snapshot_info.begin_hash, ts_snapshot_info.end_hash,
+LOG_INFO("WriteSnapshotSuccess [%d] table[%lu] range hash[%lu ~ %lu], ts[%ld ~ %ld] row count[%lu].",
+      ts_snapshot_info.type, ts_snapshot_info.table_id, ts_snapshot_info.begin_hash, ts_snapshot_info.end_hash,
       ts_snapshot_info.ts_span.begin, ts_snapshot_info.ts_span.end, ts_snapshot_info.imgrated_rows);
   return s;
 }
-KStatus TSEngineV2Impl::WriteSnapshotRollback(kwdbContext_p ctx, uint64_t snapshot_id) {
+KStatus TSEngineV2Impl::WriteSnapshotRollback(kwdbContext_p ctx, uint64_t snapshot_id, uint64_t osn) {
   TsRangeImgrationInfo ts_snapshot_info;
   {
     snapshot_mutex_.lock();
@@ -2193,41 +2196,46 @@ KStatus TSEngineV2Impl::WriteSnapshotRollback(kwdbContext_p ctx, uint64_t snapsh
       return KStatus::FAIL;
     }
   }
-  auto s = CancelBatchJob(ctx, snapshot_id);
+  auto s = CancelBatchJob(ctx, snapshot_id, osn);
   if (s != KStatus::SUCCESS) {
       LOG_ERROR("CancelBatchJob failed.");
   }
-  {
-    snapshot_mutex_.lock();
-    snapshots_.erase(snapshot_id);
-    snapshot_mutex_.unlock();
+  s = DeleteSnapshot(ctx, snapshot_id);
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("DeleteSnapshot failed.");
+    return s;
   }
-  LOG_INFO("WriteSnapshotRollback range hash[%lu ~ %lu], ts[%ld ~ %ld] row count[%lu].",
-      ts_snapshot_info.begin_hash, ts_snapshot_info.end_hash,
+  LOG_INFO("WriteSnapshotRollback [%d] table[%lu] range hash[%lu ~ %lu], ts[%ld ~ %ld] row count[%lu].",
+      ts_snapshot_info.type, ts_snapshot_info.table_id, ts_snapshot_info.begin_hash, ts_snapshot_info.end_hash,
       ts_snapshot_info.ts_span.begin, ts_snapshot_info.ts_span.end, ts_snapshot_info.imgrated_rows);
   LOG_INFO("WriteSnapshotRollback succeeded, snapshot[%lu]", snapshot_id);
   return s;
 }
 KStatus TSEngineV2Impl::DeleteSnapshot(kwdbContext_p ctx, uint64_t snapshot_id) {
-  snapshot_mutex_.lock();
-  Defer defer{[&](){
-    snapshot_mutex_.unlock();
-  }};
-  if (snapshots_.find(snapshot_id) != snapshots_.end()) {
-    if (snapshots_[snapshot_id].type == 1) {
-      LOG_WARN("snapshot[%lu] is not commit ar rollback.", snapshot_id);
-      LOG_INFO("WriteSnapshotRollback range hash[%lu ~ %lu], ts[%ld ~ %ld] row count[%lu].",
-      snapshots_[snapshot_id].begin_hash, snapshots_[snapshot_id].end_hash,
-      snapshots_[snapshot_id].ts_span.begin, snapshots_[snapshot_id].ts_span.end,
-      snapshots_[snapshot_id].imgrated_rows);
-    }
-    snapshots_.erase(snapshot_id);
-  }
   auto s = BatchJobFinish(ctx, snapshot_id);
-  if (s == KStatus::SUCCESS) {
+  if (s != KStatus::SUCCESS) {
+    LOG_ERROR("BatchJobFinish failed.");
     return s;
   }
-  LOG_INFO("DeleteSnapshot succeeded, snapshot[%lu]", snapshot_id);
+  TsRangeImgrationInfo ts_snapshot_info{0, 0, 0, 0, {0, 0}, 0, 0, 0, 0, nullptr};
+  {
+    snapshot_mutex_.lock();
+    Defer defer{[&](){
+      snapshot_mutex_.unlock();
+    }};
+    if (snapshots_.find(snapshot_id) != snapshots_.end()) {
+      ts_snapshot_info = snapshots_[snapshot_id];
+      snapshots_.erase(snapshot_id);
+    }
+  }
+  if (ts_snapshot_info.table_id != 0) {
+    uint64_t count = 0;
+    ts_snapshot_info.table->GetRangeRowCount(ctx, ts_snapshot_info.begin_hash, ts_snapshot_info.end_hash,
+      {INT64_MIN, INT64_MAX}, &count);
+    LOG_INFO("DeleteSnapshot [%d] table[%lu] range hash[%lu ~ %lu] row count[%lu].",
+        ts_snapshot_info.type, ts_snapshot_info.table_id, ts_snapshot_info.begin_hash,
+        ts_snapshot_info.end_hash, count);
+  }
   return KStatus::SUCCESS;
 }
 
