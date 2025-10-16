@@ -3281,7 +3281,10 @@ may increase either contention or retry errors, or both.`,
 			Types:      tree.ArgTypes{{"val", types.String}, {"format", types.String}},
 			ReturnType: tree.FixedReturnType(types.TimestampTZ),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
-				if args[0] == tree.DNull || args[1] == tree.DNull {
+				if args[0] == tree.DNull {
+					return tree.DNull, nil
+				}
+				if args[1] == tree.DNull {
 					return tree.DNull, nil
 				}
 				dateStr := string(tree.MustBeDString(args[0]))
