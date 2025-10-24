@@ -3298,6 +3298,13 @@ may increase either contention or retry errors, or both.`,
 				if parsedTime.IsZero() {
 					return tree.DNull, nil
 				}
+				formattedStr, err := strtime.Strftime(parsedTime, formatStr)
+				if err != nil {
+					return tree.DNull, err
+				}
+				if formattedStr != dateStr {
+					return tree.DNull, nil
+				}
 
 				sessionLoc := ctx.GetLocation()
 				finalTime := time.Date(
