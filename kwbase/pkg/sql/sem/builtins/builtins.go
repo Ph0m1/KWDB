@@ -45,6 +45,7 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+	"regexp"
 
 	"gitee.com/kwbasedb/kwbase/pkg/build"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -2867,6 +2868,9 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				val := int64(tree.MustBeDInt(args[0]))
 				// Interpret INT as milliseconds since Unix epoch.
+				if (val < 0 || val > 83900000) {
+					return tree.DNull, pgerror.Newf(pgcode.InvalidDatetimeFormat, "invalid input syntax for type time: %s", args[0])
+				}
 				sec := val / 1000
 				nsec := (val % 1000) * int64(time.Millisecond)
 				t := tree.MakeDTimestamp(timeutil.Unix(sec, nsec), time.Nanosecond)
@@ -2880,17 +2884,23 @@ may increase either contention or retry errors, or both.`,
 			ReturnType: tree.FixedReturnType(types.Time),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				s := string(tree.MustBeDString(args[0]))
-				parsedTime, err := tree.ParseDTime(ctx, s, types.DefaultTimePrecision)
-				if err == nil {
-					return parsedTime, err
+
+				var InvalidTimePattern = regexp.MustCompile(`(24:00(:00)?(\.0+)?)|(23:59:59\.[0-9]*[1-9][0-9]*)`)
+				if InvalidTimePattern.MatchString(s) {
+					return tree.DNull, fmt.Errorf("time value out of range: %q", s)
 				}
+
+				parsedTime, err := tree.ParseDTime(ctx, s, types.DefaultTimePrecision)
+				if err == nil {			
+					return parsedTime, nil
+				}
+				
 				parsedTimestamp, err := tree.ParseDTimestamp(ctx, s, types.DefaultTimePrecision)
 				if err != nil {
 					return tree.DNull, err
 				}
 				hour, min, sec := parsedTimestamp.Clock()
 				msec := parsedTimestamp.Nanosecond() / 1000
-
 				return tree.MakeDTime(timeofday.New(hour, min, sec, msec)), nil
 			},
 			Info: "Parses a string as TIMESTAMP/TIMESTAMPTZ/TIME.",
