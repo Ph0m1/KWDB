@@ -444,11 +444,11 @@ var aggregates = map[string]builtinDefinition{
 	),
 
 	"norm": makeBuiltin(aggProps(),
-		makeAggOverload([]*types.T{types.Int}, types.Decimal, newNormAggregate,
+		makeAggOverload([]*types.T{types.Int}, types.Decimal, newDecimalNormAggregate,
 			"Calculates the L2 norm (Euclidean norm) of the selected values."),
-		makeAggOverload([]*types.T{types.Float}, types.Decimal, newNormAggregate,
+		makeAggOverload([]*types.T{types.Float}, types.Float, newFloatNormAggregate,
 			"Calculates the L2 norm (Euclidean norm) of the selected values."),
-		makeAggOverload([]*types.T{types.Decimal}, types.Decimal, newNormAggregate,
+		makeAggOverload([]*types.T{types.Decimal}, types.Decimal, newDecimalNormAggregate,
 			"Calculates the L2 norm (Euclidean norm) of the selected values."),
 	),
 
@@ -834,7 +834,8 @@ var _ tree.AggregateFunc = &TimeBucketAggregate{}
 var _ tree.AggregateFunc = &ImputationAggregate{}
 var _ tree.AggregateFunc = &TimestamptzBucketAggregate{}
 var _ tree.AggregateFunc = &quantileAggregate{}
-var _ tree.AggregateFunc = &normAggregate{}
+var _ tree.AggregateFunc = &decimalNormAggregate{}
+var _ tree.AggregateFunc = &floatNormAggregate{}
 
 const sizeOfArrayAggregate = int64(unsafe.Sizeof(arrayAggregate{}))
 const sizeOfAvgAggregate = int64(unsafe.Sizeof(avgAggregate{}))
@@ -885,7 +886,8 @@ const sizeOfTwaAggregate = int64(unsafe.Sizeof(TwaAggregate{}))
 const sizeOfMaxExtendAggregate = int64(unsafe.Sizeof(MaxExtendAggregate{}))
 const sizeOfMinExtendAggregate = int64(unsafe.Sizeof(MinExtendAggregate{}))
 const sizeOfQuantileAggregate = int64(unsafe.Sizeof(quantileAggregate{}))
-const sizeOfNormAggregate = int64(unsafe.Sizeof(normAggregate{}))
+const sizeOfDecimalNormAggregate = int64(unsafe.Sizeof(decimalNormAggregate{}))
+const sizeOfFloatNormAggregate = int64(unsafe.Sizeof(floatNormAggregate{}))
 
 // singleDatumAggregateBase is a utility struct that helps aggregate builtins
 // that store a single datum internally track their memory usage related to
@@ -5037,24 +5039,41 @@ func (a *quantileAggregate) Size() int64 {
 // AggHandling implements the tree.AggregateFunc interface.
 func (a *quantileAggregate) AggHandling() {}
 
-type normAggregate struct {
+type decimalNormAggregate struct {
 	evalCtx      *tree.EvalContext
 	sumOfSquares apd.Decimal
 	sawNonNull   bool
 	acc          mon.BoundAccount
 }
 
-func newNormAggregate(
+// floatNormAggregate calculates the L2 norm for float inputs and returns a float.
+type floatNormAggregate struct {
+	evalCtx      *tree.EvalContext
+	sumOfSquares float64
+	sawNonNull   bool
+	acc          mon.BoundAccount
+}
+
+func newDecimalNormAggregate(
 	params []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
 ) tree.AggregateFunc {
-	return &normAggregate{
+	return &decimalNormAggregate{
+		evalCtx: evalCtx,
+		acc:     evalCtx.Mon.MakeBoundAccount(),
+	}
+}
+
+func newFloatNormAggregate(
+	params []*types.T, evalCtx *tree.EvalContext, _ tree.Datums,
+) tree.AggregateFunc {
+	return &floatNormAggregate{
 		evalCtx: evalCtx,
 		acc:     evalCtx.Mon.MakeBoundAccount(),
 	}
 }
 
 // Add accumulates the square of the datum into the sum.
-func (a *normAggregate) Add(ctx context.Context, datum tree.Datum, _ ...tree.Datum) error {
+func (a *decimalNormAggregate) Add(ctx context.Context, datum tree.Datum, _ ...tree.Datum) error {
 	if datum == tree.DNull {
 		return nil
 	}
@@ -5094,38 +5113,83 @@ func (a *normAggregate) Add(ctx context.Context, datum tree.Datum, _ ...tree.Dat
 	return nil
 }
 
+// Add accumulates the square of the datum into the sum.
+func (a *floatNormAggregate) Add(
+	_ context.Context, datum tree.Datum, _ ...tree.Datum,
+) error {
+	if datum == tree.DNull {
+		return nil
+	}
+	a.sawNonNull = true
+	val := float64(*datum.(*tree.DFloat))
+	squared := val * val
+	a.sumOfSquares += squared
+	return nil
+}
+
 // Result computes the square root of the sum of squares.
-func (a *normAggregate) Result() (tree.Datum, error) {
+func (a *decimalNormAggregate) Result() (tree.Datum, error) {
 	if !a.sawNonNull {
 		return tree.DNull, nil
 	}
 
-	resultDecimal := &tree.DDecimal{}
-	_, err := tree.DecimalCtx.Sqrt(&resultDecimal.Decimal, &a.sumOfSquares)
+	var sqrtResult apd.Decimal
+	_, err := tree.DecimalCtx.Sqrt(&sqrtResult, &a.sumOfSquares)
 	if err != nil {
 		return nil, err
 	}
+	dd := &tree.DDecimal{}
+	dd.Set(&sqrtResult)
 
 	// Return a DECIMAL to maintain precision.
-	return resultDecimal, nil
+	return dd, nil
+}
+
+// Result computes the square root of the sum of squares.
+func (a *floatNormAggregate) Result() (tree.Datum, error) {
+	if !a.sawNonNull {
+		return tree.DNull, nil
+	}
+	result := math.Sqrt(a.sumOfSquares)
+	return tree.NewDFloat(tree.DFloat(result)), nil
 }
 
 // Reset implements the tree.AggregateFunc interface.
-func (a *normAggregate) Reset(ctx context.Context) {
+func (a *decimalNormAggregate) Reset(ctx context.Context) {
 	a.sawNonNull = false
-	a.sumOfSquares.Coeff.SetInt64(0)
+	a.sumOfSquares.SetFinite(0, 0)
+	a.acc.Clear(ctx)
+}
+
+// Reset implements the tree.AggregateFunc interface.
+func (a *floatNormAggregate) Reset(ctx context.Context) {
+	a.sawNonNull = false
+	a.sumOfSquares = 0
 	a.acc.Clear(ctx)
 }
 
 // Close implements the tree.AggregateFunc interface.
-func (a *normAggregate) Close(ctx context.Context) {
+func (a *decimalNormAggregate) Close(ctx context.Context) {
+	a.acc.Close(ctx)
+}
+
+// Close implements the tree.AggregateFunc interface.
+func (a *floatNormAggregate) Close(ctx context.Context) {
 	a.acc.Close(ctx)
 }
 
 // Size implements the tree.AggregateFunc interface.
-func (a *normAggregate) Size() int64 {
-	return sizeOfNormAggregate
+func (a *decimalNormAggregate) Size() int64 {
+	return sizeOfDecimalNormAggregate
+}
+
+// Size implements the tree.AggregateFunc interface.
+func (a *floatNormAggregate) Size() int64 {
+	return sizeOfFloatNormAggregate
 }
 
 // AggHandling implements the tree.AggregateFunc interface.
-func (a *normAggregate) AggHandling() {}
+func (a *decimalNormAggregate) AggHandling() {}
+
+// AggHandling implements the tree.AggregateFunc interface.
+func (a *floatNormAggregate) AggHandling() {}
