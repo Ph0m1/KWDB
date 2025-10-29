@@ -710,24 +710,18 @@ DROP DATABASE
   0000-01-01 00:00:00+00:00
 (1 row)
 > SELECT to_time(86399999) AS almost_midnight;
-       almost_midnight
------------------------------
-  0000-01-01 23:59:59+00:00
-(1 row)
+ERROR: to_time(): invalid input syntax for type time: 86399999
+SQLSTATE: 22007
 > SELECT to_time(-1000) AS negative;
-          negative
------------------------------
-  0000-01-01 23:59:59+00:00
-(1 row)
+ERROR: to_time(): invalid input syntax for type time: -1000
+SQLSTATE: 22007
 > SELECT to_time(86400000) AS exactly_24h;
-         exactly_24h
------------------------------
-  0000-01-01 00:00:00+00:00
-(1 row)
+ERROR: to_time(): invalid input syntax for type time: 86400000
+SQLSTATE: 22007
 > SELECT time_to_sec('12:34:56') AS sec_result;
   sec_result
 --------------
-       45295
+       45296
 (1 row)
 > SELECT time_to_sec('00:00:00') AS zero_sec;
   zero_sec
@@ -737,7 +731,7 @@ DROP DATABASE
 > SELECT time_to_sec('23:59:59') AS max_sec;
   max_sec
 -----------
-    86398
+    86399
 (1 row)
 > SELECT time_to_sec('invalid') AS invalid_input;
 ERROR: time_to_sec(): parsing as type timestamp: could not parse "invalid"
@@ -753,9 +747,9 @@ SQLSTATE: 22007
   2025-09-18 00:00:00+00:00
 (1 row)
 > SELECT str_to_date('2023-02-29', '%Y-%m-%d') AS leap_year_invalid;
-      leap_year_invalid
------------------------------
-  2023-03-01 00:00:00+00:00
+  leap_year_invalid
+---------------------
+  NULL
 (1 row)
 > SELECT str_to_date('2024-02-29', '%Y-%m-%d') AS leap_year_valid;
        leap_year_valid

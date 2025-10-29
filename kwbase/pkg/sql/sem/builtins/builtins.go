@@ -2868,7 +2868,7 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				val := int64(tree.MustBeDInt(args[0]))
 				// Interpret INT as milliseconds since Unix epoch.
-				if (val < 0 || val > 83900000) {
+				if (val < 0 || val > 86399000) {
 					return tree.DNull, pgerror.Newf(pgcode.InvalidDatetimeFormat, "invalid input syntax for type time: %s", args[0])
 				}
 				sec := val / 1000

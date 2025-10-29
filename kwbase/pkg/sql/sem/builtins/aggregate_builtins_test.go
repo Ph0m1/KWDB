@@ -763,7 +763,7 @@ func TestNormAggregate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			evalCtx := tree.NewTestingEvalContext(cluster.MakeTestingClusterSettings())
 			defer evalCtx.Stop(context.Background())
-			agg := newNormAggregate([]*types.T{tc.values[0].ResolvedType()}, evalCtx, nil)
+			agg := newDecimalNormAggregate([]*types.T{tc.values[0].ResolvedType()}, evalCtx, nil)
 			defer agg.Close(context.Background())
 			for _, v := range tc.values {
 				if err := agg.Add(context.Background(), v); err != nil {

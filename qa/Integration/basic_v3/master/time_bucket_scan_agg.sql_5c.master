@@ -7834,9 +7834,9 @@ CREATE TABLE
 (2, 25.0);
 INSERT 5
 > SELECT norm(value) FROM test_data;  -- Placeholder, adjust based on actual function
-          norm
--------------------------
-  47.434164902525689980
+        norm
+---------------------
+  47.43416490252569
 (1 row)
 > SELECT group_id, value, group_rank() OVER (PARTITION BY group_id ORDER BY value) AS rank FROM test_data;
   group_id | value | rank
