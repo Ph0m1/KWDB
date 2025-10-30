@@ -7859,8 +7859,8 @@ INSERT 5
 > SELECT var_samp(value) FROM test_data GROUP BY group_id;
   var_samp
 ------------
-       100
         50
+       100
 (2 rows)
 > SELECT var_pop(value) FROM test_data GROUP BY group_id;
        var_pop

@@ -7865,8 +7865,8 @@ INSERT 5
 > SELECT var_pop(value) FROM test_data GROUP BY group_id;
        var_pop
 ---------------------
-                 25
   66.66666666666667
+                 25
 (2 rows)
 > SELECT quantile(value, 0.5) FROM test_data GROUP BY group_id;
   quantile
