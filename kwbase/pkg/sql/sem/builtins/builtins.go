@@ -39,13 +39,13 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"regexp"
 	"regexp/syntax"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
-	"regexp"
 
 	"gitee.com/kwbasedb/kwbase/pkg/build"
 	"gitee.com/kwbasedb/kwbase/pkg/keys"
@@ -2868,7 +2868,7 @@ may increase either contention or retry errors, or both.`,
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				val := int64(tree.MustBeDInt(args[0]))
 				// Interpret INT as milliseconds since Unix epoch.
-				if (val < 0 || val > 86399000) {
+				if val < 0 || val > 86399000 {
 					return tree.DNull, pgerror.Newf(pgcode.InvalidDatetimeFormat, "invalid input syntax for type time: %s", args[0])
 				}
 				sec := val / 1000
@@ -2891,7 +2891,7 @@ may increase either contention or retry errors, or both.`,
 				}
 
 				parsedTime, err := tree.ParseDTime(ctx, s, types.DefaultTimePrecision)
-				if err == nil {			
+				if err == nil {
 					return parsedTime, nil
 				}
 				
@@ -2950,11 +2950,11 @@ may increase either contention or retry errors, or both.`,
 				if !ok {
 					return nil, pgerror.Newf(pgcode.Internal, "expected DTime but got %T", args[0])
 				}
-				t_unrounded := int64(*t)
-				if t_unrounded < 0 || t_unrounded > 86399000000 { 
+				tUnrounded := int64(*t)
+				if tUnrounded < 0 || tUnrounded > 86399000000 {
 					return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
 				}
-				totalSeconds := (int64(t_unrounded) + 500_000) / 1_000_000
+				totalSeconds := (int64(tUnrounded) + 500_000) / 1_000_000
 				return tree.NewDInt(tree.DInt(totalSeconds)), nil
 			},
 			Info: "Converts a TIME (time-of-day) value to the number of seconds from midnight.",
@@ -2970,11 +2970,11 @@ may increase either contention or retry errors, or both.`,
 				}
 				parsedTime, err := tree.ParseDTime(ctx, s, types.DefaultTimePrecision)
 				if err == nil {
-					t_unrounded := int64(*parsedTime)
-					if t_unrounded < 0 || t_unrounded > 86399000000 {
+					tUnrounded := int64(*parsedTime)
+					if tUnrounded < 0 || tUnrounded > 86399000000 {
 						return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
 					}
-					totalSeconds := (t_unrounded + 500_000) / 1_000_000
+					totalSeconds := (tUnrounded + 500_000) / 1_000_000
 					return tree.NewDInt(tree.DInt(totalSeconds)), nil
 				}
 				parsedTimestamp, err := tree.ParseDTimestamp(ctx, s, types.DefaultTimePrecision)
@@ -2983,10 +2983,10 @@ may increase either contention or retry errors, or both.`,
 				}
 				if parsedTimestamp.Hour() < 0 || parsedTimestamp.Hour() > 23 {
 					return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59)")
-        		}
-        		if parsedTimestamp.Hour() == 23 && parsedTimestamp.Minute() == 59 && parsedTimestamp.Second() == 59 && parsedTimestamp.Nanosecond() > 0 {
-             		return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
-        		}
+        }
+        if parsedTimestamp.Hour() == 23 && parsedTimestamp.Minute() == 59 && parsedTimestamp.Second() == 59 && parsedTimestamp.Nanosecond() > 0 {
+          return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
+        }
 				totalSeconds := parsedTimestamp.Time.Hour()*3600 + parsedTimestamp.Time.Minute()*60 + parsedTimestamp.Time.Second()
 				return tree.NewDInt(tree.DInt(totalSeconds)), nil
 			},
@@ -2997,16 +2997,15 @@ may increase either contention or retry errors, or both.`,
 			ReturnType: tree.FixedReturnType(types.Int),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				ts := tree.MustBeDTimestamp(args[0])
-				t_unrounded := ts.Time
-        		if t_unrounded.Hour() < 0 || t_unrounded.Hour() > 23 {
-             		return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59)")
-        		}
-        		if t_unrounded.Hour() == 23 && t_unrounded.Minute() == 59 && t_unrounded.Second() == 59 && t_unrounded.Nanosecond() > 0 {
-             		return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
-        		}
-				nanos_unrounded := int64(t_unrounded.Hour())*3600*1_000_000_000 + int64(t_unrounded.Minute())*60*1_000_000_000 + int64(t_unrounded.Second())*1_000_000_000 + int64(t_unrounded.Nanosecond())
-        		seconds := (nanos_unrounded + 500_000_000) / 1_000_000_000
-				// seconds := ts.Time.Hour()*3600 + ts.Time.Minute()*60 + ts.Time.Second()
+				tUnrounded := ts.Time
+        if tUnrounded.Hour() < 0 || tUnrounded.Hour() > 23 {
+          return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59)")
+        }
+        if tUnrounded.Hour() == 23 && tUnrounded.Minute() == 59 && tUnrounded.Second() == 59 && tUnrounded.Nanosecond() > 0 {
+          return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
+        }
+				nanosUnrounded := int64(tUnrounded.Hour())*3600*1_000_000_000 + int64(tUnrounded.Minute())*60*1_000_000_000 + int64(tUnrounded.Second())*1_000_000_000 + int64(tUnrounded.Nanosecond())
+        seconds := (nanosUnrounded + 500_000_000) / 1_000_000_000
 				return tree.NewDInt(tree.DInt(seconds)), nil
 			},
 			Info: "Parses timestamp to seconds.",
@@ -3016,16 +3015,16 @@ may increase either contention or retry errors, or both.`,
 			ReturnType: tree.FixedReturnType(types.Int),
 			Fn: func(ctx *tree.EvalContext, args tree.Datums) (tree.Datum, error) {
 				ts := tree.MustBeDTimestampTZ(args[0])
-				t_unrounded := ts.Time
-        		if t_unrounded.Hour() < 0 || t_unrounded.Hour() > 23 {
-            		return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59)")
-        		}
-        		if t_unrounded.Hour() == 23 && t_unrounded.Minute() == 59 && t_unrounded.Second() == 59 && t_unrounded.Nanosecond() > 0 {
-            		return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
-        		}
+				tUnrounded := ts.Time
+        if tUnrounded.Hour() < 0 || tUnrounded.Hour() > 23 {
+          return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59)")
+        }
+        if tUnrounded.Hour() == 23 && tUnrounded.Minute() == 59 && tUnrounded.Second() == 59 && tUnrounded.Nanosecond() > 0 {
+          return tree.DNull, pgerror.Newf(pgcode.InvalidParameterValue, "time value out of range (00:00:00 to 23:59:59.000000)")
+        }
 
-        		nanos_unrounded := int64(t_unrounded.Hour())*3600*1_000_000_000 + int64(t_unrounded.Minute())*60*1_000_000_000 + int64(t_unrounded.Second())*1_000_000_000 + int64(t_unrounded.Nanosecond())
-        		seconds := (nanos_unrounded + 500_000_000) / 1_000_000_000
+        nanosUnrounded := int64(tUnrounded.Hour())*3600*1_000_000_000 + int64(tUnrounded.Minute())*60*1_000_000_000 + int64(tUnrounded.Second())*1_000_000_000 + int64(tUnrounded.Nanosecond())
+        seconds := (nanosUnrounded + 500_000_000) / 1_000_000_000
 				return tree.NewDInt(tree.DInt(seconds)), nil
 			},
 			Info: "Parses timestampTZ to seconds.",

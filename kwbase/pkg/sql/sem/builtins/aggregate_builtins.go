@@ -5114,9 +5114,7 @@ func (a *decimalNormAggregate) Add(ctx context.Context, datum tree.Datum, _ ...t
 }
 
 // Add accumulates the square of the datum into the sum.
-func (a *floatNormAggregate) Add(
-	_ context.Context, datum tree.Datum, _ ...tree.Datum,
-) error {
+func (a *floatNormAggregate) Add(_ context.Context, datum tree.Datum, _ ...tree.Datum) error {
 	if datum == tree.DNull {
 		return nil
 	}
